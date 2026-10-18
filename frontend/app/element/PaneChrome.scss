@@ -96,6 +96,30 @@
     }
 }
 
+// The locate flash (util/pane-locate.ts): a wash and a thick ring in the
+// pane's own colour, added when a reveal selects this pane and removed when it
+// has faded. It rests invisible; the animation drives its opacity, so the
+// alphas below are the peak. The ring mirrors the selection ring's colour
+// chain, so the flash reads as that ring settling into place.
+.pane-locate-flash {
+    @include mixins.abs-fill;
+    z-index: var(--z-pane-ring);
+    pointer-events: none;
+    opacity: 0;
+    border: 4px solid color-mix(in srgb, var(--pane-ring-color, var(--accent-color)) 90%, transparent);
+    border-radius: var(--radius-md);
+    background: color-mix(
+        in srgb,
+        var(--pane-ring-color, var(--accent-color)) var(--pane-locate-wash, 16%),
+        transparent
+    );
+
+    // The motion policy asks for less: the wash alone.
+    &--reduced {
+        border-color: transparent;
+    }
+}
+
 // The box around the content region, below the header (PaneChrome.tsx).
 // Always rendered, so switching between tabs of different view types never
 // moves the content in the DOM (Pane Tab contract Phase 4); a view type adds

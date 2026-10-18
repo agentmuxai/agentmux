@@ -25,6 +25,7 @@ import { setActiveBlockInStack } from "@/layout/index";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import type { LayoutNode } from "@/layout/lib/types";
+import { emitPaneLocate } from "./pane-locate";
 
 export interface RevealOptions {
     /** The tab holding the block, when the caller already knows it. */
@@ -122,6 +123,9 @@ export async function revealBlockLocally(blockId: string, opts: RevealOptions = 
     // otherwise take the caret while invisible. Also covers focusNode's early
     // return when the pane was already focused.
     if (opts.focusCaret !== false) giveBlockFocus(blockId);
+
+    // The pane flashes once it can be seen, so the user sees which one it is.
+    emitPaneLocate(blockId);
     return true;
 }
 

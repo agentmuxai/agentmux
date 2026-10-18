@@ -36,7 +36,8 @@ import {
     startDocTabDrag,
     startPaneTabDrag,
 } from "@/app/drag/pane-tab-drag";
-import { flashElement, onActivityFlash } from "@/app/notification/activity-flash";
+import { cancelFlashPattern, flashElement, onActivityFlash } from "@/app/notification/activity-flash";
+import { LOCATE_PILL_FLASH, onPaneLocate, onPaneLocatePlay } from "@/app/util/pane-locate";
 import { shouldReduceMotion } from "@/app/motion/motion";
 import { DURATION_BASE_MS, EASE_OUT } from "@/app/motion/tokens";
 import { isWindows } from "@/util/platformutil";
@@ -691,7 +692,19 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
         const unsubscribe = onActivityFlash((target) => {
             if (target.blockId === id() && pillRef) flashElement(pillRef, target);
         });
-        onCleanup(unsubscribe);
+        // The pane is flashing to show it was just selected: its pill does too.
+        const unsubscribeLocate = onPaneLocatePlay((blockId, paneKey) => {
+            if (blockId === id() && paneKey === props.paneKey && pillRef) flashElement(pillRef, LOCATE_PILL_FLASH);
+        });
+        // A newer reveal replaces the earlier one's pill, so two never show at once.
+        const unsubscribeRequest = onPaneLocate(() => {
+            if (pillRef) cancelFlashPattern(pillRef, LOCATE_PILL_FLASH.pattern);
+        });
+        onCleanup(() => {
+            unsubscribe();
+            unsubscribeLocate();
+            unsubscribeRequest();
+        });
     });
 
     // Tear-off to a floating pane (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md

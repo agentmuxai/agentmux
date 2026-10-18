@@ -32,6 +32,7 @@ import {
 import { getPaneTab, paneTabCapability, resolvePaneTabView } from "@/app/block/pane-tab-registry";
 import { isLightThemeActive } from "@/app/block/pane-identity";
 import { atoms, MOS, pushNotification } from "@/app/store/global";
+import { shouldReduceMotion } from "@/app/motion/motion";
 import { remoteDisplay } from "@/app/store/remote-display";
 import { readSwarmSummary } from "@/app/store/activitySummary";
 import { ErrorBoundary } from "@/element/errorboundary";
@@ -45,6 +46,18 @@ import { createPaneTabMemory, describePaneTab, PaneTabIconView, prunePaneTabMemo
 import { PaneTabRenameInput } from "./PaneTabRenameInput";
 import type { PaneTabColors } from "./PaneTabStrip";
 import { DropIndicator } from "@/app/drag/DropIndicator";
+import {
+    emitPaneLocatePlay,
+    LOCATE_READY_TIMEOUT_HIDDEN_MS,
+    LOCATE_READY_TIMEOUT_MS,
+    locateSlotWaitMs,
+    onPaneLocate,
+    recordLocateStart,
+    samplePane,
+    showLocateFlash,
+    whenPaneReady,
+    type ReadyGate,
+} from "@/app/util/pane-locate";
 import { paneDropState } from "@/app/drag/file-drop";
 
 function sameIds(a: string[], b: string[]): boolean {
@@ -82,6 +95,63 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             isFocused,
             (focused, wasFocused) => {
                 if (focused && !wasFocused && paneRoot) revealPaneStrips(paneRoot, "focus");
+            },
+            { defer: true }
+        )
+    );
+
+    // The locate flash (pane-locate.ts): a reveal of one of this pane's blocks
+    // flashes the pane once it is on screen. Any other reveal ends the one
+    // running or waiting here, so only the newest pane flashes.
+    let locateGate: ReadyGate | null = null;
+    let locateDelay: ReturnType<typeof setTimeout> | undefined;
+    let stopLocateFlash: (() => void) | null = null;
+    const endLocate = () => {
+        locateGate?.cancel();
+        locateGate = null;
+        clearTimeout(locateDelay);
+        stopLocateFlash?.();
+        stopLocateFlash = null;
+    };
+    onMount(() => {
+        const off = onPaneLocate((blockId) => {
+            endLocate();
+            if (!untrack(stackIds).includes(blockId)) return;
+            const gate = whenPaneReady(
+                () => samplePane(paneRoot, isFocused() && activeBlockId() === blockId),
+                { timeoutMs: document.visibilityState === "visible" ? LOCATE_READY_TIMEOUT_MS : LOCATE_READY_TIMEOUT_HIDDEN_MS }
+            );
+            locateGate = gate;
+            void gate.ready.then((ready) => {
+                if (!ready || locateGate !== gate) return;
+                const begin = () => {
+                    // Still the same target: the user may have switched tab while it waited.
+                    if (locateGate !== gate || !paneRoot || !isFocused() || activeBlockId() !== blockId) return;
+                    recordLocateStart(performance.now());
+                    stopLocateFlash = showLocateFlash(paneRoot, {
+                        light: isLightThemeActive(),
+                        reduced: shouldReduceMotion("feedback"),
+                    });
+                    emitPaneLocatePlay(blockId, nodeModel.nodeId);
+                };
+                // Flashes start at least a gap apart. The newest request waits for
+                // its turn rather than being dropped; a newer one replaces it.
+                const wait = locateSlotWaitMs(performance.now());
+                if (wait <= 0) begin();
+                else locateDelay = setTimeout(begin, wait);
+            });
+        });
+        onCleanup(() => {
+            off();
+            endLocate();
+        });
+    });
+    // Leaving the pane ends its flash: it must not mark a pane the user has left.
+    createEffect(
+        on(
+            isFocused,
+            (focused) => {
+                if (!focused) endLocate();
             },
             { defer: true }
         )

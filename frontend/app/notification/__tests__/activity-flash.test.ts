@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
     __resetActivityFlash,
     buildFlashKeyframes,
+    cancelFlashPattern,
     easeOut,
     emitActivityFlash,
     envelopeAt,
@@ -113,6 +114,20 @@ describe("patternEnvelopeAt", () => {
     it("fades the last strike to zero over the tail", () => {
         expect(patternEnvelopeAt(SINGLE, FLASH_STRIKE_HOLD_MS + FLASH_TAIL_MS / 2)).toBeCloseTo(1 - easeOut(0.5), 5);
         expect(patternEnvelopeAt(SINGLE, TAIL_END - 1e-6)).toBeCloseTo(0, 5);
+    });
+});
+
+describe("a pattern's own tail", () => {
+    const LONG: FlashPattern = { strikes: [{ atMs: 0, intensity: 1 }], tailMs: 700 };
+
+    it("fades over its own length instead of the default tail", () => {
+        expect(patternDurationMs(LONG)).toBe(FLASH_STRIKE_HOLD_MS + 700);
+        expect(patternEnvelopeAt(LONG, FLASH_STRIKE_HOLD_MS + 350)).toBeCloseTo(1 - easeOut(0.5), 5);
+        expect(patternEnvelopeAt(LONG, FLASH_STRIKE_HOLD_MS + 700)).toBe(0);
+    });
+
+    it("leaves a pattern without one on the default tail", () => {
+        expect(patternDurationMs(SINGLE)).toBe(FLASH_STRIKE_HOLD_MS + FLASH_TAIL_MS);
     });
 });
 
@@ -258,5 +273,39 @@ describe("flashElement", () => {
     it("ignores an empty pattern", () => {
         flashElement(makeEl(), { pattern: { strikes: [] }, delayMs: 0 });
         expect(animate).not.toHaveBeenCalled();
+    });
+
+    describe("cancelFlashPattern", () => {
+        it("stops a flash that has nothing else with it", () => {
+            const el = makeEl();
+            flashElement(el, { pattern: SINGLE, delayMs: 0 });
+            cancelFlashPattern(el, SINGLE);
+            expect(cancel).toHaveBeenCalledTimes(1);
+            expect(animate).toHaveBeenCalledTimes(1);
+        });
+
+        it("takes one flash out and leaves the others playing as they were", () => {
+            const el = makeEl();
+            flashElement(el, { pattern: THREE, delayMs: 0 });
+            vi.advanceTimersByTime(30);
+            flashElement(el, { pattern: SINGLE, delayMs: 0 });
+            cancel.mockClear();
+            animate.mockClear();
+            cancelFlashPattern(el, SINGLE);
+            // The merged animation is replaced by one with only THREE's remaining strikes.
+            expect(cancel).toHaveBeenCalledTimes(1);
+            expect(animate).toHaveBeenCalledTimes(1);
+            const [, options] = animate.mock.calls[0];
+            expect(options.duration).toBeCloseTo(patternDurationMs(THREE) - 30, 5);
+        });
+
+        it("does nothing for a pattern that is not showing", () => {
+            const el = makeEl();
+            cancelFlashPattern(el, SINGLE);
+            flashElement(el, { pattern: THREE, delayMs: 0 });
+            cancelFlashPattern(el, SINGLE);
+            expect(cancel).not.toHaveBeenCalled();
+            expect(animate).toHaveBeenCalledTimes(1);
+        });
     });
 });

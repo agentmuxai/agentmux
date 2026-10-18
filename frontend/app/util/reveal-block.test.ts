@@ -47,6 +47,11 @@ vi.mock("@/app/store/global", () => ({
     }),
 }));
 vi.mock("@/app/store/focusManager", () => ({ giveBlockFocus: (id: string) => calls.push(`caret:${id}`) }));
+/** The locate flash requests, each with the steps already taken when it was asked. */
+const located: { blockId: string; after: string[] }[] = [];
+vi.mock("@/app/util/pane-locate", () => ({
+    emitPaneLocate: (blockId: string) => located.push({ blockId, after: [...calls] }),
+}));
 vi.mock("@/layout/index", () => ({
     setActiveBlockInStack: (_m: unknown, nodeId: string, blockId: string) => calls.push(`stack:${nodeId}:${blockId}`),
 }));
@@ -88,6 +93,7 @@ function modelWithPane(nodeId: string, members: string[], magnified?: string, mi
 
 beforeEach(() => {
     calls.length = 0;
+    located.length = 0;
     ws = { oid: "ws", pinnedtabids: [], tabids: ["t1", "t2"] };
     tabs = { t1: { blockids: ["a"] }, t2: { blockids: ["agentA", "agentB"] } };
     models = { t1: modelWithPane("n1", ["a"]), t2: modelWithPane("pane", ["agentA", "agentB"]) };
@@ -125,6 +131,23 @@ describe("revealBlockLocally", () => {
         models.t2 = modelWithPane("pane", ["agentA", "agentB"], "pane");
         await revealBlockLocally("agentB");
         expect(calls.some((c) => c.startsWith("unmagnify"))).toBe(false);
+    });
+
+    it("asks for the locate flash last, once the pane is switched to, focused and has its caret", async () => {
+        await revealBlockLocally("agentB");
+        expect(located).toEqual([
+            { blockId: "agentB", after: ["setActiveTab:t2", "stack:pane:agentB", "focusNode:pane", "caret:agentB"] },
+        ]);
+    });
+
+    it("still asks for the flash when the caret is skipped", async () => {
+        await revealBlockLocally("agentB", { focusCaret: false });
+        expect(located.map((l) => l.blockId)).toEqual(["agentB"]);
+    });
+
+    it("asks for no flash when the block isn't in this window", async () => {
+        await revealBlockLocally("elsewhere");
+        expect(located).toEqual([]);
     });
 
     it("focusCaret: false skips the caret", async () => {

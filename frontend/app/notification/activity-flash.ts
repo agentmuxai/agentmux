@@ -30,6 +30,8 @@ export interface FlashStrike {
 /** The strikes of one sound, sorted by `atMs`, the first at 0. */
 export interface FlashPattern {
     strikes: FlashStrike[];
+    /** How long the last strike fades out; `FLASH_TAIL_MS` when absent. */
+    tailMs?: number;
 }
 
 /**
@@ -134,7 +136,7 @@ export function easeOut(x: number): number {
 /** How long a pattern stays visible, from its first strike. */
 export function patternDurationMs(pattern: FlashPattern): number {
     const last = pattern.strikes.at(-1);
-    return last ? last.atMs + FLASH_STRIKE_HOLD_MS + FLASH_TAIL_MS : 0;
+    return last ? last.atMs + FLASH_STRIKE_HOLD_MS + (pattern.tailMs ?? FLASH_TAIL_MS) : 0;
 }
 
 /** Overlay opacity `t` ms after the pattern starts. Zero before and after it. */
@@ -152,7 +154,7 @@ export function patternEnvelopeAt(pattern: FlashPattern, t: number): number {
         return intensity - (intensity - floor) * easeOut((t - holdEnd) / (next.atMs - holdEnd));
     }
     if (t < holdEnd) return intensity;
-    return intensity * (1 - easeOut((t - holdEnd) / FLASH_TAIL_MS));
+    return intensity * (1 - easeOut((t - holdEnd) / (pattern.tailMs ?? FLASH_TAIL_MS)));
 }
 
 /** A pattern placed on the page clock: its first strike lands at `startAt`. */
@@ -259,7 +261,12 @@ export function flashElement(
     if (baseColor) el.style.setProperty(FLASH_BASE_COLOR_VAR, baseColor);
     else el.style.removeProperty(FLASH_BASE_COLOR_VAR);
 
-    if (typeof el.animate !== "function") {
+    playScheduled(el, scheduled, t);
+}
+
+/** Play `scheduled` on `el`'s overlay from page time `t` to the end of the last one. */
+function playScheduled(el: HTMLElement, scheduled: ScheduledFlash[], t: number): void {
+    if (scheduled.length === 0 || typeof el.animate !== "function") {
         running.set(el, { scheduled, anim: null });
         return;
     }
@@ -277,6 +284,20 @@ export function flashElement(
         // No timeline (tests): the animation just starts when it starts.
     }
     running.set(el, { scheduled, anim });
+}
+
+/**
+ * Stop showing `pattern` on `el` (the very object passed to `flashElement`),
+ * leaving any other flash on it playing as it was. For a flash that a newer
+ * one replaces, so two never show at once.
+ */
+export function cancelFlashPattern(el: HTMLElement, pattern: FlashPattern): void {
+    const prev = running.get(el);
+    if (!prev || !prev.scheduled.some((s) => s.pattern === pattern)) return;
+    const t = now();
+    prev.anim?.cancel();
+    const rest = prev.scheduled.filter((s) => s.pattern !== pattern && s.startAt + patternDurationMs(s.pattern) > t);
+    playScheduled(el, rest, t);
 }
 
 // ── Test helpers (NEVER call from production) ────────────────────────────
