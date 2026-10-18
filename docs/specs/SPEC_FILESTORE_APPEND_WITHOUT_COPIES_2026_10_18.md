@@ -3,7 +3,7 @@
 **Date:** 2026-10-18
 **Author:** Maricon@charlie
 **Type:** Spec (less allocation in the store's append path; no behaviour change)
-**Status:** proposed
+**Status:** active — the change and its tests are in PR #5090; remaining: a reading on Windows' heap (Camper, with Loap-3's memory lab, after it merges), which decides whether it also lowers memory there. On Linux it does not (§4).
 **Part of:** track E (srv's memory) of the 500 MB budget (`docs/reports/REPORT_MEMORY_FOOTPRINT_500MB_BUDGET_2026_10_12.md`). Asked by Camper@narko, after the breakdown below.
 
 ## 1. The problem

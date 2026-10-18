@@ -640,6 +640,7 @@ partial list.
 | [`SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03`](SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md) | Plan: MCP-opened markdown blank-preview investigation + Editor-pane reuse |
 | [`SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15`](SPEC_EDITOR_REVAMP_UNIFIED_VIEWERS_2026_10_15.md) | SPEC: Editor revamp — one pane for every file (PDF, images, audio/video, binary, large files), and the Media pane folded into it |
 | [`SPEC_EDITOR_TREE_KEYBOARD_ICONS_AND_CLICK_ZOOM_2026_10_16`](SPEC_EDITOR_TREE_KEYBOARD_ICONS_AND_CLICK_ZOOM_2026_10_16.md) | Editor: file tree icons and keyboard, which region has focus, click zoom, and files another program is using |
+| [`SPEC_FILESTORE_APPEND_WITHOUT_COPIES_2026_10_18`](SPEC_FILESTORE_APPEND_WITHOUT_COPIES_2026_10_18.md) | Spec: A transcript append without whole-part copies |
 | [`SPEC_FILE_BROWSER_PANE_2026_10_01`](SPEC_FILE_BROWSER_PANE_2026_10_01.md) | SPEC: A rich file browser pane (working title "Hangar") |
 | [`SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27`](SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27.md) | SPEC: "Always on top" for floating panes |
 | [`SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09`](SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md) | SPEC: Floating-pane redock — hover-intent dwell and a neutral parking zone |
@@ -785,7 +786,6 @@ partial list.
 | [`SPEC_ERROR_COPY_EVERYWHERE_2026_09_24`](SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md) | SPEC: every error surface can be copied, errors and traces in one click |
 | [`SPEC_EXTERNAL_APP_DRIVING_BLENDER_2026_07_03`](SPEC_EXTERNAL_APP_DRIVING_BLENDER_2026_07_03.md) | Spec: Integrated External App Driving — Blender as the Flagship Case |
 | [`SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15`](SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md) | SPEC — Fast startup: the Upgrade button owns migrations and updates, the boot path owns nothing deferrable |
-| [`SPEC_FILESTORE_APPEND_WITHOUT_COPIES_2026_10_18`](SPEC_FILESTORE_APPEND_WITHOUT_COPIES_2026_10_18.md) | Spec: A transcript append without whole-part copies |
 | [`SPEC_FIRST_CLASS_GITHUB_APP_AND_AWS_IDENTITY_2026_09_19`](SPEC_FIRST_CLASS_GITHUB_APP_AND_AWS_IDENTITY_2026_09_19.md) | SPEC: GitHub App and AWS as first-class AgentMux identities |
 | [`SPEC_FIX_PERSONAL_MEMORY_EMPTY_WORKDIR_2026_09_01`](SPEC_FIX_PERSONAL_MEMORY_EMPTY_WORKDIR_2026_09_01.md) | Spec: Personal Memory is empty for any agent with a blank `working_directory` |
 | [`SPEC_FLEETWIDE_CRASH_HANG_FORENSICS_2026_08_14`](SPEC_FLEETWIDE_CRASH_HANG_FORENSICS_2026_08_14.md) | SPEC: Fleet-wide crash & hang forensic logging — implementation plan |
