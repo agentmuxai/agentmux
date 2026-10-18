@@ -465,8 +465,13 @@ fn spawn_internal(r: std::sync::Weak<Router>, mut rx: tokio::sync::mpsc::Unbound
                     })
                     .await;
                 }
-                // The stop itself is already recorded (`backend::user_stop`).
-                Internal::TurnStopped { block_id } => r.resolve(&block_id, Family::Turn),
+                Internal::TurnStopped { block_id } => {
+                    // `notify.emit` recorded the stop before queueing this, so
+                    // a turn start queued ahead of it may have forgotten it
+                    // since: record it again, in order (`backend::user_stop`).
+                    crate::backend::user_stop::note_user_stop(&block_id);
+                    r.resolve(&block_id, Family::Turn)
+                }
                 Internal::TurnStatus { block_id, active } => {
                     let prev = {
                         let mut turns = r.turn_active.lock().unwrap_or_else(|e| e.into_inner());
@@ -812,9 +817,9 @@ impl Router {
         let _ = self.internal.send(Internal::InputWaiting { block_id: block_id.to_string(), question, count });
     }
 
-    /// The user stopped this block's turn: cancel "finished" for it (queued,
-    /// ordered). The caller records the stop (`backend::user_stop`), which
-    /// keeps the resulting turn end from becoming a new one.
+    /// The user stopped this block's turn: cancel "finished" for it, and keep
+    /// the resulting turn end from becoming a new one (queued, ordered; the
+    /// stop is recorded in `backend::user_stop`).
     pub fn turn_stopped_nonblocking(&self, block_id: &str) {
         let _ = self.internal.send(Internal::TurnStopped { block_id: block_id.to_string() });
     }

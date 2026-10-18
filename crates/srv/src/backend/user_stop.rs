@@ -4,8 +4,10 @@
 //! The user's Stop on an agent's turn, and the grace window after it. The
 //! turn end a Stop causes is the user's own action: the notification router
 //! sends no "finished" for it, and the Swarm Supervisor neither judges nor
-//! continues it (SPEC_SWARM_SUPERVISOR_2026_10_16.md §3.4). Recorded once,
-//! by `notify.emit`'s `TurnStopped` (`server/notify_handlers.rs`).
+//! continues it (SPEC_SWARM_SUPERVISOR_2026_10_16.md §3.4). Recorded by
+//! `notify.emit`'s `TurnStopped` (`server/notify_handlers.rs`) at once, for the
+//! Supervisor, and again by the notification router when it reaches that event
+//! in its queue, so a turn start queued before the Stop can't erase it.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -73,6 +75,18 @@ mod tests {
         stops.note("b1", 1_000_000);
         stops.forget("b1");
         assert!(!stops.recent("b1", 1_000_001));
+    }
+
+    /// The order the router sees: `notify.emit` records the Stop, a turn start
+    /// queued before it is processed (and forgets it), then the queued Stop
+    /// records it again. The turn end that follows is still the user's.
+    #[test]
+    fn a_turn_start_queued_before_the_stop_does_not_erase_it() {
+        let mut stops = Stops::default();
+        stops.note("b1", 1_000_000);
+        stops.forget("b1");
+        stops.note("b1", 1_000_005);
+        assert!(stops.recent("b1", 1_000_010));
     }
 
     #[test]
