@@ -57,6 +57,26 @@ pub(crate) use window_settings::read_window_transparent_setting;
 // shouldn't host user-facing panes.
 // (kept as a regular comment — wrap_window_delegate! doesn't accept
 // doc-comments on struct fields.)
+/// The smallest a window may be, in DIP: `(width, height)`. The same on every
+/// platform: 380 wide, the floor Windows has always had, and 39 tall, the
+/// floor Windows enforces on its own at 96 DPI (its minimum track size;
+/// measured on a real Windows window: asked for 100×20, got 380×39). Windows
+/// still asks for a height of 1 and lets the OS apply that minimum, which
+/// scales with the display; elsewhere nothing else sets one, so it is stated.
+/// A floating pane (`floating-…`) is smaller by design and keeps the 240×140
+/// its edge-resize already clamps to (`MIN_W`/`MIN_H` in
+/// floating-pane-workspace.tsx).
+/// docs/reports/REPORT_WINDOW_MINIMUM_SIZE_2026_10_18.md
+pub(crate) fn window_min_size(label: Option<&str>) -> (i32, i32) {
+    if label.is_some_and(|l| l.starts_with("floating-")) {
+        (240, 140)
+    } else if cfg!(target_os = "windows") {
+        (380, 1)
+    } else {
+        (380, 39)
+    }
+}
+
 wrap_window_delegate! {
     pub struct AgentMuxWindowDelegate {
         browser_view: RefCell<Option<BrowserView>>,
@@ -74,16 +94,14 @@ wrap_window_delegate! {
             }
         }
 
-        // Windows only: floor the window at 380px wide so the tab strip and
-        // widget bar can't be resized into an unusably cramped state. No
-        // extra height floor beyond CEF/Windows' own default — only width
-        // is constrained here.
-        #[cfg(target_os = "windows")]
+        // Floor the window so the tab strip and widget bar can't be resized into
+        // an unusably cramped state, the same on every platform: 380 wide and
+        // 39 tall (a floating pane keeps its own, smaller floor). See
+        // `window_min_size`.
         fn minimum_size(&self, _view: Option<&mut View>) -> Size {
-            Size {
-                width: 380,
-                height: 1,
-            }
+            let label = self.window_registration.as_ref().map(|(_, label)| label.as_str());
+            let (width, height) = window_min_size(label);
+            Size { width, height }
         }
 
         fn on_theme_changed(&self, view: Option<&mut View>) {
@@ -1324,6 +1342,30 @@ mod remote_allow_origins_tests {
     fn never_the_wildcard_and_nothing_without_a_port() {
         assert_eq!(remote_allow_origins(0), None);
         assert!(!remote_allow_origins(9223).unwrap().contains('*'));
+    }
+}
+
+#[cfg(test)]
+mod window_min_size_tests {
+    use super::window_min_size;
+
+    // Windows asks for a height of 1 and the OS applies its own 39 (at 96 DPI).
+    const NORMAL: (i32, i32) = if cfg!(target_os = "windows") { (380, 1) } else { (380, 39) };
+
+    #[test]
+    fn every_normal_window_gets_the_same_380_wide_floor() {
+        assert_eq!(window_min_size(Some("main")), NORMAL);
+        assert_eq!(window_min_size(Some("window-3f2a")), NORMAL);
+        assert_eq!(window_min_size(Some("window-pool-1")), NORMAL);
+        // A popup window has no registration.
+        assert_eq!(window_min_size(None), NORMAL);
+        assert_eq!(NORMAL.0, 380);
+    }
+
+    #[test]
+    fn a_floating_pane_keeps_the_smaller_floor_its_edge_resize_clamps_to() {
+        assert_eq!(window_min_size(Some("floating-abc")), (240, 140));
+        assert_eq!(window_min_size(Some("floating-pool-abc")), (240, 140));
     }
 }
 
