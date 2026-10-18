@@ -60,6 +60,9 @@ function parseArgs(argv) {
         a[key] = num.has(key) ? Number(value) : value;
     }
     if (!a.portable && !a.exe) throw new Error("give --portable <dir> (a `task package` folder), or --exe <path>");
+    if (a.recycleAfter !== 0 && !(Number.isInteger(a.recycleAfter) && a.recycleAfter >= 1 && a.recycleAfter <= a.rounds)) {
+        throw new Error(`--recycle-after ${a.recycleAfter} is not a round of this run: a whole number from 1 to --rounds (${a.rounds}), or leave it out`);
+    }
     a.label ??= basename(a.portable ?? dirname(a.exe));
     return a;
 }
