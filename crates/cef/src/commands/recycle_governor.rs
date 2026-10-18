@@ -192,6 +192,9 @@ pub fn recycle_declined(args: &serde_json::Value) -> Result<serde_json::Value, S
     let reason = args.get("reason").and_then(|v| v.as_str()).unwrap_or("");
     let limits = Limits::from_env();
     if let Some(t) = GOVERNOR.lock().unwrap().tracks.get_mut(label) {
+        // Nothing reloaded, so the hour-per-window limit isn't used up: the
+        // window is asked again after the idle time.
+        t.last_request = None;
         t.declined_until = Some(Instant::now() + idle_time(&limits, crate::memory_pressure::current_level()));
     }
     tracing::info!(target: "recycle", label, reason, "[recycle] {label} declined: {reason}");
@@ -397,6 +400,18 @@ mod tests {
         let tracks = HashMap::from([("main".to_string(), track(n, 11 * MIN)), ("window-2".to_string(), track(n, 11 * MIN))]);
         let pick = decide(n, &[sample("main", 700), sample("window-2", 1200)], &tracks, &Limits::SPEC, PressureLevel::Normal, None);
         assert_eq!(pick.as_deref(), Some("window-2"));
+    }
+
+    #[test]
+    fn a_decline_holds_the_window_back_for_the_idle_time_not_the_hour() {
+        let label = "governor-test-decline";
+        let asked = Instant::now();
+        GOVERNOR.lock().unwrap().tracks.insert(label.to_string(), Track { last_request: Some(asked), ..track(asked, 11 * MIN) });
+        recycle_declined(&serde_json::json!({ "label": label, "reason": "a dialog is open" })).unwrap();
+        let t = GOVERNOR.lock().unwrap().tracks.remove(label).unwrap();
+        assert_eq!(t.last_request, None, "the hour isn't used up");
+        let until = t.declined_until.expect("held back");
+        assert!(until <= Instant::now() + Limits::SPEC.idle, "for the idle time at most");
     }
 
     #[test]
