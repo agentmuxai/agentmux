@@ -131,7 +131,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
                         light: isLightThemeActive(),
                         reduced: shouldReduceMotion("feedback"),
                     });
-                    emitPaneLocatePlay(blockId);
+                    emitPaneLocatePlay(blockId, nodeModel.nodeId);
                 };
                 // Flashes start at least a gap apart. The newest request waits for
                 // its turn rather than being dropped; a newer one replaces it.

@@ -1082,7 +1082,7 @@ describe("renderPaneChromeShell — locate flash", () => {
         stopLocateFlash.mockClear();
         slotWait = 0;
         played = [];
-        offPlay = onPaneLocatePlay((id) => played.push(id));
+        offPlay = onPaneLocatePlay((id, paneKey) => played.push(`${id}@${paneKey}`));
         mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
     });
     afterEach(() => offPlay());
@@ -1094,7 +1094,8 @@ describe("renderPaneChromeShell — locate flash", () => {
         const [host, opts] = showLocateFlash.mock.calls[0];
         expect(host.classList.contains("pane-stack")).toBe(true);
         expect(opts).toEqual({ light: false, reduced: false });
-        expect(played).toEqual(["b1"]);
+        // Told which pane is flashing, so only its pills light up.
+        expect(played).toEqual(["b1@node-1"]);
     });
 
     it("waits while the pane is not the focused one showing that block", async () => {
@@ -1137,7 +1138,7 @@ describe("renderPaneChromeShell — locate flash", () => {
         await new Promise((r) => setTimeout(r, 100));
         expect(showLocateFlash).not.toHaveBeenCalled();
         await vi.waitFor(() => expect(showLocateFlash).toHaveBeenCalledTimes(1));
-        expect(played).toEqual(["b1"]);
+        expect(played).toEqual(["b1@node-1"]);
     });
 
     it("a newer reveal replaces one that is still waiting for its turn", async () => {

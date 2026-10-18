@@ -693,8 +693,8 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
             if (target.blockId === id() && pillRef) flashElement(pillRef, target);
         });
         // The pane is flashing to show it was just selected: its pill does too.
-        const unsubscribeLocate = onPaneLocatePlay((blockId) => {
-            if (blockId === id() && pillRef) flashElement(pillRef, LOCATE_PILL_FLASH);
+        const unsubscribeLocate = onPaneLocatePlay((blockId, paneKey) => {
+            if (blockId === id() && paneKey === props.paneKey && pillRef) flashElement(pillRef, LOCATE_PILL_FLASH);
         });
         onCleanup(() => {
             unsubscribe();

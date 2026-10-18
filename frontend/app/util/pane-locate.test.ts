@@ -38,13 +38,13 @@ describe("the bus", () => {
         const offAsk = onPaneLocate(asked);
         const offPlay = onPaneLocatePlay(played);
         emitPaneLocate("a");
-        emitPaneLocatePlay("b");
+        emitPaneLocatePlay("b", "pane-1");
         expect(asked.mock.calls).toEqual([["a"]]);
-        expect(played.mock.calls).toEqual([["b"]]);
+        expect(played.mock.calls).toEqual([["b", "pane-1"]]);
         offAsk();
         offPlay();
         emitPaneLocate("c");
-        emitPaneLocatePlay("c");
+        emitPaneLocatePlay("c", "pane-1");
         expect(asked).toHaveBeenCalledTimes(1);
         expect(played).toHaveBeenCalledTimes(1);
     });

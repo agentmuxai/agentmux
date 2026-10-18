@@ -53,13 +53,15 @@ export const LOCATE_PILL_FLASH: { pattern: FlashPattern; delayMs: number } = {
 // ── Bus ──────────────────────────────────────────────────────────────────
 
 type BlockListener = (blockId: string) => void;
+/** Told which block, and which pane's flash it is: a block can have pills in more than one pane. */
+type PlayListener = (blockId: string, paneKey: string) => void;
 const requests = new Set<BlockListener>();
-const plays = new Set<BlockListener>();
+const plays = new Set<PlayListener>();
 
-function notify(listeners: Set<BlockListener>, blockId: string): void {
+function notify<A extends unknown[]>(listeners: Set<(...args: A) => void>, ...args: A): void {
     for (const l of listeners) {
         try {
-            l(blockId);
+            l(...args);
         } catch (e) {
             console.warn("[pane-locate] listener threw", e);
         }
@@ -77,12 +79,12 @@ export function onPaneLocate(listener: BlockListener): () => void {
     return () => requests.delete(listener);
 }
 
-/** The pane of `blockId` is flashing now: its pills light up too. */
-export function emitPaneLocatePlay(blockId: string): void {
-    notify(plays, blockId);
+/** The pane `paneKey` is flashing for `blockId` now: that pane's pills light up too. */
+export function emitPaneLocatePlay(blockId: string, paneKey: string): void {
+    notify(plays, blockId, paneKey);
 }
 
-export function onPaneLocatePlay(listener: BlockListener): () => void {
+export function onPaneLocatePlay(listener: PlayListener): () => void {
     plays.add(listener);
     return () => plays.delete(listener);
 }
