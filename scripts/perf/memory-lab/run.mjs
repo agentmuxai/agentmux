@@ -129,6 +129,7 @@ async function requireIdle(driver, timeoutS = 300) {
 function reportRecycle(rec) {
     if (!rec.recycled) {
         console.log(`  the command did not recycle the window: ${rec.blocked}`);
+        console.log("  (the build must have the command: \"Reload Window (Free Memory)\", #5086; on a build without it the palette finds nothing)");
         return;
     }
     const row = (m) => `    +${String(m.atSeconds).padStart(2)} s: app ${m.appMB} MB, renderers ${m.rendererMB} MB (${m.rendererProcs}), documents ${m.documents}`;
@@ -220,6 +221,8 @@ async function attempt(args, ctx) {
             rounds: args.rounds,
             gapSeconds: args.gapS,
             settleSeconds: args.settleS,
+            recycleAfter: args.recycleAfter,
+            recycleCommand: args.recycleAfter ? args.recycleCommand : null,
             seed: args.seed,
             notes,
             curve,

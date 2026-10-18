@@ -23,6 +23,9 @@ export function mismatch(base, head) {
     if (!same(base.layout, head.layout)) return `different layouts: ${JSON.stringify(base.layout)} vs ${JSON.stringify(head.layout)}`;
     if (base.rounds !== head.rounds) return `different rounds: ${base.rounds} vs ${head.rounds}`;
     if (base.seed !== head.seed) return `different conversations (seed ${base.seed} vs ${head.seed})`;
+    // A run that recycled its window is a different load, and its final follows the recycle.
+    if ((base.recycleAfter ?? 0) !== (head.recycleAfter ?? 0)) return `different recycles: after round ${base.recycleAfter ?? 0} vs ${head.recycleAfter ?? 0} (0 is none)`;
+    if ((base.recycleAfter ?? 0) > 0 && base.recycleCommand !== head.recycleCommand) return `different recycle commands: ${base.recycleCommand} vs ${head.recycleCommand}`;
     if (base.settleSeconds !== head.settleSeconds) return `different settle delays: ${base.settleSeconds} s vs ${head.settleSeconds} s`;
     if (base.steady?.samples !== head.steady?.samples) return `different sample counts: ${base.steady?.samples} vs ${head.steady?.samples}`;
     if (base.gapSeconds !== head.gapSeconds) return `different round spacing: ${base.gapSeconds} s vs ${head.gapSeconds} s`;

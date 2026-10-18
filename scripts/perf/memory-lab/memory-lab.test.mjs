@@ -110,6 +110,13 @@ describe("memory lab summary", () => {
         expect(mismatch(run, { ...run, rounds: 20 })).toMatch(/different rounds/);
         expect(mismatch(run, { ...run, seed: 2 })).toMatch(/different conversations/);
         expect(mismatch({ ...run, gapSeconds: 15, platform: "win32" }, { ...run, gapSeconds: 5, platform: "win32" })).toMatch(/different round spacing/);
+        const same = { ...run, settleSeconds: 20, steady: { samples: 3 }, gapSeconds: 15, platform: "win32" };
+        expect(mismatch({ ...same, recycleAfter: 3, recycleCommand: "R" }, { ...same, recycleAfter: 0 })).toMatch(/different recycles/);
+        expect(mismatch({ ...same, recycleAfter: 3, recycleCommand: "R" }, { ...same })).toMatch(/different recycles/);
+        expect(mismatch({ ...same, recycleAfter: 3, recycleCommand: "R" }, { ...same, recycleAfter: 5, recycleCommand: "R" })).toMatch(/different recycles/);
+        expect(mismatch({ ...same, recycleAfter: 3, recycleCommand: "R" }, { ...same, recycleAfter: 3, recycleCommand: "S" })).toMatch(/different recycle commands/);
+        expect(mismatch({ ...same, recycleAfter: 3, recycleCommand: "R" }, { ...same, recycleAfter: 3, recycleCommand: "R" })).toBeNull();
+        expect(mismatch({ ...same }, { ...same, recycleAfter: 0, recycleCommand: null })).toBeNull();
         expect(mismatch({ ...run, gapSeconds: 15, platform: "win32" }, { ...run, gapSeconds: 15, platform: "linux" })).toMatch(/different operating systems/);
     });
 });

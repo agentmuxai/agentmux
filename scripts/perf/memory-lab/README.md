@@ -69,7 +69,11 @@ made into scripts. The budget it serves is 500 MB for the app's own processes.
 
 `--recycle-after <round>` runs the window recycle command (the palette's
 "Reload Window (Free Memory)", `--recycle-command` for another) in the main
-window after that round, from the palette as a user would. Before it, the lab
+window after that round, from the palette as a user would. The build must have
+the command (#5086): on one without it the palette finds nothing, and the lab
+reports `recycled: false`. Two results compare only with the same recycle
+(round and command), or none in both: a final that follows a recycle is a
+different measurement. Before it, the lab
 puts a draft in one agent's composer and scrolls another agent's transcript up a
 little. It then samples (with a forced GC) just before, and at 5, 30 and 60
 seconds after: the app and renderer totals, the number of renderer processes, and
