@@ -26,6 +26,8 @@ export function mismatch(base, head) {
     // A run that recycled its window is a different load, and its final follows the recycle.
     if ((base.recycleAfter ?? 0) !== (head.recycleAfter ?? 0)) return `different recycles: after round ${base.recycleAfter ?? 0} vs ${head.recycleAfter ?? 0} (0 is none)`;
     if ((base.recycleAfter ?? 0) > 0 && base.recycleCommand !== head.recycleCommand) return `different recycle commands: ${base.recycleCommand} vs ${head.recycleCommand}`;
+    // Asked for the same recycle, but one build didn't do it (it lacks the command, or refused): one final follows a recycle and the other doesn't.
+    if ((base.recycleAfter ?? 0) > 0 && Boolean(base.recycle?.recycled) !== Boolean(head.recycle?.recycled)) return `only one of the runs recycled its window: ${base.recycle?.recycled ? head.label : base.label} did not (${base.recycle?.recycled ? head.recycle?.blocked : base.recycle?.blocked})`;
     if (base.settleSeconds !== head.settleSeconds) return `different settle delays: ${base.settleSeconds} s vs ${head.settleSeconds} s`;
     if (base.steady?.samples !== head.steady?.samples) return `different sample counts: ${base.steady?.samples} vs ${head.steady?.samples}`;
     if (base.gapSeconds !== head.gapSeconds) return `different round spacing: ${base.gapSeconds} s vs ${head.gapSeconds} s`;

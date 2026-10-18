@@ -115,7 +115,10 @@ describe("memory lab summary", () => {
         expect(mismatch({ ...same, recycleAfter: 3, recycleCommand: "R" }, { ...same })).toMatch(/different recycles/);
         expect(mismatch({ ...same, recycleAfter: 3, recycleCommand: "R" }, { ...same, recycleAfter: 5, recycleCommand: "R" })).toMatch(/different recycles/);
         expect(mismatch({ ...same, recycleAfter: 3, recycleCommand: "R" }, { ...same, recycleAfter: 3, recycleCommand: "S" })).toMatch(/different recycle commands/);
-        expect(mismatch({ ...same, recycleAfter: 3, recycleCommand: "R" }, { ...same, recycleAfter: 3, recycleCommand: "R" })).toBeNull();
+        const did = (recycled, blocked) => ({ ...same, recycleAfter: 3, recycleCommand: "R", recycle: { recycled, blocked } });
+        expect(mismatch({ ...did(true), label: "main" }, { ...did(false, "no notice"), label: "branch" })).toMatch(/only one of the runs recycled its window: branch did not \(no notice\)/);
+        expect(mismatch(did(true), did(true))).toBeNull();
+        expect(mismatch(did(false, "a"), did(false, "b"))).toBeNull();
         expect(mismatch({ ...same }, { ...same, recycleAfter: 0, recycleCommand: null })).toBeNull();
         expect(mismatch({ ...run, gapSeconds: 15, platform: "win32" }, { ...run, gapSeconds: 15, platform: "linux" })).toMatch(/different operating systems/);
     });
