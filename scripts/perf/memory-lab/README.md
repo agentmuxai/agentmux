@@ -107,6 +107,17 @@ layout objects, listeners, tool blocks and the text inside them), so a restored
 page can be set against a live one at the same point: a restore that mounts tool
 bodies a live page had unloaded shows in `toolTextKB`.
 
+## The nightly gate
+
+`.github/workflows/memory-soak.yml` runs the lab nightly on the latest Windows
+portable (12 agents, 10 rounds) and `gate.mjs` checks the result against
+`budget.json`. Every line there is `null` and the mode is `report`, so it
+cannot fail on a number until the operator sets them; see
+[`REPORT_MEMORY_SOAK_GATE_2026_10_18.md`](../../../docs/reports/REPORT_MEMORY_SOAK_GATE_2026_10_18.md).
+Locally: `node scripts/perf/memory-lab/gate.mjs memory-lab-out/<label>/result.json`
+(it says the result is not the gated workload unless it was run with
+`--panes 12 --rounds 10 --seed 1`).
+
 ## A run that isn't the load it was asked for
 
 A run whose agents never played reports a plausible, far too low number (an

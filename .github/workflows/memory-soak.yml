@@ -1,0 +1,105 @@
+name: Memory soak (nightly, Windows)
+
+# Measures the latest nightly Windows portable with the memory lab
+# (scripts/perf/memory-lab) and checks it against scripts/perf/memory-lab/budget.json.
+#
+# REPORT ONLY until the operator sets the lines and the mode in budget.json:
+# with every line null (as shipped) this job cannot fail on a number, and it
+# is not a required check for any PR. See docs/reports/REPORT_MEMORY_SOAK_GATE_2026_10_18.md.
+#
+# It runs on its own schedule, after the nightly artifacts build, and fetches
+# that build's portable by looking the run up rather than by a workflow_run
+# trigger (which has not fired reliably in this repo, see nightly-release.yml).
+
+on:
+  schedule:
+    - cron: '30 9 * * *' # 09:30 UTC, after ci-nightly-artifacts (06:00 UTC)
+  workflow_dispatch:
+    inputs:
+      run-id:
+        description: 'Run of "CI — nightly artifacts" whose windows-portable artifact to measure (blank: the latest successful one)'
+        required: false
+        default: ''
+
+concurrency:
+  group: memory-soak
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  soak:
+    name: lab on the nightly Windows portable
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Find the nightly build
+        id: build
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run-id }}
+        run: |
+          if [ -z "$RUN_ID" ]; then
+            RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci-nightly-artifacts.yml \
+              --status success --limit 1 --json databaseId --jq '.[0].databaseId')
+          fi
+          if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+            echo "::error::no successful nightly artifacts run to measure"
+            exit 1
+          fi
+          echo "run-id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-portable
+          run-id: ${{ steps.build.outputs.run-id }}
+          github-token: ${{ github.token }}
+          path: portable-archive
+
+      - name: Extract the portable
+        shell: bash
+        run: |
+          archive=$(ls portable-archive/agentmux-*-x64-portable.7z | head -n 1)
+          7z x "$archive" -oportable -y > /dev/null
+          dir=$(ls -d portable/agentmux-*-x64-portable | head -n 1)
+          echo "PORTABLE=$dir" >> "$GITHUB_ENV"
+          echo "measuring $(basename "$dir") from run ${{ steps.build.outputs.run-id }}"
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          prefix-key: memory-soak
+
+      - name: Run the lab (12 agents, 10 rounds)
+        shell: bash
+        run: |
+          node scripts/perf/memory-lab/run.mjs --portable "$PORTABLE" --label nightly \
+            --panes 12 --rounds 10 --seed 1 --port 9333 --out memory-lab-out
+
+      - name: Gate
+        shell: bash
+        run: |
+          node scripts/perf/memory-lab/gate.mjs memory-lab-out/nightly/result.json --md gate.md | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the numbers
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-soak-${{ github.run_id }}
+          path: |
+            memory-lab-out/nightly/result.json
+            memory-lab-out/nightly/summary.md
+            memory-lab-out/nightly/instance.log
+            gate.md
+          if-no-files-found: warn
+          retention-days: 90

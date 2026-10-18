@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 
 import { mismatch } from "./compare.mjs";
+import { evaluate, report } from "./gate.mjs";
 import { generateConversation } from "./lib/conversation.mjs";
 import { portableExe } from "./lib/driver.mjs";
 import { draftText, recycleMark, recycleSaving, scrollArmed, scrollRestored } from "./lib/recycle.mjs";
@@ -290,5 +291,49 @@ describe("memory lab conversation", () => {
         expect(tools.length).toBeGreaterThanOrEqual(8);
         expect(tools.length).toBeLessThanOrEqual(20);
         expect(a.turns[0].steps.at(-1).text.length).toBeGreaterThan(500);
+    });
+});
+
+describe("memory soak gate", () => {
+    const workload = { platform: "win32", panes: 12, rounds: 10, seed: 1, recycleAfter: 0 };
+    const result = (app, renderer, over = {}) => ({
+        platform: "win32", layout: { panes: 12 }, rounds: 10, seed: 1, recycleAfter: 0,
+        steady: { samples: 3, app: { privateMB: app }, groups: { renderer: { privateMB: renderer }, srv: { privateMB: 90 } } },
+        ...over,
+    });
+    const budget = (mode, limitsMB) => ({ mode, workload, limitsMB });
+
+    it("cannot fail while no line is set", () => {
+        const out = evaluate(result(5000, 4000), budget("enforce", { app: null, renderer: null, srv: null }));
+        expect(out.over).toBe(false);
+        expect(out.exitCode).toBe(0);
+    });
+
+    it("reports what would fail but exits 0 in report mode", () => {
+        const out = evaluate(result(1100, 700), budget("report", { app: 1000, renderer: 800, srv: null }));
+        expect(out.over).toBe(true);
+        expect(out.exitCode).toBe(0);
+        expect(report(out, result(1100, 700), budget("report", { app: 1000 }))).toMatch(/would be over/);
+    });
+
+    it("exits 1 over a line in enforce mode and 0 within it", () => {
+        expect(evaluate(result(1100, 700), budget("enforce", { app: 1000 })).exitCode).toBe(1);
+        expect(evaluate(result(999, 700), budget("enforce", { app: 1000 })).exitCode).toBe(0);
+        expect(evaluate(result(1000, 700), budget("enforce", { app: 1000 })).exitCode).toBe(0);
+    });
+
+    it("does not pass a result that is not the gated workload", () => {
+        const out = evaluate(result(500, 300, { layout: { panes: 4 } }), budget("enforce", { app: 1000 }));
+        expect(out.problem).toMatch(/panes/);
+        expect(out.exitCode).toBe(2);
+        expect(evaluate(result(500, 300, { recycleAfter: 5 }), budget("report", {})).problem).toMatch(/recycleAfter/);
+    });
+
+    it("does not pass a line whose number could not be read", () => {
+        const r = result(900, 600);
+        delete r.steady.groups.srv;
+        const out = evaluate(r, budget("enforce", { srv: 120 }));
+        expect(out.over).toBe(true);
+        expect(out.exitCode).toBe(2);
     });
 });
