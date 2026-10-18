@@ -17,7 +17,9 @@
 //! when it was granted), the sites the person was shown, and a time limit.
 //! Take over, closing the pane, a change of owner and the time limit end it,
 //! and so do [`IDLE_LIMIT`] minutes without a `Browser` call from its agent
-//! on the pane: a hung or stopped agent doesn't keep one alive.
+//! on the pane: a hung or stopped agent doesn't keep one alive. While the
+//! person has paused the pane (`browser_actions`), both clocks stand still:
+//! the agent can't call then, so it isn't going quiet.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -25,6 +27,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
+use crate::server::browser_actions::{How, Kind};
 use crate::server::AppState;
 
 /// Block meta key the browser pane's header reads.
@@ -60,15 +63,41 @@ pub(crate) struct Grant {
     pub expires_at_ms: i64,
     /// The agent's last `Browser` call on the pane, or the grant itself.
     last_active: Instant,
+    /// Since when the person has paused the pane: the time limit and the
+    /// idle limit stand still until they resume, then both move later by
+    /// the paused time.
+    pub paused_at: Option<Instant>,
 }
 
 impl Grant {
     fn live(&self) -> bool {
-        Instant::now() < self.expires
+        self.paused_at.is_some() || Instant::now() < self.expires
+    }
+
+    /// Time left on the clock, which stands still while the pane is paused.
+    fn left(&self, now: Instant) -> Duration {
+        self.expires.saturating_duration_since(self.paused_at.unwrap_or(now))
     }
 
     pub(crate) fn minutes_left(&self) -> u64 {
-        self.expires.saturating_duration_since(Instant::now()).as_secs().div_ceil(60)
+        self.left(Instant::now()).as_secs().div_ceil(60)
+    }
+
+    /// Stop (`hold`) or restart the grant's clocks at `now`. Resuming moves
+    /// its end and its idle deadline later by the paused time. Returns
+    /// whether anything changed.
+    fn hold(&mut self, hold: bool, now: Instant) -> bool {
+        match (hold, self.paused_at) {
+            (true, None) if now < self.expires => self.paused_at = Some(now),
+            (false, Some(at)) => {
+                (self.expires, self.expires_at_ms) =
+                    crate::server::browser_actions::resumed_clock(self.expires, self.expires_at_ms, at, now);
+                self.last_active += now.saturating_duration_since(at);
+                self.paused_at = None;
+            }
+            _ => return false,
+        }
+        true
     }
 
     /// Is `url` on the sites this grant is bound to? A page with no web
@@ -137,13 +166,22 @@ pub(crate) fn note_declined(pane: &str) {
 }
 
 /// Record a grant on `pane` for `agent` over `origins`, show it in the
-/// pane's header, and end it when its time is up or its agent goes quiet.
-/// Replaces any grant the pane had.
-pub(crate) fn grant(state: &AppState, pane: &str, agent: &str, origins: Vec<String>, minutes: u64) -> Grant {
-    grant_watched(state, pane, agent, origins, minutes, IDLE_LIMIT)
+/// pane's header, log it (`how`: the person's header button, or their answer
+/// to the agent's request), and end it when its time is up or its agent goes
+/// quiet. Replaces any grant the pane had.
+pub(crate) fn grant(state: &AppState, pane: &str, agent: &str, origins: Vec<String>, minutes: u64, how: How) -> Grant {
+    grant_watched(state, pane, agent, origins, minutes, how, IDLE_LIMIT)
 }
 
-fn grant_watched(state: &AppState, pane: &str, agent: &str, origins: Vec<String>, minutes: u64, idle: Duration) -> Grant {
+fn grant_watched(
+    state: &AppState,
+    pane: &str,
+    agent: &str,
+    origins: Vec<String>,
+    minutes: u64,
+    how: How,
+    idle: Duration,
+) -> Grant {
     let minutes = clamp_minutes(Some(minutes));
     let dur = Duration::from_secs(minutes * 60);
     let now = Instant::now();
@@ -155,6 +193,8 @@ fn grant_watched(state: &AppState, pane: &str, agent: &str, origins: Vec<String>
         expires: now + dur,
         expires_at_ms: chrono::Utc::now().timestamp_millis() + dur.as_millis() as i64,
         last_active: now,
+        // Granted on a paused pane: its clocks start on resume.
+        paused_at: crate::server::browser_actions::is_paused(pane).then_some(now),
     };
     {
         let mut t = table();
@@ -166,8 +206,25 @@ fn grant_watched(state: &AppState, pane: &str, agent: &str, origins: Vec<String>
         "[browser-bypass] granted: the agent acts without asking"
     );
     publish(state, pane, strip_value(&g));
+    let detail = format!("{minutes} min on {}", g.origins.join(", "));
+    crate::server::browser_actions::note(pane, agent, Kind::AutoApproveOn).detail(&detail).how(how).record(state);
     tokio::spawn(watch(state.clone(), pane.to_string(), g.id.clone(), idle));
     g
+}
+
+/// Stop (`hold`) or restart `pane`'s grant clocks: the person paused or
+/// resumed the pane. The watcher needs no word: it finds the new deadlines
+/// when it next wakes, which is never later than they are.
+pub(crate) fn hold_clock(state: &AppState, pane: &str, hold: bool) {
+    let g = {
+        let mut t = table();
+        let Some(l) = t.grants.get_mut(pane) else { return };
+        if !l.grant.hold(hold, Instant::now()) {
+            return;
+        }
+        l.grant.clone()
+    };
+    publish(state, pane, strip_value(&g));
 }
 
 /// A `Browser` call from `agent` on `target` (a pane, or a popup window,
@@ -193,12 +250,18 @@ enum Due {
 
 /// Grant `id` on `pane` at `now`: past its time, or `idle` since its agent's
 /// last `Browser` call there. `busy`: the pane waits on the person, which
-/// counts as activity.
+/// counts as activity. A paused grant is never due.
 fn due(pane: &str, id: &str, idle: Duration, now: Instant, busy: bool) -> Due {
     let mut t = table();
     let Some(g) = t.grants.get_mut(pane).map(|l| &mut l.grant).filter(|g| g.id == id) else {
         return Due::Gone;
     };
+    if let Some(at) = g.paused_at {
+        // Resuming moves both deadlines by the paused time, so neither can
+        // come sooner than this much after now: look again then.
+        let left = g.left(now).min((g.last_active + idle).saturating_duration_since(at));
+        return Due::At(now + left.max(Duration::from_secs(1)));
+    }
     if now >= g.expires {
         return Due::End(TIME_UP_REASON);
     }
@@ -221,7 +284,7 @@ async fn watch(state: AppState, pane: String, id: String, idle: Duration) {
         match due(&pane, &id, idle, Instant::now(), busy) {
             Due::Gone => return,
             Due::End(reason) => {
-                end_if(&state, &pane, Some(&id), reason, true);
+                end_if(&state, &pane, Some(&id), reason, true, How::TimedOut);
                 return;
             }
             Due::At(at) => tokio::time::sleep_until(tokio::time::Instant::from_std(at)).await,
@@ -231,9 +294,10 @@ async fn watch(state: AppState, pane: String, id: String, idle: Duration) {
 
 /// End `pane`'s grant, if it has one, and take the header strip down; with
 /// `say_why`, the strip says why it ended instead (the person who ended it
-/// themselves needs no note). Returns whether there was one.
-pub(crate) fn end(state: &AppState, pane: &str, reason: &str, say_why: bool) -> bool {
-    end_if(state, pane, None, reason, say_why)
+/// themselves needs no note). Returns whether there was one. `how` is for
+/// the action log: the agent's own stop is `Allowed`, the person's `ByUser`.
+pub(crate) fn end(state: &AppState, pane: &str, reason: &str, say_why: bool, how: How) -> bool {
+    end_if(state, pane, None, reason, say_why, how)
 }
 
 /// End `pane`'s grant for callers that have no [`AppState`]: Take over,
@@ -247,7 +311,7 @@ pub(crate) fn forget(pane: &str, reason: &str) {
     }
 }
 
-fn end_if(state: &AppState, pane: &str, id: Option<&str>, reason: &str, say_why: bool) -> bool {
+fn end_if(state: &AppState, pane: &str, id: Option<&str>, reason: &str, say_why: bool, how: How) -> bool {
     let removed = {
         let mut t = table();
         match t.grants.get(pane) {
@@ -260,12 +324,18 @@ fn end_if(state: &AppState, pane: &str, id: Option<&str>, reason: &str, say_why:
     // The note has no `expires_at`, so the header never takes it for a
     // grant; the next grant, or the host registering, replaces it.
     publish(state, pane, if say_why { json!({ "agent": g.agent, "ended": reason }) } else { Value::Null });
+    crate::server::browser_actions::note(pane, &g.agent, Kind::AutoApproveOff).detail(reason).how(how).record(state);
     true
 }
 
 /// The header strip's copy of a live grant.
 fn strip_value(g: &Grant) -> Value {
-    json!({ "agent": g.agent, "origins": g.origins, "minutes": g.minutes, "expires_at": g.expires_at_ms })
+    let mut v = json!({ "agent": g.agent, "origins": g.origins, "minutes": g.minutes, "expires_at": g.expires_at_ms });
+    // Paused: the header shows the time left, which isn't running down.
+    if g.paused_at.is_some() {
+        v["paused_left"] = json!(g.left(Instant::now()).as_millis() as u64);
+    }
+    v
 }
 
 /// Write `value` as the header strip's `browser:bypass`.
@@ -342,7 +412,7 @@ pub(crate) fn tests_put(pane: &str, agent: &str) {
 /// `Browser` call, for other modules' tests.
 #[cfg(test)]
 pub(crate) fn tests_grant_idle(state: &AppState, pane: &str, agent: &str, idle: Duration) -> Grant {
-    grant_watched(state, pane, agent, vec!["https://github.com".to_string()], 15, idle)
+    grant_watched(state, pane, agent, vec!["https://github.com".to_string()], 15, How::ByUser, idle)
 }
 
 #[cfg(test)]
@@ -358,8 +428,50 @@ mod tests {
             expires: Instant::now() + Duration::from_secs(secs),
             expires_at_ms: 0,
             last_active: Instant::now(),
+            paused_at: None,
         };
         table().grants.insert(pane.to_string(), Live { grant, state: None });
+    }
+
+    #[test]
+    fn a_pause_stops_both_clocks_and_resume_restarts_them() {
+        let idle = IDLE_LIMIT;
+        let t0 = Instant::now();
+        // Paused right after the agent's last call, with 30 minutes left.
+        put("bp-held", "naki", &["https://github.com"], 60);
+        {
+            let mut t = table();
+            let g = &mut t.grants.get_mut("bp-held").unwrap().grant;
+            g.last_active = t0;
+            g.paused_at = Some(t0);
+            g.expires = t0 + Duration::from_secs(30 * 60);
+        }
+        // Paused for longer than the idle limit: still not due.
+        let later = t0 + idle + Duration::from_secs(120);
+        assert!(matches!(due("bp-held", "bp-held-id", idle, later, false), Due::At(_)), "paused, so not due");
+        assert!(active_for("bp-held", "naki").is_some(), "a paused grant stays");
+        // Resume: the idle deadline is a whole quiet IDLE_LIMIT away again,
+        // and the end the 30 minutes it had left.
+        assert!(table().grants.get_mut("bp-held").unwrap().grant.hold(false, later));
+        let g = active_for("bp-held", "naki").unwrap();
+        assert_eq!(g.paused_at, None);
+        assert_eq!(g.expires, later + Duration::from_secs(30 * 60));
+        assert_eq!(due("bp-held", "bp-held-id", idle, later, false), Due::At(later + idle));
+        assert!(matches!(due("bp-held", "bp-held-id", idle, later + idle - Duration::from_secs(1), false), Due::At(_)));
+        assert_eq!(due("bp-held", "bp-held-id", idle, later + idle, false), Due::End(IDLE_REASON));
+        forget("bp-held", "test");
+    }
+
+    #[test]
+    fn a_paused_grant_does_not_run_out() {
+        put("bp-held-time", "naki", &["https://github.com"], 0);
+        let now = Instant::now();
+        table().grants.get_mut("bp-held-time").unwrap().grant.paused_at = Some(now);
+        assert!(active_for("bp-held-time", "naki").is_some(), "a paused grant stays, though its time is past");
+        let Due::At(at) = due("bp-held-time", "bp-held-time-id", IDLE_LIMIT, now, false) else { panic!("not ended") };
+        assert_eq!(at, now + Duration::from_secs(1), "the watcher looks again rather than ending it");
+        table().grants.get_mut("bp-held-time").unwrap().grant.paused_at = None;
+        assert!(active_for("bp-held-time", "naki").is_none());
     }
 
     fn quiet_for(pane: &str, d: Duration) {

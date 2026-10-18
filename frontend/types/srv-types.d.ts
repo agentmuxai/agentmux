@@ -602,6 +602,33 @@ declare global {
         origins: string[];
         minutes: number;
         expires_at: number;
+        /** Set while the person has paused the pane: the time left, in ms,
+         *  which isn't running down; `expires_at` moves on resume. */
+        paused_left?: number;
+    };
+
+    /** One thing the driving agent did in a browser pane, as srv logged it
+     *  (PLAN_BROWSER_DRIVER_FIXES_2026_10_17.md §5). Never what was typed. */
+    type BrowserActionEntry = {
+        /** Milliseconds since the Unix epoch. */
+        ts: number;
+        agent: string;
+        /** navigate, back, forward, reload, click, fill, select, check, key,
+         *  upload, eval, handoff, auto-approve-on, auto-approve-off, pause, resume. */
+        kind: string;
+        url?: string;
+        /** The element's label or ref, or a field's ref for a fill. */
+        target?: string;
+        /** allowed, approved, auto-approved, declined, `refused: <why>`,
+         *  timed out, or by the user. */
+        how: string;
+        detail?: string;
+    };
+
+    /** A pane's action log: how many entries it ever had, and the newest. */
+    type BrowserActions = {
+        count: number;
+        entries: BrowserActionEntry[];
     };
 
     /** What `browser:bypass` holds after srv ended a grant on its own (its
@@ -630,6 +657,12 @@ declare global {
          *  strip in the header. Written by srv only
          *  (SPEC_BROWSER_PANE_BYPASS_2026_10_16.md §3.3). */
         "browser:bypass"?: BrowserBypass | BrowserBypassEnded | null;
+        /** What the driving agent did in this pane, for the header's Log.
+         *  Written by srv only (PLAN_BROWSER_DRIVER_FIXES_2026_10_17.md §5). */
+        "browser:actions"?: BrowserActions | null;
+        /** The person paused the driving agent: its calls on this pane are
+         *  refused until they resume it. Written by srv only. */
+        "browser:paused"?: boolean | null;
         /** The pane whose page opened this one as a popup, and that page's
          *  origin, shown as "Popup from …". Written by srv only
          *  (SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md §3.4, §5). */

@@ -46,6 +46,7 @@ use agentmux_common::api_types::{
 };
 
 use super::{AppState, HostIpc};
+use crate::server::browser_actions::{note, How, Kind, Note};
 
 /// Signatures older than this are rejected — bounds replay of a leaked/
 /// logged signature to a short window. Mirrors `server/reactive.rs`'s
@@ -348,7 +349,7 @@ pub(crate) async fn handle_ui_click(
         Ok(b) => b,
         Err((code, e)) => return err_response(code, e),
     };
-    if let Err(resp) = refuse_on_driven_pane(&block_id, "UI's click action", "Browser's snapshot action, then its click action on a ref") {
+    if let Err(resp) = refuse_on_driven_pane(&state, note(&block_id, &req.auth.agent_id, Kind::Click).target(&req.selector), &block_id, "UI's click action", "Browser's snapshot action, then its click action on a ref") {
         return resp;
     }
     let host = match get_host_ipc(&state).await {
@@ -468,27 +469,19 @@ pub(crate) async fn handle_ui_browser_navigate(
         Err((code, e)) => return err_response(code, e),
     };
     // Off the pane's site list: refused outright, without asking the person.
+    let log = || note(&block_id, &req.auth.agent_id, Kind::Navigate).url(&req.url);
     if let Some(e) = crate::server::browser_allowlist::refuse_agent_navigation(&banner_for(&block_id).0, &req.url) {
-        return err_response(StatusCode::FORBIDDEN, e);
+        return log().fail(&state, StatusCode::FORBIDDEN, e);
     }
     let host = match get_host_ipc(&state).await {
         Ok(h) => h,
         Err(e) => return err_response(StatusCode::SERVICE_UNAVAILABLE, e),
     };
-    if let Err(resp) = proxy_ack(
-        &state,
-        &host,
-        "navigate",
-        json!({ "block_id": block_id, "url": req.url }),
-    )
-    .await
-    {
+    if let Err(resp) = proxy_ack(&state, &host, "navigate", json!({ "block_id": block_id, "url": req.url })).await {
         return resp;
     }
-    tracing::info!(
-        agent_id = %req.auth.agent_id, block_id = %block_id, url = %req.url,
-        "[ui-automation] browser navigate"
-    );
+    tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, url = %req.url, "[ui-automation] browser navigate");
+    log().record(&state);
     (StatusCode::OK, Json(json!({ "ok": true }))).into_response()
 }
 
@@ -510,6 +503,7 @@ pub(crate) async fn handle_ui_browser_back(
         return resp;
     }
     tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, "[ui-automation] browser back");
+    note(&block_id, &req.auth.agent_id, Kind::Back).record(&state);
     (StatusCode::OK, Json(json!({ "ok": true }))).into_response()
 }
 
@@ -531,6 +525,7 @@ pub(crate) async fn handle_ui_browser_forward(
         return resp;
     }
     tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, "[ui-automation] browser forward");
+    note(&block_id, &req.auth.agent_id, Kind::Forward).record(&state);
     (StatusCode::OK, Json(json!({ "ok": true }))).into_response()
 }
 
@@ -548,17 +543,12 @@ pub(crate) async fn handle_ui_browser_reload(
         Ok(h) => h,
         Err(e) => return err_response(StatusCode::SERVICE_UNAVAILABLE, e),
     };
-    if let Err(resp) = proxy_ack(
-        &state,
-        &host,
-        "reload",
-        json!({ "block_id": block_id, "ignore_cache": req.ignore_cache.unwrap_or(false) }),
-    )
-    .await
-    {
+    let body = json!({ "block_id": block_id, "ignore_cache": req.ignore_cache.unwrap_or(false) });
+    if let Err(resp) = proxy_ack(&state, &host, "reload", body).await {
         return resp;
     }
     tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, "[ui-automation] browser reload");
+    note(&block_id, &req.auth.agent_id, Kind::Reload).record(&state);
     (StatusCode::OK, Json(json!({ "ok": true }))).into_response()
 }
 
@@ -575,7 +565,7 @@ pub(crate) async fn handle_ui_browser_eval(
         Err((code, e)) => return err_response(code, e),
     };
     if let Err(resp) = refuse_on_driven_pane(
-        &block_id,
+        &state, note(&block_id, &req.auth.agent_id, Kind::Eval), &block_id,
         "Browser's eval action",
         "Browser's snapshot action to read the page, and its click, fill, select and check actions to act on it",
     ) {
@@ -630,9 +620,11 @@ pub(crate) async fn handle_ui_browser_dispatch_key(
     // would pass the approval banner, so on a driven pane they're refused.
     let presses = matches!(req.key.as_deref(), Some("Enter") | Some("NumpadEnter") | Some("Space"))
         || req.text.as_deref().is_some_and(|t| t.contains('\n') || t.contains('\r'));
+    // The key's name, never the text typed: it can be anything the agent was given.
+    let log = || note(&block_id, &req.auth.agent_id, Kind::Key).target(req.selector.as_deref().unwrap_or("")).detail(req.key.as_deref().unwrap_or("typed text (not logged)"));
     if presses {
         if let Err(resp) = refuse_on_driven_pane(
-            &block_id,
+            &state, log(), &block_id,
             "Browser's key action with Enter or Space",
             "Browser's click action on the button (it asks the user when the click submits something)",
         ) {
@@ -643,22 +635,12 @@ pub(crate) async fn handle_ui_browser_dispatch_key(
         Ok(h) => h,
         Err(e) => return err_response(StatusCode::SERVICE_UNAVAILABLE, e),
     };
-    if let Err(resp) = proxy_ack(
-        &state,
-        &host,
-        "dispatch_key",
-        json!({
-            "block_id": block_id,
-            "selector": req.selector,
-            "text": req.text,
-            "key": req.key,
-        }),
-    )
-    .await
-    {
+    let body = json!({ "block_id": block_id, "selector": req.selector, "text": req.text, "key": req.key });
+    if let Err(resp) = proxy_ack(&state, &host, "dispatch_key", body).await {
         return resp;
     }
     tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, "[ui-automation] browser dispatch_key");
+    log().record(&state);
     (StatusCode::OK, Json(json!({ "ok": true }))).into_response()
 }
 
@@ -944,17 +926,10 @@ pub(crate) async fn handle_ui_browser_set_files(
         Err(e) => return err_response(StatusCode::INTERNAL_SERVER_ERROR, format!("reading the files failed: {e}")),
     };
     let names: Vec<&str> = files.iter().filter_map(|f| f["name"].as_str()).collect();
-    tracing::info!(
-        agent_id = %req.auth.agent_id, block_id = %block_id, r#ref = %req.ref_, files = ?names,
-        "[ui-automation] browser upload"
-    );
-    proxy_data(
-        &state,
-        "set_files",
-        json!({ "block_id": block_id, "ref": req.ref_, "files": files }),
-        std::time::Duration::from_secs(60),
-    )
-    .await
+    tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, r#ref = %req.ref_, files = ?names, "[ui-automation] browser upload");
+    let log = note(&block_id, &req.auth.agent_id, Kind::Upload).target(&req.ref_).detail(&names.join(", "));
+    let sent = json!({ "block_id": block_id, "ref": req.ref_, "files": files });
+    log.outcome(&state, proxy_value(&state, "set_files", sent, std::time::Duration::from_secs(60)).await)
 }
 
 /// `POST /api/v1/ui/browser/wait_for` — backs `BrowserWaitFor`.
@@ -988,29 +963,20 @@ pub(crate) async fn handle_ui_browser_wait_for(
 /// approval banner (spec §5.4): arbitrary script, clicks by CSS selector,
 /// and the keys that press buttons. The reference tools do the same work
 /// with the approval check in front of committing clicks.
+/// A refusal goes in the pane's action log as `log`.
 #[allow(clippy::result_large_err)]
-fn refuse_on_driven_pane(block_id: &str, what: &str, instead: &str) -> Result<(), axum::response::Response> {
+fn refuse_on_driven_pane(state: &AppState, log: Note, block_id: &str, what: &str, instead: &str) -> Result<(), axum::response::Response> {
     // A popup window has no owner record of its own (it is driven through the
     // pane that opened it), and it is always driven: the same refusal holds.
-    if crate::server::browser_popup::is_window_id(block_id) {
-        return Err(err_response(
-            StatusCode::FORBIDDEN,
-            format!(
-                "{what} isn't allowed on a popup window: it could submit a form without the \
-                 user's approval. Use {instead}."
-            ),
-        ));
-    }
-    if crate::server::browser_owner::owner_of(block_id).is_none() {
+    let on = if crate::server::browser_popup::is_window_id(block_id) {
+        "a popup window"
+    } else if crate::server::browser_owner::owner_of(block_id).is_some() {
+        "a browser pane you opened with Browser's open action"
+    } else {
         return Ok(());
-    }
-    Err(err_response(
-        StatusCode::FORBIDDEN,
-        format!(
-            "{what} isn't allowed on a browser pane you opened with Browser's open action: it could submit \
-             a form without the user's approval. Use {instead}."
-        ),
-    ))
+    };
+    let msg = format!("{what} isn't allowed on {on}: it could submit a form without the user's approval. Use {instead}.");
+    Err(log.fail(state, StatusCode::FORBIDDEN, msg))
 }
 
 /// A popup pane (`browser:popup_of`) is driven as part of its opener: while
@@ -1138,6 +1104,7 @@ pub(crate) fn banner_for(target: &str) -> (String, Option<String>) {
 /// (they're working in it), an approval (they're reading the form the
 /// approved click will send, which mustn't change under them), or a question.
 fn not_waiting_on_user(pane: &str) -> Result<(), (StatusCode, String)> {
+    crate::server::browser_actions::not_paused(pane)?;
     match crate::server::browser_attention::waiting_on_user(pane) {
         None => Ok(()),
         Some(kind) => Err((StatusCode::CONFLICT, kind.tools_paused(pane))),
@@ -1198,6 +1165,7 @@ pub(crate) async fn handle_ui_browser_handoff(
         Ok((a, _waiting)) => a,
         Err(e) => return err_response(e.status(), e.to_string()),
     };
+    note(&block_id, &req.auth.agent_id, Kind::Handoff).target(&reason).how(How::from_answer(answer)).record(&state);
     let answer = match answer {
         crate::server::browser_attention::Answer::Yes => "done",
         crate::server::browser_attention::Answer::Cancelled => "cancelled",
@@ -1475,10 +1443,8 @@ pub(crate) async fn handle_ui_browser_act(
         Err((code, e)) => return err_response(code, e),
     };
     // The typed text isn't logged: it can be anything the agent was given.
-    tracing::info!(
-        agent_id = %req.auth.agent_id, block_id = %block_id, action = %req.action, r#ref = %req.ref_,
-        "[ui-automation] browser act"
-    );
+    tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, action = %req.action, r#ref = %req.ref_, "[ui-automation] browser act");
+    let log = || Note::act(&block_id, &req);
     // `approved` carries what the user was shown: the host checks the form
     // still matches it before clicking (the page's own script could have
     // changed it while they read the banner).
@@ -1496,18 +1462,18 @@ pub(crate) async fn handle_ui_browser_act(
     };
     let first = match proxy_value(&state, "act", body(None), std::time::Duration::from_secs(20)).await {
         Ok(d) => d,
-        Err((code, e)) => return err_response(code, e),
+        Err(e) => return log().outcome(&state, Err(e)),
     };
     // A committing click (submit, send, pay, delete, ...) waits for the
     // user's approval in the pane; only their click there lets it through
     // (spec §5.4).
     let Some(ask) = first.pointer("/after/needs_approval").cloned() else {
-        return (StatusCode::OK, Json(json!({ "ok": true, "data": first }))).into_response();
+        return log().outcome(&state, Ok(first));
     };
     // Bypass (bypass spec §4.1): the person let this agent click without
     // asking on this page's site.
     if let Some(resp) =
-        crate::server::browser_bypass_routes::bypassed_click(&state, &block_id, &req.auth.agent_id, &ask, body(Some(&ask))).await
+        crate::server::browser_bypass_routes::bypassed_click(&state, &block_id, &req.auth.agent_id, &ask, body(Some(&ask)), log()).await
     {
         return resp;
     }
@@ -1537,28 +1503,23 @@ pub(crate) async fn handle_ui_browser_act(
         Ok(a) => a,
         Err(e) => return err_response(e.status(), e.to_string()),
     };
+    let asked = || log().asked(&ask);
     match answer {
         // The user may have taken the pane over while the banner was up:
         // their Take over wins over an Approve that comes after it.
         crate::server::browser_attention::Answer::Yes
             if crate::server::browser_owner::owner_of(&banner_at) != owner_before =>
         {
-            err_response(
-                StatusCode::FORBIDDEN,
-                "the user took over this pane, so the approved click wasn't made".to_string(),
-            )
+            asked().fail(&state, StatusCode::FORBIDDEN, "the user took over this pane, so the approved click wasn't made".to_string())
         }
         crate::server::browser_attention::Answer::Yes => {
             crate::server::browser_dialog::note_approved_click(&block_id, &ask);
-            proxy_data(&state, "act", body(Some(&ask)), std::time::Duration::from_secs(20)).await
+            asked().how(How::Approved).outcome(&state, proxy_value(&state, "act", body(Some(&ask)), std::time::Duration::from_secs(20)).await)
         }
-        crate::server::browser_attention::Answer::Cancelled => {
-            err_response(StatusCode::FORBIDDEN, "the user didn't approve this action: don't retry it; ask them what to do".to_string())
-        }
-        crate::server::browser_attention::Answer::TimedOut => err_response(
-            StatusCode::REQUEST_TIMEOUT,
-            "the user didn't answer the approval within 10 minutes; ask them in chat before trying again".to_string(),
-        ),
+        crate::server::browser_attention::Answer::Cancelled => asked().how(How::Declined).fail(&state, StatusCode::FORBIDDEN,
+            "the user didn't approve this action: don't retry it; ask them what to do".to_string()),
+        crate::server::browser_attention::Answer::TimedOut => asked().how(How::TimedOut).fail(&state, StatusCode::REQUEST_TIMEOUT,
+            "the user didn't answer the approval within 10 minutes; ask them in chat before trying again".to_string()),
     }
 }
 

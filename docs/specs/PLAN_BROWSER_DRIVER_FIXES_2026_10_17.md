@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-17
 **Author:** Naki #2 (naki-naki-2)
-**Status:** active — PR 1 (dialogs) is #5074; PRs 2–5 follow. Turns `REPORT_BROWSER_DRIVER_ROADBLOCKS_2026_10_17.md` into PRs.
+**Status:** implemented — PR 1 (dialogs) #5074, PR 2 (action log and Pause) #5076, PR 3 (attention slot) #5079, PR 4 (find) #5075, PR 5 (small fixes) #5077. Turns `REPORT_BROWSER_DRIVER_ROADBLOCKS_2026_10_17.md` into PRs. Not yet run: the §9 acceptance job in a live pane.
 **Related:** `SPEC_BROWSER_PANE_NATIVE_DIALOGS_2026_10_17.md` (R1), `REPORT_BROWSER_PANE_BLANK_AFTER_BLOCKED_SIGN_IN_REDIRECT_RCA_2026_10_16.md` (R2), `SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md` (§5.5, B3b: action log, Pause, `BrowserDialog`), `SPEC_BROWSER_PANE_BYPASS_2026_10_16.md` (Auto-approve).
 
 ## 1. Goal

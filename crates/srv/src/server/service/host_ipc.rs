@@ -191,5 +191,7 @@ async fn handle_register(state: &AppState, call: &WebCallType) -> WebReturnType 
     crate::server::ui_handlers::reset_popup_windows(state);
     // A bypass never outlives srv: clear a strip saved with a pane from before.
     crate::server::browser_bypass::reset_strips(state);
+    // Nor does an action log or a pause: clear ones saved with a pane.
+    crate::server::browser_actions::reset_strips(state);
     WebReturnType::success_empty()
 }

@@ -330,21 +330,13 @@ $browser-nav-stack-below: 388px;
         color: var(--secondary-text-color);
     }
 
-    // Bypass sits next to Take over, both at the right end.
-    .browser-bypass-button {
+    // Log, Pause, Auto-approve and Take over sit together at the right end.
+    .browser-actions-log-button {
         margin-left: auto;
-
-        + .browser-take-over {
-            margin-left: 0;
-        }
     }
 
     .browser-bypass-strip-error {
         color: var(--error-color);
-    }
-
-    .browser-bypass-end {
-        margin-left: auto;
     }
 
     // Bypass on: the whole strip turns red, so it can't be missed
@@ -359,7 +351,8 @@ $browser-nav-stack-below: 388px;
         }
     }
 
-    // Paused: the page left the granted sites, so clicks ask again (§3.4).
+    // Paused: the page left the granted sites, so clicks ask again (§3.4),
+    // or the person paused the agent.
     &--paused {
         background: var(--attention-bg-color);
         border-left-color: var(--attention-color);
@@ -367,6 +360,84 @@ $browser-nav-stack-below: 388px;
         > i {
             color: var(--attention-color);
         }
+    }
+
+    // No agent drives the pane any more (Take over): only its Log is left.
+    &--ended {
+        background: var(--highlight-bg-color);
+        color: var(--secondary-text-color);
+    }
+
+    // The person paused the agent: its actions wait until they resume.
+    &--held {
+        background: var(--attention-bg-color);
+        border-left: 3px solid var(--attention-color);
+
+        > i {
+            color: var(--attention-color);
+        }
+    }
+}
+
+// The Log of what the agent did, in the pane's flow under the header strip
+// like Auto-approve's confirmation, and for the same reason.
+.browser-action-log {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-4);
+    background: var(--highlight-bg-color);
+    border-bottom: 1px solid var(--border-color);
+    color: var(--main-text-color);
+    font-size: var(--text-sm);
+    flex-shrink: 0;
+    max-height: 40%;
+    min-height: 0;
+
+    .browser-action-log-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-2);
+    }
+
+    .browser-action-log-empty {
+        color: var(--secondary-text-color);
+    }
+
+    .browser-action-log-list {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        overflow-y: auto;
+        min-height: 0;
+    }
+
+    .browser-action-log-row {
+        display: grid;
+        grid-template-columns: max-content 8em minmax(0, 2fr) 9em minmax(0, 1.5fr);
+        gap: var(--space-2);
+        padding: 1px 0;
+        white-space: nowrap;
+
+        > span {
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        &--failed .browser-action-log-how {
+            color: var(--error-color);
+        }
+    }
+
+    .browser-action-log-time,
+    .browser-action-log-url,
+    .browser-action-log-detail {
+        color: var(--secondary-text-color);
+    }
+
+    .browser-action-log-time {
+        font-variant-numeric: tabular-nums;
     }
 }
 

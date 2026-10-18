@@ -141,6 +141,10 @@ declare global {
             blockId: string,
             args: { on: boolean; minutes?: number; agent?: string; origins?: string[] },
         ): Promise<void>;
+        /** The person's Pause (`paused`) or Resume in an agent-driven browser
+         *  pane's header. Relayed by the host, which srv trusts and agents
+         *  can't impersonate, so no agent can resume itself. */
+        setBrowserPaused?(blockId: string, paused: boolean): Promise<void>;
         /** Answer a widget's install prompt: approve exactly the package version
          *  (`hash`) the user was shown, or cancel. Relayed by the host, which srv
          *  trusts and agents can't impersonate. SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §8.3. */

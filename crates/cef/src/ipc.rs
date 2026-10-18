@@ -724,6 +724,24 @@ async fn route_command(
             .await
             .map_err(|e| format!("browser_bypass_set: {e}"))?
         }
+        "browser_pause_set" => {
+            // The person's Pause or Resume in an agent-driven browser pane's
+            // header. Relayed to srv as the host, so no agent can lift a
+            // pause on itself (PLAN_BROWSER_DRIVER_FIXES_2026_10_17.md §5).
+            let body = serde_json::json!({
+                "block_id": args.get("block_id").and_then(|v| v.as_str()).unwrap_or(""),
+                "paused": args.get("paused").and_then(|v| v.as_bool()).unwrap_or(false),
+            });
+            let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
+            let auth_key = state.auth_key.lock().clone();
+            let ipc_token = state.ipc_token.clone();
+            tracing::info!("[ipc] browser_pause_set paused={}", body["paused"]);
+            tokio::task::spawn_blocking(move || {
+                crate::client::backend_browser_pause(&web_endpoint, &auth_key, &ipc_token, &body)
+            })
+            .await
+            .map_err(|e| format!("browser_pause_set: {e}"))?
+        }
         "widget_approval_decide" => {
             // The user's Install/Cancel on a widget's install prompt, relayed
             // to srv as the host: no agent can approve a widget itself

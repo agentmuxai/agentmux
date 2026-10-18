@@ -12,6 +12,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::json;
 
+use crate::server::browser_actions::{note, How, Kind, Note};
 use crate::server::browser_bypass as bypass;
 use crate::server::ui_handlers::{
     banner_for, err_response, from_host, get_host_ipc, owning_agent, proxy_to_host_timeout, proxy_value, target_block_id,
@@ -41,15 +42,22 @@ async fn page_url(state: &AppState, target: &str) -> Result<String, String> {
 /// without the person's approval if they granted `agent` a bypass on the
 /// site the page is on (bypass spec §4.1). `approved` is the act request to
 /// send for it. `page` is the address the host read from the page itself. A
-/// payment still asks (§11.2). None: ask as usual.
+/// payment still asks (§11.2). None: ask as usual. `log` describes the click
+/// for the pane's action log.
 pub(crate) async fn bypassed_click(
     state: &AppState,
     block_id: &str,
     agent: &str,
     ask: &serde_json::Value,
     approved: serde_json::Value,
+    log: Note,
 ) -> Option<Response> {
     let g = bypass::active_for(&bypass_pane(block_id), agent)?;
+    // The person may have paused the pane after this act passed
+    // `target_block_id`: a paused grant is still live, so check again here.
+    if let Err((code, e)) = crate::server::browser_actions::not_paused(block_id) {
+        return Some(log.asked(ask).fail(state, code, e));
+    }
     let what = ask.get("what").and_then(|v| v.as_str()).unwrap_or("");
     // The element's text after its name: shown apart from `what`, but judged
     // with it, so a payment word on any line asks (roadblocks report R7).
@@ -65,21 +73,19 @@ pub(crate) async fn bypassed_click(
         return None;
     }
     tracing::info!(
-        agent_id = %agent, block_id = %block_id, what = %what, origin = %origin,
+        agent_id = %agent, block_id = %block_id, what = %what, origin = %origin, page = %page,
         "[browser-bypass] committing click made without asking"
     );
     // The page may confirm it while the click is still running.
     crate::server::browser_dialog::note_click(block_id, what, crate::server::browser_dialog::How::Auto);
-    Some(match proxy_value(state, "act", approved, std::time::Duration::from_secs(20)).await {
-        Ok(mut data) => {
-            if let Some(o) = data.as_object_mut() {
-                o.insert("bypassed".to_string(), json!(true));
-                o.insert("bypass_minutes_left".to_string(), json!(g.minutes_left()));
-            }
-            (StatusCode::OK, Json(json!({ "ok": true, "data": data }))).into_response()
+    let made = proxy_value(state, "act", approved, std::time::Duration::from_secs(20)).await.map(|mut data| {
+        if let Some(o) = data.as_object_mut() {
+            o.insert("bypassed".to_string(), json!(true));
+            o.insert("bypass_minutes_left".to_string(), json!(g.minutes_left()));
         }
-        Err((code, e)) => err_response(code, e),
-    })
+        data
+    });
+    Some(log.asked(ask).how(How::AutoApproved).outcome(state, made))
 }
 
 /// `POST /api/v1/ui/browser/request_bypass` — backs Browser's `request_bypass`
@@ -166,12 +172,13 @@ pub(crate) async fn handle_ui_browser_request_bypass(
         Err(e) => return err_response(e.status(), e.to_string()),
     };
     use crate::server::browser_attention::Answer;
+    let answer_was = answer;
     let answer = match answer {
         // A Take over while the banner was up wins over an Allow after it.
         Answer::Yes if crate::server::browser_owner::owner_of(&pane) != owner_before => {
             return err_response(StatusCode::FORBIDDEN, "the user took over this pane, so auto-approve wasn't turned on".to_string());
         }
-        Answer::Yes => return granted(&bypass::grant(&state, &pane, &agent, origins, minutes)),
+        Answer::Yes => return granted(&bypass::grant(&state, &pane, &agent, origins, minutes, How::Approved)),
         Answer::Cancelled => {
             bypass::note_declined(&pane);
             tracing::info!(agent_id = %agent, pane = %pane, "[browser-bypass] the user said No");
@@ -179,6 +186,7 @@ pub(crate) async fn handle_ui_browser_request_bypass(
         }
         Answer::TimedOut => "timed_out",
     };
+    note(&pane, &agent, Kind::AutoApproveOn).detail(&reason).how(How::from_answer(answer_was)).record(&state);
     (StatusCode::OK, Json(json!({ "ok": true, "data": { "answer": answer } }))).into_response()
 }
 
@@ -195,7 +203,7 @@ pub(crate) async fn handle_ui_browser_end_bypass(
         Err((code, e)) => return err_response(code, e),
     };
     let pane = bypass_pane(&block_id);
-    let ended = bypass::active_for(&pane, &req.auth.agent_id).is_some() && bypass::end(&state, &pane, "the agent turned it off", true);
+    let ended = bypass::active_for(&pane, &req.auth.agent_id).is_some() && bypass::end(&state, &pane, "the agent turned it off", true, How::Allowed);
     (StatusCode::OK, Json(json!({ "ok": true, "data": { "ended": ended } }))).into_response()
 }
 
@@ -217,7 +225,7 @@ pub(crate) async fn handle_host_browser_bypass(
     let block_id = s("block_id");
     let pane = bypass_pane(&block_id);
     if body.get("on").and_then(|v| v.as_bool()) != Some(true) {
-        let ended = bypass::end(&state, &pane, "the user turned it off", false);
+        let ended = bypass::end(&state, &pane, "the user turned it off", false, How::ByUser);
         return (StatusCode::OK, Json(json!({ "ok": true, "data": { "ended": ended } }))).into_response();
     }
     let block = match state.mstore.get::<crate::backend::obj::Block>(&pane) {
@@ -254,7 +262,7 @@ pub(crate) async fn handle_host_browser_bypass(
         );
     }
     let minutes = bypass::clamp_minutes(body.get("minutes").and_then(|v| v.as_u64()));
-    let g = bypass::grant(&state, &pane, &owner, origins, minutes);
+    let g = bypass::grant(&state, &pane, &owner, origins, minutes, How::ByUser);
     (
         StatusCode::OK,
         Json(json!({ "ok": true, "data": { "origins": g.origins, "minutes": g.minutes, "expires_at": g.expires_at_ms } })),

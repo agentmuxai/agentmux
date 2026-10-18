@@ -893,6 +893,17 @@ pub struct UiBrowserEndBypassRequest {
     pub pane: Option<String>,
 }
 
+/// `POST /api/v1/ui/browser/actions` — backs Browser's `log`: what the agent
+/// did in a browser pane it drives, as the pane's action log records it
+/// (PLAN_BROWSER_DRIVER_FIXES_2026_10_17.md §5). Read-only, own panes only.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiBrowserActionsRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane: Option<String>,
+}
+
 /// `POST /api/v1/ui/browser/dialogs` — the page dialogs the caller's browser
 /// panes showed since it last asked (SPEC_BROWSER_PANE_NATIVE_DIALOGS_2026_10_17.md §6.1).
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1860,14 +1860,19 @@ async fn a_popup_window_is_driven_through_the_pane_that_opened_it() {
 /// address (`url`), and `act` asks for approval of a click named `what` on
 /// that page, then makes it only when sent back exactly what it asked. The
 /// click's `description` (a menu item's text under its name) rides along.
+/// With `plain` set, `act` just acts, as for a fill or an ordinary click.
 #[derive(Clone, Default)]
 struct BypassFakeHost {
     url: std::sync::Arc<std::sync::Mutex<String>>,
     what: std::sync::Arc<std::sync::Mutex<String>>,
     description: std::sync::Arc<std::sync::Mutex<String>>,
     clicks: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    plain: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// What srv answered page dialogs with (`dialog_answer`).
     dialog_answers: std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+    /// When set, `act` pauses this pane (as the person's Pause would) before
+    /// it answers: a Pause that lands while the agent's act is in flight.
+    pause_on_act: std::sync::Arc<std::sync::Mutex<Option<(AppState, String)>>>,
 }
 
 impl BypassFakeHost {
@@ -1901,6 +1906,12 @@ impl BypassFakeHost {
                 post(move |Json(b): Json<serde_json::Value>| {
                     let h = h2.clone();
                     async move {
+                        if let Some((state, pane)) = h.pause_on_act.lock().unwrap().take() {
+                            crate::server::browser_actions::set_paused(&state, &pane, true);
+                        }
+                        if h.plain.load(std::sync::atomic::Ordering::SeqCst) {
+                            return Json(serde_json::json!({ "ok": true, "data": { "after": { "tag": "input" } } }));
+                        }
                         let ask = h.ask();
                         if b["approved"].as_bool() == Some(true) {
                             if b["approved_as"] != ask {
@@ -2128,6 +2139,161 @@ async fn bypass_is_granted_only_through_the_host_and_lifts_approvals_on_its_site
     assert_eq!(body["data"]["answer"], "declined");
     let (s, _) = post_json(&app, "/api/v1/ui/browser/request_bypass", request).await;
     assert_eq!(s, StatusCode::TOO_MANY_REQUESTS);
+}
+
+/// The entries of `pane`'s action log, as the header reads them.
+fn logged(state: &AppState, pane: &str) -> Vec<serde_json::Value> {
+    let block = state.mstore.must_get::<crate::backend::obj::Block>(pane).unwrap();
+    block.meta.get("browser:actions").and_then(|v| v["entries"].as_array().cloned()).unwrap_or_default()
+}
+
+// PLAN_BROWSER_DRIVER_FIXES_2026_10_17.md §5: what an agent does in a pane it
+// drives is logged with how it went (never what it typed); only the person
+// pauses it, through the host; a pause refuses the agent's calls and stops
+// an Auto-approve grant's clock, and Resume restores both; an agent reads the
+// log of its own panes only, even while paused.
+#[tokio::test]
+async fn a_driven_panes_actions_are_logged_and_only_the_person_pauses_them() {
+    use axum::http::StatusCode;
+    use std::sync::atomic::Ordering::SeqCst;
+    let state = test_state();
+    let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let tab_id = dispatch_apply(&state, Command::CreateTab { workspace_id: ws_id, name: "t".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let own = stand_in_pane(&state, &tab_id).await;
+    let (agent, auth) = signed_agent_on(&state, &own);
+    let other_own = stand_in_pane(&state, &tab_id).await;
+    let (_other, other_auth) = signed_agent_on(&state, &other_own);
+    let fake = BypassFakeHost::default();
+    *fake.url.lock().unwrap() = "https://github.com/example/repo/issues/1".into();
+    *fake.what.lock().unwrap() = "Click \"Delete draft\"".into();
+    let port = fake.serve().await;
+    *state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port, token: "host-ipc-token".into() });
+    let app = crate::server::build_router(state.clone());
+    let host = [("X-Host-Token", "host-ipc-token")];
+
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/open", merged(&auth, serde_json::json!({ "url": "https://github.com/" }))).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let pane = body["data"]["pane"].as_str().unwrap().to_string();
+
+    // A fill is logged by its field, never its value.
+    fake.plain.store(true, SeqCst);
+    let fill = merged(&auth, serde_json::json!({ "pane": pane, "ref": "e4", "action": "fill", "text": "hunter2-typed" }));
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/act", fill.clone()).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let log = logged(&state, &pane);
+    assert_eq!(log.len(), 1);
+    assert_eq!(log[0]["kind"], "fill");
+    assert_eq!(log[0]["target"], "e4");
+    assert_eq!(log[0]["how"], "allowed");
+    assert_eq!(log[0]["agent"], agent.as_str());
+    let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();
+    assert!(!serde_json::to_string(&block.meta).unwrap().contains("hunter2"));
+
+    // A refusal is logged with its reason.
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/eval", merged(&auth, serde_json::json!({ "pane": pane, "script": "1" }))).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let log = logged(&state, &pane);
+    assert_eq!(log[1]["kind"], "eval");
+    assert!(log[1]["how"].as_str().unwrap().starts_with("refused: "), "{}", log[1]);
+
+    // The person's Auto-approve, and a click made under it, with its page.
+    fake.plain.store(false, SeqCst);
+    let grant = serde_json::json!({ "block_id": pane, "on": true, "minutes": 15, "agent": agent, "origins": ["https://github.com"] });
+    let (s, body) = post_json_headers(&app, "/api/v1/host/browser_bypass", grant, &host).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let click = merged(&auth, serde_json::json!({ "pane": pane, "ref": "e9", "action": "click" }));
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/act", click.clone()).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let log = logged(&state, &pane);
+    assert_eq!(log[2]["kind"], "auto-approve-on");
+    assert_eq!(log[2]["how"], "by the user");
+    assert_eq!(log[3]["kind"], "click");
+    assert_eq!(log[3]["how"], "auto-approved");
+    assert_eq!(log[3]["target"], "\"Delete draft\"");
+    assert_eq!(log[3]["url"], "https://github.com/example/repo/issues/1");
+
+    // Only the person pauses: an agent with the auth key alone gets 403.
+    let pause = serde_json::json!({ "block_id": pane, "paused": true });
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_pause", pause.clone(), &[]).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_pause", pause.clone(), &[("X-Host-Token", "guess")]).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    assert!(!crate::server::browser_actions::is_paused(&pane));
+    let (s, body) = post_json_headers(&app, "/api/v1/host/browser_pause", pause, &host).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["paused"], true);
+    let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();
+    assert_eq!(block.meta.get("browser:paused"), Some(&serde_json::json!(true)));
+    // The grant's clock stands still while paused.
+    assert!(block.meta["browser:bypass"]["paused_left"].as_u64().is_some_and(|ms| ms > 14 * 60 * 1000));
+    assert!(crate::server::browser_bypass::active_for(&pane, &agent).unwrap().paused_at.is_some());
+
+    // Paused: every call on the pane is refused, and nothing is made.
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/act", click.clone()).await;
+    assert_eq!(s, StatusCode::CONFLICT, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("the user paused this pane"), "{body}");
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/snapshot", merged(&auth, serde_json::json!({ "pane": pane }))).await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    assert_eq!(fake.clicks.load(SeqCst), 1);
+    // Its log is still the agent's to read, and only its own.
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/actions", merged(&auth, serde_json::json!({ "pane": pane }))).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["paused"], true);
+    let entries = body["data"]["entries"].as_array().unwrap();
+    assert_eq!(entries.last().unwrap()["kind"], "pause");
+    assert_eq!(entries.last().unwrap()["how"], "by the user");
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/actions", merged(&other_auth, serde_json::json!({ "pane": pane }))).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+
+    // Resume, through the host, restores the agent and the grant's clock.
+    let (s, body) = post_json_headers(&app, "/api/v1/host/browser_pause", serde_json::json!({ "block_id": pane, "paused": false }), &host).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert!(crate::server::browser_bypass::active_for(&pane, &agent).unwrap().paused_at.is_none());
+    let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();
+    assert!(block.meta.get("browser:paused").is_none_or(|v| v.is_null()));
+    assert!(block.meta["browser:bypass"].get("paused_left").is_none());
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/act", click).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(fake.clicks.load(SeqCst), 2);
+    let log = logged(&state, &pane);
+    let kinds: Vec<&str> = log.iter().map(|e| e["kind"].as_str().unwrap()).collect();
+    assert_eq!(kinds, ["fill", "eval", "auto-approve-on", "click", "pause", "resume", "click"]);
+
+    // A Pause that lands after the act passed target_block_id still stops
+    // the click Auto-approve would have made.
+    *fake.pause_on_act.lock().unwrap() = Some((state.clone(), pane.clone()));
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/act", merged(&auth, serde_json::json!({ "pane": pane, "ref": "e9", "action": "click" }))).await;
+    assert_eq!(s, StatusCode::CONFLICT, "{body}");
+    assert_eq!(fake.clicks.load(SeqCst), 2, "nothing was clicked");
+    let log = logged(&state, &pane);
+    assert_eq!(log.last().unwrap()["kind"], "click");
+    assert!(log.last().unwrap()["how"].as_str().unwrap().starts_with("refused: the user paused this pane"), "{}", log.last().unwrap());
+
+    // Take over ends the pause, and the header's copy of it too; the log
+    // outlives it, and goes with the pane.
+    let mut clear = crate::backend::obj::MetaMapType::new();
+    clear.insert("browser:owner_agent".into(), serde_json::Value::Null);
+    crate::server::browser_owner::guard_client_meta_write(&format!("block:{pane}"), &clear).unwrap();
+    assert!(!crate::server::browser_actions::is_paused(&pane));
+    let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();
+    assert!(block.meta.get("browser:paused").is_none_or(|v| v.is_null()), "{:?}", block.meta.get("browser:paused"));
+    assert_eq!(crate::server::browser_actions::entries(&pane).1.len(), 9);
+    crate::server::browser_actions::drop_pane(&pane);
+    assert_eq!(crate::server::browser_actions::entries(&pane).0, 0);
 }
 
 /// An Auto-approve grant ends after its agent goes quiet on the pane, and the
