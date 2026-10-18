@@ -1,7 +1,7 @@
 # SPEC: each agent's Bash calls keep their own working directory
 
 **Date:** 2026-10-18
-**Status:** active — built in the PR that adds this spec.
+**Status:** active — built in #5096.
 **Author:** Naki #2 (naki-naki-2), at the repo owner's request.
 **Builds on:** the cwd persistence in `crates/bashwrap/src/bash_wrap.rs` (`CwdState`, `docs/retro/RETRO_BASH_CWD_RESET_NOTICE_WINDOWS_2026_08_02.md`).
 
