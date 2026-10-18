@@ -179,6 +179,13 @@ export class BrowserViewModel {
     /** Unsubscribe from `browser-pane-favicon-urls` IPC events. */
     private _faviconUnsub: (() => void) | null = null;
 
+    /** Unsubscribe from `browser-pane-notice`. */
+    private _noticeUnsub: (() => void) | null = null;
+
+    /** The host's own notice that a navigation stopped, for when srv couldn't
+     *  be told: shown when srv has no banner up, and taken down here. */
+    private _localNotice = createSignal<BrowserAttention | undefined>(undefined);
+
     /** The block's meta — the host context's, reactive. */
     meta: Accessor<MetaType | undefined>;
     private ctx: PaneTabHostContext;
@@ -193,7 +200,7 @@ export class BrowserViewModel {
      *  written by srv; SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §7). */
     popupWindowsAtom: Accessor<{ id: string; url: string }[]>;
     /** The driving agent's pending request to the user (hand-off, approval,
-     *  or a navigation off the pane's sites). */
+     *  or a navigation off the pane's sites), or a notice of one stopped. */
     attentionAtom: Accessor<BrowserAttention | undefined>;
     /** The bypass the person granted the driving agent, while it lasts
      *  (`browser:bypass`, written by srv; SPEC_BROWSER_PANE_BYPASS_2026_10_16.md §3.3). */
@@ -420,7 +427,7 @@ export class BrowserViewModel {
             this.showControlsAtom = createMemo(() => (this.meta()?.["browser:show_controls"] as boolean | undefined) ?? true);
             this.attentionAtom = createMemo(() => {
                 const v = this.meta()?.["browser:attention"];
-                return v && typeof v === "object" && typeof v.id === "string" ? v : undefined;
+                return v && typeof v === "object" && typeof v.id === "string" ? v : this._localNotice[0]();
             });
             const rawBypass = createMemo((): BrowserBypass | undefined => {
                 const v = this.meta()?.["browser:bypass"];
@@ -641,6 +648,29 @@ export class BrowserViewModel {
         }).then((unsub) => {
             if (this.closed) unsub();
             else this._closeRequestUnsub = unsub;
+        });
+
+        // The host stopped a navigation off the pane's sites and srv couldn't
+        // say so: the pane says it itself, rather than sit on a blank page
+        // (REPORT_BROWSER_PANE_BLANK_AFTER_BLOCKED_SIGN_IN_REDIRECT_RCA_2026_10_16.md §6.2).
+        void getApi().listen<{ block_id: string; url?: string; sites?: string[]; why?: string }>(
+            "browser-pane-notice",
+            (payload) => {
+                if (this.closed || payload.block_id !== this.blockId) return;
+                this.diag(`notice recv url=${JSON.stringify(payload.url)}`);
+                this._localNotice[1]({
+                    id: `local-${Date.now()}`,
+                    kind: "notice",
+                    local: true,
+                    url: payload.url,
+                    origin: pageOrigin(payload.url),
+                    sites: payload.sites ?? [],
+                    why: payload.why,
+                });
+            },
+        ).then((unsub) => {
+            if (this.closed) unsub();
+            else this._noticeUnsub = unsub;
         });
 
         // Load URL from block meta on init. An empty/missing `url` falls
@@ -874,10 +904,20 @@ export class BrowserViewModel {
         return getApi().browserPanes.closePopup(popupId);
     }
 
-    /** The human answers the pane's banner (a hand-off or an approval). */
-    resolveAttention(decision: "done" | "approve" | "cancel"): Promise<void> {
+    /** The human answers the pane's banner (a hand-off, an approval, a
+     *  question or a notice). Back is a notice's: the pane goes back, and the
+     *  notice comes down as dismissed. */
+    resolveAttention(decision: "done" | "approve" | "cancel" | "back"): Promise<void> {
         const a = this.attentionAtom();
         if (!a) return Promise.resolve();
+        if (decision === "back") {
+            this.goBack();
+            decision = "cancel";
+        }
+        if (a.local) {
+            this._localNotice[1](undefined);
+            return Promise.resolve();
+        }
         // Through the host, never srv directly: srv accepts an answer only
         // from the host, so no agent can approve its own request (§5.4).
         // If srv no longer knows the request (it restarted), it takes the
@@ -955,6 +995,10 @@ export class BrowserViewModel {
         if (this._faviconUnsub) {
             this._faviconUnsub();
             this._faviconUnsub = null;
+        }
+        if (this._noticeUnsub) {
+            this._noticeUnsub();
+            this._noticeUnsub = null;
         }
         if (this._memoRootDispose) {
             this._memoRootDispose();

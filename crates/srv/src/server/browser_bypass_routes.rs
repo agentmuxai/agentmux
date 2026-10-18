@@ -160,7 +160,7 @@ pub(crate) async fn handle_ui_browser_request_bypass(
     .await
     {
         Ok(a) => a,
-        Err(e) => return err_response(StatusCode::CONFLICT, e),
+        Err(e) => return err_response(e.status(), e.to_string()),
     };
     use crate::server::browser_attention::Answer;
     let answer = match answer {

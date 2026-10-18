@@ -2220,3 +2220,185 @@ async fn a_page_dialog_is_decided_by_policy_or_asked_and_only_the_host_reports_o
     let (_, body) = post_json(&app, "/api/v1/ui/browser/dialogs", auth).await;
     assert!(body["data"]["dialogs"].as_array().unwrap().is_empty());
 }
+
+/// A CEF host stand-in that records the addresses srv loads in a pane
+/// (`navigate`) and takes srv's pushes of the owned panes.
+#[derive(Clone, Default)]
+struct NavFakeHost {
+    loads: std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+}
+
+impl NavFakeHost {
+    async fn serve(&self) -> u16 {
+        use axum::{routing::post, Json, Router};
+        let h = self.clone();
+        let app = Router::new()
+            .route(
+                "/agentmux/browser/navigate",
+                post(move |Json(b): Json<serde_json::Value>| {
+                    let h = h.clone();
+                    async move {
+                        h.loads.lock().unwrap().push(b);
+                        Json(serde_json::json!({ "ok": true, "data": {} }))
+                    }
+                }),
+            )
+            .route(
+                "/agentmux/browser/owned_panes",
+                post(|| async { Json(serde_json::json!({ "ok": true, "data": {} })) }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        port
+    }
+
+    async fn wait_for_loads(&self, n: usize) -> Vec<serde_json::Value> {
+        for _ in 0..200 {
+            if self.loads.lock().unwrap().len() >= n {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        self.loads.lock().unwrap().clone()
+    }
+}
+
+async fn wait_for_banner_where(state: &AppState, pane: &str, want: impl Fn(&serde_json::Value) -> bool) -> serde_json::Value {
+    let mut last = serde_json::Value::Null;
+    for _ in 0..200 {
+        let block = state.mstore.must_get::<crate::backend::obj::Block>(pane).unwrap();
+        last = block.meta.get("browser:attention").cloned().unwrap_or(serde_json::Value::Null);
+        if want(&last) {
+            return last;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("the banner on {pane} never matched; last {last}");
+}
+
+// REPORT_BROWSER_PANE_BLANK_AFTER_BLOCKED_SIGN_IN_REDIRECT_RCA_2026_10_16.md
+// §6.4: a navigation the host stopped during a hand-off (a sign-in leaving
+// the pane's sites) is asked about over the hand-off; answering it brings the
+// hand-off back, still waiting; Allow loads the address; Block and an address
+// that isn't a web one end in a notice, never in nothing.
+#[tokio::test]
+async fn a_navigation_stopped_during_a_handoff_is_asked_about_over_it() {
+    use axum::http::StatusCode;
+    let state = test_state();
+    let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let tab_id = dispatch_apply(&state, Command::CreateTab { workspace_id: ws_id, name: "t".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let own = stand_in_pane(&state, &tab_id).await;
+    let (_agent, auth) = signed_agent_on(&state, &own);
+    let fake = NavFakeHost::default();
+    let port = fake.serve().await;
+    *state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port, token: "host-ipc-token".into() });
+    let app = crate::server::build_router(state.clone());
+    let host = [("X-Host-Token", "host-ipc-token")];
+    let open = merged(&auth, serde_json::json!({ "url": "https://github.com/login", "allowed_origins": ["github.com"] }));
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/open", open).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let pane = body["data"]["pane"].as_str().unwrap().to_string();
+    let report = |url: &str| serde_json::json!({ "pane": pane, "target": pane, "url": url, "kind": "navigate" });
+    let answer = |id: &serde_json::Value, decision: &str| serde_json::json!({ "block_id": pane, "id": id, "decision": decision });
+
+    // The agent hands the pane over to sign in, and waits.
+    let handoff = {
+        let app = app.clone();
+        let body = merged(&auth, serde_json::json!({ "pane": pane, "reason": "Sign in to GitHub" }));
+        tokio::spawn(async move { post_json(&app, "/api/v1/ui/browser/handoff", body).await })
+    };
+    let h = wait_for_banner(&state, &pane).await;
+    assert_eq!(h["kind"], "handoff");
+
+    // "Continue with Google": the host stopped the redirect. Only the host reports one.
+    let google = "https://accounts.google.com/o/oauth2/v2/auth?client_id=x";
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_navigation", report(google), &[]).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, body) = post_json_headers(&app, "/api/v1/host/browser_navigation", report(google), &host).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["asked"], true, "{body}");
+    assert_eq!(body["data"]["settled"], "asking");
+    let q = wait_for_banner_where(&state, &pane, |b| b["kind"] == "navigation").await;
+    assert_eq!(q["origin"], "https://accounts.google.com");
+    assert_eq!(q["url"], google);
+
+    // Another attempt while that question is up is dropped, with a reason,
+    // and no second banner.
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_navigation", report("https://accounts.google.com/x"), &host).await;
+    assert_eq!(body["data"]["asked"], false, "{body}");
+    assert_eq!(body["data"]["settled"], "busy");
+    assert!(!body["data"]["reason"].as_str().unwrap_or("").is_empty());
+    assert_eq!(wait_for_banner(&state, &pane).await["id"], q["id"]);
+
+    // Allow: the site joins the list, the address loads, and the hand-off's
+    // banner is back with the hand-off still waiting.
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer(&q["id"], "approve"), &host).await;
+    assert_eq!(s, StatusCode::OK);
+    let loads = fake.wait_for_loads(1).await;
+    assert_eq!(loads, vec![serde_json::json!({ "block_id": pane, "url": google })]);
+    let back = wait_for_banner_where(&state, &pane, |b| b["kind"] == "handoff").await;
+    assert_eq!(back["id"], h["id"]);
+    assert!(crate::server::browser_allowlist::list_for(&pane).unwrap().contains(&"https://accounts.google.com".to_string()));
+    assert!(!handoff.is_finished(), "the hand-off still waits for Done");
+    assert_eq!(crate::server::browser_attention::waiting_on_user(&pane), Some(crate::server::browser_attention::Kind::Handoff));
+
+    // Block ends in a notice saying so, with Allow still on offer; Allow
+    // there loads it after all.
+    let microsoft = "https://login.microsoftonline.com/common/oauth2";
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_navigation", report(microsoft), &host).await;
+    assert_eq!(body["data"]["asked"], true, "{body}");
+    let q = wait_for_banner_where(&state, &pane, |b| b["kind"] == "navigation").await;
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer(&q["id"], "cancel"), &host).await;
+    assert_eq!(s, StatusCode::OK);
+    let n = wait_for_banner_where(&state, &pane, |b| b["kind"] == "notice").await;
+    assert_eq!(n["why"], "You blocked it.");
+    assert_eq!(n["allow"], true);
+    assert_eq!(n["origin"], "https://login.microsoftonline.com");
+    assert!(n["sites"].as_array().unwrap().contains(&serde_json::json!("https://github.com")));
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer(&n["id"], "approve"), &host).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(fake.wait_for_loads(2).await[1], serde_json::json!({ "block_id": pane, "url": microsoft }));
+    wait_for_banner_where(&state, &pane, |b| b["id"] == h["id"]).await;
+
+    // An address that isn't a web one is never asked about: the pane says why.
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_navigation", report("data:text/html,hi"), &host).await;
+    assert_eq!(body["data"]["settled"], "notice", "{body}");
+    let n = wait_for_banner_where(&state, &pane, |b| b["kind"] == "notice").await;
+    assert_eq!(n["allow"], false);
+    // Dismissed (or Back), the hand-off is back.
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer(&n["id"], "cancel"), &host).await;
+    assert_eq!(s, StatusCode::OK);
+    wait_for_banner_where(&state, &pane, |b| b["id"] == h["id"]).await;
+    assert!(!handoff.is_finished());
+
+    // Done ends the hand-off as before.
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer(&h["id"], "done"), &host).await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, body) = handoff.await.unwrap();
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["answer"], "done");
+    wait_for_banner_where(&state, &pane, |b| b.is_null()).await;
+
+    // A notice locks nothing: with one up, the agent's tools still reach the pane.
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_navigation", report("data:,x"), &host).await;
+    assert_eq!(body["data"]["settled"], "notice", "{body}");
+    wait_for_banner_where(&state, &pane, |b| b["kind"] == "notice").await;
+    assert_eq!(crate::server::browser_attention::waiting_on_user(&pane), None);
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/focus_info", merged(&auth, serde_json::json!({ "pane": pane }))).await;
+    assert_ne!(s, StatusCode::CONFLICT, "{body}");
+}
