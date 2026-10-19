@@ -29,7 +29,7 @@ function flag(argv, name) {
 
 /** The last runs of the nightly artifacts workflow, each with whether its windows portable can still be downloaded. */
 function fetchRuns(repo) {
-    const list = gh(["api", "--method", "GET", `repos/${repo}/actions/workflows/${WORKFLOW}/runs`, "-F", `per_page=${LOOKBACK}`, "-F", "exclude_pull_requests=true"]);
+    const list = gh(["api", "--method", "GET", `repos/${repo}/actions/workflows/${WORKFLOW}/runs`, "-F", `per_page=${LOOKBACK}`, "-F", "branch=main", "-F", "exclude_pull_requests=true"]);
     // Neither the run's status nor its conclusion is looked at: a red macOS leg, or a rerun of it in progress, leaves the
     // Windows portable as good as it was (2026-10-19: the run was in progress again after a macOS DNS flake).
     return list.workflow_runs
