@@ -17,6 +17,7 @@ mod core;
 mod counter;
 mod ijson;
 mod lines;
+mod off_worker;
 mod offset_ops;
 mod replace;
 mod types;
@@ -25,6 +26,8 @@ mod zone_txn;
 mod tests;
 #[cfg(test)]
 mod tests_append_reference;
+#[cfg(test)]
+mod tests_off_worker;
 #[cfg(test)]
 mod tests_atomic;
 #[cfg(test)]

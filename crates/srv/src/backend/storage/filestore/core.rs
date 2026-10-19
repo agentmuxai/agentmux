@@ -191,9 +191,15 @@ impl FileStore {
     /// it carries the site out to the code that called the store.
     #[track_caller]
     pub(crate) fn lock_conn(&self) -> TimedConn<'_> {
-        let site = std::panic::Location::caller();
+        self.lock_conn_at(std::panic::Location::caller())
+    }
+
+    /// [`Self::lock_conn`] with the site given, for a caller that takes the
+    /// connection inside a closure (where `#[track_caller]` no longer reaches).
+    pub(super) fn lock_conn_at(&self, site: &'static std::panic::Location<'static>) -> TimedConn<'_> {
         let asked = std::time::Instant::now();
-        let guard = self.conn.lock().unwrap();
+        // The wait is where the stall piles callers up: do it off the worker.
+        let guard = super::off_worker::off_worker(|| self.conn.lock().unwrap());
         let waited = asked.elapsed();
         if waited >= SLOW_CONN {
             tracing::warn!(site = %site, waited_ms = waited.as_millis() as u64, "filestore: slow to get the connection");
@@ -287,11 +293,16 @@ impl FileStore {
         &self,
         f: impl FnOnce(&Transaction<'_>) -> Result<T, StoreError>,
     ) -> Result<T, StoreError> {
-        let mut conn = self.lock_conn();
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let out = f(&tx)?;
-        tx.commit()?;
-        Ok(out)
+        // Taking the connection, writing and committing all block (a commit
+        // waits for the disk): none of it on a runtime worker.
+        let site = std::panic::Location::caller();
+        super::off_worker::off_worker(|| {
+            let mut conn = self.lock_conn_at(site);
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let out = f(&tx)?;
+            tx.commit()?;
+            Ok(out)
+        })
     }
 
     /// Run `f` as one read transaction: in WAL mode every read inside it sees
