@@ -612,7 +612,7 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
             // Simulate a successful install; onInstalled resolves the
             // agent's bundle provider again to update the cache. The backend
             // now finds the CLI, and the invalidation the install makes has
-            // every card on that provider ask once more (Codex on #5130).
+            // every card on that provider ask once more (#5130).
             vi.mocked(RpcApi.InstallCheckCommand).mockResolvedValue({ installed: true, version: null, path: null, source: null });
             await installReq.onInstalled(true);
             await waitFor(() => expect(RpcApi.InstallCheckCommand).toHaveBeenCalledTimes(2));
