@@ -25,7 +25,6 @@
 // processes more than once; the run ends with `footprint`'s own total over the
 // same processes, which counts each once.
 
-#[cfg(target_os = "linux")]
 use agentmux_procstats::is_running;
 use agentmux_procstats::{base_name, command_line_of, snapshot, ProcInfo, ProcKey, MEMORY_METRIC};
 use std::collections::{HashMap, HashSet};
