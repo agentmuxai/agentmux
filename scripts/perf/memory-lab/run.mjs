@@ -234,9 +234,9 @@ async function measureOpens(driver, args, home, { memtree, rootPid }) {
         console.log(`  open ${agent.name} (${kind}): ${o.outcome === "no-line" ? "no [agent-open] line" : `first screen ${o.firstScreenMs} ms (${o.firstScreenPhase}), revealed ${o.revealedMs} ms, history ${o.historyLines ?? "?"} lines`}`);
         opens.push(o);
     }
-    // An open without its line has no figure, and a median over the others would hide it: the run does not stand.
-    const missing = opens.filter((o) => o.outcome === "no-line");
-    if (missing.length) throw new InvalidRun(`${missing.length} of ${opens.length} opens logged no [agent-open] line within 60 s: ${missing.map((o) => o.agent).join(", ")}`);
+    // An open without a first screen (no line, or a line of an open that failed, timed out or was closed) has no figure, and a median over the others would hide it: the run does not stand.
+    const missing = opens.filter((o) => typeof o.firstScreenMs !== "number");
+    if (missing.length) throw new InvalidRun(`${missing.length} of ${opens.length} opens never reached a first screen (no [agent-open] line within 60 s, or the open failed): ${missing.map((o) => `${o.agent} (${o.outcome})`).join(", ")}`);
     const tasks = (await driver.longTasks().catch(() => null))?.tasks ?? [];
     const withTasks = withLongTasks(opens, tasks);
     const storeAfter = storeLockOf(home);
