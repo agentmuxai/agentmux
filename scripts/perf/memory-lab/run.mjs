@@ -285,13 +285,14 @@ async function main() {
     const dir = resolve(args.out, args.label);
     const home = join(dir, "home");
     mkdirSync(dir, { recursive: true });
+    // Nothing of an earlier run under this label may stand in for this one: a run that fails leaves no report.
+    for (const old of ["result.json", "summary.md", ...readdirSync(dir).filter((f) => /^invalid-run-\d+\.txt$/.test(f))]) rmSync(join(dir, old), { force: true });
     // --srv: the portable with its srv swapped for the one under test (a copy; the original is untouched).
     const swapped = args.srv ? withReplacedSrv(args.portable, resolve(args.srv), dir) : null;
     if (swapped) console.log(`srv replaced: ${swapped.replaced.file} <- ${swapped.replaced.from} (${swapped.replaced.sha256})`);
     const exe = args.exe ?? portableExe(swapped ? swapped.portable : args.portable);
     if (!existsSync(exe)) throw new Error(`${exe} not found`);
-    // Nothing of an earlier run under this label may stand in for this one: a run that fails leaves no report.
-    for (const old of ["result.json", "summary.md", ...readdirSync(dir).filter((f) => /^invalid-run-\d+\.txt$/.test(f))]) rmSync(join(dir, old), { force: true });
+
 
     // The same conversation for every build: a seed fixes it.
     const script = join(dir, "conversation.json");
