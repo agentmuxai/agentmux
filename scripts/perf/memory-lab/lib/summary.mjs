@@ -243,7 +243,10 @@ export function compareRuns(baseRuns, headRuns, margins = DEFAULT_MARGINS) {
         heavy: metric("open first screen, long conversation", "ms", (r) => r.opens?.summary?.heavy?.firstScreenMedianMs),
         longestTask: metric("longest main-thread task while opening", "ms", (r) => (r.opens ? Math.max(0, ...Object.values(r.opens.summary ?? {}).map((s) => s.longestTaskMs ?? 0)) : null)),
     };
-    return { rows, wall, slow, lock, written, storageWritten, slowCommands, opens, margins, baseRuns: baseRuns.length, headRuns: headRuns.length };
+    // What srv wrote while the first agent played its heavy turns (--heavy-turns): report only, the number a write-amplification change moves.
+    const heavyWritten = metric("srv written in the heavy turns", "MB", (r) => r.heavyIo?.writtenMB?.srv);
+    const heavyStorageWritten = metric("srv reached storage in the heavy turns", "MB", (r) => r.heavyIo?.storageWrittenMB?.srv);
+    return { rows, wall, slow, lock, written, storageWritten, slowCommands, opens, heavyWritten, heavyStorageWritten, margins, baseRuns: baseRuns.length, headRuns: headRuns.length };
 }
 
 /** A markdown table of `compareRuns`: memory and CPU side by side, then the round time. */
@@ -273,6 +276,9 @@ export function runsTable(cmp, baseLabel = "base", headLabel = "head") {
     const l = cmp.lock;
     if (l && (l.base.n || l.head.n)) {
         lines.push("", `Longest hold of srv's transcript store connection (report only; every store write waits for it): ${baseLabel} ${f(l.base.median)} ms${range(l.base)}, ${headLabel} ${f(l.head.median)} ms${range(l.head)}${l.pct == null ? "" : `, ${sign(l.pct)}`}. A hold of 0 means none reached the 500 ms srv logs.`);
+    }
+    for (const h of [cmp.heavyWritten, cmp.heavyStorageWritten]) {
+        if (h && (h.base.n || h.head.n)) lines.push("", `${h.name[0].toUpperCase()}${h.name.slice(1)} (report only), median: ${baseLabel} ${f(h.base.median)} MB${range(h.base)}, ${headLabel} ${f(h.head.median)} MB${range(h.head)}${h.pct == null ? "" : `, ${sign(h.pct)}`}.`);
     }
     for (const o of Object.values(cmp.opens ?? {})) {
         if (o.base.n || o.head.n) lines.push("", `${o.name[0].toUpperCase()}${o.name.slice(1)} (report only), median: ${baseLabel} ${f(o.base.median)} ms${range(o.base)}, ${headLabel} ${f(o.head.median)} ms${range(o.head)}${o.pct == null ? "" : `, ${sign(o.pct)}`}.`);

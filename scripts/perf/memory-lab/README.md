@@ -224,6 +224,27 @@ event just before dispatching it, so it cannot show queueing. Use `respArrival` 
 While opening agents (`--open-agents`), the page's slow frames during the opens are reported apart from the workload's, in
 `result.opens.frames` (the scripts that filled them, with their bundle positions, and the forced layout) and a summary line.
 
+## Is every transcript intact? (`--verify-transcripts`)
+
+With `--open-agents`, `--verify-transcripts` reads every agent's transcript through `agent:open_tail` (its output stream's line
+count and newest line, which stream it is, a hash of its lines and the number of tool calls in it) once the turns and the
+heavy turns are over, and again after the agents have been reopened and gone idle. A transcript only ever grows, so the second
+reading must begin with exactly the lines of the first (the hash), be on the same stream (`g:` the agent's own, `b:` the block's),
+end on a finished turn (`"type":"result"`), and hold at least the tool calls the scripted turns made. A problem makes the run
+fail after it has written `result.transcripts` and the summary. A transcript above 16 MB is not read whole: its line count, newest
+line and stream are still checked, not its hash or tool calls.
+
+The line count is **not** expected to stay the same: with the lab's fake CLI a reopen starts the CLI again, srv sends its startup
+message and the fake CLI, which remembers nothing, plays the next turn it has (about 450 lines). A real agent would answer
+that message too.
+
+## The heavy turns' write volume
+
+`result.heavyIo` (with `--heavy-turns`) is what srv and the other processes wrote while the first agent played its heavy turns, from
+just before the first to just after the last: `writtenMB` per group like `io.writtenMB`, and `storageWrittenMB` (the part that
+reached storage; none on Windows). `io` covers the regular rounds only. `compare.mjs` shows both for srv, report only, and the
+nightly history keeps them as `heavy_srv_written_mb` and `heavy_srv_storage_written_mb`.
+
 ## Opening an agent again
 
 `--open-agents N` closes the first N agents' panes after everything else has been measured, then opens each again with the

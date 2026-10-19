@@ -44,6 +44,7 @@ import { parseSettingPairs, settingsSeen } from "./lib/settings.mjs";
 import { parseDiskLoad, startDiskLoad } from "./lib/diskload.mjs";
 import { describeOpen, opensLine, summariseOpens, withLongTasks } from "./lib/agentopen.mjs";
 import { framesLine, summariseFrames } from "./lib/frames.mjs";
+import { checkTranscripts, expectedToolUses, readTranscriptScript, transcriptsLine } from "./lib/transcripts.mjs";
 import { CALIBRATE_AFTER_MS, summariseWorkerProbe, workerProbeLine } from "./lib/wsworker.mjs";
 import { slowSendsAgainstLongTasks, summariseLongTasks } from "./lib/longtasks.mjs";
 import { segmentsOf, slowSendBreakdown } from "./lib/sendsegments.mjs";
@@ -64,7 +65,7 @@ class InvalidRun extends Error {}
 function parseArgs(argv) {
     const a = { panes: 4, rounds: 10, port: 9333, every: 5, gapS: 15, settleS: 20, samples: 3, seed: 1, attempts: 2, recycleAfter: 0, holdMinutes: 0, openAgents: 0, heavyTurns: 0, heavyKb: 600, recycleCommand: "Reload Window (Free Memory)", out: "memory-lab-out", keep: false };
     const num = new Set(["panes", "rounds", "port", "every", "gapS", "settleS", "samples", "seed", "attempts", "recycleAfter", "holdMinutes", "diskLoadCapGb", "openAgents", "heavyTurns", "heavyKb"]);
-    const flags = { "--keep": "keep", "--ws-worker": "wsWorker" };
+    const flags = { "--keep": "keep", "--ws-worker": "wsWorker", "--verify-transcripts": "verifyTranscripts" };
     for (let i = 0; i < argv.length; i++) {
         const raw = argv[i];
         if (raw === "--setting") {
@@ -105,6 +106,7 @@ function parseArgs(argv) {
     for (const k of ["openAgents", "heavyTurns"]) if (!(Number.isInteger(a[k]) && a[k] >= 0)) throw new Error(`--${k.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase())} needs a whole number of 0 or more`);
     if (!(a.heavyKb >= 1)) throw new Error("--heavy-kb needs a number of KB of 1 or more");
     if (a.openAgents > a.panes) throw new Error(`--open-agents ${a.openAgents} is more than the ${a.panes} agents`);
+    if (a.verifyTranscripts && a.openAgents < 1) throw new Error("--verify-transcripts compares the transcripts before and after the reopens: give --open-agents");
     if (a.wsWorker && a.recycleAfter) throw new Error("--ws-worker does not survive a window recycle (the page and its worker are replaced): leave out --recycle-after");
     if (a.heavyTurns > 0 && a.openAgents < 1) throw new Error("--heavy-turns needs --open-agents (the first agent plays the heavy turns, and is opened again)");
     a.label ??= basename(a.portable ?? dirname(a.exe));
@@ -213,12 +215,14 @@ async function requireIdle(driver, timeoutS = 300) {
  * `--heavy-turns` big turns first, so one open is of a long conversation and of a turn too long for the first slice. Runs after
  * every other measurement of the run, which it would disturb.
  */
-async function measureOpens(driver, args, home, { memtree, rootPid }) {
+async function measureOpens(driver, args, home, { memtree, rootPid, beforeReopens = null }) {
     const heavy = args.heavyTurns > 0;
     let heavyWrittenMB = null;
+    let heavyStorageWrittenMB = null;
     if (heavy) {
         await osSample(memtree, rootPid, args.port);
         const before = cpuLedger.writtenTotals();
+        const storageBefore = cpuLedger.storageTotals();
         const storeBytesBefore = transcriptBytes(home);
         const t0 = Date.now();
         for (let k = 1; k <= args.heavyTurns; k++) {
@@ -228,13 +232,20 @@ async function measureOpens(driver, args, home, { memtree, rootPid }) {
         }
         await requireIdle(driver);
         await osSample(memtree, rootPid, args.port);
+        // The same fields as result.io: a group whose counter was never readable has no figure, and there is no storage figure on Windows.
         heavyWrittenMB = writtenBetween(before, cpuLedger.writtenTotals());
+        for (const g of cpuLedger.writeIncomplete()) heavyWrittenMB[g] = null;
+        if (cpuLedger.sawStorageCounters()) {
+            heavyStorageWrittenMB = writtenBetween(storageBefore, cpuLedger.storageTotals());
+            for (const g of cpuLedger.storageIncomplete()) heavyStorageWrittenMB[g] = null;
+        }
         // The heavy turns must have been played, or the "heavy" open is an ordinary one under another name: the store must have grown by about what they carry
         // (the pane shows only some of a long conversation's tool rows, so what it shows says nothing).
         const grew = transcriptBytes(home) - storeBytesBefore;
         const expected = args.heavyTurns * args.heavyKb * 1024;
         if (grew < expected * 0.5) throw new InvalidRun(`the heavy turns were not all played: the transcript store grew ${Math.round(grew / 1024)} KB, ${args.heavyTurns} turn(s) of ${args.heavyKb} KB carry about ${Math.round(expected / 1024)} KB`);
     }
+    if (beforeReopens) await beforeReopens();
     const storeBefore = storeLockOf(home);
     const opensStart = Date.now();
     const opens = [];
@@ -261,7 +272,7 @@ async function measureOpens(driver, args, home, { memtree, rootPid }) {
     const storeAfter = storeLockOf(home);
     const summary = summariseOpens(withTasks);
     return {
-        heavy: heavy ? { turns: args.heavyTurns, kb: args.heavyKb, writtenMB: heavyWrittenMB } : null,
+        heavy: heavy ? { turns: args.heavyTurns, kb: args.heavyKb, writtenMB: heavyWrittenMB, storageWrittenMB: heavyStorageWrittenMB } : null,
         opens: withTasks,
         frames,
         summary,
@@ -479,7 +490,23 @@ async function attempt(args, ctx) {
         // What the run's workload did to the store and the disk, taken before the opens below add to them.
         const storeLockWorkload = storeLockOf(home);
         const volumeAtEnd = volumeOf(dir);
-        const openPhase = args.openAgents > 0 ? await measureOpens(driver, args, home, { memtree, rootPid: instance.pid }) : null;
+        // Every agent's transcript, read through agent:open_tail (lib/transcripts.mjs): once the turns are over (and the heavy ones played), and again after the reopens.
+        const readTranscripts = async (before = null) => {
+            const out = [];
+            for (const a of driver.agents) out.push({ agent: a.name, read: await driver.eval(readTranscriptScript(a.blockId, before?.find((b) => b.agent === a.name)?.read?.totalLines ?? null)) });
+            return out;
+        };
+        let transcriptReadsBefore = null;
+        const openPhase = args.openAgents > 0 ? await measureOpens(driver, args, home, { memtree, rootPid: instance.pid, beforeReopens: async () => { if (args.verifyTranscripts) transcriptReadsBefore = await readTranscripts(); } }) : null;
+        let transcripts = null;
+        if (args.verifyTranscripts) {
+            const scripted = JSON.parse(readFileSync(script, "utf8"));
+            const expected = Object.fromEntries(driver.agents.map((a, i) => [a.name, expectedToolUses(scripted, playedRounds, i === 0 ? args.heavyTurns : 0)]));
+            // A reopened agent's CLI plays a turn when it starts (see lib/transcripts.mjs): read the transcripts once those are over.
+            await requireIdle(driver);
+            transcripts = checkTranscripts(transcriptReadsBefore, await readTranscripts(transcriptReadsBefore), expected);
+            console.log(`  ${transcriptsLine(transcripts)}`);
+        }
 
         const notes = [];
         if (process.platform === "darwin") notes.push("macOS: the totals are per-process footprints summed, an upper bound; footprint's own total over the app's processes is in final.footprint");
@@ -524,6 +551,10 @@ async function attempt(args, ctx) {
             storeLock: storeLockWorkload,
             // Agents opened again after their panes were closed (--open-agents), each from the request to the first screen; null without the option.
             opens: openPhase,
+            // The heavy turns' own write volume (--heavy-turns): the same per-group fields as io, from just before the first heavy turn to just after the last. The regular rounds' are in io.
+            heavyIo: openPhase?.heavy ?? null,
+            // Each agent's transcript before and after the reopens (--verify-transcripts, lib/transcripts.mjs); a run that finds a problem still writes its result, then fails.
+            transcripts,
             // The page's main thread (tasks of 50 ms or more) and each send's time, to tell a busy page from a waiting srv.
             pageLongTasks,
             // What filled the page's slow frames (50 ms or more): script or rendering, which script, how long the handler took per message size, panes flushed per frame (lib/frames.mjs).
@@ -538,10 +569,11 @@ async function attempt(args, ctx) {
             slowEvals: driver.slowEvals(), // { total, slowest }: every command that took 5 s or more, the 30 slowest listed
         };
         writeFileSync(join(dir, "result.json"), JSON.stringify(result, null, 1));
-        const md = [`# ${args.label}`, "", `${args.panes} agents over ${layout.length} tab(s), ${playedRounds} rounds (${args.gapS} s apart)${args.holdMinutes > 0 ? `, then held idle ${args.holdMinutes} min` : ""}, forced GC, median of ${summary.samples} samples.`, "", table(summary), "", cpuTable(cpu, wall, io), ...(pageLongTasks ? ["", `Page main thread: ${pageLongTasks.count} long task(s) of 50 ms or more, ${pageLongTasks.totalMs} ms in all, longest ${pageLongTasks.maxMs} ms, ${pageLongTasks.over1s} over 1 s; ${sendsVsLong.slowSends} send(s) took over 5 s, ${sendsVsLong.overlappingLongTask} of them while a long task of 500 ms or more ran. The page's 100 ms timer was up to ${pageLongTasks.timerLag.maxMs} ms late (${pageLongTasks.timerLag.over1s} times over 1 s).${pageLongTasks.truncated ? ` Only the first ${pageLongTasks.recorded} long tasks were timed: the totals, rounds and overlaps cover those.` : ""}`] : []), ...(pageFrames ? ["", framesLine(pageFrames)] : []), ...(openPhase ? ["", opensLine(openPhase.summary)] : []), ...(openPhase?.frames ? ["", framesLine(openPhase.frames).replace(/^Page frames over 50 ms/, "While opening, page frames over 50 ms").replace(/; panes per frame: not available in this build$/, "")] : []), ...(wsWorker ? ["", workerProbeLine(wsWorker)] : []), ...(volumeAtStart ? ["", `Volume under the data folder: ${volumeAtStart.freePct}% free (${volumeAtStart.freeGB} of ${volumeAtStart.totalGB} GB) at the start.`] : []), ...(result.storeLock ? ["", `Store lock: longest hold of srv's transcript store connection ${result.storeLock.longestHeldMs} ms${result.storeLock.longestHeldSite ? ` (${result.storeLock.longestHeldSite})` : ""}, ${result.storeLock.holds} hold(s) and ${result.storeLock.waits} wait(s) of 500 ms or more.`] : []), ...notes.map((n) => `\n> ${n}`)].join("\n");
+        const md = [`# ${args.label}`, "", `${args.panes} agents over ${layout.length} tab(s), ${playedRounds} rounds (${args.gapS} s apart)${args.holdMinutes > 0 ? `, then held idle ${args.holdMinutes} min` : ""}, forced GC, median of ${summary.samples} samples.`, "", table(summary), "", cpuTable(cpu, wall, io), ...(pageLongTasks ? ["", `Page main thread: ${pageLongTasks.count} long task(s) of 50 ms or more, ${pageLongTasks.totalMs} ms in all, longest ${pageLongTasks.maxMs} ms, ${pageLongTasks.over1s} over 1 s; ${sendsVsLong.slowSends} send(s) took over 5 s, ${sendsVsLong.overlappingLongTask} of them while a long task of 500 ms or more ran. The page's 100 ms timer was up to ${pageLongTasks.timerLag.maxMs} ms late (${pageLongTasks.timerLag.over1s} times over 1 s).${pageLongTasks.truncated ? ` Only the first ${pageLongTasks.recorded} long tasks were timed: the totals, rounds and overlaps cover those.` : ""}`] : []), ...(pageFrames ? ["", framesLine(pageFrames)] : []), ...(openPhase ? ["", opensLine(openPhase.summary)] : []), ...(transcripts ? ["", transcriptsLine(transcripts)] : []), ...(openPhase?.frames ? ["", framesLine(openPhase.frames).replace(/^Page frames over 50 ms/, "While opening, page frames over 50 ms").replace(/; panes per frame: not available in this build$/, "")] : []), ...(wsWorker ? ["", workerProbeLine(wsWorker)] : []), ...(volumeAtStart ? ["", `Volume under the data folder: ${volumeAtStart.freePct}% free (${volumeAtStart.freeGB} of ${volumeAtStart.totalGB} GB) at the start.`] : []), ...(result.storeLock ? ["", `Store lock: longest hold of srv's transcript store connection ${result.storeLock.longestHeldMs} ms${result.storeLock.longestHeldSite ? ` (${result.storeLock.longestHeldSite})` : ""}, ${result.storeLock.holds} hold(s) and ${result.storeLock.waits} wait(s) of 500 ms or more.`] : []), ...notes.map((n) => `\n> ${n}`)].join("\n");
         writeFileSync(join(dir, "summary.md"), md + "\n");
         console.log("\n" + md);
         console.log(`\n-> ${join(dir, "result.json")}`);
+        if (transcripts && !transcripts.ok) throw new Error(`transcript check failed (the result was written to ${join(dir, "result.json")}): ${transcripts.problems.join("; ")}`);
         succeeded = true;
     } finally {
         process.off("SIGINT", interrupted);
