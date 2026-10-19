@@ -11,7 +11,8 @@
 import { cleanup, render, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/app/platform/pane-overlay", () => ({ usePaneOverlay: () => {} }));
+vi.mock("@/app/platform/pane-overlay", () => ({
+    useHiddenTabMarker: () => () => undefined, usePaneOverlay: () => {} }));
 vi.mock("./modal-dispatch", () => ({
     requestLabel: (req: { kind: string }) => req.kind,
     // Each fake panel's primary button is its initial-focus target.

@@ -5,7 +5,17 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 vi.mock("@/app/platform/ipc", () => ({ invokeCommand: vi.fn(() => Promise.resolve()) }));
 
-import { __overlayRectCount, __setAutoOverlayRect, onPaneOverlayReleased, overlayCoversPane, registerPaneOverlay } from "./pane-overlay";
+import {
+    DORMANT_SLOT_ATTR,
+    HIDDEN_TAB_ATTR,
+    __overlayRectCount,
+    __setAutoOverlayRect,
+    isInHiddenPaneTab,
+    onPaneOverlayReleased,
+    overlayCoversPane,
+    registerPaneOverlay,
+    remeasurePaneOverlays,
+} from "./pane-overlay";
 import { __resetPaneRectRegistry, registerPaneRect } from "./pane-rect-registry";
 
 // registerPaneOverlay — the imperative sibling of usePaneOverlay used by the
@@ -58,6 +68,70 @@ describe("registerPaneOverlay", () => {
         h.release();
         h.update();
         expect(__overlayRectCount()).toBe(before);
+    });
+});
+
+// A hidden window tab or dormant pane-stack member keeps its real rect, so an
+// overlay inside one must cut no hole through the panes on screen
+// (REPORT_BROWSER_PANE_GREY_HOLE_RCA_2026_10_18.md).
+describe("overlays in hidden tabs and dormant pane-stack members", () => {
+    afterEach(() => {
+        document.body.innerHTML = "";
+    });
+
+    // The marker watcher is a MutationObserver: its callback runs as a microtask.
+    const flushObservers = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    function makeElIn(container: HTMLElement): HTMLElement {
+        const el = makeEl();
+        container.appendChild(el);
+        return el;
+    }
+
+    for (const attr of [HIDDEN_TAB_ATTR, DORMANT_SLOT_ATTR]) {
+        test(`an overlay under [${attr}] registers no rect`, () => {
+            const container = document.createElement("div");
+            container.setAttribute(attr, "");
+            document.body.appendChild(container);
+            const el = makeElIn(container);
+            expect(isInHiddenPaneTab(el)).toBe(true);
+            const before = __overlayRectCount();
+            const h = registerPaneOverlay(el);
+            expect(__overlayRectCount()).toBe(before);
+            h.release();
+        });
+
+        test(`hiding the container ([${attr}] added) drops the rect, showing it again restores it`, async () => {
+            const container = document.createElement("div");
+            document.body.appendChild(container);
+            const before = __overlayRectCount();
+            const h = registerPaneOverlay(makeElIn(container));
+            expect(__overlayRectCount()).toBe(before + 1);
+
+            container.setAttribute(attr, "");
+            await flushObservers();
+            expect(__overlayRectCount()).toBe(before);
+
+            container.removeAttribute(attr);
+            await flushObservers();
+            expect(__overlayRectCount()).toBe(before + 1);
+            h.release();
+        });
+    }
+
+    test("remeasurePaneOverlays re-reads every registered overlay", () => {
+        const container = document.createElement("div");
+        document.body.appendChild(container);
+        const el = makeElIn(container);
+        const h = registerPaneOverlay(el, { keys: true });
+        registerPaneRect("pane-r", { x: 0, y: 0, w: 500, h: 500 });
+        expect(overlayCoversPane("pane-r")).toBe(true);
+        // Set without letting the observer run: only an explicit re-measure sees it.
+        container.setAttribute(HIDDEN_TAB_ATTR, "");
+        remeasurePaneOverlays();
+        expect(overlayCoversPane("pane-r")).toBe(false);
+        h.release();
+        __resetPaneRectRegistry();
     });
 });
 

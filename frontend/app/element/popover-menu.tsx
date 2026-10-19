@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { assertMenuInPaintableArea } from "@/app/util/menu-position";
-import { usePaneOverlay } from "@/app/platform/pane-overlay";
+import { useHiddenTabMarker, usePaneOverlay } from "@/app/platform/pane-overlay";
 import clsx from "clsx";
 import { createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
@@ -46,6 +46,8 @@ interface PopoverMenuProps {
 // ── Main component ─────────────────────────────────────────────────────────
 
 const PopoverMenu = (props: PopoverMenuProps): JSX.Element => {
+    // Portal-mounted: drop its pane hole while its window tab is hidden (pane-overlay.ts).
+    const hiddenTab = useHiddenTabMarker();
     const [menuEl, setMenuEl] = createSignal<HTMLDivElement | null>(null);
     const [left, setLeft] = createSignal(props.pos.x);
     const [top, setTop]   = createSignal(props.pos.y);
@@ -101,6 +103,7 @@ const PopoverMenu = (props: PopoverMenuProps): JSX.Element => {
                 class="menu popover-menu"
                 style={{ position: "fixed", left: `${left()}px`, top: `${top()}px` }}
                 data-pane-overlay
+                data-window-tab-hidden={hiddenTab()}
             >
                 <For each={props.items}>
                     {(item) => <PopoverMenuItemRenderer item={item} onClose={close} />}

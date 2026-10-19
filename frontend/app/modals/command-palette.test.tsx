@@ -38,7 +38,8 @@ vi.mock("@/app/store/command-registry", () => ({
 }));
 vi.mock("@/app/store/keymodel", () => ({ disableGlobalKeybindings: () => {}, enableGlobalKeybindings: () => {} }));
 vi.mock("@/app/keybindings", () => ({ shortcutFor: () => "" }));
-vi.mock("@/app/platform/pane-overlay", () => ({ usePaneOverlay: () => {} }));
+vi.mock("@/app/platform/pane-overlay", () => ({
+    useHiddenTabMarker: () => () => undefined, usePaneOverlay: () => {} }));
 
 import { CommandPaletteModal } from "./command-palette";
 
