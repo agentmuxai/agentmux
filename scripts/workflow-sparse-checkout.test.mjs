@@ -90,7 +90,7 @@ describe("sparse checkouts cover what their scripts import", () => {
         expect(sparseJobs.map((j) => j.id)).toEqual(
             expect.arrayContaining([
                 "codex-review-gate.yml evaluate",
-                "codex-review-gate.yml sweep",
+                "codex-review-gate-sweep.yml sweep",
                 "ci-pr.yml changes",
                 "ci-pr.yml ci-required",
                 "srv-image.yml changes",

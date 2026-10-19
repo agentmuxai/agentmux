@@ -21,10 +21,8 @@ name: Codex review gate
 #   pull_request_review  Codex's findings review
 #   workflow_dispatch    re-evaluate one PR by hand (e.g. PRs opened before
 #                        this workflow existed), or by the sweep
-#   schedule             the sweep: dispatches the above for each open PR whose
-#                        head has no status, or a pending one older than a
-#                        Codex answer or muxreview note (an evaluation lost to
-#                        an outage, a dropped webhook or a cancelled run)
+#   (the sweep, which dispatches the above for each open PR whose head has no
+#   status or a stale pending one, is codex-review-gate-sweep.yml)
 #
 # pull_request_target and issue_comment run main's copy of this workflow
 # with a write token, so a PR cannot edit the gate that judges it. Nothing
@@ -43,9 +41,6 @@ on:
       pr:
         description: PR number to re-evaluate
         required: true
-  # Off the top of the hour, where GitHub delays scheduled runs most.
-  schedule:
-    - cron: "17,47 * * * *"
 
 permissions:
   contents: read
@@ -101,39 +96,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr }}
-        run: node scripts/ci-codex-review-gate.mjs
-
-  # Dispatches `evaluate` (workflow_dispatch) rather than posting statuses
-  # itself, so each PR's evaluation runs in that PR's concurrency group above
-  # and can't race an event-driven run. Dispatches made with GITHUB_TOKEN do
-  # start runs, unlike other events it causes. It never asks Codex anything.
-  sweep:
-    if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      statuses: read
-      pull-requests: read
-      issues: read
-      actions: write
-    concurrency:
-      group: codex-review-gate-sweep
-      cancel-in-progress: true
-    steps:
-      # A schedule only ever runs on the default branch, so this is main's copy.
-      - uses: actions/checkout@v4
-        with:
-          sparse-checkout: |
-            scripts/ci-codex-review-gate.mjs
-            scripts/lib/github-rest.mjs
-            scripts/lib/is-main.mjs
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
-
-      - name: Dispatch the gate for PRs that missed an input
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          SWEEP: "1"
-          DISPATCH_REF: ${{ github.ref_name }}
         run: node scripts/ci-codex-review-gate.mjs
