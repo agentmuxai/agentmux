@@ -33,6 +33,7 @@ import { setLastInputForTests } from "@/app/store/last-input";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import { sleep } from "@/util/util";
 import { createTranscriptSettleLatch, TranscriptCursor } from "../transcript-cursor";
+import { beginAgentOpen, finishAgentOpen, openTraceEnv, resetAgentOpenTracesForTests } from "../open-trace";
 import { __resetOpenTailForTests, type OpenTailResult } from "./open-tail";
 import { OLDER_PAGE_LINES, RESTORE_WINDOW_LINES, useHistoryPagination } from "./useHistoryPagination";
 
@@ -247,6 +248,58 @@ describe("the seam between the first screen and the rest", () => {
         await flush();
         expect(openTail).not.toHaveBeenCalled();
         expect(RpcApi.BlockfileLineCountCommand).toHaveBeenCalled();
+    });
+
+    // The [agent-open] line says when the read came back and when the pane gave up on it, so a slow fallback shows
+    // where its time went (the read, or the usual open's own reads).
+    describe("the open's line says how a fallback went", () => {
+        const lineAfter = async (over: Record<string, unknown> = {}): Promise<string> => {
+            resetAgentOpenTracesForTests();
+            const lines: string[] = [];
+            const was = openTraceEnv.log;
+            openTraceEnv.log = (l) => void lines.push(l);
+            try {
+                beginAgentOpen("blk-1", "Agent", "mount");
+                mount(over);
+                await flush();
+                finishAgentOpen("blk-1", "closed");
+            } finally {
+                openTraceEnv.log = was;
+                resetAgentOpenTracesForTests();
+            }
+            return lines.find((l) => l.startsWith("[agent-open]")) ?? "";
+        };
+
+        it("a first screen that is used has the attempt and no fallback", async () => {
+            openTail.mockResolvedValue(tailOf(3, 100));
+            const line = await lineAfter();
+            expect(line).toContain("first_screen_attempt=");
+            expect(line).not.toContain("fallback_at=");
+        });
+
+        it("a slice that starts mid-turn gives the attempt, then the fallback with its reason", async () => {
+            openTail.mockResolvedValue(tailOf(3, 100, { lines: [delta, user("b"), user("c")] }));
+            usual();
+            const line = await lineAfter();
+            expect(line).toMatch(/first_screen_attempt=\d/);
+            expect(line).toMatch(/fallback_at=\d/);
+            expect(line).toContain("fallback=mid_turn");
+            expect(line.indexOf("first_screen_attempt=")).toBeLessThan(line.indexOf("fallback_at="));
+        });
+
+        it("a srv with no open tail gives the fallback too", async () => {
+            openTail.mockResolvedValue(null);
+            usual();
+            const line = await lineAfter();
+            expect(line).toContain("fallback=no_tail");
+        });
+
+        it("another format falls back without an attempt", async () => {
+            usual();
+            const line = await lineAfter({ outputFormat: () => "codex-json" });
+            expect(line).not.toContain("first_screen_attempt=");
+            expect(line).toContain("fallback=format");
+        });
     });
 
     it("a format that turns out not to be Claude's after the read opens the usual way", async () => {

@@ -41,6 +41,10 @@ const OPEN_PHASES = [
     "config",
     "committed",
     "history_start",
+    // The first-screen read came back (whether or not it was used), and the pane gave up on it and
+    // opened the usual way: the time between them is what a fallback costs.
+    "first_screen_attempt",
+    "fallback_at",
     "history_read",
     "parsed",
     "first_screen",
