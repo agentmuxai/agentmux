@@ -1,5 +1,36 @@
 # AgentMux Version History
 
+## 0.59.33 — 2026-10-18
+
+- Browser panes: agents see a field's length limit and can't overflow it, are warned when a page changes what they typed, can open a review page's collapsed sections, see what a key press did, and never see a password, card or tax-ID field in a screenshot.
+- Tower: every process shows what kind it is (agents, AgentMux, shells, builds, runtimes, browsers, VMs, editors, apps, system) with an icon and a colour from your theme; a breakdown of the machine by kind with chips that filter the list; group by type; the system folded away; CPU and memory drawn as bars that warn when heavy; and the pane now paints your theme's own background instead of near-black.
+- The status bar shows how much agent history is kept on this machine, left of the token count, and a click opens where it is kept
+- The memory attribution log counts only this AgentMux instance's own processes
+- The title bar and status bar zoom now stays the same when a window reloads, instead of jumping back to 100%.
+- A memory lab script measures a build's memory per process group under a repeatable 4- or 12-agent load, and compares two builds
+- New command: Reload Window (Free Memory). It reloads the window to give back the memory a long session builds up, keeps each pane's draft, scroll position and layout, and refuses while a message, an upload or unsaved editor text would be lost.
+- The Swarm shows the right provider icon for agents in another AgentMux on this machine even when that AgentMux is older, and a neutral mark instead of the AgentMux logo when no provider is known
+- The memory lab can run the window recycle command mid-run and measure what it saves (before, then 5, 30 and 60 seconds after), and checks a draft and a scroll position survive it
+- Storing a transcript line allocates half as much: the store no longer copies whole 64 KB parts on every append
+- AgentMux now reloads a window by itself when it has been idle for 10 minutes and its page uses far more memory than after loading, keeping drafts, scroll positions and layout. Turn it off with window:autorecycle: false.
+- Selecting an agent from Swarm (or any other reveal) now flashes its pane once, in the agent's colour, as soon as the pane is on screen, so it is easy to see which pane was selected.
+- A closed terminal now releases its WebGL context straight away, so the GPU process gives its memory back
+- The memory lab can hold a recycled window idle and sample it for minutes, with a control run that presses nothing, and records what the page holds after a recycle
+- A nightly memory soak job measures the Windows portable with the memory lab and reports it, with no line set yet
+- A subagent that changes folder in its Bash commands no longer moves where the main agent's next command runs: each subagent keeps its own working folder
+- "New conversation" no longer drops the archived conversation from an agent's history: the archive is kept where search and the Agent History view read it, with its timestamps and running summary
+- AgentMux no longer checks for updates on its own: it asks GitHub only when you click Check for update (always shown in the version panel's Maintenance, as Check again once a release is offered) or an agent asks, and a check pins the release that is then downloaded and installed
+- A local build of AgentMux on Windows or Linux, and a release it upgraded to, stays signed in to MuxBus across restarts instead of needing a new sign-in every time
+- A Bash command that prints nothing while it works (a build or test run with its output in a file) is no longer killed after 10 minutes of silence; only a command that is stuck, using no CPU and starting nothing, is killed.
+- An agent with no account linked now says so when it can't start, instead of saying its bound account was deleted
+- Windows and their workspaces keep their names when AgentMux quits and opens again, an upgrade's restart included
+- Linux: srv's threads share two malloc arenas, which cuts its retained memory by about a quarter under load
+- When AgentMux quits or upgrades it no longer silently stops what agents left running (a dev server, an AgentMux an agent started): the upgrade lists it in the version panel and its dialog, on Windows another AgentMux among it saves its windows first, as at a shutdown, so they all come back on its next start, and each agent is told afterwards what of its own was stopped
+- Browser panes stay signed in to their sites after an upgrade: a new version starts with the previous version's browser profiles (cookies, site storage, named profiles)
+- Fix: AgentMux builds on macOS and Linux again (the idle-window recycle used Windows-only calls).
+- What you type to an agent is kept with the agent: ArrowUp recalls it and an unsent draft comes back after a restart, an upgrade or in a new pane
+- An AgentMux too old for the newest release to upgrade in place now says which version to install first, instead of offering a download it can't use; releases name the oldest version they upgrade from
+
 ## 0.59.32 — 2026-10-17
 
 - Quick Fork goes straight to the new conversation: the forked agent's pane opens with its parent's full history, an exact copy, with no black pane or My Agents screen in between
