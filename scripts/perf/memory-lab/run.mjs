@@ -314,7 +314,8 @@ async function attempt(args, ctx) {
         if (diskLoadResult?.stuck) throw new InvalidRun(diskLoadResult.stuck);
         // A writer that hit its cap stopped writing while the workload went on: the rest of the run had no load.
         if (diskLoadResult?.capReached) {
-            throw new InvalidRun(`the disk load reached its cap of ${diskLoadResult.capGB} GB (the writer ran ${diskLoadResult.seconds} s in all) before the workload ended: lower --disk-load, or raise --disk-load-cap-gb (a stress run is wear on the disk)`);
+            // A plain error, not an InvalidRun: it is the settings, a retry would write up to the cap again and fail the same way.
+            throw new Error(`the disk load reached its cap of ${diskLoadResult.capGB} GB (the writer ran ${diskLoadResult.seconds} s in all) before the workload ended: lower --disk-load, or raise --disk-load-cap-gb (a stress run is wear on the disk)`);
         }
         await sleep(args.settleS * 1000);
         const final = await takeSample({ port: args.port, memtree, rootPid: instance.pid, label: `${args.label}-final`, gc: true });
