@@ -599,6 +599,11 @@
           "default": true,
           "description": "When an agent's AgentMux MCP server (its AgentMux tools) doesn't connect, AgentMux reconnects it twice, then restarts the agent once without the shell prefix (the conversation continues), and otherwise tells the agent and shows it in the pane. Set false to only show and tell, with no automatic repair. See docs/specs/SPEC_AGENT_MCP_SELF_HEAL_2026_10_10.md."
         },
+        "agent:transcriptsinglecopy": {
+          "type": "boolean",
+          "default": false,
+          "description": "Write a defined agent's transcript to the agent's own zone in the global transcript store only, not also to the block's own store. Halves what AgentMux writes to disk while agents run (measured: srv bytes written -50%, srv CPU -43%). Quick-launch panes and writers that have lost the agent lease keep their own copy. Off until it has been through a soak. See docs/specs/SPEC_AGENT_TRANSCRIPT_SINGLE_COPY_2026_10_19.md."
+        },
         "agent:askquestiontimeoutms": {
           "type": "integer",
           "minimum": 1000,

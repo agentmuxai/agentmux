@@ -564,6 +564,7 @@ async fn a_replaced_transcript_resets_and_sends_a_fresh_snapshot() {
             &block,
             crate::backend::mps::FILE_OP_REPLACE,
             &state.filestore,
+            &state.mstore,
         );
     });
     let (event, id, reset) = next_event(&mut body).await.unwrap();
