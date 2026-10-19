@@ -677,6 +677,14 @@ describe("the page's long tasks", () => {
         expect(summariseLongTasks(null)).toBeNull(); // never installed, or lost to a reload
     });
 
+    it("summarises the page's timer lag, leaving out the lab's own forced-GC windows", () => {
+        const withLag = { n: 0, tasks: [], top: [], lag: [[5000, 300], [9000, 1500], [20000, 4000]] };
+        expect(summariseLongTasks(withLag, []).timerLag).toEqual({ count: 3, maxMs: 4000, over1s: 2 });
+        // the 4 s late firing at 20,000 waited over 16,000-20,000: inside the forced-GC window
+        expect(summariseLongTasks(withLag, [], [{ start: 15000, end: 21000 }]).timerLag).toEqual({ count: 2, maxMs: 1500, over1s: 1 });
+        expect(summariseLongTasks({ n: 0, tasks: [], top: [] }, []).timerLag).toEqual({ count: 0, maxMs: 0, over1s: 0 }); // an old record has none
+    });
+
     it("joins the records of the documents before and after a reload", () => {
         const before = { n: 2, tasks: [[1000, 90], [2000, 3000]], top: [{ at: 2000, ms: 3000, name: "self", container: "" }] };
         const after = { n: 1, tasks: [[9000, 400]], top: [{ at: 9000, ms: 400, name: "self", container: "" }] };

@@ -69,6 +69,8 @@ export function summariseLongTasks(raw, windows = [], excluded = []) {
     const all = raw.tasks.map(([at, ms]) => ({ at, ms }));
     const inExcluded = (t) => excluded.some((w) => t.at < w.end && t.at + t.ms > w.start);
     const tasks = all.filter((t) => !inExcluded(t));
+    // A timer firing `ms` late at `at` waited over [at - ms, at]: leave out the ones that fell in the lab's own forced-GC windows too.
+    const lag = (raw.lag ?? []).filter(([at, ms]) => !excluded.some((w) => at - ms < w.end && at > w.start));
     const total = tasks.reduce((n, t) => n + t.ms, 0);
     const byRound = windows.map((w) => {
         const inside = tasks.filter((t) => t.at >= w.start && t.at < w.end);
@@ -85,7 +87,7 @@ export function summariseLongTasks(raw, windows = [], excluded = []) {
         over1s: tasks.filter((t) => t.ms >= 1000).length,
         longest: raw.top.filter((t) => !inExcluded(t)).map((t) => ({ ...t, at: new Date(t.at).toISOString() })),
         // How late the page's 100 ms timer fired (only the firings 200 ms or more late are kept): the main thread's queueing delay.
-        timerLag: { count: (raw.lag ?? []).length, maxMs: (raw.lag ?? []).reduce((m, [, ms]) => Math.max(m, ms), 0), over1s: (raw.lag ?? []).filter(([, ms]) => ms >= 1000).length },
+        timerLag: { count: lag.length, maxMs: lag.reduce((m, [, ms]) => Math.max(m, ms), 0), over1s: lag.filter(([, ms]) => ms >= 1000).length },
         byRound,
     };
 }
