@@ -902,17 +902,18 @@ jobs:
   # - only a run whose commit is still main's head acts, so an older run
   #   finishing late can't close a newer failure's issue or reopen one after
   #   main went green (the newer push's run reports instead);
-  # - one main status at a time (queued, never cancelled), so two failing runs
-  #   can't both create an issue; a green one closes every open main-red issue.
+  # - no concurrency group: GitHub keeps one pending job per group and lets a
+  #   newer arrival replace it, so a late older run could displace the head's
+  #   (Codex on #5121). Two runs can still race to create an issue when main
+  #   moves on between them, so after creating one the oldest open main-red
+  #   issue is kept and any other closed as its duplicate; a green run closes
+  #   every open one.
   main-status:
     name: main status
     needs: [ci-required]
     if: ${{ always() && github.event_name == 'push' }}
     runs-on: ubuntu-latest
     timeout-minutes: 3
-    concurrency:
-      group: ci-pr-main-status
-      cancel-in-progress: false
     permissions:
       contents: read
       issues: write
@@ -951,4 +952,10 @@ jobs:
             gh label create main-red --repo "$REPO" --color B60205 --description "CI on main is failing" --force >/dev/null
             gh issue create --repo "$REPO" --title "main is red" --label main-red \
               --body "$note"$'\n\n'"This issue is opened and closed by CI (ci-pr.yml, main status): it stays open while pushes to main fail, with a comment for each, and closes when one is green."
+            # Another run may have created one at the same moment: keep the oldest.
+            all=$(gh issue list --repo "$REPO" --label main-red --state open --json number --jq 'map(.number) | sort | .[]')
+            keep=$(printf '%s\n' "$all" | head -1)
+            for n in $(printf '%s\n' "$all" | tail -n +2); do
+              gh issue close "$n" --repo "$REPO" --reason "not planned" --comment "Duplicate of #$keep, opened by a run at the same moment."
+            done
           fi
