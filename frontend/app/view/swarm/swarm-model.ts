@@ -29,6 +29,7 @@ import { createSignal, type Accessor, type Setter } from "solid-js";
 import { groupBackgroundTasks, type AgentBackgroundTasks } from "./swarm-background";
 import { toolDetail } from "@/app/view/agent/tool-meta/tool-descriptors";
 import { onSubagentNamed, withSubagentName } from "./subagent-naming";
+import { withAgentProgress, withAgentStatus } from "./swarm-updates";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -1246,9 +1247,9 @@ export class SwarmViewModel {
                 todosPartial: data.todosPartial,
                 currentTool: data.currentTool,
             };
-            // Replace the Map (not mutate) so Solid sees a new reference
-            // and buildTree's memo actually re-runs.
-            this.setProgress((prev) => new Map(prev).set(blockId, next));
+            // A new Map (not a mutation) so Solid sees a new reference and buildTree re-runs, but only for a
+            // change: the same progress again leaves the Map alone (swarm-updates.ts).
+            this.setProgress((prev) => withAgentProgress(prev, blockId, next));
         });
         if (unsubProgress) this.unsubs.push(unsubProgress);
 
@@ -1969,22 +1970,14 @@ export class SwarmViewModel {
             void BlockService.GetControllerStatus(blockId)
                 .then((rts) => {
                     const status = derivedRunningStatus(rts?.is_agent_pane, rts?.turn_active, rts?.shellprocstatus);
-                    this.setAgentStatuses((prev) => {
-                        const m = new Map(prev);
-                        m.set(blockId, status);
-                        return m;
-                    });
+                    this.setAgentStatuses((prev) => withAgentStatus(prev, blockId, status));
                 })
                 .catch(() => {/* keep idle default */});
 
             const scope = MOS.makeORef("block", blockId);
             const unsub = onMuxEvent(WpsEvent.ControllerStatus, (data) => {
                     const next = derivedRunningStatus(data.is_agent_pane, data.turn_active, data.shellprocstatus);
-                    this.setAgentStatuses((prev) => {
-                        const m = new Map(prev);
-                        m.set(blockId, next);
-                        return m;
-                    });
+                    this.setAgentStatuses((prev) => withAgentStatus(prev, blockId, next));
                 }, scope);
             if (unsub) this.blockUnsubs.push(unsub);
         }
