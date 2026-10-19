@@ -15,8 +15,8 @@
  * the CLI isn't installed yet). When `installed === false`, a
  * bottom-right "Click to install" ribbon is overlaid on the card —
  * like a "For Sale" sign. The ribbon disappears once installation
- * succeeds (parent re-runs install.check after the install modal
- * closes).
+ * succeeds (the picker re-runs install.check when the panel's install
+ * ends); while it runs the ribbon reads "Installing…".
  */
 
 import { createMemo, onMount, Show, type JSX } from "solid-js";
@@ -189,7 +189,7 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
             </span>
             {/* No runtime badge here. A template is runtime-agnostic —
                 the host/container choice is made when you instantiate it
-                (in the create-from-template modal), not a property of the
+                (in the panel that opens under the card), not a property of the
                 template itself. The badge belongs on a launched session
                 (MyAgentsList), where the runtime is concrete. */}
             <Show when={props.installed === false}>

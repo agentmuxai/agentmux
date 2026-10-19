@@ -5,7 +5,7 @@
  * InstallProgress — both layers of an install, with no chrome
  * (SPEC_UNIVERSAL_INSTALL_DIALOG_2026_09_23.md §4, §5.1): Layer 1's step
  * list, and Layer 2's "Details" console, collapsed by default. Used inline
- * (the Toolchain pane, the prereq modal) and inside `<InstallDialog>`.
+ * (the Toolchain pane, and the new-agent panel's Tools and Install steps).
  *
  * Details remembers its open/closed choice per install kind for the
  * session, opens by itself on failure, and then scrolls to the first

@@ -5,8 +5,7 @@
  * SystemToolInstallInline — one-click install of a system tool (git,
  * node/npm, python) through the platform's own package manager, shown
  * inline below wherever a tool's "not found" row already renders (the
- * Toolchain modal's core-tools list, `AgentPrereqModal`'s missing-prereq
- * list). Not a nested modal — an expand-in-place panel.
+ * Toolchain modal's core-tools list, the new-agent panel's Tools step). Not a nested modal — an expand-in-place panel.
  *
  * State machine: `checking` → (`unavailable` — renders nothing, caller
  * keeps its existing link+copy-command fallback) | `ready` (shows the

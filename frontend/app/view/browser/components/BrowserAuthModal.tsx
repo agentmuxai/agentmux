@@ -6,7 +6,7 @@
  * when CEF fires `browser-pane-auth-required` for a browser pane.
  *
  * Phase α of SPEC_BROWSER_PANE_HTTP_BASIC_AUTH_2026_05_18.md.
- * Sibling to `AgentLaunchModalPanel` / `AgentInstallModalPanel` —
+ * Sibling to `AgentLaunchModalPanel` —
  * mounts inside the canonical `<ModalLayer>` via the `browser-auth` request kind.
  */
 

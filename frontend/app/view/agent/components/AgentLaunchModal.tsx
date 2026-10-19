@@ -89,7 +89,7 @@ export interface LaunchOverrides {
      *  `launchAgentDefinition` falls back to the provider's own
      *  `default: true` model, or `DEFAULT_RUNTIME_CONFIG.model` if the
      *  provider declares none. Callers that let the user pick a model at
-     *  creation time (e.g. AgentCreateFromTemplateModal) set this so the
+     *  creation time (e.g. AgentCreateForm) set this so the
      *  first launch doesn't silently start on an unrelated provider's
      *  default model. */
     model?: string;
@@ -374,7 +374,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
 
     // Live Docker-availability signal, purely informational here — see the
     // inline hint near the sandbox radio below. Deliberately NOT part of the
-    // gating logic: unlike the create-from-template modal, this modal also
+    // gating logic: unlike the new-agent form (AgentCreateForm), this modal also
     // drives relaunch/continue of already-configured container agents, and
     // hard-disabling on a possibly-stale probe at modal-open time risks
     // blocking a legitimate continue. `containerSupported` (does this

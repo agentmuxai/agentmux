@@ -134,8 +134,8 @@ export const ModalLayer: Component<ModalLayerProps> = (props) => {
     // Every content mount starts at the top of the panel. `.modal-panel`
     // is the scroll container and survives a `replace`, so without this
     // the new content inherits the old content's scroll position — e.g.
-    // a prereq modal scrolled down to "Launch anyway" handed the install
-    // modal an already-scrolled panel
+    // a long modal scrolled to its bottom handed the next one an
+    // already-scrolled panel
     // (SPEC_UNIVERSAL_INSTALL_DIALOG_2026_09_23.md §1.1 item 2, §4.3 rule 4).
     const onContentMount = (el: HTMLDivElement) => {
         const moveFocus = replacing;

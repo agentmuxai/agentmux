@@ -10,9 +10,9 @@
  *    node count, last-active timestamp). Click = reattach via the
  *    existing `continueOfInstanceId + workDirOverride` flow.
  *  - **+ New from template** (bottom): seeded templates
- *    (`is_seeded = 1`). Click = open the create-from-template modal,
- *    which clones the template into a new user agent + immediately
- *    launches it.
+ *    (`is_seeded = 1`). Click = open its panel below the card's row
+ *    (`AgentCreatePanel`), which clones the template into a new user
+ *    agent and launches it (SPEC_AGENT_PICKER_INLINE_CREATE_2026_10_18.md).
  *
  * Templates by Phase 1 invariant carry NO session zone (the startup
  * migration `migrate_promote_template_sessions_v1` evicts any
@@ -22,9 +22,8 @@
  * Pre-existing flows kept intact:
  *  - Modifier-key force-modal on a My Agents row (Shift / Ctrl / Alt /
  *    Cmd) bypasses auto-continue.
- *  - Install + prereq modals layered on top of template-create flow
- *    (templates with un-installed CLIs still go through their install
- *    modal before the create-from-template modal opens).
+ *  - The tools a harness needs and its CLI's install come first, as
+ *    steps of the same panel, when they apply.
  *
  * See docs/specs/SPEC_AGENT_DEFINITIONS_MODAL_2026_04_23.md (legacy)
  * and docs/specs/SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md (current).
@@ -1015,8 +1014,8 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                             Top: user-owned agents from
                             `ListRecentSessionsCommand` with their
                             current Option E session state.
-                            Bottom: seeded templates, click = open the
-                            create-from-template modal. */}
+                            Bottom: seeded templates, click = open its
+                            panel below the card's row. */}
                         <AgentPickerFilterBar
                             value={filterQuery}
                             onInput={setFilterQuery}
