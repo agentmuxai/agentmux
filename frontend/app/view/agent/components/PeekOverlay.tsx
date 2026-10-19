@@ -79,6 +79,7 @@
  * unaffected — still top-anchored.
  */
 
+import { useHiddenTabMarker } from "@/app/platform/pane-overlay";
 import clsx from "clsx";
 import { autoUpdate } from "@floating-ui/dom";
 import { createSignal, createComputed, createEffect, on, onCleanup, Show, untrack, type JSX } from "solid-js";
@@ -221,6 +222,8 @@ function withPaneZoom(style: JSX.CSSProperties, paneZoom: number): JSX.CSSProper
 }
 
 export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
+    // Portal-mounted: drop its pane hole while its window tab is hidden (pane-overlay.ts).
+    const hiddenTab = useHiddenTabMarker();
     const [floatingStyle, setFloatingStyle] = createSignal<JSX.CSSProperties>({
         position: "fixed",
         left: "0px",
@@ -573,6 +576,7 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
                     ref={registerFloating}
                     class={clsx("agent-node-peek-overlay", props.class)}
                     data-pane-overlay={outside() ? "" : undefined}
+                    data-window-tab-hidden={hiddenTab()}
                     onMouseEnter={() => {
                         if (!bridges()) return;
                         clearBridgeTimer();

@@ -36,6 +36,18 @@ export function isInHiddenPaneTab(el: Element): boolean {
     return el.closest(HIDDEN_CONTAINER_SELECTOR) != null;
 }
 
+/**
+ * The `data-window-tab-hidden` value for a `data-pane-overlay` element that
+ * renders through a Portal: under `document.body` it has no hidden-tab
+ * ancestor, so it marks itself while the window tab it was opened from isn't
+ * displayed. Call in the component's scope:
+ * `data-window-tab-hidden={hiddenTab()}`.
+ */
+export function useHiddenTabMarker(): Accessor<"" | undefined> {
+    const displayed = useWindowTabDisplayed();
+    return () => (displayed() ? undefined : "");
+}
+
 // Every registered overlay's re-measure, and the auto service's sweep. Hiding
 // or showing a tab changes neither an overlay's size nor its own style, so no
 // per-overlay observer sees it: the marker watcher below re-measures them all.

@@ -2,6 +2,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { useHiddenTabMarker } from "@/app/platform/pane-overlay";
 import { cn } from "@/util/util";
 import {
     autoUpdate,
@@ -38,6 +39,8 @@ interface TooltipProps {
 }
 
 function TooltipInner(props: TooltipProps): JSX.Element {
+    // Portal-mounted: drop its pane hole while its window tab is hidden (pane-overlay.ts).
+    const hiddenTab = useHiddenTabMarker();
     const placement: Placement = props.placement ?? "top";
     const forceOpen = () => props.forceOpen ?? false;
     const immediate = () => props.immediate ?? false;
@@ -193,6 +196,7 @@ function TooltipInner(props: TooltipProps): JSX.Element {
                             "bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl z-50"
                         )}
                         data-pane-overlay
+                        data-window-tab-hidden={hiddenTab()}
                     >
                         {props.content}
                     </div>

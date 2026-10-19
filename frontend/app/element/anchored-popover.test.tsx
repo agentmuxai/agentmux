@@ -18,6 +18,7 @@ vi.mock("@floating-ui/dom", () => ({
     autoUpdate: vi.fn(() => vi.fn()),
 }));
 vi.mock("@/app/platform/pane-overlay", () => ({
+    useHiddenTabMarker: () => () => undefined,
     usePaneOverlay: vi.fn(),
 }));
 vi.mock("@/app/util/menu-position", () => ({

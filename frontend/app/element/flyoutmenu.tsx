@@ -10,7 +10,7 @@ import clsx from "clsx";
 import { createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 
-import { usePaneOverlay } from "@/app/platform/pane-overlay";
+import { useHiddenTabMarker, usePaneOverlay } from "@/app/platform/pane-overlay";
 import {
     assertMenuInPaintableArea,
     computeMenuPosition,
@@ -293,6 +293,8 @@ type MenuBodyProps = MenuLevelProps & {
  * as MoreDropdown in action-widgets.tsx).
  */
 const MenuBody = (props: MenuBodyProps): JSX.Element => {
+    // Portal-mounted: drop its pane hole while its window tab is hidden (pane-overlay.ts).
+    const hiddenTab = useHiddenTabMarker();
     let menuEl: HTMLDivElement | undefined;
     usePaneOverlay(() => menuEl, { keys: true });
 
@@ -307,6 +309,7 @@ const MenuBody = (props: MenuBodyProps): JSX.Element => {
             ref={registerFloating}
             style={props.style}
             data-pane-overlay
+            data-window-tab-hidden={hiddenTab()}
         >
             <MenuRows {...props} parentKey={null} />
         </div>
@@ -430,6 +433,8 @@ type SubMenuProps = MenuLevelProps & {
 };
 
 const SubMenu = (props: SubMenuProps): JSX.Element => {
+    // Portal-mounted: drop its pane hole while its window tab is hidden (pane-overlay.ts).
+    const hiddenTab = useHiddenTabMarker();
     const position = () => props.subMenuPosition[props.parentKey];
 
     // Submenu positioning routes through the Phase 1 primitive: anchored to the
@@ -504,6 +509,7 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
             class={clsx("menu sub-menu", { "menu--mirrored": props.mirrored })}
             style={subStyle()}
             data-pane-overlay
+            data-window-tab-hidden={hiddenTab()}
             onMouseEnter={() => props.hover.onSubmenuEnter()}
             onMouseLeave={(e) => props.hover.onSubmenuLeave(e)}
         >

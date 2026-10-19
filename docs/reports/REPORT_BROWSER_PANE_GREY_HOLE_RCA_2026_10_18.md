@@ -124,10 +124,24 @@ closed on its own.
      check, it can't be escaped by a descendant with an explicit
      `visibility: visible`, and it isn't fooled by `content-visibility: hidden`,
      which leaves descendants' computed visibility `visible`.
-   - `usePaneOverlay` also reads `useWindowTabDisplayed()`, the window tab's
-     displayed state that views already use to pause while hidden
-     (`window-tab-visibility.ts`, `pane-tab-visibility.ts`). That reaches an
-     overlay rendered through a Portal, outside its tab's DOM.
+   - An overlay rendered through a Portal sits under `document.body`, outside
+     its tab's DOM, so no marker is above it. `usePaneOverlay` reads
+     `useWindowTabDisplayed()` instead: the window tab's displayed state that
+     views already use to pause while hidden (`window-tab-visibility.ts`,
+     `pane-tab-visibility.ts`).
+   - The Portal-mounted `data-pane-overlay` elements mark themselves while
+     their window tab isn't displayed (`useHiddenTabMarker()`): the tooltip,
+     popover menu, anchored popover, flyout menu and submenu, and the agent
+     pane's peek overlay. Overlays in the window's own chrome (the More
+     dropdown, pinned-widget flyout, tab context panel) never sit in a tab and
+     need nothing.
+   - **Not covered:** the imperative context menu (`js-context-menu.ts`). It is
+     plain DOM with no Solid context.
+     - It closes on any click, since a backdrop covering the whole window
+       catches it, including a click on another tab. It also closes on Escape.
+     - It can still stay open across a tab switch made from the keyboard. That
+       is the one case left; it would need the menu to close when the
+       displayed tab changes.
 2. **Every overlay is re-measured when a tab is hidden or shown** (shipped).
    One `MutationObserver` on the two marker attributes, for the whole document,
    calls `remeasurePaneOverlays()`. That runs every registered overlay's
@@ -152,6 +166,9 @@ closed on its own.
 - `usePaneOverlay` cuts no hole while its window tab isn't displayed, cuts one
   when the tab is shown, and drops it when the tab is hidden again. Outside any
   window tab, it always clips.
+- With the Windows auto service running, a Portal-mounted `data-pane-overlay`
+  drops its hole when its window tab is hidden and gets it back when the tab is
+  shown again.
 - Every one of these tests fails with the check disabled.
 
 ## Side finding
