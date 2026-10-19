@@ -50,8 +50,10 @@ This revision **replaces** §2.1 (routing), the color and envelope parts of
 
 1. **Always flash, no routing.** Every tone that passes the gates (§2.2)
    flashes **both** the source's window tab (active or not) **and** its own
-   pill in its pane header (whether or not its window tab is showing),
-   including for the focused pane. The owner wanted the flash every time,
+   pill in its pane header, including for the focused pane. (Amended
+   2026-10-19: a pill whose window tab is hidden does not start its flash,
+   since nothing shows it; each flash is a Web Animation. The window tab's
+   own flash still shows the activity.) The owner wanted the flash every time,
    regardless of what is on screen. §2.1's table, the focused-pane exception,
    and the `flashTargetFor` routing rule are gone. An event is just
    `{ blockId }`.
