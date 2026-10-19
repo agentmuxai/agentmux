@@ -314,10 +314,7 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
             <Show when={props.title}>
                 <div class="sysinfo-chart-title">{props.title}</div>
             </Show>
-            <div
-                ref={container}
-                classList={{ "sysinfo-chart-canvas": true, "sysinfo-chart-canvas--titled": !!props.title }}
-            />
+            <div ref={container} class="sysinfo-chart-canvas" />
             <div ref={tip} class="sysinfo-chart-tip" style={{ display: "none" }} />
         </div>
     );
@@ -333,7 +330,7 @@ type SingleLinePlotProps = {
     targetLen: number;
     intervalSecs: number;
     syncKey?: string;
-};
+} & Pick<TimeChartProps, "timeAxis" | "yLabels" | "top" | "axisWidth" | "onAxisWidth">;
 
 /**
  * One metric, as a simple view shows it: titled with its figures now and over
@@ -360,7 +357,12 @@ export function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
             syncKey={props.syncKey}
             sparkline={props.sparkline}
             title={props.sparkline ? undefined : titled(name(), figures(props.plotData, props.yval, format))}
-            class="min-h-[100px]"
+            timeAxis={props.timeAxis}
+            yLabels={props.yLabels}
+            top={props.top}
+            axisWidth={props.axisWidth}
+            onAxisWidth={props.onAxisWidth}
+            class="sysinfo-grid-chart"
         />
     );
 }
