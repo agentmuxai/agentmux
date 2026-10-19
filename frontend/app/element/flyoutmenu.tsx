@@ -52,6 +52,9 @@ function styleToString(pos: MenuPositionResult): string {
 // levels, so a still-open descendant closes naturally via Solid unmounting
 // it when its own ancestor's <Show> flips off, not through this registry.
 
+// Where a menu is until its position is computed: in the DOM, not visible.
+const HIDDEN_FLOATING_STYLE = "position:absolute;left:0px;top:0px;visibility:hidden";
+
 type MenuProps = {
     items: MenuItem[];
     className?: string;
@@ -66,6 +69,14 @@ type MenuProps = {
      * menu keeps the standard left-to-right layout.
      */
     mirrored?: boolean;
+    /**
+     * Keep the menu inside this element (a browser pane) when it fits, and
+     * with `alignToAnchorSide` open it from the side its button is on:
+     * SPEC_BROWSER_PANE_THIN_BAR_AND_MENUS_IN_PANE_2026_10_18.md §5. Other
+     * menus are kept inside the window only.
+     */
+    containWithin?: () => HTMLElement | null | undefined;
+    alignToAnchorSide?: boolean;
     onOpenChange?: (isOpen: boolean) => void;
     /**
      * Receives a function that closes the menu, for an owner that must close
@@ -84,9 +95,7 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
     const [subMenuPosition, setSubMenuPosition] = createSignal<SubMenuPositionMap>({});
 
     const [isOpen, setIsOpen] = createSignal(false);
-    const [floatingStyle, setFloatingStyle] = createSignal(
-        "position:absolute;left:0px;top:0px;visibility:hidden",
-    );
+    const [floatingStyle, setFloatingStyle] = createSignal(HIDDEN_FLOATING_STYLE);
 
     let referenceEl: HTMLElement | null = null;
     let floatingEl: HTMLElement | null = null;
@@ -94,6 +103,14 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
 
     const onOpenChangeMenu = (open: boolean) => {
         if (!open) {
+            // The menu is leaving the DOM: stop following its anchor and
+            // container (autoUpdate, and the container's resize observer).
+            cleanupAutoUpdate?.();
+            cleanupAutoUpdate = null;
+            floatingEl = null;
+            // Reopened later, it starts hidden until its position is computed,
+            // not at wherever it was last shown.
+            setFloatingStyle(HIDDEN_FLOATING_STYLE);
             setVisibleSubMenus({});
             setHoveredItems([]);
             setSubMenuPosition({});
@@ -115,7 +132,13 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
         // slack/webview pane sat under the anchor). Matches showJsContextMenu
         // and the statusbar popovers.
         const pos = await computeMenuPosition(
-            { anchor: referenceEl, placement: props.placement ?? "bottom-start", avoidNativePanes: false },
+            {
+                anchor: referenceEl,
+                placement: props.placement ?? "bottom-start",
+                avoidNativePanes: false,
+                containWithin: props.containWithin?.() ?? undefined,
+                alignToAnchorSide: props.alignToAnchorSide,
+            },
             floatingEl,
         );
         setFloatingStyle(styleToString(pos));
@@ -126,7 +149,17 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
         requestAnimationFrame(() => {
             if (!(referenceEl instanceof Element) || !(floatingEl instanceof Element)) return;
             cleanupAutoUpdate?.();
-            cleanupAutoUpdate = autoUpdate(referenceEl, floatingEl, updatePosition);
+            const stopAutoUpdate = autoUpdate(referenceEl, floatingEl, updatePosition);
+            // A menu kept inside a container must follow the container's own
+            // resize (a pane's splitter dragged under an open menu), which
+            // autoUpdate doesn't watch: it sees only the anchor and the menu.
+            const container = props.containWithin?.();
+            const observer = container && typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => void updatePosition()) : undefined;
+            if (container) observer?.observe(container);
+            cleanupAutoUpdate = () => {
+                stopAutoUpdate();
+                observer?.disconnect();
+            };
             // Dev-only paintable-area guard (spec §6.1); gated so it is
             // zero-cost in release builds.
             assertMenuInPaintableArea(el, "flyout-menu");

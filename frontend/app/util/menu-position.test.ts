@@ -14,6 +14,7 @@ import {
     computeMenuPosition,
     getNativePaneRects,
     getPaintableArea,
+    placementBySide,
 } from "./menu-position";
 
 const VIEWPORT_W = 1200;
@@ -285,5 +286,85 @@ describe("computeMenuPosition — cross-axis offset (Floating UI offset() parity
         );
         expect(a.style.left).toBe(b.style.left);
         expect(a.style.top).toBe(b.style.top);
+    });
+});
+
+describe("computeMenuPosition — kept inside a container (browser pane menus)", () => {
+    // A pane at x 600..1000, y 100..700, in the 1200x800 window.
+    const pane = () => elementWithRect(makeRect(600, 100, 400, 600));
+    function menu(w: number, h: number): HTMLElement {
+        const el = elementWithRect(makeRect(0, 0, w, h));
+        Object.defineProperty(el, "scrollHeight", { value: h, configurable: true });
+        return el;
+    }
+    const at = (res: { style: { left?: unknown; top?: unknown } }) => ({
+        left: parseInt(res.style.left as string, 10),
+        top: parseInt(res.style.top as string, 10),
+    });
+
+    it("opens leftward from a button in the pane's right half, its right edge on the pane's", async () => {
+        // Bookmarks in a thin pane sits left of Profile, 40px from the edge.
+        const res = await computeMenuPosition(
+            { anchor: makeRect(932, 110, 28, 28), containWithin: pane(), alignToAnchorSide: true },
+            menu(200, 150),
+        );
+        expect(res.placement).toBe("bottom-end");
+        expect(at(res)).toEqual({ left: 1000 - 200, top: 138 + 8 });
+    });
+
+    it("opens rightward from a button in the pane's left half", async () => {
+        const res = await computeMenuPosition(
+            { anchor: makeRect(610, 110, 28, 28), containWithin: pane(), alignToAnchorSide: true },
+            menu(200, 150),
+        );
+        expect(res.placement).toBe("bottom-start");
+        expect(at(res).left).toBe(610);
+    });
+
+    it("is moved along the bar to stay inside the pane when it fits", async () => {
+        const res = await computeMenuPosition(
+            { anchor: makeRect(760, 110, 28, 28), containWithin: pane(), alignToAnchorSide: true },
+            menu(300, 150),
+        );
+        // Start-aligned at 760 it would end at 1060, past the pane.
+        expect(at(res).left + 300).toBeLessThanOrEqual(1000);
+        expect(at(res).left).toBeGreaterThanOrEqual(600);
+    });
+
+    it("runs past a pane too narrow for it on the far side, but stays in the window", async () => {
+        const narrow = elementWithRect(makeRect(600, 100, 160, 600));
+        const res = await computeMenuPosition(
+            { anchor: makeRect(730, 110, 28, 28), containWithin: narrow, alignToAnchorSide: true },
+            menu(200, 150),
+        );
+        expect(res.placement).toBe("bottom-end");
+        expect(at(res).left + 200).toBe(760); // the pane's right edge
+        expect(at(res).left).toBeLessThan(600);
+        expect(at(res).left).toBeGreaterThanOrEqual(0);
+    });
+
+    it("runs below a pane too short for it rather than scrolling in a sliver, and never flips above", async () => {
+        const short = elementWithRect(makeRect(600, 100, 400, 200));
+        const res = await computeMenuPosition(
+            { anchor: makeRect(960, 110, 28, 28), containWithin: short, alignToAnchorSide: true },
+            menu(200, 400),
+        );
+        expect(at(res).top).toBe(146);
+        expect(res.maxHeight).toBeGreaterThanOrEqual(400);
+    });
+
+    it("caps a tall menu to the room below the button inside the pane when that room is enough", async () => {
+        const res = await computeMenuPosition(
+            { anchor: makeRect(960, 110, 28, 28), containWithin: pane(), alignToAnchorSide: true },
+            menu(200, 900),
+        );
+        expect(at(res).top).toBe(146);
+        expect(res.maxHeight).toBe(696 - 146);
+    });
+
+    it("picks the side by the anchor's centre", () => {
+        const box = makeRect(0, 0, 400, 100);
+        expect(placementBySide("bottom-start", makeRect(10, 0, 20, 20), box)).toBe("bottom-start");
+        expect(placementBySide("bottom-start", makeRect(370, 0, 20, 20), box)).toBe("bottom-end");
     });
 });

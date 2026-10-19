@@ -56,22 +56,30 @@ describe("BrowserNavBar layout structure", () => {
         expect(isOverChrome(bar.querySelector<HTMLElement>(".browser-address-bar")!)).toBe(true);
     });
 
-    it("holds the navigation buttons, the address bar and Profile in one grid, with no Go button", () => {
+    it("holds the navigation buttons, Bookmarks, the thin layout's line, the address bar and Profile in one grid, with no Go button", () => {
         const bar = renderBar();
         const grid = bar.querySelector(":scope > .browser-nav-bar-grid")!;
         expect(grid).toBeTruthy();
         const children = [...grid.children].map((c) => c.classList[c.classList.length - 1]);
-        expect(children).toEqual(["browser-nav-group--nav", "browser-address-wrap", "browser-nav-group--profile"]);
+        // In this order, which is also the Tab order in both layouts.
+        expect(children).toEqual([
+            "browser-nav-group--nav",
+            "browser-nav-group--bookmarks",
+            "browser-nav-break",
+            "browser-address-wrap",
+            "browser-nav-group--profile",
+        ]);
+        expect(grid.querySelector(".browser-nav-break")!.getAttribute("aria-hidden")).toBe("true");
         expect(bar.querySelector('[title="Go"]')).toBeNull();
         expect(grid.querySelector(".browser-address-wrap > input.browser-address-bar")).toBeTruthy();
     });
 
-    it("puts Back, Forward, Reload, Home and Bookmarks on the left and Profile alone on the right", () => {
+    it("puts Back, Forward, Reload and Home in the nav group, Bookmarks in its own cell and Profile alone on the right", () => {
         const bar = renderBar();
         const nav = bar.querySelector(".browser-nav-group--nav")!;
         expect(titles(nav).slice(0, 3)).toEqual(["Back", "Forward", "Reload"]);
-        expect(nav.children).toHaveLength(5); // and Home, Bookmarks
-        expect(nav.querySelector('[title="Bookmarks"]')).toBeTruthy();
+        expect(nav.children).toHaveLength(4); // and Home
+        expect(bar.querySelector('.browser-nav-group--bookmarks [title="Bookmarks"]')).toBeTruthy();
         const profile = bar.querySelector(".browser-nav-group--profile")!;
         expect(profile.children).toHaveLength(1);
         expect(profile.querySelector(".browser-profile-btn")).toBeTruthy();
