@@ -40,8 +40,11 @@ export function lastSample(text) {
     return footprint ? { ...records[records.length - 1], footprint } : records[records.length - 1];
 }
 
-/** What the lab's own scripted agents run as: the fake Claude is a Node script, so its process is a pane's child. */
-export const FAKE_CLI_ROOTS = "node";
+/**
+ * What the lab's own scripted agents run as: the fake Claude is a Node script, so its process is a pane's child.
+ * On Linux a node process's name reads `MainThread`, which would otherwise count each agent in the app's host group.
+ */
+export const FAKE_CLI_ROOTS = "node,MainThread";
 
 /**
  * `memtree` labels a process by its command line's `--type=`; on Linux a

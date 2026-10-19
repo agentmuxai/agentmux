@@ -469,6 +469,25 @@ describe("CPU and round time", () => {
     });
 });
 
+describe("Linux process roles", () => {
+    // The roles of a real 12-pane Linux run (Ubuntu, CEF): the CDP step names the GPU process "GPU" and a utility process by its service.
+    const role = (role, name = "agentmux-cef") => groupOf({ role, name, app: true });
+
+    it("groups Chromium's Linux roles as the Windows ones", () => {
+        expect(role("renderer")).toBe("renderer");
+        expect(role("GPU")).toBe("gpu");
+        expect(role("gpu-process")).toBe("gpu");
+        expect(role("utility")).toBe("utility");
+        expect(role("storage.mojom.StorageService")).toBe("utility");
+        expect(role("tracing.mojom.TracingService")).toBe("utility");
+        expect(role("zygote")).toBe("utility");
+        expect(role("zygote-forked")).toBe("utility");
+        expect(role("main", "agentmux-launcher")).toBe("host");
+        expect(role("main", "agentmux-srv")).toBe("srv");
+        expect(role("crashpad-handler")).toBe("other");
+    });
+});
+
 describe("srv drift", () => {
     it("reads the commit from a portable's name", () => {
         expect(portableCommit("C:/b/agentmux-0.59.32+gfe727c686.20261018T111038.865-x64-portable")).toBe("fe727c686");
