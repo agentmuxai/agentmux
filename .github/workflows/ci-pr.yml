@@ -950,11 +950,16 @@ jobs:
             gh issue comment "$open" --repo "$REPO" --body "$note"
           else
             gh label create main-red --repo "$REPO" --color B60205 --description "CI on main is failing" --force >/dev/null
-            gh issue create --repo "$REPO" --title "main is red" --label main-red \
-              --body "$note"$'\n\n'"This issue is opened and closed by CI (ci-pr.yml, main status): it stays open while pushes to main fail, with a comment for each, and closes when one is green."
-            # Another run may have created one at the same moment: keep the oldest.
+            mine=$(gh issue create --repo "$REPO" --title "main is red" --label main-red \
+              --body "$note"$'\n\n'"This issue is opened and closed by CI (ci-pr.yml, main status): it stays open while pushes to main fail, with a comment for each, and closes when one is green." | grep -o '[0-9]*$')
+            # Another run may have created one at the same moment: keep the
+            # oldest, and if that isn't this run's, carry this run's report
+            # over, so the open issue names the head's failure (Codex on #5121).
             all=$(gh issue list --repo "$REPO" --label main-red --state open --json number --jq 'map(.number) | sort | .[]')
             keep=$(printf '%s\n' "$all" | head -1)
+            if [ -n "$keep" ] && [ "$keep" != "$mine" ]; then
+              gh issue comment "$keep" --repo "$REPO" --body "$note"
+            fi
             for n in $(printf '%s\n' "$all" | tail -n +2); do
               gh issue close "$n" --repo "$REPO" --reason "not planned" --comment "Duplicate of #$keep, opened by a run at the same moment."
             done
