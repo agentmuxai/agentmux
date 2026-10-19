@@ -1,6 +1,6 @@
 # Spec: CI that keeps main green: a merge queue with fast gates, quicker PR builds, and a red-main alert
 
-**Status:** proposed. Nothing here is built yet.
+**Status:** active. Phase 0 shipped in #5118; Phase 1 (every required check reports in a merge queue) in #5119. Left: Phase 2 (turn the queue on), 3 (agents' merging), 4 (quicker PR builds), 5 (red-main alert), 6 (the Codex sweep).
 **Date:** 2026-10-19
 **Author:** Lazo
 **Verified against:** `agentmux` `main` @ `4c16363db` (2026-10-19), by reading the workflows and measuring recent runs through the Actions API.
