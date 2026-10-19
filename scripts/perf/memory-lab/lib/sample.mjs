@@ -186,6 +186,7 @@ async function pageStats(port, target) {
         const metrics = Object.fromEntries(perf.metrics.map((m) => [m.name, m.value]));
         let probe = null;
         try {
+            // This session is cdp-client's (connectPage above), whose evaluate takes { timeout }; the driver's session (session.mjs) is a different class.
             probe = await session.evaluate(PAGE_PROBE, { timeout: 60_000 });
         } catch (e) {
             probe = { error: String(e.message) };
