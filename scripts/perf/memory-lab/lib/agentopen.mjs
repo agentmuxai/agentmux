@@ -54,7 +54,7 @@ export function parseOpenLine(line) {
             } catch {
                 v = v.slice(1, -1);
             }
-        } else if (/^-?\d+(\.\d+)?$/.test(v)) v = Number(v);
+        } else if (m[1] !== "block" && /^-?\d+(\.\d+)?$/.test(v)) v = Number(v); // the block's first 8 characters are an id (often all digits), not a number
         fields[m[1]] = v;
     }
     return { kind, fields };

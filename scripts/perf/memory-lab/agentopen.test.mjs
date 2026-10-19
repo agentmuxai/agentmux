@@ -21,6 +21,13 @@ describe("the app's open lines", () => {
         expect(parseOpenLine("[fe] something else")).toBeNull();
     });
 
+    it("keeps a block id that happens to be all digits as text, so the block's line is still found", () => {
+        const line = OPEN.replace("1a2b3c4d", "39627044");
+        expect(parseOpenLine(line).fields.block).toBe("39627044");
+        expect(findOpenLines({ lines: [[1000, line]] }, "39627044-0000-1111-2222-333344445555").open.at).toBe(1000);
+        expect(parseOpenLine(line).fields.total).toBe(1341);
+    });
+
     it("finds a block's lines among others, by the block's first 8 characters", () => {
         const records = [[1000, OPEN.replace("1a2b3c4d", "ffffffff")], [2000, OPEN], [5000, REST]];
         const { open, rest } = findOpenLines({ lines: records }, "1a2b3c4d-0000-1111-2222-333344445555");
