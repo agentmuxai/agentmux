@@ -122,7 +122,7 @@ The scheduled sweep has never started (§3), so PRs whose Codex status was lost 
 ## 6. Order and size
 
 1. Phase 0: #5118.
-2. Phase 1: one PR (workflows, classifier and its tests, this spec). Safe on its own.
+2. Phase 1: one PR (workflows, this spec). Safe on its own.
 3. Phase 2: settings, after Phase 1 merges, with the canary and the announcement (Phase 3).
 4. Phase 4: one PR, measured over a few runs before and after.
 5. Phase 5: one PR.
