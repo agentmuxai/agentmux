@@ -15,8 +15,14 @@
  *
  * Until srv serves it (and for any file srv can't give line positions for), a
  * read returns `null` and the pane opens the way it always did.
+ *
+ * The RPC goes through the generated `RpcApi.AgentOpenTailCommand`, which exists
+ * once srv has the typed command (scripts/gen-rpc-stubs.mjs builds stubs from
+ * srv's schema, and refuses a direct `rpcCall`). Until then there is no stub and
+ * no call at all: the open costs nothing extra.
  */
 
+import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 
 /** A first screen: about what fits one pane, plus a margin. */
@@ -64,6 +70,11 @@ export interface OpenTail extends OpenTailResult {
     total_lines: number;
 }
 
+/** The generated stub, absent until srv's schema has the command. */
+type OpenTailApi = {
+    AgentOpenTailCommand?: (client: typeof TabRpcClient, data: OpenTailRequest, opts?: { timeout?: number }) => Promise<OpenTailResult>;
+};
+
 /**
  * Set once srv answers "unknown command": an older srv doesn't serve the
  * command, so later opens skip the call instead of paying a round trip each.
@@ -102,9 +113,9 @@ export async function readOpenTail(
     opts?: { call?: (req: OpenTailRequest) => Promise<OpenTailResult>; timeout?: number },
 ): Promise<OpenTail | null> {
     if (unsupported) return null;
-    const call =
-        opts?.call ??
-        ((r: OpenTailRequest) => TabRpcClient.rpcCall("agent:open_tail", r, { timeout: opts?.timeout ?? 5000 }) as Promise<OpenTailResult>);
+    const stub = (RpcApi as unknown as OpenTailApi).AgentOpenTailCommand;
+    const call = opts?.call ?? (stub ? (r: OpenTailRequest) => stub(TabRpcClient, r, { timeout: opts?.timeout ?? 5000 }) : null);
+    if (!call) return null; // srv has no typed command for it yet
     try {
         const res = await call(req);
         return usableOpenTail(res) ? res : null;

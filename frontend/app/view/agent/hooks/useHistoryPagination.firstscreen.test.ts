@@ -10,7 +10,7 @@
 import { createRoot } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const rpcCall = vi.hoisted(() => vi.fn());
+const openTail = vi.hoisted(() => vi.fn());
 const scrolledUp = vi.hoisted(() => ({ value: false }));
 const paneHidden = vi.hoisted(() => ({ value: false }));
 
@@ -20,9 +20,10 @@ vi.mock("@/app/store/rpc-api", () => ({
         BlockfileLineCountCommand: vi.fn(),
         BlockfileReadRangeCommand: vi.fn(),
         BlockfileReadStateCommand: vi.fn(),
+        AgentOpenTailCommand: openTail,
     },
 }));
-vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: { rpcCall } }));
+vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("../virtualization/scroll-memo", () => ({
     hasScrolledUpMemo: () => scrolledUp.value,
     noteOlderHistoryLoaded: vi.fn(),
@@ -84,7 +85,7 @@ const flush = async () => {
 
 beforeEach(async () => {
     vi.clearAllMocks();
-    rpcCall.mockReset();
+    openTail.mockReset();
     scrolledUp.value = false;
     paneHidden.value = false;
     __resetOpenTailForTests();
@@ -100,13 +101,13 @@ afterEach(() => {
 
 describe("first screen", () => {
     it("paints from one read, with no snapshot, line-count or range call before it", async () => {
-        rpcCall.mockResolvedValue(tailOf(3, 100));
+        openTail.mockResolvedValue(tailOf(3, 100));
         const { paneEvents, docEvents, settled, hook } = mount();
         await flush();
 
-        expect(rpcCall).toHaveBeenCalledTimes(1);
-        expect(rpcCall).toHaveBeenCalledWith(
-            "agent:open_tail",
+        expect(openTail).toHaveBeenCalledTimes(1);
+        expect(openTail).toHaveBeenCalledWith(
+            {},
             { block_id: "blk-1", filename: "output", tail_bytes: 64 * 1024, definition_id: "def-claude" },
             { timeout: 5000 },
         );
@@ -125,7 +126,7 @@ describe("first screen", () => {
     });
 
     it("lets the user send (InitReady) before any of the rest has loaded", async () => {
-        rpcCall.mockResolvedValue(tailOf(3, 20_003));
+        openTail.mockResolvedValue(tailOf(3, 20_003));
         const { paneEvents } = mount({ restoreBytes: () => 1_000_000 });
         await flush();
         expect(paneEvents.map((e) => e.type)).toEqual(["InitStart", "InitReady"]);
@@ -133,7 +134,7 @@ describe("first screen", () => {
     });
 
     it("an empty transcript settles as empty and is ready at once", async () => {
-        rpcCall.mockResolvedValue({ lines: [], stream: "b:blk-1", gen: "g1", start_line: 0, end_line: 0, total_lines: 0 });
+        openTail.mockResolvedValue({ lines: [], stream: "b:blk-1", gen: "g1", start_line: 0, end_line: 0, total_lines: 0 });
         const { paneEvents, docEvents, settled } = mount();
         await flush();
         expect(settled).toEqual(["empty"]);
@@ -143,7 +144,7 @@ describe("first screen", () => {
 
     it("a v2 snapshot supplies the overlay, and restores as a snapshot does", async () => {
         const onSnapshotOverlay = vi.fn();
-        rpcCall.mockResolvedValue(
+        openTail.mockResolvedValue(
             tailOf(3, 100, {
                 snapshot: JSON.stringify({
                     schemaVersion: 2,
@@ -165,6 +166,46 @@ describe("first screen", () => {
     });
 });
 
+describe("a failure in the first screen never leaves the pane waiting", () => {
+    it("before anything is painted, the usual open runs instead", async () => {
+        openTail.mockResolvedValue(tailOf(3, 100));
+        vi.mocked(RpcApi.AgentSessionReadCommand).mockResolvedValue({});
+        vi.mocked(RpcApi.BlockfileLineCountCommand).mockResolvedValue({ count: 0 });
+        // The parse of the first screen throws once; the usual open's read is fine.
+        const outputFormat = vi.fn().mockImplementationOnce(() => {
+            throw new Error("boom");
+        });
+        outputFormat.mockReturnValue("claude-stream-json");
+        const { paneEvents, docEvents, settled } = mount({ outputFormat });
+        await flush();
+        expect(docEvents).toEqual([]);
+        expect(RpcApi.BlockfileLineCountCommand).toHaveBeenCalled();
+        expect(settled).toEqual(["empty"]);
+        expect(paneEvents.map((e) => e.type)).toEqual(["InitStart", "InitReady"]);
+    });
+
+    it("after it is painted, fails open: sending is allowed, the live feed resumes, the pane is ready", async () => {
+        openTail.mockResolvedValue(
+            tailOf(3, 100, {
+                snapshot: JSON.stringify({ schemaVersion: 2, highWaterMark: 100, sourceBlockId: "blk-1", documentState: {} }),
+            }),
+        );
+        const onHistoryReady = vi.fn();
+        const onSnapshotOverlay = vi.fn(() => {
+            throw new Error("overlay failed");
+        });
+        const { paneEvents, docEvents, settled } = mount({ onHistoryReady, onSnapshotOverlay });
+        await flush();
+        expect(docEvents).toHaveLength(1); // painted
+        // The live stream was told where the history ends, before the failure.
+        expect(settled[0]).toEqual({ stream: "b:blk-1", gen: "g1", next: 100 });
+        // InitFailed fails open (only InitPending blocks sends), and the pane is told it is ready.
+        expect(paneEvents.map((e) => e.type)).toEqual(["InitStart", "InitFailed"]);
+        expect(paneEvents[1].reason).toBe("overlay failed");
+        expect(onHistoryReady).toHaveBeenCalledTimes(1);
+    });
+});
+
 describe("falls back to the usual open", () => {
     const usualOpen = async () => {
         vi.mocked(RpcApi.BlockfileLineCountCommand).mockResolvedValue({ count: 0 });
@@ -174,18 +215,31 @@ describe("falls back to the usual open", () => {
     };
 
     it("when srv doesn't know the command, asking once and never again", async () => {
-        rpcCall.mockRejectedValue(new Error("unknown command: agent:open_tail"));
+        openTail.mockRejectedValue(new Error("unknown command: agent:open_tail"));
         const first = await usualOpen();
         expect(RpcApi.BlockfileLineCountCommand).toHaveBeenCalled();
         expect(first.settled).toEqual(["empty"]);
         expect(first.paneEvents.map((e) => e.type)).toEqual(["InitStart", "InitReady"]);
         dispose?.();
         await usualOpen();
-        expect(rpcCall).toHaveBeenCalledTimes(1);
+        expect(openTail).toHaveBeenCalledTimes(1);
+    });
+
+    it("when srv has no generated open-tail command yet, without calling anything", async () => {
+        const api = RpcApi as unknown as Record<string, unknown>;
+        const stub = api.AgentOpenTailCommand;
+        delete api.AgentOpenTailCommand;
+        try {
+            await usualOpen();
+            expect(openTail).not.toHaveBeenCalled();
+            expect(RpcApi.BlockfileLineCountCommand).toHaveBeenCalled();
+        } finally {
+            api.AgentOpenTailCommand = stub;
+        }
     });
 
     it("when the read has no line positions (a file srv can't count)", async () => {
-        rpcCall.mockResolvedValue(tailOf(3, 100, { stream: undefined, gen: undefined }));
+        openTail.mockResolvedValue(tailOf(3, 100, { stream: undefined, gen: undefined }));
         await usualOpen();
         expect(RpcApi.BlockfileLineCountCommand).toHaveBeenCalled();
     });
@@ -193,7 +247,7 @@ describe("falls back to the usual open", () => {
     it("for a v1 snapshot, which restores its own nodes", async () => {
         const nodes = [{ id: "n1", type: "user_message", text: "hello" }];
         const v1 = JSON.stringify({ schemaVersion: 1, highWaterMark: 5, historyOffset: 0, nodes });
-        rpcCall.mockResolvedValue(tailOf(3, 100, { snapshot: v1 }));
+        openTail.mockResolvedValue(tailOf(3, 100, { snapshot: v1 }));
         vi.mocked(RpcApi.AgentSessionReadCommand).mockResolvedValue({ content: v1, modts: 1 });
         const { docEvents } = mount();
         await flush();
@@ -203,12 +257,12 @@ describe("falls back to the usual open", () => {
 
     it("for a pane that was scrolled up: its row may be older than a first screen", async () => {
         scrolledUp.value = true;
-        rpcCall.mockResolvedValue(tailOf(3, 100));
+        openTail.mockResolvedValue(tailOf(3, 100));
         vi.mocked(RpcApi.AgentSessionReadCommand).mockResolvedValue({});
         vi.mocked(RpcApi.BlockfileLineCountCommand).mockResolvedValue({ count: 0 });
         mount();
         await flush();
-        expect(rpcCall).not.toHaveBeenCalled();
+        expect(openTail).not.toHaveBeenCalled();
         expect(RpcApi.BlockfileLineCountCommand).toHaveBeenCalled();
     });
 });
@@ -224,7 +278,7 @@ describe("the rest of the restore window", () => {
     const release = () => setLastInputForTests(60_000);
 
     it("loads in pages once the user is idle, pinned to the first screen's generation, prepending", async () => {
-        rpcCall.mockResolvedValue(tailOf(3, FLOOR_END));
+        openTail.mockResolvedValue(tailOf(3, FLOOR_END));
         vi.mocked(RpcApi.BlockfileReadRangeCommand).mockImplementation(async () => page(2));
         const { docEvents, hook } = mount();
         await flush();
@@ -245,7 +299,7 @@ describe("the rest of the restore window", () => {
     });
 
     it("asks for no more bytes than the live feed keeps", async () => {
-        rpcCall.mockResolvedValue(tailOf(3, FLOOR_END));
+        openTail.mockResolvedValue(tailOf(3, FLOOR_END));
         vi.mocked(RpcApi.BlockfileReadRangeCommand).mockImplementation(async () => page(1));
         const { hook } = mount({ restoreBytes: () => 1_000_000 });
         await flush();
@@ -258,7 +312,7 @@ describe("the rest of the restore window", () => {
     });
 
     it("keeps where a page the byte budget cut starts, and ends the fill there", async () => {
-        rpcCall.mockResolvedValue(tailOf(3, FLOOR_END));
+        openTail.mockResolvedValue(tailOf(3, FLOOR_END));
         // The page was asked from 18,000 but only its newest 40 lines fit.
         vi.mocked(RpcApi.BlockfileReadRangeCommand).mockResolvedValue({ ...page(40), offset: 19_960 });
         const { hook } = mount({ restoreBytes: () => 1_000_000 });
@@ -270,7 +324,7 @@ describe("the rest of the restore window", () => {
     });
 
     it("ends when the transcript was replaced under it, leaving the first screen", async () => {
-        rpcCall.mockResolvedValue(tailOf(3, FLOOR_END));
+        openTail.mockResolvedValue(tailOf(3, FLOOR_END));
         vi.mocked(RpcApi.BlockfileReadRangeCommand).mockResolvedValue({ lines: [], total: 0, gen_mismatch: true });
         const { docEvents, hook } = mount();
         await flush();
@@ -283,7 +337,7 @@ describe("the rest of the restore window", () => {
     });
 
     it("waits while the pane is hidden", async () => {
-        rpcCall.mockResolvedValue(tailOf(3, FLOOR_END));
+        openTail.mockResolvedValue(tailOf(3, FLOOR_END));
         vi.mocked(RpcApi.BlockfileReadRangeCommand).mockImplementation(async () => page(2));
         paneHidden.value = true;
         const { hook } = mount();
@@ -296,7 +350,7 @@ describe("the rest of the restore window", () => {
     });
 
     it("stops when the pane closes", async () => {
-        rpcCall.mockResolvedValue(tailOf(3, FLOOR_END));
+        openTail.mockResolvedValue(tailOf(3, FLOOR_END));
         vi.mocked(RpcApi.BlockfileReadRangeCommand).mockImplementation(async () => page(2));
         mount();
         await flush();
@@ -308,17 +362,17 @@ describe("the rest of the restore window", () => {
     });
 
     it("does not fill when a turn cap is set: the feed keeps few turns", async () => {
-        rpcCall.mockResolvedValue(tailOf(3, FLOOR_END));
+        openTail.mockResolvedValue(tailOf(3, FLOOR_END));
         mount({ restoreTurns: () => 5 });
         await flush();
         release();
         await sleep(400);
-        expect(rpcCall.mock.calls[0][1]).toMatchObject({ tail_turns: 5 });
+        expect(openTail.mock.calls[0][1]).toMatchObject({ tail_turns: 5 });
         expect(RpcApi.BlockfileReadRangeCommand).not.toHaveBeenCalled();
     });
 
     it("a scroll-up's page waits for the fill's page in flight instead of reading beside it", async () => {
-        rpcCall.mockResolvedValue(tailOf(3, FLOOR_END));
+        openTail.mockResolvedValue(tailOf(3, FLOOR_END));
         const releaseRead: Array<() => void> = [];
         vi.mocked(RpcApi.BlockfileReadRangeCommand).mockImplementation(
             () => new Promise((resolve) => releaseRead.push(() => resolve(page(2)))),
@@ -358,7 +412,7 @@ describe("appends during the open leave no gap and no duplicate", () => {
 
     it("resumes the live stream at the slice's end line", async () => {
         // The first screen ends at line 100 (it shows lines [97, 100)).
-        rpcCall.mockImplementation(async () => {
+        openTail.mockImplementation(async () => {
             await sleep(30); // events arrive while the read is in flight
             return tailOf(3, 100);
         });

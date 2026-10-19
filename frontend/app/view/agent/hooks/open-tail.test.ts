@@ -4,7 +4,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
+vi.mock("@/app/store/rpc-api", () => ({ RpcApi: {} as Record<string, unknown> }));
 
+import { RpcApi } from "@/app/store/rpc-api";
 import { __resetOpenTailForTests, readOpenTail, usableOpenTail, type OpenTailResult } from "./open-tail";
 
 const good = (over: Partial<OpenTailResult> = {}): OpenTailResult => ({
@@ -55,6 +57,22 @@ describe("usableOpenTail", () => {
 });
 
 describe("readOpenTail", () => {
+    it("makes no call at all while srv has no generated command for it", async () => {
+        expect((RpcApi as Record<string, unknown>).AgentOpenTailCommand).toBeUndefined();
+        expect(await readOpenTail(REQ)).toBeNull();
+    });
+
+    it("calls the generated command once srv has it", async () => {
+        const stub = vi.fn().mockResolvedValue(good());
+        (RpcApi as Record<string, unknown>).AgentOpenTailCommand = stub;
+        try {
+            expect(await readOpenTail(REQ)).toMatchObject({ end_line: 10 });
+            expect(stub).toHaveBeenCalledWith({}, REQ, { timeout: 5000 });
+        } finally {
+            delete (RpcApi as Record<string, unknown>).AgentOpenTailCommand;
+        }
+    });
+
     it("returns a usable answer as it is", async () => {
         const call = vi.fn().mockResolvedValue(good());
         expect(await readOpenTail(REQ, { call })).toMatchObject({ start_line: 7, end_line: 10, gen: "g1" });

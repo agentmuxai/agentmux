@@ -393,53 +393,70 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
             // A v1 snapshot carries its nodes: the usual path restores from it.
             if (schema === SNAPSHOT_SCHEMA_VERSION_V1 && Array.isArray(snapshot.nodes)) return false;
 
-            markAgentOpen(opts.blockId, "history_read", { history_lines: tail.lines.length });
-            const parsed = parseHistoryLines(tail.lines, opts.outputFormat(), opts.agentName?.(), tail.stamps, parseOptsAt(tail, tail.start_line));
-            markAgentOpen(opts.blockId, "parsed");
+            // Nothing here may leave the pane waiting: before the first dispatch the
+            // usual open can still run; after it, fail open as that path does.
+            let dispatched = false;
+            try {
+                markAgentOpen(opts.blockId, "history_read", { history_lines: tail.lines.length });
+                const parsed = parseHistoryLines(tail.lines, opts.outputFormat(), opts.agentName?.(), tail.stamps, parseOptsAt(tail, tail.start_line));
+                markAgentOpen(opts.blockId, "parsed");
 
-            // The same decisions the v2 restore makes below.
-            const hasUsableHwm = schema >= SNAPSHOT_SCHEMA_VERSION_V2 && typeof snapshot.highWaterMark === "number" && snapshot.highWaterMark > 0;
-            const sourceMatchesThisBlock =
-                typeof snapshot?.sourceBlockId !== "string" || snapshot.sourceBlockId === "" || snapshot.sourceBlockId === opts.blockId;
-            const restored = hasUsableHwm && (sourceMatchesThisBlock || !!opts.definitionId);
-            if (schema >= SNAPSHOT_SCHEMA_VERSION_V2 && !restored && !sourceMatchesThisBlock) setSnapshotIsForeignBlock(true);
+                // The same decisions the v2 restore makes below.
+                const hasUsableHwm = schema >= SNAPSHOT_SCHEMA_VERSION_V2 && typeof snapshot.highWaterMark === "number" && snapshot.highWaterMark > 0;
+                const sourceMatchesThisBlock =
+                    typeof snapshot?.sourceBlockId !== "string" || snapshot.sourceBlockId === "" || snapshot.sourceBlockId === opts.blockId;
+                const restored = hasUsableHwm && (sourceMatchesThisBlock || !!opts.definitionId);
+                if (schema >= SNAPSHOT_SCHEMA_VERSION_V2 && !restored && !sourceMatchesThisBlock) setSnapshotIsForeignBlock(true);
 
-            if (restored) {
-                batch(() => opts.model.dispatchDoc({ type: "HistoryRestored", fromSnapshot: true, nodes: parsed.nodes }));
-            } else if (parsed.nodes.length > 0) {
-                batch(() => opts.model.dispatchDoc({ type: "HistoryLoaded", nodes: parsed.nodes }));
+                if (restored) {
+                    batch(() => opts.model.dispatchDoc({ type: "HistoryRestored", fromSnapshot: true, nodes: parsed.nodes }));
+                } else if (parsed.nodes.length > 0) {
+                    batch(() => opts.model.dispatchDoc({ type: "HistoryLoaded", nodes: parsed.nodes }));
+                }
+                dispatched = true;
+                // Live records resume at the slice's end line: earlier ones are on
+                // screen, later ones arrive as events (or as a gap the cursor reads).
+                opts.transcriptSettle?.settle(tail.end_line === 0 ? "empty" : { stream: tail.stream, gen: tail.gen, next: tail.end_line });
+                seedContextFromHistory(opts.model, parsed);
+                contextSeeded = !!parsed.lastContext || Object.keys(parsed.reportedContextWindows).length > 0;
+                if (restored) applySnapshotOverlay(snapshot);
+
+                setHistoryOffset(tail.start_line);
+                setHistoryTotal(tail.total_lines);
+                opts.log(
+                    "history",
+                    `first screen: ${parsed.nodes.length} nodes from lines [${tail.start_line}, ${tail.end_line}) of ${tail.total_lines}` +
+                        (tail.start_line > 0 ? ` (${tail.start_line} older lines to fill)` : ""),
+                );
+                markAgentOpen(opts.blockId, "first_screen");
+                opts.model.dispatchPane({ type: "InitReady", at: Date.now() });
+                opts.onHistoryReady?.();
+
+                let sliceBytes = 0;
+                for (const line of tail.lines) sliceBytes += line.length + 1;
+                void fillRest(
+                    tail.gen,
+                    planFill({
+                        startLine: tail.start_line,
+                        endLine: tail.end_line,
+                        sliceBytes,
+                        windowLines: RESTORE_WINDOW_LINES,
+                        restoreBytes: opts.restoreBytes?.(),
+                    }),
+                    tailTurns !== undefined,
+                );
+            } catch (err: any) {
+                if (!mounted) return true;
+                const reason = err?.message ?? String(err);
+                if (!dispatched) {
+                    opts.log("history", `first screen failed (${reason}); opening the usual way`, "warn");
+                    return false;
+                }
+                opts.log("history", `first screen failed after painting: ${reason}`, "warn");
+                opts.transcriptSettle?.settle(null);
+                opts.model.dispatchPane({ type: "InitFailed", at: Date.now(), reason });
+                opts.onHistoryReady?.();
             }
-            // Live records resume at the slice's end line: earlier ones are on
-            // screen, later ones arrive as events (or as a gap the cursor reads).
-            opts.transcriptSettle?.settle(tail.end_line === 0 ? "empty" : { stream: tail.stream, gen: tail.gen, next: tail.end_line });
-            seedContextFromHistory(opts.model, parsed);
-            contextSeeded = !!parsed.lastContext || Object.keys(parsed.reportedContextWindows).length > 0;
-            if (restored) applySnapshotOverlay(snapshot);
-
-            setHistoryOffset(tail.start_line);
-            setHistoryTotal(tail.total_lines);
-            opts.log(
-                "history",
-                `first screen: ${parsed.nodes.length} nodes from lines [${tail.start_line}, ${tail.end_line}) of ${tail.total_lines}` +
-                    (tail.start_line > 0 ? ` (${tail.start_line} older lines to fill)` : ""),
-            );
-            markAgentOpen(opts.blockId, "first_screen");
-            opts.model.dispatchPane({ type: "InitReady", at: Date.now() });
-            opts.onHistoryReady?.();
-
-            let sliceBytes = 0;
-            for (const line of tail.lines) sliceBytes += line.length + 1;
-            void fillRest(
-                tail.gen,
-                planFill({
-                    startLine: tail.start_line,
-                    endLine: tail.end_line,
-                    sliceBytes,
-                    windowLines: RESTORE_WINDOW_LINES,
-                    restoreBytes: opts.restoreBytes?.(),
-                }),
-                tailTurns !== undefined,
-            );
             return true;
         };
 
