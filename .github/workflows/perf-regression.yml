@@ -122,7 +122,7 @@ jobs:
           node scripts/perf/memory-lab/ab.mjs --a-portable "$A_PORTABLE" --b-portable "$B_PORTABLE" \
             --a-label a --b-label b --runs "$RUNS" --out perf-out \
             --margins scripts/perf/memory-lab/budget.json \
-            -- --panes "$PANES" --rounds "$ROUNDS" --seed 1 --port 9333
+            -- --panes "$PANES" --rounds "$ROUNDS" --seed 1 --port 9333 --open-agents 3 --heavy-turns 1 --heavy-kb 600
 
       # No earlier build to compare with (the first night, or its portable has expired): B alone, so the numbers still exist.
       - name: Run the lab (B alone)
@@ -135,7 +135,7 @@ jobs:
         run: |
           for n in $(seq 1 "$RUNS"); do
             node scripts/perf/memory-lab/run.mjs --portable "$B_PORTABLE" --label "b$n" \
-              --panes "$PANES" --rounds "$ROUNDS" --seed 1 --port 9333 --out perf-out
+              --panes "$PANES" --rounds "$ROUNDS" --seed 1 --port 9333 --open-agents 3 --heavy-turns 1 --heavy-kb 600 --out perf-out
           done
           node scripts/perf/memory-lab/spread.mjs perf-out/b*/result.json --md perf-out/spread.md
 

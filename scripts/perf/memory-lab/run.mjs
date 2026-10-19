@@ -243,7 +243,8 @@ async function measureOpens(driver, args, home, { memtree, rootPid }) {
         opens: withTasks,
         summary,
         // Holds and waits of 500 ms or more on the store's connection that began while the agents were being opened (other agents were idle).
-        storeLockDuring: storeBefore && storeAfter ? { holds: storeAfter.holds - storeBefore.holds, waits: storeAfter.waits - storeBefore.waits, longestHeldMs: storeAfter.longestHeldMs, longestHeldSite: storeAfter.longestHeldSite } : null,
+        // The longest hold is the log's running maximum, so it belongs to the opens only if it grew; otherwise it was set earlier and is not reported here.
+        storeLockDuring: storeBefore && storeAfter ? { holds: storeAfter.holds - storeBefore.holds, waits: storeAfter.waits - storeBefore.waits, longestHeldMs: storeAfter.longestHeldMs > storeBefore.longestHeldMs ? storeAfter.longestHeldMs : null, longestHeldSite: storeAfter.longestHeldMs > storeBefore.longestHeldMs ? storeAfter.longestHeldSite : null } : null,
     };
 }
 

@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 
 import { describeOpen, findOpenLines, longestTaskIn, opensLine, parseOpenLine, summariseOpens, withLongTasks } from "./lib/agentopen.mjs";
+import { mismatch } from "./compare.mjs";
 import { compareRuns } from "./lib/summary.mjs";
 import { generateConversation } from "./lib/conversation.mjs";
 
@@ -100,5 +101,21 @@ describe("heavy turns in the scripted conversation", () => {
     it("makes a turn about as big as asked, not many times over", () => {
         const t = generateConversation({ turns: 0, seed: 1, heavy: { turns: 1, kb: 600 } }).turns[0];
         expect(JSON.stringify(t).length).toBeLessThan(900 * 1024);
+    });
+});
+
+describe("which runs' opens can be compared", () => {
+    const run = (opens) => ({ layout: { panes: 4 }, rounds: 2, seed: 1, settleSeconds: 5, steady: { samples: 1 }, gapSeconds: 5, platform: "win32", opens });
+    const opens = (n, heavy) => ({ opens: Array.from({ length: n }, () => ({})), heavy });
+
+    it("refuses opens of a different number of agents or a different long conversation", () => {
+        expect(mismatch(run(opens(3, { turns: 1, kb: 600 })), run(opens(3, { turns: 1, kb: 600 })))).toBeNull();
+        expect(mismatch(run(opens(3, null)), run(opens(4, null)))).toMatch(/different agent opens/);
+        expect(mismatch(run(opens(3, { turns: 1, kb: 600 })), run(opens(3, { turns: 1, kb: 2048 })))).toMatch(/600 KB.*2048 KB/);
+        expect(mismatch(run(opens(3, null)), run(opens(3, { turns: 80, kb: 600 })))).toMatch(/different agent opens/);
+    });
+
+    it("lets a run without opens be compared on everything else", () => {
+        expect(mismatch(run(null), run(opens(3, null)))).toBeNull();
     });
 });

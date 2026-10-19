@@ -34,6 +34,9 @@ export function mismatch(base, head) {
     // The rate and the cap: a small cap stops the writing early, so two runs at one rate with different caps did not carry the same load.
     const loadOf = (r) => (r.diskLoad ? `${r.diskLoad.rateMBps} MB/s, capped at ${r.diskLoad.capGB} GB` : "none");
     if (loadOf(base) !== loadOf(head)) return `different background disk loads: ${loadOf(base)} vs ${loadOf(head)}`;
+    // Opens measured on both sides must be the same opens: the number of agents, and the long conversation they were given (a run without opens has no open figures to compare, which is not a mismatch).
+    const opensOf = (r) => (r.opens ? `${r.opens.opens?.length} open(s), long conversation ${r.opens.heavy ? `${r.opens.heavy.turns} turn(s) of ${r.opens.heavy.kb} KB` : "none"}` : null);
+    if (opensOf(base) && opensOf(head) && opensOf(base) !== opensOf(head)) return `different agent opens: ${opensOf(base)} vs ${opensOf(head)}`;
     if (base.settleSeconds !== head.settleSeconds) return `different settle delays: ${base.settleSeconds} s vs ${head.settleSeconds} s`;
     if (base.steady?.samples !== head.steady?.samples) return `different sample counts: ${base.steady?.samples} vs ${head.steady?.samples}`;
     if (base.gapSeconds !== head.gapSeconds) return `different round spacing: ${base.gapSeconds} s vs ${head.gapSeconds} s`;
