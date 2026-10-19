@@ -1,9 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// How full the volume under the lab's data folder is. An SSD slows badly as it fills (its cache runs out), and
-// the operator's longest store-lock holds (5 to 11.6 s, 14-17 October) all fell on days the drive had 4 to 6% free
-// and none since 238 GB was freed (#5141): a lab run that stalls should say how full its disk was.
+// How full the volume under the lab's data folder is. An SSD slows badly as it fills (its cache runs out), so a lab
+// run that stalls should say how full its disk was (#5141).
 
 import { statfsSync } from "node:fs";
 

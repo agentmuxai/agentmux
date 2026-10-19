@@ -193,17 +193,15 @@ Locally: `node scripts/perf/memory-lab/gate.mjs memory-lab-out/<label>/result.js
 
 ## Background disk load
 
-A lab run on an idle disk never shows what the operator's instances did: srv's transcript store held for seconds while
-other work (agents' builds) saturated the volume (#5141). `--disk-load <MB/s>` (or `max`) runs a writer that streams
+A lab run on an idle disk does not show what a busy machine does: srv's transcript store can be held for seconds while
+other work (agents' builds) saturates the volume (#5141). `--disk-load <MB/s>` (or `max`) runs a writer that streams
 large files, synced chunk by chunk, to the same volume as the lab's data folder from the start of the workload until the
 last agent turn is over (it stops before the settle and the forced-GC sample, so memory is measured the same way). Pass
-the same flag on both sides of an A/B: `compare.mjs` refuses runs with different loads, and `result.diskLoad` records the
-rate and what was written. It writes at most `--disk-load-cap-gb` (default 20) in a run: `max` on a fast disk writes
-hundreds of MB/s, and a stress run is wear on an SSD. A fast NVMe may not be stressed by one writer (a `max` run here wrote
-600 MB/s and srv's store was never held for 500 ms); a SATA SSD or a hard disk is where it matters. `--out` picks the volume.
-`result.volume` records how full that volume was at the start and the end: an SSD slows badly as it fills (the operator's longest
-store-lock holds, 5 to 11.6 s on 14-17 October, fell on days the drive had 4 to 6% free, and none came after 238 GB was freed),
-so a stall on a nearly full disk is a different finding from one on an empty disk.
+the same flags on both sides of an A/B: `compare.mjs` refuses runs with a different load or cap, and `result.diskLoad`
+records the rate and what was written. It writes at most `--disk-load-cap-gb` (default 20) in a run: `max` on a fast disk
+writes hundreds of MB/s, and a stress run is wear on an SSD. A fast NVMe may not be stressed by one writer; a SATA SSD or a
+hard disk is where it matters. `--out` picks the volume. `result.volume` records how full that volume was at the start and
+the end: an SSD slows badly as it fills, so a stall on a nearly full disk is a different finding from one on an empty disk.
 
 ## A run that isn't the load it was asked for
 

@@ -130,6 +130,11 @@ describe("memory lab summary", () => {
         expect(mismatch(did(true), did(true))).toBeNull();
         expect(mismatch(did(false, "a"), did(false, "b"))).toBeNull();
         expect(mismatch({ ...same }, { ...same, recycleAfter: 0, recycleCommand: null })).toBeNull();
+        const load = (rateMBps, capGB) => ({ ...same, diskLoad: { rateMBps, capGB } });
+        expect(mismatch(load(50, 20), load(50, 20))).toBeNull();
+        expect(mismatch(load(50, 20), same)).toMatch(/different background disk loads/);
+        expect(mismatch(load(50, 20), load(100, 20))).toMatch(/different background disk loads/);
+        expect(mismatch(load(50, 20), load(50, 5))).toMatch(/capped at 20 GB vs .*capped at 5 GB/);
         expect(mismatch({ ...same, holdMinutes: 10 }, { ...same, holdMinutes: 0 })).toMatch(/different idle holds/);
         expect(mismatch({ ...same, holdMinutes: 10 }, { ...same, holdMinutes: 10 })).toBeNull();
         expect(mismatch({ ...run, gapSeconds: 15, platform: "win32" }, { ...run, gapSeconds: 15, platform: "linux" })).toMatch(/different operating systems/);

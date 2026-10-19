@@ -1,9 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Background disk load for a lab run. The operator's real instances saw srv's transcript store held for
-// seconds because other work (agents' builds) saturated the disk; a lab run on an idle disk never does
-// (issue #5141). `--disk-load <MB/s>` (or `max`) runs a writer process that streams large files to the same
+// Background disk load for a lab run. srv's transcript store can be held for seconds while other work (agents'
+// builds) saturates the disk; a lab run on an idle disk never shows that (issue #5141). `--disk-load <MB/s>` (or `max`) runs a writer process that streams large files to the same
 // volume as the lab's data folder while the agents work, so both sides of an A/B see the same load.
 
 import { spawn } from "node:child_process";

@@ -30,8 +30,9 @@ export function mismatch(base, head) {
     if ((base.recycleAfter ?? 0) > 0 && Boolean(base.recycle?.recycled) !== Boolean(head.recycle?.recycled)) return `only one of the runs recycled its window: ${base.recycle?.recycled ? head.label : base.label} did not (${base.recycle?.recycled ? head.recycle?.blocked : base.recycle?.blocked})`;
     if ((base.holdMinutes ?? 0) !== (head.holdMinutes ?? 0)) return `different idle holds: ${base.holdMinutes ?? 0} min vs ${head.holdMinutes ?? 0} min`;
     if ((base.workloadVersion ?? 1) !== (head.workloadVersion ?? 1)) return `different workload versions (${base.workloadVersion ?? 1} vs ${head.workloadVersion ?? 1}): the rounds are paced differently`;
-    const loadOf = (r) => (r.diskLoad ? r.diskLoad.rateMBps : 0);
-    if (loadOf(base) !== loadOf(head)) return `different background disk loads: ${loadOf(base) || "none"} vs ${loadOf(head) || "none"} MB/s`;
+    // The rate and the cap: a small cap stops the writing early, so two runs at one rate with different caps did not carry the same load.
+    const loadOf = (r) => (r.diskLoad ? `${r.diskLoad.rateMBps} MB/s, capped at ${r.diskLoad.capGB} GB` : "none");
+    if (loadOf(base) !== loadOf(head)) return `different background disk loads: ${loadOf(base)} vs ${loadOf(head)}`;
     if (base.settleSeconds !== head.settleSeconds) return `different settle delays: ${base.settleSeconds} s vs ${head.settleSeconds} s`;
     if (base.steady?.samples !== head.steady?.samples) return `different sample counts: ${base.steady?.samples} vs ${head.steady?.samples}`;
     if (base.gapSeconds !== head.gapSeconds) return `different round spacing: ${base.gapSeconds} s vs ${head.gapSeconds} s`;
