@@ -5,12 +5,14 @@ name: PR title names the agent
 # say which agent opened it, so its title must start with "<Agent>@<host>: ",
 # e.g. "Korp@narko: fix the toolbar". PRs from any other author pass.
 # Keep this file identical across agentmux, agentmux-docs, agentmux-landing and
-# agentmux-mobile.
+# agentmux-mobile. That includes the merge_group trigger and step: in a
+# repository without a merge queue the event never fires, so they're harmless
+# there and the copies stay the same.
 
 on:
   pull_request:
     types: [opened, edited, reopened, synchronize]
-  # A merge queue group (docs/specs/SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19.md
+  # A merge queue group (agentmux's docs/specs/SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19.md
   # §5 Phase 1): a title belongs to a PR, which the PR's own run checked, so here it
   # passes.
   merge_group:

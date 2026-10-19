@@ -109,7 +109,7 @@ The ubuntu Rust leg is the critical path, and two thirds of its nextest step is 
 ### Phase 5: a red main is announced
 
 A job at the end of `ci-pr.yml` that runs on `push` to main:
-- **When `CI required` fails:** it opens, or comments on, one issue titled "main is red", with the commit, the failing jobs and links. The issue is assigned no one; github-consumer's issue notifications reach the agents watching the repository.
+- **When `CI required` fails:** it opens, or comments on, one issue titled "main is red", with the commit, the failing jobs and links, and agents watching the repository are notified.
 - **When a later push to main is green:** the same job closes that issue, naming the commit that fixed it.
 - One issue at a time, so a red streak is one thread, not one per push. With the queue, this should be rare: it catches what the queue's fast gates don't check (a test that only fails on main).
 

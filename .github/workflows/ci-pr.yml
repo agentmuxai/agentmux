@@ -169,8 +169,6 @@ jobs:
             echo "::notice::running all checks — $1"
           }
 
-          # R4: only pull requests are eligible. Post-merge runs on main always
-          # do the full job — low volume, and the last gate before a release.
           # A merge queue group: the fast gates only (SPEC_CI_MERGE_QUEUE_AND_FAST_GATES
           # §5 Phase 1): docs gates in full, `cargo check --tests` on ubuntu, tsc
           # and the generated-file checks on one frontend leg. Tests ran on each
@@ -182,6 +180,8 @@ jobs:
             exit 0
           fi
 
+          # R4: only pull requests are eligible. Post-merge runs on main always
+          # do the full job — low volume, and the last gate before a release.
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             run_everything "not a pull_request (R4)"
             exit 0
