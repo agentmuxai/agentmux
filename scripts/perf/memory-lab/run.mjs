@@ -44,6 +44,7 @@ import { parseSettingPairs, settingsSeen } from "./lib/settings.mjs";
 import { parseDiskLoad, startDiskLoad } from "./lib/diskload.mjs";
 import { describeOpen, opensLine, summariseOpens, withLongTasks } from "./lib/agentopen.mjs";
 import { framesLine, summariseFrames } from "./lib/frames.mjs";
+import { CALIBRATE_AFTER_MS, summariseWorkerProbe, workerProbeLine } from "./lib/wsworker.mjs";
 import { slowSendsAgainstLongTasks, summariseLongTasks } from "./lib/longtasks.mjs";
 import { segmentsOf, slowSendBreakdown } from "./lib/sendsegments.mjs";
 import { arrivalTotals, arrivalsDuringSlowSends } from "./lib/wsarrivals.mjs";
@@ -63,7 +64,7 @@ class InvalidRun extends Error {}
 function parseArgs(argv) {
     const a = { panes: 4, rounds: 10, port: 9333, every: 5, gapS: 15, settleS: 20, samples: 3, seed: 1, attempts: 2, recycleAfter: 0, holdMinutes: 0, openAgents: 0, heavyTurns: 0, heavyKb: 600, recycleCommand: "Reload Window (Free Memory)", out: "memory-lab-out", keep: false };
     const num = new Set(["panes", "rounds", "port", "every", "gapS", "settleS", "samples", "seed", "attempts", "recycleAfter", "holdMinutes", "diskLoadCapGb", "openAgents", "heavyTurns", "heavyKb"]);
-    const flags = { "--keep": "keep" };
+    const flags = { "--keep": "keep", "--ws-worker": "wsWorker" };
     for (let i = 0; i < argv.length; i++) {
         const raw = argv[i];
         if (raw === "--setting") {
@@ -104,6 +105,7 @@ function parseArgs(argv) {
     for (const k of ["openAgents", "heavyTurns"]) if (!(Number.isInteger(a[k]) && a[k] >= 0)) throw new Error(`--${k.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase())} needs a whole number of 0 or more`);
     if (!(a.heavyKb >= 1)) throw new Error("--heavy-kb needs a number of KB of 1 or more");
     if (a.openAgents > a.panes) throw new Error(`--open-agents ${a.openAgents} is more than the ${a.panes} agents`);
+    if (a.wsWorker && a.recycleAfter) throw new Error("--ws-worker does not survive a window recycle (the page and its worker are replaced): leave out --recycle-after");
     if (a.heavyTurns > 0 && a.openAgents < 1) throw new Error("--heavy-turns needs --open-agents (the first agent plays the heavy turns, and is opened again)");
     a.label ??= basename(a.portable ?? dirname(a.exe));
     return a;
@@ -234,6 +236,7 @@ async function measureOpens(driver, args, home, { memtree, rootPid }) {
         if (grew < expected * 0.5) throw new InvalidRun(`the heavy turns were not all played: the transcript store grew ${Math.round(grew / 1024)} KB, ${args.heavyTurns} turn(s) of ${args.heavyKb} KB carry about ${Math.round(expected / 1024)} KB`);
     }
     const storeBefore = storeLockOf(home);
+    const opensStart = Date.now();
     const opens = [];
     for (let i = 0; i < args.openAgents; i++) {
         const agent = driver.agents[i];
@@ -248,12 +251,19 @@ async function measureOpens(driver, args, home, { memtree, rootPid }) {
     const missing = opens.filter((o) => typeof o.firstScreenMs !== "number");
     if (missing.length) throw new InvalidRun(`${missing.length} of ${opens.length} opens never reached a first screen (no [agent-open] line within 60 s, or the open failed): ${missing.map((o) => `${o.agent} (${o.outcome})`).join(", ")}`);
     const tasks = (await driver.longTasks().catch(() => null))?.tasks ?? [];
+    // The page's slow frames (50 ms or more) while the agents were opened, apart from the workload's: which script filled them.
+    const rawFrames = await driver.frames().catch(() => null);
+    const duringOpens = rawFrames && rawFrames.frames.filter((f) => f[0] >= opensStart);
+    const spans = opens.filter((o) => o.span).map((o) => ({ round: o.agent, start: o.span.start, end: o.span.end }));
+    const frames = rawFrames ? summariseFrames({ ...rawFrames, frames: duringOpens, n: duringOpens.length, truncated: false, sizes: [], big: [], counter: null }, spans) : null;
+    if (frames) delete frames.messages;
     const withTasks = withLongTasks(opens, tasks);
     const storeAfter = storeLockOf(home);
     const summary = summariseOpens(withTasks);
     return {
         heavy: heavy ? { turns: args.heavyTurns, kb: args.heavyKb, writtenMB: heavyWrittenMB } : null,
         opens: withTasks,
+        frames,
         summary,
         // Holds and waits of 500 ms or more on the store's connection that began while the agents were being opened (other agents were idle).
         // The longest hold is the log's running maximum, so it belongs to the opens only if it grew; otherwise it was set earlier and is not reported here.
@@ -373,6 +383,13 @@ async function attempt(args, ctx) {
         const roundWindows = [];
         const sendLog = [];
         await driver.installLongTasks();
+        let wsWorkerRead = null;
+        if (args.wsWorker) {
+            const started = await driver.startWsWorker();
+            if (started?.error) throw new Error(`--ws-worker: ${started.error}`);
+            console.log("  worker probe running: a second websocket on a Web Worker");
+            await sleep(CALIBRATE_AFTER_MS + 500); // idle, so the page is caught up when the offset between the two streams is taken (lib/wsworker.mjs)
+        }
         const volumeAtStart = volumeOf(dir);
         // The background disk load starts with the workload and ends with its last turn, before the settle and the forced-GC final.
         diskLoad = args.diskLoadRate ? startDiskLoad({ dir, mbps: args.diskLoadRate, capGB: args.diskLoadCapGb }) : null;
@@ -401,6 +418,10 @@ async function attempt(args, ctx) {
             }
         }
 
+        if (args.wsWorker) {
+            wsWorkerRead = await driver.readWsWorker();
+            await driver.stopWsWorker();
+        }
         // Let the last turns finish and the frontend go idle, then measure with a forced GC.
         try {
             await requireIdle(driver);
@@ -439,6 +460,10 @@ async function attempt(args, ctx) {
         const rawLong = await driver.longTasks().catch(() => null);
         const pageLongTasks = summariseLongTasks(rawLong, roundWindows, forcedGcWindows);
         const sendsVsLong = slowSendsAgainstLongTasks(sendLog, rawLong);
+        // The probe, against the slow sends: each one's window is from the call to the answer reaching the page's JS.
+        const wsWorker = args.wsWorker
+            ? summariseWorkerProbe(wsWorkerRead, rawLong?.ws, [...sendLog].sort((a, b) => b.ms - a.ms).filter((s, i) => s.ms >= 5000 || (i < 8 && s.ms >= 1000)).map((s) => ({ round: s.round, agent: s.agent, from: s.pageStart ?? s.start, to: s.respArrival ?? s.start + s.ms })))
+            : null;
         const pageFrames = summariseFrames(await driver.frames().catch(() => null), roundWindows, forcedGcWindows);
 
         // The store of record: the agents' turns must be in it, whatever the page shows.
@@ -503,6 +528,8 @@ async function attempt(args, ctx) {
             pageLongTasks,
             // What filled the page's slow frames (50 ms or more): script or rendering, which script, how long the handler took per message size, panes flushed per frame (lib/frames.mjs).
             pageFrames,
+            // The worker probe (--ws-worker, lib/wsworker.mjs): where the slow answers wait; null without the option.
+            wsWorker,
             sendsVsLongTasks: sendsVsLong,
             sends: sendLog.map((s) => ({ ...s, start: new Date(s.start).toISOString(), pageStart: s.pageStart == null ? null : new Date(s.pageStart).toISOString(), respArrival: s.respArrival == null ? null : new Date(s.respArrival).toISOString(), ...segmentsOf(s) })),
             sendBreakdown: slowSendBreakdown(sendLog),
@@ -511,7 +538,7 @@ async function attempt(args, ctx) {
             slowEvals: driver.slowEvals(), // { total, slowest }: every command that took 5 s or more, the 30 slowest listed
         };
         writeFileSync(join(dir, "result.json"), JSON.stringify(result, null, 1));
-        const md = [`# ${args.label}`, "", `${args.panes} agents over ${layout.length} tab(s), ${playedRounds} rounds (${args.gapS} s apart)${args.holdMinutes > 0 ? `, then held idle ${args.holdMinutes} min` : ""}, forced GC, median of ${summary.samples} samples.`, "", table(summary), "", cpuTable(cpu, wall, io), ...(pageLongTasks ? ["", `Page main thread: ${pageLongTasks.count} long task(s) of 50 ms or more, ${pageLongTasks.totalMs} ms in all, longest ${pageLongTasks.maxMs} ms, ${pageLongTasks.over1s} over 1 s; ${sendsVsLong.slowSends} send(s) took over 5 s, ${sendsVsLong.overlappingLongTask} of them while a long task of 500 ms or more ran. The page's 100 ms timer was up to ${pageLongTasks.timerLag.maxMs} ms late (${pageLongTasks.timerLag.over1s} times over 1 s).${pageLongTasks.truncated ? ` Only the first ${pageLongTasks.recorded} long tasks were timed: the totals, rounds and overlaps cover those.` : ""}`] : []), ...(pageFrames ? ["", framesLine(pageFrames)] : []), ...(openPhase ? ["", opensLine(openPhase.summary)] : []), ...(volumeAtStart ? ["", `Volume under the data folder: ${volumeAtStart.freePct}% free (${volumeAtStart.freeGB} of ${volumeAtStart.totalGB} GB) at the start.`] : []), ...(result.storeLock ? ["", `Store lock: longest hold of srv's transcript store connection ${result.storeLock.longestHeldMs} ms${result.storeLock.longestHeldSite ? ` (${result.storeLock.longestHeldSite})` : ""}, ${result.storeLock.holds} hold(s) and ${result.storeLock.waits} wait(s) of 500 ms or more.`] : []), ...notes.map((n) => `\n> ${n}`)].join("\n");
+        const md = [`# ${args.label}`, "", `${args.panes} agents over ${layout.length} tab(s), ${playedRounds} rounds (${args.gapS} s apart)${args.holdMinutes > 0 ? `, then held idle ${args.holdMinutes} min` : ""}, forced GC, median of ${summary.samples} samples.`, "", table(summary), "", cpuTable(cpu, wall, io), ...(pageLongTasks ? ["", `Page main thread: ${pageLongTasks.count} long task(s) of 50 ms or more, ${pageLongTasks.totalMs} ms in all, longest ${pageLongTasks.maxMs} ms, ${pageLongTasks.over1s} over 1 s; ${sendsVsLong.slowSends} send(s) took over 5 s, ${sendsVsLong.overlappingLongTask} of them while a long task of 500 ms or more ran. The page's 100 ms timer was up to ${pageLongTasks.timerLag.maxMs} ms late (${pageLongTasks.timerLag.over1s} times over 1 s).${pageLongTasks.truncated ? ` Only the first ${pageLongTasks.recorded} long tasks were timed: the totals, rounds and overlaps cover those.` : ""}`] : []), ...(pageFrames ? ["", framesLine(pageFrames)] : []), ...(openPhase ? ["", opensLine(openPhase.summary)] : []), ...(openPhase?.frames ? ["", framesLine(openPhase.frames).replace(/^Page frames over 50 ms/, "While opening, page frames over 50 ms").replace(/; panes per frame: not available in this build$/, "")] : []), ...(wsWorker ? ["", workerProbeLine(wsWorker)] : []), ...(volumeAtStart ? ["", `Volume under the data folder: ${volumeAtStart.freePct}% free (${volumeAtStart.freeGB} of ${volumeAtStart.totalGB} GB) at the start.`] : []), ...(result.storeLock ? ["", `Store lock: longest hold of srv's transcript store connection ${result.storeLock.longestHeldMs} ms${result.storeLock.longestHeldSite ? ` (${result.storeLock.longestHeldSite})` : ""}, ${result.storeLock.holds} hold(s) and ${result.storeLock.waits} wait(s) of 500 ms or more.`] : []), ...notes.map((n) => `\n> ${n}`)].join("\n");
         writeFileSync(join(dir, "summary.md"), md + "\n");
         console.log("\n" + md);
         console.log(`\n-> ${join(dir, "result.json")}`);
