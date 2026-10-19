@@ -15,6 +15,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { measuresComparison } from "./lib/measures.mjs";
 import { compareRuns, DEFAULT_MARGINS, runsTable } from "./lib/summary.mjs";
 
 /** Why two results can't be compared, or null. */
@@ -50,7 +51,18 @@ function main() {
     // Default margins differ per metric (DEFAULT_MARGINS); a flag sets one number for all CPU, or for the round time.
     const cpuFlag = take("--cpu-margin");
     const wallFlag = take("--wall-margin");
-    const margins = { cpuPct: cpuFlag != null ? Number(cpuFlag) : DEFAULT_MARGINS.cpuPct, wallPct: wallFlag != null ? Number(wallFlag) : DEFAULT_MARGINS.wallPct };
+    // --margins <file>: a JSON file with the margins (budget.json's `margins`, or the margins themselves); the flags above override its CPU and round-time ones.
+    const marginsFile = take("--margins");
+    const json = take("--json");
+    const fromFile = marginsFile ? (() => { const j = JSON.parse(readFileSync(marginsFile, "utf8")); return j.margins ?? j; })() : {};
+    // A CPU margin object from a file is laid over the defaults, so a group it leaves out keeps its default instead of never flagging.
+    const margins = {
+        ...DEFAULT_MARGINS,
+        ...fromFile,
+        ...(fromFile.cpuPct && typeof fromFile.cpuPct === "object" ? { cpuPct: { ...DEFAULT_MARGINS.cpuPct, ...fromFile.cpuPct } } : {}),
+        ...(cpuFlag != null ? { cpuPct: Number(cpuFlag) } : {}),
+        ...(wallFlag != null ? { wallPct: Number(wallFlag) } : {}),
+    };
     for (const [flag, v] of [["--cpu-margin", cpuFlag], ["--wall-margin", wallFlag]]) {
         if (v != null && !(Number.isFinite(Number(v)) && v.trim() !== "")) {
             console.error(`${flag} needs a number of percent (10, not "${v}")`);
@@ -60,7 +72,7 @@ function main() {
     // `<base.json> <head.json>`, or comma-separated lists of runs of each side (several runs, interleaved, tell noise from change).
     const [basePaths, headPaths] = [take("--base") ?? argv[0], take("--head") ?? argv[1]].map((x) => (x ? x.split(",") : []));
     if (!basePaths.length || !headPaths.length) {
-        console.error("usage: compare.mjs <base result.json[,more]> <head result.json[,more]> [--md out.md] [--cpu-margin <pct for every group>] [--wall-margin <pct>]");
+        console.error("usage: compare.mjs <base result.json[,more]> <head result.json[,more]> [--md out.md] [--json out.json] [--margins <file>] [--cpu-margin <pct for every group>] [--wall-margin <pct>]");
         process.exit(2);
     }
     const base = basePaths.map((p) => JSON.parse(readFileSync(p, "utf8")));
@@ -100,6 +112,10 @@ function main() {
     ].join("\n");
     console.log(out);
     if (md) writeFileSync(md, out + "\n");
+    if (json) {
+        const cmp = compareRuns(base, head, margins);
+        writeFileSync(json, JSON.stringify({ base: base.map((r) => r.label), head: head.map((r) => r.label), margins, ...measuresComparison(cmp) }, null, 1));
+    }
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) main();

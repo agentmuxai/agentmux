@@ -438,7 +438,7 @@ describe("CPU and round time", () => {
         expect(cmp.wall.flagged).toBe(false);
         const text = runsTable(cmp, "base", "head");
         expect(text).toMatch(/CPU over \+10%/);
-        expect(text).toMatch(/CPU over \+20%/);
+        expect(text.match(/CPU over \+10%/g)).toHaveLength(2); // app and renderers, each past +10%
         expect(text).toMatch(/3 run\(s\) against 2/);
     });
 
@@ -451,12 +451,12 @@ describe("CPU and round time", () => {
     });
 
     it("applies the margin per metric and needs the ranges apart", () => {
-        // renderer CPU +15%: past 10 but not past its own 20; app CPU +15%: past 10
+        // renderer and app CPU +15%: both past their +10%
         const base = [run("b1", 900, 600, 100, 70, 10000), run("b2", 900, 600, 101, 70.5, 10000)];
         const head = [run("h1", 900, 600, 116, 81, 10000), run("h2", 900, 600, 117, 81.5, 10000)];
         const cmp = compareRuns(base, head);
         expect(cmp.rows.find((r) => r.group === "app").cpu.flagged).toBe(true);
-        expect(cmp.rows.find((r) => r.group === "renderer").cpu.flagged).toBe(false);
+        expect(cmp.rows.find((r) => r.group === "renderer").cpu.flagged).toBe(true);
         // the same +15% app CPU with overlapping ranges is noise, not a flag
         const noisy = compareRuns([run("b1", 900, 600, 100, 70, 10000), run("b2", 900, 600, 120, 70, 10000)], [run("h1", 900, 600, 118, 70, 10000), run("h2", 900, 600, 140, 70, 10000)]);
         expect(noisy.rows.find((r) => r.group === "app").cpu.pct).toBeGreaterThan(10);
@@ -664,7 +664,7 @@ describe("bytes written", () => {
         expect(cmp.written.flagged).toBe(false); // less is not a regression
         const worse = compareRuns([run("b1", 2000), run("b2", 2100)], [run("h1", 2600), run("h2", 2700)]);
         expect(worse.written.flagged).toBe(true);
-        expect(runsTable(worse, "base", "head")).toMatch(/Bytes srv wrote during the workload.*base 2050 MB.*head 2650 MB.*over \+10%/);
+        expect(runsTable(worse, "base", "head")).toMatch(/Bytes srv wrote during the workload.*base 2050 MB.*head 2650 MB.*over \+3%/);
     });
 });
 
