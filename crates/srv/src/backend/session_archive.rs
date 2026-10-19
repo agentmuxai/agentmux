@@ -286,10 +286,9 @@ pub fn read_session_output(
             .to_string();
         read_gz(Path::new(&archive_path_str))?
     } else {
-        // What the pane shows: the agent's own zone when it has content, the
-        // block's copy otherwise (`TranscriptSource`).
-        crate::backend::transcript::source::TranscriptSource::resolve(filestore, mstore, block_id)
-            .read_all()
+        filestore
+            .read_file(block_id, OUTPUT_FILENAME)
+            .map_err(|e| format!("filestore read: {e}"))?
             .unwrap_or_default()
     };
 

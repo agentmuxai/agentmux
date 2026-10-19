@@ -35,8 +35,9 @@ pub struct Tail {
 }
 
 impl<'a> TranscriptSource<'a> {
-    /// The agent's zone when the block is an agent block that is not archived
-    /// and the zone has content; the block's own store otherwise (no
+    /// The agent's zone when the block is a defined agent's block (not a
+    /// quick-launch pane, whose zone is shared by every pane of its provider)
+    /// that is not archived and the zone has content; the block's own store otherwise (no
     /// `agentId`, no global store, an archived session, or an empty zone).
     pub fn resolve(block_fs: &'a FileStore, mstore: &Store, block_id: &str) -> Self {
         Self::resolve_with(block_fs, global_transcript_store().map(|g| g.as_ref()), mstore, block_id)
@@ -62,6 +63,14 @@ impl<'a> TranscriptSource<'a> {
             return own();
         }
         let Some(zone) = agent_zone_for_block_meta(&block.meta) else { return own() };
+        // A quick-launch pane carries a provider key (`claude`, `codex`, ...) as
+        // its `agentId`, and every pane of that provider shares the zone: its
+        // tail would be built from the interleaved output of all of them. Only
+        // an agent definition's own zone is one conversation.
+        let agent_id = crate::backend::obj::meta_get_string(&block.meta, "agentId", "");
+        if crate::backend::providers::get_provider(&agent_id).is_some() {
+            return own();
+        }
         let has_content = gfs
             .read_snapshot(|r| Ok(r.file(&zone, OUTPUT_FILE)?.map(|f| f.size)))
             .ok()
@@ -192,6 +201,18 @@ mod tests {
         put(&own, BLOCK, "{\"copy\":\"block\"}\n");
         put(&global, &zone(), "{\"copy\":\"global\"}\n");
         assert!(!TranscriptSource::resolve_with(&own, Some(&global), &mstore, BLOCK).global);
+    }
+
+    #[test]
+    fn a_quick_launch_pane_whose_agent_id_is_a_provider_key_keeps_its_own_copy() {
+        let (own, global, mstore) = stores();
+        block(&mstore, Some("claude"), false);
+        put(&own, BLOCK, "{\"copy\":\"block\"}\n");
+        // Every pane of the provider shares this zone.
+        put(&global, &crate::backend::agent_session::agent_current_zone("claude"), "{\"copy\":\"all panes\"}\n");
+        let s = TranscriptSource::resolve_with(&own, Some(&global), &mstore, BLOCK);
+        assert!(!s.global, "a provider-key zone is not one conversation");
+        assert_eq!(s.read_all().unwrap(), b"{\"copy\":\"block\"}\n");
     }
 
     #[test]
