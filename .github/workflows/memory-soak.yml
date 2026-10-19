@@ -13,7 +13,9 @@ name: Memory soak (nightly, Windows)
 
 on:
   schedule:
-    - cron: '30 9 * * *' # 09:30 UTC, after ci-nightly-artifacts (06:00 UTC)
+    # ci-nightly-artifacts is scheduled for 06:00 UTC but GitHub starts it late (its runs have begun between 10:28 and
+    # 11:36 UTC) and it takes about 25 minutes; this runs well after, so it measures the same morning's build.
+    - cron: '30 13 * * *'
   workflow_dispatch:
     inputs:
       run-id:
