@@ -172,7 +172,8 @@ export function cpuTable(cpu, wall, io = null) {
     lines.push(`| **app total** | **${cpu.seconds.app}** |`);
     if (io) {
         const mbOrNA = (v) => (v == null ? "n/a" : `${v} MB`);
-        lines.push("", `Bytes written during the workload: srv ${mbOrNA(io.writtenMB.srv)}, renderers ${mbOrNA(io.writtenMB.renderer)}, app total ${mbOrNA(io.writtenMB.app)}${io.incompleteGroups?.length ? ` (n/a: a process in ${io.incompleteGroups.filter((g) => g !== "app").join(", ")} gave no counter)` : ""}.`);
+        const storage = io.storageWrittenMB ? ` Of that, reached storage: srv ${mbOrNA(io.storageWrittenMB.srv)}, app total ${mbOrNA(io.storageWrittenMB.app)}.` : "";
+        lines.push("", `Bytes written during the workload: srv ${mbOrNA(io.writtenMB.srv)}, renderers ${mbOrNA(io.writtenMB.renderer)}, app total ${mbOrNA(io.writtenMB.app)}${io.incompleteGroups?.length ? ` (n/a: a process in ${io.incompleteGroups.filter((g) => g !== "app").join(", ")} gave no counter)` : ""}.${storage}`);
     }
     lines.push("", `Round time (send to all agents idle): median ${wall.medianMs ?? "n/a"} ms, slowest ${wall.maxMs ?? "n/a"} ms, ${wall.untimedRounds} of ${wall.roundMs.length} rounds not timed.`);
     return lines.join("\n");
@@ -233,7 +234,8 @@ export function compareRuns(baseRuns, headRuns, margins = DEFAULT_MARGINS) {
         .map(([side, r]) => ({ side, label: r.label, ms: r.slowestEvalMs }));
     const lock = metric("store lock", "ms", (r) => r.storeLock?.longestHeldMs);
     const written = metric("srv written", "MB", (r) => r.io?.writtenMB?.srv, margins.writtenPct ?? DEFAULT_MARGINS.writtenPct);
-    return { rows, wall, slow, lock, written, margins, baseRuns: baseRuns.length, headRuns: headRuns.length };
+    const storageWritten = metric("srv reached storage", "MB", (r) => r.io?.storageWrittenMB?.srv, margins.writtenPct ?? DEFAULT_MARGINS.writtenPct);
+    return { rows, wall, slow, lock, written, storageWritten, margins, baseRuns: baseRuns.length, headRuns: headRuns.length };
 }
 
 /** A markdown table of `compareRuns`: memory and CPU side by side, then the round time. */
@@ -255,6 +257,10 @@ export function runsTable(cmp, baseLabel = "base", headLabel = "head") {
     const wr = cmp.written;
     if (wr && (wr.base.n || wr.head.n)) {
         lines.push("", `Bytes srv wrote during the workload (report only; what the OS counts is in result.io.note): ${baseLabel} ${f(wr.base.median)} MB${range(wr.base)}, ${headLabel} ${f(wr.head.median)} MB${range(wr.head)}${wr.pct == null ? "" : `, ${sign(wr.pct)}`}${wr.flagged ? ` (over +${wr.marginPct}%)` : ""}.`);
+    }
+    const sw = cmp.storageWritten;
+    if (sw && (sw.base.n || sw.head.n)) {
+        lines.push("", `Of that, bytes that reached storage (Linux write_bytes, macOS disk bytes; report only): ${baseLabel} ${f(sw.base.median)} MB${range(sw.base)}, ${headLabel} ${f(sw.head.median)} MB${range(sw.head)}${sw.pct == null ? "" : `, ${sign(sw.pct)}`}${sw.flagged ? ` (over +${sw.marginPct}%)` : ""}.`);
     }
     const l = cmp.lock;
     if (l && (l.base.n || l.head.n)) {

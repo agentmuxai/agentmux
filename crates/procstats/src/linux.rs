@@ -67,6 +67,40 @@ pub fn write_bytes(pid: u32) -> Option<u64> {
     io.lines().find_map(|l| l.strip_prefix("wchar:")).and_then(|v| v.trim().parse().ok())
 }
 
+/// `write_bytes` of `/proc/<pid>/io` less `cancelled_write_bytes`: the bytes the process caused to be sent to the block
+/// layer, minus the writeback the kernel avoided because the data was truncated or the file deleted before it was
+/// written (a process that writes 1 MB and then deletes the file is accounted 1 MB in `write_bytes` and the same in
+/// `cancelled_write_bytes`, and does no storage I/O). Signed: a process that truncates data another process dirtied is
+/// credited the cancellation but not the write, so its value can be below zero; sum a group's values before clamping. Same user only.
+pub fn storage_write_bytes(pid: u32) -> Option<i64> {
+    let io = std::fs::read_to_string(format!("/proc/{pid}/io")).ok()?;
+    storage_bytes_from_io(&io)
+}
+
+fn storage_bytes_from_io(io: &str) -> Option<i64> {
+    let field = |name: &str| io.lines().find_map(|l| l.strip_prefix(name)).and_then(|v| v.trim().parse::<i64>().ok());
+    Some(field("write_bytes:")? - field("cancelled_write_bytes:").unwrap_or(0))
+}
+
+#[cfg(test)]
+mod storage_bytes_tests {
+    use super::storage_bytes_from_io;
+
+    const IO: &str = "rchar: 1\nwchar: 9000\nsyscr: 1\nsyscw: 1\nread_bytes: 0\nwrite_bytes: 4096\ncancelled_write_bytes: 1024\n";
+
+    #[test]
+    fn storage_bytes_leave_out_cancelled_writeback() {
+        assert_eq!(storage_bytes_from_io(IO), Some(3072));
+        // a file that was written and deleted: nothing reached storage
+        assert_eq!(storage_bytes_from_io("write_bytes: 4096\ncancelled_write_bytes: 4096\n"), Some(0));
+        // data another process dirtied, truncated by this one: negative, so that the group's sum comes out right
+        assert_eq!(storage_bytes_from_io("write_bytes: 100\ncancelled_write_bytes: 4096\n"), Some(-3996));
+        // an old kernel without the line, or no write_bytes at all
+        assert_eq!(storage_bytes_from_io("write_bytes: 4096\n"), Some(4096));
+        assert_eq!(storage_bytes_from_io("rchar: 1\n"), None);
+    }
+}
+
 pub fn cpu_count() -> usize {
     let n = unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) };
     if n > 0 { n as usize } else { 1 }

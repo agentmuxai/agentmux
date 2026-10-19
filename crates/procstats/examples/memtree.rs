@@ -272,8 +272,24 @@ struct Row {
     cpu_ns: Option<u64>,
     /// Bytes written so far (cumulative; what the OS counts is in `procstats::write_bytes`).
     write_bytes: Option<u64>,
+    /// Bytes that reached storage so far (Linux, macOS; none on Windows). Signed: see `procstats::storage_write_bytes`.
+    storage_write_bytes: Option<i64>,
     /// Tells this process from a later one that reuses its PID (see `ProcInfo::start_key`).
     start_key: u64,
+}
+
+/// A counter read by PID, kept only when the process is still the sampled one before and after the read: a PID reused in
+/// between would hand back the successor's lifetime total.
+fn counter<T>(p: &ProcInfo, read: fn(u32) -> Option<T>) -> Option<T> {
+    if !is_running(p.key()) {
+        return None;
+    }
+    let v = read(p.pid);
+    if is_running(p.key()) {
+        v
+    } else {
+        None
+    }
 }
 
 fn esc(s: &str) -> String {
@@ -287,7 +303,7 @@ fn esc(s: &str) -> String {
         .collect()
 }
 
-fn opt(v: Option<u64>) -> String {
+fn opt<T: std::fmt::Display>(v: Option<T>) -> String {
     v.map(|n| n.to_string()).unwrap_or_else(|| "null".into())
 }
 
@@ -462,12 +478,8 @@ fn main() {
                 cpu_ns: p.cpu_ns,
                 // Read by PID, so only counted when the process is still the one the sample saw before and after the read:
                 // a PID reused in between would hand back the successor's lifetime total.
-                write_bytes: if is_running(p.key()) {
-                    let v = agentmux_procstats::write_bytes(p.pid);
-                    if is_running(p.key()) { v } else { None }
-                } else {
-                    None
-                },
+                write_bytes: counter(&p, agentmux_procstats::write_bytes),
+                storage_write_bytes: counter(&p, agentmux_procstats::storage_write_bytes),
                 start_key: p.start_key,
             });
         }
@@ -484,8 +496,8 @@ fn main() {
                 .iter()
                 .map(|r| {
                     format!(
-                        "{{\"pid\":{},\"name\":\"{}\",\"role\":\"{}\",\"app\":{},\"private\":{},\"resident\":{},\"commit\":{},\"pss\":{},\"uss\":{},\"cpu_ns\":{},\"write_bytes\":{},\"start_key\":{}}}",
-                        r.pid, esc(&r.name), esc(&r.role), r.app, opt(r.private), opt(r.resident), opt(r.commit), opt(r.pss), opt(r.uss), opt(r.cpu_ns), opt(r.write_bytes), r.start_key
+                        "{{\"pid\":{},\"name\":\"{}\",\"role\":\"{}\",\"app\":{},\"private\":{},\"resident\":{},\"commit\":{},\"pss\":{},\"uss\":{},\"cpu_ns\":{},\"write_bytes\":{},\"storage_write_bytes\":{},\"start_key\":{}}}",
+                        r.pid, esc(&r.name), esc(&r.role), r.app, opt(r.private), opt(r.resident), opt(r.commit), opt(r.pss), opt(r.uss), opt(r.cpu_ns), opt(r.write_bytes), opt(r.storage_write_bytes), r.start_key
                     )
                 })
                 .collect();
