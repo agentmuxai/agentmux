@@ -30,7 +30,7 @@
 //!
 //! The throwaway block deliberately carries no `agentId` / `agentName` /
 //! `agentMode` / `agent:*` meta:
-//!   - No `agentId` ⇒ `crate::backend::transcript::append::resolve_global_output_zone` (file_ops.rs)
+//!   - No `agentId` ⇒ `crate::backend::transcript::append::resolve_global_output_zone`
 //!     resolves to `None` for this block, so `spawn_turn`'s own stdout
 //!     mirroring never writes into any real agent's persisted
 //!     `agent:<defId>:current` transcript zone.

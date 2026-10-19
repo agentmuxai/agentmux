@@ -8,8 +8,7 @@
 //! These lived in `blockcontroller/shell/file_ops.rs` next to the terminal output
 //! path, which made the store-lock warnings (`site=`) and a reader's search for
 //! "where does a transcript get written" point at the terminal code. Terminal
-//! output (`handle_append_block_file` for `term`) stays in `shell/`. This file is
-//! a move: the code is unchanged.
+//! output (`handle_append_block_file` for `term`) stays in `shell/`.
 
 use std::sync::Arc;
 

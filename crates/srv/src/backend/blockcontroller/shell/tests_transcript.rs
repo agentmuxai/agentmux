@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Transcript appends are written first and published with their positions
-//! (`file_ops::append_transcript`, Phase 5a-3).
+//! (`transcript::append::append_transcript`, Phase 5a-3).
 
 use std::sync::{Arc, Barrier, Mutex};
 
