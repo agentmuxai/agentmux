@@ -272,15 +272,15 @@ struct Row {
     cpu_ns: Option<u64>,
     /// Bytes written so far (cumulative; what the OS counts is in `procstats::write_bytes`).
     write_bytes: Option<u64>,
-    /// Bytes that reached storage so far (Linux, macOS; none on Windows).
-    storage_write_bytes: Option<u64>,
+    /// Bytes that reached storage so far (Linux, macOS; none on Windows). Signed: see `procstats::storage_write_bytes`.
+    storage_write_bytes: Option<i64>,
     /// Tells this process from a later one that reuses its PID (see `ProcInfo::start_key`).
     start_key: u64,
 }
 
 /// A counter read by PID, kept only when the process is still the sampled one before and after the read: a PID reused in
 /// between would hand back the successor's lifetime total.
-fn counter(p: &ProcInfo, read: fn(u32) -> Option<u64>) -> Option<u64> {
+fn counter<T>(p: &ProcInfo, read: fn(u32) -> Option<T>) -> Option<T> {
     if !is_running(p.key()) {
         return None;
     }
@@ -303,7 +303,7 @@ fn esc(s: &str) -> String {
         .collect()
 }
 
-fn opt(v: Option<u64>) -> String {
+fn opt<T: std::fmt::Display>(v: Option<T>) -> String {
     v.map(|n| n.to_string()).unwrap_or_else(|| "null".into())
 }
 

@@ -227,7 +227,7 @@ pub fn write_bytes(pid: u32) -> Option<u64> {
 }
 
 /// Windows keeps no per-process count of the bytes that reached the disk (only `WriteTransferCount`, see [`write_bytes`]).
-pub fn storage_write_bytes(_pid: u32) -> Option<u64> {
+pub fn storage_write_bytes(_pid: u32) -> Option<i64> {
     None
 }
 

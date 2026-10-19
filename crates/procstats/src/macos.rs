@@ -175,8 +175,8 @@ pub fn write_bytes(pid: u32) -> Option<u64> {
 }
 
 /// macOS counts only what reached the disk, which is also what [`write_bytes`] returns.
-pub fn storage_write_bytes(pid: u32) -> Option<u64> {
-    write_bytes(pid)
+pub fn storage_write_bytes(pid: u32) -> Option<i64> {
+    write_bytes(pid).map(|v| v.min(i64::MAX as u64) as i64)
 }
 
 /// `KERN_PROCARGS2`: argc, the executable path, padding, then argv. Same user

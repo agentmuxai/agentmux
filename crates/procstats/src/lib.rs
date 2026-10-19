@@ -55,7 +55,7 @@ mod os {
     pub fn write_bytes(_pid: u32) -> Option<u64> {
         None
     }
-    pub fn storage_write_bytes(_pid: u32) -> Option<u64> {
+    pub fn storage_write_bytes(_pid: u32) -> Option<i64> {
         None
     }
     pub fn cpu_count() -> usize {
@@ -180,7 +180,11 @@ pub fn write_bytes(pid: u32) -> Option<u64> {
 /// [`write_bytes`] that reached the disk, so it leaves out writes the page cache coalesced or dropped. Linux:
 /// `write_bytes` less `cancelled_write_bytes` in `/proc/<pid>/io` (writeback avoided by truncating or deleting).
 /// macOS: `ri_diskio_byteswritten`. Windows has no such counter (`None`).
-pub fn storage_write_bytes(pid: u32) -> Option<u64> {
+///
+/// Signed on purpose: a process that truncates data another process dirtied is credited the cancellation but
+/// not the write (the kernel documents this "negative" I/O), so one process's value can be below zero. Add the
+/// values of a set of processes first and clamp the sum, never each one.
+pub fn storage_write_bytes(pid: u32) -> Option<i64> {
     os::storage_write_bytes(pid)
 }
 

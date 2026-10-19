@@ -605,6 +605,12 @@ describe("bytes written", () => {
         ledger.note([p(1, 950 * MiB2, 60 * MiB2)]);
         expect(ledger.storageTotals().srv).toBe(60 * MiB2);
         expect(ledger.writtenTotals().srv).toBe(950 * MiB2); // the write counter only grows
+        // a process that truncated what another dirtied is below zero alone; the group's sum is what is clamped
+        const mixed = new CpuLedger();
+        mixed.note([p(1, 500 * MiB2, 80 * MiB2), p(2, 10 * MiB2, -30 * MiB2, "agentmux-srv-helper.exe")]);
+        expect(mixed.storageTotals().srv).toBe(50 * MiB2);
+        expect(writtenBetween({ srv: 0 }, mixed.storageTotals()).srv).toBe(50);
+        expect(writtenBetween({ srv: 200 * MiB2 }, mixed.storageTotals()).srv).toBe(0); // never below zero in the report
         const windows = new CpuLedger(); // Windows: no storage counter at all
         windows.note([p(1, 100 * MiB2, undefined)]);
         expect(windows.writeIncomplete()).toEqual([]);

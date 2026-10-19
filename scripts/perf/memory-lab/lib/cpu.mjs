@@ -68,6 +68,8 @@ export class CpuLedger {
     /** Bytes that reached storage so far, per group and `app`, counting every process seen. */
     storageTotals() {
         const out = Object.fromEntries([...GROUPS, "app"].map((g) => [g, 0]));
+        // Each process's value is signed (data one process dirtied and another truncated is credited to neither alone), so the
+        // sums are exact and only the group's total is clamped: the delta in `writtenBetween` never goes below zero.
         for (const { storage, group } of this.#seen.values()) {
             out[group] += storage;
             out.app += storage;
