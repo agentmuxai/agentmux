@@ -1,5 +1,26 @@
 # AgentMux Version History
 
+## 0.59.34 — 2026-10-18
+
+- Browser: wait finds text inside iframes, an approved click says the user approved it and after how long, and date, time, month and week fields fill from a date like "October 15, 2026"
+- Ctrl+R in an agent's composer searches what you typed to that agent, and can forget an entry or clear the history
+- Swarm broadcasts you send are kept in each recipient agent's input history, and agent:inputhistory:max sets how many messages each agent keeps (0 keeps none)
+- The nightly memory soak finds the extracted portable wherever the archive puts it
+- An agent's input history starts full: the first time its composer opens, what you typed in its past conversations is added (only your own messages, never jekts or notes)
+- Warden has a History section: every agent's kept history, forks under their parent and deleted agents included, its sessions, where history is stored and that it is kept forever; the status bar total opens it, and an agent's history opened from Warden or My Agents now shows its conversation
+- The nightly memory soak installs the packages the lab's CDP client needs
+- Browser pane: the agent strip (Auto-approve on, Driven by) reads as one line of text with its buttons together on the right; on a narrow pane the buttons move to their own row instead of squeezing the text into a tall column
+- Windows: Check for update and Upgrade & restart work on Windows 10 again. The release is unpacked by AgentMux itself, not by Windows' tar, which can't read it. An install on v0.59.33 or older still needs this one upgrade done by hand (extract the .7z with 7-Zip, or run the setup.exe)
+- A test of the remote host's durable pane stats accepts bash as the session shell on macOS, where /bin/sh is bash
+- The memory lab can run a portable with its srv swapped for one under test, to measure an srv change without a full build
+- A menu, tooltip or question panel left open in a hidden tab no longer cuts a grey hole through the browser panes of the tab you are looking at
+- A failing nightly leg, macOS included, now opens a nightly-red issue naming the failing tests, and one failing test no longer stops the rest of the suite from running
+- fix(zoom): Ctrl+scroll zooms every pane the same way (5% steps with the zoom indicator), Help joins the shared pane zoom, keeping a zoom it had saved, and a saved layout restores whether a Sysinfo pane shows its view buttons
+- The agent picker and the Toolchain pane now agree on whether a harness's CLI is installed. Harnesses AgentMux doesn't install (Grok, Goose, Kimi and others) show "Click to install" when their CLI isn't found, and the Toolchain no longer reports a CLI you installed yourself as an npm harness's own copy
+- A nightly job that runs out of time is reported in the nightly-red issue; GitHub marks it cancelled, which had been read as nothing to report
+- feat(sysinfo): Sysinfo's text zooms with the pane (Ctrl+scroll, Ctrl/Cmd +/-), its rows contract when zoomed out, and charts are denser: titles on the plot, one time axis per column, one y axis per row of cores, aligned plots, and 2px gaps
+- Starting a new agent no longer goes through dialogs: clicking a harness card opens a panel right under it, with the tools it needs, its install (which keeps going if you close the panel, with a notification when it's done) and the new agent's settings. The New Agent section also says that AgentMux manages its own agent CLIs, with links for the harnesses you install yourself
+
 ## 0.59.33 — 2026-10-18
 
 - Browser panes: agents see a field's length limit and can't overflow it, are warned when a page changes what they typed, can open a review page's collapsed sections, see what a key press did, and never see a password, card or tax-ID field in a screenshot.
