@@ -451,6 +451,16 @@ describe("CPU and round time", () => {
         expect(compareRuns(base, head, { cpuPct: 10, wallPct: 20 }).rows.find((r) => r.group === "renderer").cpu.flagged).toBe(true);
     });
 
+    it("flags a run with a page command over 10 s", () => {
+        const a = { ...run("a", 900, 600, 100, 70, 10000), slowestEvalMs: 2100 };
+        const b = { ...run("b", 900, 600, 100, 70, 10000), slowestEvalMs: 14300 };
+        const cmp = compareRuns([a], [b]);
+        expect(cmp.slow).toEqual([{ side: "head", label: "b", ms: 14300 }]);
+        expect(runsTable(cmp, "base", "head")).toMatch(/SLOW PAGE COMMAND: b \(head\).*14\.3 s/);
+        expect(compareRuns([a], [a]).slow).toEqual([]);
+        expect(compareRuns([run("old", 900, 600, 1, 1, 1)], [a]).slow).toEqual([]); // no figure: not flagged
+    });
+
     it("refuses to compare different workload versions", () => {
         const same = { layout: { panes: 4 }, rounds: 10, seed: 1, gapSeconds: 15, platform: "win32", settleSeconds: 20, steady: { samples: 3 } };
         expect(mismatch({ ...same, workloadVersion: 1 }, { ...same, workloadVersion: 2 })).toMatch(/workload versions/);

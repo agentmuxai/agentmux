@@ -33,6 +33,8 @@ export class CdpSession {
     constructor(wsUrl) {
         this.ws = new WebSocket(wsUrl);
         this.nextId = 1;
+        /** How long a command may take unless the call says otherwise; a caller driving a heavy page can raise it. */
+        this.defaultTimeoutMs = 10000;
         this.pending = new Map();
         /** CDP events by method, for on()/off() (the recorder's screencast frames). */
         this.listeners = new Map();
@@ -89,7 +91,7 @@ export class CdpSession {
         this.listeners.get(method)?.delete(fn);
     }
 
-    send(method, params = {}, timeoutMs = 10000) {
+    send(method, params = {}, timeoutMs = this.defaultTimeoutMs) {
         if (this.closed) return Promise.reject(new Error(`CDP session closed, cannot send ${method}`));
         const id = this.nextId++;
         return new Promise((resolve, reject) => {

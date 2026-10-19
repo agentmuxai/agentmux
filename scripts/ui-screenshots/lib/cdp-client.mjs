@@ -28,7 +28,13 @@ import { dirname, join } from "node:path";
  */
 export function nodeWs() {
     const req = createRequire(import.meta.url);
-    return req(join(dirname(req.resolve("ws/package.json")), "index.js"));
+    let pkg;
+    try {
+        pkg = req.resolve("ws/package.json");
+    } catch {
+        throw new Error("the `ws` package is not installed: run `npm ci` in the checkout this script is in (these scripts run from a checkout of the repo, not from a copied folder)");
+    }
+    return req(join(dirname(pkg), "index.js"));
 }
 
 const WebSocket = nodeWs();
