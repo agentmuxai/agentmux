@@ -154,7 +154,7 @@ export const AgentPresentationView = ({
     // (docs/analysis/REPORT_TIMERS_DEADLINES_AND_CLOCKS_AUDIT_2026_10_17.md §6.4).
     const visibility = usePaneTabVisibility(model.blockId);
     const hidden = (): boolean => visibility() !== "active";
-    const renderDormant = useRenderDormant(hidden); // `hidden`, or the window itself (minimized/covered)
+    const renderDormant = useRenderDormant(hidden); // `hidden`, or the window itself (minimized)
     const providerKey = (): string => block()?.meta?.["agentProvider"] ?? agentId;
     const provider = () => getProvider(providerKey());
     const outputFormat = (): string => block()?.meta?.["agentOutputFormat"] ?? "claude-stream-json";

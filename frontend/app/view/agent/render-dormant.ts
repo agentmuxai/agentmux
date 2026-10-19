@@ -4,7 +4,8 @@
 /**
  * Whether an agent pane should treat itself as dormant for rendering: its tab
  * is hidden (`usePaneTabVisibility`) OR the whole window can't be seen
- * (minimized, or fully covered), which Chromium reports as `document.hidden`.
+ * (minimized; or fully covered, where the platform reports it: Windows doesn't), which
+ * Chromium reports as `document.hidden`.
  *
  * A minimized window runs no animation frames and no ResizeObserver callbacks,
  * so everything the pane trims on geometry (a held row released once it
@@ -28,7 +29,7 @@ function listen(): void {
     document.addEventListener("visibilitychange", () => setWindowHidden(document.hidden));
 }
 
-/** True while the page itself is hidden (window minimized or covered). */
+/** True while the page itself is hidden (window minimized, or covered where reported). */
 export function useWindowHidden(): Accessor<boolean> {
     listen();
     return windowHidden;
