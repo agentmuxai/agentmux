@@ -42,6 +42,7 @@ import { parseDiskLoad, startDiskLoad } from "./lib/diskload.mjs";
 import { volumeOf } from "./lib/volume.mjs";
 import { slowSendsAgainstLongTasks, summariseLongTasks } from "./lib/longtasks.mjs";
 import { segmentsOf, slowSendBreakdown } from "./lib/sendsegments.mjs";
+import { arrivalTotals, arrivalsDuringSlowSends } from "./lib/wsarrivals.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..", "..");
@@ -395,6 +396,8 @@ async function attempt(args, ctx) {
             sendsVsLongTasks: sendsVsLong,
             sends: sendLog.map((s) => ({ ...s, start: new Date(s.start).toISOString(), pageStart: s.pageStart == null ? null : new Date(s.pageStart).toISOString(), ...segmentsOf(s) })),
             sendBreakdown: slowSendBreakdown(sendLog),
+            // What the page's websocket received: the whole run's totals, and during each slow send's time in the page.
+            wsArrivals: { totals: arrivalTotals(rawLong?.ws), duringSlowSends: arrivalsDuringSlowSends(rawLong?.ws, sendLog) },
             slowEvals: driver.slowEvals(), // { total, slowest }: every command that took 5 s or more, the 30 slowest listed
         };
         writeFileSync(join(dir, "result.json"), JSON.stringify(result, null, 1));
