@@ -16,6 +16,7 @@ import { existsSync, mkdirSync, openSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path";
 
 import { findOpenLines, OPEN_TAP, READ_OPENS } from "./agentopen.mjs";
+import { writeSettings } from "./settings.mjs";
 import { DETACH_FRAMES, FRAME_PROBE, mergeFrameRecords, READ_FRAMES } from "./frames.mjs";
 import { DETACH_LONG_TASKS, LONG_TASK_OBSERVER, mergeLongTaskRecords, READ_LONG_TASKS } from "./longtasks.mjs";
 import { timedCall } from "./sendsegments.mjs";
@@ -83,12 +84,12 @@ export async function portInUse(port) {
  * other instance.
  * @returns {Promise<{ pid: number, port: number, home: string, stop: () => void }>}
  */
-export async function launch({ exe, home, port, script, log, env = process.env, extraEnv = {} }) {
+export async function launch({ exe, home, port, script, log, env = process.env, extraEnv = {}, keepHome = false }) {
     if (Number(port) === 9222) throw new Error("port 9222 is the production instance's");
     if (await portInUse(port)) {
         throw new Error(`something already answers on CDP port ${port} (another instance, or one a lab run left behind); stop it or pick another --port`);
     }
-    rmSync(home, { recursive: true, force: true });
+    if (!keepHome) rmSync(home, { recursive: true, force: true });
     mkdirSync(home, { recursive: true });
     const built = buildInstanceEnv(env, { AGENTMUX_HOME_OVERRIDE: home, AGENTMUX_CDP_PORT: String(port), FAKE_CLAUDE_SCRIPT: script }, extraEnv);
     const out = openSync(log, "a");
@@ -121,6 +122,25 @@ export async function launch({ exe, home, port, script, log, env = process.env, 
         throw e;
     }
     return { pid: child.pid, port, home, envRecord: built.record, stop: () => stopTree(child.pid) };
+}
+
+/**
+ * `launch`, with app settings in place before the instance reads them: the first start (on an empty data folder) shows where this
+ * build keeps its settings, the file is written there, the instance is stopped and started again on the same folder (see lib/settings.mjs).
+ * Without settings it is `launch`. The result has `settingsFiles`, the paths written.
+ */
+export async function launchWithSettings(opts, settings) {
+    if (!settings || !Object.keys(settings).length) return await launch(opts);
+    const first = await launch(opts);
+    let files;
+    try {
+        files = writeSettings(opts.home, settings);
+    } finally {
+        await first.stop();
+    }
+    await sleep(2000); // the port and the data folder's lock are free again
+    const second = await launch({ ...opts, keepHome: true });
+    return Object.assign(second, { settingsFiles: files });
 }
 
 /** Whether anything is left in the process group `pid` leads. */

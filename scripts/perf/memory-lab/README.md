@@ -186,6 +186,20 @@ layout objects, listeners, tool blocks and the text inside them), so a restored
 page can be set against a live one at the same point: a restore that mounts tool
 bodies a live page had unloaded shows in `toolTextKB`.
 
+## Passing an app setting to the instance
+
+`--setting NAME=value` (repeat it for several) puts an app setting in the instance's `settings.json`, for an experiment whose
+switch is a setting (for example `--setting agent:transcriptsinglecopy=true`). An environment variable cannot do this: it does
+not get through the launcher to srv. The value is read as `true`/`false`, a number, JSON (`[..]`, `{..}`, `"..."`) or plain
+text. Which folder a build reads settings from depends on its channel (a local build has its own, a release uses the shared
+one), and that is known only once it has run, so the lab starts the instance on the empty data folder, writes the file in every
+place a build may look (the `channels` folder and each channel's `config` folder), stops it and starts it again on the same
+folder: srv reads the setting at its own start, never after. That costs about 20 s a run.
+
+`result.settings` records what was asked, the files written, and whether the app's full config shows each value (`true`: that
+value; `false`: another one; `null`: the key isn't in its config). `compare.mjs` notes when the two sides were given different settings and refuses a side whose runs were not
+all given the same. Note that `seenInAppConfig` says the setting was loaded into the app's config, not that the build uses it: the config holds any key, so a build that does not know the setting reports it too (checked on a build from before `agent:transcriptsinglecopy` existed). Whether the effect is there is for the measurement to show. `ab.mjs` takes `--a-setting` and `--b-setting` for the two sides, and `--setting` after the lone `--` for both.
+
 ## Opening an agent again
 
 `--open-agents N` closes the first N agents' panes after everything else has been measured, then opens each again with the

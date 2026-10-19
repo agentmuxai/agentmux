@@ -31,7 +31,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { generateConversation } from "./lib/conversation.mjs";
-import { connect, installScript, launch, layoutFor, portableExe } from "./lib/driver.mjs";
+import { connect, installScript, launchWithSettings, layoutFor, portableExe } from "./lib/driver.mjs";
 import { driftWarning, withReplacedSrv } from "./lib/srv.mjs";
 import { runRecycle, recycleSaving } from "./lib/recycle.mjs";
 import { agentProcessesCountedAsApp, cpuLedger, forcedGcWindows, osSample, portBelongsTo, takeSample } from "./lib/sample.mjs";
@@ -40,6 +40,7 @@ import { cpuBetween, writtenBetween } from "./lib/cpu.mjs";
 import { storeLockOf } from "./lib/storelock.mjs";
 import { volumeOf } from "./lib/volume.mjs";
 import { parseEnvPairs } from "./lib/instanceenv.mjs";
+import { parseSettingPairs, settingsSeen } from "./lib/settings.mjs";
 import { parseDiskLoad, startDiskLoad } from "./lib/diskload.mjs";
 import { describeOpen, opensLine, summariseOpens, withLongTasks } from "./lib/agentopen.mjs";
 import { framesLine, summariseFrames } from "./lib/frames.mjs";
@@ -65,6 +66,12 @@ function parseArgs(argv) {
     const flags = { "--keep": "keep" };
     for (let i = 0; i < argv.length; i++) {
         const raw = argv[i];
+        if (raw === "--setting") {
+            const value = argv[++i];
+            if (value === undefined) throw new Error("--setting needs NAME=value");
+            (a.settingPairs ??= []).push(value);
+            continue;
+        }
         if (raw === "--env") {
             const value = argv[++i];
             if (value === undefined) throw new Error("--env needs NAME=value");
@@ -83,6 +90,7 @@ function parseArgs(argv) {
     }
     if (!a.portable && !a.exe) throw new Error("give --portable <dir> (a `task package` folder), or --exe <path>");
     a.instanceEnv = parseEnvPairs(a.envPairs);
+    a.settings = parseSettingPairs(a.settingPairs);
     a.diskLoadRate = parseDiskLoad(a.diskLoad);
     if (a.diskLoadCapGb !== undefined && !(Number.isFinite(a.diskLoadCapGb) && a.diskLoadCapGb > 0)) {
         throw new Error(`--disk-load-cap-gb needs a positive number of GB (got "${a.diskLoadCapGb}"): it is what keeps a stress run from wearing out the disk`);
@@ -308,7 +316,7 @@ async function holdIdle(args, memtree, rootPid) {
 /** One try: starts the instance, runs the load, measures, writes the result. */
 async function attempt(args, ctx) {
     const { exe, memtree, dir, home, script, layout, swapped } = ctx;
-    const instance = await launch({ exe, home, port: args.port, script, log: join(dir, "instance.log"), extraEnv: args.instanceEnv });
+    const instance = await launchWithSettings({ exe, home, port: args.port, script, log: join(dir, "instance.log"), extraEnv: args.instanceEnv }, args.settings);
     const curve = [];
     let diskLoad = null; // stopped in the outer finally on any path out of this attempt: a retry must not start a second writer beside it
     cpuLedger.reset();
@@ -330,6 +338,9 @@ async function attempt(args, ctx) {
         installScript(home, script);
         driver = await connect(args.port, home, join(dir, "work"));
         await driver.setupAccount();
+        // What the app says it was given: a setting its build doesn't know is dropped from the full config, and that shows here instead of the run passing as a baseline.
+        const settingsSeenByApp = Object.keys(args.settings).length ? settingsSeen(args.settings, await driver.eval("RpcApi.GetFullConfigCommand(TabRpcClient)").catch(() => null)) : null;
+        if (settingsSeenByApp) console.log(`  settings given: ${JSON.stringify(args.settings)}; the app reports ${JSON.stringify(settingsSeenByApp)} (true: same value, false: another value, null: not in its config)`);
         try {
             await driver.build(layout);
             await sleep(15_000);
@@ -461,6 +472,8 @@ async function attempt(args, ctx) {
             diskLoad: diskLoadResult,
             // What the instance was given (see lib/instanceenv.mjs): the --env variables, what the lab set, and the shell's AGENTMUX_* it dropped.
             instanceEnv: instance.envRecord,
+            // App settings given with --setting (lib/settings.mjs): what was asked, where the file was written, and whether the app's full config shows the value.
+            settings: settingsSeenByApp ? { requested: args.settings, files: instance.settingsFiles ?? [], seenInAppConfig: settingsSeenByApp } : null,
             // How full the volume was (see lib/volume.mjs): a stall on a nearly full disk is not the same finding as one on an empty disk.
             volume: { atStart: volumeAtStart, atEnd: volumeAtEnd },
             rounds: args.rounds,

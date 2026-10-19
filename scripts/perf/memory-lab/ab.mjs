@@ -8,7 +8,8 @@
 //        -- --panes 12 --rounds 10 --disk-load 50
 //
 // A or B may differ by build (--a-portable/--b-portable), by an srv swapped into the same portable (--a-srv,
-// --b-srv, with --a-srv-commit/--b-srv-commit) or by a setting (--a-env NAME=value, --b-env). Everything after the
+// --b-srv, with --a-srv-commit/--b-srv-commit), by an environment variable (--a-env NAME=value, --b-env) or by an app
+// setting (--a-setting NAME=value, --b-setting; written to the instance's settings.json). Everything after the
 // lone -- goes to both sides' runs. The runs alternate A B A B ...; the comparison (medians, ranges, flags) is
 // written to <out>/compare.md and <out>/ab.json lists what ran.
 
