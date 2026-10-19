@@ -183,6 +183,38 @@ fn read_indexed(fs: &FileStore, zone: &str, offset: u64, limit: u64, stale_ok: b
     .flatten()
 }
 
+/// How many lines of `zone`'s `output` start before byte `byte`, and how many
+/// there are: the line a reader loading up to `byte` stops at. A binary
+/// search over `output.idx`, from one snapshot; `None` when the index isn't
+/// fresh for `output` (extend it first, `extend_output_idx`).
+pub(crate) fn lines_before_byte(fs: &FileStore, zone: &str, byte: u64) -> Option<(u64, u64)> {
+    const H: i64 = OUTPUT_IDX_HEADER_LEN;
+    fs.read_snapshot(|snap| {
+        let Some(out) = snap.file(zone, "output")? else { return Ok(None) };
+        let Some(idx) = snap.file(zone, IDX)? else { return Ok(None) };
+        let Some(header) = snap.bytes(zone, IDX, 0, H)? else { return Ok(None) };
+        let covered = u64::from_le_bytes(header.as_slice().try_into().unwrap_or([0; 8]));
+        if idx.size < H || covered != out.size.max(0) as u64 || !labelled_for(&idx.meta, out.gen.as_deref()) {
+            return Ok(None);
+        }
+        let total = ((idx.size - H) / 8) as u64;
+        let (mut lo, mut hi) = (0u64, total);
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            let Some(entry) = snap.bytes(zone, IDX, H + (mid * 8) as i64, 8)? else { return Ok(None) };
+            let start = u64::from_le_bytes(entry.as_slice().try_into().unwrap_or([0; 8]));
+            if start < byte {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        Ok(Some((lo, total)))
+    })
+    .ok()
+    .flatten()
+}
+
 /// Rebuild `output.idx` from `output` in a single streaming scan and atomically
 /// replace it. The index is the byte offset of every **non-blank** line, matching
 /// the reader's line addressing (`String::lines().filter(!trim().is_empty())`).

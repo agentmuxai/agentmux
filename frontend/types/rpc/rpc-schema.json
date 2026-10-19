@@ -3199,6 +3199,25 @@
     }
   },
   {
+    "command": "history.locate",
+    "request": "agentmux_srv::backend::rpc_types::history::HistoryLocateReq",
+    "requestName": "HistoryLocateReq",
+    "requestTs": {
+      "imports": [
+        "HistoryLocateReq"
+      ],
+      "name": "HistoryLocateReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::history::HistoryLocation",
+    "responseName": "HistoryLocation",
+    "responseTs": {
+      "imports": [
+        "HistoryLocation"
+      ],
+      "name": "HistoryLocation"
+    }
+  },
+  {
     "command": "history.usage",
     "request": "agentmux_srv::backend::rpc_types::history::HistoryUsageReq",
     "requestName": "HistoryUsageReq",

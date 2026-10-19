@@ -1217,6 +1217,10 @@
             "method": "HistoryAgentSessionsCommand"
         },
         {
+            "command": "history.locate",
+            "method": "HistoryLocateCommand"
+        },
+        {
             "command": "history.usage",
             "method": "HistoryUsageCommand"
         },

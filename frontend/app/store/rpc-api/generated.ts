@@ -275,6 +275,8 @@ import type { HistoryAgentSessions } from "@/types/rpc/HistoryAgentSessions";
 import type { HistoryAgentSessionsReq } from "@/types/rpc/HistoryAgentSessionsReq";
 import type { HistoryAgents } from "@/types/rpc/HistoryAgents";
 import type { HistoryAgentsReq } from "@/types/rpc/HistoryAgentsReq";
+import type { HistoryLocateReq } from "@/types/rpc/HistoryLocateReq";
+import type { HistoryLocation } from "@/types/rpc/HistoryLocation";
 import type { HistoryUsage } from "@/types/rpc/HistoryUsage";
 import type { HistoryUsageReq } from "@/types/rpc/HistoryUsageReq";
 import type { HostSession } from "@/types/rpc/HostSession";
@@ -2092,6 +2094,10 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<HistoryAgentSessions> {
     return client.rpcCall("history.agent_sessions", data, opts);
+  },
+  // command "history.locate"
+  HistoryLocateCommand(client: RpcClient, data: HistoryLocateReq, opts?: RpcOpts): Promise<HistoryLocation> {
+    return client.rpcCall("history.locate", data, opts);
   },
   // command "history.usage"
   HistoryUsageCommand(client: RpcClient, data: HistoryUsageReq, opts?: RpcOpts): Promise<HistoryUsage> {

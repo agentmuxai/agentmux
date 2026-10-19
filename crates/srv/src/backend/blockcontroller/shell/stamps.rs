@@ -66,7 +66,7 @@ pub(crate) fn stamps_for(
     while hi - lo > SEARCH_STOP {
         let mid = lo + (hi - lo) / 2;
         match first_record_after(read, mid, hi)? {
-            Probe::Found { start, off } if off <= first => lo = start,
+            Probe::Found { start, off, .. } if off <= first => lo = start,
             Probe::Found { .. } | Probe::NoneBefore => hi = mid,
             Probe::Unreadable => return Ok(None),
         }
@@ -123,9 +123,47 @@ pub(crate) fn stamps_for(
     ))
 }
 
+/// The byte offset in `output` of the first line received after `at_ms`:
+/// where a reader showing the transcript up to that time stops. `Ok(Some(None))`
+/// when every record is at or before it; `Ok(None)` when bytes it needs aren't
+/// stored. Records rise in time as they do in offset, so a binary search finds
+/// the region; a scan from there finds the record.
+pub(crate) fn byte_after_time(
+    read: &dyn Fn(i64, i64) -> Result<Option<Vec<u8>>, StoreError>,
+    size: i64,
+    at_ms: i64,
+) -> Result<Option<Option<u64>>, StoreError> {
+    let (mut lo, mut hi) = (0i64, size);
+    while hi - lo > SEARCH_STOP {
+        let mid = lo + (hi - lo) / 2;
+        match first_record_after(read, mid, hi)? {
+            Probe::Found { start, ms, .. } if ms <= at_ms => lo = start,
+            Probe::Found { .. } | Probe::NoneBefore => hi = mid,
+            Probe::Unreadable => return Ok(None),
+        }
+    }
+    let mut pos = lo;
+    let mut carry: Vec<u8> = Vec::new();
+    while pos < size {
+        let len = CHUNK.min(size - pos);
+        let Some(chunk) = read(pos, len)? else { return Ok(None) };
+        carry.extend_from_slice(&chunk);
+        pos += len;
+        while let Some(nl) = carry.iter().position(|&b| b == b'\n') {
+            if let Some((off, ms)) = parse(&carry[..nl]) {
+                if ms > at_ms {
+                    return Ok(Some(Some(off)));
+                }
+            }
+            carry.drain(..=nl);
+        }
+    }
+    Ok(Some(parse(&carry).filter(|&(_, ms)| ms > at_ms).map(|(off, _)| off)))
+}
+
 enum Probe {
     /// The first parsable record starting after `pos`.
-    Found { start: i64, off: u64 },
+    Found { start: i64, off: u64, ms: i64 },
     /// No parsable record starts in `[pos, hi)`.
     NoneBefore,
     /// Bytes not stored.
@@ -160,8 +198,8 @@ fn first_record_after(
                 break;
             }
             let Some(len) = buf[rel..].iter().position(|&b| b == b'\n') else { break };
-            if let Some((off, _)) = parse(&buf[rel..rel + len]) {
-                return Ok(Probe::Found { start, off });
+            if let Some((off, ms)) = parse(&buf[rel..rel + len]) {
+                return Ok(Probe::Found { start, off, ms });
             }
             start += len as i64 + 1;
         }

@@ -18,6 +18,8 @@ impl HistoryService {
             .map(|s| crate::backend::rpc_types::HistorySession {
                 bytes: s.ranges.iter().map(|(_, from, to)| (to - from).max(0) as u64).sum(),
                 archived: s.ranges.iter().all(|(zone, _, _)| zone.contains(":archive:")),
+                zone: s.ranges.last().map(|(zone, _, _)| zone.clone()).unwrap_or_default(),
+                end_byte: s.ranges.last().map(|(_, _, end)| (*end).max(0) as u64).unwrap_or(0),
                 session_id: s.session_id,
                 cwd: s.cwd.unwrap_or_default(),
                 first_ms: s.first_ms.max(0) as u64,

@@ -62,6 +62,7 @@ import {
     type TranscriptFileEvent,
 } from "../transcript-cursor";
 import { injectDayDividers } from "./day-dividers";
+import { HistoryNavigator, type HistoryMode } from "./HistoryNavigator";
 import type { DocumentNode, DocumentState, FilterState } from "../types";
 
 /** Lines per fetch. Larger than the live pane's 200 — a reading posture
@@ -121,6 +122,8 @@ export interface AgentHistoryViewProps {
      * gaps and wrong scroll math (zoom > 1). codex P1 on PR #2542.
      */
     zoomFactor?: Accessor<number>;
+    /** The agent's definition id: lists its archived conversations and sessions. */
+    agentId?: string;
 }
 
 export function AgentHistoryView(props: AgentHistoryViewProps) {
@@ -128,6 +131,18 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
     // RPC read below targets. `blockId` itself is reserved for the layout
     // key only.
     const readBlockId = props.sourceBlockId ?? props.blockId;
+
+    // What the reader shows (SPEC_WARDEN_HISTORY_SECTION_2026_10_18.md phase 2):
+    // "live" follows the current conversation; "jumped" shows it up to a chosen
+    // line; "archive" shows a conversation archived by "New conversation". Only
+    // "live" follows new records. `endLine` is where what is loaded ends.
+    const [mode, setMode] = createSignal<HistoryMode>("live");
+    const [archiveZone, setArchiveZone] = createSignal<string | null>(null);
+    const [endLine, setEndLine] = createSignal(0);
+    const src = (): { archive_zone?: string } => {
+        const zone = untrack(archiveZone);
+        return zone ? { archive_zone: zone } : {};
+    };
 
     // The accumulated RAW LINES (+ parallel stamps) of everything this
     // reader shows, and ONE resumable parser that has consumed exactly them.
@@ -217,6 +232,7 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
     let scrollToBottom: ((reason?: string) => void) | undefined;
     const [stale, setStale] = createSignal(false);
     const recover = (): void => {
+        if (untrack(mode) !== "live") return;
         if (untrack(following)) return void load();
         setStale(true);
     };
@@ -231,7 +247,7 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
     // pairs them with its optimistic copy; this reader has none, so they are
     // parsed like any other record.
     const appendRecords = (text: string): void => {
-        if (untrack(stale)) return;
+        if (untrack(stale) || untrack(mode) !== "live") return;
         // The cursor joined a new generation (an archive or restore that
         // recreated the stream without a replace event for this block): these
         // records start another transcript, which must not be parsed onto
@@ -368,6 +384,7 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
                 publishNow();
                 setHistoryOffset(Math.min(offset, typeof resp.total === "number" ? resp.total : offset));
                 setTotalLines(typeof resp.total === "number" ? resp.total : total);
+                setEndLine(typeof resp.total === "number" ? resp.total : total);
                 setLoading(false);
             });
             c.settle(historyPin(offset, resp));
@@ -435,8 +452,129 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
 
     // A stale reader who scrolls back to the bottom gets the newest page.
     createEffect(() => {
-        if (stale() && followingSignal()) void load();
+        if (stale() && followingSignal() && mode() === "live") void load();
     });
+
+    /**
+     * Load what a jump or an archive shows: the page ending at line `end` (the
+     * end when not given), without following. Read through `src()`, so an
+     * archive's own lines.
+     */
+    const loadStatic = async (end?: number): Promise<void> => {
+        const seq = ++loadSeq;
+        cursor?.dispose();
+        cursor = null;
+        const current = (): boolean => seq === loadSeq && !disposed;
+        clearTimeout(publishTimer);
+        publishTimer = undefined;
+        dirty = false;
+        accLines = [];
+        accStamps = [];
+        parser = newParser();
+        batch(() => {
+            setStale(false);
+            setLoading(true);
+            setLoadError(null);
+        });
+        try {
+            const countResp = await RpcApi.BlockfileLineCountCommand(
+                TabRpcClient,
+                { block_id: readBlockId, filename: "output", ...src() },
+                { timeout: 15_000 }
+            );
+            if (!current()) return;
+            const total = countResp?.count ?? 0;
+            const upTo = Math.min(end ?? total, total);
+            const offset = Math.max(0, upTo - HISTORY_PAGE);
+            const resp =
+                upTo > offset
+                    ? await RpcApi.BlockfileReadRangeCommand(
+                          TabRpcClient,
+                          { block_id: readBlockId, filename: "output", offset, limit: upTo - offset, ...src() },
+                          { timeout: 30_000 }
+                      )
+                    : { lines: [] as string[] };
+            if (!current()) return;
+            accLines = resp.lines ?? [];
+            accStamps = stampsOf(resp);
+            parser.feed(accLines, accStamps);
+            batch(() => {
+                publishNow();
+                setHistoryOffset(offset);
+                setEndLine(offset + accLines.length);
+                setTotalLines(total);
+                setLoading(false);
+            });
+            queueMicrotask(() => scrollToBottom?.("history-jump"));
+        } catch (err) {
+            if (!current()) return;
+            batch(() => {
+                setLoadError((err as Error | undefined)?.message ?? String(err));
+                setLoading(false);
+            });
+        }
+    };
+
+    /** The next page after what a jump or an archive shows. */
+    const loadNewer = async (): Promise<void> => {
+        if (untrack(mode) === "live" || loadingOlder()) return;
+        const from = endLine();
+        const total = totalLines();
+        if (from >= total) return;
+        const seq = loadSeq;
+        setLoadingOlder(true);
+        try {
+            const resp = await RpcApi.BlockfileReadRangeCommand(
+                TabRpcClient,
+                {
+                    block_id: readBlockId,
+                    filename: "output",
+                    offset: from,
+                    limit: Math.min(HISTORY_PAGE, total - from),
+                    ...src(),
+                },
+                { timeout: 15_000 }
+            );
+            if (seq !== loadSeq || disposed) return;
+            const lines = resp.lines ?? [];
+            const stamps = stampsOf(resp);
+            parser.feed(lines, stamps);
+            accLines = accLines.concat(lines);
+            accStamps = accStamps.concat(stamps);
+            batch(() => {
+                publishNow();
+                setEndLine(from + lines.length);
+            });
+        } catch {
+            // Non-fatal, as loadOlder: the button stays.
+        } finally {
+            setLoadingOlder(false);
+        }
+    };
+
+    /** Back to following the current conversation, from its newest page. */
+    const backToLatest = async (): Promise<void> => {
+        batch(() => {
+            setMode("live");
+            setArchiveZone(null);
+        });
+        await load();
+        scrollToBottom?.("history-back-to-latest");
+    };
+
+    const openArchive = (zone: string | null): void => {
+        if (!zone) return void backToLatest();
+        batch(() => {
+            setArchiveZone(zone);
+            setMode("archive");
+        });
+        void loadStatic();
+    };
+
+    const jumpTo = (line: number): void => {
+        if (untrack(mode) !== "archive") setMode("jumped");
+        void loadStatic(line);
+    };
 
     onMount(() => {
         const fileSubject = getFileSubject(readBlockId, "output");
@@ -503,7 +641,7 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
             const newOffset = Math.max(0, currentOffset - HISTORY_PAGE);
             const resp = await RpcApi.BlockfileReadRangeCommand(
                 TabRpcClient,
-                { block_id: readBlockId, filename: "output", offset: newOffset, limit: currentOffset - newOffset },
+                { block_id: readBlockId, filename: "output", offset: newOffset, limit: currentOffset - newOffset, ...src() },
                 { timeout: 15_000 }
             );
             // A reload started meanwhile: this page belongs to the old view.
@@ -530,6 +668,17 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
         <div class="agent-history-view">
             <div class="agent-history-header">
                 <div class="agent-history-title">Agent History</div>
+                <HistoryNavigator
+                    agentId={props.agentId}
+                    readBlockId={readBlockId}
+                    mode={mode}
+                    archiveZone={archiveZone}
+                    hasNewer={() => endLine() < totalLines()}
+                    onOpenArchive={openArchive}
+                    onJump={jumpTo}
+                    onShowNewer={() => void loadNewer()}
+                    onLatest={() => void backToLatest()}
+                />
                 <Show when={stale()}>
                     <button type="button" class="agent-history-jump-latest" onClick={() => void jumpToLatest()}>
                         Newer turns — jump to latest
@@ -544,7 +693,9 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
                         ? "loading history…"
                         : loadError()
                             ? `couldn't load history: ${loadError()}`
-                            : historyOffset() === 0 && totalLines() > 0
+                            : mode() !== "live" && totalLines() > 0
+                              ? `${mode() === "archive" ? "archived conversation · " : ""}lines ${historyOffset() + 1}–${endLine()} of ${totalLines()}`
+                              : historyOffset() === 0 && totalLines() > 0
                                 ? "full history loaded"
                                 : totalLines() > 0
                                     ? `${totalLines()} lines · scroll up for earlier`

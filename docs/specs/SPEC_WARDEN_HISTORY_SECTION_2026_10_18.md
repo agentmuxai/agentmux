@@ -1,6 +1,6 @@
 # SPEC: agent history in Warden — the History section
 
-**Status:** active — phase 1 (§4: Agents and Storage, the status bar link, the history tab fix) ships in PR #5116; phases 2 and 3 (§5) are not started.
+**Status:** active — phase 1 (§4: Agents and Storage, the status bar link, the history tab fix) shipped in PR #5116; phase 2 (§5.1: archives, jump to a session or date, session count) ships in the PR that adds §5.1; phase 3 (§5.2) not started.
 **Date:** 2026-10-18
 **Author:** Agent5@narko, at the repo owner's direction
 **Decided by the repo owner (2026-10-18):** history lives in Warden, as a section beside Audit, not as a page of its own ("build it into warden").
@@ -56,7 +56,18 @@ The status bar total's numbers (`history.usage`), larger: the total, one row per
 
 ## 5. Later phases
 
-- **Phase 2, the per-agent view's last phase** (`SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md` §4.5): an archives section in the Agent History view, jump to date, and a session count on the link row. With archives now kept in the global store (#5100), the view can list them.
+### 5.1 Phase 2: the Agent History reader navigates
+
+The per-agent view's last phase (`SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md` §4.5), in the reader's header (`history/HistoryNavigator.tsx`):
+
+- **Conversation:** the current one, or one archived by "New conversation" (`agent:session:list_archives`, which lists the global store since #5100). An archive is read through `blockfile:read_range` / `line_count` with `archive_zone`, refused unless it is an archive of the block's own agent (`history_output_source`), and isn't followed: it doesn't change.
+- **Jump to** a session's end (from the agent's record, `history.agent_sessions`, now with each session's zone and end byte) or the end of a date. `history.locate` turns the byte or time into the line to load up to: a binary search over `output.idx` (`lines_before_byte`) and over `output.tsidx` (`byte_after_time`). The reader shows the conversation up to that line, at the bottom as it always opens; it pages older as before, **Show newer** pages forward, and **Back to latest** follows the current conversation again. Jumping changes no scrolling code: the virtual list still opens at the bottom.
+- **Session count:** "N sessions" for the conversation shown, beside the Jump list. The old spec put it on the live pane's link row; it sits here instead, where sessions are navigated, and the live pane doesn't scan its agent's record when it opens.
+
+The reader has three modes: live (follows), jumped and archive (don't: records appended meanwhile are left to the live mode, which reloads the newest page).
+
+### 5.2 Later
+
 - **Phase 3, with the history store** (`REPORT_AGENT_HISTORY_STORE_DEDUP_COMPRESSION_2026_10_17.md`, not in the repo): Storage shows duplication and what compression saves; an **Integrity** view ("verify history", the last signed checkpoint, what was redacted and when); Audit reads its events from the same store so they survive a restart; deletion, when the user chooses it, is confirmed and recorded.
 
 ## 6. Out of scope

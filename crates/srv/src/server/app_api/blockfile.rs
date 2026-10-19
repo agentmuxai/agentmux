@@ -30,8 +30,14 @@ fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // report 0 lines and the pane would render empty. Count from the
                 // agent's GLOBAL transcript zone instead. See
                 // `docs/analysis/ANALYSIS_CROSS_CHANNEL_CONVERSATION_HISTORY_2026_06_14.md`.
-                if let Some((gfs, zone)) =
-                    global_output_source(&filestore, &global_store, &mstore, &cmd.block_id, &cmd.filename)
+                if let Some((gfs, zone)) = history_output_source(
+                    &filestore,
+                    &global_store,
+                    &mstore,
+                    &cmd.block_id,
+                    &cmd.filename,
+                    cmd.archive_zone.as_deref(),
+                )?
                 {
                     // Blocking pool (#2841). A counted zone answers from its
                     // counter (O(1), Phase 5a-3); a zone without an epoch gets
@@ -130,6 +136,45 @@ fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 }
 
+/// Where a block's transcript is read from: with `archive_zone`, that
+/// archived conversation of the block's agent (in the global store, or the
+/// per-channel store for an archive written before archives moved there),
+/// refused unless it is one of that agent's own archives; otherwise the
+/// global current zone, as [`global_output_source`].
+pub(crate) fn history_output_source(
+    per_channel: &Arc<crate::backend::storage::filestore::FileStore>,
+    global: &Option<Arc<crate::backend::storage::filestore::FileStore>>,
+    mstore: &Arc<crate::backend::storage::store::Store>,
+    block_id: &str,
+    filename: &str,
+    archive_zone: Option<&str>,
+) -> Result<Option<(Arc<crate::backend::storage::filestore::FileStore>, String)>, String> {
+    let Some(zone) = archive_zone else {
+        return Ok(global_output_source(per_channel, global, mstore, block_id, filename));
+    };
+    let refuse = || format!("{zone:?} is not an archived conversation of this block's agent");
+    let agent_id = mstore
+        .get::<Block>(block_id)
+        .ok()
+        .flatten()
+        .map(|b| crate::backend::obj::meta_get_string(&b.meta, "agentId", ""))
+        .ok_or_else(refuse)?;
+    let own = crate::backend::agent_session::is_valid_definition_id(&agent_id)
+        && filename == crate::backend::agent_session::OUTPUT_FILE
+        && zone
+            .strip_prefix(&format!("agent:{agent_id}:archive:"))
+            .is_some_and(|ms| !ms.is_empty() && ms.bytes().all(|b| b.is_ascii_digit()));
+    if !own {
+        return Err(refuse());
+    }
+    for store in global.iter().chain(std::iter::once(per_channel)) {
+        if matches!(store.stat(zone, filename), Ok(Some(_))) {
+            return Ok(Some((store.clone(), zone.to_string())));
+        }
+    }
+    Err(format!("archived conversation {zone} not found"))
+}
+
 fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker = state.broker.clone();
     let filestore = state.filestore.clone();
@@ -167,7 +212,7 @@ pub(crate) async fn read_range(
     // (`agent:<defId>:current`) instead. `read_block` is the zone for
     // every FileStore call below — the local block_id normally, the
     // agent zone when the agent ran in another build/channel.
-    let source = global_output_source(&filestore, &global_store, &mstore, &cmd.block_id, &cmd.filename);
+    let source = history_output_source(&filestore, &global_store, &mstore, &cmd.block_id, &cmd.filename, cmd.archive_zone.as_deref())?;
     let stream = match &source {
         Some((_, zone)) => format!("g:{zone}"),
         None => format!("b:{}", cmd.block_id),

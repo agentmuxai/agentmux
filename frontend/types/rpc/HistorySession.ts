@@ -19,4 +19,9 @@ bytes: number,
 /**
  * All of it is in archived conversations.
  */
-archived: boolean, };
+archived: boolean, 
+/**
+ * The zone holding its last lines, and the byte where they end: where
+ * the Agent History view's "Jump to" loads up to (`history.locate`).
+ */
+zone: string, end_byte: number, };

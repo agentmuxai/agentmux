@@ -57,6 +57,7 @@ export function AgentHistoryTabView({ model }: { model: AgentViewModel }): JSX.E
                 outputFormat={outputFormat}
                 agentName={agentName}
                 zoomFactor={zoomFactor}
+                agentId={(block()?.meta?.["agent:historyTabFor"] as string | undefined) ?? (block()?.meta?.["agentId"] as string | undefined)}
             />
         </div>
     );

@@ -3,4 +3,11 @@
 /**
  * Request for blockfile:line_count — count total lines in a blockfile.
  */
-export type CommandBlockfileLineCountData = { block_id: string, filename: string, };
+export type CommandBlockfileLineCountData = { block_id: string, filename: string, 
+/**
+ * Read this archived conversation of the block's agent
+ * (`agent:<agentId>:archive:<ms>`, from `agent:session:list_archives`)
+ * instead of its current one. The Agent History view's archives. Refused
+ * unless it names an archive of the agent in the block's own `agentId`.
+ */
+archive_zone?: string, };
