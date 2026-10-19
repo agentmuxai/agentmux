@@ -7,13 +7,14 @@
 // itself with useHiddenTabMarker. REPORT_BROWSER_PANE_GREY_HOLE_RCA_2026_10_18.md.
 
 import { cleanup, render } from "@solidjs/testing-library";
-import { createSignal } from "solid-js";
+import { createSignal, type Accessor, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 vi.mock("@/app/platform/ipc", () => ({ invokeCommand: vi.fn(() => Promise.resolve()) }));
 vi.mock("@/store/global", () => ({ getSettingsKeyAtom: () => () => undefined }));
 
+import { PaneStackMemberActiveProvider } from "@/app/tab/pane-stack-member";
 import { WindowTabDisplayedProvider } from "@/app/workspace/window-tab-visibility";
 import { __autoOverlayRectCount, __overlayRectCount, useHiddenTabMarker, usePaneOverlay } from "./pane-overlay";
 import { startPaneOverlayAutoService } from "./pane-overlay-auto";
@@ -32,79 +33,88 @@ function Overlay(p: { el: HTMLElement }) {
     return null;
 }
 
-describe("usePaneOverlay and the window tab's displayed state", () => {
+// The two owners an overlay can be hidden with: its window tab, or its member of
+// a keep-alive pane stack. Both are read from context.
+const owners: { name: string; Provider: (p: { value: Accessor<boolean>; children: JSX.Element }) => JSX.Element }[] = [
+    { name: "window tab", Provider: (p) => <WindowTabDisplayedProvider value={p.value}>{p.children}</WindowTabDisplayedProvider> },
+    { name: "pane-stack member", Provider: (p) => <PaneStackMemberActiveProvider value={p.value}>{p.children}</PaneStackMemberActiveProvider> },
+];
+
+describe("overlays and the shown state of the tab or pane-stack member they came from", () => {
     afterEach(() => {
         cleanup();
         document.body.innerHTML = "";
     });
 
-    test("no hole while the tab is hidden; the hole appears when it is shown and goes when hidden again", () => {
-        const [displayed, setDisplayed] = createSignal(false);
-        const before = __overlayRectCount();
-        const el = makeEl();
-        render(() => (
-            <WindowTabDisplayedProvider value={displayed}>
-                <Overlay el={el} />
-            </WindowTabDisplayedProvider>
-        ));
-        expect(__overlayRectCount()).toBe(before);
+    for (const { name, Provider } of owners) {
+        test(`usePaneOverlay: no hole while its ${name} is hidden; the hole appears when shown and goes when hidden again`, () => {
+            const [shown, setShown] = createSignal(false);
+            const before = __overlayRectCount();
+            const el = makeEl();
+            render(() => (
+                <Provider value={shown}>
+                    <Overlay el={el} />
+                </Provider>
+            ));
+            expect(__overlayRectCount()).toBe(before);
 
-        setDisplayed(true);
-        expect(__overlayRectCount()).toBe(before + 1);
+            setShown(true);
+            expect(__overlayRectCount()).toBe(before + 1);
 
-        setDisplayed(false);
-        expect(__overlayRectCount()).toBe(before);
-    });
+            setShown(false);
+            expect(__overlayRectCount()).toBe(before);
+        });
 
-    test("a Portal-mounted data-pane-overlay (tooltip, menu) drops its auto-discovered hole while its window tab is hidden", async () => {
-        // The auto service runs on Windows only, and needs ResizeObserver and a real box.
-        const ua = vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
-        vi.stubGlobal(
-            "ResizeObserver",
-            class {
-                observe(): void {}
-                unobserve(): void {}
-                disconnect(): void {}
-            },
-        );
-        const box = vi
-            .spyOn(HTMLElement.prototype, "getBoundingClientRect")
-            .mockReturnValue({ left: 10, top: 20, width: 100, height: 50, x: 10, y: 20, right: 110, bottom: 70, toJSON: () => ({}) } as DOMRect);
-        const flushObservers = () => new Promise((resolve) => setTimeout(resolve, 0));
-        startPaneOverlayAutoService();
-
-        function PortalOverlay() {
-            const hiddenTab = useHiddenTabMarker();
-            return (
-                <Portal>
-                    <div data-pane-overlay data-window-tab-hidden={hiddenTab()} />
-                </Portal>
+        test(`a Portal-mounted data-pane-overlay (tooltip, menu) drops its auto-discovered hole while its ${name} is hidden`, async () => {
+            // The auto service runs on Windows only, and needs ResizeObserver and a real box.
+            const ua = vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+            vi.stubGlobal(
+                "ResizeObserver",
+                class {
+                    observe(): void {}
+                    unobserve(): void {}
+                    disconnect(): void {}
+                },
             );
-        }
-        const [displayed, setDisplayed] = createSignal(true);
-        const before = __autoOverlayRectCount();
-        render(() => (
-            <WindowTabDisplayedProvider value={displayed}>
-                <PortalOverlay />
-            </WindowTabDisplayedProvider>
-        ));
-        await flushObservers();
-        expect(__autoOverlayRectCount()).toBe(before + 1);
+            const box = vi
+                .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+                .mockReturnValue({ left: 10, top: 20, width: 100, height: 50, x: 10, y: 20, right: 110, bottom: 70, toJSON: () => ({}) } as DOMRect);
+            const flushObservers = () => new Promise((resolve) => setTimeout(resolve, 0));
+            startPaneOverlayAutoService();
 
-        setDisplayed(false);
-        await flushObservers();
-        expect(__autoOverlayRectCount()).toBe(before);
+            function PortalOverlay() {
+                const hiddenTab = useHiddenTabMarker();
+                return (
+                    <Portal>
+                        <div data-pane-overlay data-window-tab-hidden={hiddenTab()} />
+                    </Portal>
+                );
+            }
+            const [shown, setShown] = createSignal(true);
+            const before = __autoOverlayRectCount();
+            render(() => (
+                <Provider value={shown}>
+                    <PortalOverlay />
+                </Provider>
+            ));
+            await flushObservers();
+            expect(__autoOverlayRectCount()).toBe(before + 1);
 
-        setDisplayed(true);
-        await flushObservers();
-        expect(__autoOverlayRectCount()).toBe(before + 1);
+            setShown(false);
+            await flushObservers();
+            expect(__autoOverlayRectCount()).toBe(before);
 
-        ua.mockRestore();
-        box.mockRestore();
-        vi.unstubAllGlobals();
-    });
+            setShown(true);
+            await flushObservers();
+            expect(__autoOverlayRectCount()).toBe(before + 1);
 
-    test("outside any window tab (a floating window) the overlay always clips", () => {
+            ua.mockRestore();
+            box.mockRestore();
+            vi.unstubAllGlobals();
+        });
+    }
+
+    test("outside any window tab or pane stack (a floating window) the overlay always clips", () => {
         const before = __overlayRectCount();
         const { unmount } = render(() => <Overlay el={makeEl()} />);
         expect(__overlayRectCount()).toBe(before + 1);

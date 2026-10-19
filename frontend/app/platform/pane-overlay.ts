@@ -17,6 +17,7 @@
 
 import { getApi } from "@/app/store/app-api";
 import { anyPaneIntersects, getPaneRect, paneCount } from "@/app/platform/pane-rect-registry";
+import { usePaneStackMemberActive } from "@/app/tab/pane-stack-member";
 import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
 import { createEffect, on, onCleanup, onMount, type Accessor } from "solid-js";
 
@@ -37,15 +38,25 @@ export function isInHiddenPaneTab(el: Element): boolean {
 }
 
 /**
+ * Whether the window tab and pane-stack member a component was rendered from
+ * are both shown. Read from context, so it holds through a Portal too.
+ */
+function useOwnerShown(): Accessor<boolean> {
+    const tabDisplayed = useWindowTabDisplayed();
+    const memberActive = usePaneStackMemberActive();
+    return () => tabDisplayed() && memberActive();
+}
+
+/**
  * The `data-window-tab-hidden` value for a `data-pane-overlay` element that
- * renders through a Portal: under `document.body` it has no hidden-tab
- * ancestor, so it marks itself while the window tab it was opened from isn't
- * displayed. Call in the component's scope:
+ * renders through a Portal: under `document.body` it has no hidden-tab or
+ * dormant-slot ancestor, so it marks itself while the window tab or pane-stack
+ * member it was opened from isn't shown. Call in the component's scope:
  * `data-window-tab-hidden={hiddenTab()}`.
  */
 export function useHiddenTabMarker(): Accessor<"" | undefined> {
-    const displayed = useWindowTabDisplayed();
-    return () => (displayed() ? undefined : "");
+    const shown = useOwnerShown();
+    return () => (shown() ? undefined : "");
 }
 
 // Every registered overlay's re-measure, and the auto service's sweep. Hiding
@@ -465,15 +476,15 @@ export function usePaneOverlay(getEl: Accessor<HTMLElement | null | undefined>, 
     const id = nextOverlayId++;
     if (opts?.keys) keyOverlays.add(id);
     // The context reaches an overlay rendered through a Portal too, where the
-    // DOM marker check below can't see its tab.
-    const tabDisplayed = useWindowTabDisplayed();
+    // DOM marker check below can't see its tab or pane-stack member.
+    const ownerShown = useOwnerShown();
     const update = (): void => {
         const el = getEl();
         if (!el) return;
         const rect = rectFromElement(el);
         // A collapsed box, or one in a hidden tab or a dormant pane-stack
         // member, contributes no hole — drop the entry rather than send it.
-        const shown = tabDisplayed() && el.isConnected && !isInHiddenPaneTab(el);
+        const shown = ownerShown() && el.isConnected && !isInHiddenPaneTab(el);
         if (shown && rect.w > 0 && rect.h > 0) {
             overlayRects.set(id, rect);
         } else {
@@ -481,7 +492,7 @@ export function usePaneOverlay(getEl: Accessor<HTMLElement | null | undefined>, 
         }
         sendClip();
     };
-    createEffect(on(tabDisplayed, () => update(), { defer: true }));
+    createEffect(on(ownerShown, () => update(), { defer: true }));
     let observer: ResizeObserver | undefined;
     let styleObserver: MutationObserver | undefined;
     onMount(() => {

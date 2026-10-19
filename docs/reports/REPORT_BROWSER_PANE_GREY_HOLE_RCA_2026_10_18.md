@@ -125,12 +125,15 @@ closed on its own.
      `visibility: visible`, and it isn't fooled by `content-visibility: hidden`,
      which leaves descendants' computed visibility `visible`.
    - An overlay rendered through a Portal sits under `document.body`, outside
-     its tab's DOM, so no marker is above it. `usePaneOverlay` reads
-     `useWindowTabDisplayed()` instead: the window tab's displayed state that
-     views already use to pause while hidden (`window-tab-visibility.ts`,
-     `pane-tab-visibility.ts`).
-   - The Portal-mounted `data-pane-overlay` elements mark themselves while
-     their window tab isn't displayed (`useHiddenTabMarker()`): the tooltip,
+     its tab's DOM, so no marker is above it. `usePaneOverlay` reads context
+     instead:
+     - `useWindowTabDisplayed()`, the window tab's displayed state that views
+       already use to pause while hidden (`window-tab-visibility.ts`);
+     - `usePaneStackMemberActive()`, which each keep-alive slot provides for
+       its member, combined with any outer stack (`pane-stack-member.ts`).
+   - The Portal-mounted `data-pane-overlay` elements mark themselves while the
+     window tab or pane-stack member they came from isn't shown
+     (`useHiddenTabMarker()`): the tooltip,
      popover menu, anchored popover, flyout menu and submenu, and the agent
      pane's peek overlay. Overlays in the window's own chrome (the More
      dropdown, pinned-widget flyout, tab context panel) never sit in a tab and
@@ -166,7 +169,7 @@ closed on its own.
 - `usePaneOverlay` cuts no hole while its window tab isn't displayed, cuts one
   when the tab is shown, and drops it when the tab is hidden again. Outside any
   window tab, it always clips.
-- With the Windows auto service running, a Portal-mounted `data-pane-overlay`
+- For both owners (a window tab and a pane-stack member), with the Windows auto service running, a Portal-mounted `data-pane-overlay`
   drops its hole when its window tab is hidden and gets it back when the tab is
   shown again.
 - Every one of these tests fails with the check disabled.
