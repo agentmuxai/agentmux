@@ -230,6 +230,7 @@ async function attempt(args, ctx) {
     // The instance has its own process group on macOS and Linux, so Ctrl-C reaches only the lab: end the instance first.
     const interrupted = async () => {
         await instance.stop();
+        if (diskLoad) await diskLoad.stop(); // and its files
         process.exit(130);
     };
     process.once("SIGINT", interrupted);

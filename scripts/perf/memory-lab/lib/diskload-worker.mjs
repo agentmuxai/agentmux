@@ -26,6 +26,13 @@ let fileNo = 0;
 let fd = null;
 let inFile = 0;
 
+// A lab that died without stopping the writer (killed, crashed) leaves its files: the writer removes them as it goes.
+const leave = () => {
+    if (fd !== null) closeSync(fd);
+    rmSync(dir, { recursive: true, force: true });
+    process.exit(0);
+};
+
 const parentAlive = () => {
     try {
         process.kill(Number(parentPid), 0);
@@ -42,7 +49,7 @@ for (;;) {
             fd = null;
         }
         console.log(`written ${written}`);
-        if (!parentAlive()) process.exit(0);
+        if (!parentAlive()) leave();
         await new Promise((r) => setTimeout(r, 1000));
         continue;
     }
@@ -64,7 +71,7 @@ for (;;) {
     if (now - lastReport >= 1000) {
         console.log(`written ${written}`);
         lastReport = now;
-        if (!parentAlive()) process.exit(0);
+        if (!parentAlive()) leave();
     }
     const wait = sleepNeededMs(written, now - started, mbps);
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
