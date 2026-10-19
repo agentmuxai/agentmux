@@ -165,6 +165,15 @@ pub fn snapshot() -> std::io::Result<Vec<ProcInfo>> {
     Ok(out)
 }
 
+/// `ri_diskio_byteswritten` of `proc_pid_rusage`: the bytes the process has written to disk. Same user only.
+pub fn write_bytes(pid: u32) -> Option<u64> {
+    let mut usage: libc::rusage_info_v2 = unsafe { zeroed() };
+    let ok = unsafe {
+        libc::proc_pid_rusage(pid as c_int, libc::RUSAGE_INFO_V2, (&mut usage as *mut libc::rusage_info_v2).cast())
+    } == 0;
+    ok.then_some(usage.ri_diskio_byteswritten)
+}
+
 /// `KERN_PROCARGS2`: argc, the executable path, padding, then argv. Same user
 /// only.
 pub fn command_line(pid: u32) -> Option<String> {

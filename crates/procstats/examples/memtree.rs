@@ -25,7 +25,6 @@
 // processes more than once; the run ends with `footprint`'s own total over the
 // same processes, which counts each once.
 
-#[cfg(target_os = "linux")]
 use agentmux_procstats::is_running;
 use agentmux_procstats::{base_name, command_line_of, snapshot, ProcInfo, ProcKey, MEMORY_METRIC};
 use std::collections::{HashMap, HashSet};
@@ -271,6 +270,10 @@ struct Row {
     uss: Option<u64>,
     /// User + kernel CPU time so far, in nanoseconds (cumulative; a rate needs two samples).
     cpu_ns: Option<u64>,
+    /// Bytes written so far (cumulative; what the OS counts is in `procstats::write_bytes`).
+    write_bytes: Option<u64>,
+    /// Tells this process from a later one that reuses its PID (see `ProcInfo::start_key`).
+    start_key: u64,
 }
 
 fn esc(s: &str) -> String {
@@ -457,6 +460,15 @@ fn main() {
                 pss,
                 uss,
                 cpu_ns: p.cpu_ns,
+                // Read by PID, so only counted when the process is still the one the sample saw before and after the read:
+                // a PID reused in between would hand back the successor's lifetime total.
+                write_bytes: if is_running(p.key()) {
+                    let v = agentmux_procstats::write_bytes(p.pid);
+                    if is_running(p.key()) { v } else { None }
+                } else {
+                    None
+                },
+                start_key: p.start_key,
             });
         }
         let (mut app, mut child) = (Totals::default(), Totals::default());
@@ -472,8 +484,8 @@ fn main() {
                 .iter()
                 .map(|r| {
                     format!(
-                        "{{\"pid\":{},\"name\":\"{}\",\"role\":\"{}\",\"app\":{},\"private\":{},\"resident\":{},\"commit\":{},\"pss\":{},\"uss\":{},\"cpu_ns\":{}}}",
-                        r.pid, esc(&r.name), esc(&r.role), r.app, opt(r.private), opt(r.resident), opt(r.commit), opt(r.pss), opt(r.uss), opt(r.cpu_ns)
+                        "{{\"pid\":{},\"name\":\"{}\",\"role\":\"{}\",\"app\":{},\"private\":{},\"resident\":{},\"commit\":{},\"pss\":{},\"uss\":{},\"cpu_ns\":{},\"write_bytes\":{},\"start_key\":{}}}",
+                        r.pid, esc(&r.name), esc(&r.role), r.app, opt(r.private), opt(r.resident), opt(r.commit), opt(r.pss), opt(r.uss), opt(r.cpu_ns), opt(r.write_bytes), r.start_key
                     )
                 })
                 .collect();

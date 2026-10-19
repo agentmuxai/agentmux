@@ -52,6 +52,9 @@ mod os {
     pub fn start_key(_pid: u32) -> Option<u64> {
         None
     }
+    pub fn write_bytes(_pid: u32) -> Option<u64> {
+        None
+    }
     pub fn cpu_count() -> usize {
         std::thread::available_parallelism()
             .map(|n| n.get())
@@ -161,6 +164,15 @@ pub fn command_line_of(key: ProcKey) -> Option<String> {
     (os::start_key(key.pid)? == key.start_key).then_some(line)
 }
 
+/// Bytes this process has written so far (cumulative; a rate needs two reads), read on demand.
+/// Windows: the bytes it passed to write calls (`WriteTransferCount`, which includes writes that
+/// stay in the cache). Linux: the bytes it sent to storage (`write_bytes` in `/proc/<pid>/io`).
+/// macOS: the bytes it wrote to disk (`ri_diskio_byteswritten`). `None` when the OS won't say
+/// (the process has exited, or belongs to another user).
+pub fn write_bytes(pid: u32) -> Option<u64> {
+    os::write_bytes(pid)
+}
+
 /// Logical CPUs on the whole machine — what "percent of the machine" divides
 /// by (every processor group on Windows).
 pub fn cpu_count() -> usize {
@@ -242,6 +254,27 @@ mod tests {
             mem_resident: None,
             mem_commit: None,
         }
+    }
+
+    #[test]
+    fn this_process_reports_the_bytes_it_has_written() {
+        let me = std::process::id();
+        let before = write_bytes(me);
+        // macOS and Linux count what reaches storage, which a test can't force; Windows counts what is passed to write calls.
+        #[cfg(windows)]
+        {
+            use std::io::Write;
+            let path = std::env::temp_dir().join(format!("procstats-write-{me}.bin"));
+            let mut f = std::fs::File::create(&path).unwrap();
+            f.write_all(&vec![7u8; 4 * 1024 * 1024]).unwrap();
+            f.sync_all().unwrap();
+            drop(f);
+            let _ = std::fs::remove_file(&path);
+            let after = write_bytes(me).expect("write counters");
+            assert!(after >= before.expect("write counters") + 4 * 1024 * 1024, "{before:?} -> {after}");
+        }
+        #[cfg(not(windows))]
+        let _ = before;
     }
 
     #[test]

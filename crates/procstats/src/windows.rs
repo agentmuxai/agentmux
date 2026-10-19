@@ -211,6 +211,21 @@ pub fn start_key(pid: u32) -> Option<u64> {
     }
 }
 
+/// `GetProcessIoCounters(WriteTransferCount)`: the bytes the process has passed to write calls.
+pub fn write_bytes(pid: u32) -> Option<u64> {
+    use windows_sys::Win32::System::Threading::{GetProcessIoCounters, IO_COUNTERS};
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if h.is_null() {
+            return None;
+        }
+        let mut counters: IO_COUNTERS = std::mem::zeroed();
+        let ok = GetProcessIoCounters(h, &mut counters) != 0;
+        CloseHandle(h);
+        ok.then_some(counters.WriteTransferCount)
+    }
+}
+
 pub fn cpu_count() -> usize {
     unsafe { GetActiveProcessorCount(ALL_PROCESSOR_GROUPS) as usize }
 }

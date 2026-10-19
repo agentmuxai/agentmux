@@ -166,10 +166,14 @@ export function wallSummary(roundMs) {
 }
 
 /** A markdown table of a run's CPU seconds per group and its round times. */
-export function cpuTable(cpu, wall) {
+export function cpuTable(cpu, wall, io = null) {
     const lines = ["| group | CPU seconds |", "|---|---:|"];
     for (const g of GROUPS) if (cpu.seconds[g]) lines.push(`| ${g} | ${cpu.seconds[g]} |`);
     lines.push(`| **app total** | **${cpu.seconds.app}** |`);
+    if (io) {
+        const mbOrNA = (v) => (v == null ? "n/a" : `${v} MB`);
+        lines.push("", `Bytes written during the workload: srv ${mbOrNA(io.writtenMB.srv)}, renderers ${mbOrNA(io.writtenMB.renderer)}, app total ${mbOrNA(io.writtenMB.app)}${io.incompleteGroups?.length ? ` (n/a: a process in ${io.incompleteGroups.filter((g) => g !== "app").join(", ")} gave no counter)` : ""}.`);
+    }
     lines.push("", `Round time (send to all agents idle): median ${wall.medianMs ?? "n/a"} ms, slowest ${wall.maxMs ?? "n/a"} ms, ${wall.untimedRounds} of ${wall.roundMs.length} rounds not timed.`);
     return lines.join("\n");
 }
@@ -185,7 +189,7 @@ export const SLOW_COMMAND_MS = 10_000;
  * CPU and the round time move more (measured spread of identical runs: about 5%,
  * 3%, 13% and 15%).
  */
-export const DEFAULT_MARGINS = { cpuPct: { app: 10, srv: 10, default: 20 }, wallPct: 20 };
+export const DEFAULT_MARGINS = { cpuPct: { app: 10, srv: 10, default: 20 }, wallPct: 20, writtenPct: 10 };
 
 /** The CPU margin of a group; a single number means every group. */
 const marginFor = (margins, group) => {
@@ -228,7 +232,8 @@ export function compareRuns(baseRuns, headRuns, margins = DEFAULT_MARGINS) {
         .filter(([, r]) => r.slowestEvalMs > SLOW_COMMAND_MS)
         .map(([side, r]) => ({ side, label: r.label, ms: r.slowestEvalMs }));
     const lock = metric("store lock", "ms", (r) => r.storeLock?.longestHeldMs);
-    return { rows, wall, slow, lock, margins, baseRuns: baseRuns.length, headRuns: headRuns.length };
+    const written = metric("srv written", "MB", (r) => r.io?.writtenMB?.srv, margins.writtenPct ?? DEFAULT_MARGINS.writtenPct);
+    return { rows, wall, slow, lock, written, margins, baseRuns: baseRuns.length, headRuns: headRuns.length };
 }
 
 /** A markdown table of `compareRuns`: memory and CPU side by side, then the round time. */
@@ -247,6 +252,10 @@ export function runsTable(cmp, baseLabel = "base", headLabel = "head") {
     }
     const w = cmp.wall;
     lines.push("", `Round time (send to all agents idle), median: ${baseLabel} ${f(w.base.median)} ms${range(w.base)}, ${headLabel} ${f(w.head.median)} ms${range(w.head)}, ${sign(w.pct)}${w.flagged ? ` (over +${w.marginPct}%)` : ""}.`);
+    const wr = cmp.written;
+    if (wr && (wr.base.n || wr.head.n)) {
+        lines.push("", `Bytes srv wrote during the workload (report only; what the OS counts is in result.io.note): ${baseLabel} ${f(wr.base.median)} MB${range(wr.base)}, ${headLabel} ${f(wr.head.median)} MB${range(wr.head)}${wr.pct == null ? "" : `, ${sign(wr.pct)}`}${wr.flagged ? ` (over +${wr.marginPct}%)` : ""}.`);
+    }
     const l = cmp.lock;
     if (l && (l.base.n || l.head.n)) {
         lines.push("", `Longest hold of srv's transcript store connection (report only; every store write waits for it): ${baseLabel} ${f(l.base.median)} ms${range(l.base)}, ${headLabel} ${f(l.head.median)} ms${range(l.head)}${l.pct == null ? "" : `, ${sign(l.pct)}`}. A hold of 0 means none reached the 500 ms srv logs.`);
