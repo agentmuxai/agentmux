@@ -1,6 +1,6 @@
 # SPEC: The browser pane's thin bar puts Bookmarks on the right with a line between its rows, and its menus stay inside the pane
 
-**Status:** active — built in #PRNUM (T1 and T2 together); live check in a dev build pending.
+**Status:** active — built in #5153 (T1 and T2 together, plus §5.5); tried by the operator in a dev build on 2026-10-18.
 **Author:** Korp@narko, 2026-10-18, at the operator's request
 **Trigger (operator, 2026-10-18):** "in the browser pane also, 2 changes: when in responsive mode (thin) have the bookmarks button on the right of the address bar, to the left of profiles. On normal, it would be on the left. Lets also add a design line over the break on thin-view so there is some design continuouity, there should be a best practice. Second thing is that unlike other panels, the browser pane panels should stay within the bounds of the pane (as much as possible, if it is pushed out by a pane being thin, that is ok, but it should make best attempt) under normal conditions, the profile would open into the left (from the right) (as opposed to into the ight which currently happens. wirte a spec to file"
 **Builds on:** `SPEC_BROWSER_PANE_NAV_BAR_RESPONSIVE_AND_CHROME_ZOOM_2026_10_14.md` (the two layouts, one DOM, the 388px breakpoint), `SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md` (the Profile menu), `SPEC_BROWSER_PANE_BOOKMARKS_AND_GO_ICON_2026_08_22.md` (the Bookmarks menu), `SPEC_MENU_PAINTABLE_AREA_GUARD_2026_05_20.md` (`computeMenuPosition`, the one positioning path every DOM menu uses).
