@@ -218,6 +218,7 @@ fn register_session_archive_handler(engine: &Arc<WshRpcEngine>, state: &AppState
                             &cmd.block_id,
                             crate::backend::mps::FILE_OP_DELETE,
                             &filestore,
+                            &mstore,
                         );
                         Ok::<_, String>(archived)
                     })?;
@@ -265,6 +266,7 @@ fn register_session_restore_handler(engine: &Arc<WshRpcEngine>, state: &AppState
                             &cmd.block_id,
                             crate::backend::mps::FILE_OP_REPLACE,
                             &filestore,
+                            &mstore,
                         );
                         Ok::<_, String>(restored)
                     })?;

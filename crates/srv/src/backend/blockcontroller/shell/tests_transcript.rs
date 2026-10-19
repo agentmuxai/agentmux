@@ -59,6 +59,10 @@ fn pos_of<'a>(ev: &'a mps::WSFileEventData, prefix: &str) -> &'a mps::StreamPos 
     ev.pos.iter().find(|p| p.stream.starts_with(prefix)).unwrap_or_else(|| panic!("no {prefix} position in {ev:?}"))
 }
 
+fn mem_store() -> crate::backend::storage::store::Store {
+    crate::backend::storage::store::Store::open_in_memory().unwrap()
+}
+
 fn gen_of(fs: &FileStore, zone: &str) -> String {
     fs.line_state(zone, "output").unwrap().unwrap().counted.unwrap().gen
 }
@@ -249,9 +253,9 @@ fn a_replaced_or_deleted_transcript_is_announced_with_its_new_generation() {
     let (broker, rec, fs, _gfs) = setup(block);
     fs.make_file(block, "output", Default::default(), Default::default()).unwrap();
     fs.write_file(block, "output", b"{\"a\":1}\n{\"b\":2}\n").unwrap();
-    crate::backend::transcript::append::publish_transcript_changed(&broker, block, mps::FILE_OP_REPLACE, &fs);
+    crate::backend::transcript::append::publish_transcript_changed(&broker, block, mps::FILE_OP_REPLACE, &fs, &mem_store());
     fs.delete_files(block, &["output"]).unwrap();
-    crate::backend::transcript::append::publish_transcript_changed(&broker, block, mps::FILE_OP_DELETE, &fs);
+    crate::backend::transcript::append::publish_transcript_changed(&broker, block, mps::FILE_OP_DELETE, &fs, &mem_store());
 
     let seen = rec.seen.lock().unwrap();
     let (replaced, deleted) = (&seen[0].0, &seen[1].0);
@@ -279,7 +283,7 @@ fn an_append_during_a_replace_is_published_after_it() {
                 holding.send(()).unwrap();
                 std::thread::sleep(std::time::Duration::from_millis(150));
                 fs.write_file(block, "output", b"{\"new\":1}\n").unwrap();
-                crate::backend::transcript::append::publish_transcript_changed(&broker, block, mps::FILE_OP_REPLACE, &fs);
+                crate::backend::transcript::append::publish_transcript_changed(&broker, block, mps::FILE_OP_REPLACE, &fs, &mem_store());
             })
         })
     };
@@ -345,4 +349,97 @@ fn without_a_filestore_the_event_still_goes_out_without_positions() {
     assert_eq!(seen.len(), 1);
     assert!(seen[0].0.pos.is_empty());
     assert_eq!(seen[0].0.offset, None);
+}
+
+// ---- single copy: SPEC_AGENT_TRANSCRIPT_SINGLE_COPY_2026_10_19.md step B ----
+
+use crate::backend::transcript::append::append_transcript_with;
+
+fn has_output(fs: &FileStore, zone: &str) -> bool {
+    fs.stat(zone, "output").unwrap().is_some_and(|f| f.size > 0)
+}
+
+#[test]
+fn with_single_copy_a_defined_agent_is_written_to_its_zone_only() {
+    let block = "blk-single";
+    let (broker, rec, fs, gfs) = setup(block);
+    append_transcript_with(at(&broker), block, b"{\"a\":1}\n{\"b\":2}\n", Some(&fs), Some((&gfs, ZONE)), true, None, true);
+    append_transcript_with(at(&broker), block, b"{\"c\":3}\n", Some(&fs), Some((&gfs, ZONE)), true, None, true);
+    assert!(!has_output(&fs, block), "nothing in the block's own store");
+    assert!(fs.stat(block, "output.tsidx").unwrap().is_none(), "nor its sidecar");
+    assert_eq!(gfs.read_file(ZONE, "output").unwrap().unwrap(), b"{\"a\":1}\n{\"b\":2}\n{\"c\":3}\n");
+    assert!(gfs.stat(ZONE, "output.tsidx").unwrap().is_some(), "the zone keeps its sidecar");
+    let seen = rec.seen.lock().unwrap();
+    assert_eq!(seen.len(), 2);
+    for (ev, _) in seen.iter() {
+        assert!(ev.pos.iter().all(|p| p.stream.starts_with("g:")), "only the zone's position: {ev:?}");
+        assert_eq!(ev.offset, None);
+    }
+    let (e0, e1) = (&seen[0].0, &seen[1].0);
+    assert_eq!((pos_of(e0, "g:").line, pos_of(e0, "g:").lines), (0, 2));
+    assert_eq!((pos_of(e1, "g:").line, pos_of(e1, "g:").lines), (2, 3));
+}
+
+#[test]
+fn without_the_setting_both_copies_are_written_as_before() {
+    let block = "blk-both";
+    let (broker, rec, fs, gfs) = setup(block);
+    append_transcript_with(at(&broker), block, b"{\"a\":1}\n", Some(&fs), Some((&gfs, ZONE)), true, None, false);
+    assert!(has_output(&fs, block) && has_output(&gfs, ZONE));
+    let seen = rec.seen.lock().unwrap();
+    assert_eq!(seen[0].0.offset, Some(0));
+    assert_eq!(seen[0].0.pos.len(), 2);
+}
+
+#[test]
+fn a_quick_launch_pane_keeps_its_own_copy_with_the_setting_on() {
+    let block = "blk-quick";
+    let (broker, _rec, fs, gfs) = setup(block);
+    let provider_zone = "agent:claude:current";
+    append_transcript_with(at(&broker), block, b"{\"a\":1}\n", Some(&fs), Some((&gfs, provider_zone)), true, None, true);
+    assert!(has_output(&fs, block), "the provider's zone is shared by every pane: the block keeps its copy");
+    assert!(has_output(&gfs, provider_zone));
+}
+
+#[test]
+fn a_writer_with_no_global_zone_keeps_writing_the_block_copy() {
+    // A fenced writer passes no global zone.
+    let block = "blk-fenced";
+    let (broker, rec, fs, _gfs) = setup(block);
+    append_transcript_with(at(&broker), block, b"{\"a\":1}\n", Some(&fs), None, true, None, true);
+    assert!(has_output(&fs, block));
+    assert_eq!(rec.seen.lock().unwrap()[0].0.offset, Some(0));
+}
+
+#[test]
+fn a_failed_global_write_falls_back_to_the_block_copy_so_the_line_is_not_lost() {
+    let block = "blk-fallback";
+    let dir = std::env::temp_dir().join(format!("single-copy-fallback-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("g.db");
+    drop(FileStore::open(&db).unwrap());
+    let read_only = Arc::new(FileStore::open_read_only(&db).unwrap());
+    let (broker, rec, fs, _) = setup(block);
+    append_transcript_with(at(&broker), block, b"{\"a\":1}\n", Some(&fs), Some((&read_only, ZONE)), true, None, true);
+    assert!(has_output(&fs, block), "the global store refused the write: the line went to the block's copy");
+    let seen = rec.seen.lock().unwrap();
+    assert!(seen[0].0.pos.iter().any(|p| p.stream.starts_with("b:")));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_replace_announcement_names_the_zone_when_the_block_has_no_copy() {
+    use crate::backend::transcript::source::TranscriptSource;
+    let block = "blk-announce";
+    let (broker, rec, fs, gfs) = setup(block);
+    gfs.make_file(ZONE, "output", Default::default(), Default::default()).unwrap();
+    gfs.append_lines(ZONE, "output", b"{\"a\":1}\n{\"b\":2}\n").unwrap();
+    let source = TranscriptSource { fs: &gfs, zone: ZONE.to_string(), global: true };
+    crate::backend::transcript::append::publish_transcript_changed_from(&broker, block, mps::FILE_OP_REPLACE, &fs, &source);
+    let seen = rec.seen.lock().unwrap();
+    let ev = &seen[0].0;
+    assert_eq!(ev.fileop, mps::FILE_OP_REPLACE);
+    let p = pos_of(ev, "g:");
+    assert_eq!((p.stream.as_str(), p.line, p.lines), ("g:agent:def-5a3:current", 0, 2));
+    assert_eq!(p.gen, gen_of(&gfs, ZONE));
 }

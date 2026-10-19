@@ -51,6 +51,12 @@ impl ConfigState {
         self.config.read().unwrap().settings.clone()
     }
 
+    /// One boolean from the settings' extra keys, read under the lock without
+    /// cloning the settings: for a setting looked at on a hot path.
+    pub fn extra_bool(&self, key: &str) -> Option<bool> {
+        self.config.read().unwrap().settings.extra.get(key).and_then(serde_json::Value::as_bool)
+    }
+
     /// Update just the settings portion, and the per-connection settings that
     /// live inside it (`settings.json` → `connections`): every
     /// per-connection reader looks at `FullConfigType::connections`.
@@ -145,5 +151,23 @@ mod tests {
             serde_json::from_value(serde_json::json!({ "term:theme": "x", "connections": "nope" })).unwrap();
         assert_eq!(not_an_object.term_theme, "x");
         assert!(not_an_object.connections.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod extra_bool_tests {
+    use super::*;
+
+    #[test]
+    fn a_boolean_extra_key_is_read_without_cloning_the_settings() {
+        let state = ConfigState::new();
+        assert_eq!(state.extra_bool("agent:transcriptsinglecopy"), None);
+        let mut settings = state.get_settings();
+        settings.extra.insert("agent:transcriptsinglecopy".to_string(), serde_json::json!(true));
+        settings.extra.insert("agent:other".to_string(), serde_json::json!("text"));
+        state.update_settings(settings);
+        assert_eq!(state.extra_bool("agent:transcriptsinglecopy"), Some(true));
+        assert_eq!(state.extra_bool("agent:other"), None, "not a boolean");
+        assert_eq!(state.extra_bool("agent:absent"), None);
     }
 }

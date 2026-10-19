@@ -296,6 +296,7 @@ async fn app_main() {
     // An agent's AgentMux MCP server that didn't connect is noticed and
     // repaired (`agent:mcpselfheal`).
     backend::mcp_health::install(Arc::clone(&state.config_watcher));
+    backend::transcript::append::install_config(Arc::clone(&state.config_watcher));
     // A leader hears from its workers (SPEC_AGENT_WORKERS_2026_10_15.md §3.3).
     backend::worker_notes::install(
         Arc::clone(&state.broker),

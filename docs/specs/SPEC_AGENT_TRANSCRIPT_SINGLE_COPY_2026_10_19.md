@@ -3,7 +3,7 @@
 **Date:** 2026-10-19
 **Author:** Maricon@charlie
 **Type:** Spec (a storage contract change; behaviour for the user is unchanged)
-**Status:** active — step A (the readers) is in PR #5173 except the block-level archive, the replace/delete announcements and fenced writers (A2); remaining: A2, B (stop the block write behind a kill switch, with the lab A/B) and C (remove the dead paths). B needs the coordinator's and the operator's go.
+**Status:** active — step A (the readers) landed in #5173; step B (the setting `agent:transcriptsinglecopy`, off by default, and the skip in `append_transcript`) is in PR #5176; remaining: the lab A/B with the setting on (`--heavy-turns`, `--disk-load`), then flipping the default in a one-line change, and C (remove the dead paths) after a soak.
 **Issue:** #5141. Measured in `docs/reports/REPORT_FILESTORE_WRITE_VOLUME_2026_10_19.md`.
 **Platform:** all.
 
@@ -37,7 +37,8 @@ Write an agent's transcript line to the **global store only** when a global writ
 - **No change to what is stored in the global zone.** The line, its positions, its counter and its sidecar are exactly what they are now.
 - **Reads:** every row of §2 reads the global zone for such a block, falling back to the block's copy when the block has history from before this change (an old block's per-channel output stays where it is and is never deleted by this change).
 - **Events:** the `b:<block>` position and the block's `offset` are no longer present for such a block; the `g:` position is. The cursor treats a `b:`-less event as it does today for a pane pinned to `g:`. Replace/delete announcements carry the `g:` position.
-- **Setting:** a kill switch (an `agentmux` setting, default on once the soak below is done) restores the double write, for diagnosis.
+- **Setting:** `agent:transcriptsinglecopy` (boolean, **off by default**). Off, every build writes both copies exactly as before; on, a defined agent's line goes to the agent's zone first and to the block's own store only if that write failed (the line is never lost). A writer with no global zone (a fenced one) and a quick-launch pane keep writing the block's copy. The default is flipped in a separate one-line change once the lab and the nightly check have run with it on.
+- **Announcements:** `publish_transcript_changed` (the replace and delete announcements of a session archive or restore) names the agent's zone when the block has no counted copy of its own.
 - **Older builds** in other channels read the global zone before the block's own (they already do), so they see the same agent history. An older build in the *same* channel that opens a block written only to the global zone reads the global copy too; one that cannot (no global store) is not a supported combination today either.
 
 ## 4. Behaviours that change, and how they are checked

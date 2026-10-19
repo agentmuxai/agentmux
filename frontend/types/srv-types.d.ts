@@ -1092,6 +1092,7 @@ declare global {
         "agent:askquestiontimeoutms"?: number;
         "agent:overlapnotes"?: boolean;
         "agent:mcpselfheal"?: boolean;
+        "agent:transcriptsinglecopy"?: boolean;
         "agent:turnscopedtail"?: boolean;
         "agent:onewayflow"?: boolean;
         "agent:followcontroller"?: boolean;

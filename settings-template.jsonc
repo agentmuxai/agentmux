@@ -171,6 +171,11 @@
     // them, then restart the agent once without the shell prefix.
     // "agent:mcpselfheal":         true,
 
+    // Write an agent's transcript to the agent's own zone only, instead of also
+    // to the block's own store. Halves what AgentMux writes to disk while
+    // agents run. Off until it has been through a soak.
+    // "agent:transcriptsinglecopy": false,
+
     // -- Other --
     // "widget:icononly":           false,
     // "blockheader:showblockids": false,

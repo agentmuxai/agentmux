@@ -19,6 +19,33 @@ use crate::backend::storage::filestore::{AppendPos, FileStore};
 
 use crate::backend::blockcontroller::shell::handle_append_block_file;
 
+/// `agent:transcriptsinglecopy`: write a defined agent's transcript to the
+/// agent's zone in the global store only, not also to the block's own store
+/// (docs/specs/SPEC_AGENT_TRANSCRIPT_SINGLE_COPY_2026_10_19.md, step B). Off
+/// unless set to `true`: the two writes are what every build did until now.
+pub const SETTING_SINGLE_COPY: &str = "agent:transcriptsinglecopy";
+
+static CONFIG: std::sync::OnceLock<Arc<crate::backend::wconfig::ConfigState>> = std::sync::OnceLock::new();
+
+/// Attach the live settings (bootstrap), so [`SETTING_SINGLE_COPY`] can be read.
+pub fn install_config(config: Arc<crate::backend::wconfig::ConfigState>) {
+    let _ = CONFIG.set(config);
+}
+
+fn single_copy_enabled() -> bool {
+    // Read per transcript line: one key under the read lock, no clone of the settings.
+    CONFIG.get().and_then(|c| c.extra_bool(SETTING_SINGLE_COPY)).unwrap_or(false)
+}
+
+/// Whether `zone` is a defined agent's own zone (`agent:<id>:current`), whose
+/// transcript is one conversation, and not a quick-launch provider's, which
+/// every pane of that provider shares.
+fn is_defined_agent_zone(zone: &str) -> bool {
+    zone.strip_prefix("agent:")
+        .and_then(|z| z.strip_suffix(":current"))
+        .is_some_and(|id| crate::backend::providers::get_provider(id).is_none())
+}
+
 /// Persist a user message the controller wrote to the agent's stdin, so
 /// `parseHistoryLines` can reconstruct its `user_message` node on reopen.
 ///
@@ -144,6 +171,26 @@ pub(crate) fn append_transcript(
     stamp_tsidx: bool,
     echo: Option<&str>,
 ) {
+    append_transcript_with(broker, block_id, data, filestore, global, stamp_tsidx, echo, single_copy_enabled());
+}
+
+/// [`append_transcript`] with the single-copy setting given.
+///
+/// With it on, a defined agent's line goes to the global zone only. The block's
+/// own copy is still written when there is no global write to rely on: a
+/// fenced writer (it passes no global zone), a quick-launch pane (a provider's
+/// shared zone), or a global write that failed (the line must not be lost).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn append_transcript_with(
+    broker: Option<&mps::Broker>,
+    block_id: &str,
+    data: &[u8],
+    filestore: Option<&Arc<FileStore>>,
+    global: Option<(&Arc<FileStore>, &str)>,
+    stamp_tsidx: bool,
+    echo: Option<&str>,
+    single_copy: bool,
+) {
     use crate::backend::agent_session::OUTPUT_FILE;
     // The records exactly as they are written (`append_lines` normalizes to
     // complete, non-blank lines): the event carries these bytes, and its
@@ -158,7 +205,16 @@ pub(crate) fn append_transcript(
 
     let mut offset = None;
     let mut pos = Vec::new();
-    if let Some(fs) = filestore {
+    // Single copy: the agent's zone first; the block's copy only if that failed.
+    let global_only = single_copy && global.is_some_and(|(_, zone)| is_defined_agent_zone(zone));
+    let mut global_pos = None;
+    if global_only {
+        if let Some((gfs, zone)) = global {
+            global_pos = Some(mirror_append_to_global(gfs, zone, &records));
+        }
+    }
+    let write_block_copy = !global_only || global_pos.as_ref().is_some_and(Option::is_none);
+    if let Some(fs) = filestore.filter(|_| write_block_copy) {
         if let Some(p) = append_transcript_lines(fs, block_id, OUTPUT_FILE, &records, stamp_tsidx, "filestore") {
             // Past the `\n` that closed a torn last line, if one was written.
             offset = Some(p.records_offset.max(0) as u64);
@@ -168,7 +224,11 @@ pub(crate) fn append_transcript(
         }
     }
     if let Some((gfs, zone)) = global {
-        if let Some(c) = mirror_append_to_global(gfs, zone, &records).and_then(|p| p.counted) {
+        let landed = match global_pos {
+            Some(done) => done,
+            None => mirror_append_to_global(gfs, zone, &records),
+        };
+        if let Some(c) = landed.and_then(|p| p.counted) {
             pos.push(mps::StreamPos { stream: format!("g:{zone}"), gen: c.gen, line: c.first_line, lines: c.lines });
         }
     }
@@ -205,15 +265,40 @@ pub fn with_transcript_order<T>(block_id: &str, f: impl FnOnce() -> T) -> T {
 /// next read. `fileop` is [`mps::FILE_OP_REPLACE`] — with the new generation
 /// and line count read from `filestore` — or [`mps::FILE_OP_DELETE`]. Call it,
 /// with the replace or delete itself, inside [`with_transcript_order`].
-pub fn publish_transcript_changed(broker: &mps::Broker, block_id: &str, fileop: &str, filestore: &FileStore) {
+pub fn publish_transcript_changed(
+    broker: &mps::Broker,
+    block_id: &str,
+    fileop: &str,
+    filestore: &FileStore,
+    mstore: &crate::backend::storage::store::Store,
+) {
+    let source = crate::backend::transcript::source::TranscriptSource::resolve(filestore, mstore, block_id);
+    publish_transcript_changed_from(broker, block_id, fileop, filestore, &source);
+}
+
+/// [`publish_transcript_changed`] with the transcript's source resolved. The
+/// position names the block's own stream when it has a counted copy, the
+/// agent's zone otherwise (a defined agent written to the zone only, which is
+/// the stream its pane follows).
+pub(crate) fn publish_transcript_changed_from(
+    broker: &mps::Broker,
+    block_id: &str,
+    fileop: &str,
+    filestore: &FileStore,
+    source: &crate::backend::transcript::source::TranscriptSource<'_>,
+) {
     use crate::backend::agent_session::OUTPUT_FILE;
-    let pos = match filestore.line_state(block_id, OUTPUT_FILE) {
+    let pos_in = |fs: &FileStore, zone: &str, stream: String| match fs.line_state(zone, OUTPUT_FILE) {
         Ok(Some(state)) => state
             .counted
-            .map(|c| vec![mps::StreamPos { stream: format!("b:{block_id}"), gen: c.gen, line: 0, lines: c.lines }])
+            .map(|c| vec![mps::StreamPos { stream, gen: c.gen, line: 0, lines: c.lines }])
             .unwrap_or_default(),
         _ => Vec::new(),
     };
+    let mut pos = pos_in(filestore, block_id, format!("b:{block_id}"));
+    if pos.is_empty() && source.global {
+        pos = pos_in(source.fs, &source.zone, format!("g:{}", source.zone));
+    }
     let event_data = mps::WSFileEventData {
         zoneid: block_id.to_string(),
         filename: OUTPUT_FILE.to_string(),
