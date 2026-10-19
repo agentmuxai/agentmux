@@ -54,6 +54,16 @@
            scale(1) endpoints (a 2D-only transform would drop the layer). */
         will-change: transform, opacity;
       }
+      /* A pre-warmed pool window (frontend/app/init/pool.ts markPoolWaiting)
+         is hidden for as long as it waits, which can be hours, but Chromium
+         still counts its page as visible, so a running pulse kept the GPU
+         process compositing frames for nobody: about 15% of a core with three
+         pool windows, measured on Windows (Posa, 2026-10-19). Paused while it
+         waits; promotion clears the attribute, so the pulse runs again the
+         moment the window is shown. */
+      html[data-pool-window] #startup-loading svg {
+        animation-play-state: paused;
+      }
       @keyframes startup-pulse {
         0%, 100% { opacity: 0.9; transform: scale(1) translateZ(0); }
         50%       { opacity: 0.65; transform: scale(0.97) translateZ(0); }
