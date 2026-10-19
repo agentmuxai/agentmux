@@ -712,6 +712,27 @@ describe("the background disk load", () => {
         expect(() => parseDiskLoad("-5")).toThrow(/positive number/);
     });
 
+    it("reports a writer that died on its own, and one that reached its cap", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "lab-diskload-"));
+        try {
+            const dying = startDiskLoad({ dir, mbps: 5 });
+            await new Promise((r) => setTimeout(r, 800));
+            process.kill(dying.pid, "SIGKILL");
+            await new Promise((r) => setTimeout(r, 800));
+            expect(dying.diedEarly()).toMatch(/exited on its own/);
+            const report = await dying.stop();
+            expect(report.diedEarly).toMatch(/volume may be full/);
+
+            const capped = startDiskLoad({ dir, mbps: Infinity, capGB: 0.02 }); // 20 MB
+            await new Promise((r) => setTimeout(r, 2500));
+            const done = await capped.stop();
+            expect(done.capReached).toBe(true);
+            expect(done.diedEarly).toBeUndefined();
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    }, 30000);
+
     it("stops once and returns the same report when asked again", async () => {
         const dir = mkdtempSync(join(tmpdir(), "lab-diskload-"));
         try {

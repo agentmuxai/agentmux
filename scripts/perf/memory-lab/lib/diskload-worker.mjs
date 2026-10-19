@@ -49,6 +49,7 @@ for (;;) {
             fd = null;
         }
         console.log(`written ${written}`);
+        console.log("capped");
         if (!parentAlive()) leave();
         await new Promise((r) => setTimeout(r, 1000));
         continue;

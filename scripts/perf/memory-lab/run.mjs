@@ -290,6 +290,8 @@ async function attempt(args, ctx) {
             if (r % args.every === 0 || r === playedRounds) await mark(r);
             if (r === args.recycleAfter) {
                 console.log(`  recycling the window after round ${r}: ${args.recycleCommand}`);
+                // With a hold the agents stop here: the writer ends with their last turn, before the recycle and the idle samples.
+                if (args.holdMinutes > 0 && diskLoad) diskLoadResult = await diskLoad.stop();
                 recycle = await runRecycle({ driver, memtree, port: args.port, rootPid: instance.pid, label: args.label, command: args.recycleCommand });
                 reportRecycle(recycle);
                 if (args.holdMinutes > 0) hold = await holdIdle(args, memtree, instance.pid);
@@ -300,8 +302,10 @@ async function attempt(args, ctx) {
         try {
             await requireIdle(driver);
         } finally {
-            if (diskLoad) diskLoadResult = await diskLoad.stop();
+            if (diskLoad && !diskLoadResult) diskLoadResult = await diskLoad.stop();
         }
+        // A writer that died on its own means the load was not applied for the whole workload: that run says nothing.
+        if (diskLoadResult?.diedEarly) throw new InvalidRun(diskLoadResult.diedEarly);
         await sleep(args.settleS * 1000);
         const final = await takeSample({ port: args.port, memtree, rootPid: instance.pid, label: `${args.label}-final`, gc: true });
         const samples = [final];

@@ -44,6 +44,15 @@ export function startDiskLoad({ dir, mbps, capGB = DEFAULT_CAP_GB }) {
     const started = Date.now();
     let written = 0;
     let buffer = "";
+    let capReached = false;
+    // How the writer ended, if it ended on its own: a disk that fills or a write that fails kills it while the workload goes on.
+    let exited = null;
+    child.once("exit", (code, signal) => {
+        exited = { code, signal, at: Date.now() };
+    });
+    child.once("error", (e) => {
+        exited ??= { code: null, signal: null, error: String(e.message), at: Date.now() };
+    });
     child.stdout.on("data", (d) => {
         buffer += d;
         for (let i; (i = buffer.indexOf("\n")) >= 0; ) {
@@ -51,20 +60,28 @@ export function startDiskLoad({ dir, mbps, capGB = DEFAULT_CAP_GB }) {
             buffer = buffer.slice(i + 1);
             const m = /^written (\d+)$/.exec(line);
             if (m) written = Number(m[1]);
+            if (line === "capped") capReached = true;
         }
     });
     let stopped = null;
     return {
         pid: child.pid,
+        /** Why the writer died before it was stopped, or null while it runs (or if it was only stopped). */
+        diedEarly() {
+            return exited && !stopped ? `the disk-load writer exited on its own (code ${exited.code}, signal ${exited.signal}${exited.error ? `, ${exited.error}` : ""}) ${Math.round((exited.at - started) / 1000)} s in: the volume may be full, or a write failed` : null;
+        },
         async stop() {
             if (stopped) return stopped;
-            await new Promise((resolve) => {
-                child.once("exit", resolve);
-                child.kill();
-                setTimeout(resolve, 5000);
-            });
+            const diedEarly = this.diedEarly();
+            if (!exited) {
+                await new Promise((resolve) => {
+                    child.once("exit", resolve);
+                    child.kill();
+                    setTimeout(resolve, 5000);
+                });
+            }
             rmSync(target, { recursive: true, force: true });
-            stopped = { capGB, rateMBps: Number.isFinite(mbps) ? mbps : "max", writtenMB: Math.round((written / 1048576) * 10) / 10, seconds: Math.round((Date.now() - started) / 100) / 10 };
+            stopped = { capGB, rateMBps: Number.isFinite(mbps) ? mbps : "max", writtenMB: Math.round((written / 1048576) * 10) / 10, seconds: Math.round((Date.now() - started) / 100) / 10, capReached, ...(diedEarly ? { diedEarly } : {}) };
             return stopped;
         },
     };
