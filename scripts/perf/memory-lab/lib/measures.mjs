@@ -22,10 +22,10 @@ export function measuresOf(result) {
         srv_written_mb: result.io?.writtenMB?.srv ?? null,
         store_lock_max_ms: result.storeLock?.longestHeldMs ?? null,
         slow_page_commands: result.slowEvals?.total ?? null,
-        // Opening an agent again (--open-agents): the median first screen of ordinary conversations and of the long one, and the worst main-thread task meanwhile.
         // What srv wrote while the first agent played its heavy turns (--heavy-turns), and the part that reached storage (not on Windows).
         heavy_srv_written_mb: result.heavyIo?.writtenMB?.srv ?? null,
         heavy_srv_storage_written_mb: result.heavyIo?.storageWrittenMB?.srv ?? null,
+        // Opening an agent again (--open-agents): the median first screen of ordinary conversations and of the long one, and the worst main-thread task meanwhile.
         open_first_screen_ms: result.opens?.summary?.regular?.firstScreenMedianMs ?? null,
         open_heavy_first_screen_ms: result.opens?.summary?.heavy?.firstScreenMedianMs ?? null,
         open_longest_task_ms: result.opens ? Math.max(0, ...Object.values(result.opens.summary ?? {}).map((s) => s.longestTaskMs ?? 0)) : null,
