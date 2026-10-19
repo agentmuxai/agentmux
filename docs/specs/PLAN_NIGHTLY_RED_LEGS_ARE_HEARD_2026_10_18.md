@@ -1,6 +1,6 @@
 # Plan: a failing nightly leg is heard, and macOS tests count
 
-**Status:** active. Shipped: the macOS test fix (#5125, Loap-3). This PR: Phase 1. Left: Phase 2 (fix what Phase 0 finds), Phase 3 (macOS blocks after five green nightlies).
+**Status:** active. Shipped: the macOS test fix (#5125, Loap-3); Phase 0 and Phase 1, with the macOS timeout at 90 minutes (#5129); a timed-out job is reported (this PR). Left: Phase 3 (macOS blocks after five green nightlies). Phase 2 found nothing to fix.
 **Date:** 2026-10-18
 **Author:** Camper
 **Verified against:** `agentmux` `main` @ `71a3e2300` (2026-10-19 UTC), by reading `ci-nightly-build.yml` and the job logs of the last 30 nightly runs through the Actions API.
@@ -44,6 +44,8 @@ A nightly dispatched on `71a3e2300` (after #5125), run `39186668162`. It answers
 - how long the full macOS test job takes against the 60-minute limit.
 
 Each failing test goes to the agent whose PR added it (or the area's owner), as #5125 did. If the job times out, Phase 1 raises the limit.
+
+**Result** (run `39186668162`, 2026-10-19): **every macOS test passed**, srv's included, for the first time since 2026-10-12. The workspace step took 56 minutes and the `agentmux-cef` step 3, and the job then hit its 60-minute limit while saving its cache. So no test needs fixing (Phase 2 is empty), and the 90-minute limit is needed. GitHub reported that timeout as `cancelled`, for the job and the run, not `timed_out`; Phase 1's job therefore reads each cancelled job's annotations ("The job has exceeded the maximum execution time"), or a timeout would say nothing.
 
 ### Phase 1: a failing leg is heard, and a failure doesn't hide the rest (one PR)
 

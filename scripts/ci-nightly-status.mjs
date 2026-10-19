@@ -32,6 +32,16 @@ export function finishedJobs(jobs) {
     return jobs.filter((j) => j.status === "completed" && !IGNORED.some((re) => re.test(j.name)));
 }
 
+/**
+ * Whether a job's check-run annotations say it hit its timeout-minutes.
+ * GitHub reports such a job as `cancelled`, not `timed_out`, and the run too
+ * (the 2026-10-19 macOS test job), so the conclusion alone can't tell it from
+ * a run someone cancelled.
+ */
+export function timedOut(annotations) {
+    return annotations.some((a) => /exceeded the maximum execution time/.test(a.message ?? ""));
+}
+
 /** "red" if any job failed, "green" if every one passed or was skipped, else "unknown". */
 export function verdict(jobs) {
     if (jobs.some((j) => RED.has(j.conclusion))) return "red";
@@ -85,7 +95,14 @@ export function report(env, gh = realGh, log = console.log) {
         log(`Run on ${REF}, not main: nothing to report.`);
         return writes;
     }
-    const jobs = finishedJobs(JSON.parse(gh(["api", "--paginate", "--slurp", `repos/${REPO}/actions/runs/${RUN_ID}/jobs?per_page=100`])).flatMap((p) => p.jobs));
+    const jobs = finishedJobs(JSON.parse(gh(["api", "--paginate", "--slurp", `repos/${REPO}/actions/runs/${RUN_ID}/jobs?per_page=100`])).flatMap((p) => p.jobs)).map((j) => {
+        if (j.conclusion !== "cancelled") return j;
+        try {
+            return timedOut(JSON.parse(gh(["api", `repos/${REPO}/check-runs/${j.id}/annotations`]))) ? { ...j, conclusion: "timed_out" } : j;
+        } catch {
+            return j; // No annotations to read: leave it cancelled, which reports nothing.
+        }
+    });
     const state = verdict(jobs);
     const open = JSON.parse(gh(["issue", "list", "--repo", REPO, "--label", LABEL, "--state", "open", "--json", "number"])).map((i) => i.number);
     const plan = decide(state, open);
