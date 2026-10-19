@@ -50,12 +50,7 @@ fn finish(reply: Reply) -> Option<Generated> {
 /// an unknown provider or a CLI that isn't already available either way;
 /// the caller treats that the same as any other unresolvable case.
 pub async fn resolve_provider_cli_path_readonly(provider_id: &str) -> Option<String> {
-    let provider = crate::backend::providers::get_provider(provider_id)?;
-    let paths = agentmux_common::DataPaths::from_env()?;
-    if let Some(bin) = crate::backend::cli_install::find_installed_for_provider(&paths, provider.id) {
-        return Some(bin.to_string_lossy().to_string());
-    }
-    crate::server::cli_handlers::resolve_provider_cli_on_path(provider.id, provider.cli_command).await
+    crate::server::cli_handlers::locate_provider_cli(provider_id).await.map(|l| l.path)
 }
 
 /// A session title recovered from the session's recent activity, for an agent

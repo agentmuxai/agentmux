@@ -24,7 +24,8 @@ import type { InstallCheckResult } from "@/types/rpc/InstallCheckResult";
 
 const TTL_MS = 30_000;
 
-type Entry = { startedAt: number; result: Promise<InstallCheckResult> };
+/** `answer` is what callers get: `rpc`'s result while it is still current. */
+type Entry = { startedAt: number; rpc: Promise<InstallCheckResult>; answer: Promise<InstallCheckResult> };
 const entries = new Map<string, Entry>();
 
 const keyOf = (req: InstallCheckReq) => `${req.providerId}\u0000${req.cliCommand}\u0000${req.npmPackage ?? ""}`;
@@ -32,22 +33,53 @@ const keyOf = (req: InstallCheckReq) => `${req.providerId}\u0000${req.cliCommand
 export function checkProviderInstalled(req: InstallCheckReq, now: () => number = Date.now): Promise<InstallCheckResult> {
     const key = keyOf(req);
     const hit = entries.get(key);
-    if (hit && now() - hit.startedAt < TTL_MS) return hit.result;
-    const entry: Entry = { startedAt: now(), result: RpcApi.InstallCheckCommand(TabRpcClient, req) };
+    if (hit && now() - hit.startedAt < TTL_MS) return hit.answer;
+    const rpc = RpcApi.InstallCheckCommand(TabRpcClient, req);
+    const entry = { startedAt: now(), rpc } as Entry;
+    // An answer forgotten while in flight (an install finished, a refresh)
+    // is stale, a failure as much as a result: the caller gets the newer
+    // check's answer instead, asked now if none started, so a slow old
+    // answer can't overwrite a newer one.
+    // (Registered before the eviction below, so a current check that fails
+    // is still current here, and its failure goes to its callers.)
+    const superseded = () => entries.get(key) !== entry;
+    const newer = () => entries.get(key)?.answer ?? checkProviderInstalled(req, now);
+    entry.answer = rpc.then(
+        (result) => (superseded() ? newer() : result),
+        (err) => {
+            if (superseded()) return newer();
+            throw err;
+        },
+    );
     entries.set(key, entry);
-    entry.result.catch(() => {
+    rpc.catch(() => {
         if (entries.get(key) === entry) entries.delete(key);
     });
-    return entry.result;
+    return entry.answer;
+}
+
+/** Told when answers are forgotten: `providerId`, or undefined for all. */
+const invalidationListeners = new Set<(providerId: string | undefined) => void>();
+
+/**
+ * Runs `cb` whenever cached answers are forgotten, so a mounted consumer (a
+ * picker's cards, the Toolchain's rows) asks again instead of keeping the
+ * answer it copied: an install in one, or a refresh that finds a CLI, shows in
+ * the other. Returns the unsubscribe.
+ */
+export function onInstallCheckInvalidated(cb: (providerId: string | undefined) => void): () => void {
+    invalidationListeners.add(cb);
+    return () => invalidationListeners.delete(cb);
 }
 
 /** Forget cached answers for `providerId` (every CLI of it), or for all providers. */
 export function invalidateInstallCheck(providerId?: string): void {
     if (providerId == null) {
         entries.clear();
-        return;
+    } else {
+        for (const key of [...entries.keys()]) {
+            if (key.startsWith(`${providerId}\u0000`)) entries.delete(key);
+        }
     }
-    for (const key of [...entries.keys()]) {
-        if (key.startsWith(`${providerId}\u0000`)) entries.delete(key);
-    }
+    for (const cb of [...invalidationListeners]) cb(providerId);
 }

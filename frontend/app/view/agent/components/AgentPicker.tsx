@@ -55,7 +55,7 @@ import { resolveEffectiveLaunchProvider } from "../agent-launch-env";
 import { copyForkHistory } from "../quick-fork";
 import type { AgentViewModel } from "../agent-model";
 import { realAccountIdOrEmpty } from "../identity-carry-over";
-import { checkProviderInstalled, invalidateInstallCheck } from "../install-check-cache";
+import { checkProviderInstalled, invalidateInstallCheck, onInstallCheckInvalidated } from "../install-check-cache";
 import { mergeOpenDefinitions, openAgentLocations, type OpenAgentLocation } from "../open-agent-panes";
 import { openOrFocusHistoryTab } from "../open-history-tab";
 import { beginAgentOpen, finishAgentOpen } from "../open-trace";
@@ -348,11 +348,17 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     const [openDefinitions, refreshOpenDefinitions, openLocations, resolveOpenDefinitions] =
         useInstanceOpenDefinitions();
 
-    // Per-agent install state, keyed by agent.id.
-    //   undefined = not yet checked / non-npm provider (no install needed)
-    //   true      = present in the per-version cache
-    //   false     = needs install — card shows the bottom-right ribbon
+    // Per-agent install state, keyed by agent.id: the same answer the
+    // Toolchain pane shows (one `install.check`, one backend lookup).
+    //   undefined = not yet checked
+    //   true      = found: AgentMux's install, or the user's own copy of a
+    //               CLI AgentMux doesn't install
+    //   false     = not found — card shows the bottom-right ribbon
     const [installState, setInstallState] = createSignal<Record<string, boolean | undefined>>({});
+    /** Agents whose CLI AgentMux doesn't install (no npm package: Kimi,
+     *  Goose, Grok, …): the user installs it, so the npm install modal never
+     *  opens for them. */
+    const [userInstalled, setUserInstalled] = createSignal<Record<string, boolean>>({});
     /** Per-definition CLI drift, resolved alongside the install check (same
      *  round-trip). Absent = not checked yet, or a provider with no pin. */
     const [driftState, setDriftState] = createSignal<Record<string, PinDrift | undefined>>({});
@@ -366,25 +372,30 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // tier needs per-agent session probing, re-introduce the cache
     // there scoped to that tier's data source — not here.
 
+    /** Each checked agent's resolved provider, to re-check only the cards an
+     *  invalidation concerns. */
+    const providerOfAgent = new Map<string, string>();
     const checkInstalled = async (agent: AgentDefinition) => {
         // Same resolver as the launch (agent-model.ts), so the CLI checked
         // here is the one that will run (#2594).
         const providerId = await resolveEffectiveLaunchProvider(agent);
         const prov = getProvider(providerId);
-        // Non-npm providers (kimi via pip, system-PATH CLIs) don't go
-        // through the install modal — never show the ribbon.
-        if (!prov?.npmPackage || prov.npmPackage.length === 0) {
+        if (prov) providerOfAgent.set(agent.id, prov.id);
+        if (!prov) {
             setInstallState((s) => ({ ...s, [agent.id]: undefined }));
             return;
         }
+        setUserInstalled((s) => ({ ...s, [agent.id]: !prov.npmPackage }));
         try {
-            // One check per provider CLI, shared across agents and pickers.
+            // One check per provider CLI, shared across agents, pickers and
+            // the Toolchain pane. A CLI AgentMux doesn't install is checked
+            // too: found on PATH or in its installer's folder, or the ribbon.
             const r = await checkProviderInstalled({
                 providerId: prov.id,
                 cliCommand: prov.cliCommand,
                 // Lets the same round-trip answer "which version", so the card
                 // can show an upgrade hint without a second probe per card.
-                npmPackage: prov.npmPackage,
+                npmPackage: prov.npmPackage || undefined,
             });
             setInstallState((s) => ({ ...s, [agent.id]: r.installed }));
             // Same predicate the Toolchain pane renders — the card must not
@@ -882,8 +893,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             let installed = installState()[agent.id];
             if (installed === undefined) {
                 // `checkInstalled` already resolves through the bundle
-                // and itself no-ops (leaving `installed` as `undefined`)
-                // for a non-npm-installable provider — no need to
+                // and records whether AgentMux installs this CLI — no need to
                 // duplicate that check here with a second, un-resolved
                 // `agent.provider` read (#2594: two places deciding "does
                 // this need installing" from two different provider
@@ -891,11 +901,15 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 await checkInstalled(agent);
                 installed = installState()[agent.id];
             }
+            // A CLI AgentMux doesn't install has no npm install to run: the
+            // launch names its own installer (AMX-CLI-004) until the inline
+            // install step (SPEC_AGENT_PICKER_INLINE_CREATE_2026_10_18.md §2.3).
+            const needsNpmInstall = installed === false && !userInstalled()[agent.id];
 
             const missing = await probeMissingPrereqs(agent);
             if (missing.length > 0) {
                 const proceedWithFlow = () => {
-                    if (installed === false) {
+                    if (needsNpmInstall) {
                         // Open the same template-aware install request
                         // the non-prereq branch below uses: an install
                         // whose success path launched the seeded
@@ -946,7 +960,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 return;
             }
 
-            if (installed === false) {
+            if (needsNpmInstall) {
                 modalLayer.open(buildTemplateInstallRequest(agent));
                 return;
             }
@@ -1071,6 +1085,17 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             if (!(agent.id in untrack(installState))) void checkInstalled(agent);
         }
     });
+    // Another picker or the Toolchain pane forgot an answer (an install
+    // finished, a refresh found a CLI): ask again for the cards it concerns,
+    // so a card never keeps a stale ribbon. One shared check per provider.
+    onCleanup(
+        onInstallCheckInvalidated((providerId) => {
+            for (const agent of untrack(agents)) {
+                const known = providerOfAgent.get(agent.id);
+                if (providerId == null || known === undefined || known === providerId) void checkInstalled(agent);
+            }
+        }),
+    );
 
     // Per-pane zoom — read `term:zoom` from block meta and apply CSS
     // `zoom` on the root, matching AgentPresentationView (chat mode).

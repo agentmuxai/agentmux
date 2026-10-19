@@ -484,62 +484,51 @@ pub(super) async fn open_agent_inner(
                 )
                 .to_string_lossy()
                 .to_string();
-                let mut resolved_cli_path = crate::backend::cli_install::find_installed(
-                    &paths,
-                    &provider.id,
-                    provider.pinned_version,
-                    provider.cli_command,
-                )
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|| npm_bin.clone());
+                // The one lookup the picker and the Toolchain pane use too:
+                // AgentMux's install, else the user's own copy for a provider
+                // AgentMux doesn't install (Kimi, Goose, …).
+                let mut resolved_cli_path = crate::server::cli_handlers::locate_provider_cli(provider.id)
+                    .await
+                    .map(|l| l.path)
+                    .unwrap_or_else(|| npm_bin.clone());
                 if !std::path::Path::new(&resolved_cli_path).exists() {
-                    // Fallback: provider not installed via npm — try system PATH.
-                    // This is used for Python-based CLIs like Kimi that are not
-                    // distributed on npm.
-                    if provider.npm_package.is_empty() {
-                        if let Some(path) = resolve_provider_cli_on_path(provider.id, provider.cli_command).await {
-                            resolved_cli_path = path;
-                        }
+                    // An npm-backed provider whose pinned CLI isn't there yet
+                    // (a fresh install, or the minute or two after an upgrade
+                    // moved the pin): install it, as the UI's launch flow does,
+                    // instead of making the caller go and do that first.
+                    if provider.npm_package.is_empty() || provider.pinned_version.is_empty() {
+                        return Err(format!(
+                            "CLI_NOT_AVAILABLE: {} not found at {}. Install it, then try again.",
+                            provider.cli_command, npm_bin
+                        ));
                     }
-                    if !std::path::Path::new(&resolved_cli_path).exists() {
-                        // An npm-backed provider whose pinned CLI isn't there yet
-                        // (a fresh install, or the minute or two after an upgrade
-                        // moved the pin): install it, as the UI's launch flow does,
-                        // instead of making the caller go and do that first.
-                        if provider.npm_package.is_empty() || provider.pinned_version.is_empty() {
+                    let req = crate::backend::cli_install::NpmInstallRequest {
+                        provider_id: provider.id.to_string(),
+                        npm_package: provider.npm_package.to_string(),
+                        pinned_version: provider.pinned_version.to_string(),
+                        cli_command: provider.cli_command.to_string(),
+                        background: false,
+                    };
+                    match crate::backend::cli_install::ensure_installed(
+                        paths.clone(),
+                        req,
+                        std::time::Duration::from_secs(AGENT_OPEN_INSTALL_WAIT_SECS),
+                    )
+                    .await
+                    {
+                        Ok(bin) => resolved_cli_path = bin.to_string_lossy().to_string(),
+                        Err(crate::backend::cli_install::EnsureError::StillInstalling) => {
                             return Err(format!(
-                                "CLI_NOT_AVAILABLE: {} not found at {}. Install it, then try again.",
-                                provider.cli_command, npm_bin
+                                "CLI_INSTALLING: {} {} is still being installed. Try again in a minute; \
+                                 the install carries on in the background.",
+                                provider.cli_command, provider.pinned_version
                             ));
                         }
-                        let req = crate::backend::cli_install::NpmInstallRequest {
-                            provider_id: provider.id.to_string(),
-                            npm_package: provider.npm_package.to_string(),
-                            pinned_version: provider.pinned_version.to_string(),
-                            cli_command: provider.cli_command.to_string(),
-                            background: false,
-                        };
-                        match crate::backend::cli_install::ensure_installed(
-                            paths.clone(),
-                            req,
-                            std::time::Duration::from_secs(AGENT_OPEN_INSTALL_WAIT_SECS),
-                        )
-                        .await
-                        {
-                            Ok(bin) => resolved_cli_path = bin.to_string_lossy().to_string(),
-                            Err(crate::backend::cli_install::EnsureError::StillInstalling) => {
-                                return Err(format!(
-                                    "CLI_INSTALLING: {} {} is still being installed. Try again in a minute; \
-                                     the install carries on in the background.",
-                                    provider.cli_command, provider.pinned_version
-                                ));
-                            }
-                            Err(crate::backend::cli_install::EnsureError::Failed(why)) => {
-                                return Err(format!(
-                                    "CLI_NOT_AVAILABLE: {} {} could not be installed: {why}",
-                                    provider.cli_command, provider.pinned_version
-                                ));
-                            }
+                        Err(crate::backend::cli_install::EnsureError::Failed(why)) => {
+                            return Err(format!(
+                                "CLI_NOT_AVAILABLE: {} {} could not be installed: {why}",
+                                provider.cli_command, provider.pinned_version
+                            ));
                         }
                     }
                 }
