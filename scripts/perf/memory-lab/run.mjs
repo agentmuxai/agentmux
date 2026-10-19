@@ -38,6 +38,7 @@ import { agentProcessesCountedAsApp, cpuLedger, osSample, portBelongsTo, takeSam
 import { agentsWithoutTurns, cpuTable, groupSample, inMegabytes, steady, table, transcriptGrowthProblem, wallSummary } from "./lib/summary.mjs";
 import { cpuBetween } from "./lib/cpu.mjs";
 import { storeLockOf } from "./lib/storelock.mjs";
+import { slowSendsAgainstLongTasks, summariseLongTasks } from "./lib/longtasks.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..", "..");
@@ -138,9 +139,10 @@ export const WORKLOAD_VERSION = 2;
  * agent is idle again (null when no agent was ever seen working, or they never
  * went idle within `capS`), and at least `gapS` after the send either way.
  */
-async function playRound(driver, args, capS = Math.max(180, args.gapS * 8)) {
+async function playRound(driver, args, capS = Math.max(180, args.gapS * 8), sendLog = null, round = null) {
     const t0 = Date.now();
-    await driver.send();
+    const timings = await driver.send();
+    if (sendLog) timings.forEach((t, i) => sendLog.push({ round, agent: i, ...t }));
     let sawWorking = false;
     let quiet = 0;
     let doneAt = null;
@@ -257,12 +259,17 @@ async function attempt(args, ctx) {
         // The CPU of the workload is what is spent after this point; startup and building the layout are before it.
         const cpuAtStart = cpuLedger.totals();
         const roundMs = [];
+        const roundWindows = [];
+        const sendLog = [];
+        await driver.installLongTasks();
         let recycle = null;
         // With --hold-minutes the agents stop at the recycle round: what matters then is how long the window stays down.
         const playedRounds = args.holdMinutes > 0 ? args.recycleAfter : args.rounds;
         let hold = null;
         for (let r = 1; r <= playedRounds; r++) {
-            roundMs.push(await playRound(driver, args));
+            const windowStart = Date.now();
+            roundMs.push(await playRound(driver, args, undefined, sendLog, r));
+            roundWindows.push({ round: r, start: windowStart, end: Date.now() });
             if (r === 1) await requireTurns(driver, args);
             if (r % args.every === 0 || r === playedRounds) await mark(r);
             if (r === args.recycleAfter) {
@@ -285,6 +292,9 @@ async function attempt(args, ctx) {
         const summary = inMegabytes(steady(samples));
         const cpu = { fromRound: 0, seconds: cpuBetween(cpuAtStart, cpuLedger.totals()), note: "highest CPU time seen per process, summed per group; includes the settle and the forced-GC final" };
         const wall = wallSummary(roundMs);
+        const rawLong = await driver.longTasks().catch(() => null);
+        const pageLongTasks = summariseLongTasks(rawLong, roundWindows);
+        const sendsVsLong = slowSendsAgainstLongTasks(sendLog, rawLong);
 
         // The store of record: the agents' turns must be in it, whatever the page shows.
         const turnBytes = JSON.parse(readFileSync(script, "utf8")).turns.slice(0, playedRounds).map((t) => JSON.stringify(t).length);
@@ -330,10 +340,14 @@ async function attempt(args, ctx) {
             slowestEvalMs: driver.slowestEvalMs(),
             // How long srv's transcript store kept callers waiting (issue #5141): from srv's own warnings, null without a log.
             storeLock: storeLockOf(home),
+            // The page's main thread (tasks of 50 ms or more) and each send's time, to tell a busy page from a waiting srv.
+            pageLongTasks,
+            sendsVsLongTasks: sendsVsLong,
+            sends: sendLog.map((s) => ({ ...s, start: new Date(s.start).toISOString() })),
             slowEvals: driver.slowEvals(), // { total, slowest }: every command that took 5 s or more, the 30 slowest listed
         };
         writeFileSync(join(dir, "result.json"), JSON.stringify(result, null, 1));
-        const md = [`# ${args.label}`, "", `${args.panes} agents over ${layout.length} tab(s), ${playedRounds} rounds (${args.gapS} s apart)${args.holdMinutes > 0 ? `, then held idle ${args.holdMinutes} min` : ""}, forced GC, median of ${summary.samples} samples.`, "", table(summary), "", cpuTable(cpu, wall), ...(result.storeLock ? ["", `Store lock: longest hold of srv's transcript store connection ${result.storeLock.longestHeldMs} ms${result.storeLock.longestHeldSite ? ` (${result.storeLock.longestHeldSite})` : ""}, ${result.storeLock.holds} hold(s) and ${result.storeLock.waits} wait(s) of 500 ms or more.`] : []), ...notes.map((n) => `\n> ${n}`)].join("\n");
+        const md = [`# ${args.label}`, "", `${args.panes} agents over ${layout.length} tab(s), ${playedRounds} rounds (${args.gapS} s apart)${args.holdMinutes > 0 ? `, then held idle ${args.holdMinutes} min` : ""}, forced GC, median of ${summary.samples} samples.`, "", table(summary), "", cpuTable(cpu, wall), ...(pageLongTasks ? ["", `Page main thread: ${pageLongTasks.count} long task(s) of 50 ms or more, ${pageLongTasks.totalMs} ms in all, longest ${pageLongTasks.maxMs} ms, ${pageLongTasks.over1s} over 1 s; ${sendsVsLong.slowSends} send(s) took over 5 s, ${sendsVsLong.overlappingLongTask} of them while a long task of 500 ms or more ran.`] : []), ...(result.storeLock ? ["", `Store lock: longest hold of srv's transcript store connection ${result.storeLock.longestHeldMs} ms${result.storeLock.longestHeldSite ? ` (${result.storeLock.longestHeldSite})` : ""}, ${result.storeLock.holds} hold(s) and ${result.storeLock.waits} wait(s) of 500 ms or more.`] : []), ...notes.map((n) => `\n> ${n}`)].join("\n");
         writeFileSync(join(dir, "summary.md"), md + "\n");
         console.log("\n" + md);
         console.log(`\n-> ${join(dir, "result.json")}`);

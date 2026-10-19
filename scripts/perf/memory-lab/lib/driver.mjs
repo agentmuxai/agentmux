@@ -15,6 +15,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, openSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { LONG_TASK_OBSERVER, READ_LONG_TASKS } from "./longtasks.mjs";
 import { installFakeClaude } from "../../../ui-screenshots/install-fake-claude.mjs";
 import { CdpSession, findMainTarget } from "../../../ui-screenshots/lib/session.mjs";
 import { openNewTab } from "../../../ui-screenshots/widget-shots.mjs";
@@ -217,6 +218,7 @@ export async function connect(port, home, workDir) {
                     session = await CdpSession.connect((await findMainTarget(port)).webSocketDebuggerUrl);
                     session.defaultTimeoutMs = EVAL_TIMEOUT_MS;
                     await session.evaluate("1");
+                    await session.evaluate(LONG_TASK_OBSERVER).catch(() => {}); // the reload dropped the observer
                     return;
                 } catch (e) {
                     if (Date.now() > end) throw new Error(`no main window page on port ${port} after ${timeoutMs / 1000} s: ${e.message}`);
@@ -299,11 +301,27 @@ export async function connect(port, home, workDir) {
 
         /** One message to every agent (or to `blockIds`): each plays the next scripted turn. `staggerMs` offsets them, as real agents aren't in lockstep. */
         async send(blockIds = agents.map((a) => a.blockId), { staggerMs = 0, text = "Continue with the next step of the refactor." } = {}) {
+            // Each send's start (epoch ms, as srv's log timestamps are UTC) and how long the command took, to set beside srv's lines.
+            const timings = [];
             for (const b of blockIds) {
                 const mid = `lab-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-                await ev(`RpcApi.AgentInputCommand(TabRpcClient, { blockid: ${JSON.stringify(b)}, message: ${JSON.stringify(text)}, message_id: ${JSON.stringify(mid)} })`);
+                const start = Date.now();
+                try {
+                    await ev(`RpcApi.AgentInputCommand(TabRpcClient, { blockid: ${JSON.stringify(b)}, message: ${JSON.stringify(text)}, message_id: ${JSON.stringify(mid)} })`);
+                } finally {
+                    timings.push({ start, ms: Date.now() - start });
+                }
                 if (staggerMs) await sleep(staggerMs);
             }
+            return timings;
+        },
+        /** Starts recording the page's long tasks (main-thread tasks of 50 ms or more); a reload loses it, so call again after one. */
+        async installLongTasks() {
+            return ev(LONG_TASK_OBSERVER);
+        },
+        /** The long tasks recorded since `installLongTasks`, or null. */
+        async longTasks() {
+            return ev(READ_LONG_TASKS);
         },
 
         /**

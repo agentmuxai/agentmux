@@ -14,6 +14,7 @@ import { basename, join } from "node:path";
 import { mismatch } from "./compare.mjs";
 import { evaluate, report } from "./gate.mjs";
 import { driftWarning, portableCommit, srvTarget, withReplacedSrv } from "./lib/srv.mjs";
+import { slowSendsAgainstLongTasks, summariseLongTasks } from "./lib/longtasks.mjs";
 import { mergeStoreLock, parseStoreLock } from "./lib/storelock.mjs";
 import { CpuLedger, cpuBetween } from "./lib/cpu.mjs";
 import { generateConversation } from "./lib/conversation.mjs";
@@ -564,5 +565,30 @@ describe("the store lock in srv's log", () => {
         expect(text).toMatch(/Longest hold of srv's transcript store connection .*base 1000 ms.*head 7500 ms/);
         // runs from before this was recorded add nothing
         expect(runsTable(compareRuns([{ label: "o", steady: { app: { privateMB: 1 }, groups: {} } }], [{ label: "p", steady: { app: { privateMB: 1 }, groups: {} } }]), "a", "b")).not.toMatch(/Longest hold/);
+    });
+});
+
+describe("the page's long tasks", () => {
+    const raw = { n: 5, tasks: [[1000, 80], [2100, 2400], [4000, 60], [9000, 700], [9500, 120]], top: [{ at: 2100, ms: 2400, name: "self", container: "window" }] };
+
+    it("summarises them overall and per round", () => {
+        const s = summariseLongTasks(raw, [{ round: 1, start: 0, end: 3000 }, { round: 2, start: 3000, end: 10000 }]);
+        expect(s).toMatchObject({ count: 5, totalMs: 3360, maxMs: 2400, over1s: 1 });
+        expect(s.byRound).toEqual([
+            { round: 1, count: 2, totalMs: 2480, maxMs: 2400 },
+            { round: 2, count: 3, totalMs: 880, maxMs: 700 },
+        ]);
+        expect(s.longest[0]).toMatchObject({ ms: 2400, container: "window", at: new Date(2100).toISOString() });
+        expect(summariseLongTasks(null)).toBeNull(); // never installed, or lost to a reload
+    });
+
+    it("says how many slow sends ran while a long task of 500 ms or more did", () => {
+        const sends = [
+            { start: 2000, ms: 6000 }, // overlaps the 2.4 s task at 2100
+            { start: 20000, ms: 7000 }, // slow, nothing on the page
+            { start: 9100, ms: 300 }, // fast
+        ];
+        expect(slowSendsAgainstLongTasks(sends, raw)).toEqual({ slowSends: 2, overlappingLongTask: 1 });
+        expect(slowSendsAgainstLongTasks(sends, null)).toEqual({ slowSends: 2, overlappingLongTask: 0 });
     });
 });
