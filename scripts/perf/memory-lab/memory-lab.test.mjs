@@ -15,7 +15,7 @@ import { mismatch } from "./compare.mjs";
 import { evaluate, report } from "./gate.mjs";
 import { driftWarning, portableCommit, srvTarget, withReplacedSrv } from "./lib/srv.mjs";
 import { mergeStoreLock, parseStoreLock } from "./lib/storelock.mjs";
-import { CpuLedger, cpuBetween } from "./lib/cpu.mjs";
+import { CpuLedger, cpuBetween, writtenBetween } from "./lib/cpu.mjs";
 import { generateConversation } from "./lib/conversation.mjs";
 import { commandName, portableExe } from "./lib/driver.mjs";
 import { draftText, recycleMark, recycleSaving, scrollArmed, scrollRestored } from "./lib/recycle.mjs";
@@ -564,5 +564,38 @@ describe("the store lock in srv's log", () => {
         expect(text).toMatch(/Longest hold of srv's transcript store connection .*base 1000 ms.*head 7500 ms/);
         // runs from before this was recorded add nothing
         expect(runsTable(compareRuns([{ label: "o", steady: { app: { privateMB: 1 }, groups: {} } }], [{ label: "p", steady: { app: { privateMB: 1 }, groups: {} } }]), "a", "b")).not.toMatch(/Longest hold/);
+    });
+});
+
+describe("bytes written", () => {
+    const MiB = 1048576;
+    const proc = (pid, role, write_bytes, name = "x.exe") => ({ pid, name, role, app: true, write_bytes });
+
+    it("counts the highest write counter seen per process, per group, so a replaced process keeps what it wrote", () => {
+        const ledger = new CpuLedger();
+        ledger.note([proc(1, "main", 10 * MiB, "agentmux-srv.exe"), proc(2, "renderer", 1 * MiB)]);
+        const atStart = ledger.writtenTotals();
+        ledger.note([proc(1, "main", 50 * MiB, "agentmux-srv.exe"), proc(2, "renderer", 3 * MiB)]);
+        ledger.note([proc(1, "main", 90 * MiB, "agentmux-srv.exe"), proc(3, "renderer", 2 * MiB)]); // renderer 2 replaced by 3
+        const written = writtenBetween(atStart, ledger.writtenTotals());
+        expect(written.srv).toBe(80);
+        expect(written.renderer).toBe(4); // 3 - 1 for pid 2, plus 2 for pid 3
+        expect(written.app).toBe(84);
+    });
+
+    it("leaves out the panes' children and a process whose counter could not be read", () => {
+        const ledger = new CpuLedger();
+        ledger.note([{ ...proc(1, "renderer", 900 * MiB), app: false }, proc(2, "renderer", undefined)]);
+        expect(ledger.writtenTotals().app).toBe(0);
+    });
+
+    it("compares what srv wrote on each side, flagged past +10% when the ranges are apart", () => {
+        const run = (label, srv) => ({ label, steady: { app: { privateMB: 900 }, groups: {} }, io: { writtenMB: { srv } } });
+        const cmp = compareRuns([run("b1", 5300), run("b2", 5400)], [run("h1", 2100), run("h2", 2200)]);
+        expect(cmp.written.pct).toBeLessThan(-50);
+        expect(cmp.written.flagged).toBe(false); // less is not a regression
+        const worse = compareRuns([run("b1", 2000), run("b2", 2100)], [run("h1", 2600), run("h2", 2700)]);
+        expect(worse.written.flagged).toBe(true);
+        expect(runsTable(worse, "base", "head")).toMatch(/Bytes srv wrote during the workload.*base 2050 MB.*head 2650 MB.*over \+10%/);
     });
 });

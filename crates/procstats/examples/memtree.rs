@@ -271,6 +271,8 @@ struct Row {
     uss: Option<u64>,
     /// User + kernel CPU time so far, in nanoseconds (cumulative; a rate needs two samples).
     cpu_ns: Option<u64>,
+    /// Bytes written so far (cumulative; what the OS counts is in `procstats::write_bytes`).
+    write_bytes: Option<u64>,
 }
 
 fn esc(s: &str) -> String {
@@ -457,6 +459,7 @@ fn main() {
                 pss,
                 uss,
                 cpu_ns: p.cpu_ns,
+                write_bytes: agentmux_procstats::write_bytes(p.pid),
             });
         }
         let (mut app, mut child) = (Totals::default(), Totals::default());
@@ -472,8 +475,8 @@ fn main() {
                 .iter()
                 .map(|r| {
                     format!(
-                        "{{\"pid\":{},\"name\":\"{}\",\"role\":\"{}\",\"app\":{},\"private\":{},\"resident\":{},\"commit\":{},\"pss\":{},\"uss\":{},\"cpu_ns\":{}}}",
-                        r.pid, esc(&r.name), esc(&r.role), r.app, opt(r.private), opt(r.resident), opt(r.commit), opt(r.pss), opt(r.uss), opt(r.cpu_ns)
+                        "{{\"pid\":{},\"name\":\"{}\",\"role\":\"{}\",\"app\":{},\"private\":{},\"resident\":{},\"commit\":{},\"pss\":{},\"uss\":{},\"cpu_ns\":{},\"write_bytes\":{}}}",
+                        r.pid, esc(&r.name), esc(&r.role), r.app, opt(r.private), opt(r.resident), opt(r.commit), opt(r.pss), opt(r.uss), opt(r.cpu_ns), opt(r.write_bytes)
                     )
                 })
                 .collect();
