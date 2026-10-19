@@ -203,13 +203,25 @@ async function requireIdle(driver, timeoutS = 300) {
  * `--heavy-turns` big turns first, so one open is of a long conversation and of a turn too long for the first slice. Runs after
  * every other measurement of the run, which it would disturb.
  */
-async function measureOpens(driver, args, home) {
+async function measureOpens(driver, args, home, { memtree, rootPid }) {
     const heavy = args.heavyTurns > 0;
+    let heavyWrittenMB = null;
     if (heavy) {
+        await osSample(memtree, rootPid, args.port);
+        const before = cpuLedger.writtenTotals();
+        const t0 = Date.now();
         for (let k = 1; k <= args.heavyTurns; k++) {
             await driver.send([driver.agents[0].blockId], { text: `[heavy ${k}] Run the whole test suite and report what failed.` });
-            await requireIdle(driver);
+            await waitTurnDone(driver);
+            if (k % 10 === 0 || k === args.heavyTurns) console.log(`  heavy turn ${k} of ${args.heavyTurns} played (${Math.round((Date.now() - t0) / 1000)} s)`);
         }
+        await requireIdle(driver);
+        await osSample(memtree, rootPid, args.port);
+        heavyWrittenMB = writtenBetween(before, cpuLedger.writtenTotals());
+        // The heavy turns must have been played, or the "heavy" open is an ordinary one under another name.
+        const rows = await driver.toolRows();
+        const others = Math.max(0, ...rows.slice(1).map((r) => r.tools));
+        if (!(rows[0].tools > others)) throw new InvalidRun(`the heavy turns were not played: ${rows[0].name} shows ${rows[0].tools} tool rows, the others up to ${others}`);
     }
     const storeBefore = storeLockOf(home);
     const opens = [];
@@ -227,12 +239,29 @@ async function measureOpens(driver, args, home) {
     const storeAfter = storeLockOf(home);
     const summary = summariseOpens(withTasks);
     return {
-        heavy: heavy ? { turns: args.heavyTurns, kb: args.heavyKb } : null,
+        heavy: heavy ? { turns: args.heavyTurns, kb: args.heavyKb, writtenMB: heavyWrittenMB } : null,
         opens: withTasks,
         summary,
         // Holds and waits of 500 ms or more on the store's connection that began while the agents were being opened (other agents were idle).
         storeLockDuring: storeBefore && storeAfter ? { holds: storeAfter.holds - storeBefore.holds, waits: storeAfter.waits - storeBefore.waits, longestHeldMs: storeAfter.longestHeldMs, longestHeldSite: storeAfter.longestHeldSite } : null,
     };
+}
+
+/** One agent's turn is over: it was seen working, and has been idle for two polls (a fast version of `requireIdle`, for many turns in a row). */
+async function waitTurnDone(driver, capS = 180) {
+    let sawWorking = false;
+    let quiet = 0;
+    for (let t = 0; t < capS * 2; t++) {
+        await sleep(500);
+        const busy = await driver.busy().catch(() => null);
+        if (busy == null) continue;
+        if (busy > 0) {
+            sawWorking = true;
+            quiet = 0;
+        } else if (sawWorking && ++quiet >= 2) return;
+        else if (!sawWorking && t > 20) return; // never started: the idle check after the loop reports it
+    }
+    throw new InvalidRun(`a heavy turn was still playing ${capS} s after it was sent`);
 }
 
 /** What a recycle did, in a few lines. */
@@ -408,7 +437,7 @@ async function attempt(args, ctx) {
         // What the run's workload did to the store and the disk, taken before the opens below add to them.
         const storeLockWorkload = storeLockOf(home);
         const volumeAtEnd = volumeOf(dir);
-        const openPhase = args.openAgents > 0 ? await measureOpens(driver, args, home) : null;
+        const openPhase = args.openAgents > 0 ? await measureOpens(driver, args, home, { memtree, rootPid: instance.pid }) : null;
 
         const notes = [];
         if (process.platform === "darwin") notes.push("macOS: the totals are per-process footprints summed, an upper bound; footprint's own total over the app's processes is in final.footprint");
