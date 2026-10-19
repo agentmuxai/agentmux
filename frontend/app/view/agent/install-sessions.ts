@@ -73,7 +73,7 @@ function entryFor(providerId: string): Entry {
                     icon: ok ? "fa-check" : "fa-triangle-exclamation",
                     title: ok ? `${name} is installed` : `${name} didn't install`,
                     message: ok
-                        ? `Open the ${name} card in a new agent pane to create the agent.`
+                        ? `Click its card under New Agent to create the agent.`
                         : (session.failure()?.message ?? "Open its card in a new agent pane to see why, and retry."),
                     timestamp: new Date().toISOString(),
                     type: ok ? "info" : "error",

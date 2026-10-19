@@ -107,7 +107,8 @@
     color: var(--main-text-color);
 }
 
-.agent-create-panel-text {
+.agent-create-panel-text,
+.agent-create-form-hint {
     margin: 0;
     font-size: var(--text-sm);
     color: var(--secondary-text-color);
