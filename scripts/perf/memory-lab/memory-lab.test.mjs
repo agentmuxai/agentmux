@@ -587,6 +587,9 @@ describe("bytes written", () => {
         const ledger = new CpuLedger();
         ledger.note([{ ...proc(1, "renderer", 900 * MiB), app: false }, proc(2, "renderer", undefined)]);
         expect(ledger.writtenTotals().app).toBe(0);
+        expect(ledger.sawWriteCounters()).toBe(false); // so a run records no figure, not "0 MB"
+        ledger.note([proc(3, "renderer", 0)]);
+        expect(ledger.sawWriteCounters()).toBe(true);
     });
 
     it("compares what srv wrote on each side, flagged past +10% when the ranges are apart", () => {

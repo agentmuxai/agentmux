@@ -15,8 +15,10 @@ import { GROUPS, groupOf } from "./summary.mjs";
 
 export class CpuLedger {
     #seen = new Map();
+    #sawWrites = false;
 
     reset() {
+        this.#sawWrites = false;
         this.#seen.clear();
     }
 
@@ -24,6 +26,7 @@ export class CpuLedger {
     note(procs) {
         for (const p of procs ?? []) {
             if (!p.app || (p.cpu_ns == null && p.write_bytes == null)) continue;
+            if (p.write_bytes != null) this.#sawWrites = true;
             const key = `${p.pid}|${p.name}`;
             const before = this.#seen.get(key) ?? { ns: 0, written: 0, group: groupOf(p) };
             this.#seen.set(key, {
@@ -32,6 +35,11 @@ export class CpuLedger {
                 group: before.group,
             });
         }
+    }
+
+    /** Whether any app process reported a write counter: without one, "0 bytes written" would be a false number, not a measurement. */
+    sawWriteCounters() {
+        return this.#sawWrites;
     }
 
     /** Bytes written so far, per group and `app`, counting every process seen. */
