@@ -904,3 +904,75 @@ jobs:
       - env:
           NEEDS_JSON: ${{ toJSON(needs) }}
         run: node scripts/ci-required-check.mjs
+
+  # When a push to main fails CI, say so in one issue, labelled main-red; when
+  # a later push is green, close it. Main went red for three pushes on
+  # 2026-10-18 and nobody heard (docs/specs/SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19.md
+  # §5 Phase 5). One issue per red streak, a comment per failing push. Found
+  # by label, not search, which can lag behind a just-created issue. A
+  # cancelled run says nothing. Pushes to main run CI concurrently, so:
+  # - only a run whose commit is still main's head acts, so an older run
+  #   finishing late can't close a newer failure's issue or reopen one after
+  #   main went green (the newer push's run reports instead);
+  # - no concurrency group: GitHub keeps one pending job per group and lets a
+  #   newer arrival replace it, so a late older run could displace the head's
+  #   (Codex on #5121). Two runs can still race to create an issue when main
+  #   moves on between them, so after creating one the oldest open main-red
+  #   issue is kept and any other closed as its duplicate; a green run closes
+  #   every open one.
+  main-status:
+    name: main status
+    needs: [ci-required]
+    if: ${{ always() && github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      issues: write
+      actions: read
+    steps:
+      - name: Open, update or close the main-red issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RESULT: ${{ needs.ci-required.result }}
+          SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          [ "$RESULT" = "failure" ] || [ "$RESULT" = "success" ] || { echo "CI required: $RESULT, nothing to say."; exit 0; }
+          head=$(gh api "repos/$REPO/git/ref/heads/main" --jq .object.sha)
+          if [ "$head" != "$SHA" ]; then
+            echo "main has moved on to ${head:0:9}; that push's run reports main's state."; exit 0
+          fi
+          open=$(gh issue list --repo "$REPO" --label main-red --state open --json number --jq '.[].number')
+          subject=$(gh api "repos/$REPO/commits/$SHA" --jq '.commit.message | split("\n")[0]')
+          at="\`${SHA:0:9}\` ($subject)"
+          if [ "$RESULT" = "success" ]; then
+            for n in $open; do
+              gh issue close "$n" --repo "$REPO" --comment "Green again at $at: $RUN_URL"
+            done
+            exit 0
+          fi
+          open=$(printf '%s\n' "$open" | head -1)
+          failing=$(gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/jobs" --jq '.jobs[] | select(.conclusion == "failure") | "- " + .name' | grep -v -- '- CI required$' || true)
+          note="CI failed on main at $at: $RUN_URL"$'\n\n'"Failing jobs:"$'\n'"${failing:-- (see the run)}"
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --repo "$REPO" --body "$note"
+          else
+            gh label create main-red --repo "$REPO" --color B60205 --description "CI on main is failing" --force >/dev/null
+            mine=$(gh issue create --repo "$REPO" --title "main is red" --label main-red \
+              --body "$note"$'\n\n'"This issue is opened and closed by CI (ci-pr.yml, main status): it stays open while pushes to main fail, with a comment for each, and closes when one is green." | grep -o '[0-9]*$')
+            # Another run may have created one at the same moment: keep the
+            # oldest, and if that isn't this run's, carry this run's report
+            # over, so the open issue names the head's failure (Codex on #5121).
+            all=$(gh issue list --repo "$REPO" --label main-red --state open --json number --jq 'map(.number) | sort | .[]')
+            keep=$(printf '%s\n' "$all" | head -1)
+            if [ -n "$keep" ] && [ "$keep" != "$mine" ]; then
+              gh issue comment "$keep" --repo "$REPO" --body "$note"
+            fi
+            for n in $(printf '%s\n' "$all" | tail -n +2); do
+              gh issue close "$n" --repo "$REPO" --reason "not planned" --comment "Duplicate of #$keep, opened by a run at the same moment."
+            done
+          fi
