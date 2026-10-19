@@ -416,22 +416,39 @@ describe("CPU and round time", () => {
     it("compares the medians of several runs and flags CPU or round time past the margin", () => {
         const base = [run("b1", 900, 600, 100, 70, 10000), run("b2", 920, 610, 104, 72, 10400), run("b3", 910, 605, 102, 71, 10200)];
         const head = [run("h1", 700, 450, 125, 90, 10100), run("h2", 710, 455, 127, 92, 10300)];
-        const cmp = compareRuns(base, head, { cpuPct: 10, wallPct: 10 });
+        const cmp = compareRuns(base, head);
         const app = cmp.rows.find((r) => r.group === "app");
         expect(app.memory.pct).toBeLessThan(-20);
-        expect(app.cpu.flagged).toBe(true); // 102 -> 126, about +23%
+        expect(app.cpu.flagged).toBe(true); // 102 -> 126, about +23%, past +10%, and the ranges are apart
+        expect(cmp.rows.find((r) => r.group === "renderer").cpu.flagged).toBe(true); // 71 -> 91, about +28%, past +20%
         expect(cmp.wall.flagged).toBe(false);
         const text = runsTable(cmp, "base", "head");
         expect(text).toMatch(/CPU over \+10%/);
+        expect(text).toMatch(/CPU over \+20%/);
         expect(text).toMatch(/3 run\(s\) against 2/);
     });
 
     it("does not flag a change inside the margin, and treats a missing number as unknown", () => {
-        const cmp = compareRuns([run("b", 900, 600, 100, 70, 10000)], [run("h", 800, 500, 105, 72, 10500)], { cpuPct: 10, wallPct: 10 });
+        const cmp = compareRuns([run("b", 900, 600, 100, 70, 10000)], [run("h", 800, 500, 105, 72, 10500)]);
         expect(cmp.rows.find((r) => r.group === "app").cpu.flagged).toBe(false);
         const old = compareRuns([{ label: "o", steady: { app: { privateMB: 900 }, groups: {} } }], [run("h", 800, 500, 105, 72, 10500)]);
         expect(old.rows.find((r) => r.group === "app").cpu.base.n).toBe(0);
         expect(old.rows.find((r) => r.group === "app").cpu.flagged).toBe(false);
+    });
+
+    it("applies the margin per metric and needs the ranges apart", () => {
+        // renderer CPU +15%: past 10 but not past its own 20; app CPU +15%: past 10
+        const base = [run("b1", 900, 600, 100, 70, 10000), run("b2", 900, 600, 101, 70.5, 10000)];
+        const head = [run("h1", 900, 600, 116, 81, 10000), run("h2", 900, 600, 117, 81.5, 10000)];
+        const cmp = compareRuns(base, head);
+        expect(cmp.rows.find((r) => r.group === "app").cpu.flagged).toBe(true);
+        expect(cmp.rows.find((r) => r.group === "renderer").cpu.flagged).toBe(false);
+        // the same +15% app CPU with overlapping ranges is noise, not a flag
+        const noisy = compareRuns([run("b1", 900, 600, 100, 70, 10000), run("b2", 900, 600, 120, 70, 10000)], [run("h1", 900, 600, 118, 70, 10000), run("h2", 900, 600, 140, 70, 10000)]);
+        expect(noisy.rows.find((r) => r.group === "app").cpu.pct).toBeGreaterThan(10);
+        expect(noisy.rows.find((r) => r.group === "app").cpu.flagged).toBe(false);
+        // a single number sets every CPU group
+        expect(compareRuns(base, head, { cpuPct: 10, wallPct: 20 }).rows.find((r) => r.group === "renderer").cpu.flagged).toBe(true);
     });
 
     it("refuses to compare different workload versions", () => {

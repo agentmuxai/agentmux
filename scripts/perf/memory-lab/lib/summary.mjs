@@ -170,15 +170,30 @@ export function cpuTable(cpu, wall) {
 const pctChange = (base, head) => (base == null || head == null || base === 0 ? null : Math.round(((head - base) / base) * 1000) / 10);
 
 /**
+ * The percent past which a change is flagged (report only: it decides nothing).
+ * Per metric, because the noise differs: app and srv CPU are steady, renderer
+ * CPU and the round time move more (measured spread of identical runs: about 5%,
+ * 3%, 13% and 15%).
+ */
+export const DEFAULT_MARGINS = { cpuPct: { app: 10, srv: 10, default: 20 }, wallPct: 20 };
+
+/** The CPU margin of a group; a single number means every group. */
+const marginFor = (margins, group) => {
+    const c = margins.cpuPct;
+    return typeof c === "number" ? c : (c[group] ?? c.default);
+};
+
+/**
  * Several runs of a build against several of another: per metric the median
  * of each side, the change in percent and, to judge the noise, each side's
- * lowest and highest. `margins` are the percent past which CPU or round time is
- * flagged (report only: this decides nothing).
+ * lowest and highest. A CPU or round-time change is flagged only when it is past
+ * its margin AND the two sides' ranges do not overlap (the lowest run of the
+ * head is still above the highest of the base).
  * @param {object[]} baseRuns result.json contents
  * @param {object[]} headRuns
- * @param {{ cpuPct: number, wallPct: number }} margins
+ * @param {{ cpuPct: number | Record<string, number>, wallPct: number }} margins
  */
-export function compareRuns(baseRuns, headRuns, margins = { cpuPct: 10, wallPct: 10 }) {
+export function compareRuns(baseRuns, headRuns, margins = DEFAULT_MARGINS) {
     const side = (runs, get) => {
         const v = runs.map(get).filter((x) => x != null && Number.isFinite(x));
         return { median: median(v), min: v.length ? Math.min(...v) : null, max: v.length ? Math.max(...v) : null, n: v.length };
@@ -187,7 +202,8 @@ export function compareRuns(baseRuns, headRuns, margins = { cpuPct: 10, wallPct:
         const base = side(baseRuns, get);
         const head = side(headRuns, get);
         const pct = pctChange(base.median, head.median);
-        return { name, unit, base, head, pct, flagged: marginPct != null && pct != null && pct > marginPct };
+        const separate = base.min != null && head.min != null && head.min > base.max; // the ranges do not overlap
+        return { name, unit, base, head, pct, marginPct, flagged: marginPct != null && pct != null && pct > marginPct && separate };
     };
     const rows = [];
     for (const g of ["app", ...GROUPS]) {
@@ -195,7 +211,7 @@ export function compareRuns(baseRuns, headRuns, margins = { cpuPct: 10, wallPct:
         const cpu = (r) => r.cpu?.seconds?.[g];
         const everyone = [...baseRuns, ...headRuns];
         if (side(everyone, mem).median === 0 && !side(everyone, cpu).median) continue; // a group that isn't there
-        rows.push({ group: g, memory: metric(g, "MB", mem), cpu: metric(g, "s", cpu, margins.cpuPct) });
+        rows.push({ group: g, memory: metric(g, "MB", mem), cpu: metric(g, "s", cpu, marginFor(margins, g)) });
     }
     const wall = metric("round time", "ms", (r) => r.wall?.medianMs, margins.wallPct);
     return { rows, wall, margins, baseRuns: baseRuns.length, headRuns: headRuns.length };
@@ -213,10 +229,10 @@ export function runsTable(cmp, baseLabel = "base", headLabel = "head") {
     for (const r of cmp.rows) {
         const m = r.memory;
         const c = r.cpu;
-        lines.push(`| ${r.group === "app" ? "**app total**" : r.group} | ${f(m.base.median)}${range(m.base)} | ${f(m.head.median)}${range(m.head)} | ${sign(m.pct)} | ${f(c.base.median)}${range(c.base)} | ${f(c.head.median)}${range(c.head)} | ${sign(c.pct)} | ${c.flagged ? `CPU over +${cmp.margins.cpuPct}%` : ""} |`);
+        lines.push(`| ${r.group === "app" ? "**app total**" : r.group} | ${f(m.base.median)}${range(m.base)} | ${f(m.head.median)}${range(m.head)} | ${sign(m.pct)} | ${f(c.base.median)}${range(c.base)} | ${f(c.head.median)}${range(c.head)} | ${sign(c.pct)} | ${c.flagged ? `CPU over +${c.marginPct}%` : ""} |`);
     }
     const w = cmp.wall;
-    lines.push("", `Round time (send to all agents idle), median: ${baseLabel} ${f(w.base.median)} ms${range(w.base)}, ${headLabel} ${f(w.head.median)} ms${range(w.head)}, ${sign(w.pct)}${w.flagged ? ` (over +${cmp.margins.wallPct}%)` : ""}.`);
-    lines.push("", `${cmp.baseRuns} run(s) against ${cmp.headRuns}; medians, with the lowest-highest in brackets when there is more than one. Flags are report-only, at +${cmp.margins.cpuPct}% CPU and +${cmp.margins.wallPct}% round time; the operator sets the real margins.`);
+    lines.push("", `Round time (send to all agents idle), median: ${baseLabel} ${f(w.base.median)} ms${range(w.base)}, ${headLabel} ${f(w.head.median)} ms${range(w.head)}, ${sign(w.pct)}${w.flagged ? ` (over +${w.marginPct}%)` : ""}.`);
+    lines.push("", `${cmp.baseRuns} run(s) against ${cmp.headRuns}; medians, with the lowest-highest in brackets when there is more than one. A flag needs the change to pass the margin (${typeof cmp.margins.cpuPct === "number" ? `+${cmp.margins.cpuPct}%` : `+${cmp.margins.cpuPct.app}% app and srv CPU, +${cmp.margins.cpuPct.default}% other groups`} CPU, +${cmp.margins.wallPct}% round time) and the two sides' ranges not to overlap. Flags are report-only; the operator sets the real margins.`);
     return lines.join("\n");
 }

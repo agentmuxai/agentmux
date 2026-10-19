@@ -15,7 +15,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { compareRuns, runsTable } from "./lib/summary.mjs";
+import { compareRuns, DEFAULT_MARGINS, runsTable } from "./lib/summary.mjs";
 
 /** Why two results can't be compared, or null. */
 export function mismatch(base, head) {
@@ -44,12 +44,14 @@ function main() {
         return i >= 0 ? argv.splice(i, 2)[1] : null;
     };
     const md = take("--md");
-    const cpuPct = Number(take("--cpu-margin") ?? 10);
-    const wallPct = Number(take("--wall-margin") ?? 10);
+    // Default margins differ per metric (DEFAULT_MARGINS); a flag sets one number for all CPU, or for the round time.
+    const cpuFlag = take("--cpu-margin");
+    const wallFlag = take("--wall-margin");
+    const margins = { cpuPct: cpuFlag != null ? Number(cpuFlag) : DEFAULT_MARGINS.cpuPct, wallPct: wallFlag != null ? Number(wallFlag) : DEFAULT_MARGINS.wallPct };
     // `<base.json> <head.json>`, or comma-separated lists of runs of each side (several runs, interleaved, tell noise from change).
     const [basePaths, headPaths] = [take("--base") ?? argv[0], take("--head") ?? argv[1]].map((x) => (x ? x.split(",") : []));
     if (!basePaths.length || !headPaths.length) {
-        console.error("usage: compare.mjs <base result.json[,more]> <head result.json[,more]> [--md out.md] [--cpu-margin 10] [--wall-margin 10]");
+        console.error("usage: compare.mjs <base result.json[,more]> <head result.json[,more]> [--md out.md] [--cpu-margin <pct for every group>] [--wall-margin <pct>]");
         process.exit(2);
     }
     const base = basePaths.map((p) => JSON.parse(readFileSync(p, "utf8")));
@@ -70,7 +72,7 @@ function main() {
         "",
         `${head[0].layout.panes} agents, ${head[0].rounds} rounds, forced GC, private working set (MB) and CPU seconds over the workload.`,
         "",
-        runsTable(compareRuns(base, head, { cpuPct, wallPct }), baseLabel, headLabel),
+        runsTable(compareRuns(base, head, margins), baseLabel, headLabel),
     ].join("\n");
     console.log(out);
     if (md) writeFileSync(md, out + "\n");

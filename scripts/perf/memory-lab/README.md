@@ -73,9 +73,13 @@ How to compare two builds (or the same build with and without a change):
 3. `node scripts/perf/memory-lab/compare.mjs --base a1,a2,a3,a4 --head b1,b2,b3,b4`
    (paths to the `result.json` files; two positional files still work). It
    prints each side's median with its lowest-highest, the change in percent,
-   and flags CPU or round time past `--cpu-margin` / `--wall-margin` (percent,
-   default 10). The flags are report-only and the margins are a starting point:
-   the operator sets the real ones, once the noise is known.
+   and flags CPU or round time past its margin. The default margins are per
+   metric, from the measured noise of identical runs: +10% for app and srv CPU,
+   +20% for the renderers' (and other groups') CPU and for the round time;
+   `--cpu-margin` / `--wall-margin` set one number for all CPU or for the round
+   time. A flag also needs the two sides' lowest-highest ranges not to overlap.
+   The flags are report-only and the margins are a starting point: the operator
+   sets the real ones.
 
 Results made with a different workload version (`result.workloadVersion`; the
 pacing of the rounds) are refused: the two are different loads.
