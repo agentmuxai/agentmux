@@ -3,7 +3,7 @@
 **Date:** 2026-10-19
 **Author:** Maricon@charlie
 **Type:** Spec (a storage contract change; behaviour for the user is unchanged)
-**Status:** active — step A (the readers) landed in #5173; step B (the setting `agent:transcriptsinglecopy`, off by default, and the skip in `append_transcript`) is in PR #PRNUM; remaining: the lab A/B with the setting on (`--heavy-turns`, `--disk-load`), then flipping the default in a one-line change, and C (remove the dead paths) after a soak.
+**Status:** active — step A (the readers) landed in #5173; step B (the setting `agent:transcriptsinglecopy`, off by default, and the skip in `append_transcript`) is in PR #5176; remaining: the lab A/B with the setting on (`--heavy-turns`, `--disk-load`), then flipping the default in a one-line change, and C (remove the dead paths) after a soak.
 **Issue:** #5141. Measured in `docs/reports/REPORT_FILESTORE_WRITE_VOLUME_2026_10_19.md`.
 **Platform:** all.
 
