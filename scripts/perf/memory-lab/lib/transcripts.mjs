@@ -20,26 +20,42 @@ export function expectedToolUses(script, regularTurns, heavyTurns = 0) {
     return n;
 }
 
-/** Above this many bytes the lab does not read a whole transcript just to count its tool calls (the line count and newest line are still checked). */
-export const COUNT_LIMIT_BYTES = 16 * 1024 * 1024;
+/**
+ * Above this many bytes the lab does not read a whole transcript just to hash it and count its tool calls (the line count, newest line
+ * and stream are still checked). A transcript is read in pages of `blockfile:read_range`: `agent:open_tail` cannot, srv caps its
+ * `tail_bytes` at 1 MiB.
+ */
+export const COUNT_LIMIT_BYTES = 128 * 1024 * 1024;
+
+/** Lines per page; a page of long tool results is a few MB at most. */
+export const PAGE_LINES = 200;
 
 /** Runs in the page: one agent's transcript, as { totalLines, stream, gen, size, last, toolUses, hashAll, hashFirst }. Everything but the first five is null above COUNT_LIMIT_BYTES. `hashFirst`: of the first `prefixLines` lines. */
 export function readTranscriptScript(blockId, prefixLines = null) {
     return `(async () => {
   try {
-    const call = (tail) => RpcApi.AgentOpenTailCommand(TabRpcClient, { block_id: ${JSON.stringify(blockId)}, filename: "output", tail_bytes: tail });
-    const head = await call(4096);
+    const block_id = ${JSON.stringify(blockId)};
+    const head = await RpcApi.AgentOpenTailCommand(TabRpcClient, { block_id, filename: "output", tail_bytes: 4096 });
     const out = { totalLines: head.total_lines ?? null, stream: head.stream ?? null, gen: head.gen ?? null, size: head.size ?? null, last: head.lines.length ? head.lines[head.lines.length - 1] : null, toolUses: null, hashAll: null, hashFirst: null };
-    if (head.size != null && head.size <= ${COUNT_LIMIT_BYTES}) {
-      const all = await call(head.size + 1);
-      if (all.has_more_before === false && all.total_lines === head.total_lines) {
-        let n = 0;
-        const fnv = (upTo) => { let h = 0x811c9dc5; for (let i = 0; i < upTo && i < all.lines.length; i++) { const line = all.lines[i]; for (let k = 0; k < line.length; k++) { h ^= line.charCodeAt(k); h = Math.imul(h, 0x01000193) >>> 0; } h ^= 10; h = Math.imul(h, 0x01000193) >>> 0; } return h; };
-        for (const line of all.lines) { let at = 0; while ((at = line.indexOf('"type":"tool_use"', at)) >= 0) { n++; at += 17; } }
-        out.toolUses = n;
-        out.hashAll = fnv(all.lines.length);
-        out.hashFirst = ${prefixLines == null ? "null" : "fnv(" + Number(prefixLines) + ")"};
+    if (head.size != null && head.total_lines != null && head.size <= ${COUNT_LIMIT_BYTES}) {
+      // The whole transcript, a page of lines at a time (hashed and counted in the page: nothing big crosses to the lab).
+      const prefix = ${prefixLines == null ? "null" : Number(prefixLines)};
+      let h = 0x811c9dc5, hashFirst = null, tools = 0, offset = 0, ok = true;
+      const fnv = (line) => { for (let k = 0; k < line.length; k++) { h ^= line.charCodeAt(k); h = Math.imul(h, 0x01000193) >>> 0; } h ^= 10; h = Math.imul(h, 0x01000193) >>> 0; };
+      if (prefix === 0) hashFirst = h;
+      while (offset < head.total_lines) {
+        const page = await RpcApi.BlockfileReadRangeCommand(TabRpcClient, { block_id, filename: "output", offset, limit: ${PAGE_LINES}, expect_gen: head.gen ?? undefined });
+        if (page.gen_mismatch || !page.lines.length) { ok = false; break; }
+        for (const line of page.lines) {
+          fnv(line);
+          let at = 0;
+          while ((at = line.indexOf('"type":"tool_use"', at)) >= 0) { tools++; at += 17; }
+          offset++;
+          if (prefix != null && offset === prefix) hashFirst = h;
+          if (offset >= head.total_lines) break;
+        }
       }
+      if (ok && offset === head.total_lines) { out.toolUses = tools; out.hashAll = h; out.hashFirst = hashFirst; }
     }
     return out;
   } catch (e) { return { error: String(e && e.message ? e.message : e) }; }
@@ -101,9 +117,10 @@ export function checkTranscripts(before, after, expected = {}) {
 export function transcriptsLine(t) {
     if (!t) return "";
     const kinds = [...new Set(t.agents.map((a) => a.streamKind))].join("/");
+    const n = t.agents.length;
     const added = t.agents.filter((a) => a.linesAdded > 0).length;
-    const unchecked = t.agents.filter((a) => a.startsWithBefore == null).length;
-    return t.ok
-        ? `Transcripts: ${t.agents.length} agents' transcripts (stream ${kinds}) kept every line they had before the reopens (${added} grew, by the turn the restarted CLI played), end on a finished turn, and hold at least the scripted tool calls${unchecked ? `; ${unchecked} too big to compare line by line` : ""}.`
-        : `TRANSCRIPT PROBLEM (stream ${kinds}): ${t.problems.join("; ")}`;
+    const compared = t.agents.filter((a) => a.startsWithBefore != null).length;
+    const counted = t.agents.filter((a) => a.toolUses != null).length;
+    if (!t.ok) return `TRANSCRIPT PROBLEM (stream ${kinds}): ${t.problems.join("; ")}`;
+    return `Transcripts (stream ${kinds}): ${n} agents' transcripts end on a finished turn and none lost a line (${added} grew, by the turn the restarted CLI played); ${compared} of ${n} compared line by line with what they held before the reopens, ${counted} of ${n} had their tool calls counted against the script${compared < n || counted < n ? " (the others are too big to read whole)" : ""}.`;
 }

@@ -231,7 +231,7 @@ count and newest line, which stream it is, a hash of its lines and the number of
 heavy turns are over, and again after the agents have been reopened and gone idle. A transcript only ever grows, so the second
 reading must begin with exactly the lines of the first (the hash), be on the same stream (`g:` the agent's own, `b:` the block's),
 end on a finished turn (`"type":"result"`), and hold at least the tool calls the scripted turns made. A problem makes the run
-fail after it has written `result.transcripts` and the summary. A transcript above 16 MB is not read whole: its line count, newest
+fail after it has written `result.transcripts` and the summary. A transcript is read whole in pages of `blockfile:read_range` (`agent:open_tail` is capped at 1 MiB by srv), up to 128 MB; above that its line count, newest
 line and stream are still checked, not its hash or tool calls.
 
 The line count is **not** expected to stay the same: with the lab's fake CLI a reopen starts the CLI again, srv sends its startup
