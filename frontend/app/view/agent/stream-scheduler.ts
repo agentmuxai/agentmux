@@ -94,13 +94,36 @@ function runOne(id: string, req: Request): void {
     }
 }
 
+/**
+ * How many panes each frame's flush covered, for the perf lab
+ * (scripts/perf/memory-lab): the lab sets `globalThis.__labFrameCounter` in the
+ * page, and only while it is set does a frame count here. Nothing is set in the app, so a normal
+ * run costs one property read per frame and allocates nothing; the lab sizes `hist`, so what is
+ * kept is bounded by it (the last slot is "that many or more").
+ */
+interface LabFrameCounter {
+    frames: number;
+    hist: number[];
+}
+
+function noteFlushedPanes(ran: number): void {
+    const counter = (globalThis as { __labFrameCounter?: LabFrameCounter | null }).__labFrameCounter;
+    if (!counter || ran === 0) return;
+    counter.frames++;
+    counter.hist[Math.min(ran, counter.hist.length - 1)]++;
+}
+
 function runFrame(): void {
     rafId = null;
     const t = now();
     const interacting = t - lastInputAt < INPUT_WINDOW_MS;
     const entries = [...pending.entries()];
+    let ran = 0;
     if (!interacting) {
-        for (const [id, req] of entries) runOne(id, req);
+        for (const [id, req] of entries) {
+            runOne(id, req);
+            ran++;
+        }
     } else {
         // Oldest first (Map insertion order). One pane per frame normally; two
         // while the oldest has waited STARVATION_MS, so a long queue catches up
@@ -110,8 +133,12 @@ function runFrame(): void {
         // avoid).
         const oldestWait = entries.length > 0 ? t - entries[0][1].requestedAt : 0;
         const budget = oldestWait >= STARVATION_MS ? MAX_PANES_PER_FRAME_WHILE_INTERACTING : 1;
-        for (const [id, req] of entries.slice(0, budget)) runOne(id, req);
+        for (const [id, req] of entries.slice(0, budget)) {
+            runOne(id, req);
+            ran++;
+        }
     }
+    noteFlushedPanes(ran);
     if (pending.size > 0) arm();
 }
 
