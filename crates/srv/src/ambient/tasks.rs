@@ -82,7 +82,7 @@ pub(crate) async fn generate_recovered_title(
     let slot = call::admit(&purpose::ACTIVITY_SUMMARY_PUSHED, block_id, generation).await?;
 
     let block: Block = mstore.get(block_id).ok().flatten()?;
-    let Some(digest) = digest::read_recent_activity_digest(filestore, block_id) else {
+    let Some(digest) = digest::read_recent_activity_digest(filestore, mstore, block_id) else {
         slot.abandon(super::outcome::Outcome::EmptyDigest);
         return None;
     };
@@ -140,7 +140,7 @@ pub(crate) async fn generate_definition_activity_summary(
 ) -> Option<Generated> {
     let slot = call::admit(&purpose::DEFINITION_SUMMARY, definition_id, 1).await?;
 
-    let digest = digest::read_recent_activity_digest(filestore, block_id)?;
+    let digest = digest::read_recent_activity_digest(filestore, mstore, block_id)?;
 
     let target = match mstore.get::<Block>(block_id) {
         Ok(Some(block)) => match CliTarget::from_meta(&block.meta) {

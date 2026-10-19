@@ -129,16 +129,9 @@ fn classify_last_error_source(message: &str) -> &'static str {
 /// normal output, last line doesn't parse as this exact frame shape) —
 /// deliberately not distinguished further, since all of them mean the
 /// same thing to a caller: nothing actionable to surface here.
-fn last_error_frame(filestore: &FileStore, block_id: &str) -> Option<LastErrorFrame> {
-    let file = filestore.stat(block_id, "output").ok().flatten()?;
-    if file.size <= 0 {
-        return None;
-    }
-    let start = (file.size - LAST_ERROR_TAIL_BYTES).max(0);
-    let (_, bytes) = filestore
-        .read_at(block_id, "output", start, file.size - start)
-        .ok()?;
-    let text = String::from_utf8_lossy(&bytes);
+fn last_error_frame(source: &crate::backend::transcript::source::TranscriptSource<'_>) -> Option<LastErrorFrame> {
+    let tail = source.tail(LAST_ERROR_TAIL_BYTES)?;
+    let text = String::from_utf8_lossy(&tail.bytes);
     let last_line = text.lines().rev().find(|l| !l.trim().is_empty())?;
 
     let value: serde_json::Value = serde_json::from_str(last_line).ok()?;
@@ -154,7 +147,7 @@ fn last_error_frame(filestore: &FileStore, block_id: &str) -> Option<LastErrorFr
     Some(LastErrorFrame {
         message,
         source,
-        written_ms: file.modts.max(0) as u64,
+        written_ms: tail.modts.max(0) as u64,
     })
 }
 
@@ -174,7 +167,7 @@ pub async fn handle_muxspect_list(State(state): State<AppState>) -> impl IntoRes
         .into_iter()
         .map(|status| {
             let is_agent = status.is_agent();
-            let last_error = last_error_frame(&state.filestore, &status.block_id);
+            let last_error = last_error_frame(&crate::backend::transcript::source::TranscriptSource::resolve(&state.filestore, &state.mstore, &status.block_id));
             let mut value = serde_json::to_value(&status).unwrap_or_default();
             if let Some(obj) = value.as_object_mut() {
                 obj.insert("is_agent".to_string(), json!(is_agent));
@@ -227,7 +220,7 @@ pub async fn handle_muxspect_describe(
     // whether to bother. In practice this is only ever non-null for
     // exactly the case it exists for: nothing has appended to this
     // block's output since an unrecovered pre-spawn failure.
-    let last_error = last_error_frame(&state.filestore, &q.block_id);
+    let last_error = last_error_frame(&crate::backend::transcript::source::TranscriptSource::resolve(&state.filestore, &state.mstore, &q.block_id));
 
     Json(json!({
         "block_id": q.block_id,
@@ -1003,15 +996,10 @@ fn last_line_preview_and_activity(
     filestore: &std::sync::Arc<FileStore>,
     block_id: &str,
 ) -> (Option<String>, Option<u64>) {
-    if let Ok(Some(file)) = filestore.stat(block_id, "output") {
-        if file.size > 0 {
-            let start = (file.size - PREVIEW_TAIL_BYTES).max(0);
-            if let Ok((_, bytes)) = filestore.read_at(block_id, "output", start, file.size - start) {
-                let text = String::from_utf8_lossy(&bytes);
-                if let Some(last) = text.lines().rev().find(|l| !l.trim().is_empty()) {
-                    return (Some(truncate_preview(last)), Some(file.modts.max(0) as u64));
-                }
-            }
+    if let Some(tail) = crate::backend::transcript::source::TranscriptSource::resolve(filestore, mstore, block_id).tail(PREVIEW_TAIL_BYTES) {
+        let text = String::from_utf8_lossy(&tail.bytes);
+        if let Some(last) = text.lines().rev().find(|l| !l.trim().is_empty()) {
+            return (Some(truncate_preview(last)), Some(tail.modts.max(0) as u64));
         }
     }
 
@@ -1429,7 +1417,7 @@ mod tests {
     #[test]
     fn last_error_frame_none_for_missing_block() {
         let filestore = FileStore::open_in_memory().unwrap();
-        assert!(last_error_frame(&filestore, "no-such-block").is_none());
+        assert!(last_error_frame(&crate::backend::transcript::source::TranscriptSource::own(&filestore, "no-such-block")).is_none());
     }
 
     #[test]
@@ -1438,7 +1426,7 @@ mod tests {
         filestore
             .make_file("block-1", "output", FileMeta::new(), FileOpts::default())
             .unwrap();
-        assert!(last_error_frame(&filestore, "block-1").is_none());
+        assert!(last_error_frame(&crate::backend::transcript::source::TranscriptSource::own(&filestore, "block-1")).is_none());
     }
 
     #[test]
@@ -1455,13 +1443,25 @@ mod tests {
         content.push('\n');
         filestore.write_file("block-1", "output", content.as_bytes()).unwrap();
 
-        let found = last_error_frame(&filestore, "block-1").expect("last line is an error frame");
+        let found = last_error_frame(&crate::backend::transcript::source::TranscriptSource::own(&filestore, "block-1")).expect("last line is an error frame");
         assert_eq!(
             found.message,
             "[AgentMux] no credentials for claude: bind an account in Connectors → Accounts."
         );
         assert_eq!(found.source, "identity");
         assert!(found.written_ms > 0);
+    }
+
+    /// An agent's error frame is read from the agent's zone; the block's own store holds nothing.
+    #[test]
+    fn last_error_frame_is_read_from_the_agents_zone() {
+        use crate::backend::transcript::source::TranscriptSource;
+        let (own, global, zone) = (FileStore::open_in_memory().unwrap(), FileStore::open_in_memory().unwrap(), "agent:error-frame-global:current");
+        global.make_file(zone, "output", FileMeta::new(), FileOpts::default()).unwrap();
+        global.append_lines(zone, "output", format!("{}\n", error_frame_line("[AgentMux] no credentials for claude: bind an account in Connectors → Accounts.")).as_bytes()).unwrap();
+        let found = last_error_frame(&TranscriptSource { fs: &global, zone: zone.to_string(), global: true }).expect("the frame in the agent zone");
+        assert_eq!(found.source, "identity");
+        assert!(last_error_frame(&TranscriptSource::own(&own, "blk")).is_none());
     }
 
     /// Pins the "only the LAST non-blank line counts" rule (see the
@@ -1481,7 +1481,7 @@ mod tests {
         content.push_str("{\"type\":\"assistant\",\"text\":\"turn resumed fine after the retry\"}\n");
         filestore.write_file("block-1", "output", content.as_bytes()).unwrap();
 
-        assert!(last_error_frame(&filestore, "block-1").is_none());
+        assert!(last_error_frame(&crate::backend::transcript::source::TranscriptSource::own(&filestore, "block-1")).is_none());
     }
 
     #[test]
@@ -1495,7 +1495,7 @@ mod tests {
             .write_file("block-1", "output", format!("{normal_result}\n").as_bytes())
             .unwrap();
 
-        assert!(last_error_frame(&filestore, "block-1").is_none());
+        assert!(last_error_frame(&crate::backend::transcript::source::TranscriptSource::own(&filestore, "block-1")).is_none());
     }
 
     fn dock_node(id: &str, status: &str, observed_at: i64) -> crate::backend::dock_snapshot::DockNodeSnapshot {

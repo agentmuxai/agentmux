@@ -365,7 +365,7 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                     .map(str::to_string);
                 let activity = match user_message {
                     Some(_) => None,
-                    None => ambient::digest::read_recent_activity_digest(&filestore, &cmd.block_id),
+                    None => ambient::digest::read_recent_activity_digest(&filestore, &mstore, &cmd.block_id),
                 };
 
                 // A stored value that is not a real title (a placeholder an older build
@@ -470,8 +470,8 @@ fn register_session_next_prompt_suggestion(engine: &Arc<WshRpcEngine>, state: &A
                 let activity = match cmd.activity.filter(|entries| !entries.is_empty()) {
                     Some(entries) => ambient::digest::activity_from_entries(&cmd.block_id, entries)
                         .filter(|a| a.ending != ambient::digest::TurnEnding::UserLast)
-                        .or_else(|| ambient::digest::read_recent_activity(&filestore, &cmd.block_id)),
-                    None => ambient::digest::read_recent_activity(&filestore, &cmd.block_id),
+                        .or_else(|| ambient::digest::read_recent_activity(&filestore, &mstore, &cmd.block_id)),
+                    None => ambient::digest::read_recent_activity(&filestore, &mstore, &cmd.block_id),
                 };
                 let Some(activity) = activity else {
                     slot.abandon(ambient::outcome::Outcome::EmptyDigest);

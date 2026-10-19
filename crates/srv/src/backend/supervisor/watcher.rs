@@ -234,7 +234,7 @@ impl Supervisor {
         }
         // No readable conversation (none yet, or a hidden memory reinjection):
         // nothing to judge, so the notice the router left to us goes out as usual.
-        let Some(activity) = digest::read_recent_activity(&self.filestore, block_id) else {
+        let Some(activity) = digest::read_recent_activity(&self.filestore, &self.mstore, block_id) else {
             if notify && trigger != Some(TriggerKind::System) {
                 self.notify_finished(block_id, trigger);
             }

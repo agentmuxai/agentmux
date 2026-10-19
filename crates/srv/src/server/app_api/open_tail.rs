@@ -61,10 +61,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     });
 }
 
-/// Which store and zone a block's transcript is read from: the agent's global
-/// zone when it has content, else the block's own (the choice
-/// `global_output_source` makes, decided here from a reader snapshot rather
-/// than `stat`, which takes the writer mutex on a cache miss).
+/// Which store and zone a block's transcript is read from: the same rule
+/// `blockfile:read_range` and `blockfile:line_count` use (`global_output_source`:
+/// the agent's global zone when the block has a valid `agentId`, is not archived
+/// and the zone has content, the block's own otherwise), so the first screen and
+/// the older pages the pane reads next come from one file. Decided here from a
+/// reader snapshot rather than `stat`, which takes the writer mutex on a cache miss.
 fn pick_source(
     filestore: &Arc<FileStore>,
     global: Option<&Arc<FileStore>>,
@@ -84,11 +86,7 @@ fn pick_source(
         return local();
     }
     let Some(zone) = crate::backend::agent_session::agent_zone_for_block_meta(&block.meta) else { return local() };
-    let size = gfs
-        .read_snapshot(|r| Ok(r.file(&zone, "output")?.map(|f| f.size)))
-        .ok()
-        .flatten()
-        .unwrap_or(0);
+    let size = gfs.read_snapshot(|r| Ok(r.file(&zone, "output")?.map(|f| f.size))).ok().flatten().unwrap_or(0);
     if size > 0 {
         let stream = format!("g:{zone}");
         (gfs.clone(), zone, stream)
