@@ -88,7 +88,12 @@ jobs:
     # than the PR lane's 20 min (ci-pr.yml) — 60 min is generous headroom over a
     # from-scratch CEF build+test on any of the three platforms while still
     # bounding a hang to a fraction of the 360-minute default.
-    timeout-minutes: 60
+    #
+    # macOS gets 90: its test leg took 43 min for the full suite on 2026-10-12
+    # and 44 min just to reach a failing test on 10-18, so with every binary
+    # running (--no-fail-fast) 60 is too close, and a timeout hides which test
+    # failed. It is a hang bound, not a budget.
+    timeout-minutes: ${{ matrix.os == 'macos-latest' && 90 || 60 }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

@@ -1,6 +1,6 @@
 # Plan: a failing nightly leg is heard, and macOS tests count
 
-**Status:** active. Shipped: the macOS test fix (#5125, Loap-3). This PR: Phase 1. Left: Phase 2 (fix what Phase 0 finds), Phase 3 (macOS blocks after five green nightlies), and the macOS timeout if Phase 0 shows it is needed.
+**Status:** active. Shipped: the macOS test fix (#5125, Loap-3). This PR: Phase 1. Left: Phase 2 (fix what Phase 0 finds), Phase 3 (macOS blocks after five green nightlies).
 **Date:** 2026-10-18
 **Author:** Camper
 **Verified against:** `agentmux` `main` @ `71a3e2300` (2026-10-19 UTC), by reading `ci-nightly-build.yml` and the job logs of the last 30 nightly runs through the Actions API.
@@ -55,7 +55,7 @@ In `ci-nightly-build.yml`:
    - **any job failed or timed out:** open one issue labelled `nightly-red` (or comment on the open one), listing the failing jobs, the first failing tests from each job's log (up to 10, or the crate that didn't compile), and the run link;
    - **every job green:** close the open `nightly-red` issue, naming the run.
    It uses the same rules as `main status`: one issue per red streak, and a cancelled run says nothing. Two nightlies never run at once (the workflow's concurrency group queues them), so unlike pushes to main they can't race to create the issue. The doc link report is left out: it is a report by design and posts to the docs-stale issue. Issues notify the agents watching the repository, as `main-red` does.
-4. **macOS timeout** to 90 minutes if Phase 0 shows the full suite near 60 (a timeout is a hang bound, not a budget).
+4. **macOS timeout** to 90 minutes (a timeout is a hang bound, not a budget). Phase 0's macOS test job was still in its workspace step 38 minutes in, with the `agentmux-cef` step to follow, so 60 is too close.
 
 `continue-on-error` on macOS stays in this phase. With the issue, it no longer hides a failure; it only keeps the run's own colour from changing, which Phase 3 decides.
 
