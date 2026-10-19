@@ -17,11 +17,18 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** The metrics gated, with where each is in a result's `steady`. */
+/**
+ * The metrics gated: its name, the budget key holding the line, the label, the unit and where the number is in a result.
+ * Memory is a forced-GC median; CPU seconds are spent over the workload; the round time is the median time the agents took per round.
+ */
 const METRICS = [
-    ["app", "App total (private working set)", (s) => s.app?.privateMB],
-    ["renderer", "Renderers", (s) => s.groups?.renderer?.privateMB],
-    ["srv", "srv", (s) => s.groups?.srv?.privateMB],
+    ["app", "limitsMB", "App total (private working set)", "MB", (r) => r.steady?.app?.privateMB],
+    ["renderer", "limitsMB", "Renderers", "MB", (r) => r.steady?.groups?.renderer?.privateMB],
+    ["srv", "limitsMB", "srv", "MB", (r) => r.steady?.groups?.srv?.privateMB],
+    ["app", "limitsCpuSeconds", "App CPU over the workload", "s", (r) => r.cpu?.seconds?.app],
+    ["renderer", "limitsCpuSeconds", "Renderers CPU over the workload", "s", (r) => r.cpu?.seconds?.renderer],
+    ["srv", "limitsCpuSeconds", "srv CPU over the workload", "s", (r) => r.cpu?.seconds?.srv],
+    ["roundMs", "limitsRound", "Round time (median)", "ms", (r) => r.wall?.medianMs],
 ];
 
 /** Why a result isn't the gated workload, or null. */
@@ -45,10 +52,10 @@ export function notTheWorkload(result, workload) {
  */
 export function evaluate(result, budget) {
     const problem = notTheWorkload(result, budget.workload ?? {});
-    const rows = METRICS.map(([metric, label, pick]) => {
-        const valueMB = problem ? null : (pick(result.steady) ?? null);
-        const limitMB = budget.limitsMB?.[metric] ?? null;
-        return { metric, label, valueMB, limitMB, over: valueMB != null && limitMB != null && valueMB > limitMB };
+    const rows = METRICS.map(([metric, key, label, unit, pick]) => {
+        const valueMB = problem ? null : (pick(result) ?? null); // `MB` here is the metric's own unit
+        const limitMB = budget[key]?.[metric] ?? null;
+        return { metric, key, label, unit, valueMB, limitMB, over: valueMB != null && limitMB != null && valueMB > limitMB };
     });
     // A metric with a line that couldn't be read counts as over: a gate that passes on missing data isn't one.
     const unreadable = rows.some((r) => r.limitMB != null && r.valueMB == null);
@@ -61,10 +68,10 @@ export function report(outcome, result, budget) {
     const f = (v) => (v == null ? "n/a" : `${v}`);
     const lines = [`## Memory soak gate (${budget.mode})`, ""];
     if (outcome.problem) lines.push(`**Not measured:** ${outcome.problem}.`, "");
-    lines.push("| metric | MB | line (MB) | |", "|---|---:|---:|---|");
+    lines.push("| metric | value | line | |", "|---|---:|---:|---|");
     for (const r of outcome.rows) {
         const verdict = r.limitMB == null ? "no line set" : r.valueMB == null ? "not read" : r.over ? (budget.mode === "enforce" ? "OVER" : "would be over") : "within";
-        lines.push(`| ${r.label} | ${f(r.valueMB)} | ${f(r.limitMB)} | ${verdict} |`);
+        lines.push(`| ${r.label} | ${f(r.valueMB)} ${r.unit} | ${r.limitMB == null ? "n/a" : `${r.limitMB} ${r.unit}`} | ${verdict} |`);
     }
     if (!outcome.problem) lines.push("", `${result.layout?.panes} agents, ${result.rounds} rounds, seed ${result.seed}, ${result.platform}; median of ${result.steady?.samples} forced-GC samples.`);
     if (budget.mode !== "enforce") lines.push("", "Report only: this gate fails nothing until the operator sets the lines and the mode.");

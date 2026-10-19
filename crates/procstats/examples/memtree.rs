@@ -269,6 +269,8 @@ struct Row {
     commit: Option<u64>,
     pss: Option<u64>,
     uss: Option<u64>,
+    /// User + kernel CPU time so far, in nanoseconds (cumulative; a rate needs two samples).
+    cpu_ns: Option<u64>,
 }
 
 fn esc(s: &str) -> String {
@@ -454,6 +456,7 @@ fn main() {
                 commit: p.mem_commit,
                 pss,
                 uss,
+                cpu_ns: p.cpu_ns,
             });
         }
         let (mut app, mut child) = (Totals::default(), Totals::default());
@@ -469,8 +472,8 @@ fn main() {
                 .iter()
                 .map(|r| {
                     format!(
-                        "{{\"pid\":{},\"name\":\"{}\",\"role\":\"{}\",\"app\":{},\"private\":{},\"resident\":{},\"commit\":{},\"pss\":{},\"uss\":{}}}",
-                        r.pid, esc(&r.name), esc(&r.role), r.app, opt(r.private), opt(r.resident), opt(r.commit), opt(r.pss), opt(r.uss)
+                        "{{\"pid\":{},\"name\":\"{}\",\"role\":\"{}\",\"app\":{},\"private\":{},\"resident\":{},\"commit\":{},\"pss\":{},\"uss\":{},\"cpu_ns\":{}}}",
+                        r.pid, esc(&r.name), esc(&r.role), r.app, opt(r.private), opt(r.resident), opt(r.commit), opt(r.pss), opt(r.uss), opt(r.cpu_ns)
                     )
                 })
                 .collect();
