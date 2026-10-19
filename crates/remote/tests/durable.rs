@@ -242,7 +242,9 @@ fn serve_measures_a_sessions_shell_through_the_daemon() {
 
     let f = pane_procs(&home, "stats1");
     assert_eq!(f.found, PaneFound::Session, "{f:?}");
-    assert_eq!(f.names.first().map(|n| n.0.as_str()), Some("sh"), "the session's shell first: {f:?}");
+    // The shell is started as `sh`; where /bin/sh is bash (macOS) the process reads "bash".
+    let shell = f.names.first().map(|n| n.0.as_str());
+    assert!(matches!(shell, Some("sh" | "bash")), "the session's shell first: {f:?}");
     assert!(f.names.iter().any(|(n, _)| n == "sleep"), "and what it started: {f:?}");
     assert!(f.processes >= 2 && f.host_processes > f.processes, "{f:?}");
 
