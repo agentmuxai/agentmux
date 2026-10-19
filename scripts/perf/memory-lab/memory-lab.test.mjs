@@ -7,9 +7,13 @@
 // needs a build and isn't tested here.
 
 import { describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
 
 import { mismatch } from "./compare.mjs";
 import { evaluate, report } from "./gate.mjs";
+import { srvTarget, withReplacedSrv } from "./lib/srv.mjs";
 import { generateConversation } from "./lib/conversation.mjs";
 import { portableExe } from "./lib/driver.mjs";
 import { draftText, recycleMark, recycleSaving, scrollArmed, scrollRestored } from "./lib/recycle.mjs";
@@ -336,5 +340,38 @@ describe("memory soak gate", () => {
         expect(out.over).toBe(true);
         expect(out.exitCode).toBe(2);
         expect(report(out, r, budget("enforce", { srv: 120 }))).toMatch(/\| srv \| n\/a \| 120 \| not read \|/);
+    });
+});
+
+describe("replacing a portable's srv", () => {
+    it("finds the one srv file wherever it sits", () => {
+        expect(srvTarget(["agentmux.exe", "runtime/agentmux-srv-0.59.32-windows.x64.exe", "README.txt"])).toBe("runtime/agentmux-srv-0.59.32-windows.x64.exe");
+        expect(srvTarget(["AgentMux.app/Contents/MacOS/agentmux-srv", "AgentMux.app/Contents/MacOS/agentmux-launcher"])).toBe("AgentMux.app/Contents/MacOS/agentmux-srv");
+    });
+
+    it("refuses a portable with no srv or two", () => {
+        expect(() => srvTarget(["agentmux.exe"])).toThrow(/found 0/);
+        expect(() => srvTarget(["a/agentmux-srv-1.exe", "b/agentmux-srv-2.exe"])).toThrow(/found 2/);
+    });
+
+    it("copies the portable, swaps the srv in the copy and leaves the original alone", () => {
+        const root = mkdtempSync(join(tmpdir(), "lab-srv-"));
+        try {
+            const portable = join(root, "portable");
+            mkdirSync(join(portable, "runtime"), { recursive: true });
+            writeFileSync(join(portable, "agentmux.exe"), "host");
+            writeFileSync(join(portable, "runtime", "agentmux-srv-1.0.exe"), "old srv");
+            const mine = join(root, "my-srv.exe");
+            writeFileSync(mine, "new srv");
+            const out = withReplacedSrv(portable, mine, join(root, "out"));
+            expect(basename(out.portable)).toBe("portable");
+            expect(readFileSync(join(out.portable, "runtime", "agentmux-srv-1.0.exe"), "utf8")).toBe("new srv");
+            expect(readFileSync(join(out.portable, "agentmux.exe"), "utf8")).toBe("host");
+            expect(readFileSync(join(portable, "runtime", "agentmux-srv-1.0.exe"), "utf8")).toBe("old srv");
+            expect(out.replaced).toMatchObject({ file: join("runtime", "agentmux-srv-1.0.exe"), bytes: 7 });
+            expect(() => withReplacedSrv(portable, join(root, "missing.exe"), join(root, "out"))).toThrow(/not a file/);
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
     });
 });

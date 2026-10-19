@@ -43,6 +43,19 @@ made into scripts. The budget it serves is 500 MB for the app's own processes.
    or operating system: the same conversation on the same OS is what makes the
    numbers comparable.
 
+### Measuring an srv change without building the app
+
+`--srv <path to an agentmux-srv executable>` (with `--portable`) runs a copy of
+the portable whose `agentmux-srv` is replaced by yours; the host, the
+renderer and the packaging stay as they were, so only srv differs. The
+portable itself is untouched; the copy lives in the label's output folder
+(about 500 MB on Windows). `result.json` records what was put in
+(`srvReplaced`: file, source path, size, a hash). A portable has exactly one
+`agentmux-srv*` file or the lab refuses. Build srv for the portable's
+platform, and from a version the portable's host can talk to (the same
+protocol); a mismatched one fails to start, which the lab reports as a failed
+launch.
+
 ## What it does
 
 - Starts the portable **isolated**: its own data folder

@@ -32,6 +32,7 @@ import { fileURLToPath } from "node:url";
 
 import { generateConversation } from "./lib/conversation.mjs";
 import { connect, installScript, launch, layoutFor, portableExe } from "./lib/driver.mjs";
+import { withReplacedSrv } from "./lib/srv.mjs";
 import { runRecycle, recycleSaving } from "./lib/recycle.mjs";
 import { osSample, portBelongsTo, takeSample } from "./lib/sample.mjs";
 import { agentsWithoutTurns, groupSample, inMegabytes, steady, table, transcriptGrowthProblem } from "./lib/summary.mjs";
@@ -54,12 +55,13 @@ function parseArgs(argv) {
             continue;
         }
         const key = raw.replace(/^--/, "").replace(/-([a-z])/g, (_, c) => c.toUpperCase());
-        if (!raw.startsWith("--") || !(key in a || ["portable", "label", "memtree", "exe"].includes(key))) throw new Error(`unknown argument ${raw}`);
+        if (!raw.startsWith("--") || !(key in a || ["portable", "label", "memtree", "exe", "srv"].includes(key))) throw new Error(`unknown argument ${raw}`);
         const value = argv[++i];
         if (value === undefined) throw new Error(`${raw} needs a value`);
         a[key] = num.has(key) ? Number(value) : value;
     }
     if (!a.portable && !a.exe) throw new Error("give --portable <dir> (a `task package` folder), or --exe <path>");
+    if (a.srv && (!a.portable || a.exe)) throw new Error("--srv replaces the srv of a --portable folder: give --portable and not --exe (an --exe has no srv beside it to replace, and would be launched instead of the copy)");
     if (a.recycleAfter !== 0 && !(Number.isInteger(a.recycleAfter) && a.recycleAfter >= 1 && a.recycleAfter <= a.rounds)) {
         throw new Error(`--recycle-after ${a.recycleAfter} is not a round of this run: a whole number from 1 to --rounds (${a.rounds}), or leave it out`);
     }
@@ -163,7 +165,7 @@ async function holdIdle(args, memtree, rootPid) {
 
 /** One try: starts the instance, runs the load, measures, writes the result. */
 async function attempt(args, ctx) {
-    const { exe, memtree, dir, home, script, layout } = ctx;
+    const { exe, memtree, dir, home, script, layout, swapped } = ctx;
     const instance = await launch({ exe, home, port: args.port, script, log: join(dir, "instance.log") });
     const curve = [];
     let driver;
@@ -241,6 +243,7 @@ async function attempt(args, ctx) {
             when: new Date().toISOString(),
             platform: process.platform,
             portable: args.portable ?? null,
+            srvReplaced: swapped?.replaced ?? null,
             layout: { panes: args.panes, tabs: layout },
             agents: driver.agents.map((a) => ({ name: a.name, id: a.id, tabId: a.tabId })),
             toolRows: await driver.toolRows(),
@@ -278,14 +281,18 @@ async function attempt(args, ctx) {
 
 async function main() {
     const args = parseArgs(process.argv.slice(2));
-    const exe = args.exe ?? portableExe(args.portable);
-    if (!existsSync(exe)) throw new Error(`${exe} not found`);
     const memtree = memtreeBinary(args.memtree);
     const dir = resolve(args.out, args.label);
     const home = join(dir, "home");
     mkdirSync(dir, { recursive: true });
     // Nothing of an earlier run under this label may stand in for this one: a run that fails leaves no report.
     for (const old of ["result.json", "summary.md", ...readdirSync(dir).filter((f) => /^invalid-run-\d+\.txt$/.test(f))]) rmSync(join(dir, old), { force: true });
+    // --srv: the portable with its srv swapped for the one under test (a copy; the original is untouched).
+    const swapped = args.srv ? withReplacedSrv(args.portable, resolve(args.srv), dir) : null;
+    if (swapped) console.log(`srv replaced: ${swapped.replaced.file} <- ${swapped.replaced.from} (${swapped.replaced.sha256})`);
+    const exe = args.exe ?? portableExe(swapped ? swapped.portable : args.portable);
+    if (!existsSync(exe)) throw new Error(`${exe} not found`);
+
 
     // The same conversation for every build: a seed fixes it.
     const script = join(dir, "conversation.json");
@@ -295,7 +302,7 @@ async function main() {
     console.log(`${args.label}: ${args.panes} agents over ${layout.length} tab(s) [${layout.join("/")}], ${args.holdMinutes > 0 ? args.recycleAfter : args.rounds} rounds${args.holdMinutes > 0 ? ` then ${args.holdMinutes} min idle` : ""}, port ${args.port}`);
     for (let n = 1; ; n++) {
         try {
-            await attempt(args, { exe, memtree, dir, home, script, layout });
+            await attempt(args, { exe, memtree, dir, home, script, layout, swapped });
             return;
         } catch (e) {
             if (!(e instanceof InvalidRun)) throw e;
