@@ -46,9 +46,14 @@ export function startDiskLoad({ dir, mbps, capGB = DEFAULT_CAP_GB }) {
     let capReached = false;
     // How the writer ended, if it ended on its own: a disk that fills or a write that fails kills it while the workload goes on.
     let exited = null;
-    child.once("exit", (code, signal) => {
-        exited = { code, signal, at: Date.now() };
+    const exitedPromise = new Promise((resolve) => {
+        child.once("exit", (code, signal) => {
+            exited = { code, signal, at: Date.now() };
+            resolve(true);
+        });
     });
+    /** Whether the writer has exited within `ms`. */
+    const waitExit = (ms) => Promise.race([exitedPromise, new Promise((r) => setTimeout(() => r(false), ms))]);
     child.once("error", (e) => {
         exited ??= { code: null, signal: null, error: String(e.message), at: Date.now() };
     });
@@ -72,15 +77,20 @@ export function startDiskLoad({ dir, mbps, capGB = DEFAULT_CAP_GB }) {
         async stop() {
             if (stopped) return stopped;
             const diedEarly = this.diedEarly();
+            // A writer stuck in a sync on an overloaded volume may not act on a polite kill: ask, then force, and only then
+            // go on (a stop that returned with I/O still in flight would let the next measurement start under the load).
+            let forced = false;
+            let stuck = false;
             if (!exited) {
-                await new Promise((resolve) => {
-                    child.once("exit", resolve);
-                    child.kill();
-                    setTimeout(resolve, 5000);
-                });
+                child.kill();
+                if (!(await waitExit(5000))) {
+                    forced = true;
+                    child.kill("SIGKILL");
+                    if (!(await waitExit(15000))) stuck = true;
+                }
             }
             rmSync(target, { recursive: true, force: true });
-            stopped = { capGB, rateMBps: Number.isFinite(mbps) ? mbps : "max", writtenMB: Math.round((written / 1048576) * 10) / 10, seconds: Math.round((Date.now() - started) / 100) / 10, capReached, ...(diedEarly ? { diedEarly } : {}) };
+            stopped = { capGB, rateMBps: Number.isFinite(mbps) ? mbps : "max", writtenMB: Math.round((written / 1048576) * 10) / 10, seconds: Math.round((Date.now() - started) / 100) / 10, capReached, ...(forced ? { forcedKill: true } : {}), ...(stuck ? { stuck: "the disk-load writer did not exit even when killed: its I/O may still be running" } : {}), ...(diedEarly ? { diedEarly } : {}) };
             return stopped;
         },
     };

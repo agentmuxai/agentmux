@@ -306,6 +306,7 @@ async function attempt(args, ctx) {
         }
         // A writer that died on its own means the load was not applied for the whole workload: that run says nothing.
         if (diskLoadResult?.diedEarly) throw new InvalidRun(diskLoadResult.diedEarly);
+        if (diskLoadResult?.stuck) throw new InvalidRun(diskLoadResult.stuck);
         await sleep(args.settleS * 1000);
         const final = await takeSample({ port: args.port, memtree, rootPid: instance.pid, label: `${args.label}-final`, gc: true });
         const samples = [final];
