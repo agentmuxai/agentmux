@@ -16,6 +16,7 @@ import { existsSync, mkdirSync, openSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path";
 
 import { DETACH_LONG_TASKS, LONG_TASK_OBSERVER, mergeLongTaskRecords, READ_LONG_TASKS } from "./longtasks.mjs";
+import { timedCall } from "./sendsegments.mjs";
 import { installFakeClaude } from "../../../ui-screenshots/install-fake-claude.mjs";
 import { CdpSession, findMainTarget } from "../../../ui-screenshots/lib/session.mjs";
 import { openNewTab } from "../../../ui-screenshots/widget-shots.mjs";
@@ -307,10 +308,13 @@ export async function connect(port, home, workDir) {
             for (const b of blockIds) {
                 const mid = `lab-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
                 const start = Date.now();
+                let page = null;
                 try {
-                    await ev(`RpcApi.AgentInputCommand(TabRpcClient, { blockid: ${JSON.stringify(b)}, message: ${JSON.stringify(text)}, message_id: ${JSON.stringify(mid)} })`);
+                    page = await ev(timedCall(`RpcApi.AgentInputCommand(TabRpcClient, { blockid: ${JSON.stringify(b)}, message: ${JSON.stringify(text)}, message_id: ${JSON.stringify(mid)} })`));
+                    if (page?.error) throw new Error(`AgentInput failed: ${page.error}`);
                 } finally {
-                    timings.push({ start, ms: Date.now() - start });
+                    // the page's own clock and stopwatch for this call: see lib/sendsegments.mjs
+                    timings.push({ start, ms: Date.now() - start, pageStart: page?.pageStart ?? null, pageMs: page?.pageMs ?? null });
                 }
                 if (staggerMs) await sleep(staggerMs);
             }

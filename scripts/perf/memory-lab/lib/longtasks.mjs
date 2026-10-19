@@ -10,7 +10,15 @@
 /** Installed in the page. Keeps every long task (start as epoch ms, duration) and the ten longest with what Chromium says about them. */
 export const LONG_TASK_OBSERVER = `(() => {
   if (window.__labLong) return true;
-  const L = (window.__labLong = { n: 0, tasks: [], top: [] });
+  const L = (window.__labLong = { n: 0, tasks: [], top: [], lag: [] });
+  // How late a 100 ms timer fires: the wait a task queued behind the page's other work has (a long task is one task; a queue of short ones shows here).
+  let last = performance.now();
+  window.__labLagTimer = setInterval(() => {
+    const now = performance.now();
+    const late = Math.round(now - last - 100);
+    last = now;
+    if (late >= 200 && L.lag.length < 5000) L.lag.push([Math.round(performance.timeOrigin + now), late]);
+  }, 100);
   try {
     window.__labLongObserver = new PerformanceObserver((list) => {
       for (const e of list.getEntries()) {
@@ -32,10 +40,10 @@ export const LONG_TASK_OBSERVER = `(() => {
 })()`;
 
 /** Reads the observer's record back (null when it was never installed, e.g. after a reload). */
-export const READ_LONG_TASKS = `window.__labLong ? { n: window.__labLong.n, tasks: window.__labLong.tasks, top: window.__labLong.top } : null`;
+export const READ_LONG_TASKS = `window.__labLong ? { n: window.__labLong.n, tasks: window.__labLong.tasks, top: window.__labLong.top, lag: window.__labLong.lag } : null`;
 
 /** Stops the observer and forgets the page's record, so the next install starts a fresh one and the old one collects nothing more. */
-export const DETACH_LONG_TASKS = `(window.__labLongObserver && window.__labLongObserver.disconnect(), window.__labLongObserver = null, window.__labLong = null, true)`;
+export const DETACH_LONG_TASKS = `(window.__labLongObserver && window.__labLongObserver.disconnect(), window.__labLongObserver = null, clearInterval(window.__labLagTimer), window.__labLong = null, true)`;
 
 /** One record from several (the document before a reload, and the one after): counts add, tasks join, the ten longest stay. */
 export function mergeLongTaskRecords(records) {
@@ -45,6 +53,7 @@ export function mergeLongTaskRecords(records) {
         n: list.reduce((n, r) => n + r.n, 0),
         tasks: list.flatMap((r) => r.tasks),
         top: list.flatMap((r) => r.top).sort((a, b) => b.ms - a.ms).slice(0, 10),
+        lag: list.flatMap((r) => r.lag ?? []),
     };
 }
 
@@ -75,6 +84,8 @@ export function summariseLongTasks(raw, windows = [], excluded = []) {
         maxMs: tasks.reduce((m, t) => Math.max(m, t.ms), 0),
         over1s: tasks.filter((t) => t.ms >= 1000).length,
         longest: raw.top.filter((t) => !inExcluded(t)).map((t) => ({ ...t, at: new Date(t.at).toISOString() })),
+        // How late the page's 100 ms timer fired (only the firings 200 ms or more late are kept): the main thread's queueing delay.
+        timerLag: { count: (raw.lag ?? []).length, maxMs: (raw.lag ?? []).reduce((m, [, ms]) => Math.max(m, ms), 0), over1s: (raw.lag ?? []).filter(([, ms]) => ms >= 1000).length },
         byRound,
     };
 }
