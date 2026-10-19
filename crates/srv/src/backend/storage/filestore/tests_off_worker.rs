@@ -88,3 +88,69 @@ fn without_a_runtime_it_just_calls_through() {
     fs.append_data(ZONE, "f", b"x\n").unwrap();
     assert_eq!(fs.read_file(ZONE, "f").unwrap().unwrap(), b"x\n");
 }
+
+/// Every other way into a multi-thread runtime that is not one of its workers:
+/// the root future of `block_on`, a blocking-pool thread, a plain thread that
+/// entered the runtime's handle. `block_in_place` must not panic in any of them.
+#[test]
+fn the_other_ways_into_a_multi_thread_runtime_do_not_panic() {
+    let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+    let fs = Arc::new(FileStore::open_in_memory().unwrap());
+    fs.make_file(ZONE, "f", FileMeta::new(), FileOpts::default()).unwrap();
+
+    // The root future of `block_on`.
+    rt.block_on(async { fs.append_data(ZONE, "f", b"a\n").unwrap() });
+
+    // A blocking-pool thread.
+    let fs2 = fs.clone();
+    rt.block_on(async move { tokio::task::spawn_blocking(move || fs2.append_data(ZONE, "f", b"b\n").unwrap()).await.unwrap() });
+
+    // A plain thread that entered the handle.
+    let handle = rt.handle().clone();
+    let fs3 = fs.clone();
+    std::thread::spawn(move || {
+        let _enter = handle.enter();
+        fs3.append_data(ZONE, "f", b"c\n").unwrap();
+    })
+    .join()
+    .unwrap();
+
+    // A worker, inside a block_in_place already (nested).
+    let fs4 = fs.clone();
+    rt.block_on(async move {
+        tokio::spawn(async move { tokio::task::block_in_place(|| fs4.append_data(ZONE, "f", b"d\n").unwrap()) }).await.unwrap()
+    });
+
+    assert_eq!(fs.read_file(ZONE, "f").unwrap().unwrap(), b"a\nb\nc\nd\n");
+}
+
+/// Measurement, not an assertion (`--ignored --nocapture`): what an uncontended
+/// store call costs when made from a runtime worker. The off-worker handoff
+/// must not tax the common case (the connection free).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore]
+async fn uncontended_call_cost_on_a_worker() {
+    let fs = Arc::new(FileStore::open_in_memory().unwrap());
+    fs.make_file(ZONE, "f", FileMeta::new(), FileOpts::default()).unwrap();
+    let fs2 = fs.clone();
+    let (append_us, list_us) = tokio::spawn(async move {
+        let data = vec![b'x'; 300];
+        for _ in 0..200 {
+            fs2.append_data(ZONE, "f", &data).unwrap();
+        }
+        let n = 5000;
+        let t = Instant::now();
+        for _ in 0..n {
+            fs2.append_data(ZONE, "f", &data).unwrap();
+        }
+        let append_us = t.elapsed().as_secs_f64() * 1e6 / n as f64;
+        let t = Instant::now();
+        for _ in 0..n {
+            let _ = fs2.list_files(ZONE).unwrap();
+        }
+        (append_us, t.elapsed().as_secs_f64() * 1e6 / n as f64)
+    })
+    .await
+    .unwrap();
+    println!("MEASURE uncontended on a worker: append {append_us:.1} us/call, list_files {list_us:.1} us/call");
+}

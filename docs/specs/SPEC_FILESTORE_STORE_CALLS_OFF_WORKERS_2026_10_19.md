@@ -17,7 +17,7 @@
 
 It is applied where the waiting happens:
 
-- **`lock_conn`**: the wait for the connection's mutex, which is where the queue builds. Every direct user (stat, reads of a file's parts, list calls, the line counter's scan) is covered.
+- **`lock_conn`**: the wait for the connection's mutex, which is where the queue builds. It tries the mutex first and hands the worker off only when it is held, so a free connection costs nothing. Every direct user (stat, reads of a file's parts, list calls, the line counter's scan) is covered.
 - **`write_txn`**: taking the connection, the write and the commit, whole, so the holder of a write does not sit on a worker either. Every append, `write_file`, `make_file`, copy, truncate and replace goes through it.
 
 The slow-connection log still names the caller's site: `write_txn` captures its `#[track_caller]` location before entering the closure and passes it to `lock_conn_at`.
@@ -32,6 +32,10 @@ The slow-connection log still names the caller's site: `write_txn` captures its 
 
 `tests_off_worker.rs`: with the connection held on a plain thread for 600 ms and six async tasks (on a two-worker runtime) calling a write and a read, an unrelated task that sleeps 10 ms at a time never waits more than 250 ms. Without the change the same test measures a 550 ms gap (the negative control, checked before committing). A current-thread runtime and a thread without a runtime call straight through.
 
-## 5. Measurement
+## 5. Cost when nothing is waiting
+
+A handoff on every call was the first version, and muxreview rightly asked what it costs. Measured (`uncontended_call_cost_on_a_worker`, an ignored test; debug build, in-memory store, 5000 calls from a task on a four-worker runtime): `list_files` 28.4 µs without the handoff, 32.1 µs with it on every call (+13%), 28.5 µs with try-lock first; an append 4.0 ms without, 4.0 ms with the handoff on every call, 3.9 ms with try-lock first. `write_txn` keeps the whole write off the worker (about 4 µs against a write that costs milliseconds). No measurable cost remains for a free connection.
+
+## 6. Measurement
 
 Posa on the machine that stalls (Area54): the lab's A/B on the same pinned commit, with `result.storeLock` (#5142) and the longest round, counting runs where unrelated handlers (the 1–2 s non-store handlers #5141 saw during a hold) are no longer delayed. The write-volume work is measured separately; this change is expected to leave bytes written, store lock holds and CPU unchanged.

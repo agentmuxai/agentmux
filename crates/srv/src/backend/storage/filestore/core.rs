@@ -198,8 +198,13 @@ impl FileStore {
     /// connection inside a closure (where `#[track_caller]` no longer reaches).
     pub(super) fn lock_conn_at(&self, site: &'static std::panic::Location<'static>) -> TimedConn<'_> {
         let asked = std::time::Instant::now();
-        // The wait is where the stall piles callers up: do it off the worker.
-        let guard = super::off_worker::off_worker(|| self.conn.lock().unwrap());
+        // The wait is where the stall piles callers up: do it off the worker,
+        // but only when there is one (a free connection costs no handoff).
+        let guard = match self.conn.try_lock() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::WouldBlock) => super::off_worker::off_worker(|| self.conn.lock().unwrap()),
+            Err(std::sync::TryLockError::Poisoned(e)) => panic!("filestore connection poisoned: {e}"),
+        };
         let waited = asked.elapsed();
         if waited >= SLOW_CONN {
             tracing::warn!(site = %site, waited_ms = waited.as_millis() as u64, "filestore: slow to get the connection");
