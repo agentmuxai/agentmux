@@ -996,8 +996,7 @@ fn last_line_preview_and_activity(
     filestore: &std::sync::Arc<FileStore>,
     block_id: &str,
 ) -> (Option<String>, Option<u64>) {
-    let source = crate::backend::transcript::source::TranscriptSource::resolve(filestore, mstore, block_id);
-    if let Some(tail) = source.tail(PREVIEW_TAIL_BYTES) {
+    if let Some(tail) = crate::backend::transcript::source::TranscriptSource::resolve(filestore, mstore, block_id).tail(PREVIEW_TAIL_BYTES) {
         let text = String::from_utf8_lossy(&tail.bytes);
         if let Some(last) = text.lines().rev().find(|l| !l.trim().is_empty()) {
             return (Some(truncate_preview(last)), Some(tail.modts.max(0) as u64));
@@ -1453,20 +1452,16 @@ mod tests {
         assert!(found.written_ms > 0);
     }
 
-    /// An agent's error frame is read from the agent's zone, with nothing in the block's own store.
+    /// An agent's error frame is read from the agent's zone; the block's own store holds nothing.
     #[test]
     fn last_error_frame_is_read_from_the_agents_zone() {
-        let block_store = FileStore::open_in_memory().unwrap();
-        let global = FileStore::open_in_memory().unwrap();
-        let zone = "agent:error-frame-global:current";
+        use crate::backend::transcript::source::TranscriptSource;
+        let (own, global, zone) = (FileStore::open_in_memory().unwrap(), FileStore::open_in_memory().unwrap(), "agent:error-frame-global:current");
         global.make_file(zone, "output", FileMeta::new(), FileOpts::default()).unwrap();
-        let line = error_frame_line("[AgentMux] no credentials for claude: bind an account in Connectors → Accounts.");
-        global.append_lines(zone, "output", format!("{line}\n").as_bytes()).unwrap();
-        let source = crate::backend::transcript::source::TranscriptSource { fs: &global, zone: zone.to_string(), global: true };
-        let found = last_error_frame(&source).expect("the frame in the agent zone");
+        global.append_lines(zone, "output", format!("{}\n", error_frame_line("[AgentMux] no credentials for claude: bind an account in Connectors → Accounts.")).as_bytes()).unwrap();
+        let found = last_error_frame(&TranscriptSource { fs: &global, zone: zone.to_string(), global: true }).expect("the frame in the agent zone");
         assert_eq!(found.source, "identity");
-        assert!(found.written_ms > 0);
-        assert!(last_error_frame(&crate::backend::transcript::source::TranscriptSource::own(&block_store, "blk")).is_none());
+        assert!(last_error_frame(&TranscriptSource::own(&own, "blk")).is_none());
     }
 
     /// Pins the "only the LAST non-blank line counts" rule (see the

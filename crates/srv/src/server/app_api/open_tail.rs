@@ -23,7 +23,6 @@ use super::*;
 
 use crate::backend::storage::filestore::{is_blank_line, FileStore, SnapshotReader};
 use crate::backend::storage::StoreError;
-use crate::backend::transcript::source::TranscriptSource;
 
 /// A first screen: about what fits one pane, plus a margin.
 const DEFAULT_TAIL_BYTES: u64 = 64 * 1024;
@@ -62,21 +61,37 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     });
 }
 
-/// Which store and zone a block's transcript is read from, as the other
-/// transcript readers decide it (`TranscriptSource`).
+/// Which store and zone a block's transcript is read from: the same rule
+/// `blockfile:read_range` and `blockfile:line_count` use (`global_output_source`:
+/// the agent's global zone when the block has a valid `agentId`, is not archived
+/// and the zone has content, the block's own otherwise), so the first screen and
+/// the older pages the pane reads next come from one file. Decided here from a
+/// reader snapshot rather than `stat`, which takes the writer mutex on a cache miss.
 fn pick_source(
     filestore: &Arc<FileStore>,
     global: Option<&Arc<FileStore>>,
     mstore: &Arc<Store>,
     block_id: &str,
 ) -> (Arc<FileStore>, String, String) {
-    let source = TranscriptSource::resolve_with(filestore, global.map(|g| g.as_ref()), mstore, block_id);
-    if source.global {
-        let gfs = global.expect("a global source has a global store").clone();
-        let stream = format!("g:{}", source.zone);
-        (gfs, source.zone, stream)
+    let local = || (filestore.clone(), block_id.to_string(), format!("b:{block_id}"));
+    let Some(gfs) = global else { return local() };
+    let Some(block) = mstore.get::<Block>(block_id).ok().flatten() else { return local() };
+    let archived = block
+        .meta
+        .get(crate::backend::session_archive::META_SESSION_ARCHIVED_AT)
+        .and_then(|v| v.as_i64())
+        .map(|v| v > 0)
+        .unwrap_or(false);
+    if archived {
+        return local();
+    }
+    let Some(zone) = crate::backend::agent_session::agent_zone_for_block_meta(&block.meta) else { return local() };
+    let size = gfs.read_snapshot(|r| Ok(r.file(&zone, "output")?.map(|f| f.size))).ok().flatten().unwrap_or(0);
+    if size > 0 {
+        let stream = format!("g:{zone}");
+        (gfs.clone(), zone, stream)
     } else {
-        (filestore.clone(), block_id.to_string(), format!("b:{block_id}"))
+        local()
     }
 }
 

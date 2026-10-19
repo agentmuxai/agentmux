@@ -169,10 +169,11 @@ pub fn spawn_background_subsystems(
     // instead of 20s — a checklist that lags is worse than none. Same
     // registry, same no-AppState property.
     let progress_filestore = Arc::clone(filestore);
+    let progress_mstore = Arc::clone(mstore);
     let progress_broker = broker.clone();
     tokio::spawn(async move {
         backend::reactive::progress_watcher::run_agent_progress_loop(
-            progress_filestore, progress_broker,
+            progress_filestore, progress_mstore, progress_broker,
         ).await;
     });
 

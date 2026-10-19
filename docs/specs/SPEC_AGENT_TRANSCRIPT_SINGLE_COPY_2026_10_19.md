@@ -3,7 +3,7 @@
 **Date:** 2026-10-19
 **Author:** Maricon@charlie
 **Type:** Spec (a storage contract change; behaviour for the user is unchanged)
-**Status:** active — step A1 (the readers that only look at the tail or the size) is in PR #5173; remaining: A2 (the progress watcher, the block-level archive, the replace/delete announcements, a fenced writer), B (stop the block write behind a kill switch, with the lab A/B) and C (remove the dead paths). B needs the coordinator's and the operator's go.
+**Status:** active — step A (the readers) is in PR #5173 except the block-level archive, the replace/delete announcements and fenced writers (A2); remaining: A2, B (stop the block write behind a kill switch, with the lab A/B) and C (remove the dead paths). B needs the coordinator's and the operator's go.
 **Issue:** #5141. Measured in `docs/reports/REPORT_FILESTORE_WRITE_VOLUME_2026_10_19.md`.
 **Platform:** all.
 
@@ -21,7 +21,7 @@ For a live agent block whose `agentId` meta is valid, whose global zone has cont
 |---|---|---|
 | `ambient/digest.rs` (`read_recent_activity`) and its callers: title recovery, pull-path summaries and next-prompt suggestions, the supervisor's judgement, a worker's last words | last 96 KB | read the global tail (the zone is derivable at every caller from `agentId`) |
 | `reactive/activity_watcher.rs:131` | the size, as a changed-since gate | the global size, or the block event it already sees |
-| `reactive/progress_watcher.rs:604,638` | incremental bytes after a per-block cursor (todo list, current tool) | switch to the block's file events (`EVENT_BLOCK_FILE` carries the bytes), which needs no store at all; not the shared zone, whose offsets are not per block |
+| `reactive/progress_watcher.rs:604,638` | incremental bytes after a per-block cursor (todo list, current tool) | reads the agent's zone through `TranscriptSource` for a defined agent (one conversation, one live writer, so its offsets serve as the cursor); the cursor counts bytes of one copy, so a change of source starts over as a first sight (done in A) |
 | `server/muxspect_handlers.rs:133,1006` | the last error frame; the last line and the file's modts | the global tail; the modts of a shared zone is not per block, so *last activity* keeps its meaning only if taken from the event time |
 | `session_archive.rs` (`archive_session_output`, `restore_session_output`, `read_session_output`) and its callers: `session:archive`, `session:restore`, `session:export`, the sweep, the `/transcript` endpoint | the whole `output` and sidecars | `session:export` and `/transcript` stay on the block's copy until B, because the agent's zone holds the agent's whole record, not one block's session, so reading it changes what an export contains: B decides that scope explicitly; the block-level archive of an agent block becomes redundant with the agent-level archive (`agent_session/archive.rs`, which already works on the global zone) and must still set `session:archived_at`, which `global_output_source` reads |
 | `resume_retry.rs` (`has_prior_transcript`, `pane_history_tail`), `persistent/spawn.rs`, `session:resume_preflight` | existence and the tail, with a global fallback already | none needed |

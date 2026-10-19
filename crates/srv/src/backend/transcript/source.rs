@@ -109,6 +109,12 @@ impl<'a> TranscriptSource<'a> {
             .flatten()
     }
 
+    /// `[offset, offset + len)` of the file, from one snapshot; `None` if any of
+    /// it is not stored (a writer mid-append).
+    pub fn read_range(&self, offset: i64, len: i64) -> Option<Vec<u8>> {
+        self.fs.read_snapshot(|r| r.bytes(&self.zone, OUTPUT_FILE, offset, len)).ok().flatten()
+    }
+
     /// The whole file.
     pub fn read_all(&self) -> Option<Vec<u8>> {
         self.fs

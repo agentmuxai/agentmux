@@ -36,6 +36,8 @@ use tokio::time::interval;
 
 use crate::backend::blockcontroller::{get_block_controller_status, STATUS_RUNNING};
 use crate::backend::storage::filestore::FileStore;
+use crate::backend::storage::store::Store;
+use crate::backend::transcript::source::TranscriptSource;
 use crate::backend::mps::Broker;
 use crate::backend::work_facts::overlap_notes::{NewEdit, NewPr};
 
@@ -312,6 +314,9 @@ struct BlockState {
     new_prs: Vec<NewPrCommand>,
     /// This block's output has been looked at before.
     seen: bool,
+    /// `next_offset` counts bytes of the agent's zone, not of the block's own
+    /// copy. The offsets of the two differ, so a change of source starts over.
+    global: bool,
 }
 
 impl BlockState {
@@ -600,12 +605,17 @@ fn first_string(v: &serde_json::Value, keys: &[&str]) -> Option<String> {
 ///
 /// Returns false when there was nothing to do, so the caller can skip the rest
 /// of the work for this block.
-fn consume_new_output(filestore: &FileStore, block_id: &str, state: &mut BlockState) -> bool {
-    let size = match filestore.stat(block_id, "output") {
-        Ok(Some(wf)) => wf.size,
-        Ok(None) => 0,
-        Err(_) => return false,
+fn consume_new_output(source: &TranscriptSource<'_>, state: &mut BlockState) -> bool {
+    let size = match source.stat() {
+        Some((size, _)) => size,
+        None => 0,
     };
+    // The cursor counts bytes of one copy. When the copy it reads from changes
+    // (the agent's zone got its first line), start over rather than mix offsets.
+    if state.seen && state.global != source.global {
+        *state = BlockState::default();
+    }
+    state.global = source.global;
     // Whatever is already there the first time this block is looked at is
     // backlog; only what appears after that was written live (see
     // `apply_lines` on stamping recent files).
@@ -619,7 +629,7 @@ fn consume_new_output(filestore: &FileStore, block_id: &str, state: &mut BlockSt
     // accumulated state describes a transcript that no longer exists, so start
     // over rather than mixing two conversations' checklists.
     if size < state.next_offset {
-        *state = BlockState { seen: true, ..BlockState::default() };
+        *state = BlockState { seen: true, global: source.global, ..BlockState::default() };
     }
 
     if state.next_offset == 0 && size > MAX_READ_BYTES {
@@ -635,7 +645,7 @@ fn consume_new_output(filestore: &FileStore, block_id: &str, state: &mut BlockSt
         return false;
     }
     let want = available.min(MAX_READ_BYTES);
-    let Ok((_, bytes)) = filestore.read_at(block_id, "output", state.next_offset, want) else {
+    let Some(bytes) = source.read_range(state.next_offset, want) else {
         return false;
     };
     if bytes.is_empty() {
@@ -686,6 +696,7 @@ type Swept = (HashMap<String, BlockState>, Vec<SweepOutcome>, (Vec<NewEdit>, Vec
 /// only this loop ever touches it, and one owner is simpler than one mutex.
 fn sweep_blocking(
     filestore: &FileStore,
+    mstore: &Store,
     agents: Vec<(String, String)>,
     mut states: HashMap<String, BlockState>,
     last_published: &HashMap<String, AgentProgress>,
@@ -704,7 +715,9 @@ fn sweep_blocking(
         }
 
         let state = states.entry(block_id.clone()).or_default();
-        let had_new = consume_new_output(filestore, &block_id, state);
+        // The agent's zone for a defined agent, the block's own copy otherwise.
+        let source = TranscriptSource::resolve(filestore, mstore, &block_id);
+        let had_new = consume_new_output(&source, state);
         edits.extend(state.new_edits.drain(..).map(|f| NewEdit {
             agent_id: agent_id.clone(),
             block_id: block_id.clone(),
@@ -736,7 +749,7 @@ fn sweep_blocking(
 }
 
 /// Run the progress sweep loop. Never returns.
-pub async fn run_agent_progress_loop(filestore: Arc<FileStore>, broker: Arc<Broker>) {
+pub async fn run_agent_progress_loop(filestore: Arc<FileStore>, mstore: Arc<Store>, broker: Arc<Broker>) {
     let mut ticker = interval(Duration::from_secs(SWEEP_INTERVAL_SECS));
     let mut tick: u64 = 0;
     let mut states: HashMap<String, BlockState> = HashMap::new();
@@ -762,10 +775,11 @@ pub async fn run_agent_progress_loop(filestore: Arc<FileStore>, broker: Arc<Brok
         last_published.retain(|block_id, _| registered.contains(block_id));
 
         let fs = filestore.clone();
+        let ms = mstore.clone();
         let published = last_published.clone();
         let taken = std::mem::take(&mut states);
         let joined = tokio::task::spawn_blocking(move || {
-            sweep_blocking(&fs, agents, taken, &published, force_republish)
+            sweep_blocking(&fs, &ms, agents, taken, &published, force_republish)
         })
         .await;
 
@@ -852,6 +866,11 @@ mod tests {
         apply_lines(state, &refs, Some(now_ms));
     }
 
+    /// A block's own copy, as `consume_new_output` reads it.
+    fn consume(fs: &FileStore, block: &str, st: &mut BlockState) -> bool {
+        consume_new_output(&TranscriptSource::own(fs, block), st)
+    }
+
     fn output_store(block: &str, text: &str) -> FileStore {
         use crate::backend::storage::filestore::{FileMeta, FileOpts};
         let fs = FileStore::open_in_memory().unwrap();
@@ -872,7 +891,7 @@ mod tests {
 ", edit_call("e1", "Edit", "file_path", "/r/old.rs"), stamped);
         let fs = output_store(block, &backlog);
         let mut st = BlockState::default();
-        assert!(consume_new_output(&fs, block, &mut st));
+        assert!(consume(&fs, block, &mut st));
         let got: Vec<(&str, u64)> = st.recent_files.iter().map(|f| (f.path.as_str(), f.ts_ms)).collect();
         assert_eq!(got, vec![("/r/stamped.rs", 1_790_848_800_000)], "the untimed backlog edit is not recorded");
         assert!(st.new_edits.is_empty(), "backlog edits are never checked for overlap");
@@ -881,7 +900,7 @@ mod tests {
         fs.append_data(block, "output", format!("{}
 ", edit_call("e2", "Write", "file_path", "/r/new.rs")).as_bytes())
             .unwrap();
-        assert!(consume_new_output(&fs, block, &mut st));
+        assert!(consume(&fs, block, &mut st));
         assert_eq!(st.recent_files[0].path, "/r/new.rs");
         assert!(st.recent_files[0].ts_ms >= before, "a live edit takes the read time");
         let live: Vec<&str> = st.new_edits.iter().map(|f| f.path.as_str()).collect();
@@ -894,11 +913,60 @@ mod tests {
         let block = "b-empty";
         let fs = FileStore::open_in_memory().unwrap();
         let mut st = BlockState::default();
-        assert!(!consume_new_output(&fs, block, &mut st));
+        assert!(!consume(&fs, block, &mut st));
         let fs = output_store(block, &format!("{}
 ", edit_call("e1", "Edit", "file_path", "/r/a.rs")));
-        assert!(consume_new_output(&fs, block, &mut st));
+        assert!(consume(&fs, block, &mut st));
         assert_eq!(st.recent_files.len(), 1);
+    }
+
+    /// A defined agent's progress is read from the agent's zone, with nothing
+    /// in the block's own store.
+    #[test]
+    fn progress_is_read_from_the_agents_zone() {
+        let zone = "agent:progress-global:current";
+        let global = output_store(zone, "");
+        let mut st = BlockState::default();
+        let source = TranscriptSource { fs: &global, zone: zone.to_string(), global: true };
+        assert!(!consume_new_output(&source, &mut st), "an empty zone has nothing");
+        global
+            .append_data(zone, "output", format!("{}\n", edit_call("e1", "Edit", "file_path", "/r/zone.rs")).as_bytes())
+            .unwrap();
+        assert!(consume_new_output(&source, &mut st));
+        assert_eq!(st.recent_files.len(), 1);
+        assert_eq!(st.recent_files[0].path, "/r/zone.rs");
+        assert!(st.global);
+    }
+
+    /// The cursor counts bytes of one copy: when the source changes (the agent's
+    /// zone got its first line while the block's own copy had history), the
+    /// watcher starts over instead of reading the zone from the block's offset.
+    #[test]
+    fn a_change_of_source_starts_the_cursor_over() {
+        let block = "b-flip";
+        let own = output_store(block, &format!("{}\n{}\n", edit_call("e1", "Edit", "file_path", "/r/own1.rs"), edit_call("e2", "Edit", "file_path", "/r/own2.rs")));
+        let mut st = BlockState::default();
+        assert!(consume(&own, block, &mut st));
+        let offset_in_own = st.next_offset;
+        assert!(offset_in_own > 0 && !st.global);
+
+        let zone = "agent:progress-flip:current";
+        let global = output_store(zone, &format!("{}\n", edit_call("g1", "Edit", "file_path", "/r/zone1.rs")));
+        let source = TranscriptSource { fs: &global, zone: zone.to_string(), global: true };
+        // What the zone already holds is backlog (a first sight), as for any new
+        // source: nothing recorded as just edited, and nothing carried over from
+        // the other copy; the cursor sits at the end of the zone.
+        assert!(consume_new_output(&source, &mut st));
+        assert!(st.global);
+        assert!(st.recent_files.is_empty(), "{:?}", st.recent_files.iter().map(|f| &f.path).collect::<Vec<_>>());
+        assert_eq!(st.next_offset, global.stat(zone, "output").unwrap().unwrap().size);
+        // What is written after that is live.
+        global
+            .append_data(zone, "output", format!("{}\n", edit_call("g2", "Edit", "file_path", "/r/zone2.rs")).as_bytes())
+            .unwrap();
+        assert!(consume_new_output(&source, &mut st));
+        let paths: Vec<&str> = st.recent_files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, vec!["/r/zone2.rs"]);
     }
 
     fn edit_call(id: &str, tool: &str, key: &str, path: &str) -> String {
