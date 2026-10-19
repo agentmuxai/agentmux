@@ -4,7 +4,7 @@
 // Unit tests for ci-nightly-status.mjs: the nightly-red issue.
 
 import { describe, expect, it } from "vitest";
-import { decide, failedTests, finishedJobs, note, report, verdict } from "./ci-nightly-status.mjs";
+import { decide, failedTests, finishedJobs, note, report, timedOut, verdict } from "./ci-nightly-status.mjs";
 
 const job = (name, conclusion, status = "completed") => ({ id: 1, name, status, conclusion });
 
@@ -106,11 +106,12 @@ describe("note", () => {
 describe("report", () => {
     const env = { REPO: "o/r", RUN_ID: "7", RUN_URL: "https://example.test/run/7", REF: "refs/heads/main", SHA: "71a3e2300abcdef" };
     /** A fake gh: answers the reads from `jobs` and `open`, and records every other call. */
-    function fakeGh(jobs, open) {
+    function fakeGh(jobs, open, annotations = []) {
         const calls = [];
         const gh = (args) => {
             calls.push(args);
             const [cmd, sub] = args;
+            if (cmd === "api" && args.some((a) => a.includes("/annotations"))) return JSON.stringify(annotations);
             if (cmd === "api" && args.includes("--paginate")) return JSON.stringify([{ jobs }]);
             if (cmd === "issue" && sub === "list") return JSON.stringify(open.map((number) => ({ number })));
             if (cmd === "api" && sub.endsWith("/logs")) return "2026-10-18T19:26:13Z test a_test ... FAILED";
@@ -127,6 +128,32 @@ describe("report", () => {
         expect(writes.map((w) => w.slice(0, 2))).toEqual([["label", "create"], ["issue", "create"]]);
         const body = writes[1][writes[1].indexOf("--body") + 1];
         expect(body).toContain("- cargo test (macos-latest)\n  - `a_test`");
+    });
+
+    it("reports a job that hit its timeout, which GitHub calls cancelled", () => {
+        // The 2026-10-19 nightly: the macOS test job ran out of its 60 minutes saving its cache.
+        // Two pages, the timeout on the second (--paginate --slurp returns one array per page).
+        const page1 = Array.from({ length: 100 }, () => ({ annotation_level: "warning", message: "Node.js 20 is deprecated." }));
+        const { gh } = fakeGh([{ ...job("cargo test (macos-latest)", "cancelled"), id: 9 }], [], [page1, [{ annotation_level: "failure", message: "The job has exceeded the maximum execution time of 1h0m0s" }]]);
+        const writes = report(env, gh, quiet);
+        expect(writes.map((w) => w.slice(0, 2))).toEqual([["label", "create"], ["issue", "create"]]);
+        expect(writes[1][writes[1].indexOf("--body") + 1]).toContain("- cargo test (macos-latest) (timed out)");
+    });
+
+    it("says in the log when a cancelled job's annotations can't be read", () => {
+        const { gh: base } = fakeGh([job("cargo test (macos-latest)", "cancelled")], []);
+        const gh = (args) => {
+            if (args.some((a) => a.includes("/annotations"))) throw new Error("HTTP 403: Resource not accessible by integration\nmore");
+            return base(args);
+        };
+        const lines = [];
+        expect(report(env, gh, (l) => lines.push(l))).toEqual([]);
+        expect(lines.some((l) => l.includes("Couldn't read cargo test (macos-latest)'s annotations") && l.endsWith("HTTP 403: Resource not accessible by integration"))).toBe(true);
+    });
+
+    it("stays silent for a job someone cancelled", () => {
+        const { gh } = fakeGh([job("cargo test (macos-latest)", "cancelled")], [498], [[{ annotation_level: "failure", message: "The operation was canceled." }]]);
+        expect(report(env, gh, quiet)).toEqual([]);
     });
 
     it("comments on the open issue the next red night", () => {
@@ -149,5 +176,13 @@ describe("report", () => {
         const { gh, calls } = fakeGh([job("x", "failure")], []);
         expect(report({ ...env, REF: "refs/heads/camper/x" }, gh, quiet)).toEqual([]);
         expect(calls).toEqual([]);
+    });
+});
+
+describe("timedOut", () => {
+    it("reads GitHub's timeout annotation, and nothing else", () => {
+        expect(timedOut([{ message: "The job has exceeded the maximum execution time of 1h30m0s" }])).toBe(true);
+        expect(timedOut([{ message: "The operation was canceled." }, { message: "Node.js 20 is deprecated." }])).toBe(false);
+        expect(timedOut([])).toBe(false);
     });
 });
