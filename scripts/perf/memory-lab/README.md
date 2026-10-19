@@ -213,7 +213,7 @@ event nobody publishes) and times the answer on that socket.
 1 s or more) how far the page's stream was behind the worker's in the send's window and the worker's slowest RPC then. Read it
 as: a worker RPC of a few ms while the page's stream is seconds behind says srv answers promptly and the lateness is on the
 page's side; a slow worker RPC says srv's egress or the socket. The lag compares cumulative message counts of two streams that
-differ by a few messages (the page also receives its own RPC answers), so it is good to about 100 ms. The second subscriber makes
+differ by a few messages (the page also receives its own RPC answers), so it is good to about 100 ms: the constant offset between them is taken once, in the idle seconds after the worker opens (the lab waits 3 s before the first round for this), not at each send, so a backlog the page already had when a send was made counts. The second subscriber makes
 srv do a little more work: use it to find a cause, not for a figure to compare between builds. It needs the window to stay as it
 is (not with `--recycle-after`). The forced reconnect that captures the subscriptions can take seconds on a window with many
 agents just created (srv completes the close handshake slowly); the lab waits up to a minute for it.

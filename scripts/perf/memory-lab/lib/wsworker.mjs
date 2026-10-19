@@ -97,7 +97,7 @@ onmessage = (e) => {
       }
     };
   } else if (m.cmd === "read") {
-    postMessage({ read: true, opened, closed, total, buckets: Object.entries(buckets).map(([k, v]) => [Number(k), v[0], v[1]]), pings, unanswered: pending.size });
+    postMessage({ read: true, readAt: Date.now(), opened, closed, total, buckets: Object.entries(buckets).map(([k, v]) => [Number(k), v[0], v[1]]), pings, unanswered: pending.size });
   } else if (m.cmd === "stop") {
     clearInterval(timer);
     try { ws.close(); } catch {}
@@ -151,6 +151,9 @@ export const STOP_WORKER = `(async () => {
 
 const round1 = (x) => Math.round(x * 10) / 10;
 
+/** How long after the worker opens the two streams are taken to be caught up (the lab waits this long, idle, before the first round). */
+export const CALIBRATE_AFTER_MS = 2500;
+
 /** Cumulative count of `[key, n]` buckets up to and including time `t` (epoch ms; a bucket is the 100 ms starting at its key). */
 function cumulative(buckets) {
     const sorted = [...buckets].sort((a, b) => a[0] - b[0]);
@@ -177,11 +180,13 @@ function timeReaching(cum, n) {
 /**
  * How far behind the worker's stream the page's was, over [from, to]: for each page bucket in the window, the page had
  * received N messages by its end, and the worker reached N earlier; the difference is how long the page was behind.
- * Both streams count from the moment each was recorded, so `pageOffset`/`workerOffset` (messages one side has that the
- * other does not, from before the window) are taken as the totals ratio's difference at the window start and removed.
+ * The two streams differ by a constant number of messages (the page also receives its own RPC answers and route traffic, and
+ * each began counting at its own moment), so that offset is taken once, at `calibrateAt`, a moment the page was keeping up
+ * (the idle seconds after the worker opened), and removed. It is NOT taken at the window's start: a send that waits behind a
+ * backlog built before the call would then show no lag at all.
  * Returns the largest such lag in the window, and null when the two cannot be lined up.
  */
-export function pageLagIn(pageBuckets, workerBuckets, from, to) {
+export function pageLagIn(pageBuckets, workerBuckets, from, to, calibrateAt = from) {
     // pageBuckets: [key, messages, bytes, biggest, processingMs] (the page tap's shape); workerBuckets: [key, messages, bytes].
     const page = cumulative((pageBuckets ?? []).map((b) => [b[0], b[1]]));
     const worker = cumulative((workerBuckets ?? []).map((b) => [b[0], b[1]]));
@@ -192,7 +197,7 @@ export function pageLagIn(pageBuckets, workerBuckets, from, to) {
         for (let i = 0; i < cum.times.length && cum.times[i] + 100 <= t; i++) n = cum.counts[i];
         return n;
     };
-    const base = upTo(page, from) - upTo(worker, from); // messages the page has counted that the worker has not (or minus)
+    const base = upTo(page, calibrateAt) - upTo(worker, calibrateAt); // messages the page has counted that the worker has not (or minus), while both were caught up
     let max = 0;
     let any = false;
     for (let i = 0; i < page.times.length; i++) {
@@ -223,15 +228,18 @@ export function pingsIn(pings, from, to) {
  * @param worker what `READ_WORKER` returned; @param pageWs the page tap's per-100 ms buckets
  * @param slowSends `[{ round, agent, from, to }]` in epoch ms
  */
-export function summariseWorkerProbe(worker, pageWs, slowSends = []) {
+export function summariseWorkerProbe(worker, pageWsAll, slowSends = []) {
     if (!worker) return null;
-    const pageTotal = (pageWs ?? []).reduce((n, b) => n + b[1], 0);
+    // Only what the page received while the worker was listening: the page's tap keeps counting after the worker is stopped.
+    const pageWs = (pageWsAll ?? []).filter((b) => (worker.opened == null || b[0] + 100 > worker.opened) && (worker.readAt == null || b[0] <= worker.readAt));
+    const calibrateAt = (worker.opened ?? 0) + CALIBRATE_AFTER_MS;
+    const pageTotal = pageWs.reduce((n, b) => n + b[1], 0);
     const answered = (worker.pings ?? []).filter(([, ms]) => ms != null).map(([, ms]) => ms).sort((a, b) => a - b);
     const q = (p) => (answered.length ? answered[Math.min(answered.length - 1, Math.floor(answered.length * p))] : null);
     return {
         streams: { pageMessages: pageTotal, workerMessages: worker.total?.[0] ?? 0, workerMB: round1((worker.total?.[1] ?? 0) / 1048576) },
         workerRpc: { sent: worker.pings?.length ?? 0, unanswered: worker.unanswered ?? 0, medianMs: q(0.5), p95Ms: q(0.95), maxMs: answered.length ? answered[answered.length - 1] : null },
-        slowSends: slowSends.map((s) => ({ round: s.round, agent: s.agent, pageLagBehindWorkerMs: pageLagIn(pageWs, worker.buckets, s.from, s.to), workerRpcInWindow: pingsIn(worker.pings, s.from, s.to) })),
+        slowSends: slowSends.map((s) => ({ round: s.round, agent: s.agent, pageLagBehindWorkerMs: pageLagIn(pageWs, worker.buckets, s.from, s.to, calibrateAt), workerRpcInWindow: pingsIn(worker.pings, s.from, s.to) })),
     };
 }
 

@@ -44,7 +44,7 @@ import { parseSettingPairs, settingsSeen } from "./lib/settings.mjs";
 import { parseDiskLoad, startDiskLoad } from "./lib/diskload.mjs";
 import { describeOpen, opensLine, summariseOpens, withLongTasks } from "./lib/agentopen.mjs";
 import { framesLine, summariseFrames } from "./lib/frames.mjs";
-import { summariseWorkerProbe, workerProbeLine } from "./lib/wsworker.mjs";
+import { CALIBRATE_AFTER_MS, summariseWorkerProbe, workerProbeLine } from "./lib/wsworker.mjs";
 import { slowSendsAgainstLongTasks, summariseLongTasks } from "./lib/longtasks.mjs";
 import { segmentsOf, slowSendBreakdown } from "./lib/sendsegments.mjs";
 import { arrivalTotals, arrivalsDuringSlowSends } from "./lib/wsarrivals.mjs";
@@ -388,6 +388,7 @@ async function attempt(args, ctx) {
             const started = await driver.startWsWorker();
             if (started?.error) throw new Error(`--ws-worker: ${started.error}`);
             console.log("  worker probe running: a second websocket on a Web Worker");
+            await sleep(CALIBRATE_AFTER_MS + 500); // idle, so the page is caught up when the offset between the two streams is taken (lib/wsworker.mjs)
         }
         const volumeAtStart = volumeOf(dir);
         // The background disk load starts with the workload and ends with its last turn, before the settle and the forced-GC final.
