@@ -112,7 +112,8 @@ export function usableOpenTail(r: OpenTailResult | null | undefined): r is OpenT
  * a response, so the pane opens the usual way, which parses it whole.
  */
 export function startsAtTurn(line: string | undefined): boolean {
-    if (!line) return false;
+    // A user record always names its type, so most lines are ruled out without a parse.
+    if (!line || !line.includes('"user"')) return false;
     try {
         const rec = JSON.parse(line);
         if (rec?.type !== "user" || rec.parent_tool_use_id) return false;

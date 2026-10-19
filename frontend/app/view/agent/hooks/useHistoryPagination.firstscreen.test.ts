@@ -498,6 +498,90 @@ describe("the rest of the restore window", () => {
     });
 });
 
+describe("every page of the fill starts at a turn start", () => {
+    const END = 20_003; // the first screen is lines [20_000, 20_003): it starts at a turn start
+    const release = () => setLastInputForTests(60_000);
+    const delta = (n: number) => `{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"w${n}"}}}`;
+    /** A transcript whose turns start every `every` lines. */
+    const serve = (every: number | null, over: Record<string, unknown> = {}) =>
+        vi.mocked(RpcApi.BlockfileReadRangeCommand).mockImplementation(async (_c: any, req: any) => ({
+            lines: Array.from({ length: req.limit }, (_, i) => {
+                const n = req.offset + i;
+                return every !== null && n % every === 0 ? user(`t${n}`) : delta(n);
+            }),
+            total: END,
+            stream: "b:blk-1",
+            gen: "g1",
+            ...over,
+        }));
+    const requests = () => vi.mocked(RpcApi.BlockfileReadRangeCommand).mock.calls.map((c) => c[1] as { offset: number; limit: number });
+
+    it("defers a page's leading partial turn to the next page, so no run is cut at a seam", async () => {
+        openTail.mockResolvedValue(tailOf(3, END));
+        serve(700); // turn starts at multiples of 700: the first page [18_000, 20_000) first has one at 18_200
+        const { hook } = mount();
+        await flush();
+        release();
+        await vi.waitFor(() => expect(hook().historyOffset()).toBeLessThan(18_300), { timeout: 4000 });
+        const reqs = requests();
+        expect(reqs[0]).toMatchObject({ offset: 18_000, limit: 2_000 });
+        // The 200 lines before that turn start were not loaded: the document now begins there.
+        // The next page ends exactly where the document begins.
+        await vi.waitFor(() => expect(requests().length).toBeGreaterThanOrEqual(2), { timeout: 4000 });
+        expect(requests()[1].offset + requests()[1].limit).toBe(18_200);
+        expect(requests()[1]).toMatchObject({ offset: 16_200, limit: 2_000 });
+    });
+
+    it("every page dispatched begins on a user message, except the window's own top", async () => {
+        openTail.mockResolvedValue(tailOf(3, END));
+        serve(700);
+        const { docEvents, hook } = mount();
+        await flush();
+        release();
+        const floor = END - RESTORE_WINDOW_LINES;
+        await vi.waitFor(() => expect(hook().historyOffset()).toBe(floor), { timeout: 6000 });
+        const pages = docEvents.slice(1); // after the first screen
+        expect(pages.length).toBeGreaterThan(2);
+        // The last page ends the fill at the window's floor, which the usual open also leaves where it falls.
+        for (const page of pages.slice(0, -1)) expect(page.nodes[0].type).toBe("user_message");
+    });
+
+    it("a page with no turn start reads further back until it has one", async () => {
+        openTail.mockResolvedValue(tailOf(3, END));
+        serve(5_000); // the first turn start below 20_000 is at 15_000
+        const { hook } = mount();
+        await flush();
+        release();
+        await vi.waitFor(() => expect(hook().historyOffset()).toBe(15_000), { timeout: 4000 });
+        // [18_000, 20_000), then [16_000, 18_000), then [14_000, 16_000), which holds 15_000.
+        expect(requests().slice(0, 3).map((r) => r.offset)).toEqual([18_000, 16_000, 14_000]);
+    });
+
+    it("stops reading back at the window's floor and takes the page as it is", async () => {
+        openTail.mockResolvedValue(tailOf(3, END));
+        serve(null); // no turn start anywhere
+        const { hook } = mount();
+        await flush();
+        release();
+        const floor = END - RESTORE_WINDOW_LINES;
+        await vi.waitFor(() => expect(hook().historyOffset()).toBe(floor), { timeout: 6000 });
+        await sleep(300);
+        // Nothing was read below the floor.
+        expect(Math.min(...requests().map((r) => r.offset))).toBeGreaterThanOrEqual(floor);
+    });
+
+    it("leaves a page the byte budget cut alone: srv placed its start", async () => {
+        openTail.mockResolvedValue(tailOf(3, END));
+        serve(null, { offset: 19_960 });
+        const { hook } = mount({ restoreBytes: () => 1_000_000 });
+        await flush();
+        release();
+        await vi.waitFor(() => expect(hook().historyOffset()).toBe(19_960), { timeout: 4000 });
+        await sleep(300);
+        expect(requests()).toHaveLength(1);
+    });
+});
+
 describe("appends during the open leave no gap and no duplicate", () => {
     const b64 = (text: string) => Buffer.from(text, "utf-8").toString("base64");
     const event = (line: number, lines: number, text: string) => ({

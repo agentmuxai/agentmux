@@ -265,26 +265,55 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
      */
     const fetchOlderPage = async (
         maxLines: number,
-        extra?: { expectGen?: string; tailBytes?: number },
+        extra?: { expectGen?: string; tailBytes?: number; alignFloor?: number },
     ): Promise<{ lines: number; bytes: number; nodes: number; trimmed: boolean } | null> => {
         const currentOffset = historyOffset();
         if (currentOffset === 0) return null; // already at the beginning
         const newOffset = Math.max(0, currentOffset - maxLines);
-        const loadLimit = currentOffset - newOffset;
+        const readLines = (offset: number, limit: number, tailBytes?: number) =>
+            RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
+                block_id: opts.blockId,
+                filename: "output",
+                offset,
+                limit,
+                ...(extra?.expectGen ? { expect_gen: extra.expectGen } : {}),
+                ...(tailBytes ? { tail_bytes: tailBytes } : {}),
+            }, { timeout: 15000 });
 
-        const resp = await RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
-            block_id: opts.blockId,
-            filename: "output",
-            offset: newOffset,
-            limit: loadLimit,
-            ...(extra?.expectGen ? { expect_gen: extra.expectGen } : {}),
-            ...(extra?.tailBytes ? { tail_bytes: extra.tailBytes } : {}),
-        }, { timeout: 15000 });
+        const resp = await readLines(newOffset, currentOffset - newOffset, extra?.tailBytes);
         // The file is another generation now: these lines aren't this document's.
         if (resp.gen_mismatch) return null;
-        const readStart = typeof resp.offset === "number" ? resp.offset : newOffset;
+        let readStart = typeof resp.offset === "number" ? resp.offset : newOffset;
+        const trimmed = readStart > newOffset;
+        let lines = resp.lines ?? [];
+        let stamps = resp.stamps;
 
-        const parsed = parseHistoryLines(resp.lines ?? [], opts.outputFormat(), opts.agentName?.(), resp.stamps, parseOptsAt(resp, readStart));
+        // A page of the restore window parses apart from the rows below it, and a
+        // streamed run that straddled the seam would get two ids and show as two
+        // rows; the usual open parses the window whole. So the fill's page starts at
+        // a turn start (`alignFloor` is the window's lowest line): the lines before
+        // the first one wait for the next page, and a page with none reads further
+        // back until it has one. A page the byte budget cut was already placed at a
+        // turn start by srv, and the window's own top is as the usual open leaves it.
+        if (extra?.alignFloor !== undefined && !trimmed) {
+            let first = lines.findIndex(startsAtTurn);
+            while (first < 0 && readStart > extra.alignFloor) {
+                const more = Math.min(maxLines, readStart - extra.alignFloor);
+                const prev = await readLines(readStart - more, more);
+                if (prev.gen_mismatch) return null;
+                lines = [...(prev.lines ?? []), ...lines];
+                stamps = stamps && prev.stamps ? [...prev.stamps, ...stamps] : undefined;
+                readStart -= more;
+                first = lines.findIndex(startsAtTurn);
+            }
+            if (first > 0) {
+                lines = lines.slice(first);
+                stamps = stamps?.slice(first);
+                readStart += first;
+            }
+        }
+
+        const parsed = parseHistoryLines(lines, opts.outputFormat(), opts.agentName?.(), stamps, parseOptsAt(resp, readStart));
         const newNodes = parsed.nodes;
         if (newNodes.length > 0) {
             // batch() ensures HistoryLoaded's documentAtom write is not a
@@ -302,7 +331,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
         }
 
         setHistoryOffset(readStart);
-        return { lines: resp.lines?.length ?? 0, bytes: linesBytes(resp.lines ?? []), nodes: newNodes.length, trimmed: readStart > newOffset };
+        return { lines: lines.length, bytes: linesBytes(lines), nodes: newNodes.length, trimmed };
     };
 
     /**
@@ -495,7 +524,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 page: async (maxLines) => {
                     try {
                         const budget = Number.isFinite(plan.budgetBytes) ? Math.max(1, plan.budgetBytes - fillBytes) : undefined;
-                        const page = await exclusive(() => fetchOlderPage(maxLines, { expectGen: gen, tailBytes: budget }));
+                        const page = await exclusive(() => fetchOlderPage(maxLines, { expectGen: gen, tailBytes: budget, alignFloor: plan.floorLine }));
                         if (!page) return null;
                         fillBytes += page.bytes;
                         return { lines: page.lines, bytes: page.bytes, last: page.trimmed };
