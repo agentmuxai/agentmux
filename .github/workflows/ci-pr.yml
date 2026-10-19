@@ -892,3 +892,50 @@ jobs:
       - env:
           NEEDS_JSON: ${{ toJSON(needs) }}
         run: node scripts/ci-required-check.mjs
+
+  # When a push to main fails CI, say so in one issue, labelled main-red; when
+  # a later push is green, close it. Main went red for three pushes on
+  # 2026-10-18 and nobody heard (docs/specs/SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19.md
+  # §5 Phase 5). One issue per red streak, a comment per failing push. Found
+  # by label, not search, which can lag behind a just-created issue. A
+  # cancelled run (a newer push superseded it) says nothing.
+  main-status:
+    name: main status
+    needs: [ci-required]
+    if: ${{ always() && github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      issues: write
+      actions: read
+    steps:
+      - name: Open, update or close the main-red issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RESULT: ${{ needs.ci-required.result }}
+          SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          [ "$RESULT" = "failure" ] || [ "$RESULT" = "success" ] || { echo "CI required: $RESULT, nothing to say."; exit 0; }
+          open=$(gh issue list --repo "$REPO" --label main-red --state open --json number --jq '.[0].number // empty')
+          subject=$(gh api "repos/$REPO/commits/$SHA" --jq '.commit.message | split("\n")[0]')
+          at="\`${SHA:0:9}\` ($subject)"
+          if [ "$RESULT" = "success" ]; then
+            if [ -n "$open" ]; then
+              gh issue close "$open" --repo "$REPO" --comment "Green again at $at: $RUN_URL"
+            fi
+            exit 0
+          fi
+          failing=$(gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/jobs" --jq '.jobs[] | select(.conclusion == "failure") | "- " + .name' | grep -v -- '- CI required$' || true)
+          note="CI failed on main at $at: $RUN_URL"$'\n\n'"Failing jobs:"$'\n'"${failing:-- (see the run)}"
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --repo "$REPO" --body "$note"
+          else
+            gh label create main-red --repo "$REPO" --color B60205 --description "CI on main is failing" --force >/dev/null
+            gh issue create --repo "$REPO" --title "main is red" --label main-red \
+              --body "$note"$'\n\n'"This issue is opened and closed by CI (ci-pr.yml, main status): it stays open while pushes to main fail, with a comment for each, and closes when one is green."
+          fi
