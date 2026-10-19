@@ -41,6 +41,7 @@ import { storeLockOf } from "./lib/storelock.mjs";
 import { volumeOf } from "./lib/volume.mjs";
 import { parseEnvPairs } from "./lib/instanceenv.mjs";
 import { parseDiskLoad, startDiskLoad } from "./lib/diskload.mjs";
+import { describeOpen, opensLine, summariseOpens, withLongTasks } from "./lib/agentopen.mjs";
 import { framesLine, summariseFrames } from "./lib/frames.mjs";
 import { slowSendsAgainstLongTasks, summariseLongTasks } from "./lib/longtasks.mjs";
 import { segmentsOf, slowSendBreakdown } from "./lib/sendsegments.mjs";
@@ -59,8 +60,8 @@ function srvHint(args) {
 class InvalidRun extends Error {}
 
 function parseArgs(argv) {
-    const a = { panes: 4, rounds: 10, port: 9333, every: 5, gapS: 15, settleS: 20, samples: 3, seed: 1, attempts: 2, recycleAfter: 0, holdMinutes: 0, recycleCommand: "Reload Window (Free Memory)", out: "memory-lab-out", keep: false };
-    const num = new Set(["panes", "rounds", "port", "every", "gapS", "settleS", "samples", "seed", "attempts", "recycleAfter", "holdMinutes", "diskLoadCapGb"]);
+    const a = { panes: 4, rounds: 10, port: 9333, every: 5, gapS: 15, settleS: 20, samples: 3, seed: 1, attempts: 2, recycleAfter: 0, holdMinutes: 0, openAgents: 0, heavyTurns: 0, heavyKb: 600, recycleCommand: "Reload Window (Free Memory)", out: "memory-lab-out", keep: false };
+    const num = new Set(["panes", "rounds", "port", "every", "gapS", "settleS", "samples", "seed", "attempts", "recycleAfter", "holdMinutes", "diskLoadCapGb", "openAgents", "heavyTurns", "heavyKb"]);
     const flags = { "--keep": "keep" };
     for (let i = 0; i < argv.length; i++) {
         const raw = argv[i];
@@ -92,6 +93,10 @@ function parseArgs(argv) {
         throw new Error(`--recycle-after ${a.recycleAfter} is not a round of this run: a whole number from 1 to --rounds (${a.rounds}), or leave it out`);
     }
     if (a.holdMinutes < 0 || (a.holdMinutes > 0 && a.recycleAfter === 0)) throw new Error("--hold-minutes needs --recycle-after (use --recycle-command none for the control): the agents stop after that round and the window is left idle");
+    for (const k of ["openAgents", "heavyTurns"]) if (!(Number.isInteger(a[k]) && a[k] >= 0)) throw new Error(`--${k.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase())} needs a whole number of 0 or more`);
+    if (!(a.heavyKb >= 1)) throw new Error("--heavy-kb needs a number of KB of 1 or more");
+    if (a.openAgents > a.panes) throw new Error(`--open-agents ${a.openAgents} is more than the ${a.panes} agents`);
+    if (a.heavyTurns > 0 && a.openAgents < 1) throw new Error("--heavy-turns needs --open-agents (the first agent plays the heavy turns, and is opened again)");
     a.label ??= basename(a.portable ?? dirname(a.exe));
     return a;
 }
@@ -191,6 +196,43 @@ async function requireIdle(driver, timeoutS = 300) {
         await sleep(5000);
     }
     throw new InvalidRun(`agents were still playing turns ${timeoutS} s after the last round`);
+}
+
+/**
+ * Opens agents again after their panes were closed, each from the request to the first screen (P0.5). The first agent plays
+ * `--heavy-turns` big turns first, so one open is of a long conversation and of a turn too long for the first slice. Runs after
+ * every other measurement of the run, which it would disturb.
+ */
+async function measureOpens(driver, args, home) {
+    const heavy = args.heavyTurns > 0;
+    if (heavy) {
+        for (let k = 1; k <= args.heavyTurns; k++) {
+            await driver.send([driver.agents[0].blockId], { text: `[heavy ${k}] Run the whole test suite and report what failed.` });
+            await requireIdle(driver);
+        }
+    }
+    const storeBefore = storeLockOf(home);
+    const opens = [];
+    for (let i = 0; i < args.openAgents; i++) {
+        const agent = driver.agents[i];
+        const kind = heavy && i === 0 ? "heavy" : "regular";
+        const r = await driver.reopen(agent, { restTimeoutS: kind === "heavy" ? 120 : 30 });
+        const o = describeOpen({ agent: agent.name, kind, rpcStart: r.rpcStart, rpcMs: r.rpcMs, open: r.open, rest: r.rest });
+        o.tapRewraps = r.tapRewraps;
+        console.log(`  open ${agent.name} (${kind}): ${o.outcome === "no-line" ? "no [agent-open] line" : `first screen ${o.firstScreenMs} ms (${o.firstScreenPhase}), revealed ${o.revealedMs} ms, history ${o.historyLines ?? "?"} lines`}`);
+        opens.push(o);
+    }
+    const tasks = (await driver.longTasks().catch(() => null))?.tasks ?? [];
+    const withTasks = withLongTasks(opens, tasks);
+    const storeAfter = storeLockOf(home);
+    const summary = summariseOpens(withTasks);
+    return {
+        heavy: heavy ? { turns: args.heavyTurns, kb: args.heavyKb } : null,
+        opens: withTasks,
+        summary,
+        // Holds and waits of 500 ms or more on the store's connection that began while the agents were being opened (other agents were idle).
+        storeLockDuring: storeBefore && storeAfter ? { holds: storeAfter.holds - storeBefore.holds, waits: storeAfter.waits - storeBefore.waits, longestHeldMs: storeAfter.longestHeldMs, longestHeldSite: storeAfter.longestHeldSite } : null,
+    };
 }
 
 /** What a recycle did, in a few lines. */
@@ -363,6 +405,10 @@ async function attempt(args, ctx) {
             bytesPerTurn: turnBytes.reduce((a, b) => a + b, 0) / turnBytes.length,
         });
         if (problem) throw new InvalidRun(problem);
+        // What the run's workload did to the store and the disk, taken before the opens below add to them.
+        const storeLockWorkload = storeLockOf(home);
+        const volumeAtEnd = volumeOf(dir);
+        const openPhase = args.openAgents > 0 ? await measureOpens(driver, args, home) : null;
 
         const notes = [];
         if (process.platform === "darwin") notes.push("macOS: the totals are per-process footprints summed, an upper bound; footprint's own total over the app's processes is in final.footprint");
@@ -381,7 +427,7 @@ async function attempt(args, ctx) {
             // What the instance was given (see lib/instanceenv.mjs): the --env variables, what the lab set, and the shell's AGENTMUX_* it dropped.
             instanceEnv: instance.envRecord,
             // How full the volume was (see lib/volume.mjs): a stall on a nearly full disk is not the same finding as one on an empty disk.
-            volume: { atStart: volumeAtStart, atEnd: volumeOf(dir) },
+            volume: { atStart: volumeAtStart, atEnd: volumeAtEnd },
             rounds: args.rounds,
             gapSeconds: args.gapS,
             settleSeconds: args.settleS,
@@ -402,7 +448,9 @@ async function attempt(args, ctx) {
             // The slowest page command of the run: a machine near the driver's limit (90 s) shows here before it fails.
             slowestEvalMs: driver.slowestEvalMs(),
             // How long srv's transcript store kept callers waiting (issue #5141): from srv's own warnings, null without a log.
-            storeLock: storeLockOf(home),
+            storeLock: storeLockWorkload,
+            // Agents opened again after their panes were closed (--open-agents), each from the request to the first screen; null without the option.
+            opens: openPhase,
             // The page's main thread (tasks of 50 ms or more) and each send's time, to tell a busy page from a waiting srv.
             pageLongTasks,
             // What filled the page's slow frames (50 ms or more): script or rendering, which script, how long the handler took per message size, panes flushed per frame (lib/frames.mjs).
@@ -415,7 +463,7 @@ async function attempt(args, ctx) {
             slowEvals: driver.slowEvals(), // { total, slowest }: every command that took 5 s or more, the 30 slowest listed
         };
         writeFileSync(join(dir, "result.json"), JSON.stringify(result, null, 1));
-        const md = [`# ${args.label}`, "", `${args.panes} agents over ${layout.length} tab(s), ${playedRounds} rounds (${args.gapS} s apart)${args.holdMinutes > 0 ? `, then held idle ${args.holdMinutes} min` : ""}, forced GC, median of ${summary.samples} samples.`, "", table(summary), "", cpuTable(cpu, wall, io), ...(pageLongTasks ? ["", `Page main thread: ${pageLongTasks.count} long task(s) of 50 ms or more, ${pageLongTasks.totalMs} ms in all, longest ${pageLongTasks.maxMs} ms, ${pageLongTasks.over1s} over 1 s; ${sendsVsLong.slowSends} send(s) took over 5 s, ${sendsVsLong.overlappingLongTask} of them while a long task of 500 ms or more ran. The page's 100 ms timer was up to ${pageLongTasks.timerLag.maxMs} ms late (${pageLongTasks.timerLag.over1s} times over 1 s).${pageLongTasks.truncated ? ` Only the first ${pageLongTasks.recorded} long tasks were timed: the totals, rounds and overlaps cover those.` : ""}`] : []), ...(pageFrames ? ["", framesLine(pageFrames)] : []), ...(volumeAtStart ? ["", `Volume under the data folder: ${volumeAtStart.freePct}% free (${volumeAtStart.freeGB} of ${volumeAtStart.totalGB} GB) at the start.`] : []), ...(result.storeLock ? ["", `Store lock: longest hold of srv's transcript store connection ${result.storeLock.longestHeldMs} ms${result.storeLock.longestHeldSite ? ` (${result.storeLock.longestHeldSite})` : ""}, ${result.storeLock.holds} hold(s) and ${result.storeLock.waits} wait(s) of 500 ms or more.`] : []), ...notes.map((n) => `\n> ${n}`)].join("\n");
+        const md = [`# ${args.label}`, "", `${args.panes} agents over ${layout.length} tab(s), ${playedRounds} rounds (${args.gapS} s apart)${args.holdMinutes > 0 ? `, then held idle ${args.holdMinutes} min` : ""}, forced GC, median of ${summary.samples} samples.`, "", table(summary), "", cpuTable(cpu, wall, io), ...(pageLongTasks ? ["", `Page main thread: ${pageLongTasks.count} long task(s) of 50 ms or more, ${pageLongTasks.totalMs} ms in all, longest ${pageLongTasks.maxMs} ms, ${pageLongTasks.over1s} over 1 s; ${sendsVsLong.slowSends} send(s) took over 5 s, ${sendsVsLong.overlappingLongTask} of them while a long task of 500 ms or more ran. The page's 100 ms timer was up to ${pageLongTasks.timerLag.maxMs} ms late (${pageLongTasks.timerLag.over1s} times over 1 s).${pageLongTasks.truncated ? ` Only the first ${pageLongTasks.recorded} long tasks were timed: the totals, rounds and overlaps cover those.` : ""}`] : []), ...(pageFrames ? ["", framesLine(pageFrames)] : []), ...(openPhase ? ["", opensLine(openPhase.summary)] : []), ...(volumeAtStart ? ["", `Volume under the data folder: ${volumeAtStart.freePct}% free (${volumeAtStart.freeGB} of ${volumeAtStart.totalGB} GB) at the start.`] : []), ...(result.storeLock ? ["", `Store lock: longest hold of srv's transcript store connection ${result.storeLock.longestHeldMs} ms${result.storeLock.longestHeldSite ? ` (${result.storeLock.longestHeldSite})` : ""}, ${result.storeLock.holds} hold(s) and ${result.storeLock.waits} wait(s) of 500 ms or more.`] : []), ...notes.map((n) => `\n> ${n}`)].join("\n");
         writeFileSync(join(dir, "summary.md"), md + "\n");
         console.log("\n" + md);
         console.log(`\n-> ${join(dir, "result.json")}`);
@@ -454,7 +502,7 @@ async function main() {
 
     // The same conversation for every build: a seed fixes it.
     const script = join(dir, "conversation.json");
-    writeFileSync(script, JSON.stringify(generateConversation({ turns: args.rounds + 2, seed: args.seed })));
+    writeFileSync(script, JSON.stringify(generateConversation({ turns: args.rounds + 2, seed: args.seed, heavy: args.heavyTurns > 0 ? { turns: args.heavyTurns, kb: args.heavyKb } : null })));
 
     const layout = layoutFor(args.panes);
     console.log(`${args.label}: ${args.panes} agents over ${layout.length} tab(s) [${layout.join("/")}], ${args.holdMinutes > 0 ? args.recycleAfter : args.rounds} rounds${args.holdMinutes > 0 ? ` then ${args.holdMinutes} min idle` : ""}, port ${args.port}`);

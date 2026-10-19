@@ -22,7 +22,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** The scripted conversation, as the object fake-claude reads. */
-export function generateConversation({ turns: TURNS = 400, seed: seed0 = 1, realistic: REALISTIC = false } = {}) {
+export function generateConversation({ turns: TURNS = 400, seed: seed0 = 1, realistic: REALISTIC = false, heavy = null } = {}) {
     let seed = seed0;
     const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
     const int = (a, b) => a + Math.floor(rnd() * (b - a + 1));
@@ -102,6 +102,20 @@ export function generateConversation({ turns: TURNS = 400, seed: seed0 = 1, real
         }
         steps.push({ text: mdReply() });
         turns.push({ steps, usage: { input_tokens: int(2000, 9000), output_tokens: int(300, 3000), cache_creation_input_tokens: 0, cache_read_input_tokens: int(10000, 90000) }, costUsd: 0.05 });
+    }
+    // Heavy turns come after the regular ones, from the same random stream, so the regular turns are the same with or without them. Each
+    // is about `heavy.kb` KB in one turn (tool results are not streamed, so a big one costs the fake CLI no time) and is played only by a
+    // message containing its `match` text ("[heavy 1]", "[heavy 2]", ...), which the regular rounds never send.
+    for (let k = 1; heavy && k <= heavy.turns; k++) {
+        const steps = [{ thinking: para(int(3, 8)) }, { text: sentence() }];
+        let bytes = 0;
+        while (bytes < heavy.kb * 1024) {
+            const result = bashOut(300);
+            bytes += result.length;
+            steps.push({ tool: "Bash", input: { command: `npm test -- ${pick(WORDS)} 2>&1 | tail -300`, description: sentence(5) }, result, runMs: 50 });
+        }
+        steps.push({ text: mdReply() });
+        turns.push({ match: `[heavy ${k}]`, steps, usage: { input_tokens: int(2000, 9000), output_tokens: int(300, 3000), cache_creation_input_tokens: 0, cache_read_input_tokens: int(10000, 90000) }, costUsd: 0.05 });
     }
     const script = { model: "claude-sonnet-5-5", account: "dev@acme.example", msPerChunk: REALISTIC ? 35 : 4, turns };
     return script;

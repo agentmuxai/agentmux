@@ -237,7 +237,13 @@ export function compareRuns(baseRuns, headRuns, margins = DEFAULT_MARGINS) {
     const written = metric("srv written", "MB", (r) => r.io?.writtenMB?.srv, margins.writtenPct ?? DEFAULT_MARGINS.writtenPct);
     const storageWritten = metric("srv reached storage", "MB", (r) => r.io?.storageWrittenMB?.srv, margins.writtenPct ?? DEFAULT_MARGINS.writtenPct);
     const slowCommands = metric("slow page commands", "", (r) => r.slowEvals?.total);
-    return { rows, wall, slow, lock, written, storageWritten, slowCommands, margins, baseRuns: baseRuns.length, headRuns: headRuns.length };
+    // Opening an agent again (--open-agents): report only until the noise is known.
+    const opens = {
+        regular: metric("open first screen", "ms", (r) => r.opens?.summary?.regular?.firstScreenMedianMs),
+        heavy: metric("open first screen, long conversation", "ms", (r) => r.opens?.summary?.heavy?.firstScreenMedianMs),
+        longestTask: metric("longest main-thread task while opening", "ms", (r) => (r.opens ? Math.max(0, ...Object.values(r.opens.summary ?? {}).map((s) => s.longestTaskMs ?? 0)) : null)),
+    };
+    return { rows, wall, slow, lock, written, storageWritten, slowCommands, opens, margins, baseRuns: baseRuns.length, headRuns: headRuns.length };
 }
 
 /** A markdown table of `compareRuns`: memory and CPU side by side, then the round time. */
@@ -267,6 +273,9 @@ export function runsTable(cmp, baseLabel = "base", headLabel = "head") {
     const l = cmp.lock;
     if (l && (l.base.n || l.head.n)) {
         lines.push("", `Longest hold of srv's transcript store connection (report only; every store write waits for it): ${baseLabel} ${f(l.base.median)} ms${range(l.base)}, ${headLabel} ${f(l.head.median)} ms${range(l.head)}${l.pct == null ? "" : `, ${sign(l.pct)}`}. A hold of 0 means none reached the 500 ms srv logs.`);
+    }
+    for (const o of Object.values(cmp.opens ?? {})) {
+        if (o.base.n || o.head.n) lines.push("", `${o.name[0].toUpperCase()}${o.name.slice(1)} (report only), median: ${baseLabel} ${f(o.base.median)} ms${range(o.base)}, ${headLabel} ${f(o.head.median)} ms${range(o.head)}${o.pct == null ? "" : `, ${sign(o.pct)}`}.`);
     }
     for (const s of cmp.slow ?? []) lines.push("", `SLOW PAGE COMMAND: ${s.label} (${s.side}) had a page command that took ${Math.round(s.ms / 100) / 10} s (over ${SLOW_COMMAND_MS / 1000} s): the window was unresponsive for that long during a round.`);
     lines.push("", `${cmp.baseRuns} run(s) against ${cmp.headRuns}; medians, with the lowest-highest in brackets when there is more than one. A flag needs the change to pass the margin (${typeof cmp.margins.cpuPct === "number" ? `+${cmp.margins.cpuPct}%` : `+${cmp.margins.cpuPct.app}% app and srv CPU, +${cmp.margins.cpuPct.default}% other groups`} CPU, +${cmp.margins.wallPct}% round time) and the two sides' ranges not to overlap. Flags are report-only; the operator sets the real margins.`);

@@ -22,6 +22,10 @@ export function measuresOf(result) {
         srv_written_mb: result.io?.writtenMB?.srv ?? null,
         store_lock_max_ms: result.storeLock?.longestHeldMs ?? null,
         slow_page_commands: result.slowEvals?.total ?? null,
+        // Opening an agent again (--open-agents): the median first screen of ordinary conversations and of the long one, and the worst main-thread task meanwhile.
+        open_first_screen_ms: result.opens?.summary?.regular?.firstScreenMedianMs ?? null,
+        open_heavy_first_screen_ms: result.opens?.summary?.heavy?.firstScreenMedianMs ?? null,
+        open_longest_task_ms: result.opens ? Math.max(0, ...Object.values(result.opens.summary ?? {}).map((s) => s.longestTaskMs ?? 0)) : null,
     };
 }
 
@@ -75,6 +79,9 @@ export function measuresComparison(cmp) {
     measures.srv_written_mb = cell(cmp.written);
     measures.store_lock_max_ms = cell(cmp.lock);
     measures.slow_page_commands = cell(cmp.slowCommands);
+    measures.open_first_screen_ms = cell(cmp.opens?.regular);
+    measures.open_heavy_first_screen_ms = cell(cmp.opens?.heavy);
+    measures.open_longest_task_ms = cell(cmp.opens?.longestTask);
     const flags = Object.entries(measures).filter(([, v]) => v?.flag).map(([k]) => k);
     return { measures, flags };
 }

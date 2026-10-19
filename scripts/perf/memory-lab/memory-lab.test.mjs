@@ -877,7 +877,7 @@ describe("the measures the nightly performance check watches", () => {
     it("reads one run under the names of the history line", () => {
         expect(measuresOf(run(800, 400, 16000, 5000))).toEqual({
             app_mb: 800, renderer_mb: 560, srv_mb: 40, app_cpu_s: 400, srv_cpu_s: 60, renderer_cpu_s: 300, gpu_cpu_s: 20,
-            round_ms: 16000, srv_written_mb: 5000, store_lock_max_ms: 0, slow_page_commands: 2,
+            round_ms: 16000, srv_written_mb: 5000, store_lock_max_ms: 0, slow_page_commands: 2, open_first_screen_ms: null, open_heavy_first_screen_ms: null, open_longest_task_ms: null,
         });
         // a run with no figure for a measure has null for it, never zero
         expect(measuresOf(run(800, 400, 16000, null)).srv_written_mb).toBeNull();
