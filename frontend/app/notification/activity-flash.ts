@@ -182,6 +182,12 @@ export function envelopeAt(scheduled: readonly ScheduledFlash[], t: number): num
 export function buildFlashKeyframes(scheduled: readonly ScheduledFlash[], from: number, to: number): Keyframe[] {
     const span = to - from;
     if (span <= 0) return [];
+    // One sound that has not begun: its envelope is a few straight and `ease-out` segments, so it
+    // is a handful of keyframes. Sampling it every 8 ms made ~65 per flash, and creating them was
+    // 7% of the page with 12 agents streaming.
+    if (scheduled.length === 1 && scheduled[0].startAt >= from && scheduled[0].pattern.strikes.length > 0) {
+        return analyticKeyframes(scheduled[0], from, span);
+    }
     const times: { t: number; onset: boolean }[] = [];
     for (let t = 0; t < span; t += FLASH_SAMPLE_STEP_MS) times.push({ t, onset: false });
     times.push({ t: span, onset: false });
@@ -208,6 +214,36 @@ export function buildFlashKeyframes(scheduled: readonly ScheduledFlash[], from: 
         if (!same) keyframes.push({ offset, opacity: envelopeAt(scheduled, from + t) });
         prevT = t;
     }
+    // Pin the ends exactly; float division can leave 0.9999999.
+    keyframes[0].offset = 0;
+    keyframes[keyframes.length - 1].offset = 1;
+    return keyframes;
+}
+
+/**
+ * The keyframes of one pattern placed at or after `from`, exactly: each decay (after a hold, to the
+ * next strike's floor or to zero) is a segment with the keyframe easing `ease-out`, the very curve
+ * `easeOut` computes, instead of 8 ms samples of it. Same shape as the sampled path: a pair at every
+ * strike (the value just before, then the peak).
+ */
+function analyticKeyframes(flash: ScheduledFlash, from: number, span: number): Keyframe[] {
+    const { pattern } = flash;
+    const strikes = pattern.strikes;
+    const lead = flash.startAt - from;
+    const keyframes: Keyframe[] = [];
+    if (lead > 0) keyframes.push({ offset: 0, opacity: 0 });
+    strikes.forEach((strike, k) => {
+        const onset = lead + strike.atMs;
+        const offset = onset / span;
+        keyframes.push({ offset, opacity: patternEnvelopeAt(pattern, strike.atMs - 1e-3) });
+        keyframes.push({ offset, opacity: strike.intensity });
+        const next = strikes[k + 1];
+        const holdEnd = strike.atMs + FLASH_STRIKE_HOLD_MS;
+        // The next strike lands inside the hold: the level just holds until then.
+        if (next && next.atMs <= holdEnd) return;
+        keyframes.push({ offset: (lead + holdEnd) / span, opacity: strike.intensity, easing: "ease-out" });
+    });
+    keyframes.push({ offset: 1, opacity: 0 });
     // Pin the ends exactly; float division can leave 0.9999999.
     keyframes[0].offset = 0;
     keyframes[keyframes.length - 1].offset = 1;

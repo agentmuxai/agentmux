@@ -173,6 +173,66 @@ describe("buildFlashKeyframes", () => {
     });
 });
 
+// A single sound that has not begun is a few straight and `ease-out` segments (not 8 ms samples of them): the
+// same overlay opacity at every instant, in a handful of keyframes.
+describe("buildFlashKeyframes (one sound, exact segments)", () => {
+    /** The opacity the browser would draw at page time `t`: linear between keyframes, the keyframe's `ease-out` where it has one. */
+    function drawn(kf: Keyframe[], span: number, t: number): number {
+        const x = t / span;
+        let i = -1;
+        for (let j = 0; j < kf.length; j++) if ((kf[j].offset as number) <= x) i = j;
+        if (i < 0) return kf[0].opacity as number;
+        if (i === kf.length - 1) return kf[i].opacity as number;
+        const a = kf[i];
+        const b = kf[i + 1];
+        const width = (b.offset as number) - (a.offset as number);
+        if (width <= 0) return a.opacity as number;
+        let p = (x - (a.offset as number)) / width;
+        if (a.easing === "ease-out") p = easeOut(p);
+        return (a.opacity as number) + ((b.opacity as number) - (a.opacity as number)) * p;
+    }
+
+    const PATTERNS: Array<[string, FlashPattern]> = [
+        ["one strike", SINGLE],
+        ["three strikes", THREE],
+        ["strikes inside each other's hold", { strikes: [{ atMs: 0, intensity: 1 }, { atMs: 10, intensity: 0.6 }, { atMs: 80, intensity: 0.8 }] }],
+        ["its own tail", { strikes: [{ atMs: 0, intensity: 0.7 }], tailMs: 120 }],
+    ];
+
+    for (const [name, pattern] of PATTERNS) {
+        for (const delay of [0, 16, 40]) {
+            it(`${name}, ${delay} ms ahead: draws what the envelope says at every millisecond`, () => {
+                const span = delay + patternDurationMs(pattern);
+                const kf = buildFlashKeyframes([{ startAt: 500 + delay, pattern }], 500, 500 + span);
+                let worst = 0;
+                for (let t = 0; t <= span; t += 1) {
+                    const want = patternEnvelopeAt(pattern, t - delay);
+                    worst = Math.max(worst, Math.abs(drawn(kf, span, t) - want));
+                }
+                expect(worst).toBeLessThan(0.001);
+            });
+        }
+    }
+
+    it("is a handful of keyframes, not a sample every 8 ms", () => {
+        const kf = buildFlashKeyframes([{ startAt: 100, pattern: THREE }], 100, 100 + patternDurationMs(THREE));
+        expect(kf.length).toBeLessThanOrEqual(3 * THREE.strikes.length + 3);
+        expect(kf.length).toBeGreaterThanOrEqual(THREE.strikes.length * 2);
+    });
+
+    it("a sound already under way, or two overlapping, are still sampled (their envelope is a maximum)", () => {
+        const span = patternDurationMs(THREE);
+        const resumed = buildFlashKeyframes([{ startAt: 70, pattern: THREE }], 100, 70 + span);
+        const merged = buildFlashKeyframes(
+            [{ startAt: 100, pattern: THREE }, { startAt: 130, pattern: SINGLE }],
+            100,
+            100 + span
+        );
+        expect(resumed.length).toBeGreaterThan(20);
+        expect(merged.length).toBeGreaterThan(20);
+    });
+});
+
 describe("flashElement", () => {
     let animate: ReturnType<typeof vi.fn>;
     let cancel: ReturnType<typeof vi.fn>;
