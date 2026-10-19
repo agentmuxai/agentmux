@@ -579,6 +579,8 @@ describe("the page's long tasks", () => {
             { round: 2, count: 3, totalMs: 880, maxMs: 700 },
         ]);
         expect(s.longest[0]).toMatchObject({ ms: 2400, container: "window", at: new Date(2100).toISOString() });
+        expect(s.truncated).toBe(false);
+        expect(summariseLongTasks({ ...raw, n: 9000 }, []).truncated).toBe(true); // more were counted than kept
         expect(summariseLongTasks(null)).toBeNull(); // never installed, or lost to a reload
     });
 

@@ -17,7 +17,7 @@ export const LONG_TASK_OBSERVER = `(() => {
         const at = Math.round(performance.timeOrigin + e.startTime);
         const ms = Math.round(e.duration);
         L.n++;
-        if (L.tasks.length < 5000) L.tasks.push([at, ms]);
+        if (L.tasks.length < 20000) L.tasks.push([at, ms]);
         const a = e.attribution && e.attribution[0];
         L.top.push({ at, ms, name: e.name, container: a ? [a.containerType, a.containerName, a.containerSrc, a.containerId].filter(Boolean).join(" ") : "" });
         L.top.sort((x, y) => y.ms - x.ms);
@@ -63,6 +63,8 @@ export function summariseLongTasks(raw, windows = []) {
     return {
         count: raw.n,
         recorded: tasks.length,
+        // Past the cap the page counts tasks but stops keeping their times: totals, per-round and overlap figures then cover only the recorded ones.
+        truncated: raw.n > tasks.length,
         totalMs: total,
         maxMs: tasks.reduce((m, t) => Math.max(m, t.ms), 0),
         over1s: tasks.filter((t) => t.ms >= 1000).length,
