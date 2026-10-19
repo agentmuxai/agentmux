@@ -24,9 +24,12 @@ export function srvTarget(relPaths) {
  */
 export function withReplacedSrv(portable, srvPath, intoDir) {
     if (!existsSync(srvPath) || !statSync(srvPath).isFile()) throw new Error(`--srv ${srvPath} is not a file`);
-    const copy = join(intoDir, "portable-with-srv");
-    rmSync(copy, { recursive: true, force: true });
-    cpSync(portable, copy, { recursive: true });
+    // Under the source's own name: portableExe tells a macOS bundle by its ".app" and a folder by what is in it.
+    const holder = join(intoDir, "portable-with-srv");
+    const copy = join(holder, basename(portable));
+    rmSync(holder, { recursive: true, force: true });
+    // Symlinks stay as they are: rewritten to absolute paths they would lead back into the original.
+    cpSync(portable, copy, { recursive: true, verbatimSymlinks: true });
     const files = readdirSync(copy, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).map((e) => join(e.parentPath ?? e.path, e.name).slice(copy.length + 1));
     const target = srvTarget(files);
     copyFileSync(srvPath, join(copy, target));

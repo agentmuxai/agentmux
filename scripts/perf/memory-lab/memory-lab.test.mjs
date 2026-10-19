@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import { mismatch } from "./compare.mjs";
 import { evaluate, report } from "./gate.mjs";
@@ -364,6 +364,7 @@ describe("replacing a portable's srv", () => {
             const mine = join(root, "my-srv.exe");
             writeFileSync(mine, "new srv");
             const out = withReplacedSrv(portable, mine, join(root, "out"));
+            expect(basename(out.portable)).toBe("portable");
             expect(readFileSync(join(out.portable, "runtime", "agentmux-srv-1.0.exe"), "utf8")).toBe("new srv");
             expect(readFileSync(join(out.portable, "agentmux.exe"), "utf8")).toBe("host");
             expect(readFileSync(join(portable, "runtime", "agentmux-srv-1.0.exe"), "utf8")).toBe("old srv");

@@ -61,7 +61,7 @@ function parseArgs(argv) {
         a[key] = num.has(key) ? Number(value) : value;
     }
     if (!a.portable && !a.exe) throw new Error("give --portable <dir> (a `task package` folder), or --exe <path>");
-    if (a.srv && !a.portable) throw new Error("--srv replaces the srv of a --portable folder: give --portable too (an --exe has no srv beside it to replace)");
+    if (a.srv && (!a.portable || a.exe)) throw new Error("--srv replaces the srv of a --portable folder: give --portable and not --exe (an --exe has no srv beside it to replace, and would be launched instead of the copy)");
     if (a.recycleAfter !== 0 && !(Number.isInteger(a.recycleAfter) && a.recycleAfter >= 1 && a.recycleAfter <= a.rounds)) {
         throw new Error(`--recycle-after ${a.recycleAfter} is not a round of this run: a whole number from 1 to --rounds (${a.rounds}), or leave it out`);
     }
