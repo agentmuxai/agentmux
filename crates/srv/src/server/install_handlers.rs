@@ -162,8 +162,14 @@ pub struct InstallCheckResult {
     /// Read from `package.json` rather than by running `<cli> --version`: the
     /// agent picker calls this once per card, and spawning a process per card
     /// to answer a question a file read already answers is not a trade worth
-    /// making.
+    /// making. The user's own copy of a provider AgentMux doesn't install
+    /// (`source: "system_path"`) has no such file, so it is asked instead.
     pub version: Option<String>,
+    /// The CLI a launch would run, when found.
+    pub path: Option<String>,
+    /// `"local_install"` (AgentMux's own copy) or `"system_path"` (the user's,
+    /// for a provider AgentMux doesn't install), when found.
+    pub source: Option<String>,
 }
 
 /// Result of `install.cancel`.
@@ -503,19 +509,33 @@ pub fn register_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         req.cli_command
                     ));
                 }
-                let installed_dir = resolve_installed_dir(&req.provider_id, &req.cli_command);
-                // Only meaningful when something is actually installed — a
-                // stale package.json next to a missing binary would otherwise
-                // report a version for a provider that cannot launch — and
-                // read from that same install.
-                let version = installed_dir.as_deref().and_then(|dir| {
-                    req.npm_package
-                        .as_deref()
-                        .and_then(|pkg| installed_version_in(dir, pkg))
-                });
+                // The one lookup a launch uses (`locate_provider_cli`), so the
+                // agent picker and the Toolchain pane give the same answer: an
+                // npm provider's own install only, and the user's copy only for
+                // a provider AgentMux doesn't install.
+                let located = crate::server::cli_handlers::locate_provider_cli(&req.provider_id).await;
+                let version = match &located {
+                    // Read from the install's package.json, not by running it
+                    // (one check per picker card): only meaningful when the
+                    // CLI is actually there, and read from that same install.
+                    Some(l) if l.source == crate::server::cli_handlers::CliSource::LocalInstall => {
+                        resolve_installed_dir(&req.provider_id, &req.cli_command).and_then(|dir| {
+                            req.npm_package
+                                .as_deref()
+                                .and_then(|pkg| installed_version_in(&dir, pkg))
+                        })
+                    }
+                    // The user's own copy has no package.json of ours: ask it.
+                    // Only the few providers AgentMux doesn't install get here.
+                    Some(l) => Some(crate::server::cli_handlers::get_cli_version(&l.path).await)
+                        .filter(|v| !v.is_empty() && v != "unknown"),
+                    None => None,
+                };
                 Ok(InstallCheckResult {
-                    installed: installed_dir.is_some(),
+                    installed: located.is_some(),
                     version,
+                    path: located.as_ref().map(|l| l.path.clone()),
+                    source: located.map(|l| l.source.as_str().to_string()),
                 })
             }
         },

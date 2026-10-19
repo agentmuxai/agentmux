@@ -10,6 +10,7 @@ import { getApi, createBlock } from "@/store/global";
 import { CORE_TOOLS, LOCAL_MODEL_TOOLS, cliCommandForPlatform, currentPlatform, rowIconClass, type CoreTool } from "@/app/store/toolchain-catalog";
 import { EXTERNAL_WIDGETS, widgetCliCommandForPlatform } from "@/app/view/agent/providers/widget-catalog";
 import { getProviderList } from "@/app/view/agent/providers";
+import { checkProviderInstalled, invalidateInstallCheck } from "@/app/view/agent/install-check-cache";
 import { resolveDrift } from "@/app/view/agent/providers/version-drift";
 import { ensureCapability, getCapability, isAvailable, watchCapability } from "@/app/store/toolchain-capabilities";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
@@ -135,6 +136,9 @@ export function ToolchainView(): JSX.Element {
         id: p.id, label: p.displayName, icon: p.icon, kind: "provider",
         loading: true, found: false, docsUrl: p.docsUrl, installUrl: p.docsUrl,
         npmPackage: p.npmPackage,
+        // A CLI AgentMux doesn't install: the command of its own installer,
+        // shown with a copy button while it is missing.
+        installCommand: p.npmPackage ? undefined : (plat === "windows" ? p.windowsInstallCommand : p.unixInstallCommand) || undefined,
         // The version AgentMux validated. Core tools have no pin and stay
         // undefined — resolveDrift reports `unknown` for them rather than
         // claiming they're current.
@@ -195,7 +199,30 @@ export function ToolchainView(): JSX.Element {
             await ensureCapability(row.id, { force: opts?.force });
             return; // row update happens via the sync effect, from the shared store
         }
-        const cliCmd = row.kind === "provider" ? (def as any).cliCommand : cliCommandForPlatform(def as CoreTool, plat);
+        if (row.kind === "provider") {
+            // The agent picker's own check (`install.check`, one backend
+            // lookup, one shared cache), so a card and its row never disagree.
+            const prov = def as ReturnType<typeof getProviderList>[number];
+            if (opts?.force) invalidateInstallCheck(prov.id);
+            try {
+                const r = await checkProviderInstalled({
+                    providerId: prov.id,
+                    cliCommand: prov.cliCommand,
+                    npmPackage: prov.npmPackage || undefined,
+                });
+                setRows(idx, {
+                    loading: false,
+                    found: r.installed,
+                    version: r.version ?? undefined,
+                    path: r.path ?? undefined,
+                    source: r.source ?? undefined,
+                });
+            } catch {
+                setRows(idx, { loading: false, found: false });
+            }
+            return;
+        }
+        const cliCmd = cliCommandForPlatform(def as CoreTool, plat);
         const data = { provider_id: row.id, cli_command: cliCmd, npm_package: "", pinned_version: "", windows_install_command: "", unix_install_command: "" };
         try {
             const r = await RpcApi.ResolveCliCommand(TabRpcClient, data, { timeout: 12000 });
@@ -374,6 +401,14 @@ export function ToolchainView(): JSX.Element {
                         </span>
                         <Show when={row.source === "local_install"}>
                             <span class="toolchain-pill toolchain-pill--muted">managed</span>
+                        </Show>
+                        <Show when={row.kind === "provider" && row.source === "system_path"}>
+                            <span
+                                class="toolchain-pill toolchain-pill--muted"
+                                title="AgentMux doesn't install this CLI: it runs the copy you installed"
+                            >
+                                your install
+                            </span>
                         </Show>
                         {/* Drift, split by who can act on it. `behind-pin` is
                             the user's — loud, and paired with the install

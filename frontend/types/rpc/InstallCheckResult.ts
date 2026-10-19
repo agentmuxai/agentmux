@@ -14,6 +14,16 @@ export type InstallCheckResult = { installed: boolean,
  * Read from `package.json` rather than by running `<cli> --version`: the
  * agent picker calls this once per card, and spawning a process per card
  * to answer a question a file read already answers is not a trade worth
- * making.
+ * making. The user's own copy of a provider AgentMux doesn't install
+ * (`source: "system_path"`) has no such file, so it is asked instead.
  */
-version: string | null, };
+version: string | null, 
+/**
+ * The CLI a launch would run, when found.
+ */
+path: string | null, 
+/**
+ * `"local_install"` (AgentMux's own copy) or `"system_path"` (the user's,
+ * for a provider AgentMux doesn't install), when found.
+ */
+source: string | null, };

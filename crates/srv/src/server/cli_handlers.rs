@@ -70,39 +70,49 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .to_string_lossy()
                     .to_string();
 
-                // Step 1: already installed (shared dir, else legacy per-version dir)?
-                if let Some(found) = crate::backend::cli_install::find_installed(
-                    &paths,
-                    &cmd.provider_id,
-                    &pinned_version,
-                    &cmd.cli_command,
-                ) {
-                    let found = found.to_string_lossy().to_string();
-                    let version = get_cli_version(&found).await;
-                    tracing::info!(path = %found, version = %version, "CLI found in local install");
+                // Steps 1 and 2: already there? A provider in the registry goes
+                // through the one lookup (`locate_provider_cli`): AgentMux's
+                // install, else the user's own copy only when the registry says
+                // AgentMux doesn't install it. A core tool (git, node, …) isn't
+                // in the registry: its install dir, else PATH when the caller
+                // sent no package.
+                let registered = crate::backend::providers::get_provider(&cmd.provider_id);
+                let located = match registered {
+                    Some(_) => locate_provider_cli(&cmd.provider_id).await,
+                    None => match crate::backend::cli_install::find_installed(
+                        &paths,
+                        &cmd.provider_id,
+                        &pinned_version,
+                        &cmd.cli_command,
+                    ) {
+                        Some(found) => Some(LocatedCli {
+                            path: found.to_string_lossy().into_owned(),
+                            source: CliSource::LocalInstall,
+                        }),
+                        None if cmd.npm_package.is_empty() => {
+                            resolve_provider_cli_on_path(&cmd.provider_id, &cmd.cli_command)
+                                .await
+                                .map(|path| LocatedCli { path, source: CliSource::SystemPath })
+                        }
+                        None => None,
+                    },
+                };
+                if let Some(found) = located {
+                    let version = get_cli_version(&found.path).await;
+                    tracing::info!(path = %found.path, version = %version, source = found.source.as_str(), "CLI found");
                     notices.observe_version(&version);
                     return Ok(ResolveCliResult {
-                        cli_path: found,
+                        cli_path: found.path,
                         version,
-                        source: "local_install".to_string(),
+                        source: found.source.as_str().to_string(),
                     });
                 }
 
-                // Step 2: Not in versioned dir — check system PATH for non-npm CLIs.
-                if cmd.npm_package.is_empty() {
-                    if let Some(path) = resolve_provider_cli_on_path(&cmd.provider_id, &cmd.cli_command).await {
-                        let version = get_cli_version(&path).await;
-                        tracing::info!(
-                            path = %path, version = %version,
-                            "CLI found on system PATH"
-                        );
-                        notices.observe_version(&version);
-                        return Ok(ResolveCliResult {
-                            cli_path: path,
-                            version,
-                            source: "system_path".to_string(),
-                        });
-                    }
+                // Not found. AgentMux doesn't install it: say how to.
+                let path_only = registered
+                    .map(|p| p.npm_package.is_empty())
+                    .unwrap_or_else(|| cmd.npm_package.is_empty());
+                if path_only {
                     // This branch fires for PATH-only providers
                     // (`npm_package` empty) whose CLI isn't on the
                     // system PATH. AgentMux can't auto-install these
@@ -119,6 +129,16 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         provider: cmd.provider_id.clone(),
                         cli: cmd.cli_command.clone(),
                         install_hint,
+                    }
+                    .to_wire()
+                    .to_string());
+                }
+                // An npm-managed provider that isn't installed, asked about
+                // without its package: a look, not an install request.
+                if cmd.npm_package.is_empty() {
+                    return Err(agentmux_common::AgentMuxError::CliNotInstalled {
+                        provider: cmd.provider_id.clone(),
+                        cli: cmd.cli_command.clone(),
                     }
                     .to_wire()
                     .to_string());
@@ -836,6 +856,58 @@ async fn run_auth_check(
 // token) now surfaces honestly as a failed validation plus an actionable auth
 // card, and is fixed by logging in for THIS channel.
 
+/// Where a CLI found by [`locate_provider_cli`] came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CliSource {
+    /// AgentMux's own install, under its shared or legacy CLI dir.
+    LocalInstall,
+    /// The user's own install: on PATH or in its installer's folder.
+    SystemPath,
+}
+
+impl CliSource {
+    /// The wire value, as `resolvecli` and `install.check` report it.
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            CliSource::LocalInstall => "local_install",
+            CliSource::SystemPath => "system_path",
+        }
+    }
+}
+
+/// A provider CLI that [`locate_provider_cli`] found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LocatedCli {
+    pub path: String,
+    pub source: CliSource,
+}
+
+/// The CLI a launch of `provider_id` would run, without installing anything:
+/// AgentMux's own install; else, only for a provider whose registry entry has
+/// no npm package (the ones AgentMux doesn't install), the user's own copy on
+/// PATH or in its installer's folder. Whether a provider is npm-managed comes
+/// from the registry, never from a caller, so an npm provider's missing
+/// install never reads as "found" because a copy of its CLI is on PATH: a
+/// launch would not run that copy. The one lookup behind `install.check`,
+/// `resolvecli`, the launch (`agent.open`) and the ambient calls, so the
+/// agent picker and the Toolchain pane can't disagree
+/// (SPEC_AGENT_PICKER_INLINE_CREATE_2026_10_18.md §1). `None` for an unknown
+/// provider.
+pub(crate) async fn locate_provider_cli(provider_id: &str) -> Option<LocatedCli> {
+    let provider = crate::backend::providers::get_provider(provider_id)?;
+    if let Some(paths) = agentmux_common::DataPaths::from_env() {
+        if let Some(bin) = crate::backend::cli_install::find_installed_for_provider(&paths, provider.id) {
+            return Some(LocatedCli { path: bin.to_string_lossy().into_owned(), source: CliSource::LocalInstall });
+        }
+    }
+    if !provider.npm_package.is_empty() {
+        return None;
+    }
+    resolve_provider_cli_on_path(provider.id, provider.cli_command)
+        .await
+        .map(|path| LocatedCli { path, source: CliSource::SystemPath })
+}
+
 /// A PATH-only provider's CLI: on PATH, else in the folder its own installer
 /// uses ([`crate::backend::providers::known_install_paths`]), which may not
 /// be on this process's PATH until AgentMux restarts.
@@ -1012,7 +1084,7 @@ impl CliNotices {
     }
 }
 
-async fn get_cli_version(cli_path: &str) -> String {
+pub(crate) async fn get_cli_version(cli_path: &str) -> String {
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(5),
         {
@@ -1080,6 +1152,45 @@ fn prune_result(
 
 #[cfg(test)]
 mod tests {
+
+    /// The one lookup decides npm vs PATH from the registry: an npm provider's
+    /// CLI on PATH is not "found" (a launch would never run it), while a
+    /// provider AgentMux doesn't install is found there, as the user's copy.
+    #[tokio::test]
+    async fn locate_provider_cli_uses_path_only_for_providers_agentmux_does_not_install() {
+        let _guard = crate::test_support::ISOLATED_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // No managed installs: an empty AgentMux home.
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", home.path());
+        // `claude` (npm-managed) and `kimi` (PATH-only) both on PATH, first.
+        let bin = tempfile::tempdir().unwrap();
+        for cli in ["claude", "kimi"] {
+            let file = if cfg!(windows) { bin.path().join(format!("{cli}.cmd")) } else { bin.path().join(cli) };
+            std::fs::write(&file, if cfg!(windows) { "@echo off\r\n" } else { "#!/bin/sh\n" }).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+        }
+        let old_path = std::env::var_os("PATH").unwrap_or_default();
+        let mut dirs = vec![bin.path().to_path_buf()];
+        dirs.extend(std::env::split_paths(&old_path));
+        std::env::set_var("PATH", std::env::join_paths(dirs).unwrap());
+
+        let claude = super::locate_provider_cli("claude").await;
+        let kimi = super::locate_provider_cli("kimi").await;
+        let unknown = super::locate_provider_cli("no-such-provider").await;
+
+        std::env::set_var("PATH", old_path);
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+
+        assert_eq!(claude, None, "an npm provider's copy on PATH is not the one a launch runs");
+        let kimi = kimi.expect("a PATH-only provider is found on PATH");
+        assert_eq!(kimi.source, super::CliSource::SystemPath);
+        assert!(kimi.path.starts_with(&bin.path().to_string_lossy().to_string()), "{}", kimi.path);
+        assert_eq!(unknown, None);
+    }
 
     /// `where` lists every match; a `.cmd` shim first must not hide the
     /// `.exe` after it, which the prompt-argument branch then picks.

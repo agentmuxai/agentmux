@@ -142,6 +142,7 @@ vi.mock("./AgentCard", () => ({
             data-is-template={String(props.agent.is_seeded === 1)}
             data-has-session={String(!!props.hasCurrentSession)}
             data-launching={String(!!props.launching)}
+            data-installed={String(props.installed)}
             data-block-id={props.blockId}
             data-has-ctx-menu={String(typeof props.onContextMenu === "function")}
             onClick={(e) => props.onLaunch(props.agent, e)}
@@ -590,7 +591,7 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         });
 
         it("marks the just-installed (drifted) agent's own install cache via the resolved provider", async () => {
-            vi.mocked(RpcApi.InstallCheckCommand).mockResolvedValue({ installed: false, version: null });
+            vi.mocked(RpcApi.InstallCheckCommand).mockResolvedValue({ installed: false, version: null, path: null, source: null });
             // Explicit no-missing-prereqs default — `vi.clearAllMocks()`
             // in the outer `beforeEach` clears call history but not a
             // prior test's `.mockResolvedValue`, so this can't rely on
@@ -651,7 +652,7 @@ describe("AgentPicker — install check on mount", () => {
                     )
                 )
         );
-        vi.mocked(RpcApi.InstallCheckCommand).mockResolvedValue({ installed: true, version: null });
+        vi.mocked(RpcApi.InstallCheckCommand).mockResolvedValue({ installed: true, version: null, path: null, source: null });
 
         render(() => <AgentPicker model={makeMockModel() as unknown as AgentViewModel} />);
         await screen.findByTestId("agent-card-tpl-39");
@@ -663,6 +664,46 @@ describe("AgentPicker — install check on mount", () => {
 
         expect(RpcApi.GetBundleCommand).toHaveBeenCalledTimes(40);
         expect(RpcApi.InstallCheckCommand).toHaveBeenCalledTimes(1);
+    });
+});
+
+// SPEC_AGENT_PICKER_INLINE_CREATE_2026_10_18.md §1: a CLI AgentMux doesn't
+// install (no npm package; "claude" in this file's provider mock) is checked
+// like any other, so its card shows the ribbon exactly when the Toolchain
+// pane, which reads the same check, says "not found".
+describe("AgentPicker — a CLI AgentMux doesn't install", () => {
+    it("is checked, without a package, and the card shows the ribbon when it is missing", async () => {
+        vi.mocked(RpcApi.InstallCheckCommand).mockResolvedValue({ installed: false, version: null, path: null, source: null });
+        render(() => <AgentPicker model={makeMockModel() as unknown as AgentViewModel} />);
+        const card = await screen.findByTestId("agent-card-tpl-claude");
+        await waitFor(() => expect(card.dataset.installed).toBe("false"));
+        expect(vi.mocked(RpcApi.InstallCheckCommand).mock.calls[0][1]).toEqual({
+            providerId: "claude",
+            cliCommand: "claude",
+            npmPackage: undefined,
+        });
+    });
+
+    it("shows no ribbon when the user's own copy is found", async () => {
+        vi.mocked(RpcApi.InstallCheckCommand).mockResolvedValue({
+            installed: true,
+            version: "1.0.0",
+            path: "/home/u/.local/bin/claude",
+            source: "system_path",
+        });
+        render(() => <AgentPicker model={makeMockModel() as unknown as AgentViewModel} />);
+        const card = await screen.findByTestId("agent-card-tpl-claude");
+        await waitFor(() => expect(card.dataset.installed).toBe("true"));
+    });
+
+    it("never opens the npm install modal for it", async () => {
+        vi.mocked(RpcApi.InstallCheckCommand).mockResolvedValue({ installed: false, version: null, path: null, source: null });
+        render(() => <AgentPicker model={makeMockModel() as unknown as AgentViewModel} />);
+        const card = await screen.findByTestId("agent-card-tpl-claude");
+        await waitFor(() => expect(card.dataset.installed).toBe("false"));
+        fireEvent.click(card);
+        await waitFor(() => expect(modalLayerOpen).toHaveBeenCalled());
+        expect(modalLayerOpen.mock.calls.map((c) => c[0].kind)).toEqual(["create-from-template"]);
     });
 });
 
