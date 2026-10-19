@@ -18,6 +18,7 @@ import { mergeLongTaskRecords, slowSendsAgainstLongTasks, summariseLongTasks } f
 import { parseDiskLoad, sleepNeededMs, startDiskLoad } from "./lib/diskload.mjs";
 import { volumeOf } from "./lib/volume.mjs";
 import { segmentsOf, slowSendBreakdown, timedCall } from "./lib/sendsegments.mjs";
+import { arrivalTotals, arrivalsBetween, arrivalsDuringSlowSends } from "./lib/wsarrivals.mjs";
 import { mergeStoreLock, parseStoreLock } from "./lib/storelock.mjs";
 import { CpuLedger, cpuBetween, writtenBetween } from "./lib/cpu.mjs";
 import { generateConversation } from "./lib/conversation.mjs";
@@ -826,5 +827,29 @@ describe("where a slow send's time went", () => {
             maxInPageMs: 29500,
             maxAfterMs: 8700,
         });
+    });
+});
+
+describe("what the page's websocket received", () => {
+    // [bucket start (epoch ms), messages, bytes, biggest message]
+    const ws = [[1000, 5, 5000, 2000], [1100, 3, 900, 400], [4000, 1, 80, 80], [4100, 2, 200, 150]];
+
+    it("totals the traffic in a window and finds the longest silence", () => {
+        expect(arrivalsBetween(ws, 1000, 5000)).toEqual({ messages: 11, bytes: 6180, biggestMessageBytes: 2000, longestSilenceMs: 2800 });
+        // nothing arrived at all: the whole window is silence
+        expect(arrivalsBetween(ws, 2000, 3500)).toEqual({ messages: 0, bytes: 0, biggestMessageBytes: 0, longestSilenceMs: 1500 });
+        expect(arrivalsBetween(undefined, 0, 1000)).toEqual({ messages: 0, bytes: 0, biggestMessageBytes: 0, longestSilenceMs: 1000 });
+    });
+
+    it("reports what arrived during each slow send's time in the page", () => {
+        const sends = [
+            { round: 2, agent: 3, ms: 6000, pageStart: 1000, pageMs: 3900 }, // slow, traffic arrived
+            { round: 2, agent: 4, ms: 300, pageStart: 1000, pageMs: 280 }, // fast
+            { round: 3, agent: 0, ms: 7000, pageStart: null, pageMs: null }, // no page figures
+        ];
+        const out = arrivalsDuringSlowSends(ws, sends);
+        expect(out).toHaveLength(1);
+        expect(out[0]).toMatchObject({ round: 2, agent: 3, inPageMs: 3900, messages: 11, longestSilenceMs: 2800 });
+        expect(arrivalTotals(ws)).toEqual({ messages: 11, bytes: 6180, biggestMessageBytes: 2000 });
     });
 });
