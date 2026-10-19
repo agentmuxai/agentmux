@@ -150,6 +150,16 @@ describe("ToolBlock's height on unload", () => {
         expect(placeholder.style.minHeight).toBe("400px");
     });
 
+    it("a row that scrolled out and comes back with its result out is the same as before: a placeholder, no height to keep", () => {
+        // The remembered height lives in the row's own component, which a scroll-out discards; a row mounted fresh
+        // with its text already out never had one.
+        const { container } = mountPinned(() => ({ ...loaded, result: undefined, resultUnloaded: stub }));
+        const placeholder = container.querySelector(".agent-tool-result-unloaded") as HTMLElement;
+        expect(placeholder).not.toBeNull();
+        expect(placeholder.style.minHeight).toBe("");
+        expect(reads).toBe(0);
+    });
+
     it("reads no height when the row just goes away", () => {
         const { unmount } = mountPinned(() => loaded);
         reads = 0;
