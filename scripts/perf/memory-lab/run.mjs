@@ -38,6 +38,7 @@ import { agentProcessesCountedAsApp, cpuLedger, forcedGcWindows, osSample, portB
 import { agentsWithoutTurns, cpuTable, groupSample, inMegabytes, steady, table, transcriptGrowthProblem, wallSummary } from "./lib/summary.mjs";
 import { cpuBetween, writtenBetween } from "./lib/cpu.mjs";
 import { storeLockOf } from "./lib/storelock.mjs";
+import { parseDiskLoad, startDiskLoad } from "./lib/diskload.mjs";
 import { slowSendsAgainstLongTasks, summariseLongTasks } from "./lib/longtasks.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -63,12 +64,13 @@ function parseArgs(argv) {
             continue;
         }
         const key = raw.replace(/^--/, "").replace(/-([a-z])/g, (_, c) => c.toUpperCase());
-        if (!raw.startsWith("--") || !(key in a || ["portable", "label", "memtree", "exe", "srv", "srvCommit"].includes(key))) throw new Error(`unknown argument ${raw}`);
+        if (!raw.startsWith("--") || !(key in a || ["portable", "label", "memtree", "exe", "srv", "srvCommit", "diskLoad", "diskLoadCapGb"].includes(key))) throw new Error(`unknown argument ${raw}`);
         const value = argv[++i];
         if (value === undefined) throw new Error(`${raw} needs a value`);
         a[key] = num.has(key) ? Number(value) : value;
     }
     if (!a.portable && !a.exe) throw new Error("give --portable <dir> (a `task package` folder), or --exe <path>");
+    a.diskLoadRate = parseDiskLoad(a.diskLoad);
     if (a.srv && (!a.portable || a.exe)) throw new Error("--srv replaces the srv of a --portable folder: give --portable and not --exe (an --exe has no srv beside it to replace, and would be launched instead of the copy)");
     if (a.recycleAfter !== 0 && !(Number.isInteger(a.recycleAfter) && a.recycleAfter >= 1 && a.recycleAfter <= a.rounds)) {
         throw new Error(`--recycle-after ${a.recycleAfter} is not a round of this run: a whole number from 1 to --rounds (${a.rounds}), or leave it out`);
@@ -265,6 +267,9 @@ async function attempt(args, ctx) {
         const roundWindows = [];
         const sendLog = [];
         await driver.installLongTasks();
+        // The background disk load starts with the workload and ends with its last turn, before the settle and the forced-GC final.
+        const diskLoad = args.diskLoadRate ? startDiskLoad({ dir, mbps: args.diskLoadRate, capGB: args.diskLoadCapGb ? Number(args.diskLoadCapGb) : undefined }) : null;
+        let diskLoadResult = null;
         let recycle = null;
         // With --hold-minutes the agents stop at the recycle round: what matters then is how long the window stays down.
         const playedRounds = args.holdMinutes > 0 ? args.recycleAfter : args.rounds;
@@ -284,7 +289,11 @@ async function attempt(args, ctx) {
         }
 
         // Let the last turns finish and the frontend go idle, then measure with a forced GC.
-        await requireIdle(driver);
+        try {
+            await requireIdle(driver);
+        } finally {
+            if (diskLoad) diskLoadResult = await diskLoad.stop();
+        }
         await sleep(args.settleS * 1000);
         const final = await takeSample({ port: args.port, memtree, rootPid: instance.pid, label: `${args.label}-final`, gc: true });
         const samples = [final];
@@ -334,6 +343,7 @@ async function attempt(args, ctx) {
             toolRows: await driver.toolRows(),
             // What was asked; `playedRounds` is how many were played (fewer with --hold-minutes).
             workloadVersion: WORKLOAD_VERSION,
+            diskLoad: diskLoadResult,
             rounds: args.rounds,
             gapSeconds: args.gapS,
             settleSeconds: args.settleS,

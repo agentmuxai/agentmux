@@ -191,6 +191,17 @@ Locally: `node scripts/perf/memory-lab/gate.mjs memory-lab-out/<label>/result.js
 (it says the result is not the gated workload unless it was run with
 `--panes 12 --rounds 10 --seed 1`).
 
+## Background disk load
+
+A lab run on an idle disk never shows what the operator's instances did: srv's transcript store held for seconds while
+other work (agents' builds) saturated the volume (#5141). `--disk-load <MB/s>` (or `max`) runs a writer that streams
+large files, synced chunk by chunk, to the same volume as the lab's data folder from the start of the workload until the
+last agent turn is over (it stops before the settle and the forced-GC sample, so memory is measured the same way). Pass
+the same flag on both sides of an A/B: `compare.mjs` refuses runs with different loads, and `result.diskLoad` records the
+rate and what was written. It writes at most `--disk-load-cap-gb` (default 20) in a run: `max` on a fast disk writes
+hundreds of MB/s, and a stress run is wear on an SSD. A fast NVMe may not be stressed by one writer (a `max` run here wrote
+600 MB/s and srv's store was never held for 500 ms); a SATA SSD or a hard disk is where it matters. `--out` picks the volume.
+
 ## A run that isn't the load it was asked for
 
 A run whose agents never played reports a plausible, far too low number (an

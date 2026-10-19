@@ -7,7 +7,7 @@
 // needs a build and isn't tested here.
 
 import { describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
@@ -15,6 +15,7 @@ import { mismatch } from "./compare.mjs";
 import { evaluate, report } from "./gate.mjs";
 import { driftWarning, portableCommit, srvTarget, withReplacedSrv } from "./lib/srv.mjs";
 import { mergeLongTaskRecords, slowSendsAgainstLongTasks, summariseLongTasks } from "./lib/longtasks.mjs";
+import { parseDiskLoad, sleepNeededMs, startDiskLoad } from "./lib/diskload.mjs";
 import { mergeStoreLock, parseStoreLock } from "./lib/storelock.mjs";
 import { CpuLedger, cpuBetween, writtenBetween } from "./lib/cpu.mjs";
 import { generateConversation } from "./lib/conversation.mjs";
@@ -696,4 +697,39 @@ describe("the page's long tasks", () => {
         expect(slowSendsAgainstLongTasks(sends, raw)).toEqual({ slowSends: 2, overlappingLongTask: 1 });
         expect(slowSendsAgainstLongTasks(sends, null)).toEqual({ slowSends: 2, overlappingLongTask: 0 });
     });
+});
+
+describe("the background disk load", () => {
+    it("reads the requested rate", () => {
+        expect(parseDiskLoad(undefined)).toBeNull();
+        expect(parseDiskLoad("0")).toBeNull();
+        expect(parseDiskLoad("50")).toBe(50);
+        expect(parseDiskLoad("2.5")).toBe(2.5);
+        expect(parseDiskLoad("max")).toBe(Infinity);
+        expect(parseDiskLoad("MAX")).toBe(Infinity);
+        expect(() => parseDiskLoad("fast")).toThrow(/positive number/);
+        expect(() => parseDiskLoad("-5")).toThrow(/positive number/);
+    });
+
+    it("sleeps to hold the rate, and not at all when behind or unthrottled", () => {
+        // 100 MiB written after 1 s at 50 MB/s is a second ahead of schedule
+        expect(sleepNeededMs(100 * 1048576, 1000, 50)).toBe(1000);
+        expect(sleepNeededMs(10 * 1048576, 1000, 50)).toBe(0); // behind
+        expect(sleepNeededMs(1e12, 1, Infinity)).toBe(0);
+    });
+
+    it("writes to the folder while it runs, reports what it wrote and cleans up", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "lab-diskload-"));
+        try {
+            const load = startDiskLoad({ dir, mbps: 20 });
+            await new Promise((r) => setTimeout(r, 3500));
+            const result = await load.stop();
+            expect(result.rateMBps).toBe(20);
+            expect(result.writtenMB).toBeGreaterThan(8);
+            expect(result.writtenMB).toBeLessThan(400);
+            expect(existsSync(join(dir, "diskload"))).toBe(false);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    }, 20000);
 });
