@@ -16,12 +16,19 @@ export const MB = 1024 * 1024;
 /** The groups, in the order a report lists them. */
 export const GROUPS = ["renderer", "gpu", "srv", "host", "utility", "other"];
 
-/** Which group a process of the app's own belongs to. */
+/**
+ * Which group a process of the app's own belongs to. The role is the `--type=` of a
+ * Chromium subprocess or, from the CDP process list, Chromium's own type: Windows says
+ * `gpu-process` and `utility`, Linux `GPU`, and names a utility process by its service
+ * (`storage.mojom.StorageService`). The zygote and what it forks without a role of
+ * their own are Chromium's helper processes, counted with the utility ones.
+ */
 export function groupOf(proc) {
-    if (proc.role === "renderer") return "renderer";
-    if (proc.role === "gpu-process") return "gpu";
-    if (proc.role === "utility") return "utility";
-    if (proc.role !== "main") return "other"; // crashpad, zygote, ...
+    const role = String(proc.role ?? "");
+    if (role === "renderer") return "renderer";
+    if (/^gpu/i.test(role)) return "gpu";
+    if (role === "utility" || role.includes(".mojom.") || role === "zygote" || role === "zygote-forked") return "utility";
+    if (role !== "main") return "other"; // crashpad, ...
     const name = String(proc.name ?? "").toLowerCase();
     if (name.startsWith("agentmux-srv")) return "srv";
     return "host"; // the launcher and the CEF host
