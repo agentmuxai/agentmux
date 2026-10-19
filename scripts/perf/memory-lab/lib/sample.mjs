@@ -71,6 +71,12 @@ export function withChromiumRoles(sample, processInfo) {
     return { ...sample, procs: sample.procs.map((p) => (p.role === "zygote-forked" && type.has(p.pid) ? { ...p, role: role(type.get(p.pid)) } : p)) };
 }
 
+/**
+ * The windows (epoch ms) in which the lab itself forced a garbage collection and took memory dumps: the page's
+ * long tasks that overlap them are the instrument's, and the long-task summary leaves them out.
+ */
+export const forcedGcWindows = [];
+
 /** Every sample of a run notes its processes' CPU time here (see lib/cpu.mjs). */
 export const cpuLedger = new CpuLedger();
 
@@ -253,7 +259,16 @@ export function mainPage(pages) {
  * process also with its allocator roots) and the pages.
  * @param {{ port: number, memtree: string, rootPid: number, label: string, gc?: boolean, pages?: boolean }} o
  */
-export async function takeSample({ port, memtree, rootPid, label, gc = false, pages = true }) {
+export async function takeSample(options) {
+    const start = Date.now();
+    try {
+        return await takeSampleInner(options);
+    } finally {
+        if (options.gc) forcedGcWindows.push({ start, end: Date.now() });
+    }
+}
+
+async function takeSampleInner({ port, memtree, rootPid, label, gc = false, pages = true }) {
     const browser = await connectBrowser(port, { timeoutMs: 15_000 });
     let dumps = [];
     let pageList = [];

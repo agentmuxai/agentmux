@@ -12,7 +12,7 @@ export const LONG_TASK_OBSERVER = `(() => {
   if (window.__labLong) return true;
   const L = (window.__labLong = { n: 0, tasks: [], top: [] });
   try {
-    new PerformanceObserver((list) => {
+    window.__labLongObserver = new PerformanceObserver((list) => {
       for (const e of list.getEntries()) {
         const at = Math.round(performance.timeOrigin + e.startTime);
         const ms = Math.round(e.duration);
@@ -23,7 +23,8 @@ export const LONG_TASK_OBSERVER = `(() => {
         L.top.sort((x, y) => y.ms - x.ms);
         if (L.top.length > 10) L.top.length = 10;
       }
-    }).observe({ type: "longtask" }); // not buffered: what ran before the workload (startup, the layout) is not the workload
+    });
+    window.__labLongObserver.observe({ type: "longtask" }); // not buffered: what ran before the workload (startup, the layout) is not the workload
     return true;
   } catch (e) {
     return String(e);
@@ -33,8 +34,8 @@ export const LONG_TASK_OBSERVER = `(() => {
 /** Reads the observer's record back (null when it was never installed, e.g. after a reload). */
 export const READ_LONG_TASKS = `window.__labLong ? { n: window.__labLong.n, tasks: window.__labLong.tasks, top: window.__labLong.top } : null`;
 
-/** Forgets the page's record so the next install starts a fresh one (the old observer keeps filling its detached copy). */
-export const DETACH_LONG_TASKS = `(window.__labLong = null, true)`;
+/** Stops the observer and forgets the page's record, so the next install starts a fresh one and the old one collects nothing more. */
+export const DETACH_LONG_TASKS = `(window.__labLongObserver && window.__labLongObserver.disconnect(), window.__labLongObserver = null, window.__labLong = null, true)`;
 
 /** One record from several (the document before a reload, and the one after): counts add, tasks join, the ten longest stay. */
 export function mergeLongTaskRecords(records) {
@@ -50,25 +51,30 @@ export function mergeLongTaskRecords(records) {
 /**
  * Summarises the long tasks of a run: totals, the longest with its attribution, and per round
  * (`windows`: [{ round, start, end }] in epoch ms) how many there were, how long they took
- * in all, and the longest, so growth with the streaming panes shows.
+ * in all, and the longest, so growth with the streaming panes shows. Tasks that overlap an
+ * `excluded` window (the lab's own forced-GC memory samples, whose pauses are the instrument's,
+ * not the workload's) are left out and counted in `excludedTasks`.
  */
-export function summariseLongTasks(raw, windows = []) {
+export function summariseLongTasks(raw, windows = [], excluded = []) {
     if (!raw) return null;
-    const tasks = raw.tasks.map(([at, ms]) => ({ at, ms }));
+    const all = raw.tasks.map(([at, ms]) => ({ at, ms }));
+    const inExcluded = (t) => excluded.some((w) => t.at < w.end && t.at + t.ms > w.start);
+    const tasks = all.filter((t) => !inExcluded(t));
     const total = tasks.reduce((n, t) => n + t.ms, 0);
     const byRound = windows.map((w) => {
         const inside = tasks.filter((t) => t.at >= w.start && t.at < w.end);
         return { round: w.round, count: inside.length, totalMs: inside.reduce((n, t) => n + t.ms, 0), maxMs: inside.reduce((m, t) => Math.max(m, t.ms), 0) };
     });
     return {
-        count: raw.n,
+        count: raw.n - (all.length - tasks.length),
+        excludedTasks: all.length - tasks.length,
         recorded: tasks.length,
         // Past the cap the page counts tasks but stops keeping their times: totals, per-round and overlap figures then cover only the recorded ones.
-        truncated: raw.n > tasks.length,
+        truncated: raw.n > all.length,
         totalMs: total,
         maxMs: tasks.reduce((m, t) => Math.max(m, t.ms), 0),
         over1s: tasks.filter((t) => t.ms >= 1000).length,
-        longest: raw.top.map((t) => ({ ...t, at: new Date(t.at).toISOString() })),
+        longest: raw.top.filter((t) => !inExcluded(t)).map((t) => ({ ...t, at: new Date(t.at).toISOString() })),
         byRound,
     };
 }

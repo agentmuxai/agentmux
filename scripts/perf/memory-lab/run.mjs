@@ -34,7 +34,7 @@ import { generateConversation } from "./lib/conversation.mjs";
 import { connect, installScript, launch, layoutFor, portableExe } from "./lib/driver.mjs";
 import { driftWarning, withReplacedSrv } from "./lib/srv.mjs";
 import { runRecycle, recycleSaving } from "./lib/recycle.mjs";
-import { agentProcessesCountedAsApp, cpuLedger, osSample, portBelongsTo, takeSample } from "./lib/sample.mjs";
+import { agentProcessesCountedAsApp, cpuLedger, forcedGcWindows, osSample, portBelongsTo, takeSample } from "./lib/sample.mjs";
 import { agentsWithoutTurns, cpuTable, groupSample, inMegabytes, steady, table, transcriptGrowthProblem, wallSummary } from "./lib/summary.mjs";
 import { cpuBetween, writtenBetween } from "./lib/cpu.mjs";
 import { storeLockOf } from "./lib/storelock.mjs";
@@ -216,6 +216,7 @@ async function attempt(args, ctx) {
     const instance = await launch({ exe, home, port: args.port, script, log: join(dir, "instance.log") });
     const curve = [];
     cpuLedger.reset();
+    forcedGcWindows.length = 0;
     let driver;
     let succeeded = false;
     // The instance has its own process group on macOS and Linux, so Ctrl-C reaches only the lab: end the instance first.
@@ -300,7 +301,7 @@ async function attempt(args, ctx) {
         for (const g of incomplete) writtenMB[g] = null;
         const io = !Object.values(writtenMB).some((v) => v != null) ? null : { fromRound: 0, writtenMB, incompleteGroups: incomplete, note: "highest write counter seen per process, summed per group (Windows and Linux: bytes passed to write calls; macOS: bytes written to disk)" };
         const rawLong = await driver.longTasks().catch(() => null);
-        const pageLongTasks = summariseLongTasks(rawLong, roundWindows);
+        const pageLongTasks = summariseLongTasks(rawLong, roundWindows, forcedGcWindows);
         const sendsVsLong = slowSendsAgainstLongTasks(sendLog, rawLong);
 
         // The store of record: the agents' turns must be in it, whatever the page shows.

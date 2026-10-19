@@ -634,6 +634,10 @@ describe("the page's long tasks", () => {
         ]);
         expect(s.longest[0]).toMatchObject({ ms: 2400, container: "window", at: new Date(2100).toISOString() });
         expect(s.truncated).toBe(false);
+        // the lab's own forced-GC sampling window covers the 2.4 s task at 2100: it is the instrument's, not the workload's
+        const excl = summariseLongTasks(raw, [{ round: 1, start: 0, end: 3000 }], [{ start: 2000, end: 4500 }]);
+        expect(excl).toMatchObject({ excludedTasks: 2, count: 3, maxMs: 700 }); // the 2.4 s task and the 60 ms one at 4000
+        expect(excl.longest).toEqual([]);
         expect(summariseLongTasks({ ...raw, n: 9000 }, []).truncated).toBe(true); // more were counted than kept
         expect(summariseLongTasks(null)).toBeNull(); // never installed, or lost to a reload
     });
