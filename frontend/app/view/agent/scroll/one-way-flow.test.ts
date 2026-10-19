@@ -549,6 +549,63 @@ describe("OneWayFlow", () => {
         }
     });
 
+    // A kept-alive hidden tab stays laid out at full size: its observers fire and its follower would write scrollTop every
+    // frame for a pane nobody sees (12 agents over 4 window tabs: the follower's writes were 15% of the page).
+    describe("while the pane is hidden", () => {
+        it("content that arrives writes no scrollTop and starts no frame", () => {
+            const { m, flow, fire } = setup();
+            flow.setHidden(true);
+            m.writes.length = 0;
+            for (let i = 0; i < 20; i++) {
+                flow.observeRow(m.add(120));
+                fire();
+            }
+            expect(m.writes).toEqual([]);
+            expect(frames.length).toBe(0);
+            runFrames();
+            expect(m.writes).toEqual([]);
+        });
+
+        it("a follower already moving stops when the pane is hidden", () => {
+            const { m, flow, fire } = setup();
+            flow.observeRow(m.add(300));
+            fire();
+            expect(frames.length).toBeGreaterThan(0);
+            flow.setHidden(true);
+            m.writes.length = 0;
+            runFrames();
+            expect(m.writes).toEqual([]);
+        });
+
+        it("still reports the geometry, so the overflow state stays current", () => {
+            const observed: Array<{ scrollHeight: number }> = [];
+            const { m, flow, fire } = setup({ observed: (g) => observed.push(g) });
+            flow.setHidden(true);
+            observed.length = 0;
+            flow.observeRow(m.add(120));
+            fire();
+            expect(observed).toHaveLength(1);
+            expect(observed[0].scrollHeight).toBe(m.scrollHeight());
+        });
+
+        it("shown again, it lands at the bottom and follows new output as before", () => {
+            const { m, flow, fire } = setup();
+            flow.setHidden(true);
+            for (let i = 0; i < 5; i++) {
+                flow.observeRow(m.add(200));
+                fire();
+            }
+            expect(m.top).toBeLessThan(m.max());
+            flow.setHidden(false);
+            flow.settleOnShow();
+            expect(m.top).toBe(m.max());
+            flow.observeRow(m.add(120));
+            fire();
+            runFrames();
+            expect(m.max() - m.top).toBeLessThan(REST_PX);
+        });
+    });
+
     it("shown again after a slow first paint, the window still covers the stages after it", () => {
         let t = 1000;
         const spy = vi.spyOn(performance, "now").mockImplementation(() => t);

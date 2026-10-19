@@ -50,7 +50,7 @@ const defaultDeps: ShowCoverDeps = {
  * content is drawn (§3.7).
  */
 export function useSettleOnShow(
-    flow: { settleOnShow(): void } | null,
+    flow: { settleOnShow(): void; setHidden?(hidden: boolean): void } | null,
     following: Accessor<boolean>,
     cover?: ShowCover,
     deps: ShowCoverDeps = defaultDeps,
@@ -97,6 +97,7 @@ export function useSettleOnShow(
     };
     createEffect(() => {
         const hidden = dormant();
+        flow.setHidden?.(hidden);
         if (hidden) {
             if (!wasHidden && cover) atHide = untrack(cover.changes);
             lift();
