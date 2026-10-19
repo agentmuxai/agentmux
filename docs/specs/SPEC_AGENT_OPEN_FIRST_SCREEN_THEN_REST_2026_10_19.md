@@ -1,9 +1,9 @@
 # Spec: opening an agent shows its first screen at once, and loads the rest afterwards
 
-**Status:** active. The frontend (§5 step 2) is implemented: `open-tail.ts`, `history-fill.ts`, `useHistoryPagination.ts`. srv's `agent:open_tail` (step 1) and moving the index and counter upkeep off the read path (step 3) are still to land; until srv serves the command, the pane opens the usual way. Tracked as P0 in `PLAN_PERFORMANCE_AND_MEMORY_TRACKING_2026_10_19.md`.
+**Status:** active. The frontend is in #5156. Left: srv's `agent:open_tail` (step 1) and the index and counter upkeep off the read path (step 3).
 **Date:** 2026-10-19
 **Author:** Camper (coordinator)
-**Builds on:** `SPEC_AGENT_OPEN_LATENCY_2026_09_27.md` (#3927–#3965), `REPORT_AGENT_OPEN_STALL_RCA_2026_10_05.md` (#4371–#4417), issue #5141 (the store lock), `REPORT_PERFORMANCE_LAB_2026_10_19.md` §4.1.
+**Builds on:** `SPEC_AGENT_OPEN_LATENCY_2026_09_27.md` (#3927–#3965), `REPORT_AGENT_OPEN_STALL_RCA_2026_10_05.md` (#4371–#4417), issue #5141 (the store lock).
 
 ## 1. Ask
 
@@ -24,7 +24,7 @@ The pane already loads a tail rather than the whole transcript. It is still slow
    - a stale `output.idx` (the steady state for a live agent) is extended with `patch_derived_if` → `write_txn`, or rebuilt whole after a `replace_file`;
    - `stat` on a cache miss and `read_at` also take the writer mutex.
 
-   So an open queues behind every agent's appends, the lock that froze for up to 11.6 s in the owner's instances (#5141).
+   So an open queues behind every agent's appends, on the lock that can be held for seconds when the disk is slow (#5141).
 4. **The pane waits for all of it.**
    - The cover stays up until history has painted, at most 1.5 s, and then "Loading conversation…" shows (`usePaneReveal.ts`, `PANE_REVEAL_BOUND_MS`).
    - **The user can't send** until history is ready (`InitPending` suppresses `TurnStart`, `reducer.ts:683-690`).
