@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, vi } from "vitest";
-import { clampZoom, readZoom, writePaneZoom } from "./zoom-factor";
+import { clampZoom, paneZoomPatch, readZoom, writePaneZoom } from "./zoom-factor";
 
 describe("readZoom", () => {
     it("reads a pane's term:zoom, clamped to 0.5..2.0", () => {
@@ -39,5 +39,13 @@ describe("writePaneZoom", () => {
         const set = vi.fn();
         expect(writePaneZoom(set, 1.004)).toBe(1.0);
         expect(set).toHaveBeenLastCalledWith({ "term:zoom": null });
+    });
+});
+
+describe("paneZoomPatch", () => {
+    it("is the meta write writePaneZoom makes", () => {
+        expect(paneZoomPatch(1.234)).toEqual({ "term:zoom": 1.23 });
+        expect(paneZoomPatch(1.0)).toEqual({ "term:zoom": null });
+        expect(paneZoomPatch(0.1)).toEqual({ "term:zoom": 0.5 });
     });
 });

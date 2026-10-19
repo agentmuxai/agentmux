@@ -5,7 +5,7 @@
 import type { PaneTabHostContext, PaneTabManifest } from "@/app/block/pane-tab-registry";
 import { QuickTips } from "@/app/element/quicktips";
 import { FilterInput } from "@/app/element/ui";
-import { readZoom, writePaneZoom } from "@/app/store/zoom-factor";
+import { paneZoomPatch, readZoom } from "@/app/store/zoom-factor";
 import { createMemo, createSignal, onMount, type JSX } from "solid-js";
 
 /**
@@ -35,12 +35,20 @@ function HelpView(props: { ctx: PaneTabHostContext }): JSX.Element {
     // Help kept its zoom in its own `help:zoom` until it joined the shared zoom:
     // move a saved level across once, so nobody's Help zoom is lost.
     // SPEC_SYSINFO_TEXT_ZOOM_DENSITY_AND_ONE_ZOOM_PATH_2026_10_18.md §3 (A.5).
+    // The old key is cleared only once the new one is written: if that write
+    // fails, the saved level stays where it was and the move is tried next time.
     onMount(() => {
         const meta = ctx.meta();
         const legacy = meta?.["help:zoom"];
         if (typeof legacy !== "number") return;
-        if (meta?.["term:zoom"] == null) writePaneZoom((m) => ctx.setMeta(m), legacy);
-        void ctx.setMeta({ "help:zoom": null });
+        void (async () => {
+            try {
+                if (meta?.["term:zoom"] == null) await ctx.setMeta(paneZoomPatch(legacy));
+                await ctx.setMeta({ "help:zoom": null });
+            } catch {
+                // Left for the next mount.
+            }
+        })();
     });
 
     return (

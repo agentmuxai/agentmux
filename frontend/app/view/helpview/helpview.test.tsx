@@ -47,16 +47,27 @@ describe("HelpView zoom", () => {
         expect((container.querySelector(".help-filter-bar") as HTMLElement).style.zoom).toBe("");
     });
 
-    it("moves a saved help:zoom to term:zoom once, and clears help:zoom", () => {
+    const settle = () => new Promise((r) => setTimeout(r, 0));
+
+    it("moves a saved help:zoom to term:zoom, then clears help:zoom", async () => {
         renderHelp({ "help:zoom": 1.5 });
-        expect(setMetaMock).toHaveBeenCalledWith({ "term:zoom": 1.5 });
-        expect(setMetaMock).toHaveBeenCalledWith({ "help:zoom": null });
+        await settle();
+        expect(setMetaMock.mock.calls.map((c) => c[0])).toEqual([{ "term:zoom": 1.5 }, { "help:zoom": null }]);
     });
 
-    it("keeps a term:zoom already set, and still clears help:zoom", () => {
+    it("keeps a term:zoom already set, and still clears help:zoom", async () => {
         renderHelp({ "help:zoom": 1.5, "term:zoom": 0.8 });
-        expect(setMetaMock).not.toHaveBeenCalledWith({ "term:zoom": 1.5 });
-        expect(setMetaMock).toHaveBeenCalledWith({ "help:zoom": null });
+        await settle();
+        expect(setMetaMock.mock.calls.map((c) => c[0])).toEqual([{ "help:zoom": null }]);
+    });
+
+    // Codex review, #5128: the old key goes only after the new one is written.
+    it("leaves help:zoom in place when writing term:zoom fails", async () => {
+        setMetaMock.mockImplementationOnce(() => Promise.reject(new Error("offline")));
+        renderHelp({ "help:zoom": 1.5 });
+        await settle();
+        expect(setMetaMock).toHaveBeenCalledTimes(1);
+        expect(setMetaMock).not.toHaveBeenCalledWith({ "help:zoom": null });
     });
 
     it("writes nothing when there is no help:zoom", () => {
