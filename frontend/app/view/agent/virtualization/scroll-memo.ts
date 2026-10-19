@@ -45,6 +45,16 @@ export function saveScrollMemos(): void {
 
 if (typeof window !== "undefined") window.addEventListener("pagehide", saveScrollMemos);
 
+/**
+ * Whether `blockId` has a saved position that isn't "at the bottom": a row to
+ * go back to, which a first screen of the transcript may not hold yet. Doesn't
+ * consume the memo (`takeScrollMemo` does, once the history has loaded).
+ */
+export function hasScrolledUpMemo(blockId: string): boolean {
+    const memo = readSession<ScrollMemo>(KEY + blockId);
+    return !!memo && typeof memo === "object" && !("bottom" in memo) && typeof memo.nodeId === "string";
+}
+
 /** The position `blockId` had when the page went away, once; then forgotten. */
 export function takeScrollMemo(blockId: string): ScrollMemo | undefined {
     const memo = readSession<ScrollMemo>(KEY + blockId);
