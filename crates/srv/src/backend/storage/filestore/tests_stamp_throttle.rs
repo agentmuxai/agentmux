@@ -116,3 +116,23 @@ fn a_sidecar_that_was_emptied_while_the_transcript_stayed_is_stamped_at_the_next
     assert!(third > second);
     assert_eq!(records(&fs), vec![(third, 30_100)]);
 }
+
+#[test]
+fn threads_appending_to_one_sidecar_at_once_write_one_record() {
+    let fs = std::sync::Arc::new(store());
+    let handles: Vec<_> = (0..8)
+        .map(|t| {
+            let fs = fs.clone();
+            std::thread::spawn(move || {
+                for i in 0..25 {
+                    // The same instant for every thread: only the first line is due.
+                    fs.append_lines_stamped_at(ZONE, "output", format!("{{\"t\":{t},\"i\":{i}}}\n").as_bytes(), SIDECAR, 40_000).unwrap();
+                }
+            })
+        })
+        .collect();
+    for h in handles {
+        h.join().unwrap();
+    }
+    assert_eq!(records(&fs).len(), 1, "one record for 200 lines in one instant, from 8 threads");
+}
