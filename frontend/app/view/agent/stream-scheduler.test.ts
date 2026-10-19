@@ -41,6 +41,73 @@ afterEach(() => {
     vi.unstubAllGlobals();
 });
 
+describe("the lab's flush counter", () => {
+    type Counter = { frames: number; hist: number[] };
+    const counter = (): Counter => (globalThis as { __labFrameCounter?: Counter }).__labFrameCounter!;
+    const install = (bins = 5): void => {
+        (globalThis as { __labFrameCounter?: Counter }).__labFrameCounter = { frames: 0, hist: new Array(bins).fill(0) };
+    };
+    afterEach(() => {
+        delete (globalThis as { __labFrameCounter?: Counter }).__labFrameCounter;
+    });
+
+    it("counts nothing, and does not appear, unless the lab installed it", () => {
+        for (const id of ["a", "b"]) requestStreamFlush(id, () => {});
+        frame();
+        expect((globalThis as { __labFrameCounter?: Counter }).__labFrameCounter).toBeUndefined();
+    });
+
+    it("counts the panes each frame flushed: all pending ones with no input, one while interacting", () => {
+        install();
+        for (const id of ["a", "b", "c"]) requestStreamFlush(id, () => {});
+        frame(); // no input: three panes in one frame
+        for (const id of ["a", "b"]) requestStreamFlush(id, () => {});
+        __markInputForTests();
+        frame(); // interacting: one pane
+        clock += 16;
+        frame(); // the other
+        expect(counter().frames).toBe(3);
+        expect(counter().hist).toEqual([0, 2, 0, 1, 0]);
+    });
+
+    it("puts a frame with more panes than the histogram has slots in the last slot", () => {
+        install(4);
+        for (const id of ["a", "b", "c", "d", "e", "f"]) requestStreamFlush(id, () => {});
+        frame();
+        expect(counter().hist).toEqual([0, 0, 0, 1]);
+    });
+
+    it("counts a pane whose flush throws, and ignores a frame in which nothing flushed", () => {
+        install();
+        // The scheduler reports a pane's error on a microtask; catch it here so it isn't an unhandled error.
+        const errors: unknown[] = [];
+        const qm = vi.spyOn(globalThis, "queueMicrotask").mockImplementation((cb) => {
+            try {
+                cb();
+            } catch (e) {
+                errors.push(e);
+            }
+        });
+        requestStreamFlush("a", () => {
+            throw new Error("boom");
+        });
+        expect(() => frame()).not.toThrow();
+        expect(errors).toHaveLength(1);
+        qm.mockRestore();
+        expect(counter().hist[1]).toBe(1);
+        requestStreamFlush("b", () => {});
+        cancelStreamFlush("b"); // nothing pending and the frame is not armed
+        frame();
+        expect(counter().frames).toBe(1);
+    });
+
+    it("a lab that took the counter away stops it: a null counter counts nothing", () => {
+        (globalThis as { __labFrameCounter?: Counter | null }).__labFrameCounter = null;
+        requestStreamFlush("a", () => {});
+        expect(() => frame()).not.toThrow();
+    });
+});
+
 describe("stream scheduler", () => {
     it("without user input, every pending pane flushes in the next frame (the old behaviour)", () => {
         const order: string[] = [];
