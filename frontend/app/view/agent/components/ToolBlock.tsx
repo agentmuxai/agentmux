@@ -52,6 +52,7 @@ import type { ToolNode } from "../types";
 import { AnsweredQuestionMessage } from "./AnsweredQuestionMessage";
 import { createBodyMount } from "./body-mount";
 import { useAgentDormant } from "../agent-dormancy";
+import { takeBodyHeight } from "../body-height-cache";
 import { PeekOverlay } from "./PeekOverlay";
 import { PeekMetaRow } from "./PeekMetaRow";
 import { ShellTokens } from "./shell-highlight/ShellCommand";
@@ -671,9 +672,18 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                             {(() => {
                                 // Its height just before the result unloads (the old
                                 // nodes are still in place when this branch is disposed).
+                                // Only when the result is what left: the row going away (scrolled out, rolled off) needs no
+                                // height. The unload pass reads every open body's height first (body-height-cache.ts), so this
+                                // is not a layout per row; reading here is for an unload that did not go through it.
                                 onCleanup(() => {
+                                    if (!props.node.resultUnloaded) return;
+                                    const known = takeBodyHeight(props.node.id);
+                                    if (known !== undefined) {
+                                        unloadedBodyPx = known;
+                                        return;
+                                    }
                                     const body = panelEl?.querySelector<HTMLElement>(".agent-tool-overlay");
-                                    unloadedBodyPx = body?.offsetHeight ?? 0; // perf:allow-layout-read — once, as the result unloads
+                                    unloadedBodyPx = body?.offsetHeight ?? 0; // perf:allow-layout-read — an unload outside the batched pass
                                 });
                                 return <ToolBlockOverlay node={props.node} dispatchMatch={props.dispatchMatch} open={bodyShowing()} dormant={dormant()} onOverflowChange={setScrolls} />;
                             })()}
