@@ -13,6 +13,25 @@ export function clampZoom(factor: number): number {
     return Math.min(Math.max(factor, MIN_ZOOM), MAX_ZOOM);
 }
 
+/**
+ * The meta write for a pane's zoom: clamped, rounded to 0.01, and `null` (unset)
+ * at 100% so an unzoomed pane carries no `term:zoom`.
+ */
+export function paneZoomPatch(level: number): { "term:zoom": number | null } {
+    const next = clampZoom(Math.round(level * 100) / 100);
+    return { "term:zoom": Math.abs(next - DEFAULT_ZOOM) < 0.005 ? null : next };
+}
+
+/** The one way to save a pane's zoom (`paneZoomPatch`). Returns the level written. */
+export function writePaneZoom(
+    setMeta: (meta: { "term:zoom": number | null }) => unknown,
+    level: number
+): number {
+    const patch = paneZoomPatch(level);
+    void setMeta(patch);
+    return patch["term:zoom"] ?? DEFAULT_ZOOM;
+}
+
 /** A pane's `term:zoom`, clamped; DEFAULT_ZOOM when unset or not a number. */
 export function readZoom(meta: { "term:zoom"?: unknown } | null | undefined): number {
     const z = meta?.["term:zoom"];

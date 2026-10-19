@@ -4,7 +4,7 @@
 import { UnseenTurnsDot } from "@/app/block/UnseenTurnsDot";
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-holds";
-import { createMemo, createSignal, createEffect, onCleanup, For, onMount, Show, type Accessor, type JSX } from "solid-js";
+import { createMemo, createSignal, createEffect, onCleanup, For, Show, type Accessor, type JSX } from "solid-js";
 import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, ActiveShell, ActiveCron, WorkflowDispatch, SubagentEvent, DispatchActivityEntry, TodoItem } from "./swarm-model";
 import { collectClearableRows, subagentDisplayLabel, subagentRowKey, subagentToolDetail, workflowRetireSignal, AUTO_RETIRE_DELAY_MS } from "./swarm-model";
 import { LOCAL_PROVIDER_UNKNOWN, REMOTE_PROVIDER_UNKNOWN, SwarmProviderIcon } from "./swarm-provider-icon";
@@ -37,7 +37,6 @@ import { FleetToolbar, FleetResultPanel } from "./swarm-fleet-toolbar";
 import { SwarmStatsPanel } from "./swarm-stats";
 import "./swarm-view.scss";
 import { readZoom } from "@/app/store/zoom-factor";
-import { isModKey } from "@/util/platformutil";
 import { AsciiSpinner } from "@/app/element/AsciiSpinner";
 
 /** The block shown in the focused pane — for a multi-tab pane, its active
@@ -61,51 +60,10 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
     });
 
     const zoomFactor = createMemo(() => readZoom(ctx.meta()));
-    const setZoom = (next: number): void => {
-        const clamped = Math.max(0.5, Math.min(2.0, Math.round(next * 100) / 100));
-        void ctx.setMeta({ "term:zoom": clamped === 1.0 ? null : clamped });
-    };
+    // Ctrl+scroll and Ctrl/Cmd +/-/0 zoom this pane through the shared handlers
+    // (app.tsx, keymodel.ts): the `paneZoom` capability is all it needs.
 
     let rootRef: HTMLDivElement | undefined;
-
-    onMount(() => {
-        if (!rootRef) return;
-        const el = rootRef;
-        const handleCtrlWheel = (ev: WheelEvent) => {
-            // Ctrl+Shift+Scroll is AppAllPanesZoomHandler's all-panes gesture
-            // (app.tsx) — let it bubble there instead of zooming just this
-            // pane. See SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md.
-            if (!isModKey(ev) || ev.shiftKey) return;
-            ev.preventDefault();
-            ev.stopPropagation();
-            const STEP = 0.1;
-            setZoom(zoomFactor() + (ev.deltaY > 0 ? -STEP : STEP));
-        };
-        el.addEventListener("wheel", handleCtrlWheel, { passive: false, capture: true });
-        onCleanup(() => el.removeEventListener("wheel", handleCtrlWheel, { capture: true }));
-    });
-
-    onMount(() => {
-        if (!rootRef) return;
-        const el = rootRef;
-        const handleKey = (ev: KeyboardEvent) => {
-            if (!isModKey(ev) || ev.altKey) return;
-            if (!(ev.target instanceof Node) || !el.contains(ev.target)) return;
-            const STEP = 0.1;
-            if (ev.key === "+" || ev.key === "=") {
-                ev.preventDefault();
-                setZoom(zoomFactor() + STEP);
-            } else if (ev.key === "-" || ev.key === "_") {
-                ev.preventDefault();
-                setZoom(zoomFactor() - STEP);
-            } else if (ev.key === "0") {
-                ev.preventDefault();
-                setZoom(1.0);
-            }
-        };
-        document.addEventListener("keydown", handleKey, { capture: true });
-        onCleanup(() => document.removeEventListener("keydown", handleKey, { capture: true }));
-    });
 
     const tree = createMemo(() => model.buildTree());
     const clearableCount = createMemo(() => collectClearableRows(tree()).length);

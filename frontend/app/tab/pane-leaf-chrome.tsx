@@ -5,6 +5,7 @@ import { Block, resolveEffectiveViewType } from "@/app/block/block";
 import { getPaneTab, isKeepAliveView } from "@/app/block/pane-tab-registry";
 import { renderPaneChromeShell } from "@/app/element/PaneChrome";
 import { setKeepAliveBlockDormant } from "@/app/store/block-component-registry";
+import { PaneStackMemberActiveProvider, usePaneStackMemberActive } from "@/app/tab/pane-stack-member";
 import { MOS } from "@/app/store/global";
 import type { NodeModel } from "@/layout/index";
 import { paneStackIds } from "@/layout/lib/layoutNodeModels";
@@ -401,10 +402,16 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
                         setKeepAliveBlockDormant(id, id !== activeBlockId());
                     });
                     onCleanup(() => setKeepAliveBlockDormant(id, false));
+                    // For what this member renders through a Portal (pane-stack-member.ts).
+                    const outerMemberActive = usePaneStackMemberActive();
+                    const memberActive = () => outerMemberActive() && id === activeBlockId();
 
                     return (
                         <div
                             class="pane-leaf-keepalive-slot"
+                            // Overlays in a dormant member cut no hole through the
+                            // browser panes on screen (pane-overlay.ts DORMANT_SLOT_ATTR).
+                            data-pane-dormant={id === activeBlockId() ? undefined : ""}
                             style={{
                                 position: "absolute",
                                 inset: "0",
@@ -426,7 +433,9 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
                                 "pointer-events": id === activeBlockId() ? "auto" : "none",
                             }}
                         >
-                            <Block nodeModel={keepAliveNodeModelFor(id)} preview={false} />
+                            <PaneStackMemberActiveProvider value={memberActive}>
+                                <Block nodeModel={keepAliveNodeModelFor(id)} preview={false} />
+                            </PaneStackMemberActiveProvider>
                         </div>
                     );
                 }}

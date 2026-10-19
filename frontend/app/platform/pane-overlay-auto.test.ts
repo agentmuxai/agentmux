@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, test, expect, beforeEach, afterEach } from "vitest";
+import { DORMANT_SLOT_ATTR, HIDDEN_TAB_ATTR } from "./pane-overlay";
 import { isOverlayElementVisible } from "./pane-overlay-auto";
 
 function makeEl(style: Partial<CSSStyleDeclaration>): HTMLDivElement {
@@ -32,6 +33,18 @@ describe("isOverlayElementVisible", () => {
     test("returns false when visibility is hidden", () => {
         const el = track(makeEl({ visibility: "hidden" }));
         expect(isOverlayElementVisible(el)).toBe(false);
+    });
+
+    test("returns false inside a hidden window tab or a dormant pane-stack member", () => {
+        for (const attr of [HIDDEN_TAB_ATTR, DORMANT_SLOT_ATTR]) {
+            const container = track(makeEl({}));
+            container.setAttribute(attr, "");
+            const el = makeEl({});
+            container.appendChild(el);
+            expect(isOverlayElementVisible(el)).toBe(false);
+            container.removeAttribute(attr);
+            expect(isOverlayElementVisible(el)).toBe(true);
+        }
     });
 
     test("returns false when display is none", () => {

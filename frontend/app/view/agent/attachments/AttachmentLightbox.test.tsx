@@ -9,7 +9,8 @@
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/app/platform/pane-overlay", () => ({ usePaneOverlay: () => {} }));
+vi.mock("@/app/platform/pane-overlay", () => ({
+    useHiddenTabMarker: () => () => undefined, usePaneOverlay: () => {} }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { AttachmentsInfoCommand: vi.fn() } }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ getAuthKey: () => "k" }) }));

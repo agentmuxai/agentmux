@@ -76,6 +76,10 @@ jobs:
     # `continue-on-error` — it has no gate of its own that anything depends on,
     # and is the leg most prone to toolchain churn.
     continue-on-error: ${{ matrix.os == 'macos-latest' }}
+    # The job's own conclusion is still `failure` when macOS fails, and the
+    # `nightly-status` job below reads that, so a red macOS leg is reported
+    # (it failed six nights in a row unseen, 2026-10-13 to 10-18:
+    # docs/specs/PLAN_NIGHTLY_RED_LEGS_ARE_HEARD_2026_10_18.md).
     # INCIDENT_2026_09_10_CI_PR_WINDOWS_RUNNER_HANG_BACKLOG.md's contributing
     # cause #1 (no timeout-minutes -> a hung runner occupies the job for
     # GitHub's 360-minute default) was fixed on ci-pr.yml but explicitly
@@ -84,7 +88,12 @@ jobs:
     # than the PR lane's 20 min (ci-pr.yml) — 60 min is generous headroom over a
     # from-scratch CEF build+test on any of the three platforms while still
     # bounding a hang to a fraction of the 360-minute default.
-    timeout-minutes: 60
+    #
+    # macOS gets 90: its test leg took 43 min for the full suite on 2026-10-12
+    # and 44 min just to reach a failing test on 10-18, so with every binary
+    # running (--no-fail-fast) 60 is too close, and a timeout hides which test
+    # failed. It is a hang bound, not a budget.
+    timeout-minutes: ${{ matrix.os == 'macos-latest' && 90 || 60 }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -195,9 +204,12 @@ jobs:
         run: cargo build --release --workspace
 
       # Serial (--test-threads=1) for determinism; see note above.
+      # --no-fail-fast: every test binary runs and every failure is listed.
+      # Without it cargo stops at the first failing binary, and on macOS one
+      # failing remote test kept srv's whole suite from running for six nights.
       - name: cargo test --workspace
         if: matrix.mode == 'test'
-        run: cargo test --workspace -- --test-threads=1
+        run: cargo test --workspace --no-fail-fast -- --test-threads=1
 
       # agentmux-cef's `test-authfile` feature gates the authfile tests that
       # touch the real OS data dir. Nothing built them: PR CI deliberately
@@ -211,9 +223,11 @@ jobs:
       # The CEF build is already paid for by the steps above, so this is
       # near-zero marginal cost, and nightly is the lane that owns
       # agentmux-cef coverage.
+      #
+      # A separate suite, so it runs even when the workspace step above failed.
       - name: cargo test -p agentmux-cef --features test-authfile
-        if: matrix.mode == 'test'
-        run: cargo test -p agentmux-cef --features test-authfile -- --test-threads=1
+        if: ${{ !cancelled() && matrix.mode == 'test' }}
+        run: cargo test -p agentmux-cef --features test-authfile --no-fail-fast -- --test-threads=1
 
       # Superset invariant (protocol §3). Needs a Rust toolchain and a built
       # agentmux-srv, which this job already has, so it belongs here rather
@@ -351,3 +365,36 @@ jobs:
         run: >-
           bash scripts/docs-stale-issue-comment.sh nightly-doc-links
           doc-link-report/report.md doc-link-report/fingerprint.txt
+
+  # A red nightly is announced: one issue labelled nightly-red while nightlies
+  # on main fail (a comment per run, naming the failing jobs and tests), closed
+  # by the next green one. It reads each job's own conclusion, so the macOS
+  # leg's continue-on-error doesn't hide it. Main only: a run dispatched on a
+  # branch says nothing. Same shape as ci-pr.yml's `main status`.
+  # docs/specs/PLAN_NIGHTLY_RED_LEGS_ARE_HEARD_2026_10_18.md Phase 1.
+  nightly-status:
+    name: nightly status
+    needs: [build-and-test, frontend, gates]
+    if: ${{ always() && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      actions: read
+      checks: read # a cancelled job's annotations say whether it timed out
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            scripts/ci-nightly-status.mjs
+          sparse-checkout-cone-mode: false
+      - name: Open, update or close the nightly-red issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+        run: node scripts/ci-nightly-status.mjs

@@ -28,6 +28,7 @@ import {
     windowStats,
     withBusiestCore,
 } from "./sysinfo-overview-data";
+import { createAxisColumns } from "./sysinfo-layout";
 import { TimeChart } from "./sysinfo-plot";
 import { type DataItem, DefaultPlotMeta } from "./sysinfo-types";
 
@@ -56,27 +57,37 @@ export function FocusView(props: FocusProps): JSX.Element {
     // Committed memory is read against its limit, so its scale ends there.
     const commitMeta = { ...DefaultPlotMeta["mem:used"], maxy: "mem:commit:total", autoMaxY: false } as TimeSeriesMeta;
 
+    // The charts are one column: one y-axis width for all of them, so their plots
+    // line up and time reads straight down (sysinfo-layout.ts).
+    const axes = createAxisColumns(() => props.area);
+
     // The title is read inside the chart, so new samples change its text, not the chart.
     const chart = (
         title: () => string,
         series: SeriesSpec[],
         range: (r: DataItem[]) => [number, number],
         format: (v: number) => string,
-        opts: { data?: () => DataItem[]; timeAxis?: () => boolean } = {}
-    ) => (
-        <TimeChart
-            plotData={(opts.data ?? rows)()}
-            series={series}
-            yRange={range}
-            format={format}
-            targetLen={props.targetLen}
-            intervalSecs={props.intervalSecs}
-            syncKey={props.syncKey}
-            title={title()}
-            timeAxis={opts.timeAxis?.() ?? false}
-            class="sysinfo-focus-chart"
-        />
-    );
+        opts: { data?: () => DataItem[]; timeAxis?: () => boolean; top?: boolean } = {}
+    ) => {
+        const key = series.map((s) => s.key).join("+");
+        return (
+            <TimeChart
+                plotData={(opts.data ?? rows)()}
+                series={series}
+                yRange={range}
+                format={format}
+                targetLen={props.targetLen}
+                intervalSecs={props.intervalSecs}
+                syncKey={props.syncKey}
+                title={title()}
+                timeAxis={opts.timeAxis?.() ?? false}
+                top={opts.top}
+                axisWidth={axes.widthFor(0)}
+                onAxisWidth={(w) => axes.report(0, key, w)}
+                class="sysinfo-focus-chart"
+            />
+        );
+    };
 
     return (
         <div class="sysinfo-focus">
@@ -87,7 +98,7 @@ export function FocusView(props: FocusProps): JSX.Element {
                         [{ key: "cpu", label: "CPU", color: CPU }],
                         () => [0, 100],
                         pct,
-                        { timeAxis: () => cores().length === 0 }
+                        { timeAxis: () => cores().length === 0, top: true }
                     )}
                     <Show when={cores().length > 0}>
                         {chart(
@@ -117,7 +128,8 @@ export function FocusView(props: FocusProps): JSX.Element {
                         () => titled("Used", figures(rows(), "mem:used", formatGB)),
                         [{ key: "mem:used", label: "Used", color: MEM }],
                         (r) => yRange(r, "mem:used", DefaultPlotMeta["mem:used"]),
-                        formatGB
+                        formatGB,
+                        { top: true }
                     )}
                     {chart(
                         () => titled("Available", figures(rows(), "mem:available", formatGB)),
@@ -144,7 +156,8 @@ export function FocusView(props: FocusProps): JSX.Element {
                             { key: "disk:write", label: "Write", color: OUT, below: true },
                         ],
                         (r) => mirroredRange(r, "disk:read", "disk:write", 1),
-                        formatRate
+                        formatRate,
+                        { top: true }
                     )}
                     {chart(
                         () => titled("Read", figures(rows(), "disk:read", formatRate)),
@@ -180,7 +193,8 @@ export function FocusView(props: FocusProps): JSX.Element {
                             { key: "net:bytessent", label: "Out", color: OUT, below: true },
                         ],
                         (r) => mirroredRange(r, "net:bytesrecv", "net:bytessent", 1),
-                        formatRate
+                        formatRate,
+                        { top: true }
                     )}
                     {chart(
                         () => titled("In", figures(rows(), "net:bytesrecv", formatRate)),

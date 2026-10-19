@@ -20,6 +20,9 @@ import {
     __deleteAutoOverlayRect,
     __rectFromElement,
     __setAutoOverlayRect,
+    __setAutoOverlaySweep,
+    isInHiddenPaneTab,
+    startHiddenTabWatcher,
 } from "./pane-overlay";
 
 const SELECTOR = "[data-pane-overlay]";
@@ -33,32 +36,39 @@ const trackedList = new Set<Element>();
 let started = false;
 let sweepScheduled = false;
 
+function sweep(): void {
+    for (const el of trackedList) {
+        if (!document.body.contains(el)) {
+            untrack(el);
+            continue;
+        }
+        updateRect(el);
+    }
+}
+
 function scheduleSweep(): void {
     if (sweepScheduled) return;
     sweepScheduled = true;
     requestAnimationFrame(() => {
         sweepScheduled = false;
-        for (const el of trackedList) {
-            if (!document.body.contains(el)) {
-                untrack(el);
-                continue;
-            }
-            updateRect(el);
-        }
+        sweep();
     });
 }
 
 /**
  * True when the element is currently visible enough to clip the
- * browser pane underneath. Exported for unit-testing the visibility
- * filter independently of the DOM observers.
+ * browser pane underneath: not hidden itself, and not inside a hidden
+ * window tab or dormant pane-stack member (which keep their real rects).
+ * Exported for unit-testing the visibility filter independently of the
+ * DOM observers.
  */
 export function isOverlayElementVisible(el: HTMLElement): boolean {
     const cs = window.getComputedStyle(el);
     return !(
         cs.visibility === "hidden" ||
         cs.display === "none" ||
-        parseFloat(cs.opacity) === 0
+        parseFloat(cs.opacity) === 0 ||
+        isInHiddenPaneTab(el)
     );
 }
 
@@ -159,6 +169,10 @@ export function startPaneOverlayAutoService(): void {
 
     for (const el of document.querySelectorAll(SELECTOR)) track(el);
 
+    // A tab hidden or shown moves no tracked element, so re-measure them all
+    // when the hidden-tab markers change (pane-overlay.ts).
+    __setAutoOverlaySweep(sweep);
+    startHiddenTabWatcher();
     window.addEventListener("resize", scheduleSweep, { passive: true });
     window.addEventListener("scroll", scheduleSweep, { passive: true, capture: true });
 }

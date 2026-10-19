@@ -222,14 +222,21 @@ describe("section pane zoom", () => {
         expect((container.querySelector(".section-pane-view") as HTMLElement).style.zoom).toBe("1.2");
     });
 
-    it("Ctrl+Wheel steps term:zoom; back at 1.0 it clears the key", () => {
-        setPlatform("win32"); // mod+wheel: Ctrl here, ⌘ on macOS
+    // No zoom handler of its own: Ctrl+wheel is not stopped here, so it reaches the
+    // window's shared handler (AppZoomHandler, app.tsx), which steps every pane the
+    // same way and shows the indicator. SPEC_SYSINFO_TEXT_ZOOM_DENSITY_AND_ONE_ZOOM_PATH_2026_10_18.md §3.
+    it("leaves Ctrl+Wheel to the window's shared zoom handler", () => {
+        setPlatform("win32");
         const { container } = mount(memoryPaneTab);
         const view = container.querySelector(".section-pane-view")!;
-        wheel(view, { ctrlKey: true, deltaY: 100 });
-        expect(setMetaMock).toHaveBeenLastCalledWith({ "term:zoom": 0.9 });
-        wheel(view, { ctrlKey: true, deltaY: -100 });
-        expect(setMetaMock).toHaveBeenLastCalledWith({ "term:zoom": null });
+        const seen = vi.fn();
+        window.addEventListener("wheel", seen);
+        const ev = new WheelEvent("wheel", { ctrlKey: true, deltaY: 100, bubbles: true, cancelable: true });
+        view.dispatchEvent(ev);
+        window.removeEventListener("wheel", seen);
+        expect(seen).toHaveBeenCalledTimes(1);
+        expect(ev.defaultPrevented).toBe(false);
+        expect(setMetaMock).not.toHaveBeenCalled();
     });
 
     it("leaves a plain wheel and Ctrl+Shift+Wheel (all panes) alone", () => {

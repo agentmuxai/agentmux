@@ -69,6 +69,7 @@ function runFrames(n = 1): void {
 let overlayOver: string | null = null;
 let overlayReleased: (() => void) | null = null;
 vi.mock("@/app/platform/pane-overlay", () => ({
+    useHiddenTabMarker: () => () => undefined,
     overlayCoversPane: (blockId: string) => overlayOver === blockId,
     onPaneOverlayReleased: (cb: () => void) => {
         overlayReleased = cb;

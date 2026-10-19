@@ -17,7 +17,76 @@
 
 import { getApi } from "@/app/store/app-api";
 import { anyPaneIntersects, getPaneRect, paneCount } from "@/app/platform/pane-rect-registry";
-import { onCleanup, onMount, type Accessor } from "solid-js";
+import { usePaneStackMemberActive } from "@/app/tab/pane-stack-member";
+import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
+import { createEffect, on, onCleanup, onMount, type Accessor } from "solid-js";
+
+// Hidden window tabs and dormant pane-stack members stay mounted and keep
+// their real size and position (workspace.tsx, pane-leaf-chrome.tsx), so an
+// overlay inside one still has a rect over the panes of the tab on screen.
+// Their containers carry these markers, and an overlay under one cuts no hole:
+// docs/reports/REPORT_BROWSER_PANE_GREY_HOLE_RCA_2026_10_18.md.
+/** On a window tab's container while it isn't the displayed tab (workspace.tsx). */
+export const HIDDEN_TAB_ATTR = "data-window-tab-hidden";
+/** On a pane-stack slot while its member isn't the active one (pane-leaf-chrome.tsx). */
+export const DORMANT_SLOT_ATTR = "data-pane-dormant";
+const HIDDEN_CONTAINER_SELECTOR = `[${HIDDEN_TAB_ATTR}],[${DORMANT_SLOT_ATTR}]`;
+
+/** Whether `el` sits in a hidden window tab or a dormant pane-stack member. */
+export function isInHiddenPaneTab(el: Element): boolean {
+    return el.closest(HIDDEN_CONTAINER_SELECTOR) != null;
+}
+
+/**
+ * Whether the window tab and pane-stack member a component was rendered from
+ * are both shown. Read from context, so it holds through a Portal too.
+ */
+function useOwnerShown(): Accessor<boolean> {
+    const tabDisplayed = useWindowTabDisplayed();
+    const memberActive = usePaneStackMemberActive();
+    return () => tabDisplayed() && memberActive();
+}
+
+/**
+ * The `data-window-tab-hidden` value for a `data-pane-overlay` element that
+ * renders through a Portal: under `document.body` it has no hidden-tab or
+ * dormant-slot ancestor, so it marks itself while the window tab or pane-stack
+ * member it was opened from isn't shown. Call in the component's scope:
+ * `data-window-tab-hidden={hiddenTab()}`.
+ */
+export function useHiddenTabMarker(): Accessor<"" | undefined> {
+    const shown = useOwnerShown();
+    return () => (shown() ? undefined : "");
+}
+
+// Every registered overlay's re-measure, and the auto service's sweep. Hiding
+// or showing a tab changes neither an overlay's size nor its own style, so no
+// per-overlay observer sees it: the marker watcher below re-measures them all.
+const overlayUpdaters = new Set<() => void>();
+let autoOverlaySweep: (() => void) | null = null;
+let hiddenTabWatcherStarted = false;
+
+/** Set by pane-overlay-auto.ts: re-measure every auto-discovered overlay now. */
+export function __setAutoOverlaySweep(sweep: () => void): void {
+    autoOverlaySweep = sweep;
+}
+
+/** Re-measure every overlay now, e.g. after a tab was hidden or shown. */
+export function remeasurePaneOverlays(): void {
+    for (const update of [...overlayUpdaters]) update();
+    autoOverlaySweep?.();
+}
+
+/** Watch the hidden-tab and dormant-slot markers once, for the whole document. */
+export function startHiddenTabWatcher(): void {
+    if (hiddenTabWatcherStarted || typeof MutationObserver === "undefined" || typeof document === "undefined") return;
+    hiddenTabWatcherStarted = true;
+    new MutationObserver(() => remeasurePaneOverlays()).observe(document.documentElement, {
+        subtree: true,
+        attributes: true,
+        attributeFilter: [HIDDEN_TAB_ATTR, DORMANT_SLOT_ATTR],
+    });
+}
 
 interface OverlayRect {
     x: number;
@@ -284,13 +353,13 @@ function rectFromElement(el: HTMLElement): OverlayRect {
  * component rendering a DOM overlay that could overlap a pane.
  *
  * The hook reads the element's bounding rect on mount, re-reads it on
- * `window.resize`, and re-reads it whenever a `ResizeObserver` reports
- * the element's box changing — including the collapse to 0 when a
- * tab-scoped overlay's tab is hidden with `display:none` (no `resize`
- * fires for that, so without the observer the backend keeps a stale clip
- * that punches a hole through the newly active tab's panes). It
- * deregisters on unmount. Overlays that move without any size change
- * (dropped anchors) may still need an `IntersectionObserver` layered on.
+ * `window.resize`, whenever a `ResizeObserver` reports the element's box
+ * changing, and whenever its window tab or pane-stack member is hidden or
+ * shown. An overlay in a hidden tab or dormant member keeps its real size and
+ * position, so without that it would keep punching a hole through the panes
+ * of the tab on screen. It deregisters on unmount. Overlays that move without
+ * any size change (dropped anchors) may still need an `IntersectionObserver`
+ * layered on.
  *
  * Safe to nest — each call registers its own rect, the union is applied.
  * No-op on platforms without native pane HWNDs (backend IPC is a no-op).
@@ -325,7 +394,7 @@ export function registerPaneOverlay(el: HTMLElement, opts?: PaneOverlayOptions):
     const update = (): void => {
         if (released) return;
         const rect = rectFromElement(el);
-        const hidden = !el.isConnected || getComputedStyle(el).visibility === "hidden";
+        const hidden = !el.isConnected || getComputedStyle(el).visibility === "hidden" || isInHiddenPaneTab(el);
         if (!hidden && rect.w > 0 && rect.h > 0) {
             overlayRects.set(id, rect);
         } else if (!dropOverlayRect(id)) {
@@ -338,6 +407,8 @@ export function registerPaneOverlay(el: HTMLElement, opts?: PaneOverlayOptions):
     const styleObserver = typeof MutationObserver !== "undefined" ? new MutationObserver(() => update()) : undefined;
     styleObserver?.observe(el, { attributes: true, attributeFilter: ["style"] });
     window.addEventListener("resize", update);
+    overlayUpdaters.add(update);
+    startHiddenTabWatcher();
     update();
     return {
         update,
@@ -345,6 +416,7 @@ export function registerPaneOverlay(el: HTMLElement, opts?: PaneOverlayOptions):
             if (released) return;
             released = true;
             registeredOverlayEls.delete(el);
+            overlayUpdaters.delete(update);
             window.removeEventListener("resize", update);
             resizeObserver?.disconnect();
             styleObserver?.disconnect();
@@ -395,33 +467,44 @@ export function __overlayRectCount(): number {
     return overlayRects.size;
 }
 
+/** Test-only: number of auto-discovered overlays with a rect. */
+export function __autoOverlayRectCount(): number {
+    return autoOverlayRects.size;
+}
+
 export function usePaneOverlay(getEl: Accessor<HTMLElement | null | undefined>, opts?: PaneOverlayOptions): void {
     const id = nextOverlayId++;
     if (opts?.keys) keyOverlays.add(id);
+    // The context reaches an overlay rendered through a Portal too, where the
+    // DOM marker check below can't see its tab or pane-stack member.
+    const ownerShown = useOwnerShown();
     const update = (): void => {
         const el = getEl();
         if (!el) return;
         const rect = rectFromElement(el);
-        // A collapsed box (e.g. the overlay's tab hidden via display:none)
-        // contributes no hole — drop the entry rather than send a 0×0 rect.
-        if (rect.w > 0 && rect.h > 0) {
+        // A collapsed box, or one in a hidden tab or a dormant pane-stack
+        // member, contributes no hole — drop the entry rather than send it.
+        const shown = ownerShown() && el.isConnected && !isInHiddenPaneTab(el);
+        if (shown && rect.w > 0 && rect.h > 0) {
             overlayRects.set(id, rect);
         } else {
             dropOverlayRect(id);
         }
         sendClip();
     };
+    createEffect(on(ownerShown, () => update(), { defer: true }));
     let observer: ResizeObserver | undefined;
     let styleObserver: MutationObserver | undefined;
     onMount(() => {
         update();
         window.addEventListener("resize", update);
+        overlayUpdaters.add(update);
+        startHiddenTabWatcher();
         const el = getEl();
         if (el && typeof ResizeObserver !== "undefined") {
-            // A tab-scoped modal overlay is hidden via `display:none` when
-            // its tab goes inactive — the box collapses to 0 but no `resize`
-            // fires, so a ResizeObserver is needed to drop the now-stale rect
-            // (and to restore it when the tab is shown again).
+            // An overlay's box changing size (including a collapse to 0 under
+            // `display:none`) fires no `resize`, so a ResizeObserver drops or
+            // restores its rect.
             observer = new ResizeObserver(() => update());
             observer.observe(el);
         }
@@ -441,6 +524,7 @@ export function usePaneOverlay(getEl: Accessor<HTMLElement | null | undefined>, 
     });
     onCleanup(() => {
         window.removeEventListener("resize", update);
+        overlayUpdaters.delete(update);
         observer?.disconnect();
         styleObserver?.disconnect();
         const dropped = dropOverlayRect(id);

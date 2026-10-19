@@ -11,7 +11,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@floating-ui/dom", () => ({ autoUpdate: vi.fn(() => vi.fn()) }));
-vi.mock("@/app/platform/pane-overlay", () => ({ usePaneOverlay: vi.fn() }));
+vi.mock("@/app/platform/pane-overlay", () => ({
+    useHiddenTabMarker: () => () => undefined, usePaneOverlay: vi.fn() }));
 vi.mock("@/app/util/menu-position", () => ({
     computeMenuPosition: vi.fn(async () => ({ style: { position: "fixed", left: "0px", top: "0px" } })),
 }));

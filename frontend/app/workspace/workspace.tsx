@@ -396,6 +396,9 @@ function WorkspaceElem(): JSX.Element {
                                         // through (pane stacks use `inherit` for that reason).
                                         visibility: shown().visibility,
                                     }}
+                                    // Overlays in a hidden tab cut no hole through the
+                                    // shown tab's browser panes (pane-overlay.ts HIDDEN_TAB_ATTR).
+                                    data-window-tab-hidden={tid === displayTabId() ? undefined : ""}
                                 >
                                     <WindowTabDisplayedProvider value={() => tid === displayTabId()}>
                                         <ErrorBoundary>

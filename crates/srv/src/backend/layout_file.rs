@@ -529,6 +529,9 @@ fn view_from_block(store: &Store, meta: &MetaMapType, ctx: &ExportContext, warni
             if let Some(secs) = meta.get("graph:windowsecs").and_then(Value::as_u64).filter(|&s| s > 0) {
                 config.insert("window_secs".into(), Value::from(secs));
             }
+            if let Some(shown) = meta.get("sysinfo:showcontrols").and_then(Value::as_bool) {
+                config.insert("show_controls".into(), Value::Bool(shown));
+            }
         }
         "connectors" | "memory" => {
             if let Some(section) = meta_str(meta, &format!("{view_type}:section")) {
@@ -969,6 +972,9 @@ impl PlanBuilder<'_> {
                 let secs = view.config.get("window_secs").and_then(Value::as_u64);
                 if let Some(secs) = secs.filter(|&s| s > 0 && s <= 86_400) {
                     meta.insert("graph:windowsecs".into(), Value::from(secs));
+                }
+                if let Some(shown) = view.config.get("show_controls").and_then(Value::as_bool) {
+                    meta.insert("sysinfo:showcontrols".into(), Value::Bool(shown));
                 }
                 self.summary.push("System info".to_string());
             }

@@ -27,7 +27,7 @@
  * the panel's.
  */
 
-import { usePaneOverlay } from "@/app/platform/pane-overlay";
+import { useHiddenTabMarker, usePaneOverlay } from "@/app/platform/pane-overlay";
 import { computeMenuPosition } from "@/app/util/menu-position";
 import { autoUpdate, type Placement } from "@floating-ui/dom";
 import { createSignal, onCleanup, onMount, untrack, type JSX } from "solid-js";
@@ -74,6 +74,8 @@ function isEditable(el: EventTarget | null): boolean {
 }
 
 export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
+    // Portal-mounted: drop its pane hole while its window tab is hidden (pane-overlay.ts).
+    const hiddenTab = useHiddenTabMarker();
     let shell: HTMLDivElement | undefined;
     const [shellStyle, setShellStyle] = createSignal<JSX.CSSProperties>(IDLE_STYLE);
     let stopAutoUpdate: (() => void) | null = null;
@@ -145,6 +147,7 @@ export const AnchoredPopover = (props: AnchoredPopoverProps): JSX.Element => {
                 class={`anchored-popover${props.shellClass ? ` ${props.shellClass}` : ""}`}
                 style={shellStyle()}
                 data-pane-overlay
+                data-window-tab-hidden={hiddenTab()}
                 data-zoom-scope={(props.zoom ?? "chrome") === "chrome" ? "chrome" : undefined}
             >
                 <div

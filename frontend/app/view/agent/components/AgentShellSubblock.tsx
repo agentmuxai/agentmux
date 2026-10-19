@@ -32,8 +32,7 @@ import { handleShellDrawerKeydown } from "./shell-drawer-keys";
 import { buildShellDrawerClipboardItems, type ShellDrawerMenuDeps } from "./shell-drawer-menu";
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { readZoom } from "@/app/store/zoom-factor";
-import { setBlockMeta } from "@/app/store/block-meta";
-import { isModKey } from "@/util/platformutil";
+import { usePaneZoomWheel } from "@/app/store/zoom";
 
 // Matches browser-view.tsx's LOADING_SPINNER_FADE_MS / BrainSpinner.scss's
 // is-fading transition duration — keep in sync if either changes.
@@ -414,33 +413,12 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         if (spinnerFadeTimeout) clearTimeout(spinnerFadeTimeout);
     });
 
-    onMount(() => {
-        // Ctrl+Wheel zoom, scoped to THIS terminal only — capture phase so it
-        // intercepts before xterm's own bubble-phase wheel listener AND before
-        // it can bubble up to app.tsx's document-level Ctrl+Wheel handler,
-        // which would otherwise resolve `target.closest("[data-blockid]")` to
-        // the AGENT pane's block (the nearest ancestor with that attribute,
-        // since this sub-block is headless and never gets one) and zoom the
-        // whole pane instead of just this shell. Mirrors `TerminalView`'s
-        // `handleCtrlWheel` in term.tsx,
-        // writing to the sub-block's OWN meta rather than the agent's.
-        const handleCtrlWheel = (ev: WheelEvent) => {
-            // Ctrl+Shift+Scroll is AppAllPanesZoomHandler's all-panes gesture
-            // (app.tsx) — let it bubble there instead of zooming just this
-            // sub-block. See SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md.
-            if (!isModKey(ev) || ev.shiftKey) return;
-            const id = subBlockId();
-            if (!id) return;
-            ev.preventDefault();
-            ev.stopPropagation();
-            const STEP = 0.1;
-            const delta = ev.deltaY > 0 ? -STEP : STEP;
-            const next = Math.max(0.5, Math.min(2.0, Math.round((termZoom() + delta) * 100) / 100));
-            void setBlockMeta(id, { "term:zoom": next === 1.0 ? null : next });
-        };
-        containerRef?.addEventListener("wheel", handleCtrlWheel, { passive: false, capture: true });
-        onCleanup(() => containerRef?.removeEventListener("wheel", handleCtrlWheel, { capture: true }));
+    // Ctrl+scroll zooms THIS shell, by its own sub-block's `term:zoom`. The window's
+    // handler would find no `data-blockid` on this headless sub-block and zoom the
+    // whole agent pane instead.
+    usePaneZoomWheel(() => containerRef, subBlockId, BASE_FONT_SIZE);
 
+    onMount(() => {
         // Right-click in the terminal: the drawer's own Copy/Paste, and no
         // Split / agent-pane view items — those act on the
         // whole agent pane and make no sense from a terminal. Magnify, Close

@@ -6,6 +6,7 @@ import { windowResizing } from "@/app/platform/window-resize";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-holds";
+import { readZoom } from "@/app/store/zoom-factor";
 import clsx from "clsx";
 import type { JSX } from "solid-js";
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
@@ -14,7 +15,8 @@ import { SysinfoBar } from "./sysinfo-bar";
 import type { SysinfoViewModel } from "./sysinfo-model";
 import { MeasureTable, Overview } from "./sysinfo-overview";
 import { type AreaChoice, FOCUS_CHOICES } from "./sysinfo-overview-data";
-import { SingleLinePlot } from "./sysinfo-plot";
+import { createAxisColumns, inTopRow, sharesPercentRange, showsTimeAxis, showsYLabels } from "./sysinfo-layout";
+import { SingleLinePlot, SysinfoZoomContext } from "./sysinfo-plot";
 import { AreaPlotType, SIMPLE_VIEWS } from "./sysinfo-types";
 import { convertTimeSeriesToDataItem } from "./sysinfo-util";
 
@@ -145,6 +147,17 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
     // for this one plot type.
     const cols1 = createMemo(() => model.plotTypeSelectedAtom() === "CPU + Mem + Net");
     const cols2 = createMemo(() => yvals().length > 2 && !cols1());
+    const columns = () => (cols2() ? 2 : 1);
+    // Where each chart's text goes (sysinfo-layout.ts): time labels on the bottom
+    // row only, y labels on the left column only when every chart shares 0–100%,
+    // one y-axis width per column so the plots line up.
+    const sameRange = createMemo(() => sharesPercentRange(yvals()));
+    const axisColumns = createAxisColumns(() => yvals().join(","));
+
+    // The pane's zoom scales Sysinfo's text, not its charts (SysinfoZoomContext).
+    const zoom = createMemo(() => readZoom(model.meta()));
+    // The floating buttons' width, so the top row's titles keep clear of them.
+    const [actionsWidth, setActionsWidth] = createSignal(0);
 
     const overview = createMemo(() => model.plotTypeSelectedAtom() === AreaPlotType);
     // The figures as a table instead of the charts, in either mode.
@@ -166,7 +179,8 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
     );
 
     return (
-        <div class="sysinfo-pane">
+        <SysinfoZoomContext.Provider value={zoom}>
+        <div class="sysinfo-pane" style={{ "--sysinfo-actions-w": `${actionsWidth()}px` }}>
             <SysinfoBar
                 views={views()}
                 view={view()}
@@ -183,6 +197,7 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
                 onControls={(shown) => model.setControlsShown(shown)}
                 table={table()}
                 onTable={setTable}
+                onActionsWidth={setActionsWidth}
             />
             <Show when={!table()} fallback={measureTable()}>
                 <Show
@@ -199,13 +214,13 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
                 >
                     <div class="flex flex-col flex-grow mb-0 overflow-y-auto">
                         <div
-                            class={clsx("w-full h-full grid grid-rows-[repeat(auto-fit,minmax(100px,1fr))] gap-[2px]", {
+                            class={clsx("sysinfo-grid", {
                                 "grid-cols-1": cols1(),
                                 "grid-cols-2": cols2(),
                             })}
                         >
                             <For each={yvals()}>
-                                {(yval) => (
+                                {(yval, i) => (
                                     <SingleLinePlot
                                         plotData={plotData()}
                                         yval={yval}
@@ -215,6 +230,11 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
                                         targetLen={targetLen()}
                                         intervalSecs={intervalSecs()}
                                         syncKey={`sysinfo-${model.blockId}`}
+                                        timeAxis={showsTimeAxis(i(), yvals().length, columns())}
+                                        yLabels={showsYLabels(i(), columns(), sameRange())}
+                                        top={inTopRow(i(), columns())}
+                                        axisWidth={axisColumns.widthFor(i() % columns())}
+                                        onAxisWidth={(w) => axisColumns.report(i() % columns(), yval, w)}
                                     />
                                 )}
                             </For>
@@ -223,6 +243,7 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
                 </Show>
             </Show>
         </div>
+        </SysinfoZoomContext.Provider>
     );
 }
 

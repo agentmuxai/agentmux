@@ -5,19 +5,15 @@
 import type { PaneTabHostContext, PaneTabManifest } from "@/app/block/pane-tab-registry";
 import { QuickTips } from "@/app/element/quicktips";
 import { FilterInput } from "@/app/element/ui";
-import { showZoomIndicator } from "@/app/store/zoom";
-import { fireAndForget } from "@/util/util";
-import { createSignal, onMount, type JSX } from "solid-js";
-
-const MIN_ZOOM = 0.5;
-const MAX_ZOOM = 2.0;
-const KEYBOARD_STEP = 0.1;
-const WHEEL_STEP = 0.05;
+import { paneZoomPatch, readZoom } from "@/app/store/zoom-factor";
+import { createMemo, createSignal, onMount, type JSX } from "solid-js";
 
 /**
- * Help — QuickTips with Ctrl+/- / Ctrl+Wheel zoom, persisted in block meta as
- * "help:zoom", and a filter box pinned on top (SPEC_HELP_PANE_FILTER_2026_10_08.md)
- * that is the pane's typing target, so opening Help and typing filters it. The first NATIVE pane tab (Pane Tab contract Phase 2b,
+ * Help — QuickTips with a filter box pinned on top (SPEC_HELP_PANE_FILTER_2026_10_08.md)
+ * that is the pane's typing target, so opening Help and typing filters it. It zooms
+ * through the shared pane zoom (`term:zoom`: Ctrl/Cmd +/-/0, Ctrl+scroll, the
+ * all-panes gesture and reset), which it joins with its `paneZoom` capability; the
+ * filter bar stays at 100%. The first NATIVE pane tab (Pane Tab contract Phase 2b,
  * SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §4): it reaches its block only
  * through the host context, never MOS/RpcApi/nodeModel directly.
  */
@@ -27,55 +23,36 @@ export const helpPaneTab: PaneTabManifest = {
     label: "Help",
     icon: "circle-question",
     defaultHue: 90,
+    capabilities: { paneZoom: {} },
     create: () => ({ component: HelpView }),
 };
 
 function HelpView(props: { ctx: PaneTabHostContext }): JSX.Element {
     const ctx = props.ctx;
-    const [zoom, setZoom] = createSignal(1.0);
     const [filter, setFilter] = createSignal("");
+    const zoom = createMemo(() => readZoom(ctx.meta()));
 
+    // Help kept its zoom in its own `help:zoom` until it joined the shared zoom:
+    // move a saved level across once, so nobody's Help zoom is lost.
+    // SPEC_SYSINFO_TEXT_ZOOM_DENSITY_AND_ONE_ZOOM_PATH_2026_10_18.md §3 (A.5).
+    // The old key is cleared only once the new one is written: if that write
+    // fails, the saved level stays where it was and the move is tried next time.
     onMount(() => {
-        const saved = ctx.meta()?.["help:zoom"];
-        if (typeof saved === "number" && saved >= MIN_ZOOM && saved <= MAX_ZOOM) {
-            setZoom(saved);
-        }
+        const meta = ctx.meta();
+        const legacy = meta?.["help:zoom"];
+        if (typeof legacy !== "number") return;
+        void (async () => {
+            try {
+                if (meta?.["term:zoom"] == null) await ctx.setMeta(paneZoomPatch(legacy));
+                await ctx.setMeta({ "help:zoom": null });
+            } catch {
+                // Left for the next mount.
+            }
+        })();
     });
 
-    const adjustZoom = (delta: number) => {
-        const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round((zoom() + delta) * 100) / 100));
-        setZoom(next);
-        fireAndForget(() => ctx.setMeta({ "help:zoom": Math.abs(next - 1.0) < 0.01 ? null : next }));
-        showZoomIndicator(`${Math.round(next * 100)}%`);
-    };
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-        if (!e.ctrlKey && !e.metaKey) return;
-        if (e.key === "=" || e.key === "+") { e.preventDefault(); e.stopPropagation(); adjustZoom(KEYBOARD_STEP); }
-        else if (e.key === "-")            { e.preventDefault(); e.stopPropagation(); adjustZoom(-KEYBOARD_STEP); }
-        else if (e.key === "0")            { e.preventDefault(); e.stopPropagation(); adjustZoom(1.0 - zoom()); }
-    };
-
-    const handleWheel = (e: WheelEvent) => {
-        // Ctrl+Shift+Scroll is AppAllPanesZoomHandler's all-panes gesture
-        // (app.tsx) — let it bubble there instead of zooming just this pane.
-        // (Help's own zoom is a separate "help:zoom" meta key, not the
-        // shared "term:zoom" the all-panes batch steps, so this pane's own
-        // zoom is unaffected by that gesture either way — same as browser
-        // panes.) See SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md.
-        if ((!e.ctrlKey && !e.metaKey) || e.shiftKey) return;
-        e.preventDefault();
-        e.stopPropagation();
-        adjustZoom(e.deltaY > 0 ? -WHEEL_STEP : WHEEL_STEP);
-    };
-
     return (
-        <div
-            class="overflow-auto w-full h-full outline-none"
-            tabIndex={0}
-            onKeyDown={handleKeyDown}
-            onWheel={handleWheel}
-        >
+        <div class="overflow-auto w-full h-full outline-none" tabIndex={0}>
             <div class="help-filter-bar sticky top-0 z-[1] flex px-[5px] pt-[10px] pb-[6px] bg-[var(--main-bg-color)]">
                 <FilterInput value={filter()} onInput={setFilter} placeholder="Filter shortcuts and tips" ariaLabel="Filter help" />
             </div>

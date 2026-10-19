@@ -27,6 +27,7 @@ vi.mock("@floating-ui/dom", () => ({
 }));
 
 vi.mock("@/app/platform/pane-overlay", () => ({
+    useHiddenTabMarker: () => () => undefined,
     usePaneOverlay: vi.fn(),
 }));
 
