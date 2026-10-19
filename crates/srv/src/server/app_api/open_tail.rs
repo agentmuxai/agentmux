@@ -33,8 +33,6 @@ const MAX_WINDOW_BYTES: i64 = 16 << 20;
 /// The most a slice is extended back to reach a turn start, and the most
 /// `tail_bytes` asks for: the pane's restore size today.
 const RESTORE_BUDGET_BYTES: i64 = 1 << 20;
-/// How much of the receive-time sidecar's end is read to stamp the slice.
-const TSIDX_WINDOW_BYTES: i64 = 64 * 1024;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore = state.mstore.clone();
@@ -164,38 +162,15 @@ fn read_window(r: &SnapshotReader<'_>, zone: &str, complete_end: i64, want: i64)
     }
 }
 
-/// Receive-time stamps for lines starting at `offsets`, from the end of
-/// `output.tsidx` (`{"off":<batch start offset>,"ms":<unix ms>}` per batch):
-/// the newest batch that began at or before the line. `None` without a sidecar.
+/// Receive-time stamps for lines starting at `offsets` (ascending byte offsets),
+/// from `output.tsidx` in this snapshot: the same lookup `blockfile:read_range`
+/// uses (`stamps_for`), which finds the records around the range wherever they
+/// are in the sidecar. `None` without a sidecar or records near the range.
 fn read_stamps(r: &SnapshotReader<'_>, zone: &str, offsets: &[i64]) -> Result<Option<Vec<i64>>, StoreError> {
-    let Some(file) = r.file(zone, crate::backend::agent_session::TSIDX_FILE)? else { return Ok(None) };
-    if file.size <= 0 {
-        return Ok(None);
-    }
-    let from = (file.size - TSIDX_WINDOW_BYTES).max(0);
-    let Some(buf) = r.bytes(zone, crate::backend::agent_session::TSIDX_FILE, from, file.size - from)? else { return Ok(None) };
-    let text = String::from_utf8_lossy(&buf);
-    let mut lines = text.lines();
-    if from > 0 {
-        lines.next(); // a fragment
-    }
-    let mut entries: Vec<(i64, i64)> = lines
-        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
-        .filter_map(|v| Some((v.get("off")?.as_i64()?, v.get("ms")?.as_i64()?)))
-        .collect();
-    entries.sort_by_key(|e| e.0);
-    if entries.is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(
-        offsets
-            .iter()
-            .map(|o| {
-                let i = entries.partition_point(|e| e.0 <= *o);
-                if i == 0 { 0 } else { entries[i - 1].1 }
-            })
-            .collect(),
-    ))
+    use crate::backend::agent_session::TSIDX_FILE;
+    let Some(file) = r.file(zone, TSIDX_FILE)? else { return Ok(None) };
+    let offsets: Vec<u64> = offsets.iter().map(|o| (*o).max(0) as u64).collect();
+    crate::backend::blockcontroller::shell::stamps::stamps_for(&|off, len| r.bytes(zone, TSIDX_FILE, off, len), file.size, &offsets)
 }
 
 fn read_slice(r: &SnapshotReader<'_>, zone: &str, cmd: &CommandAgentOpenTailData) -> Result<Read, StoreError> {

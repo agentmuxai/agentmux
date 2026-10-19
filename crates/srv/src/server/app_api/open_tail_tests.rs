@@ -360,3 +360,20 @@ fn a_huge_tail_bytes_is_clamped_to_the_restore_budget() {
     assert_eq!(r.end_line, Some(3000));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn stamps_reach_back_past_a_long_sidecar_to_the_oldest_line() {
+    let (fs, dir) = file_store("oldstamps");
+    // Each line its own batch, so the sidecar outgrows any fixed tail window.
+    for i in 0..4000 {
+        fs.append_lines_stamped(BLOCK, "output", format!("{}\n", line(i, 20)).as_bytes(), "output.tsidx").unwrap();
+    }
+    let sidecar = fs.stat(BLOCK, "output.tsidx").unwrap().unwrap().size;
+    assert!(sidecar > 100 * 1024, "the sidecar is {sidecar} bytes");
+    let r = run(&fs, cmd(Some(256 * 1024)));
+    let stamps = r.stamps.expect("a sidecar exists");
+    assert_eq!(stamps.len(), r.lines.len());
+    assert!(r.lines.len() > 1500, "{} lines", r.lines.len());
+    assert!(stamps.iter().all(|s| *s > 0), "even the oldest line of a long slice has its receive time");
+    let _ = std::fs::remove_dir_all(dir);
+}
