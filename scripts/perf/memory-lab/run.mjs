@@ -79,10 +79,11 @@ function parseArgs(argv) {
 function memtreeBinary(given) {
     if (given) return given;
     const bin = join(repoRoot, "target", "release", "examples", process.platform === "win32" ? "memtree.exe" : "memtree");
-    if (!existsSync(bin)) {
-        console.log("building memtree (crates/procstats) ...");
-        execFileSync("cargo", ["build", "--release", "-p", "agentmux-procstats", "--example", "memtree"], { cwd: repoRoot, stdio: "inherit" });
-    }
+    // Always built: cargo makes it a no-op when it is current, and a binary left from before a change to
+    // memtree (it gained per-process CPU time) would measure without it.
+    console.log("building memtree (crates/procstats) ...");
+    execFileSync("cargo", ["build", "--release", "-p", "agentmux-procstats", "--example", "memtree"], { cwd: repoRoot, stdio: "inherit" });
+    if (!existsSync(bin)) throw new Error(`${bin} was not built`);
     return bin;
 }
 
@@ -246,6 +247,8 @@ async function attempt(args, ctx) {
             console.log(`  round ${String(round).padStart(3)}: app ${row.appMB} MB  ${Object.entries(row.groupsMB).map(([k, v]) => `${k} ${v}`).join("  ")}`);
         };
         await mark(0);
+        // Said at once, not after the run: memtree reports CPU time of every process; none at all means a memtree without it (--memtree <old binary>), not an idle app.
+        if (cpuLedger.totals().app === 0) throw new Error("no process reported CPU time: the memtree in use predates per-process CPU (give none to have the lab build the current one)");
         // The CPU of the workload is what is spent after this point; startup and building the layout are before it.
         const cpuAtStart = cpuLedger.totals();
         const roundMs = [];
