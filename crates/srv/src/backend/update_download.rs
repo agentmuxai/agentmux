@@ -529,10 +529,18 @@ fn record_channel(folder: &Path, channel: &str) -> Result<(), String> {
 /// `tar.exe` has no LZMA. Elsewhere the `.tar.xz` goes through the system `tar`.
 async fn unpack_into(file: &Path, partial: &Path) -> Result<(), String> {
     if cfg!(windows) {
-        let (file, partial) = (file.to_path_buf(), partial.to_path_buf());
-        let run = tokio::task::spawn_blocking(move || crate::backend::update_unpack::unpack_7z(&file, &partial));
-        return match tokio::time::timeout(UNPACK_TIMEOUT, run).await {
-            Err(_) => Err("unpacking took more than 10 minutes and was stopped".to_string()),
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        let (file, partial, stopper) = (file.to_path_buf(), partial.to_path_buf(), stop.clone());
+        let mut run = tokio::task::spawn_blocking(move || crate::backend::update_unpack::unpack_7z(&file, &partial, &stopper));
+        return match tokio::time::timeout(UNPACK_TIMEOUT, &mut run).await {
+            // The blocking thread can't be cancelled: tell it to stop, and wait
+            // until it has, so nothing writes into the staging folder after it is
+            // removed or reused by a retry (QTest on #5124).
+            Err(_) => {
+                stop.store(true, Ordering::Relaxed);
+                let _ = run.await;
+                Err("unpacking took more than 10 minutes and was stopped".to_string())
+            }
             Ok(Err(e)) => Err(format!("unpacking stopped unexpectedly: {e}")),
             Ok(Ok(unpacked)) => unpacked,
         };

@@ -11,18 +11,39 @@
 //! any Windows. Every entry is written under the destination or refused: an
 //! absolute path, a drive or root, or a `..` never reaches the disk.
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// An entry's data, read until `stop` is set: a timed-out unpack must stop
+/// writing, because its blocking thread can't be cancelled (QTest on #5124).
+struct UntilStopped<'a> {
+    inner: &'a mut dyn Read,
+    stop: &'a AtomicBool,
+}
+
+impl Read for UntilStopped<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.stop.load(Ordering::Relaxed) {
+            return Err(std::io::Error::other("unpacking was stopped"));
+        }
+        self.inner.read(buf)
+    }
+}
 
 /// `dest` joined with an archive entry's `name`, or why it may not be
 /// written. Both `/` and `\` separate, so a Windows-authored name is checked
-/// the same on every platform.
+/// the same on every platform. A `:` is refused too: on Windows `x:y` writes
+/// an NTFS alternate data stream, and no release file has one.
 fn entry_path(dest: &Path, name: &str) -> Result<PathBuf, String> {
     let normalized = name.replace('\\', "/");
     let mut path = dest.to_path_buf();
     let mut named = false;
     for part in Path::new(&normalized).components() {
         match part {
+            Component::Normal(p) if p.to_string_lossy().contains(':') => {
+                return Err(format!("refused an entry with a ':' in its name: {name}"));
+            }
             Component::Normal(p) => {
                 path.push(p);
                 named = true;
@@ -41,14 +62,19 @@ fn entry_path(dest: &Path, name: &str) -> Result<PathBuf, String> {
 
 /// Unpacks the `.7z` at `archive` into `dest`, which exists. Blocking: run it
 /// off the async runtime. Stops at the first entry it refuses or can't write,
-/// leaving what it wrote for the caller's staging folder to discard.
-pub(crate) fn unpack_7z(archive: &Path, dest: &Path) -> Result<(), String> {
+/// or as soon as `stop` is set, leaving what it wrote for the caller's
+/// staging folder to discard.
+pub(crate) fn unpack_7z(archive: &Path, dest: &Path, stop: &AtomicBool) -> Result<(), String> {
     let file = std::fs::File::open(archive).map_err(|e| format!("can't open {}: {e}", archive.display()))?;
     let mut reader = sevenz_rust2::ArchiveReader::new(std::io::BufReader::new(file), sevenz_rust2::Password::empty())
         .map_err(|e| format!("can't decode the archive: {e}"))?;
     // The callback can only return the crate's error; keep ours to report.
     let mut refused: Option<String> = None;
     let walked = reader.for_each_entries(|entry, data| {
+        if stop.load(Ordering::Relaxed) {
+            refused = Some("unpacking was stopped".to_string());
+            return Err(sevenz_rust2::Error::Other("unpacking was stopped".into()));
+        }
         let path = match entry_path(dest, entry.name()) {
             Ok(path) => path,
             Err(why) => {
@@ -66,7 +92,7 @@ pub(crate) fn unpack_7z(archive: &Path, dest: &Path) -> Result<(), String> {
         // Always read the entry through: in a solid archive the next one
         // decodes from where this one ends.
         let mut out = std::io::BufWriter::new(std::fs::File::create(&path)?);
-        std::io::copy(data, &mut out)?;
+        std::io::copy(&mut UntilStopped { inner: data, stop }, &mut out)?;
         out.flush()?;
         Ok(true)
     });
@@ -92,7 +118,7 @@ mod tests {
     #[test]
     fn the_release_codecs_unpack_into_a_staged_portable() {
         let dest = tempfile::tempdir().unwrap();
-        unpack_7z(Path::new(FIXTURE), dest.path()).unwrap();
+        unpack_7z(Path::new(FIXTURE), dest.path(), &go()).unwrap();
         assert!(dest.path().join("agentmux.exe").is_file());
         assert!(dest.path().join("runtime/agentmux-portable.marker").is_file());
         assert!(dest.path().join("runtime/agentmux-0.59.27.exe").is_file());
@@ -100,6 +126,20 @@ mod tests {
         let exe = std::fs::read(dest.path().join("agentmux.exe")).unwrap();
         assert_eq!(&exe[..2], b"MZ");
         assert_eq!(std::fs::read_to_string(dest.path().join("runtime/README.txt")).unwrap().trim(), "AgentMux portable");
+    }
+
+    /// Not stopped.
+    fn go() -> AtomicBool {
+        AtomicBool::new(false)
+    }
+
+    // A timed-out unpack is told to stop, and writes nothing more (QTest on #5124).
+    #[test]
+    fn a_stopped_unpack_writes_nothing_more_and_says_so() {
+        let dest = tempfile::tempdir().unwrap();
+        let err = unpack_7z(Path::new(FIXTURE), dest.path(), &AtomicBool::new(true)).unwrap_err();
+        assert_eq!(err, "unpacking was stopped");
+        assert_eq!(std::fs::read_dir(dest.path()).unwrap().count(), 0);
     }
 
     #[test]
@@ -110,6 +150,8 @@ mod tests {
         }
         #[cfg(windows)]
         assert!(entry_path(dest, "C:\\Windows\\x.dll").is_err());
+        // An NTFS alternate data stream on Windows; refused everywhere.
+        assert!(entry_path(dest, "runtime/agentmux.exe:hidden").is_err());
         assert_eq!(entry_path(dest, "runtime/./agentmux.exe").unwrap(), dest.join("runtime").join("agentmux.exe"));
         assert_eq!(entry_path(dest, "runtime\\agentmux.exe").unwrap(), dest.join("runtime").join("agentmux.exe"));
     }
@@ -120,9 +162,9 @@ mod tests {
         let bytes = std::fs::read(FIXTURE).unwrap();
         let cut = dir.path().join("cut.7z");
         std::fs::write(&cut, &bytes[..bytes.len() / 2]).unwrap();
-        let err = unpack_7z(&cut, &dir.path().join("out")).unwrap_err();
+        let err = unpack_7z(&cut, &dir.path().join("out"), &go()).unwrap_err();
         assert!(err.starts_with("can't decode the archive"), "{err}");
-        let err = unpack_7z(&dir.path().join("missing.7z"), dir.path()).unwrap_err();
+        let err = unpack_7z(&dir.path().join("missing.7z"), dir.path(), &go()).unwrap_err();
         assert!(err.starts_with("can't open"), "{err}");
     }
 
@@ -135,7 +177,7 @@ mod tests {
         let version = std::env::var("AGENTMUX_TEST_PORTABLE_VERSION").expect("AGENTMUX_TEST_PORTABLE_VERSION");
         let dest = tempfile::tempdir().unwrap();
         let started = std::time::Instant::now();
-        unpack_7z(Path::new(&archive), dest.path()).unwrap();
+        unpack_7z(Path::new(&archive), dest.path(), &go()).unwrap();
         eprintln!("unpacked in {:?}", started.elapsed());
         assert!(dest.path().join("agentmux.exe").is_file());
         assert!(dest.path().join("runtime/agentmux-portable.marker").is_file());
