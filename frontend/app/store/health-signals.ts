@@ -3,7 +3,7 @@
 
 /**
  * Performance health signals for this window: low RAM, low page file, slow
- * backend. The host pushes each change as a `health-signal` event and keeps
+ * backend, low disk space. The host pushes each change as a `health-signal` event and keeps
  * the active ones, which a window reads once when it starts so it can catch
  * up on an episode already under way. The status bar's backend dot and its
  * panel read this store. REPORT_PERFORMANCE_INDICATORS_TO_STATUS_BAR_2026_10_08.
@@ -16,7 +16,7 @@
 import { getApi } from "@/app/store/app-api";
 import { createSignal } from "solid-js";
 
-export type HealthKind = "ram" | "pagefile" | "backend";
+export type HealthKind = "ram" | "pagefile" | "backend" | "disk";
 export type HealthLevel = "normal" | "warn" | "critical";
 export type ActiveHealthLevel = Exclude<HealthLevel, "normal">;
 
@@ -33,6 +33,10 @@ export interface HealthPayload {
     disk_free_pct?: number;
     // "backend"
     avg_ms?: number;
+    // "disk": the drive with AgentMux's data
+    disk_free_gb?: number;
+    disk_total_gb?: number;
+    disk_path?: string;
 }
 
 export interface HealthSignal {
@@ -42,7 +46,7 @@ export interface HealthSignal {
     payload: HealthPayload;
 }
 
-const KINDS: HealthKind[] = ["backend", "pagefile", "ram"];
+const KINDS: HealthKind[] = ["backend", "disk", "pagefile", "ram"];
 
 function severity(level: HealthLevel): number {
     return level === "critical" ? 2 : level === "warn" ? 1 : 0;

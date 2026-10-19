@@ -4,7 +4,9 @@
 import { describe, expect, it } from "vitest";
 import {
     backendMessage,
+    diskMessage,
     formatAvg,
+    formatGb,
     formatSince,
     healthLabel,
     messageFor,
@@ -15,6 +17,7 @@ describe("healthLabel", () => {
     it("names each kind, with the backend's average when known", () => {
         expect(healthLabel("ram")).toBe("Low RAM");
         expect(healthLabel("pagefile")).toBe("Low page file");
+        expect(healthLabel("disk")).toBe("Low disk space");
         expect(healthLabel("backend", { kind: "backend", level: "warn", avg_ms: 1840 })).toBe("Slow backend 1.8s");
         expect(healthLabel("backend", { kind: "backend", level: "warn" })).toBe("Slow backend");
     });
@@ -79,5 +82,31 @@ describe("messageFor", () => {
         for (const level of ["warn", "critical"] as const) {
             expect(messageFor("backend", level, { kind: "backend", level })).not.toMatch(/page file|RAM|memory/i);
         }
+    });
+});
+
+describe("diskMessage", () => {
+    const payload = { kind: "disk" as const, disk_free_gb: 222.4, disk_free_pct: 6.01, disk_path: "/home/me/.agentmux" };
+
+    it("says which drive, how much is left and why it matters", () => {
+        const warn = messageFor("disk", "warn", { ...payload, level: "warn" });
+        expect(warn).toBe(diskMessage("warn", { ...payload, level: "warn" }));
+        expect(warn).toContain("(/home/me/.agentmux)");
+        expect(warn).toContain("222 GB free, 6.0%");
+        expect(warn).toMatch(/pause for seconds/);
+        const critical = messageFor("disk", "critical", { ...payload, level: "critical" });
+        expect(critical).toMatch(/almost full/);
+        expect(critical).toMatch(/Free up space now/);
+    });
+
+    it("leaves out what the host didn't send", () => {
+        const msg = diskMessage("warn", { kind: "disk", level: "warn" });
+        expect(msg).not.toMatch(/GB|%|\(/);
+        expect(msg).toMatch(/running low/);
+    });
+
+    it("formats gigabytes with a decimal only when small", () => {
+        expect(formatGb(9.54)).toBe("9.5 GB");
+        expect(formatGb(222.4)).toBe("222 GB");
     });
 });
