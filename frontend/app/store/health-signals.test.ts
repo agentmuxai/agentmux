@@ -23,12 +23,14 @@ describe("applyHealthEvent", () => {
         expect(stamped[0].since).toBe(42);
     });
 
-    it("orders worst first, then backend, page file, RAM", () => {
+    it("orders worst first, then backend, disk, page file, RAM", () => {
         let s: HealthSignal[] = [];
         s = applyHealthEvent(s, { kind: "ram", level: "warn" }, 1);
         s = applyHealthEvent(s, { kind: "backend", level: "warn" }, 2);
         s = applyHealthEvent(s, { kind: "pagefile", level: "critical" }, 3);
         expect(kinds(s)).toEqual(["pagefile:critical", "backend:warn", "ram:warn"]);
+        s = applyHealthEvent(s, { kind: "disk", level: "warn", disk_free_pct: 6 }, 4);
+        expect(kinds(s)).toEqual(["pagefile:critical", "backend:warn", "disk:warn", "ram:warn"]);
         expect(worstLevel(s)).toBe("critical");
         expect(worstLevel([])).toBe("normal");
     });
