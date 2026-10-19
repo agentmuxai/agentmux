@@ -24,7 +24,8 @@ import type { InstallCheckResult } from "@/types/rpc/InstallCheckResult";
 
 const TTL_MS = 30_000;
 
-type Entry = { startedAt: number; result: Promise<InstallCheckResult> };
+/** `answer` is what callers get: `rpc`'s result while it is still current. */
+type Entry = { startedAt: number; rpc: Promise<InstallCheckResult>; answer: Promise<InstallCheckResult> };
 const entries = new Map<string, Entry>();
 
 const keyOf = (req: InstallCheckReq) => `${req.providerId}\u0000${req.cliCommand}\u0000${req.npmPackage ?? ""}`;
@@ -32,13 +33,22 @@ const keyOf = (req: InstallCheckReq) => `${req.providerId}\u0000${req.cliCommand
 export function checkProviderInstalled(req: InstallCheckReq, now: () => number = Date.now): Promise<InstallCheckResult> {
     const key = keyOf(req);
     const hit = entries.get(key);
-    if (hit && now() - hit.startedAt < TTL_MS) return hit.result;
-    const entry: Entry = { startedAt: now(), result: RpcApi.InstallCheckCommand(TabRpcClient, req) };
+    if (hit && now() - hit.startedAt < TTL_MS) return hit.answer;
+    const rpc = RpcApi.InstallCheckCommand(TabRpcClient, req);
+    const entry = { startedAt: now(), rpc } as Entry;
+    // An answer forgotten while in flight (an install finished, a refresh)
+    // is stale: the caller gets the newer check's answer instead, asked now
+    // if none started, so a slow old answer can't overwrite a newer one.
+    entry.answer = rpc.then((result) => {
+        const current = entries.get(key);
+        if (current === entry) return result;
+        return current ? current.answer : checkProviderInstalled(req, now);
+    });
     entries.set(key, entry);
-    entry.result.catch(() => {
+    rpc.catch(() => {
         if (entries.get(key) === entry) entries.delete(key);
     });
-    return entry.result;
+    return entry.answer;
 }
 
 /** Told when answers are forgotten: `providerId`, or undefined for all. */

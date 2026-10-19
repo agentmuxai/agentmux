@@ -68,4 +68,19 @@ describe("install-check cache", () => {
         invalidateInstallCheck("codex");
         expect(seen).toEqual(["grok", undefined]);
     });
+
+    it("gives a caller the newer answer when its check was forgotten while in flight", async () => {
+        let answerOld!: (r: typeof ok) => void;
+        rpc.InstallCheckCommand.mockImplementationOnce(() => new Promise((res) => (answerOld = res)));
+        const first = checkProviderInstalled(claude, clock);
+        // An install finished: the answer in flight is stale, and a new check finds the CLI.
+        invalidateInstallCheck("claude");
+        const fresh = { installed: true, version: "2.0.0" };
+        rpc.InstallCheckCommand.mockResolvedValueOnce(fresh);
+        const second = checkProviderInstalled(claude, clock);
+        await expect(second).resolves.toBe(fresh);
+        // The old check answers last, saying "not installed": its caller still gets the newer answer.
+        answerOld({ installed: false, version: null } as unknown as typeof ok);
+        await expect(first).resolves.toBe(fresh);
+    });
 });
