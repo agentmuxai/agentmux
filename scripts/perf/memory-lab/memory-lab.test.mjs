@@ -17,6 +17,7 @@ import { driftWarning, portableCommit, srvTarget, withReplacedSrv } from "./lib/
 import { mergeLongTaskRecords, slowSendsAgainstLongTasks, summariseLongTasks } from "./lib/longtasks.mjs";
 import { parseDiskLoad, sleepNeededMs, startDiskLoad } from "./lib/diskload.mjs";
 import { volumeOf } from "./lib/volume.mjs";
+import { measuresOf, spreadMarkdown, spreadOf, spreadTable } from "./lib/measures.mjs";
 import { segmentsOf, slowSendBreakdown, timedCall } from "./lib/sendsegments.mjs";
 import { arrivalTotals, arrivalsBetween, arrivalsDuringSlowSends } from "./lib/wsarrivals.mjs";
 import { mergeStoreLock, parseStoreLock } from "./lib/storelock.mjs";
@@ -851,5 +852,43 @@ describe("what the page's websocket received", () => {
         expect(out).toHaveLength(1);
         expect(out[0]).toMatchObject({ round: 2, agent: 3, inPageMs: 3900, messages: 11, longestSilenceMs: 2800 });
         expect(arrivalTotals(ws)).toEqual({ messages: 11, bytes: 6180, biggestMessageBytes: 2000 });
+    });
+});
+
+describe("the measures the nightly performance check watches", () => {
+    const run = (app, cpuApp, round, written) => ({
+        layout: { panes: 12 },
+        rounds: 10,
+        steady: { app: { privateMB: app }, groups: { renderer: { privateMB: app * 0.7 }, srv: { privateMB: 40 } } },
+        cpu: { seconds: { app: cpuApp, srv: 60, renderer: 300, gpu: 20 } },
+        wall: { medianMs: round },
+        io: written == null ? null : { writtenMB: { srv: written } },
+        storeLock: { longestHeldMs: 0 },
+        slowEvals: { total: 2 },
+    });
+
+    it("reads one run under the names of the history line", () => {
+        expect(measuresOf(run(800, 400, 16000, 5000))).toEqual({
+            app_mb: 800, renderer_mb: 560, srv_mb: 40, app_cpu_s: 400, srv_cpu_s: 60, renderer_cpu_s: 300, gpu_cpu_s: 20,
+            round_ms: 16000, srv_written_mb: 5000, store_lock_max_ms: 0, slow_page_commands: 2,
+        });
+        // a run with no figure for a measure has null for it, never zero
+        expect(measuresOf(run(800, 400, 16000, null)).srv_written_mb).toBeNull();
+        expect(measuresOf({}).app_mb).toBeNull();
+    });
+
+    it("gives the lowest, median and highest of repeated runs and how wide that is", () => {
+        expect(spreadOf([100, 110, 105])).toEqual({ n: 3, min: 100, median: 105, max: 110, widthPct: 9.5 });
+        expect(spreadOf([null, undefined])).toBeNull();
+        expect(spreadOf([50, null, 52])).toMatchObject({ n: 2, min: 50, max: 52 });
+    });
+
+    it("tabulates a build's runs, with the wall time of each", () => {
+        const runs = [run(800, 400, 16000, 5000), run(820, 410, 17000, 5100), run(810, 405, 16500, 5050)];
+        const t = spreadTable(runs);
+        expect(t.app_mb).toMatchObject({ min: 800, median: 810, max: 820 });
+        const md = spreadMarkdown(runs, [420, 431, 425]);
+        expect(md).toMatch(/\| app_mb \| 3 \| 800 \| 810 \| 820 \|/);
+        expect(md).toMatch(/420 s, 431 s, 425 s; median 425 s/);
     });
 });
