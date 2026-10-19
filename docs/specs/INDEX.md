@@ -488,6 +488,7 @@ partial list.
 | [`SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06`](SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06.md) | SPEC — Swarm Row Auto-Linger Countdown on Completion |
 | [`SPEC_SWARM_SUPERVISOR_2026_10_16`](SPEC_SWARM_SUPERVISOR_2026_10_16.md) | Spec: the Swarm Supervisor keeps agents working until they are done or need the user |
 | [`SPEC_SYSINFO_CONTROLS_AND_EDGES_2026_10_16`](SPEC_SYSINFO_CONTROLS_AND_EDGES_2026_10_16.md) | Spec: Sysinfo pane — flush top-right controls, a hide-the-selectors button, flush right-hand chart edge |
+| [`SPEC_SYSINFO_TEXT_ZOOM_DENSITY_AND_ONE_ZOOM_PATH_2026_10_18`](SPEC_SYSINFO_TEXT_ZOOM_DENSITY_AND_ONE_ZOOM_PATH_2026_10_18.md) | Spec: Sysinfo text zoom, denser charts, and one zoom path for every pane |
 | [`SPEC_SYSTEM_TIER_GLOBAL_MEMORY_SEEDING_2026_09_15`](SPEC_SYSTEM_TIER_GLOBAL_MEMORY_SEEDING_2026_09_15.md) | Spec: Operator Config seeding (AgentMux-shipped, system-tier Global Memory) |
 | [`SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24`](SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24.md) | SPEC: One-click system-toolchain installer (git, Node/npm, and friends) across Windows/macOS/Linux |
 | [`SPEC_SYSTEM_TOOL_INSTALL_DETAILS_AUTOSCROLL_2026_09_10`](SPEC_SYSTEM_TOOL_INSTALL_DETAILS_AUTOSCROLL_2026_09_10.md) | SPEC: Install-log "Details" panel — auto-scroll, provider-install parity, and brand icons |
@@ -711,7 +712,6 @@ partial list.
 | [`SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20`](SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20.md) | SPEC — live subagent reconciliation + Retire action (best-practices plan) |
 | [`SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02`](SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md) | SPEC: The Swarm shows the agents of every other instance this one knows about |
 | [`SPEC_SWARM_REFINEMENTS_2026_10_17`](SPEC_SWARM_REFINEMENTS_2026_10_17.md) | Spec: Swarm refinements — the selection count, provider icons on remote agents, broadcast to remote agents |
-| [`SPEC_SYSINFO_TEXT_ZOOM_DENSITY_AND_ONE_ZOOM_PATH_2026_10_18`](SPEC_SYSINFO_TEXT_ZOOM_DENSITY_AND_ONE_ZOOM_PATH_2026_10_18.md) | Spec: Sysinfo text zoom, denser charts, and one zoom path for every pane |
 | [`SPEC_TEAROFF_PAINT_LATENCY_2026_09_30`](SPEC_TEAROFF_PAINT_LATENCY_2026_09_30.md) | SPEC: Tear-off paint latency: show the torn-off content as fast as the window |
 | [`SPEC_TERMINAL_INPUT_PRIORITY_OVER_SYSINFO_2026_06_16`](SPEC_TERMINAL_INPUT_PRIORITY_OVER_SYSINFO_2026_06_16.md) | SPEC: Terminal I/O Has Complete Priority Over Perf Monitoring |
 | [`SPEC_TERM_STATS_BADGE_TOP_OFFSET_AND_TOGGLE_2026_09_17`](SPEC_TERM_STATS_BADGE_TOP_OFFSET_AND_TOGGLE_2026_09_17.md) | SPEC: Terminal CPU%/Mem badge — fix top-right offset, add a Settings toggle |
