@@ -227,7 +227,8 @@ export function compareRuns(baseRuns, headRuns, margins = DEFAULT_MARGINS) {
     const slow = [...baseRuns.map((r) => ["base", r]), ...headRuns.map((r) => ["head", r])]
         .filter(([, r]) => r.slowestEvalMs > SLOW_COMMAND_MS)
         .map(([side, r]) => ({ side, label: r.label, ms: r.slowestEvalMs }));
-    return { rows, wall, slow, margins, baseRuns: baseRuns.length, headRuns: headRuns.length };
+    const lock = metric("store lock", "ms", (r) => r.storeLock?.longestHeldMs);
+    return { rows, wall, slow, lock, margins, baseRuns: baseRuns.length, headRuns: headRuns.length };
 }
 
 /** A markdown table of `compareRuns`: memory and CPU side by side, then the round time. */
@@ -246,6 +247,10 @@ export function runsTable(cmp, baseLabel = "base", headLabel = "head") {
     }
     const w = cmp.wall;
     lines.push("", `Round time (send to all agents idle), median: ${baseLabel} ${f(w.base.median)} ms${range(w.base)}, ${headLabel} ${f(w.head.median)} ms${range(w.head)}, ${sign(w.pct)}${w.flagged ? ` (over +${w.marginPct}%)` : ""}.`);
+    const l = cmp.lock;
+    if (l && (l.base.n || l.head.n)) {
+        lines.push("", `Longest hold of srv's transcript store connection (report only; every store write waits for it): ${baseLabel} ${f(l.base.median)} ms${range(l.base)}, ${headLabel} ${f(l.head.median)} ms${range(l.head)}${l.pct == null ? "" : `, ${sign(l.pct)}`}. A hold of 0 means none reached the 500 ms srv logs.`);
+    }
     for (const s of cmp.slow ?? []) lines.push("", `SLOW PAGE COMMAND: ${s.label} (${s.side}) had a page command that took ${Math.round(s.ms / 100) / 10} s (over ${SLOW_COMMAND_MS / 1000} s): the window was unresponsive for that long during a round.`);
     lines.push("", `${cmp.baseRuns} run(s) against ${cmp.headRuns}; medians, with the lowest-highest in brackets when there is more than one. A flag needs the change to pass the margin (${typeof cmp.margins.cpuPct === "number" ? `+${cmp.margins.cpuPct}%` : `+${cmp.margins.cpuPct.app}% app and srv CPU, +${cmp.margins.cpuPct.default}% other groups`} CPU, +${cmp.margins.wallPct}% round time) and the two sides' ranges not to overlap. Flags are report-only; the operator sets the real margins.`);
     return lines.join("\n");
