@@ -111,9 +111,9 @@ describe("report", () => {
         const gh = (args) => {
             calls.push(args);
             const [cmd, sub] = args;
+            if (cmd === "api" && args.some((a) => a.includes("/annotations"))) return JSON.stringify(annotations);
             if (cmd === "api" && args.includes("--paginate")) return JSON.stringify([{ jobs }]);
             if (cmd === "issue" && sub === "list") return JSON.stringify(open.map((number) => ({ number })));
-            if (cmd === "api" && sub.endsWith("/annotations")) return JSON.stringify(annotations);
             if (cmd === "api" && sub.endsWith("/logs")) return "2026-10-18T19:26:13Z test a_test ... FAILED";
             if (cmd === "api" && sub.startsWith("repos/o/r/commits/")) return "fix: something";
             return "";
@@ -132,7 +132,9 @@ describe("report", () => {
 
     it("reports a job that hit its timeout, which GitHub calls cancelled", () => {
         // The 2026-10-19 nightly: the macOS test job ran out of its 60 minutes saving its cache.
-        const { gh } = fakeGh([{ ...job("cargo test (macos-latest)", "cancelled"), id: 9 }], [], [{ annotation_level: "failure", message: "The job has exceeded the maximum execution time of 1h0m0s" }]);
+        // Two pages, the timeout on the second (--paginate --slurp returns one array per page).
+        const page1 = Array.from({ length: 100 }, () => ({ annotation_level: "warning", message: "Node.js 20 is deprecated." }));
+        const { gh } = fakeGh([{ ...job("cargo test (macos-latest)", "cancelled"), id: 9 }], [], [page1, [{ annotation_level: "failure", message: "The job has exceeded the maximum execution time of 1h0m0s" }]]);
         const writes = report(env, gh, quiet);
         expect(writes.map((w) => w.slice(0, 2))).toEqual([["label", "create"], ["issue", "create"]]);
         expect(writes[1][writes[1].indexOf("--body") + 1]).toContain("- cargo test (macos-latest) (timed out)");
@@ -141,7 +143,7 @@ describe("report", () => {
     it("says in the log when a cancelled job's annotations can't be read", () => {
         const { gh: base } = fakeGh([job("cargo test (macos-latest)", "cancelled")], []);
         const gh = (args) => {
-            if (args[1]?.endsWith("/annotations")) throw new Error("HTTP 403: Resource not accessible by integration\nmore");
+            if (args.some((a) => a.includes("/annotations"))) throw new Error("HTTP 403: Resource not accessible by integration\nmore");
             return base(args);
         };
         const lines = [];
@@ -150,7 +152,7 @@ describe("report", () => {
     });
 
     it("stays silent for a job someone cancelled", () => {
-        const { gh } = fakeGh([job("cargo test (macos-latest)", "cancelled")], [498], [{ annotation_level: "failure", message: "The operation was canceled." }]);
+        const { gh } = fakeGh([job("cargo test (macos-latest)", "cancelled")], [498], [[{ annotation_level: "failure", message: "The operation was canceled." }]]);
         expect(report(env, gh, quiet)).toEqual([]);
     });
 

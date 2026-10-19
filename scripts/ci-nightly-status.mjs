@@ -98,7 +98,9 @@ export function report(env, gh = realGh, log = console.log) {
     const jobs = finishedJobs(JSON.parse(gh(["api", "--paginate", "--slurp", `repos/${REPO}/actions/runs/${RUN_ID}/jobs?per_page=100`])).flatMap((p) => p.jobs)).map((j) => {
         if (j.conclusion !== "cancelled") return j;
         try {
-            return timedOut(JSON.parse(gh(["api", `repos/${REPO}/check-runs/${j.id}/annotations`]))) ? { ...j, conclusion: "timed_out" } : j;
+            // Every page: the timeout annotation can come after a page of warnings.
+            const annotations = JSON.parse(gh(["api", "--paginate", "--slurp", `repos/${REPO}/check-runs/${j.id}/annotations?per_page=100`])).flat();
+            return timedOut(annotations) ? { ...j, conclusion: "timed_out" } : j;
         } catch (e) {
             // Leave it cancelled, which reports nothing, but say why in the log.
             log(`Couldn't read ${j.name}'s annotations, so a timeout can't be told from a cancel: ${String(e.message ?? e).split("\n")[0]}`);
