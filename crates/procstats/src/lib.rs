@@ -55,6 +55,9 @@ mod os {
     pub fn write_bytes(_pid: u32) -> Option<u64> {
         None
     }
+    pub fn storage_write_bytes(_pid: u32) -> Option<u64> {
+        None
+    }
     pub fn cpu_count() -> usize {
         std::thread::available_parallelism()
             .map(|n| n.get())
@@ -171,6 +174,13 @@ pub fn command_line_of(key: ProcKey) -> Option<String> {
 /// (the process has exited, or belongs to another user).
 pub fn write_bytes(pid: u32) -> Option<u64> {
     os::write_bytes(pid)
+}
+
+/// Bytes this process has caused to be written to storage so far (cumulative), read on demand: the part of
+/// [`write_bytes`] that reached the disk, so it leaves out writes the page cache coalesced or dropped. Linux:
+/// `write_bytes` in `/proc/<pid>/io`. macOS: `ri_diskio_byteswritten`. Windows has no such counter (`None`).
+pub fn storage_write_bytes(pid: u32) -> Option<u64> {
+    os::storage_write_bytes(pid)
 }
 
 /// Logical CPUs on the whole machine — what "percent of the machine" divides

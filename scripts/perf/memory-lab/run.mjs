@@ -260,6 +260,7 @@ async function attempt(args, ctx) {
         // The CPU of the workload is what is spent after this point; startup and building the layout are before it.
         const cpuAtStart = cpuLedger.totals();
         const writtenAtStart = cpuLedger.writtenTotals();
+        const storageAtStart = cpuLedger.storageTotals();
         const roundMs = [];
         const roundWindows = [];
         const sendLog = [];
@@ -299,7 +300,12 @@ async function attempt(args, ctx) {
         const incomplete = cpuLedger.writeIncomplete();
         const writtenMB = writtenBetween(writtenAtStart, cpuLedger.writtenTotals());
         for (const g of incomplete) writtenMB[g] = null;
-        const io = !Object.values(writtenMB).some((v) => v != null) ? null : { fromRound: 0, writtenMB, incompleteGroups: incomplete, note: "highest write counter seen per process, summed per group (Windows and Linux: bytes passed to write calls; macOS: bytes written to disk)" };
+        // The bytes that reached storage: the same, null on Windows (no such counter) and for a group missing a counter.
+        const storageIncomplete = cpuLedger.storageIncomplete();
+        const storageWrittenMB = writtenBetween(storageAtStart, cpuLedger.storageTotals());
+        for (const g of storageIncomplete) storageWrittenMB[g] = null;
+        const hasStorage = cpuLedger.sawStorageCounters();
+        const io = !Object.values(writtenMB).some((v) => v != null) ? null : { fromRound: 0, writtenMB, incompleteGroups: incomplete, storageWrittenMB: hasStorage ? storageWrittenMB : null, note: "highest write counter seen per process, summed per group (Windows and Linux: bytes passed to write calls; macOS: bytes written to disk). storageWrittenMB: the part that reached storage (Linux write_bytes, macOS disk bytes; none on Windows)" };
         const rawLong = await driver.longTasks().catch(() => null);
         const pageLongTasks = summariseLongTasks(rawLong, roundWindows, forcedGcWindows);
         const sendsVsLong = slowSendsAgainstLongTasks(sendLog, rawLong);

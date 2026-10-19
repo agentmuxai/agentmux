@@ -592,6 +592,23 @@ describe("bytes written", () => {
         expect(writtenBetween({ app: 0, renderer: 0 }, ledger.writtenTotals()).renderer).toBe(35);
     });
 
+    it("counts the bytes that reached storage separately, and has none where the OS has no such counter", () => {
+        const MiB2 = 1048576;
+        const p = (pid, write_bytes, storage_write_bytes, name = "agentmux-srv.exe") => ({ pid, name, role: "main", app: true, write_bytes, storage_write_bytes });
+        const ledger = new CpuLedger();
+        ledger.note([p(1, 100 * MiB2, 20 * MiB2)]);
+        ledger.note([p(1, 900 * MiB2, 120 * MiB2)]);
+        expect(ledger.writtenTotals().srv).toBe(900 * MiB2); // asked to write
+        expect(ledger.storageTotals().srv).toBe(120 * MiB2); // reached storage
+        expect(ledger.storageIncomplete()).toEqual([]);
+        const windows = new CpuLedger(); // Windows: no storage counter at all
+        windows.note([p(1, 100 * MiB2, undefined)]);
+        expect(windows.writeIncomplete()).toEqual([]);
+        expect(windows.storageIncomplete().sort()).toEqual(["app", "srv"]);
+        expect(windows.sawStorageCounters()).toBe(false); // so a Windows run records no storage figure, not n/a everywhere
+        expect(ledger.sawStorageCounters()).toBe(true);
+    });
+
     it("leaves out the panes' children and a process whose counter could not be read", () => {
         const ledger = new CpuLedger();
         ledger.note([{ ...proc(1, "renderer", 900 * MiB), app: false }, proc(2, "renderer", undefined)]);
@@ -609,6 +626,13 @@ describe("bytes written", () => {
         // the counter of process 2 turns up on a later sample: the group is complete again
         ledger.note([proc(2, "main", 1 * MiB, "agentmux-srv.exe")]);
         expect(ledger.writeIncomplete()).toEqual([]);
+    });
+
+    it("shows what reached storage beside what was written", () => {
+        const run = (label, srv, stor) => ({ label, steady: { app: { privateMB: 900 }, groups: {} }, io: { writtenMB: { srv }, storageWrittenMB: stor == null ? null : { srv: stor } } });
+        const text = runsTable(compareRuns([run("b1", 5000, 1000)], [run("h1", 2000, 400)]), "base", "head");
+        expect(text).toMatch(/reached storage.*base 1000 MB.*head 400 MB/);
+        expect(runsTable(compareRuns([run("b1", 5000, null)], [run("h1", 2000, null)]), "base", "head")).not.toMatch(/reached storage/);
     });
 
     it("compares what srv wrote on each side, flagged past +10% when the ranges are apart", () => {

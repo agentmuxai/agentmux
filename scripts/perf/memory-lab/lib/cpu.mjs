@@ -26,11 +26,13 @@ export class CpuLedger {
             if (!p.app) continue; // a process with nothing readable is still noted: its group's write total is then incomplete
             // The start time tells a process from a later one that reuses its PID (a recycled renderer, a restarted srv).
             const key = `${p.pid}|${p.start_key ?? ""}|${p.name}`;
-            const before = this.#seen.get(key) ?? { ns: 0, written: 0, hasWritten: false, group: groupOf(p) };
+            const before = this.#seen.get(key) ?? { ns: 0, written: 0, hasWritten: false, storage: 0, hasStorage: false, group: groupOf(p) };
             this.#seen.set(key, {
                 ns: Math.max(before.ns, p.cpu_ns ?? 0),
                 written: Math.max(before.written, p.write_bytes ?? 0),
                 hasWritten: before.hasWritten || p.write_bytes != null,
+                storage: Math.max(before.storage, p.storage_write_bytes ?? 0),
+                hasStorage: before.hasStorage || p.storage_write_bytes != null,
                 group: before.group,
             });
         }
@@ -45,6 +47,30 @@ export class CpuLedger {
         for (const { hasWritten, group } of this.#seen.values()) if (!hasWritten) groups.add(group);
         if (groups.size) groups.add("app");
         return [...groups];
+    }
+
+    /** As `writeIncomplete`, for the bytes that reached storage (Linux, macOS; on Windows every group, as there is no such counter). */
+    storageIncomplete() {
+        const groups = new Set();
+        for (const { hasStorage, group } of this.#seen.values()) if (!hasStorage) groups.add(group);
+        if (groups.size) groups.add("app");
+        return [...groups];
+    }
+
+    /** Whether any process gave a storage counter at all: on Windows none does, and then there is no storage figure, not zeros. */
+    sawStorageCounters() {
+        for (const { hasStorage } of this.#seen.values()) if (hasStorage) return true;
+        return false;
+    }
+
+    /** Bytes that reached storage so far, per group and `app`, counting every process seen. */
+    storageTotals() {
+        const out = Object.fromEntries([...GROUPS, "app"].map((g) => [g, 0]));
+        for (const { storage, group } of this.#seen.values()) {
+            out[group] += storage;
+            out.app += storage;
+        }
+        return out;
     }
 
     /** Bytes written so far, per group and `app`, counting every process seen. */

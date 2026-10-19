@@ -67,6 +67,12 @@ pub fn write_bytes(pid: u32) -> Option<u64> {
     io.lines().find_map(|l| l.strip_prefix("wchar:")).and_then(|v| v.trim().parse().ok())
 }
 
+/// `write_bytes` of `/proc/<pid>/io`: the bytes the process caused to be sent to the block layer. Same user only.
+pub fn storage_write_bytes(pid: u32) -> Option<u64> {
+    let io = std::fs::read_to_string(format!("/proc/{pid}/io")).ok()?;
+    io.lines().find_map(|l| l.strip_prefix("write_bytes:")).and_then(|v| v.trim().parse().ok())
+}
+
 pub fn cpu_count() -> usize {
     let n = unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) };
     if n > 0 { n as usize } else { 1 }

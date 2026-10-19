@@ -174,6 +174,11 @@ pub fn write_bytes(pid: u32) -> Option<u64> {
     ok.then_some(usage.ri_diskio_byteswritten)
 }
 
+/// macOS counts only what reached the disk, which is also what [`write_bytes`] returns.
+pub fn storage_write_bytes(pid: u32) -> Option<u64> {
+    write_bytes(pid)
+}
+
 /// `KERN_PROCARGS2`: argc, the executable path, padding, then argv. Same user
 /// only.
 pub fn command_line(pid: u32) -> Option<String> {
