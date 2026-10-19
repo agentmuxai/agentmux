@@ -382,6 +382,7 @@ jobs:
       contents: read
       issues: write
       actions: read
+      checks: read # a cancelled job's annotations say whether it timed out
     steps:
       - uses: actions/checkout@v4
         with:

@@ -99,8 +99,10 @@ export function report(env, gh = realGh, log = console.log) {
         if (j.conclusion !== "cancelled") return j;
         try {
             return timedOut(JSON.parse(gh(["api", `repos/${REPO}/check-runs/${j.id}/annotations`]))) ? { ...j, conclusion: "timed_out" } : j;
-        } catch {
-            return j; // No annotations to read: leave it cancelled, which reports nothing.
+        } catch (e) {
+            // Leave it cancelled, which reports nothing, but say why in the log.
+            log(`Couldn't read ${j.name}'s annotations, so a timeout can't be told from a cancel: ${String(e.message ?? e).split("\n")[0]}`);
+            return j;
         }
     });
     const state = verdict(jobs);

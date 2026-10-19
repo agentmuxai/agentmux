@@ -138,6 +138,17 @@ describe("report", () => {
         expect(writes[1][writes[1].indexOf("--body") + 1]).toContain("- cargo test (macos-latest) (timed out)");
     });
 
+    it("says in the log when a cancelled job's annotations can't be read", () => {
+        const { gh: base } = fakeGh([job("cargo test (macos-latest)", "cancelled")], []);
+        const gh = (args) => {
+            if (args[1]?.endsWith("/annotations")) throw new Error("HTTP 403: Resource not accessible by integration\nmore");
+            return base(args);
+        };
+        const lines = [];
+        expect(report(env, gh, (l) => lines.push(l))).toEqual([]);
+        expect(lines.some((l) => l.includes("Couldn't read cargo test (macos-latest)'s annotations") && l.endsWith("HTTP 403: Resource not accessible by integration"))).toBe(true);
+    });
+
     it("stays silent for a job someone cancelled", () => {
         const { gh } = fakeGh([job("cargo test (macos-latest)", "cancelled")], [498], [{ annotation_level: "failure", message: "The operation was canceled." }]);
         expect(report(env, gh, quiet)).toEqual([]);
