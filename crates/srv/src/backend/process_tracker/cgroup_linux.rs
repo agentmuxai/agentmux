@@ -167,6 +167,38 @@ fn signal(pid: u32, sig: libc::c_int) {
     }
 }
 
+/// What each of `pids` is, as the process table shows it.
+///
+/// `ProcessRefreshKind::nothing()` is "everything off except tasks": on Linux that
+/// reads every THREAD of every process as well (a `/proc/<pid>/task/<tid>/stat`
+/// each), and an agent's processes are Node apps with dozens. Nothing here reads
+/// thread data, so it is switched off: a 40-thread process lists in 0.43 ms
+/// instead of 10.6 ms, and the listing is called about 13 times a second with 12
+/// agents (SPEC_SRV_PROCESS_LISTING_WITHOUT_THREADS_2026_10_18.md).
+fn describe_pids(pids: &[u32]) -> Vec<TrackedProcess> {
+    let list: Vec<sysinfo::Pid> = pids.iter().map(|p| sysinfo::Pid::from_u32(*p)).collect();
+    let mut sys = sysinfo::System::new();
+    sys.refresh_processes_specifics(
+        sysinfo::ProcessesToUpdate::Some(&list),
+        true,
+        sysinfo::ProcessRefreshKind::nothing().without_tasks().with_cmd(sysinfo::UpdateKind::Always).with_memory(),
+    );
+    sys.processes()
+        .iter()
+        .map(|(pid, p)| {
+            let cmd: Vec<String> = p.cmd().iter().map(|a| a.to_string_lossy().into_owned()).collect();
+            TrackedProcess {
+                pid: pid.as_u32(),
+                command: if cmd.is_empty() { p.name().to_string_lossy().into_owned() } else { cmd.join(" ") },
+                rss_bytes: p.memory(),
+                started_at_ms: p.start_time() * 1000,
+                parent_pid: p.parent().map(|pp| pp.as_u32()),
+                exe: cmd.first().cloned().unwrap_or_else(|| p.name().to_string_lossy().into_owned()),
+            }
+        })
+        .collect()
+}
+
 impl TrackerHandle for CgroupTracker {
     fn assign_process(&self, pid: u32) -> Result<(), String> {
         std::fs::write(self.dir.join("cgroup.procs"), pid.to_string())
@@ -178,27 +210,7 @@ impl TrackerHandle for CgroupTracker {
         if pids.is_empty() {
             return Vec::new();
         }
-        let list: Vec<sysinfo::Pid> = pids.iter().map(|p| sysinfo::Pid::from_u32(*p)).collect();
-        let mut sys = sysinfo::System::new();
-        sys.refresh_processes_specifics(
-            sysinfo::ProcessesToUpdate::Some(&list),
-            true,
-            sysinfo::ProcessRefreshKind::nothing().with_cmd(sysinfo::UpdateKind::Always).with_memory(),
-        );
-        sys.processes()
-            .iter()
-            .map(|(pid, p)| {
-                let cmd: Vec<String> = p.cmd().iter().map(|a| a.to_string_lossy().into_owned()).collect();
-                TrackedProcess {
-                    pid: pid.as_u32(),
-                    command: if cmd.is_empty() { p.name().to_string_lossy().into_owned() } else { cmd.join(" ") },
-                    rss_bytes: p.memory(),
-                    started_at_ms: p.start_time() * 1000,
-                    parent_pid: p.parent().map(|pp| pp.as_u32()),
-                    exe: cmd.first().cloned().unwrap_or_else(|| p.name().to_string_lossy().into_owned()),
-                }
-            })
-            .collect()
+        describe_pids(&pids)
     }
 
     fn kill_tree(&self) {
@@ -303,6 +315,36 @@ pub fn join_before_exec_pty(cmd: &mut portable_pty::CommandBuilder, procs: PathB
 
 #[cfg(test)]
 mod tests {
+    /// A process is one entry, however many threads it has: the test process
+    /// has a thread per test and a runtime, and still lists exactly once.
+    #[test]
+    fn a_process_with_many_threads_lists_once() {
+        let _threads: Vec<_> = (0..8).map(|_| std::thread::spawn(|| std::thread::sleep(std::time::Duration::from_secs(5)))).collect();
+        let me = std::process::id();
+        let listed = describe_pids(&[me]);
+        let pids: Vec<u32> = listed.iter().map(|p| p.pid).collect();
+        assert_eq!(pids, vec![me], "one entry for this process, not one per thread: {pids:?}");
+    }
+
+    /// Without thread data the listing still says what it always did: the
+    /// command line, the parent, the start time and the memory.
+    #[test]
+    fn the_listing_still_reports_command_parent_start_and_memory() {
+        let mut child = std::process::Command::new("sleep").arg("3077").spawn().unwrap();
+        let pid = child.id();
+        let listed = describe_pids(&[pid]);
+        let _ = child.kill();
+        let _ = child.wait();
+        assert_eq!(listed.len(), 1, "{listed:?}");
+        let p = &listed[0];
+        assert_eq!(p.pid, pid);
+        assert_eq!(p.command, "sleep 3077");
+        assert_eq!(p.exe, "sleep");
+        assert_eq!(p.parent_pid, Some(std::process::id()));
+        assert!(p.rss_bytes > 0, "memory: {}", p.rss_bytes);
+        assert!(p.started_at_ms > 0);
+    }
+
     use super::*;
 
     #[test]
