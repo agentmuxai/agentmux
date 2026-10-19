@@ -169,6 +169,8 @@ export async function runRecycle({ driver, memtree, port, rootPid, label, comman
 
     // "none" presses nothing: the control of a pair, with the same arming and the same samples.
     const control = command === "none";
+    // A reload destroys the page's long-task record: keep it first (not for the control, which does not reload).
+    if (!control) await driver.archiveLongTasks();
     if (!control) await driver.paletteCommand(command);
     const t0 = Date.now();
 

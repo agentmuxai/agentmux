@@ -23,7 +23,7 @@ export const LONG_TASK_OBSERVER = `(() => {
         L.top.sort((x, y) => y.ms - x.ms);
         if (L.top.length > 10) L.top.length = 10;
       }
-    }).observe({ type: "longtask", buffered: true });
+    }).observe({ type: "longtask" }); // not buffered: what ran before the workload (startup, the layout) is not the workload
     return true;
   } catch (e) {
     return String(e);
@@ -32,6 +32,20 @@ export const LONG_TASK_OBSERVER = `(() => {
 
 /** Reads the observer's record back (null when it was never installed, e.g. after a reload). */
 export const READ_LONG_TASKS = `window.__labLong ? { n: window.__labLong.n, tasks: window.__labLong.tasks, top: window.__labLong.top } : null`;
+
+/** Forgets the page's record so the next install starts a fresh one (the old observer keeps filling its detached copy). */
+export const DETACH_LONG_TASKS = `(window.__labLong = null, true)`;
+
+/** One record from several (the document before a reload, and the one after): counts add, tasks join, the ten longest stay. */
+export function mergeLongTaskRecords(records) {
+    const list = records.filter(Boolean);
+    if (!list.length) return null;
+    return {
+        n: list.reduce((n, r) => n + r.n, 0),
+        tasks: list.flatMap((r) => r.tasks),
+        top: list.flatMap((r) => r.top).sort((a, b) => b.ms - a.ms).slice(0, 10),
+    };
+}
 
 /**
  * Summarises the long tasks of a run: totals, the longest with its attribution, and per round

@@ -14,7 +14,7 @@ import { basename, join } from "node:path";
 import { mismatch } from "./compare.mjs";
 import { evaluate, report } from "./gate.mjs";
 import { driftWarning, portableCommit, srvTarget, withReplacedSrv } from "./lib/srv.mjs";
-import { slowSendsAgainstLongTasks, summariseLongTasks } from "./lib/longtasks.mjs";
+import { mergeLongTaskRecords, slowSendsAgainstLongTasks, summariseLongTasks } from "./lib/longtasks.mjs";
 import { mergeStoreLock, parseStoreLock } from "./lib/storelock.mjs";
 import { CpuLedger, cpuBetween } from "./lib/cpu.mjs";
 import { generateConversation } from "./lib/conversation.mjs";
@@ -580,6 +580,17 @@ describe("the page's long tasks", () => {
         ]);
         expect(s.longest[0]).toMatchObject({ ms: 2400, container: "window", at: new Date(2100).toISOString() });
         expect(summariseLongTasks(null)).toBeNull(); // never installed, or lost to a reload
+    });
+
+    it("joins the records of the documents before and after a reload", () => {
+        const before = { n: 2, tasks: [[1000, 90], [2000, 3000]], top: [{ at: 2000, ms: 3000, name: "self", container: "" }] };
+        const after = { n: 1, tasks: [[9000, 400]], top: [{ at: 9000, ms: 400, name: "self", container: "" }] };
+        const merged = mergeLongTaskRecords([before, null, after]);
+        expect(merged).toMatchObject({ n: 3 });
+        expect(merged.tasks).toHaveLength(3);
+        expect(merged.top.map((t) => t.ms)).toEqual([3000, 400]);
+        expect(summariseLongTasks(merged, [{ round: 1, start: 0, end: 5000 }, { round: 2, start: 5000, end: 10000 }]).byRound.map((r) => r.count)).toEqual([2, 1]);
+        expect(mergeLongTaskRecords([null])).toBeNull();
     });
 
     it("says how many slow sends ran while a long task of 500 ms or more did", () => {

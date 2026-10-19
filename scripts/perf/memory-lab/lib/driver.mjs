@@ -15,7 +15,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, openSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { LONG_TASK_OBSERVER, READ_LONG_TASKS } from "./longtasks.mjs";
+import { DETACH_LONG_TASKS, LONG_TASK_OBSERVER, mergeLongTaskRecords, READ_LONG_TASKS } from "./longtasks.mjs";
 import { installFakeClaude } from "../../../ui-screenshots/install-fake-claude.mjs";
 import { CdpSession, findMainTarget } from "../../../ui-screenshots/lib/session.mjs";
 import { openNewTab } from "../../../ui-screenshots/widget-shots.mjs";
@@ -175,6 +175,7 @@ export async function connect(port, home, workDir) {
     // The slowest page evaluation of the run, so a machine that is close to the limit shows in the result before it fails.
     let slowestEvalMs = 0;
     // The commands that took 5 s or more, the 30 slowest if there are more (slowEvalsTotal says how many there were).
+    const longTaskArchive = []; // the records of documents a reload has since replaced
     let slowEvals = [];
     let slowEvalsTotal = 0;
     const ev = async (expr) => {
@@ -319,9 +320,16 @@ export async function connect(port, home, workDir) {
         async installLongTasks() {
             return ev(LONG_TASK_OBSERVER);
         },
-        /** The long tasks recorded since `installLongTasks`, or null. */
+        /** The long tasks recorded since `installLongTasks`, across any reloads archived with `archiveLongTasks`, or null. */
         async longTasks() {
-            return ev(READ_LONG_TASKS);
+            return mergeLongTaskRecords([...longTaskArchive, await ev(READ_LONG_TASKS)]);
+        },
+        /** Keeps what the page has recorded so far and starts a fresh record: call before a reload, which would destroy it. */
+        async archiveLongTasks() {
+            const current = await ev(READ_LONG_TASKS);
+            if (current) longTaskArchive.push(current);
+            await ev(DETACH_LONG_TASKS);
+            await ev(LONG_TASK_OBSERVER);
         },
 
         /**
