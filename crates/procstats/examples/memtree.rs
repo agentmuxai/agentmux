@@ -461,7 +461,14 @@ fn main() {
                 pss,
                 uss,
                 cpu_ns: p.cpu_ns,
-                write_bytes: agentmux_procstats::write_bytes(p.pid),
+                // Read by PID, so only counted when the process is still the one the sample saw before and after the read:
+                // a PID reused in between would hand back the successor's lifetime total.
+                write_bytes: if is_running(p.key()) {
+                    let v = agentmux_procstats::write_bytes(p.pid);
+                    if is_running(p.key()) { v } else { None }
+                } else {
+                    None
+                },
                 start_key: p.start_key,
             });
         }
