@@ -209,6 +209,7 @@ async function measureOpens(driver, args, home, { memtree, rootPid }) {
     if (heavy) {
         await osSample(memtree, rootPid, args.port);
         const before = cpuLedger.writtenTotals();
+        const storeBytesBefore = transcriptBytes(home);
         const t0 = Date.now();
         for (let k = 1; k <= args.heavyTurns; k++) {
             await driver.send([driver.agents[0].blockId], { text: `[heavy ${k}] Run the whole test suite and report what failed.` });
@@ -218,10 +219,11 @@ async function measureOpens(driver, args, home, { memtree, rootPid }) {
         await requireIdle(driver);
         await osSample(memtree, rootPid, args.port);
         heavyWrittenMB = writtenBetween(before, cpuLedger.writtenTotals());
-        // The heavy turns must have been played, or the "heavy" open is an ordinary one under another name.
-        const rows = await driver.toolRows();
-        const others = Math.max(0, ...rows.slice(1).map((r) => r.tools));
-        if (!(rows[0].tools > others)) throw new InvalidRun(`the heavy turns were not played: ${rows[0].name} shows ${rows[0].tools} tool rows, the others up to ${others}`);
+        // The heavy turns must have been played, or the "heavy" open is an ordinary one under another name: the store must have grown by about what they carry
+        // (the pane shows only some of a long conversation's tool rows, so what it shows says nothing).
+        const grew = transcriptBytes(home) - storeBytesBefore;
+        const expected = args.heavyTurns * args.heavyKb * 1024;
+        if (grew < expected * 0.5) throw new InvalidRun(`the heavy turns were not all played: the transcript store grew ${Math.round(grew / 1024)} KB, ${args.heavyTurns} turn(s) of ${args.heavyKb} KB carry about ${Math.round(expected / 1024)} KB`);
     }
     const storeBefore = storeLockOf(home);
     const opens = [];
