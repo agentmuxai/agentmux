@@ -52,7 +52,8 @@ export function withBodyHeights<T>(
     keepIds: ReadonlySet<string>,
     unload: () => T
 ): T {
-    const ids = root ? planUnload(nodes, { keepIds }) : [];
+    // Planning walks every finished tool's result; no open body, nothing to measure, no plan needed.
+    const ids = root?.querySelector(".agent-tool-overlay") ? planUnload(nodes, { keepIds }) : [];
     rememberBodyHeights(root, ids);
     try {
         return unload();

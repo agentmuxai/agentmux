@@ -3,7 +3,8 @@
 
 import { cleanup, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as unloadModule from "./tool-result-unload";
 import { forgetBodyHeights, rememberBodyHeights, takeBodyHeight, withBodyHeights } from "./body-height-cache";
 import { ToolBlock } from "./components/ToolBlock";
 import type { ToolNode } from "./types";
@@ -94,6 +95,16 @@ describe("withBodyHeights", () => {
         // "b" is kept (pinned or held), so only "a" is read.
         expect(readsBefore).toBe(1);
         expect(takeBodyHeight("a")).toBeUndefined(); // forgotten: the unload did not take it
+    });
+
+    it("plans nothing when no tool body is open", () => {
+        const root = document.createElement("div");
+        const plan = vi.spyOn(unloadModule, "planUnload");
+        let ran = false;
+        withBodyHeights(root, [tool("a")], new Set(), () => (ran = true));
+        expect(ran).toBe(true);
+        expect(plan).not.toHaveBeenCalled();
+        plan.mockRestore();
     });
 
     it("forgets even when the unload throws", () => {
