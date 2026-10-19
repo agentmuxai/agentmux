@@ -137,9 +137,14 @@ describe("FlyoutMenu", () => {
         const before = vi.mocked(computeMenuPosition).mock.calls.length;
         fire();
         expect(vi.mocked(computeMenuPosition).mock.calls.length).toBeGreaterThan(before);
+        // Closing the menu, not unmounting the component, stops the watching.
+        expect(disconnect).not.toHaveBeenCalled();
         fireEvent.mouseDown(document.body);
-        cleanup();
-        expect(disconnect).toHaveBeenCalled();
+        expect(menuOpen()).toBe(false);
+        expect(disconnect).toHaveBeenCalledTimes(1);
+        const afterClose = vi.mocked(computeMenuPosition).mock.calls.length;
+        fire();
+        expect(vi.mocked(computeMenuPosition).mock.calls.length).toBe(afterClose);
         vi.unstubAllGlobals();
     });
 });

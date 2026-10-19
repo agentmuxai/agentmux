@@ -102,6 +102,11 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
 
     const onOpenChangeMenu = (open: boolean) => {
         if (!open) {
+            // The menu is leaving the DOM: stop following its anchor and
+            // container (autoUpdate, and the container's resize observer).
+            cleanupAutoUpdate?.();
+            cleanupAutoUpdate = null;
+            floatingEl = null;
             setVisibleSubMenus({});
             setHoveredItems([]);
             setSubMenuPosition({});
