@@ -570,7 +570,9 @@ fn a_stamped_append_writes_the_line_and_its_stamp_together() {
         )
         .unwrap();
     let before = fs.line_state(ZONE, NAME).unwrap().unwrap();
-    assert!(fs.append_lines_stamped(ZONE, NAME, b"{\"c\":3}\n", "output.tsidx").is_err());
+    // A record is due again two seconds on.
+    let later = agentmux_common::time::now_ms() + 2000;
+    assert!(fs.append_lines_stamped_at(ZONE, NAME, b"{\"c\":3}\n", "output.tsidx", later).is_err());
     assert_eq!(fs.line_state(ZONE, NAME).unwrap().unwrap(), before);
 }
 
