@@ -226,6 +226,13 @@ jobs:
       matrix:
         os: ${{ fromJSON(needs.changes.outputs.rust_os || '["windows-latest", "ubuntu-latest"]') }}
     runs-on: ${{ matrix.os }}
+    # Test binaries with line tables only, not full debug info: backtraces
+    # keep file and line, and the biggest part of codegen and link time for 18
+    # large test binaries goes (docs/specs/SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19.md
+    # §5 Phase 4; ~4.5 of the ~6.5 nextest minutes were compiling).
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
     # Both legs block, per SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21.md R2.
     # Ubuntu used to be `continue-on-error` — it spent ~6 min on every PR and
     # could not fail one, while Windows (14-15 min, the slowest leg) was the
@@ -270,6 +277,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # The mold linker: linking the large srv test binaries is a sizeable
+      # share of the nextest step (same spec, Phase 4).
+      - name: Use the mold linker (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        uses: rui314/setup-mold@v1
 
       # Kept byte-for-byte in sync with the identical step in
       # ci-nightly-build.yml — the nightly has had this since it was added;
