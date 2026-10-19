@@ -1,0 +1,166 @@
+name: Performance check (nightly, Windows)
+
+# Compares the latest nightly Windows portable (B) with the previous nightly build (A) on the memory lab
+# (scripts/perf/memory-lab): the same 12-agent workload, runs interleaved A B A B ..., medians and ranges, flags where a
+# figure moved by more than its margin in scripts/perf/memory-lab/budget.json, and the list of what was merged between
+# the two builds. Where a build sits is decided by `nightly.mjs plan`.
+#
+# REPORT ONLY. Nothing here fails on a number, and it is not a required check for any PR. The result is the job summary
+# and the uploaded artifact. Later phases add the issue for a flagged change and the history on a data branch.
+#
+# Runs after the nightly artifacts build (which GitHub starts between 10:28 and 11:36 UTC and which takes about
+# 25 minutes). It looks that build up rather than using a workflow_run trigger, which has not fired reliably in this
+# repo (see nightly-release.yml).
+
+on:
+  schedule:
+    - cron: '30 13 * * *'
+  workflow_dispatch:
+    inputs:
+      b-run:
+        description: 'Run of "CI — nightly artifacts" to test as B (blank: the latest with a windows-portable artifact)'
+        required: false
+        default: ''
+      runs:
+        description: 'Runs of the lab per side (the nightly does 4)'
+        required: false
+        default: '4'
+      panes:
+        description: 'Agents (the nightly standard is 12)'
+        required: false
+        default: '12'
+      rounds:
+        description: 'Rounds (the nightly standard is 10)'
+        required: false
+        default: '10'
+
+concurrency:
+  group: perf-regression
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  compare:
+    name: lab, previous nightly against latest
+    runs-on: windows-latest
+    # About 5 minutes a run, 8 runs, plus setup (Phase 0 sizing on this runner type).
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      # The lab's CDP client needs the `ws` package; nothing else here uses node_modules.
+      - run: npm ci --ignore-scripts
+
+      - name: Pick the builds
+        id: plan
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          B_RUN: ${{ inputs.b-run }}
+        run: |
+          args=()
+          [ -n "$B_RUN" ] && args+=(--b-run "$B_RUN")
+          node scripts/perf/memory-lab/nightly.mjs plan --out plan.json "${args[@]}"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-portable
+          run-id: ${{ steps.plan.outputs.b-run }}
+          github-token: ${{ github.token }}
+          path: archive-b
+
+      - uses: actions/download-artifact@v4
+        if: ${{ steps.plan.outputs.a-run != '' }}
+        with:
+          name: windows-portable
+          run-id: ${{ steps.plan.outputs.a-run }}
+          github-token: ${{ github.token }}
+          path: archive-a
+
+      - name: Extract the portables
+        shell: bash
+        run: |
+          extract() {
+            local side=$1
+            archive=$(ls "archive-$side"/agentmux-*-x64-portable.7z | head -n 1)
+            7z x "$archive" -o"portable-$side" -y > /dev/null
+            # The folder holding agentmux.exe, wherever the archive puts it (with or without a top-level folder).
+            exe=$(find "portable-$side" -name agentmux.exe | head -n 1)
+            if [ -z "$exe" ]; then
+              echo "::error::no agentmux.exe in the extracted portable $side; top level:"
+              ls -la "portable-$side"
+              exit 1
+            fi
+            echo "$(echo "$side" | tr a-z A-Z)_PORTABLE=$(dirname "$exe")" >> "$GITHUB_ENV"
+          }
+          extract b
+          [ -d archive-a ] && extract a
+          exit 0
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          prefix-key: perf-regression
+
+      - name: Run the lab (A and B interleaved)
+        if: ${{ steps.plan.outputs.a-run != '' }}
+        shell: bash
+        env:
+          RUNS: ${{ inputs.runs || '4' }}
+          PANES: ${{ inputs.panes || '12' }}
+          ROUNDS: ${{ inputs.rounds || '10' }}
+        run: |
+          node scripts/perf/memory-lab/ab.mjs --a-portable "$A_PORTABLE" --b-portable "$B_PORTABLE" \
+            --a-label a --b-label b --runs "$RUNS" --out perf-out \
+            --margins scripts/perf/memory-lab/budget.json \
+            -- --panes "$PANES" --rounds "$ROUNDS" --seed 1 --port 9333
+
+      # No earlier build to compare with (the first night, or its portable has expired): B alone, so the numbers still exist.
+      - name: Run the lab (B alone)
+        if: ${{ steps.plan.outputs.a-run == '' }}
+        shell: bash
+        env:
+          RUNS: ${{ inputs.runs || '4' }}
+          PANES: ${{ inputs.panes || '12' }}
+          ROUNDS: ${{ inputs.rounds || '10' }}
+        run: |
+          for n in $(seq 1 "$RUNS"); do
+            node scripts/perf/memory-lab/run.mjs --portable "$B_PORTABLE" --label "b$n" \
+              --panes "$PANES" --rounds "$ROUNDS" --seed 1 --port 9333 --out perf-out
+          done
+          node scripts/perf/memory-lab/spread.mjs perf-out/b*/result.json --md perf-out/spread.md
+
+      - name: Report
+        if: always()
+        shell: bash
+        run: |
+          args=(--plan plan.json)
+          [ -f perf-out/compare.md ] && args+=(--compare perf-out/compare.md)
+          [ -f perf-out/spread.md ] && args+=(--spread perf-out/spread.md)
+          node scripts/perf/memory-lab/nightly.mjs report "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the numbers
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-regression-${{ github.run_id }}
+          path: |
+            plan.json
+            perf-out/ab.json
+            perf-out/compare.md
+            perf-out/compare.json
+            perf-out/spread.md
+            perf-out/*/result.json
+            perf-out/*/summary.md
+            perf-out/*/instance.log
+          if-no-files-found: warn
+          retention-days: 90
