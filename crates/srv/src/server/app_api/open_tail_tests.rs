@@ -3,7 +3,7 @@
 
 //! `agent:open_tail`: the slice, where it sits, and that it reads through the
 //! WAL reader pool only.
-//! docs/specs/SPEC_AGENT_OPEN_FIRST_SCREEN_THEN_REST_2026_10_19.md
+//! The open-first-screen design (#5156), under #5141.
 
 use super::*;
 use crate::backend::storage::filestore::{FileMeta, FileOpts};
@@ -295,4 +295,68 @@ async fn the_command_is_registered_and_answers_with_the_frontends_field_names() 
     assert_eq!(v["stream"], serde_json::json!("b:blk-open-tail-rpc"));
     assert_eq!(v["end_line"].as_u64().unwrap(), v["start_line"].as_u64().unwrap() + v["lines"].as_array().unwrap().len() as u64);
     assert!(v.get("gen_mismatch").is_none() && v.get("snapshot").is_none(), "absent fields are omitted");
+}
+
+#[test]
+fn a_slice_with_no_turn_start_reaches_back_to_the_turn_that_began_before_it() {
+    let (fs, dir) = file_store("longturn");
+    let mut all = vec![user(0), line(0, 100)];
+    // One long running turn: 600 records of about 1 KB each, no turn start among the last 64 KB.
+    all.push(user(1));
+    all.extend((0..600).map(|i| line(i, 1000)));
+    seed(&fs, &all);
+    let r = run(&fs, cmd(Some(64 * 1024)));
+    assert!(r.lines[0].contains("\"question 1\""), "starts at the running turn's user message, not mid-turn: {}", &r.lines[0][..60]);
+    assert_eq!(r.lines.len(), 601, "the whole running turn, which fits the restore budget");
+    assert_eq!(r.end_line.unwrap(), r.start_line.unwrap() + r.lines.len() as u64);
+    assert_eq!(r.lines, all[r.start_line.unwrap() as usize..]);
+    assert!(r.has_more_before.unwrap());
+    let whole = fs.read_file(BLOCK, "output").unwrap().unwrap();
+    assert_eq!(&whole[r.start_byte.unwrap() as usize..r.end_byte.unwrap() as usize], format!("{}\n", r.lines.join("\n")).as_bytes());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_turn_longer_than_the_restore_budget_may_start_mid_turn() {
+    let (fs, dir) = file_store("hugeturn");
+    let mut all = vec![user(0)];
+    all.extend((0..1800).map(|i| line(i, 1000))); // about 1.8 MB, no other turn start
+    seed(&fs, &all);
+    let r = run(&fs, cmd(Some(64 * 1024)));
+    assert!(!r.lines[0].contains("\"type\":\"user\""), "no turn start within the budget: the slice stays the 64 KB one");
+    assert!(r.lines.len() < 200, "{} lines", r.lines.len());
+    assert_eq!(r.end_line.unwrap(), r.start_line.unwrap() + r.lines.len() as u64);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn start_and_end_byte_are_exact_utf8_file_offsets_for_multibyte_text() {
+    let (fs, dir) = file_store("utf8");
+    let all: Vec<String> = (0..400)
+        .map(|i| format!("{{\"i\":{i},\"text\":\"日本語のテキスト 🎉🚀 ça va très bien {}\"}}", "é".repeat(i % 30)))
+        .collect();
+    seed(&fs, &all);
+    let r = run(&fs, cmd(Some(2 * 1024)));
+    let whole = fs.read_file(BLOCK, "output").unwrap().unwrap();
+    let (start, end) = (r.start_byte.unwrap() as usize, r.end_byte.unwrap() as usize);
+    let joined = format!("{}\n", r.lines.join("\n"));
+    assert_eq!(&whole[start..end], joined.as_bytes(), "the bytes at the offsets are exactly the returned lines");
+    assert_eq!(end - start, joined.len(), "end_byte - start_byte is the UTF-8 length of the lines and their newlines");
+    assert!(joined.len() > joined.chars().count(), "the text really is multibyte");
+    assert_eq!(r.size.unwrap() as usize, whole.len());
+    assert_eq!(end, whole.len());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_huge_tail_bytes_is_clamped_to_the_restore_budget() {
+    let (fs, dir) = file_store("clamp");
+    let all: Vec<String> = (0..3000).map(|i| line(i, 1000)).collect(); // about 3 MB
+    seed(&fs, &all);
+    let r = run(&fs, cmd(Some(u64::MAX)));
+    let bytes: usize = r.lines.iter().map(|l| l.len() + 1).sum();
+    assert!(bytes <= (1 << 20) + 2048, "{bytes} bytes returned for tail_bytes = u64::MAX");
+    assert!(r.lines.len() > 500);
+    assert_eq!(r.end_line, Some(3000));
+    let _ = std::fs::remove_dir_all(dir);
 }

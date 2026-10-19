@@ -2,7 +2,7 @@
 
 /**
  * Request for `agent:open_tail`: an agent pane's first screen from one small
- * read (docs/specs/SPEC_AGENT_OPEN_FIRST_SCREEN_THEN_REST_2026_10_19.md §3.1).
+ * read (the open-first-screen design, #5156, under #5141).
  */
 export type CommandAgentOpenTailData = { block_id: string, 
 /**

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! `agent:open_tail`: an agent pane's first screen from one small read.
-//! docs/specs/SPEC_AGENT_OPEN_FIRST_SCREEN_THEN_REST_2026_10_19.md §3.1
+//! The open-first-screen design (#5156), under #5141.
 //!
 //! The pane used to open with three or four calls (the snapshot, the line
 //! count, a range of up to 10,000 lines) before it showed anything, and those
@@ -18,7 +18,7 @@
 //! usable counter epoch comes back without `stream`/`gen`/line positions and
 //! the pane opens the way it always did.
 
-use super::blockfile::{trim_to_last_turns, trim_to_tail_bytes};
+use super::blockfile::{is_claude_turn_start, trim_to_last_turns, trim_to_tail_bytes};
 use super::*;
 
 use crate::backend::storage::filestore::{is_blank_line, FileStore, SnapshotReader};
@@ -30,6 +30,9 @@ const DEFAULT_TAIL_BYTES: u64 = 64 * 1024;
 const MAX_CATCH_UP_BYTES: i64 = 4 << 20;
 /// The most a tail read grows to when the newest line is larger than the window.
 const MAX_WINDOW_BYTES: i64 = 16 << 20;
+/// The most a slice is extended back to reach a turn start, and the most
+/// `tail_bytes` asks for: the pane's restore size today.
+const RESTORE_BUDGET_BYTES: i64 = 1 << 20;
 /// How much of the receive-time sidecar's end is read to stamp the slice.
 const TSIDX_WINDOW_BYTES: i64 = 64 * 1024;
 
@@ -205,40 +208,68 @@ fn read_slice(r: &SnapshotReader<'_>, zone: &str, cmd: &CommandAgentOpenTailData
             return Ok(Read::Mismatch(state.gen));
         }
     }
-    let want = cmd.tail_bytes.filter(|b| *b > 0).unwrap_or(DEFAULT_TAIL_BYTES) as i64;
-    // Read twice the budget, so the trimming below sees lines it must drop and
-    // moves the start up to a turn start the way `read_range`'s tail_bytes does
-    // (it only does that when the byte budget cut something).
-    let Some(window) = read_window(r, zone, state.complete_end, want.saturating_mul(2))? else {
+    let want = cmd.tail_bytes.filter(|b| *b > 0).unwrap_or(DEFAULT_TAIL_BYTES).min(RESTORE_BUDGET_BYTES as u64) as i64;
+    // Read twice the budget, so the trimming sees lines it must drop and moves
+    // the start up to a turn start the way `read_range`'s tail_bytes does (it
+    // only does that when the byte budget cut something).
+    let Some(window) = read_window(r, zone, state.complete_end, want * 2)? else {
         return Ok(Read::Uncounted { size: state.size });
     };
     // A counter that disagrees with the bytes (more lines read than it counts) can't position anything.
     if window.len() as u64 > state.lines {
         return Ok(Read::Uncounted { size: state.size });
     }
-    let offsets: Vec<i64> = window.iter().map(|(o, _)| *o).collect();
-    let stamps = read_stamps(r, zone, &offsets)?.filter(|s| s.len() == window.len());
+    let mut kept = trim_window(r, zone, window, cmd.tail_turns, want)?;
 
-    // Trim by the rules `blockfile:read_range` uses, on the same shape.
-    let mut trimmed = BlockfileReadRangeResult {
-        lines: window.iter().map(|(_, l)| l.clone()).collect(),
-        stamps,
-        ..Default::default()
-    };
-    if let Some(turns) = cmd.tail_turns.filter(|t| *t > 0) {
-        trim_to_last_turns(&mut trimmed, 0, turns as usize);
+    // A first screen must not start mid-turn, or the pane would show one turn
+    // as two rows once the rest fills in. When the slice has no turn start
+    // (one long running turn, which is when opening is slowest), reach back to
+    // the nearest one, up to the restore budget; a turn longer than that may
+    // start mid-turn.
+    let starts_a_turn = kept.0.first().map(|(_, l)| is_claude_turn_start(l)).unwrap_or(true);
+    if !starts_a_turn && (kept.0.len() as u64) < state.lines && want < RESTORE_BUDGET_BYTES {
+        if let Some(big) = read_window(r, zone, state.complete_end, RESTORE_BUDGET_BYTES)? {
+            let first_offset = kept.0[0].0;
+            let at = big.iter().position(|(o, _)| *o == first_offset);
+            if let Some(at) = at {
+                if let Some(j) = big[..=at].iter().rposition(|(_, l)| is_claude_turn_start(l)) {
+                    let reach: Vec<(i64, String)> = big[j..].to_vec();
+                    let offsets: Vec<i64> = reach.iter().map(|(o, _)| *o).collect();
+                    let stamps = read_stamps(r, zone, &offsets)?.filter(|s| s.len() == reach.len());
+                    kept = (reach, stamps);
+                }
+            }
+        }
     }
-    trim_to_tail_bytes(&mut trimmed, 0, want as usize);
-    let cut = window.len() - trimmed.lines.len();
-    let lines: Vec<(i64, String)> = window.into_iter().skip(cut).collect();
+    let (lines, stamps) = kept;
     Ok(Read::Slice(Slice {
         gen: state.gen,
         size: state.size,
         lines,
-        stamps: trimmed.stamps,
+        stamps,
         end_byte: state.complete_end,
         total_lines: state.lines,
     }))
+}
+
+/// `window` trimmed by the rules `blockfile:read_range` uses (`tail_turns`,
+/// then `tail_bytes`), with its receive-time stamps.
+fn trim_window(
+    r: &SnapshotReader<'_>,
+    zone: &str,
+    window: Vec<(i64, String)>,
+    tail_turns: Option<u32>,
+    want: i64,
+) -> Result<(Vec<(i64, String)>, Option<Vec<i64>>), StoreError> {
+    let offsets: Vec<i64> = window.iter().map(|(o, _)| *o).collect();
+    let stamps = read_stamps(r, zone, &offsets)?.filter(|s| s.len() == window.len());
+    let mut trimmed = BlockfileReadRangeResult { lines: window.iter().map(|(_, l)| l.clone()).collect(), stamps, ..Default::default() };
+    if let Some(turns) = tail_turns.filter(|t| *t > 0) {
+        trim_to_last_turns(&mut trimmed, 0, turns as usize);
+    }
+    trim_to_tail_bytes(&mut trimmed, 0, want as usize);
+    let cut = window.len() - trimmed.lines.len();
+    Ok((window.into_iter().skip(cut).collect(), trimmed.stamps))
 }
 
 /// The agent's session snapshot, from reader snapshots: the global store first
