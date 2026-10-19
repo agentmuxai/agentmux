@@ -48,8 +48,11 @@ describe("placement rules", () => {
         expect([0, 1, 2].map((i) => showsTimeAxis(i, 3, 1))).toEqual([false, false, true]);
         // 2 columns of 4: the last row, both columns
         expect([0, 1, 2, 3].map((i) => showsTimeAxis(i, 4, 2))).toEqual([false, false, true, true]);
-        // 2 columns of 5: the lone chart in the last row
-        expect([0, 1, 2, 3, 4].map((i) => showsTimeAxis(i, 5, 2))).toEqual([false, false, false, false, true]);
+        // 2 columns of 5: the left column ends with the lone chart in the last row,
+        // the right column a row higher; both bottoms draw labels.
+        expect([0, 1, 2, 3, 4].map((i) => showsTimeAxis(i, 5, 2))).toEqual([false, false, false, true, true]);
+        // 2 columns of 3
+        expect([0, 1, 2].map((i) => showsTimeAxis(i, 3, 2))).toEqual([false, true, true]);
     });
 
     it("draws y labels on the left column only when every chart shares a range", () => {
@@ -75,7 +78,7 @@ describe("createAxisColumns", () => {
         // Effects start once the root has returned, so the reset is driven from outside it.
         const { cols, setSet, dispose } = createRoot((dispose) => {
             const [set, setSet] = createSignal(["a"]);
-            return { cols: createAxisColumns(set), setSet, dispose };
+            return { cols: createAxisColumns(() => set().join(",")), setSet, dispose };
         });
         cols.report(0, "a", 30);
         cols.report(0, "b", 44);
@@ -83,6 +86,9 @@ describe("createAxisColumns", () => {
         expect(cols.widthFor(0)).toBe(44);
         expect(cols.widthFor(1)).toBe(20);
         expect(cols.widthFor(2)).toBe(0);
+        // A new array with the same charts (every sample makes one) keeps them.
+        setSet(["a"]);
+        expect(cols.widthFor(0)).toBe(44);
         setSet(["x"]);
         expect(cols.widthFor(0)).toBe(0);
         dispose();

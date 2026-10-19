@@ -243,6 +243,13 @@ describe("SingleLinePlot text zoom and placement", () => {
         expect(container.querySelector(".sysinfo-chart-title")?.textContent).toMatch(/^CPU/);
     });
 
+    it("reports a y-axis width of 0 when it has no y labels, so its column isn't kept wide", async () => {
+        const reported: number[] = [];
+        mountWith(1, { yLabels: false, onAxisWidth: (w) => reported.push(w) });
+        await vi.advanceTimersByTimeAsync(200);
+        expect(reported).toEqual([0]);
+    });
+
     it("marks a top-row chart, so its title keeps clear of the floating buttons", async () => {
         const { container } = mountWith(1, { top: true });
         await vi.advanceTimersByTimeAsync(200);

@@ -268,6 +268,8 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
         const { width, height } = size();
         if (width <= 0 || height <= 0) return;
         chart = new uPlot(options(width, height), windows(), container);
+        // No y labels to measure: say so, so an old width doesn't keep the column wide.
+        if (bare() || props.yLabels === false) queueMicrotask(() => props.onAxisWidth?.(0));
     };
 
     onMount(() => {

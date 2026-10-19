@@ -9,7 +9,7 @@
  * docs/specs/SPEC_SYSINFO_TEXT_ZOOM_DENSITY_AND_ONE_ZOOM_PATH_2026_10_18.md §5.
  */
 
-import { createEffect, createSignal, on, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, on, type Accessor } from "solid-js";
 
 /** The axis label font at 100% zoom, in px. */
 export const AXIS_FONT_PX = 12;
@@ -35,10 +35,13 @@ export const timeAxisPx = (zoom: number, labels: boolean): number =>
 export const minFullChartPx = (zoom: number, timeLabels: boolean): number =>
     Math.round(MIN_PLOT_PX * zoom) + topPaddingPx(zoom) + timeAxisPx(zoom, timeLabels);
 
-/** Only the bottom chart of each column draws time labels (§5 C.2 rule 2). Charts fill rows left to right. */
+/**
+ * Only the bottom chart of each column draws time labels (§5 C.2 rule 2): the one
+ * with no chart below it. Charts fill rows left to right, so with an odd count in
+ * two columns the right column ends a row higher.
+ */
 export function showsTimeAxis(index: number, count: number, columns: number): boolean {
-    const rows = Math.ceil(count / columns);
-    return Math.floor(index / columns) === rows - 1;
+    return index + columns >= count;
 }
 
 /** When every chart in a row has the same y range, only the leftmost draws y labels (§5 C.2 rule 3). */
@@ -56,12 +59,15 @@ export const sharesPercentRange = (keys: readonly string[]): boolean =>
 /**
  * One y-axis width per column, so the plots in a column start at the same x and
  * time reads straight down (§5 C.2 rule 6). Each chart reports the width its own
- * labels need; each gets back its column's widest. Cleared when `reset` changes
- * (a new set of charts), so a chart that left doesn't keep a column wide.
+ * labels need; each gets back its column's widest. Cleared when `reset`'s value
+ * changes (a new set of charts), so a chart that left doesn't keep a column wide.
+ * Compared by value: pass a string (the metric keys joined), not a fresh array
+ * per sample, or every sample would clear it and relayout every chart (#5133).
  */
-export function createAxisColumns(reset: Accessor<unknown>) {
+export function createAxisColumns(reset: Accessor<string>) {
     const [widths, setWidths] = createSignal<Record<string, number>>({});
-    createEffect(on(reset, () => setWidths({}), { defer: true }));
+    const key = createMemo(reset);
+    createEffect(on(key, () => setWidths({}), { defer: true }));
     return {
         report(column: number, key: string, width: number): void {
             const id = `${column}:${key}`;
