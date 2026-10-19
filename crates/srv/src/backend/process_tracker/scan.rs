@@ -56,7 +56,10 @@ fn with_snapshot<T>(after: Option<std::time::Instant>, f: impl FnOnce(&sysinfo::
         snap.sys.refresh_processes_specifics(
             sysinfo::ProcessesToUpdate::All,
             true,
+            // `nothing()` still reads every thread of every process (sysinfo's
+            // "tasks"); the scan reads only process-level fields.
             sysinfo::ProcessRefreshKind::nothing()
+                .without_tasks()
                 .with_cmd(sysinfo::UpdateKind::Always)
                 .with_environ(sysinfo::UpdateKind::Always)
                 .with_memory(),

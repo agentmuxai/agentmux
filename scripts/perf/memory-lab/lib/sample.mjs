@@ -40,8 +40,23 @@ export function lastSample(text) {
     return footprint ? { ...records[records.length - 1], footprint } : records[records.length - 1];
 }
 
-/** What the lab's own scripted agents run as: the fake Claude is a Node script, so its process is a pane's child. */
-export const FAKE_CLI_ROOTS = "node";
+/**
+ * What the lab's own scripted agents run as: the fake Claude is a Node script, so its process is a pane's child.
+ * On Linux a node process's name reads `MainThread`, which would otherwise count each agent in the app's host group.
+ */
+export const FAKE_CLI_ROOTS = "node,MainThread";
+
+/** The names an agent's own CLI process can have (the scripted one is a Node script; a real one is `claude`), compared lower-case without `.exe`. */
+const AGENT_CLI_NAMES = new Set(["node", "mainthread", "claude", "codex", "gemini"]);
+
+/**
+ * The processes counted as the app that are an agent's provider process: the lab runs those as the panes' children and the
+ * budget does not count them. A platform that names the process differently (Linux: `MainThread`) would otherwise inflate
+ * the app total silently, so the lab stops on this at its first sample instead of reporting it.
+ */
+export function agentProcessesCountedAsApp(procs) {
+    return (procs ?? []).filter((p) => p.app && AGENT_CLI_NAMES.has(String(p.name ?? "").toLowerCase().replace(/\.exe$/, "")));
+}
 
 /**
  * `memtree` labels a process by its command line's `--type=`; on Linux a

@@ -28,7 +28,7 @@ What is **not** known: the spread on a GitHub-hosted runner (different CPU count
 ## 3. What the operator needs to decide
 
 1. **Which numbers are gated.** Proposed: the app total and the renderers. srv is reported but not gated: its run-to-run spread (15%) is wider than the changes worth catching, and the one srv difference seen between a recycled and a control run did not repeat.
-2. **How the lines are set.** Proposed: let the job run report-only for about two weeks (14 nightlies), then set each line at the highest of those runs plus a margin the operator picks (10% is a starting point), and tighten it as the budget work lands. An absolute line at the 500 MB target would fail every night today (the same 12-agent load measures about 1.35 GB).
+2. **How the lines are set.** Proposed: let the job run report-only for about two weeks (14 nightlies), then set each line at the highest of those runs plus a margin the operator picks (10% is a starting point), and tighten it as the budget work lands. An absolute line at the 500 MB target would fail every night today (the same 12-agent load measures about 1.0 to 1.1 GB on a development machine).
 3. **Where it may block.** Proposed: stay nightly and informational (a failed nightly opens a conversation, not a blocked PR) until the lines have held for a few weeks; only then consider a PR-time check on PRs that touch the renderer, which needs a build per push.
 4. **Who is told.** Not built: a failing nightly in `enforce` mode fails the workflow run, which shows in the Actions tab; a message to a channel is a separate decision.
 

@@ -18,7 +18,7 @@ import { CpuLedger, cpuBetween } from "./lib/cpu.mjs";
 import { generateConversation } from "./lib/conversation.mjs";
 import { commandName, portableExe } from "./lib/driver.mjs";
 import { draftText, recycleMark, recycleSaving, scrollArmed, scrollRestored } from "./lib/recycle.mjs";
-import { allocatorRoots, dumpedProcesses, lastSample, mainPage, withChromiumRoles } from "./lib/sample.mjs";
+import { agentProcessesCountedAsApp, allocatorRoots, dumpedProcesses, FAKE_CLI_ROOTS, lastSample, mainPage, withChromiumRoles } from "./lib/sample.mjs";
 import { agentsWithoutTurns, compare, compareRuns, comparisonTable, cpuTable, runsTable, wallSummary, groupOf, groupSample, inMegabytes, median, MB, steady, table, transcriptGrowthProblem } from "./lib/summary.mjs";
 
 const proc = (pid, name, role, app, privateMB, commitMB = privateMB * 2) => ({ pid, name, role, app, private: privateMB * MB, commit: commitMB * MB });
@@ -466,6 +466,45 @@ describe("CPU and round time", () => {
         expect(mismatch({ ...same, workloadVersion: 1 }, { ...same, workloadVersion: 2 })).toMatch(/workload versions/);
         expect(mismatch({ ...same }, { ...same, workloadVersion: 1 })).toBeNull(); // no stamp is version 1
         expect(mismatch({ ...same, workloadVersion: 2 }, { ...same, workloadVersion: 2 })).toBeNull();
+    });
+});
+
+describe("Linux process roles", () => {
+    // The roles of a real 12-pane Linux run (Ubuntu, CEF): the CDP step names the GPU process "GPU" and a utility process by its service.
+    const role = (role, name = "agentmux-cef") => groupOf({ role, name, app: true });
+
+    it("groups Chromium's Linux roles as the Windows ones", () => {
+        expect(role("renderer")).toBe("renderer");
+        expect(role("GPU")).toBe("gpu");
+        expect(role("gpu-process")).toBe("gpu");
+        expect(role("utility")).toBe("utility");
+        expect(role("storage.mojom.StorageService")).toBe("utility");
+        expect(role("tracing.mojom.TracingService")).toBe("utility");
+        expect(role("zygote")).toBe("utility");
+        expect(role("zygote-forked")).toBe("utility");
+        expect(role("main", "agentmux-launcher")).toBe("host");
+        expect(role("main", "agentmux-srv")).toBe("srv");
+        expect(role("crashpad-handler")).toBe("other");
+    });
+});
+
+describe("an agent's process is never the app", () => {
+    const proc = (name, app) => ({ pid: 1, name, role: "main", app });
+
+    it("names the agent CLI's process on each platform among the panes' roots", () => {
+        const roots = FAKE_CLI_ROOTS.split(",");
+        expect(roots).toContain("node"); // Windows (node.exe is matched without its extension) and macOS
+        expect(roots).toContain("MainThread"); // Linux: a node process's name reads MainThread
+    });
+
+    it("finds an agent CLI that was counted as the app, by any of those names", () => {
+        const counted = agentProcessesCountedAsApp([proc("node.exe", true), proc("MainThread", true), proc("node", true), proc("claude", true)]);
+        expect(counted).toHaveLength(4);
+    });
+
+    it("leaves the app's own processes and the panes' children alone", () => {
+        expect(agentProcessesCountedAsApp([proc("agentmux.exe", true), proc("agentmux-cef", true), proc("agentmux-srv", true), proc("node.exe", false), proc("MainThread", false)])).toEqual([]);
+        expect(agentProcessesCountedAsApp(undefined)).toEqual([]);
     });
 });
 

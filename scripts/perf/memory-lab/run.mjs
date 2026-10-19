@@ -34,7 +34,7 @@ import { generateConversation } from "./lib/conversation.mjs";
 import { connect, installScript, launch, layoutFor, portableExe } from "./lib/driver.mjs";
 import { driftWarning, withReplacedSrv } from "./lib/srv.mjs";
 import { runRecycle, recycleSaving } from "./lib/recycle.mjs";
-import { cpuLedger, osSample, portBelongsTo, takeSample } from "./lib/sample.mjs";
+import { agentProcessesCountedAsApp, cpuLedger, osSample, portBelongsTo, takeSample } from "./lib/sample.mjs";
 import { agentsWithoutTurns, cpuTable, groupSample, inMegabytes, steady, table, transcriptGrowthProblem, wallSummary } from "./lib/summary.mjs";
 import { cpuBetween } from "./lib/cpu.mjs";
 
@@ -241,6 +241,10 @@ async function attempt(args, ctx) {
 
         const mark = async (round) => {
             const s = await osSample(memtree, instance.pid, args.port);
+            const strays = agentProcessesCountedAsApp(s.procs);
+            if (strays.length) {
+                throw new Error(`${strays.length} agent CLI process(es) are counted as the app (${[...new Set(strays.map((p) => p.name))].join(", ")}): the app total would include the agents. Add the process name to FAKE_CLI_ROOTS in lib/sample.mjs.`);
+            }
             const g = groupSample(s);
             const row = { round, appMB: appMB(s), groupsMB: Object.fromEntries(Object.entries(g.groups).filter(([, v]) => v.procs).map(([k, v]) => [k, Math.round((v.private / 1048576) * 10) / 10])) };
             curve.push(row);
