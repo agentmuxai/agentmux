@@ -15,6 +15,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, openSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { findOpenLines, OPEN_TAP, READ_OPENS } from "./agentopen.mjs";
 import { DETACH_FRAMES, FRAME_PROBE, mergeFrameRecords, READ_FRAMES } from "./frames.mjs";
 import { DETACH_LONG_TASKS, LONG_TASK_OBSERVER, mergeLongTaskRecords, READ_LONG_TASKS } from "./longtasks.mjs";
 import { timedCall } from "./sendsegments.mjs";
@@ -303,6 +304,56 @@ export async function connect(port, home, workDir) {
             const id = await ev(`[...document.querySelectorAll('.tab[data-tab-id]')][${index}]?.getAttribute('data-tab-id')`);
             await session.clickSelector(`.tab[data-tab-id="${id}"]`);
             await sleep(800);
+        },
+
+        /**
+         * Closes an agent's pane and opens the agent again in the same tab, as a user does (close the pane, then My Agents or the
+         * palette), and waits for the app's own `[agent-open]` line for the new pane (and, up to `restTimeoutS`, its `[agent-open-rest]`).
+         * The agent keeps its conversation: it is the store's copy that the new pane reads. Changes `agent.blockId` to the new pane's.
+         */
+        async reopen(agent, { settleMs = 1500, timeoutS = 60, restTimeoutS = 30 } = {}) {
+            await session.clickSelector(`.tab[data-tab-id="${agent.tabId}"]`);
+            await sleep(800);
+            const closed = await ev(`(async () => {
+              const layout = window.getLayoutModelForStaticTab && window.getLayoutModelForStaticTab();
+              const node = layout && layout.getNodeByBlockId(${JSON.stringify(agent.blockId)});
+              if (!node) return "no-node";
+              await layout.closeNode(node.id);
+              return "closed";
+            })()`);
+            if (closed !== "closed") throw new Error(`could not close ${agent.name}'s pane (${closed})`);
+            for (let waited = 0; ; waited += 250) {
+                if (!(await ev(`!!document.querySelector('[data-blockid="${agent.blockId}"]')`))) break;
+                if (waited > 15_000) throw new Error(`${agent.name}'s pane was still on screen 15 s after it was closed`);
+                await sleep(250);
+            }
+            await sleep(settleMs); // srv deletes the block and frees the agent's lease
+            await ev(OPEN_TAP);
+            const rpcStart = Date.now();
+            const opened = await rpc("agent.open", { agent_id: agent.id, tab_id: agent.tabId, focus: true });
+            const rpcMs = Date.now() - rpcStart;
+            if (!opened?.block_id) throw new Error(`agent.open for ${agent.name} returned ${JSON.stringify(opened)}`);
+            agent.blockId = opened.block_id;
+            let lines = { open: null, rest: null };
+            let tapRewraps = 0;
+            const look = async () => {
+                const record = await ev(READ_OPENS);
+                tapRewraps = record?.rewraps ?? tapRewraps;
+                lines = findOpenLines(record, agent.blockId);
+            };
+            // The open's line comes when the page has been quiet for a while after the reveal; the rest's line, when the older history has loaded.
+            const until = Date.now() + timeoutS * 1000;
+            while (Date.now() < until && !lines.open) {
+                await sleep(500);
+                await look();
+            }
+            const restUntil = Date.now() + restTimeoutS * 1000;
+            // A build without the first-screen open loads the whole history before it paints, and logs no rest line.
+            while (lines.open && lines.open.first_screen != null && !lines.rest && Date.now() < restUntil) {
+                await sleep(500);
+                await look();
+            }
+            return { rpcStart, rpcMs, ...lines, tapRewraps };
         },
 
         /** One message to every agent (or to `blockIds`): each plays the next scripted turn. `staggerMs` offsets them, as real agents aren't in lockstep. */

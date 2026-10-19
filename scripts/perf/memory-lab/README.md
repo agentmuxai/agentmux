@@ -186,6 +186,27 @@ layout objects, listeners, tool blocks and the text inside them), so a restored
 page can be set against a live one at the same point: a restore that mounts tool
 bodies a live page had unloaded shows in `toolTextKB`.
 
+## Opening an agent again
+
+`--open-agents N` closes the first N agents' panes after everything else has been measured, then opens each again with the
+same request the My Agents list makes (`agent.open`), and records how long it took to get to the first screen:
+`result.opens` (and a line in the summary). The pane already logs one `[agent-open]` line per open (the phases since it
+mounted: `first_screen` on a build with the first-screen open, `painted` before it, `revealed`, `quiet`) and an
+`[agent-open-rest]` line when the older history has finished loading; the lab reads them in the page. What it adds is the
+start of the request, which is before the pane exists, so `firstScreenMs` is from the request, not from the mount, and the
+longest main-thread task (the Long Tasks API, 50 ms or more) while the open waited and while it ran.
+
+`--heavy-turns K --heavy-kb S` first has the first agent play K extra turns of about S KB each (one turn is many tool
+results; the fake CLI doesn't stream those, so a big turn is quick to play). That agent's open is reported as `heavy`, the
+others as `regular`: `--heavy-turns 1 --heavy-kb 600` is one long turn that still fits the 1 MB first slice,
+`--heavy-kb 2048` one that does not, and `--heavy-turns 80` a conversation of tens of MB. The extra turns are played after
+the memory, CPU, I/O and long-task figures are taken, so those are the same with or without these options; the regular
+turns of the scripted conversation are unchanged. A build that logs no `first_screen` phase (before the first-screen open)
+gets `painted` instead, and the lab does not wait for a rest line from it.
+
+`compare.mjs` shows the median first screen of regular and heavy opens and the worst main-thread task, report only; the
+nightly history keeps them as `open_first_screen_ms`, `open_heavy_first_screen_ms` and `open_longest_task_ms`.
+
 ## The nightly check
 
 `.github/workflows/perf-regression.yml` runs every day after the nightly artifacts build. It takes the latest build

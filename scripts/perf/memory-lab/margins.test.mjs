@@ -59,7 +59,7 @@ describe("the margins the nightly performance check flags at", () => {
         const head = times(4, (i) => run(`h${i}`, { io: { writtenMB: { srv: 14600 + i } }, slowEvals: { total: 3 }, storeLock: { longestHeldMs: 900 } }));
         const { measures, flags } = measuresComparison(compareRuns(base, head));
         expect(Object.keys(measures)).toEqual([
-            "app_mb", "renderer_mb", "srv_mb", "app_cpu_s", "srv_cpu_s", "renderer_cpu_s", "gpu_cpu_s", "round_ms", "srv_written_mb", "store_lock_max_ms", "slow_page_commands",
+            "app_mb", "renderer_mb", "srv_mb", "app_cpu_s", "srv_cpu_s", "renderer_cpu_s", "gpu_cpu_s", "round_ms", "srv_written_mb", "store_lock_max_ms", "slow_page_commands", "open_first_screen_ms", "open_heavy_first_screen_ms", "open_longest_task_ms",
         ]);
         expect(measures.srv_written_mb).toMatchObject({ flag: true });
         expect(measures.srv_written_mb.a).toBeCloseTo(14001.5);
