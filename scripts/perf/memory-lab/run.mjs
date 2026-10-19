@@ -36,7 +36,7 @@ import { driftWarning, withReplacedSrv } from "./lib/srv.mjs";
 import { runRecycle, recycleSaving } from "./lib/recycle.mjs";
 import { agentProcessesCountedAsApp, cpuLedger, osSample, portBelongsTo, takeSample } from "./lib/sample.mjs";
 import { agentsWithoutTurns, cpuTable, groupSample, inMegabytes, steady, table, transcriptGrowthProblem, wallSummary } from "./lib/summary.mjs";
-import { cpuBetween } from "./lib/cpu.mjs";
+import { cpuBetween, writtenBetween } from "./lib/cpu.mjs";
 import { storeLockOf } from "./lib/storelock.mjs";
 import { slowSendsAgainstLongTasks, summariseLongTasks } from "./lib/longtasks.mjs";
 
@@ -258,6 +258,7 @@ async function attempt(args, ctx) {
         if (cpuLedger.totals().app === 0) throw new Error("no process reported CPU time: the memtree in use predates per-process CPU (give none to have the lab build the current one)");
         // The CPU of the workload is what is spent after this point; startup and building the layout are before it.
         const cpuAtStart = cpuLedger.totals();
+        const writtenAtStart = cpuLedger.writtenTotals();
         const roundMs = [];
         const roundWindows = [];
         const sendLog = [];
@@ -292,6 +293,12 @@ async function attempt(args, ctx) {
         const summary = inMegabytes(steady(samples));
         const cpu = { fromRound: 0, seconds: cpuBetween(cpuAtStart, cpuLedger.totals()), note: "highest CPU time seen per process, summed per group; includes the settle and the forced-GC final" };
         const wall = wallSummary(roundMs);
+        // A group with a process whose counter was never readable has no total (null, not a short sum or "0 MB"); with no counter
+        // anywhere (a memtree without it, or an OS that would not say) there is no `io` at all.
+        const incomplete = cpuLedger.writeIncomplete();
+        const writtenMB = writtenBetween(writtenAtStart, cpuLedger.writtenTotals());
+        for (const g of incomplete) writtenMB[g] = null;
+        const io = !Object.values(writtenMB).some((v) => v != null) ? null : { fromRound: 0, writtenMB, incompleteGroups: incomplete, note: "highest write counter seen per process, summed per group (Windows and Linux: bytes passed to write calls; macOS: bytes written to disk)" };
         const rawLong = await driver.longTasks().catch(() => null);
         const pageLongTasks = summariseLongTasks(rawLong, roundWindows);
         const sendsVsLong = slowSendsAgainstLongTasks(sendLog, rawLong);
@@ -335,6 +342,7 @@ async function attempt(args, ctx) {
             final,
             steady: summary,
             cpu,
+            io,
             wall,
             // The slowest page command of the run: a machine near the driver's limit (90 s) shows here before it fails.
             slowestEvalMs: driver.slowestEvalMs(),
@@ -347,7 +355,7 @@ async function attempt(args, ctx) {
             slowEvals: driver.slowEvals(), // { total, slowest }: every command that took 5 s or more, the 30 slowest listed
         };
         writeFileSync(join(dir, "result.json"), JSON.stringify(result, null, 1));
-        const md = [`# ${args.label}`, "", `${args.panes} agents over ${layout.length} tab(s), ${playedRounds} rounds (${args.gapS} s apart)${args.holdMinutes > 0 ? `, then held idle ${args.holdMinutes} min` : ""}, forced GC, median of ${summary.samples} samples.`, "", table(summary), "", cpuTable(cpu, wall), ...(pageLongTasks ? ["", `Page main thread: ${pageLongTasks.count} long task(s) of 50 ms or more, ${pageLongTasks.totalMs} ms in all, longest ${pageLongTasks.maxMs} ms, ${pageLongTasks.over1s} over 1 s; ${sendsVsLong.slowSends} send(s) took over 5 s, ${sendsVsLong.overlappingLongTask} of them while a long task of 500 ms or more ran.${pageLongTasks.truncated ? ` Only the first ${pageLongTasks.recorded} long tasks were timed: the totals, rounds and overlaps cover those.` : ""}`] : []), ...(result.storeLock ? ["", `Store lock: longest hold of srv's transcript store connection ${result.storeLock.longestHeldMs} ms${result.storeLock.longestHeldSite ? ` (${result.storeLock.longestHeldSite})` : ""}, ${result.storeLock.holds} hold(s) and ${result.storeLock.waits} wait(s) of 500 ms or more.`] : []), ...notes.map((n) => `\n> ${n}`)].join("\n");
+        const md = [`# ${args.label}`, "", `${args.panes} agents over ${layout.length} tab(s), ${playedRounds} rounds (${args.gapS} s apart)${args.holdMinutes > 0 ? `, then held idle ${args.holdMinutes} min` : ""}, forced GC, median of ${summary.samples} samples.`, "", table(summary), "", cpuTable(cpu, wall, io), ...(pageLongTasks ? ["", `Page main thread: ${pageLongTasks.count} long task(s) of 50 ms or more, ${pageLongTasks.totalMs} ms in all, longest ${pageLongTasks.maxMs} ms, ${pageLongTasks.over1s} over 1 s; ${sendsVsLong.slowSends} send(s) took over 5 s, ${sendsVsLong.overlappingLongTask} of them while a long task of 500 ms or more ran.${pageLongTasks.truncated ? ` Only the first ${pageLongTasks.recorded} long tasks were timed: the totals, rounds and overlaps cover those.` : ""}`] : []), ...(result.storeLock ? ["", `Store lock: longest hold of srv's transcript store connection ${result.storeLock.longestHeldMs} ms${result.storeLock.longestHeldSite ? ` (${result.storeLock.longestHeldSite})` : ""}, ${result.storeLock.holds} hold(s) and ${result.storeLock.waits} wait(s) of 500 ms or more.`] : []), ...notes.map((n) => `\n> ${n}`)].join("\n");
         writeFileSync(join(dir, "summary.md"), md + "\n");
         console.log("\n" + md);
         console.log(`\n-> ${join(dir, "result.json")}`);

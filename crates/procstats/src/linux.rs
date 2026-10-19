@@ -59,6 +59,14 @@ pub fn start_key(pid: u32) -> Option<u64> {
     parse_stat(&stat).map(|s| s.start_ticks)
 }
 
+/// `wchar` of `/proc/<pid>/io`: the bytes the process has passed to write calls (what Windows' `WriteTransferCount` counts),
+/// whether or not the page cache later coalesced them. Not `write_bytes` (what reached the block layer), which undercounts
+/// rewrites of the same pages and so is a poor measure of how much a program writes. Same user only.
+pub fn write_bytes(pid: u32) -> Option<u64> {
+    let io = std::fs::read_to_string(format!("/proc/{pid}/io")).ok()?;
+    io.lines().find_map(|l| l.strip_prefix("wchar:")).and_then(|v| v.trim().parse().ok())
+}
+
 pub fn cpu_count() -> usize {
     let n = unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) };
     if n > 0 { n as usize } else { 1 }

@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// CPU time of the app's processes over a lab run, per group. A process's CPU
+// CPU time, and bytes written, of the app's processes over a lab run, per group. A process's CPU
 // time is cumulative and dies with it, and a recycled renderer is a new
 // process, so the total is built from the highest CPU time seen for every
 // process (the ledger), not from the last sample alone.
@@ -23,11 +23,38 @@ export class CpuLedger {
     /** Takes the `cpu_ns` of every app process of one memtree sample. */
     note(procs) {
         for (const p of procs ?? []) {
-            if (!p.app || p.cpu_ns == null) continue;
-            const key = `${p.pid}|${p.name}`;
-            const before = this.#seen.get(key);
-            if (!before || p.cpu_ns > before.ns) this.#seen.set(key, { ns: p.cpu_ns, group: groupOf(p) });
+            if (!p.app) continue; // a process with nothing readable is still noted: its group's write total is then incomplete
+            // The start time tells a process from a later one that reuses its PID (a recycled renderer, a restarted srv).
+            const key = `${p.pid}|${p.start_key ?? ""}|${p.name}`;
+            const before = this.#seen.get(key) ?? { ns: 0, written: 0, hasWritten: false, group: groupOf(p) };
+            this.#seen.set(key, {
+                ns: Math.max(before.ns, p.cpu_ns ?? 0),
+                written: Math.max(before.written, p.write_bytes ?? 0),
+                hasWritten: before.hasWritten || p.write_bytes != null,
+                group: before.group,
+            });
         }
+    }
+
+    /**
+     * The groups (and `app`) with a process whose write counter was never readable: a total over them
+     * is short by that process's writes, so it is not a measurement. A group with no process at all is not listed.
+     */
+    writeIncomplete() {
+        const groups = new Set();
+        for (const { hasWritten, group } of this.#seen.values()) if (!hasWritten) groups.add(group);
+        if (groups.size) groups.add("app");
+        return [...groups];
+    }
+
+    /** Bytes written so far, per group and `app`, counting every process seen. */
+    writtenTotals() {
+        const out = Object.fromEntries([...GROUPS, "app"].map((g) => [g, 0]));
+        for (const { written, group } of this.#seen.values()) {
+            out[group] += written;
+            out.app += written;
+        }
+        return out;
     }
 
     /** CPU seconds so far, per group and `app` (all of them), counting every process seen. */
@@ -39,6 +66,11 @@ export class CpuLedger {
         }
         return out;
     }
+}
+
+/** What was written between two `writtenTotals()`, in megabytes (MiB) to a tenth. */
+export function writtenBetween(start, end) {
+    return Object.fromEntries(Object.keys(end).map((g) => [g, Math.round((Math.max(0, end[g] - (start[g] ?? 0)) / 1048576) * 10) / 10]));
 }
 
 /** What was spent between two `totals()`, in seconds to a hundredth. */
