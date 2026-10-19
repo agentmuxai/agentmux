@@ -21,11 +21,11 @@
 //! deleted once unpacked. Its file and the unpacking folder carry this
 //! process' id, so two AgentMux instances downloading the same release never
 //! write over each other; whichever stages the folder first, the other uses.
-//! On Windows unpacking uses its own `tar.exe` (libarchive, which reads the
-//! release's LZMA2 `.7z`, and refuses `..` and absolute paths), by its full
-//! path so no other `tar` on `PATH` is run; a Windows too old for that fails
-//! with a message, and the release page still works. On Linux it is the
-//! system's `tar` (with `xz` for the `.tar.xz`).
+//! On Windows srv decodes the release's `.7z` itself (`update_unpack`,
+//! refusing `..`, absolute and drive paths): Windows 10's own `tar.exe` is
+//! libarchive without LZMA, so it can't read the release's LZMA2 + BCJ2 archive
+//! (`docs/specs/SPEC_UPDATE_UNPACK_7Z_IN_RUST_2026_10_19.md`). On Linux it is
+//! the system's `tar` (with `xz` for the `.tar.xz`).
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -503,13 +503,9 @@ async fn remove_abandoned_downloads(updates: &Path) {
     }
 }
 
+/// The system `tar`, for the Linux `.tar.xz` (Windows doesn't use it: `unpack_into`).
 fn tar_exe() -> PathBuf {
-    if cfg!(windows) {
-        let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
-        PathBuf::from(root).join("System32").join("tar.exe")
-    } else {
-        PathBuf::from("tar")
-    }
+    PathBuf::from("tar")
 }
 
 /// Whether the staged portable `folder` may be used by the AgentMux on
@@ -528,6 +524,43 @@ fn record_channel(folder: &Path, channel: &str) -> Result<(), String> {
     std::fs::write(&file, format!("{channel}\n")).map_err(|e| format!("can't write {}: {e}", file.display()))
 }
 
+/// Unpack the downloaded release `file` into the staging folder `partial`. On
+/// Windows the `.7z` is decoded in srv (`update_unpack`): Windows 10's own
+/// `tar.exe` has no LZMA. Elsewhere the `.tar.xz` goes through the system `tar`.
+async fn unpack_into(file: &Path, partial: &Path) -> Result<(), String> {
+    if cfg!(windows) {
+        let (file, partial) = (file.to_path_buf(), partial.to_path_buf());
+        let run = tokio::task::spawn_blocking(move || crate::backend::update_unpack::unpack_7z(&file, &partial));
+        return match tokio::time::timeout(UNPACK_TIMEOUT, run).await {
+            Err(_) => Err("unpacking took more than 10 minutes and was stopped".to_string()),
+            Ok(Err(e)) => Err(format!("unpacking stopped unexpectedly: {e}")),
+            Ok(Ok(unpacked)) => unpacked,
+        };
+    }
+    use agentmux_common::win32::NoWindow;
+    let mut tar = tokio::process::Command::new(tar_exe());
+    // tar needs nothing of this instance: none of its AGENTMUX_* variables.
+    crate::backend::pane_env::sanitize_external_command(&mut tar);
+    let run = tar
+        .arg("-xf")
+        .arg(file)
+        .arg("-C")
+        .arg(partial)
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .no_window()
+        .output();
+    match tokio::time::timeout(UNPACK_TIMEOUT, run).await {
+        Err(_) => Err("unpacking took more than 10 minutes and was stopped".to_string()),
+        Ok(Err(e)) => Err(format!("couldn't run tar to unpack it: {e}")),
+        Ok(Ok(o)) if !o.status.success() => {
+            let why = String::from_utf8_lossy(&o.stderr).lines().next().unwrap_or("").to_string();
+            Err(format!("tar couldn't unpack it ({why}); is `xz` installed?"))
+        }
+        Ok(Ok(_)) => Ok(()),
+    }
+}
+
 /// Unpack the release into `parent`, recording `channel` in it.
 async fn unpack_portable(file: &Path, version: &str, parent: &Path, channel: &str) -> Result<PathBuf, String> {
     let name = portable_folder_name(version);
@@ -541,31 +574,12 @@ async fn unpack_portable(file: &Path, version: &str, parent: &Path, channel: &st
     let partial = parent.join(format!(".{name}.{}.partial", std::process::id()));
     let _ = tokio::fs::remove_dir_all(&partial).await;
     tokio::fs::create_dir_all(&partial).await.map_err(|e| format!("can't write to {}: {e}", parent.display()))?;
-    use agentmux_common::win32::NoWindow;
-    let mut tar = tokio::process::Command::new(tar_exe());
-    // tar needs nothing of this instance: none of its AGENTMUX_* variables.
-    crate::backend::pane_env::sanitize_external_command(&mut tar);
-    let run = tar
-        .arg("-xf")
-        .arg(file)
-        .arg("-C")
-        .arg(&partial)
-        .stdin(std::process::Stdio::null())
-        .kill_on_drop(true)
-        .no_window()
-        .output();
-    let checked = match tokio::time::timeout(UNPACK_TIMEOUT, run).await {
-        Err(_) => Err("unpacking took more than 10 minutes and was stopped".to_string()),
-        Ok(Err(e)) => Err(format!("couldn't run tar to unpack it: {e}")),
-        Ok(Ok(o)) if !o.status.success() => {
-            let why = String::from_utf8_lossy(&o.stderr).lines().next().unwrap_or("").to_string();
-            let hint = if cfg!(windows) { "this Windows may be too old to read .7z files" } else { "is `xz` installed?" };
-            Err(format!("tar couldn't unpack it ({why}); {hint}"))
-        }
-        Ok(Ok(_)) if !is_staged_portable(&unpacked_root(&partial), version) => {
+    let checked = match unpack_into(file, &partial).await {
+        Err(e) => Err(e),
+        Ok(()) if !is_staged_portable(&unpacked_root(&partial), version) => {
             Err(format!("what was unpacked isn't an AgentMux {version} portable"))
         }
-        Ok(Ok(_)) => record_channel(&unpacked_root(&partial), channel),
+        Ok(()) => record_channel(&unpacked_root(&partial), channel),
     };
     let canonical = parent.join(&name);
     let result = match checked {
@@ -695,24 +709,15 @@ mod tests {
         assert!(!dir.path().join("again.7z.part").exists());
     }
 
-    /// Windows' tar.exe reads the archive and the folder lands in place;
-    /// a zip stands in for the release `.7z` (both go through libarchive).
+    /// The release's `.7z` (a fixture with its LZMA2 + BCJ2 coders, see
+    /// `update_unpack`) is decoded and the folder lands in place. A zip used to
+    /// stand in for it here, which Windows' tar.exe reads, and hid that it
+    /// can't read the real thing.
     #[cfg(windows)]
     #[tokio::test]
-    async fn unpacks_with_windows_tar_and_checks_what_came_out() {
+    async fn unpacks_the_release_7z_and_checks_what_came_out() {
         let dir = tempfile::tempdir().unwrap();
-        let src = dir.path().join("src");
-        fake_portable(&src, "0.59.27");
-        let archive = dir.path().join("release.zip");
-        let made = std::process::Command::new(tar_exe())
-            .args(["-a", "-cf"])
-            .arg(&archive)
-            .arg("-C")
-            .arg(&src)
-            .arg(".")
-            .status()
-            .unwrap();
-        assert!(made.success());
+        let archive = std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src/backend/testdata/update-portable-0.59.27.7z"));
         let parent = dir.path().join("apps");
         std::fs::create_dir_all(&parent).unwrap();
         let local = "local-main-b28b7a-f62415cd";

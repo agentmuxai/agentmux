@@ -135,6 +135,7 @@ pub mod tool_calls;
 pub mod tower_sampler;
 pub mod update_check;
 pub mod update_download;
+pub mod update_unpack;
 pub mod update_install;
 pub mod update_restart;
 pub mod upgrade_notice;
