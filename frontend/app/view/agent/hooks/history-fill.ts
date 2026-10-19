@@ -15,6 +15,33 @@
  * Pure of Solid and RPC: `useHistoryPagination` supplies the page read.
  */
 
+/**
+ * The UTF-8 length of `text` in bytes, the unit of `tail_bytes` and the feed's restore
+ * budget. `text.length` counts UTF-16 code units, which is a third of the bytes of CJK
+ * text and a half of an emoji's. A lone surrogate counts as 3, as `TextEncoder` writes
+ * its replacement character.
+ */
+export function utf8Bytes(text: string): number {
+    let bytes = 0;
+    for (let i = 0; i < text.length; i++) {
+        const c = text.charCodeAt(i);
+        if (c < 0x80) bytes += 1;
+        else if (c < 0x800) bytes += 2;
+        else if (c >= 0xd800 && c <= 0xdbff && i + 1 < text.length && (text.charCodeAt(i + 1) & 0xfc00) === 0xdc00) {
+            bytes += 4;
+            i++;
+        } else bytes += 3;
+    }
+    return bytes;
+}
+
+/** The bytes of `lines` as stored: each line and its newline. */
+export function linesBytes(lines: readonly string[]): number {
+    let bytes = 0;
+    for (const line of lines) bytes += utf8Bytes(line) + 1;
+    return bytes;
+}
+
 /** How long to wait before looking again while the user is active or the pane hidden. */
 export const FILL_HOLD_RECHECK_MS = 250;
 

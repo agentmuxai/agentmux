@@ -43,8 +43,8 @@ import { historyPin, type TranscriptSettleLatch } from "../transcript-cursor";
 
 import type { DocumentState, FilterState, LogFn } from "../types";
 import { logAgentOpenRest, markAgentOpen } from "../open-trace";
-import { planFill, runHistoryFill } from "./history-fill";
-import { OPEN_TAIL_BYTES, readOpenTail } from "./open-tail";
+import { linesBytes, planFill, runHistoryFill } from "./history-fill";
+import { OPEN_TAIL_BYTES, readOpenTail, startsAtTurn } from "./open-tail";
 
 export interface UseHistoryPaginationOptions {
     blockId: string;
@@ -162,6 +162,9 @@ const PAGE_SIZE = 200;
  * ~7 ms (SPEC_AGENT_OPEN_LATENCY_2026_09_27.md §4.5).
  */
 export const OLDER_PAGE_LINES = 2_000;
+
+/** The one output format whose turns the first screen's seam is placed by. */
+const CLAUDE_FORMAT = "claude-stream-json";
 
 /** The background fill waits until the user has done nothing in the window for this long. */
 const FILL_QUIET_MS = 1_000;
@@ -299,9 +302,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
         }
 
         setHistoryOffset(readStart);
-        let bytes = 0;
-        for (const line of resp.lines ?? []) bytes += line.length + 1;
-        return { lines: resp.lines?.length ?? 0, bytes, nodes: newNodes.length, trimmed: readStart > newOffset };
+        return { lines: resp.lines?.length ?? 0, bytes: linesBytes(resp.lines ?? []), nodes: newNodes.length, trimmed: readStart > newOffset };
     };
 
     /**
@@ -373,6 +374,10 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
             // A pane that was scrolled up goes back to its row once its history has
             // loaded, and that row may be older than a first screen.
             if (hasScrolledUpMemo(opts.blockId)) return false;
+            // Claude transcripts only: its turn starts are what a seam can safely sit at.
+            // The format may not be known yet; it is checked again after the read.
+            const format = opts.outputFormat();
+            if (format && format !== CLAUDE_FORMAT) return false;
             const tailTurns = opts.restoreTurns?.();
             const tail = await readOpenTail({
                 block_id: opts.blockId,
@@ -382,7 +387,14 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 ...(tailTurns ? { tail_turns: tailTurns } : {}),
             });
             if (!mounted) return true;
-            if (!tail) return false;
+            if (!tail || opts.outputFormat() !== CLAUDE_FORMAT) return false;
+            // The older part parses on its own later. A first screen that starts inside a
+            // long response would show it as two rows once that part arrives, so such a
+            // slice isn't used: the usual open parses it whole.
+            if (tail.start_line > 0 && !startsAtTurn(tail.lines[0])) {
+                opts.log("history", "first screen starts mid-turn; opening the usual way");
+                return false;
+            }
 
             let snapshot: any;
             if (tail.snapshot) {
@@ -435,8 +447,10 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 opts.model.dispatchPane({ type: "InitReady", at: Date.now() });
                 opts.onHistoryReady?.();
 
-                let sliceBytes = 0;
-                for (const line of tail.lines) sliceBytes += line.length + 1;
+                const sliceBytes =
+                    typeof tail.start_byte === "number" && typeof tail.end_byte === "number"
+                        ? tail.end_byte - tail.start_byte
+                        : linesBytes(tail.lines);
                 void fillRest(
                     tail.gen,
                     planFill({
@@ -511,7 +525,14 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
         opts.model.dispatchPane({ type: "InitStart" });
         markAgentOpen(opts.blockId, "history_start");
         (async () => {
-            if (await openFirstScreen()) return;
+            let firstScreen = false;
+            try {
+                firstScreen = await openFirstScreen();
+            } catch (err: any) {
+                // Before anything was painted: the usual open still works.
+                opts.log("history", `first screen failed (${err?.message ?? String(err)}); opening the usual way`, "warn");
+            }
+            if (firstScreen) return;
             // Fast path: try the reducer-state snapshot first. If it exists
             // and the schema version matches, restore wholesale and skip
             // the lossy 200-line NDJSON replay. Spec

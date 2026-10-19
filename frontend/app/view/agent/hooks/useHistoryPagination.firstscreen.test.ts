@@ -167,22 +167,25 @@ describe("first screen", () => {
 });
 
 describe("a failure in the first screen never leaves the pane waiting", () => {
-    it("before anything is painted, the usual open runs instead", async () => {
-        openTail.mockResolvedValue(tailOf(3, 100));
-        vi.mocked(RpcApi.AgentSessionReadCommand).mockResolvedValue({});
-        vi.mocked(RpcApi.BlockfileLineCountCommand).mockResolvedValue({ count: 0 });
-        // The parse of the first screen throws once; the usual open's read is fine.
-        const outputFormat = vi.fn().mockImplementationOnce(() => {
-            throw new Error("boom");
+    // The first screen calls outputFormat() before the read (1), after it (2), and to parse (3).
+    for (const failAt of [1, 3]) {
+        it(`before anything is painted (outputFormat throws on call ${failAt}), the usual open runs instead`, async () => {
+            openTail.mockResolvedValue(tailOf(3, 100));
+            vi.mocked(RpcApi.AgentSessionReadCommand).mockResolvedValue({});
+            vi.mocked(RpcApi.BlockfileLineCountCommand).mockResolvedValue({ count: 0 });
+            let calls = 0;
+            const outputFormat = vi.fn(() => {
+                if (++calls === failAt) throw new Error("boom");
+                return "claude-stream-json";
+            });
+            const { paneEvents, docEvents, settled } = mount({ outputFormat });
+            await flush();
+            expect(docEvents).toEqual([]);
+            expect(RpcApi.BlockfileLineCountCommand).toHaveBeenCalled();
+            expect(settled).toEqual(["empty"]);
+            expect(paneEvents.map((e) => e.type)).toEqual(["InitStart", "InitReady"]);
         });
-        outputFormat.mockReturnValue("claude-stream-json");
-        const { paneEvents, docEvents, settled } = mount({ outputFormat });
-        await flush();
-        expect(docEvents).toEqual([]);
-        expect(RpcApi.BlockfileLineCountCommand).toHaveBeenCalled();
-        expect(settled).toEqual(["empty"]);
-        expect(paneEvents.map((e) => e.type)).toEqual(["InitStart", "InitReady"]);
-    });
+    }
 
     it("after it is painted, fails open: sending is allowed, the live feed resumes, the pane is ready", async () => {
         openTail.mockResolvedValue(
@@ -203,6 +206,99 @@ describe("a failure in the first screen never leaves the pane waiting", () => {
         expect(paneEvents.map((e) => e.type)).toEqual(["InitStart", "InitFailed"]);
         expect(paneEvents[1].reason).toBe("overlay failed");
         expect(onHistoryReady).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe("the seam between the first screen and the rest", () => {
+    const delta = '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"text":"par"}}}';
+    const usual = () => {
+        vi.mocked(RpcApi.AgentSessionReadCommand).mockResolvedValue({});
+        vi.mocked(RpcApi.BlockfileLineCountCommand).mockResolvedValue({ count: 0 });
+    };
+
+    it("a first screen that starts mid-response isn't used: the usual open parses it whole", async () => {
+        openTail.mockResolvedValue(tailOf(3, 100, { lines: [delta, user("b"), user("c")] }));
+        usual();
+        const { docEvents } = mount();
+        await flush();
+        expect(docEvents).toEqual([]);
+        expect(RpcApi.BlockfileLineCountCommand).toHaveBeenCalled();
+    });
+
+    it("a first screen that starts at a user message is used", async () => {
+        openTail.mockResolvedValue(tailOf(3, 100));
+        const { docEvents } = mount();
+        await flush();
+        expect(docEvents).toHaveLength(1);
+        expect(RpcApi.BlockfileLineCountCommand).not.toHaveBeenCalled();
+    });
+
+    it("the start of the transcript has nothing above it to seam with, whatever its first line is", async () => {
+        openTail.mockResolvedValue(tailOf(3, 3, { lines: [delta, user("b"), user("c")] }));
+        const { docEvents } = mount();
+        await flush();
+        expect(docEvents).toHaveLength(1);
+        expect(RpcApi.BlockfileLineCountCommand).not.toHaveBeenCalled();
+    });
+
+    it("only Claude transcripts use a first screen: another format opens the usual way without a call", async () => {
+        usual();
+        mount({ outputFormat: () => "codex-json" });
+        await flush();
+        expect(openTail).not.toHaveBeenCalled();
+        expect(RpcApi.BlockfileLineCountCommand).toHaveBeenCalled();
+    });
+
+    it("a format that turns out not to be Claude's after the read opens the usual way", async () => {
+        openTail.mockResolvedValue(tailOf(3, 100));
+        usual();
+        let calls = 0;
+        const { docEvents } = mount({ outputFormat: () => (++calls === 1 ? "" : "codex-json") });
+        await flush();
+        expect(openTail).toHaveBeenCalledTimes(1);
+        expect(docEvents).toEqual([]);
+        expect(RpcApi.BlockfileLineCountCommand).toHaveBeenCalled();
+    });
+});
+
+describe("the restore budget counts bytes", () => {
+    const release = () => setLastInputForTests(60_000);
+    const cjkLine = JSON.stringify({ type: "user", message: { content: "中".repeat(100) } });
+    const encoded = (l: string) => new TextEncoder().encode(l).length;
+
+    it("counts UTF-8 bytes of the first screen, not UTF-16 units", async () => {
+        const lines = [cjkLine, cjkLine, cjkLine];
+        const bytes = lines.reduce((n, l) => n + encoded(l) + 1, 0);
+        expect(bytes).toBeGreaterThan(lines.reduce((n, l) => n + l.length + 1, 0) + 500);
+        openTail.mockResolvedValue(tailOf(3, 20_003, { lines }));
+        vi.mocked(RpcApi.BlockfileReadRangeCommand).mockResolvedValue({ lines: [], total: 0 });
+        mount({ restoreBytes: () => 1_000_000 });
+        await flush();
+        release();
+        await vi.waitFor(() => expect(RpcApi.BlockfileReadRangeCommand).toHaveBeenCalled(), { timeout: 4000 });
+        expect(vi.mocked(RpcApi.BlockfileReadRangeCommand).mock.calls[0][1].tail_bytes).toBe(1_000_000 - bytes);
+    });
+
+    it("uses the server's byte offsets for the first screen when it gives them", async () => {
+        openTail.mockResolvedValue(tailOf(3, 20_003, { start_byte: 1_000, end_byte: 41_000, size: 41_000 }));
+        vi.mocked(RpcApi.BlockfileReadRangeCommand).mockResolvedValue({ lines: [], total: 0 });
+        mount({ restoreBytes: () => 1_000_000 });
+        await flush();
+        release();
+        await vi.waitFor(() => expect(RpcApi.BlockfileReadRangeCommand).toHaveBeenCalled(), { timeout: 4000 });
+        expect(vi.mocked(RpcApi.BlockfileReadRangeCommand).mock.calls[0][1].tail_bytes).toBe(1_000_000 - 40_000);
+    });
+
+    it("counts UTF-8 bytes of each page it loads, so the next one asks for what is left", async () => {
+        openTail.mockResolvedValue(tailOf(3, 20_003));
+        const page = { lines: [cjkLine, cjkLine], total: 20_003, stream: "b:blk-1", gen: "g1" };
+        vi.mocked(RpcApi.BlockfileReadRangeCommand).mockResolvedValue(page);
+        mount({ restoreBytes: () => 1_000_000 });
+        await flush();
+        release();
+        await vi.waitFor(() => expect(vi.mocked(RpcApi.BlockfileReadRangeCommand).mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 4000 });
+        const [first, second] = vi.mocked(RpcApi.BlockfileReadRangeCommand).mock.calls.map((c) => c[1].tail_bytes as number);
+        expect(first - second).toBe(2 * (encoded(cjkLine) + 1));
     });
 });
 

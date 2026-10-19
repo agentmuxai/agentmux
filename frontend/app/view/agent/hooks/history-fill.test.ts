@@ -3,7 +3,33 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { FILL_HOLD_RECHECK_MS, planFill, runHistoryFill, type FillDeps } from "./history-fill";
+import { FILL_HOLD_RECHECK_MS, linesBytes, planFill, runHistoryFill, utf8Bytes, type FillDeps } from "./history-fill";
+
+describe("utf8Bytes", () => {
+    const enc = (t: string) => new TextEncoder().encode(t).length;
+
+    it("counts bytes, not UTF-16 units, as TextEncoder does", () => {
+        for (const t of ["", "plain ascii", "caf\u00e9", "\u4f60\u597d\u4e16\u754c", "\ud83d\ude00 emoji \ud83d\udc4d", "mixed \u4f60 a \ud83d\ude00 \u00e9"]) {
+            expect(utf8Bytes(t)).toBe(enc(t));
+        }
+    });
+
+    it("counts a lone surrogate as the 3 bytes of its replacement character", () => {
+        expect(utf8Bytes("\ud83d")).toBe(enc("\ud83d"));
+        expect(utf8Bytes("a\ude00b")).toBe(enc("a\ude00b"));
+    });
+
+    it("is three times the unit count for CJK, which line.length would miss", () => {
+        const cjk = "\u4e2d".repeat(100);
+        expect(cjk.length).toBe(100);
+        expect(utf8Bytes(cjk)).toBe(300);
+    });
+
+    it("linesBytes adds each line's newline", () => {
+        expect(linesBytes(["ab", "\u4e2d"])).toBe(2 + 1 + 3 + 1);
+        expect(linesBytes([])).toBe(0);
+    });
+});
 
 describe("planFill", () => {
     const base = { startLine: 9_900, endLine: 10_000, sliceBytes: 64_000, windowLines: 10_000 };

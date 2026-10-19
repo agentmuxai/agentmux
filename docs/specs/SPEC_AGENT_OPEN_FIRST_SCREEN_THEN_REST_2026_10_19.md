@@ -87,5 +87,9 @@ Each step lands behind measurement: before and after, with the `[agent-open]` ph
 ## 6. Risks
 
 - **A gap or duplicate between the slice and the live stream.** Mitigation: the slice carries `gen` and its end offset; the live stream resumes from it, with a test that appends during the open.
-- **Turn boundaries.** A byte-cut slice may start mid-turn. Cut at a line boundary, then drop leading lines up to the first turn start, as `tail_turns` does.
+- **Turn boundaries.** The older part loads later as its own parse, and a streamed text or thinking run that straddled the seam would get two ids and show as two rows. So the slice must start at a turn start (a user message), where no run crosses it:
+  - srv cuts at a line boundary, then drops leading lines up to the first turn start, as `tail_turns` does;
+  - if the newest 64 KB holds no turn start (one long turn), srv extends the slice backwards to the nearest turn start, up to the feed's restore budget (1 MB, today's restore size); only a turn longer than that starts mid-turn;
+  - the pane checks the first line. A slice that starts below line 0 on anything but a user message isn't used: the pane opens the usual way, which parses the window whole. It also uses the first screen only for `claude-stream-json`, the format whose turns it can place a seam by.
+- **Byte budgets.** `tail_bytes` and the feed's restore size are UTF-8 bytes. The pane counts the first screen from `end_byte - start_byte` when srv gives them, else from the lines' UTF-8 length, and each fill page the same way, so CJK and emoji text don't undercount.
 - **Older builds sharing the store.** This spec only reads, so it adds no new on-disk format.

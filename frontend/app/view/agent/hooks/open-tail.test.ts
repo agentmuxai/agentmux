@@ -7,7 +7,7 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: {} as Record<string, unknown> }));
 
 import { RpcApi } from "@/app/store/rpc-api";
-import { __resetOpenTailForTests, readOpenTail, usableOpenTail, type OpenTailResult } from "./open-tail";
+import { __resetOpenTailForTests, readOpenTail, startsAtTurn, usableOpenTail, type OpenTailResult } from "./open-tail";
 
 const good = (over: Partial<OpenTailResult> = {}): OpenTailResult => ({
     lines: ["a", "b", "c"],
@@ -96,5 +96,28 @@ describe("readOpenTail", () => {
         expect(await readOpenTail(REQ, { call })).toBeNull();
         expect(await readOpenTail(REQ, { call })).toBeNull();
         expect(call).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe("startsAtTurn", () => {
+    it("is true for a user message: no streamed run crosses it", () => {
+        expect(startsAtTurn('{"type":"user","message":{"role":"user","content":"hello"}}')).toBe(true);
+        expect(startsAtTurn('{"type":"user","message":{"content":[{"type":"text","text":"hi"}]}}')).toBe(true);
+    });
+
+    it("is false for a tool's result, which answers a call from the turn before it", () => {
+        expect(startsAtTurn('{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"x"}]}}')).toBe(false);
+    });
+
+    it("is false for a subagent's message", () => {
+        expect(startsAtTurn('{"type":"user","parent_tool_use_id":"toolu_1","message":{"content":"x"}}')).toBe(false);
+    });
+
+    it("is false for anything that may be the middle of a response", () => {
+        expect(startsAtTurn('{"type":"stream_event","event":{"type":"content_block_delta","delta":{"text":"par"}}}')).toBe(false);
+        expect(startsAtTurn('{"type":"assistant","message":{"content":[{"type":"text","text":"part"}]}}')).toBe(false);
+        expect(startsAtTurn("not json")).toBe(false);
+        expect(startsAtTurn("")).toBe(false);
+        expect(startsAtTurn(undefined)).toBe(false);
     });
 });

@@ -105,6 +105,26 @@ export function usableOpenTail(r: OpenTailResult | null | undefined): r is OpenT
 }
 
 /**
+ * Whether `line`, the first of a slice with older history above it, can start a parse by
+ * itself. The older part loads later as its own parse (history-fill.ts), and a streamed
+ * text or thinking run that straddled the seam would get two ids and show as two rows.
+ * A user message starts a turn, and no run crosses it. Anything else may be the middle of
+ * a response, so the pane opens the usual way, which parses it whole.
+ */
+export function startsAtTurn(line: string | undefined): boolean {
+    if (!line) return false;
+    try {
+        const rec = JSON.parse(line);
+        if (rec?.type !== "user" || rec.parent_tool_use_id) return false;
+        const content = rec.message?.content;
+        // A tool's result is a "user" record too, but it answers a call from the turn before it.
+        return !(Array.isArray(content) && content.length > 0 && content.every((c: any) => c?.type === "tool_result"));
+    } catch {
+        return false;
+    }
+}
+
+/**
  * Read the first screen. `null`: use the open's usual path (srv doesn't serve
  * the command, the read failed, or its answer has no usable line positions).
  */
