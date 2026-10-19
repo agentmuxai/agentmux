@@ -1,0 +1,49 @@
+name: Codex review gate sweep
+
+# Dispatches codex-review-gate.yml's `evaluate` (workflow_dispatch) for each
+# open PR whose head has no `Codex review` status, or a pending one older than
+# a Codex answer or muxreview note: an evaluation lost to an outage, a dropped
+# webhook or a cancelled run (#4900). Dispatching, rather than posting
+# statuses here, keeps each PR's evaluation in that PR's concurrency group in
+# codex-review-gate.yml, so it can't race an event-driven run. Dispatches made
+# with GITHUB_TOKEN do start runs, unlike other events it causes. It never
+# asks Codex anything. Logic: scripts/ci-codex-review-gate.mjs (`sweep`).
+#
+# Its own file since 2026-10-19: as a job in codex-review-gate.yml, every
+# scheduled run ended in startup_failure with no jobs and no error text
+# (docs/specs/SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19.md §5 Phase 6).
+# workflow_dispatch runs it by hand, which also shows any startup error.
+on:
+  # Off the top of the hour, where GitHub delays scheduled runs most.
+  schedule:
+    - cron: "17,47 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+  statuses: read
+  pull-requests: read
+  issues: read
+  actions: write
+concurrency:
+  group: codex-review-gate-sweep
+  cancel-in-progress: true
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # A schedule only ever runs on the default branch, so this is main's copy.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            scripts/ci-codex-review-gate.mjs
+            scripts/lib/github-rest.mjs
+            scripts/lib/is-main.mjs
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Dispatch the gate for PRs that missed an input
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SWEEP: "1"
+          DISPATCH_REF: ${{ github.ref_name }}
+        run: node scripts/ci-codex-review-gate.mjs

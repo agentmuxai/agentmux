@@ -642,9 +642,18 @@ describe("the workflow that runs the gate", () => {
     // WORKFLOW_FILE is the file the sweep dispatches; reading it proves it exists.
     const workflow = readFileSync(new URL(`../.github/workflows/${WORKFLOW_FILE}`, import.meta.url), "utf8");
 
-    it("takes the pr input the sweep sends, and runs the sweep on its schedule", () => {
+    it("takes the pr input the sweep sends", () => {
         expect(workflow).toMatch(/workflow_dispatch:\s*\n\s*inputs:\s*\n\s*pr:/);
-        expect(workflow).toMatch(/sweep:\s*\n\s*if: github\.event_name == 'schedule'/);
+    });
+
+    // Its own file since 2026-10-19: as a job here, its scheduled runs never
+    // started (SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19 §5 Phase 6).
+    it("leaves the sweep to codex-review-gate-sweep.yml, which runs it on a schedule", () => {
+        expect(workflow).not.toMatch(/^  schedule:/m);
+        const sweep = readFileSync(new URL("../.github/workflows/codex-review-gate-sweep.yml", import.meta.url), "utf8");
+        expect(sweep).toMatch(/^  schedule:\s*\n\s*- cron:/m);
+        expect(sweep).toContain('SWEEP: "1"');
+        expect(sweep).toMatch(/actions: write/);
     });
 
     it("checks out the workflow's own commit on the default branch, and never PR code", () => {
