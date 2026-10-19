@@ -275,6 +275,33 @@ describe("flashElement", () => {
         expect(animate).not.toHaveBeenCalled();
     });
 
+    describe("while the page is hidden (a minimized window runs no frames)", () => {
+        const setHidden = (hidden: boolean): void => {
+            Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+        };
+        afterEach(() => setHidden(false));
+
+        it("creates no animation, however many flashes arrive, and plays again once shown", () => {
+            const el = makeEl();
+            setHidden(true);
+            for (let i = 0; i < 200; i++) flashElement(el, { pattern: THREE, delayMs: 0 });
+            expect(animate).not.toHaveBeenCalled();
+            setHidden(false);
+            flashElement(el, { pattern: THREE, delayMs: 0 });
+            expect(animate).toHaveBeenCalledTimes(1);
+        });
+
+        it("a cancel while hidden starts no replacement animation", () => {
+            const el = makeEl();
+            flashElement(el, { pattern: THREE, delayMs: 0 });
+            flashElement(el, { pattern: SINGLE, delayMs: 0 });
+            animate.mockClear();
+            setHidden(true);
+            cancelFlashPattern(el, SINGLE);
+            expect(animate).not.toHaveBeenCalled();
+        });
+    });
+
     describe("cancelFlashPattern", () => {
         it("stops a flash that has nothing else with it", () => {
             const el = makeEl();
