@@ -128,11 +128,15 @@ pub async fn run_agent_summary_loop(mstore: Arc<Store>, filestore: Arc<FileStore
             if !digest::reads_output_format(&obj::meta_get_string(&block.meta, "agentOutputFormat", "")) {
                 continue;
             }
-            let Ok(Some(output)) = filestore.stat(&block_id, "output") else {
+            // The agent's own zone when it has content (the copy the pane reads),
+            // else the block's: the size is the "changed since" gate.
+            let Some((output_size, _)) =
+                crate::backend::transcript::source::TranscriptSource::resolve(&filestore, &mstore, &block_id).stat()
+            else {
                 continue;
             };
             let state = attempts.lock().unwrap().get(&block_id).copied().unwrap_or_default();
-            if skip_reason(false, state, output.size).is_some() {
+            if skip_reason(false, state, output_size).is_some() {
                 continue;
             }
             if !in_flight.lock().unwrap().insert(block_id.clone()) {
@@ -144,7 +148,6 @@ pub async fn run_agent_summary_loop(mstore: Arc<Store>, filestore: Arc<FileStore
             let event_bus = event_bus.clone();
             let attempts = attempts.clone();
             let in_flight = in_flight.clone();
-            let output_size = output.size;
 
             tokio::spawn(async move {
                 let result =

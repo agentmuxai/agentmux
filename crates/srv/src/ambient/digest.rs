@@ -65,9 +65,10 @@ pub(crate) fn is_hidden_reinjection_active(block_id: &str) -> bool {
 /// entries even on a streaming session full of delta lines.
 pub fn read_recent_activity_digest(
     filestore: &crate::backend::storage::filestore::FileStore,
+    mstore: &crate::backend::storage::store::Store,
     block_id: &str,
 ) -> Option<String> {
-    read_recent_activity(filestore, block_id).map(|activity| activity.text)
+    read_recent_activity(filestore, mstore, block_id).map(|activity| activity.text)
 }
 
 /// How the newest exchange in a block's recent activity ends. Decided in code,
@@ -107,8 +108,20 @@ pub fn reads_output_format(agent_output_format: &str) -> bool {
 }
 
 /// [`read_recent_activity_digest`]'s digest, with how the newest exchange ends.
+/// Read from the agent's zone in the global store when it has content, the
+/// block's own store otherwise (`TranscriptSource`).
 pub fn read_recent_activity(
     filestore: &crate::backend::storage::filestore::FileStore,
+    mstore: &crate::backend::storage::store::Store,
+    block_id: &str,
+) -> Option<RecentActivity> {
+    let source = crate::backend::transcript::source::TranscriptSource::resolve(filestore, mstore, block_id);
+    read_recent_activity_from(&source, block_id)
+}
+
+/// [`read_recent_activity`] from a resolved source.
+pub fn read_recent_activity_from(
+    source: &crate::backend::transcript::source::TranscriptSource<'_>,
     block_id: &str,
 ) -> Option<RecentActivity> {
     // Authoritative gate — checked before any byte is read. See
@@ -119,21 +132,13 @@ pub fn read_recent_activity(
     }
 
     const TAIL_BYTES: i64 = 96 * 1024;
-    let all_lines: Vec<String> = match filestore.stat(block_id, "output") {
-        Ok(Some(ref wf)) if wf.size > 0 => {
-            let tail_offset = (wf.size - TAIL_BYTES).max(0);
-            match filestore.read_at(block_id, "output", tail_offset, TAIL_BYTES) {
-                Ok((_, bytes)) => {
-                    let text = String::from_utf8_lossy(&bytes);
-                    text.lines()
-                        .filter(|l| !l.trim().is_empty())
-                        .map(|l| l.to_string())
-                        .collect()
-                }
-                _ => Vec::new(),
-            }
-        }
-        _ => Vec::new(),
+    let all_lines: Vec<String> = match source.tail(TAIL_BYTES) {
+        Some(tail) => String::from_utf8_lossy(&tail.bytes)
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| l.to_string())
+            .collect(),
+        None => Vec::new(),
     };
 
     let window: Vec<&str> = all_lines.iter().map(|s| s.as_str()).collect();
@@ -697,6 +702,7 @@ mod hidden_reinjection_registry_tests {
         // regardless of what's in the window (the whole point of finding
         // #8: the window itself can't be trusted for this decision).
         let filestore = crate::backend::storage::filestore::FileStore::open_in_memory().unwrap();
+        let mstore = crate::backend::storage::store::Store::open_in_memory().unwrap();
         let block_id = "block-digest-suppressed-pqr678";
         filestore
             .make_file(
@@ -716,10 +722,34 @@ mod hidden_reinjection_registry_tests {
             .unwrap();
 
         set_hidden_reinjection_active(block_id, true);
-        assert!(read_recent_activity_digest(&filestore, block_id).is_none());
+        assert!(read_recent_activity_digest(&filestore, &mstore, block_id).is_none());
 
         set_hidden_reinjection_active(block_id, false);
-        assert!(read_recent_activity_digest(&filestore, block_id).is_some());
+        assert!(read_recent_activity_digest(&filestore, &mstore, block_id).is_some());
+    }
+
+    /// An agent block's conversation lives in the agent's zone: a digest read
+    /// from it needs nothing in the block's own store.
+    #[test]
+    fn the_digest_reads_a_conversation_written_only_to_the_agents_zone() {
+        use crate::backend::storage::filestore::{FileMeta, FileOpts, FileStore};
+        use crate::backend::transcript::source::TranscriptSource;
+        let block_store = FileStore::open_in_memory().unwrap();
+        let global = FileStore::open_in_memory().unwrap();
+        let zone = "agent:digest-global-only:current";
+        global.make_file(zone, "output", FileMeta::new(), FileOpts::default()).unwrap();
+        let line = serde_json::json!({
+            "type": "assistant",
+            "message": { "content": [{ "type": "text", "text": "reply from the agent zone" }] }
+        })
+        .to_string();
+        global.append_lines(zone, "output", format!("{line}\n").as_bytes()).unwrap();
+        let source = TranscriptSource { fs: &global, zone: zone.to_string(), global: true };
+        let activity = read_recent_activity_from(&source, "block-digest-global-only").expect("a digest from the agent zone");
+        assert!(activity.text.contains("reply from the agent zone"), "{}", activity.text);
+        // And the block's own store, which holds nothing, gives nothing.
+        let own = TranscriptSource::own(&block_store, "block-digest-global-only");
+        assert!(read_recent_activity_from(&own, "block-digest-global-only").is_none());
     }
 }
 

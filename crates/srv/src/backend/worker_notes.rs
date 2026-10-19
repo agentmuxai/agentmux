@@ -303,7 +303,7 @@ fn last_words(mstore: &Store, filestore: &FileStore, block_id: &str) -> LastWord
     if !reads_output_format(&format) {
         return LastWords::default();
     }
-    let Some(activity) = read_recent_activity(filestore, block_id) else {
+    let Some(activity) = read_recent_activity(filestore, mstore, block_id) else {
         return LastWords::default();
     };
     let text = activity

@@ -607,6 +607,7 @@ partial list.
 | [`SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24`](SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md) | SPEC: one live instance per agent — an agent identity is driven by at most one process, across host, LAN and WAN |
 | [`SPEC_AGENT_TEARDOWN_SINGLE_PATH_2026_10_01`](SPEC_AGENT_TEARDOWN_SINGLE_PATH_2026_10_01.md) | SPEC: One teardown path for everything an agent owns |
 | [`SPEC_AGENT_TERMINAL_DRIVING_2026_10_15`](SPEC_AGENT_TERMINAL_DRIVING_2026_10_15.md) | SPEC: Agents drive terminals through MuxAPI: keys, screen, wait, commands, terminal panes |
+| [`SPEC_AGENT_TRANSCRIPT_SINGLE_COPY_2026_10_19`](SPEC_AGENT_TRANSCRIPT_SINGLE_COPY_2026_10_19.md) | Spec: an agent's transcript is written once, to the agent's own zone |
 | [`SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08`](SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md) | SPEC: Agent turns that return to the user, what started them, and a live status that says what is happening |
 | [`SPEC_AGENT_UNRESTRICTED_CAPTURE_WITH_ACCOUNTABILITY_2026_08_30`](SPEC_AGENT_UNRESTRICTED_CAPTURE_WITH_ACCOUNTABILITY_2026_08_30.md) | SPEC: Safe unrestricted screen capture for agents |
 | [`SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13`](SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md) | Spec: Modularize `frontend/app/view/agent/agent-view.tsx` |
