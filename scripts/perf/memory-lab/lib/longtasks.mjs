@@ -19,15 +19,28 @@ export const LONG_TASK_OBSERVER = `(() => {
     wsm.__labTapped = true;
     const orig = wsm.onmessage.bind(wsm);
     wsm.onmessage = function (e) {
+      // The send being timed: its answer carries its request id. When this handler first sees it is when the page's JS received the answer.
+      const watch = window.__labWatch;
+      if (watch && watch.arrival == null && typeof e.data === "string" && e.data.includes(watch.reqId)) {
+        watch.arrival = Date.now();
+        watch.eventAgeMs = Math.round((performance.now() - e.timeStamp) * 10) / 10;
+      }
       const cur = window.__labLong;
       if (cur) {
         const t = Date.now();
         const key = t - (t % 100);
-        const b = (cur.ws[key] ??= [0, 0, 0]);
+        const b = (cur.ws[key] ??= [0, 0, 0, 0]);
         const len = typeof e.data === "string" ? e.data.length : (e.data && e.data.byteLength) || 0;
         b[0]++;
         b[1] += len;
         if (len > b[2]) b[2] = len;
+        // How long the page's own handling of this message took (ms): if it fills the time, the page can't keep up with what arrives.
+        const t0 = performance.now();
+        try {
+          return orig(e);
+        } finally {
+          b[3] += performance.now() - t0;
+        }
       }
       return orig(e);
     };
@@ -61,7 +74,7 @@ export const LONG_TASK_OBSERVER = `(() => {
 })()`;
 
 /** Reads the observer's record back (null when it was never installed, e.g. after a reload). */
-export const READ_LONG_TASKS = `window.__labLong ? { n: window.__labLong.n, tasks: window.__labLong.tasks, top: window.__labLong.top, lag: window.__labLong.lag, ws: Object.entries(window.__labLong.ws).map(([k, v]) => [Number(k), v[0], v[1], v[2]]) } : null`;
+export const READ_LONG_TASKS = `window.__labLong ? { n: window.__labLong.n, tasks: window.__labLong.tasks, top: window.__labLong.top, lag: window.__labLong.lag, ws: Object.entries(window.__labLong.ws).map(([k, v]) => [Number(k), v[0], v[1], v[2], Math.round(v[3])]) } : null`;
 
 /** Stops the observer and forgets the page's record, so the next install starts a fresh one and the old one collects nothing more. */
 export const DETACH_LONG_TASKS = `(window.__labLongObserver && window.__labLongObserver.disconnect(), window.__labLongObserver = null, clearInterval(window.__labLagTimer), window.__labLong = null, true)`;

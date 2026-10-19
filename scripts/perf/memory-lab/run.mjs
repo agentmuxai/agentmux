@@ -394,7 +394,7 @@ async function attempt(args, ctx) {
             // The page's main thread (tasks of 50 ms or more) and each send's time, to tell a busy page from a waiting srv.
             pageLongTasks,
             sendsVsLongTasks: sendsVsLong,
-            sends: sendLog.map((s) => ({ ...s, start: new Date(s.start).toISOString(), pageStart: s.pageStart == null ? null : new Date(s.pageStart).toISOString(), ...segmentsOf(s) })),
+            sends: sendLog.map((s) => ({ ...s, start: new Date(s.start).toISOString(), pageStart: s.pageStart == null ? null : new Date(s.pageStart).toISOString(), respArrival: s.respArrival == null ? null : new Date(s.respArrival).toISOString(), ...segmentsOf(s) })),
             sendBreakdown: slowSendBreakdown(sendLog),
             // What the page's websocket received: the whole run's totals, and during each slow send's time in the page.
             wsArrivals: { totals: arrivalTotals(rawLong?.ws), duringSlowSends: arrivalsDuringSlowSends(rawLong?.ws, sendLog) },
