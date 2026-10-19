@@ -55,9 +55,11 @@ function main() {
     const marginsFile = take("--margins");
     const json = take("--json");
     const fromFile = marginsFile ? (() => { const j = JSON.parse(readFileSync(marginsFile, "utf8")); return j.margins ?? j; })() : {};
+    // A CPU margin object from a file is laid over the defaults, so a group it leaves out keeps its default instead of never flagging.
     const margins = {
         ...DEFAULT_MARGINS,
         ...fromFile,
+        ...(fromFile.cpuPct && typeof fromFile.cpuPct === "object" ? { cpuPct: { ...DEFAULT_MARGINS.cpuPct, ...fromFile.cpuPct } } : {}),
         ...(cpuFlag != null ? { cpuPct: Number(cpuFlag) } : {}),
         ...(wallFlag != null ? { wallPct: Number(wallFlag) } : {}),
     };
@@ -70,7 +72,7 @@ function main() {
     // `<base.json> <head.json>`, or comma-separated lists of runs of each side (several runs, interleaved, tell noise from change).
     const [basePaths, headPaths] = [take("--base") ?? argv[0], take("--head") ?? argv[1]].map((x) => (x ? x.split(",") : []));
     if (!basePaths.length || !headPaths.length) {
-        console.error("usage: compare.mjs <base result.json[,more]> <head result.json[,more]> [--md out.md] [--cpu-margin <pct for every group>] [--wall-margin <pct>]");
+        console.error("usage: compare.mjs <base result.json[,more]> <head result.json[,more]> [--md out.md] [--json out.json] [--margins <file>] [--cpu-margin <pct for every group>] [--wall-margin <pct>]");
         process.exit(2);
     }
     const base = basePaths.map((p) => JSON.parse(readFileSync(p, "utf8")));

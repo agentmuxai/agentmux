@@ -71,4 +71,29 @@ describe("the margins the nightly performance check flags at", () => {
         const bare = measuresComparison(compareRuns([{ label: "x", steady: { app: { privateMB: 1 }, groups: {} } }], [{ label: "y", steady: { app: { privateMB: 1 }, groups: {} } }]));
         expect(bare.measures.srv_written_mb).toEqual({ a: null, b: null, change_pct: null, flag: false });
     });
+
+    it("fill a CPU margin file from the defaults, so a group it leaves out still flags", async () => {
+        const { spawnSync } = await import("node:child_process");
+        const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+        const { tmpdir } = await import("node:os");
+        const { join } = await import("node:path");
+        const dir = mkdtempSync(join(tmpdir(), "lab-margins-"));
+        try {
+            const mk = (name, app) => {
+                const path = join(dir, name);
+                writeFileSync(path, JSON.stringify({ ...run(name), layout: { panes: 12, tabs: [12] }, rounds: 10, seed: 1, gapSeconds: 15, platform: "win32", settleSeconds: 20, steady: { samples: 3, app: { privateMB: 900 }, groups: { renderer: { privateMB: 600 } } }, cpu: { seconds: { app, srv: 100, renderer: 250, gpu: 30 } } }));
+                return path;
+            };
+            const margins = join(dir, "m.json");
+            writeFileSync(margins, JSON.stringify({ margins: { cpuPct: { gpu: 50 } } })); // names only gpu
+            const out = join(dir, "out.json");
+            const base = `${mk("a1", 400)},${mk("a2", 401)}`;
+            const head = `${mk("b1", 450)},${mk("b2", 451)}`; // app CPU +12%
+            spawnSync(process.execPath, [join(process.cwd(), "scripts/perf/memory-lab/compare.mjs"), "--base", base, "--head", head, "--margins", margins, "--json", out], { encoding: "utf8" });
+            const { readFileSync } = await import("node:fs");
+            expect(JSON.parse(readFileSync(out, "utf8")).flags).toContain("app_cpu_s");
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
 });

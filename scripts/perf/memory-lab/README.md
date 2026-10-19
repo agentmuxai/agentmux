@@ -78,13 +78,19 @@ How to compare two builds (or the same build with and without a change):
 3. `node scripts/perf/memory-lab/compare.mjs --base a1,a2,a3,a4 --head b1,b2,b3,b4`
    (paths to the `result.json` files; two positional files still work). It
    prints each side's median with its lowest-highest, the change in percent,
-   and flags CPU or round time past its margin. The default margins are per
-   metric, from the measured noise of identical runs: +10% for app and srv CPU,
-   +20% for the renderers' (and other groups') CPU and for the round time;
-   `--cpu-margin` / `--wall-margin` set one number for all CPU or for the round
-   time. A flag also needs the two sides' lowest-highest ranges not to overlap.
-   The flags are report-only and the margins are a starting point: the operator
-   sets the real ones.
+   and flags a measure past its margin. The default margins are per metric,
+   from the measured noise of identical runs on a runner: srv bytes written
+   +3% (it varies 0.2-0.4% between runs); app, srv and renderer CPU +10%; GPU
+   CPU and the other groups +20%; round time +20%; memory report-only unless a
+   `memoryPct` is given (it varies 13-30% on a runner). `--margins <file>` reads
+   them from a JSON file (`budget.json`'s `margins`, or the margins themselves;
+   a CPU object without a `default` is filled from the defaults); `--cpu-margin`
+   / `--wall-margin` set one number for all CPU or for the round time. A flag
+   also needs the two sides' lowest-highest ranges not to overlap. `--json
+   <file>` writes the comparison as the nightly history line's `measures`
+   (`app_mb`, `srv_written_mb`, ..., each `{a, b, change_pct, flag}`, `a` being
+   the base) and the names that flagged. The flags are report-only and the
+   margins are a starting point: the operator sets the real ones.
    A run whose slowest page command (`result.slowestEvalMs`) took over 10 s is
    named in the output too: the window was unresponsive for that long during a
    round.
