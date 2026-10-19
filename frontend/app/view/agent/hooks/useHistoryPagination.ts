@@ -400,13 +400,18 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
         // (srv has no open tail for this file, or a snapshot only that path
         // restores from).
         const openFirstScreen = async (): Promise<boolean> => {
+            // Gave up on the first screen: the usual open runs next. `fallback_at` says when, `fallback` why.
+            const fallBack = (why: string): false => {
+                markAgentOpen(opts.blockId, "fallback_at", { fallback: why });
+                return false;
+            };
             // A pane that was scrolled up goes back to its row once its history has
             // loaded, and that row may be older than a first screen.
-            if (hasScrolledUpMemo(opts.blockId)) return false;
+            if (hasScrolledUpMemo(opts.blockId)) return fallBack("scrolled_up");
             // Claude transcripts only: its turn starts are what a seam can safely sit at.
             // The format may not be known yet; it is checked again after the read.
             const format = opts.outputFormat();
-            if (format && format !== CLAUDE_FORMAT) return false;
+            if (format && format !== CLAUDE_FORMAT) return fallBack("format");
             const tailTurns = opts.restoreTurns?.();
             const tail = await readOpenTail({
                 block_id: opts.blockId,
@@ -416,13 +421,15 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 ...(tailTurns ? { tail_turns: tailTurns } : {}),
             });
             if (!mounted) return true;
-            if (!tail || opts.outputFormat() !== CLAUDE_FORMAT) return false;
+            markAgentOpen(opts.blockId, "first_screen_attempt", { tail_lines: tail?.lines.length ?? 0 });
+            if (!tail) return fallBack("no_tail");
+            if (opts.outputFormat() !== CLAUDE_FORMAT) return fallBack("format");
             // The older part parses on its own later. A first screen that starts inside a
             // long response would show it as two rows once that part arrives, so such a
             // slice isn't used: the usual open parses it whole.
             if (tail.start_line > 0 && !startsAtTurn(tail.lines[0])) {
                 opts.log("history", "first screen starts mid-turn; opening the usual way");
-                return false;
+                return fallBack("mid_turn");
             }
 
             let snapshot: any;
@@ -435,7 +442,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
             }
             const schema: number = snapshot?.schemaVersion ?? 0;
             // A v1 snapshot carries its nodes: the usual path restores from it.
-            if (schema === SNAPSHOT_SCHEMA_VERSION_V1 && Array.isArray(snapshot.nodes)) return false;
+            if (schema === SNAPSHOT_SCHEMA_VERSION_V1 && Array.isArray(snapshot.nodes)) return fallBack("v1_snapshot");
 
             // Nothing here may leave the pane waiting: before the first dispatch the
             // usual open can still run; after it, fail open as that path does.
@@ -496,7 +503,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 const reason = err?.message ?? String(err);
                 if (!dispatched) {
                     opts.log("history", `first screen failed (${reason}); opening the usual way`, "warn");
-                    return false;
+                    return fallBack("error");
                 }
                 opts.log("history", `first screen failed after painting: ${reason}`, "warn");
                 opts.transcriptSettle?.settle(null);
