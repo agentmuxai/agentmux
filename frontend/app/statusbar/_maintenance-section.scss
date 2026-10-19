@@ -68,6 +68,9 @@
     flex: 1 1 auto;
     @include mixins.truncate;
 
+    // A status sentence ("v0.59.33 is up to date (checked 02:15 AM)") that
+    // must read in full in a narrow panel: wrap it instead of an ellipsis.
+    &--wrap  { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
     &--dim   { color: var(--secondary-text-color); }
     &--warn  { color: var(--warning-color); }
     &--error { color: var(--error-color); }

@@ -91,7 +91,6 @@ export const WpsEvent = {
     UpgradeMigrationEvent:     "upgrade:migration-event",
     UpgradeMigrationsComplete: "upgrade:migrations-complete",
     UpgradeMigrationsFailed:   "upgrade:migrations-failed",
-    UpgradeSagaVacuumDone:     "upgrade:saga-vacuum-done",
     // Published by `handle_muxspect_dock_clear` in response to a
     // `muxspect dock clear` request. Scoped `block:<id>` — only a
     // renderer currently displaying that block receives it. Payload:

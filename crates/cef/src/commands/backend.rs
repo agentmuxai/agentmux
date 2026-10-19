@@ -389,22 +389,6 @@ async fn run_migrations_inner(
     }
 }
 
-/// Trigger an on-demand saga log vacuum.
-///
-/// Stubbed: the `agentmux-srv saga-vacuum` subcommand is not yet implemented.
-/// Returns `{"rows_deleted": 0}` and emits `upgrade:saga-vacuum-done` so the
-/// Maintenance panel's vacuum state machine completes correctly.
-pub async fn run_saga_vacuum(state: Arc<AppState>) -> Result<serde_json::Value, String> {
-    // TODO: spawn `agentmux-srv --wavedata <path> saga-vacuum` once the subcommand exists.
-    tracing::info!("[run_saga_vacuum] stub — returning rows_deleted=0");
-    crate::events::emit_event_to_top_level_windows(
-        &state,
-        "upgrade:saga-vacuum-done",
-        &serde_json::json!({ "rows_deleted": 0 }),
-    );
-    Ok(serde_json::json!({ "rows_deleted": 0 }))
-}
-
 /// Set the window initialization status.
 pub fn set_window_init_status(state: &Arc<AppState>, args: &serde_json::Value) -> serde_json::Value {
     let status = args
