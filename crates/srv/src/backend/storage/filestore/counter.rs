@@ -173,6 +173,52 @@ impl Row {
     }
 }
 
+/// A transcript's counted state as one reader snapshot sees it: where its
+/// complete lines end, how many there are, and the epoch they were counted in.
+/// What `agent:open_tail` positions a slice by, without writing anything.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TailState {
+    pub gen: String,
+    pub size: i64,
+    pub modts: i64,
+    /// Byte offset just past the last complete line (the start of an
+    /// unterminated last line, if the file ends in one).
+    pub complete_end: i64,
+    /// Complete non-blank lines in `[0, complete_end)`.
+    pub lines: u64,
+}
+
+/// [`TailState`] for `zone_id`/`name`, read-only: a valid epoch is used as it
+/// is, and one that is only behind (the file grew past it) is caught up in
+/// memory over at most `max_catch_up` bytes, never written back. `None` when
+/// there is no usable epoch, the catch-up is longer than that, or it would
+/// need a new generation (that is for a writer to mint).
+pub(super) fn tail_state_in(
+    conn: &Connection,
+    zone_id: &str,
+    name: &str,
+    max_catch_up: i64,
+) -> Result<Option<TailState>, StoreError> {
+    let Some(row) = read_row(conn, zone_id, name)? else { return Ok(None) };
+    if let Some((gen, c)) = row.counter() {
+        return Ok(Some(TailState { gen, size: row.size, modts: row.modts, complete_end: c.tail_start as i64, lines: c.lines }));
+    }
+    let Some(behind) = row.behind() else { return Ok(None) };
+    if row.size - behind.count.tail_start as i64 > max_catch_up {
+        return Ok(None);
+    }
+    match catch_up(conn, zone_id, name, &row, &behind)? {
+        Some((count, true)) => Ok(Some(TailState {
+            gen: behind.gen,
+            size: row.size,
+            modts: row.modts,
+            complete_end: count.tail_start as i64,
+            lines: count.lines,
+        })),
+        _ => Ok(None),
+    }
+}
+
 /// An epoch that can be caught up ([`Row::behind`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Behind {

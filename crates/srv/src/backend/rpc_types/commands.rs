@@ -747,6 +747,7 @@ pub const COMMAND_SESSION_NEXT_PROMPT_SUGGESTION: &str = "session:next_prompt_su
 // through `agent:<defId>:current`; archiving snapshots to
 // `agent:<defId>:archive:<ts_ms>`.
 pub const COMMAND_AGENT_SESSION_READ: &str = "agent:session:read";
+pub const COMMAND_AGENT_OPEN_TAIL: &str = "agent:open_tail";
 pub const COMMAND_AGENT_SESSION_WRITE_STATE: &str = "agent:session:write_state";
 pub const COMMAND_AGENT_SESSION_APPEND_OUTPUT: &str = "agent:session:append_output";
 pub const COMMAND_AGENT_SESSION_ARCHIVE: &str = "agent:session:archive";

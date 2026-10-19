@@ -76,6 +76,10 @@
             "method": "AgentProcessListCommand"
         },
         {
+            "command": "agent:open_tail",
+            "method": "AgentOpenTailCommand"
+        },
+        {
             "command": "agent:session:append_output",
             "method": "AgentSessionAppendOutputCommand"
         },

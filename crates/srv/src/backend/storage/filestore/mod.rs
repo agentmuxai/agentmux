@@ -46,6 +46,6 @@ pub use types::{FileMeta, FileOpts, MuxFile};
 pub use zone_txn::ZoneTxn;
 pub(crate) use lines::is_blank_line;
 #[allow(unused_imports)] // consumed by the transcript writers in 5a-3
-pub use counter::{normalized_records, AppendPos, Counted, CountedAppend, LineState};
+pub use counter::{normalized_records, AppendPos, Counted, CountedAppend, LineState, TailState};
 #[allow(unused_imports)]
 pub use replace::{DerivedSnapshot, DerivedView, SnapshotFile, SnapshotReader};

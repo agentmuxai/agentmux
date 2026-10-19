@@ -27,6 +27,7 @@ pub struct SnapshotReader<'a> {
 #[derive(Debug, Clone)]
 pub struct SnapshotFile {
     pub size: i64,
+    pub modts: i64,
     /// Valid generation; `None` when the file is not counted.
     pub gen: Option<String>,
     pub meta: FileMeta,
@@ -42,9 +43,17 @@ impl SnapshotReader<'_> {
         )?;
         Ok(Some(SnapshotFile {
             size: row.size,
+            modts: row.modts,
             gen: row.counter().map(|(gen, _)| gen),
             meta: serde_json::from_str(&meta).unwrap_or_default(),
         }))
+    }
+
+    /// The transcript's counted state in this snapshot (see
+    /// [`super::counter::TailState`]); an epoch only behind is caught up in
+    /// memory over at most `max_catch_up` bytes. Writes nothing.
+    pub fn tail_state(&self, zone_id: &str, name: &str, max_catch_up: i64) -> Result<Option<super::counter::TailState>, StoreError> {
+        super::counter::tail_state_in(self.tx, zone_id, name, max_catch_up)
     }
 
     /// `[offset, offset + len)`, or `None` if any of it isn't stored.
