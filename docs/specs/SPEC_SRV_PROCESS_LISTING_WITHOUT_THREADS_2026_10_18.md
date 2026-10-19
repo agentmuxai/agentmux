@@ -32,12 +32,11 @@ Linux (charlie, Ubuntu 26.04), Loap-3's memory lab (`scripts/perf/memory-lab`, w
 | | before | after | change |
 |---|---:|---:|---:|
 | **srv CPU, seconds over the workload** | 104.1 (101.7–105.7) | 85.8 (85.5–86.1) | **−17.5%** |
-| app total CPU, seconds | 323.6 (320.2–324.7) | 306.9 (306.1–315.2) | −5.2% |
+| app total CPU, seconds (includes the agents' own CLIs) | 323.6 (320.2–324.7) | 306.9 (306.1–315.2) | −5.2% |
 | srv private memory, MB | 55.9 (53.8–58.4) | 47.1 (36.4–47.5) | −15.7% |
-| app total private memory, MB | 1189.1 (1162.6–1198.8) | 1174.9 (1166.7–1184.8) | −1.2% |
 | round time, ms (median of rounds) | 11435 (11324–11488) | 11682 (11270–12247) | +2.2% |
 
-The srv CPU ranges do not overlap. The other process groups (renderer, host, utility, other) moved by at most 1% in either direction, which is the noise between runs. Round time moved +2.2% with overlapping ranges, so nothing is shown either way; it is not a speed-up and the change does not claim one. The srv memory figure is a side effect (less transient listing state) and its ranges nearly touch: read it as "not higher", not as a promise of 9 MB.
+The srv CPU ranges do not overlap. The app-total memory is left out on purpose: on Linux the lab of that day counted the 12 agents' own `node` processes (named `MainThread`) in the app's host group, about 270 MB too much (fixed in the lab afterwards). The srv group was not affected, and both sides counted the same processes, so the comparison between them holds. The other process groups (renderer, host, utility, other) moved by at most 1% in either direction, which is the noise between runs. Round time moved +2.2% with overlapping ranges, so nothing is shown either way; it is not a speed-up and the change does not claim one. The srv memory figure is a side effect (less transient listing state) and its ranges nearly touch: read it as "not higher", not as a promise of 9 MB.
 
 ## 4. What this does not do
 
