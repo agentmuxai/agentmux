@@ -1,0 +1,29 @@
+name: Codex review status in the merge queue
+
+# A merge queue group's commit needs every required check, including the
+# `Codex review` commit status that codex-review-gate.yml sets on a PR's head,
+# or the group never lands. A PR can only join the queue with that status
+# green on its own head, so the group's commit gets success, saying so. It
+# reads nothing and asks Codex nothing.
+#
+# Its own file, not a job in codex-review-gate.yml: that workflow's scheduled
+# runs fail to start (startup_failure, no jobs, since #4900), and a merge
+# group must not depend on whatever causes that.
+# docs/specs/SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19.md §5 Phase 1, 6.
+on:
+  merge_group:
+    types: [checks_requested]
+permissions:
+  statuses: write
+jobs:
+  codex-status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Codex review on the merge group's commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh api -X POST "repos/${{ github.repository }}/statuses/${{ github.sha }}"
+          -f state=success -f context="Codex review"
+          -f description="Each PR in this group passed it before joining the queue"
