@@ -266,7 +266,11 @@ export function flashElement(
 
 /** Play `scheduled` on `el`'s overlay from page time `t` to the end of the last one. */
 function playScheduled(el: HTMLElement, scheduled: ScheduledFlash[], t: number): void {
-    if (scheduled.length === 0 || typeof el.animate !== "function") {
+    // Not while the page is hidden (minimized window): it runs no frames, so Chromium keeps every
+    // cancelled or unfinished animation, with its ~60 keyframes, until the next frame. A tool-heavy
+    // turn made ~500 keyframes/s there, hundreds of MB in minutes. Nobody sees the flash anyway.
+    const pageHidden = typeof document !== "undefined" && document.hidden;
+    if (scheduled.length === 0 || typeof el.animate !== "function" || pageHidden) {
         running.set(el, { scheduled, anim: null });
         return;
     }
