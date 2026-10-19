@@ -475,7 +475,7 @@ impl AcpController {
         let event_bus_clone = self.event_bus.clone();
         // Resolve the agent's GLOBAL transcript zone once (see persistent/spawn.rs).
         let global_output_zone =
-            super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
+            crate::backend::transcript::append::resolve_global_output_zone(&self.mstore, &self.block_id);
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout).lines();
             tracing::info!(block_id = %block_id_stdout, "ACP stdout_reader started");

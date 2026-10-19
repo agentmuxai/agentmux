@@ -573,12 +573,12 @@ impl PersistentSubprocessController {
         // `persist_message_to_blockfile` stores one.
         let json_str = &*crate::backend::attachments::prompt::persisted_line(json_str);
         let global_zone =
-            super::super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
+            crate::backend::transcript::append::resolve_global_output_zone(&self.mstore, &self.block_id);
         // A paired device's message is stored with who sent it
         // (`viewer::origin`); the agent's stdin got it without.
         let stamped = crate::backend::viewer::origin::stamp(&self.block_id, json_str.as_bytes())
             .and_then(|l| String::from_utf8(l).ok());
-        super::super::shell::append_output_line(
+        crate::backend::transcript::append::append_output_line(
             broker,
             &self.block_id,
             stamped.as_deref().unwrap_or(json_str),
@@ -985,9 +985,9 @@ pub(super) struct RedeliveryPersister {
 impl RedeliveryPersister {
     pub(super) fn write(&self, line: &str) {
         let global_zone =
-            super::super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
+            crate::backend::transcript::append::resolve_global_output_zone(&self.mstore, &self.block_id);
         let record = format!("{line}\n");
-        super::super::shell::persist_user_line(
+        crate::backend::transcript::append::persist_user_line(
             self.broker.as_deref(),
             &self.block_id,
             record.as_bytes(),

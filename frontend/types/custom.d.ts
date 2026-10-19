@@ -624,8 +624,6 @@ declare global {
         /** Trigger on-demand migration run (maintenance panel retry).
          *  Returns immediately; progress arrives via `upgrade:migration-event` CEF events. */
         runMigrations: () => Promise<{ started: boolean }>;
-        /** Trigger on-demand saga log vacuum. Returns rows deleted. */
-        runSagaVacuum: () => Promise<{ rows_deleted: number }>;
     };
 
     type NativeContextMenuItem = {

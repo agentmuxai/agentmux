@@ -99,7 +99,7 @@ fn fail(p: &ContainerTurnPrep<'_>, e: &ContainerError) -> String {
     tracing::warn!(block_id = %p.block_id, container = %p.container_name, error = %e, "container agent could not start");
     let message = e.user_message();
     let line = format!("{}\n", error_result_frame(&message));
-    let zone = crate::backend::blockcontroller::shell::resolve_global_output_zone(
+    let zone = crate::backend::transcript::append::resolve_global_output_zone(
         &Some(p.mstore.clone()),
         p.block_id,
     );

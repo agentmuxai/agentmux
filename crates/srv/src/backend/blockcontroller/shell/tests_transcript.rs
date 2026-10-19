@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Transcript appends are written first and published with their positions
-//! (`file_ops::append_transcript`, Phase 5a-3).
+//! (`transcript::append::append_transcript`, Phase 5a-3).
 
 use std::sync::{Arc, Barrier, Mutex};
 
 use base64::Engine as _;
 
-use super::file_ops::append_transcript;
+use crate::backend::transcript::append::append_transcript;
 use super::handle_append_block_file;
 use crate::backend::mps;
 use crate::backend::storage::filestore::FileStore;
@@ -249,9 +249,9 @@ fn a_replaced_or_deleted_transcript_is_announced_with_its_new_generation() {
     let (broker, rec, fs, _gfs) = setup(block);
     fs.make_file(block, "output", Default::default(), Default::default()).unwrap();
     fs.write_file(block, "output", b"{\"a\":1}\n{\"b\":2}\n").unwrap();
-    super::publish_transcript_changed(&broker, block, mps::FILE_OP_REPLACE, &fs);
+    crate::backend::transcript::append::publish_transcript_changed(&broker, block, mps::FILE_OP_REPLACE, &fs);
     fs.delete_files(block, &["output"]).unwrap();
-    super::publish_transcript_changed(&broker, block, mps::FILE_OP_DELETE, &fs);
+    crate::backend::transcript::append::publish_transcript_changed(&broker, block, mps::FILE_OP_DELETE, &fs);
 
     let seen = rec.seen.lock().unwrap();
     let (replaced, deleted) = (&seen[0].0, &seen[1].0);
@@ -275,11 +275,11 @@ fn an_append_during_a_replace_is_published_after_it() {
     let replacer = {
         let (broker, fs) = (broker.clone(), fs.clone());
         std::thread::spawn(move || {
-            super::with_transcript_order(block, || {
+            crate::backend::transcript::append::with_transcript_order(block, || {
                 holding.send(()).unwrap();
                 std::thread::sleep(std::time::Duration::from_millis(150));
                 fs.write_file(block, "output", b"{\"new\":1}\n").unwrap();
-                super::publish_transcript_changed(&broker, block, mps::FILE_OP_REPLACE, &fs);
+                crate::backend::transcript::append::publish_transcript_changed(&broker, block, mps::FILE_OP_REPLACE, &fs);
             })
         })
     };
@@ -304,7 +304,7 @@ fn a_persisted_user_line_is_announced_as_an_echo_with_its_position() {
     let block = "blk-echo";
     let (broker, rec, fs, _gfs) = setup(block);
     append_transcript(at(&broker), block, b"{\"type\":\"assistant\"}\n", Some(&fs), None, true, None);
-    super::persist_user_line(Some(&broker), block, b"{\"type\":\"user\"}\n", Some(&fs), None);
+    crate::backend::transcript::append::persist_user_line(Some(&broker), block, b"{\"type\":\"user\"}\n", Some(&fs), None);
 
     let seen = rec.seen.lock().unwrap();
     assert_eq!(seen.len(), 2);

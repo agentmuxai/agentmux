@@ -495,7 +495,7 @@ impl UserRecordSink {
         }
         let global_zone = crate::backend::agent_session::agent_zone_for_block_meta(&block.meta);
         let line = format!("{}\n", user_record(message));
-        super::shell::persist_user_line(
+        crate::backend::transcript::append::persist_user_line(
             self.broker.as_deref(),
             &self.block_id,
             line.as_bytes(),

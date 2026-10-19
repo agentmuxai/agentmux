@@ -309,7 +309,7 @@ impl SubprocessController {
         let session_id_field = config.session_id_field.clone();
         // Resolve the agent's GLOBAL transcript zone once (see persistent/spawn.rs).
         let global_output_zone =
-            shell::resolve_global_output_zone(&self.mstore, &self.block_id);
+            crate::backend::transcript::append::resolve_global_output_zone(&self.mstore, &self.block_id);
         // Retain the terminal `result` frame so a failure reported on STDOUT
         // (auth / rate-limit / usage — the common case; claude may even exit 0)
         // can be classified, not just stderr-reported ones. Shared with the
@@ -415,7 +415,7 @@ impl SubprocessController {
                             // production filter is info, so this is now
                             // suppressed unless RUST_LOG=debug is set.
                             tracing::debug!(block_id = %block_id_read, line = %trimmed, "subprocess stdout → blockfile");
-                            shell::append_output_line(
+                            crate::backend::transcript::append::append_output_line(
                                 broker,
                                 &block_id_read,
                                 trimmed,
@@ -774,7 +774,7 @@ impl SubprocessController {
                             // Into the agent's global zone too: that is what
                             // the pane reads on reload (Phase 5a-3c).
                             let global_zone =
-                                shell::resolve_global_output_zone(&mstore_wait, &block_id_wait);
+                                crate::backend::transcript::append::resolve_global_output_zone(&mstore_wait, &block_id_wait);
                             crate::backend::blockcontroller::shell::handle_append_block_file(
                                 broker,
                                 &block_id_wait,

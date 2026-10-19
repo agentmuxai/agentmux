@@ -35,16 +35,7 @@ type MigState =
     | { kind: "complete"; steps: MigStep[]; applied: number }
     | { kind: "failed"; steps: MigStep[]; error: string; failedId: string | null };
 
-type VacState =
-    | { kind: "idle"; lastRunMs: number | null }
-    | { kind: "running" }
-    | { kind: "done"; rowsDeleted: number; ranAtMs: number };
-
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-function fmtDate(ms: number): string {
-    return new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
 
 function elapsedSecs(startedAtMs: number, nowMs: number): string {
     return `${((nowMs - startedAtMs) / 1000).toFixed(1)}s`;
@@ -98,7 +89,6 @@ export const MaintenanceSection = (): JSX.Element => {
     const [showNotes, setShowNotes] = createSignal(false);
 
     const [migState, setMigState] = createSignal<MigState>({ kind: "idle", pendingCount: 0 });
-    const [vacState, setVacState] = createSignal<VacState>({ kind: "idle", lastRunMs: null });
     const [nowMs, setNowMs] = createSignal(Date.now());
 
     // Fetch pending_migrations count from backend info on mount
@@ -183,20 +173,6 @@ export const MaintenanceSection = (): JSX.Element => {
         onCleanup(() => unlisten?.());
     });
 
-    onMount(() => {
-        let unlisten: (() => void) | null = null;
-        getApi().listen(WpsEvent.UpgradeSagaVacuumDone, (payload: any) => {
-            const rowsDeleted: number = payload?.rows_deleted ?? 0;
-            const ranAtMs = Date.now();
-            setVacState({ kind: "done", rowsDeleted, ranAtMs });
-            setTimeout(() => {
-                setVacState({ kind: "idle", lastRunMs: ranAtMs });
-            }, 3000);
-        }).then((fn) => { unlisten = fn; });
-
-        onCleanup(() => unlisten?.());
-    });
-
     // ── Actions ───────────────────────────────────────────────────────────────
 
     const handleRunMigrations = async () => {
@@ -206,16 +182,6 @@ export const MaintenanceSection = (): JSX.Element => {
             await getApi().runMigrations();
         } catch (e: any) {
             setMigState({ kind: "failed", steps: [], error: String(e?.message ?? e), failedId: null });
-        }
-    };
-
-    const handleRunVacuum = async () => {
-        if (vacState().kind === "running") return;
-        setVacState({ kind: "running" });
-        try {
-            await getApi().runSagaVacuum();
-        } catch {
-            setVacState({ kind: "idle", lastRunMs: null });
         }
     };
 
@@ -425,7 +391,7 @@ export const MaintenanceSection = (): JSX.Element => {
                 restart into it is under way). A `task dev` build, which
                 doesn't upgrade, learns which release is latest. */}
             <div class="maintenance-update-row">
-                <span class="maintenance-row-text maintenance-row-text--dim">{standing()}</span>
+                <span class="maintenance-row-text maintenance-row-text--dim maintenance-row-text--wrap">{standing()}</span>
                 <Show when={appUpdate()?.state === "local-build" && appUpdate()?.url}>
                     <Button density="compact" class="maintenance-btn" onClick={() => void openLink(appUpdate()!.url!)}>
                         View
@@ -543,41 +509,6 @@ export const MaintenanceSection = (): JSX.Element => {
                     </Show>
                 </div>
             </Show>
-
-            {/* ── Saga vacuum row ────────────────────────────────────────── */}
-            <div class="maintenance-summary-row">
-                <Show when={vacState().kind === "idle"}>
-                    <span class="maintenance-icon maintenance-icon--neutral">○</span>
-                    <span class="maintenance-row-label">Vacuum</span>
-                    <span class="maintenance-row-text--dim">
-                        {(vacState() as Extract<VacState, {kind: "idle"}>).lastRunMs
-                            ? `last run: ${fmtDate((vacState() as Extract<VacState, {kind: "idle"}>).lastRunMs!)}`
-                            : "not run"}
-                    </span>
-                    <Button
-                        density="compact"
-                        class="maintenance-btn"
-                        onClick={handleRunVacuum}
-                    >
-                        Run
-                    </Button>
-                </Show>
-                <Show when={vacState().kind === "running"}>
-                    <span class="maintenance-icon maintenance-icon--working maintenance-pulse">·</span>
-                    <span class="maintenance-row-label">Vacuum</span>
-                    <span class="maintenance-row-text--dim">running…</span>
-                </Show>
-                <Show when={vacState().kind === "done"}>
-                    <span class="maintenance-icon maintenance-icon--ok">✓</span>
-                    <span class="maintenance-row-label">Vacuum</span>
-                    <span class="maintenance-row-text--dim">
-                        {(vacState() as Extract<VacState, {kind: "done"}>).rowsDeleted === 0
-                            ? "nothing to clean"
-                            : `${(vacState() as Extract<VacState, {kind: "done"}>).rowsDeleted} rows removed`}
-                    </span>
-                    <Button density="compact" class="maintenance-btn" onClick={handleRunVacuum}>Run</Button>
-                </Show>
-            </div>
         </>
     );
 };

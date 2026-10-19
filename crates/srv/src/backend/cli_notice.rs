@@ -137,7 +137,7 @@ pub fn append_line_to_pane(
     line: &str,
 ) {
     let line = format!("{line}\n");
-    let zone = crate::backend::blockcontroller::shell::resolve_global_output_zone(&Some(mstore.clone()), block_id);
+    let zone = crate::backend::transcript::append::resolve_global_output_zone(&Some(mstore.clone()), block_id);
     crate::backend::blockcontroller::shell::handle_append_block_file(
         broker,
         block_id,

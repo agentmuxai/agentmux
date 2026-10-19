@@ -17,6 +17,7 @@ import { driftWarning, portableCommit, srvTarget, withReplacedSrv } from "./lib/
 import { mergeLongTaskRecords, slowSendsAgainstLongTasks, summariseLongTasks } from "./lib/longtasks.mjs";
 import { parseDiskLoad, sleepNeededMs, startDiskLoad } from "./lib/diskload.mjs";
 import { volumeOf } from "./lib/volume.mjs";
+import { segmentsOf, slowSendBreakdown, timedCall } from "./lib/sendsegments.mjs";
 import { mergeStoreLock, parseStoreLock } from "./lib/storelock.mjs";
 import { CpuLedger, cpuBetween, writtenBetween } from "./lib/cpu.mjs";
 import { generateConversation } from "./lib/conversation.mjs";
@@ -683,6 +684,14 @@ describe("the page's long tasks", () => {
         expect(summariseLongTasks(null)).toBeNull(); // never installed, or lost to a reload
     });
 
+    it("summarises the page's timer lag, leaving out the lab's own forced-GC windows", () => {
+        const withLag = { n: 0, tasks: [], top: [], lag: [[5000, 300], [9000, 1500], [20000, 4000]] };
+        expect(summariseLongTasks(withLag, []).timerLag).toEqual({ count: 3, maxMs: 4000, over1s: 2 });
+        // the 4 s late firing at 20,000 waited over 16,000-20,000: inside the forced-GC window
+        expect(summariseLongTasks(withLag, [], [{ start: 15000, end: 21000 }]).timerLag).toEqual({ count: 2, maxMs: 1500, over1s: 1 });
+        expect(summariseLongTasks({ n: 0, tasks: [], top: [] }, []).timerLag).toEqual({ count: 0, maxMs: 0, over1s: 0 }); // an old record has none
+    });
+
     it("joins the records of the documents before and after a reload", () => {
         const before = { n: 2, tasks: [[1000, 90], [2000, 3000]], top: [{ at: 2000, ms: 3000, name: "self", container: "" }] };
         const after = { n: 1, tasks: [[9000, 400]], top: [{ at: 9000, ms: 400, name: "self", container: "" }] };
@@ -783,5 +792,39 @@ describe("the volume under the data folder", () => {
 
     it("says nothing for a path that does not exist", () => {
         expect(volumeOf(join(tmpdir(), "no-such-folder-for-the-lab", "x"))).toBeNull();
+    });
+});
+
+describe("where a slow send's time went", () => {
+    it("wraps the call so the page reports its own clock and stopwatch", () => {
+        const src = timedCall("RpcApi.X()");
+        expect(src).toContain("await RpcApi.X()");
+        expect(src).toContain("pageStart");
+        expect(src).toContain("performance.now()");
+    });
+
+    it("splits a send into before, in the page, and after", () => {
+        // the lab started at t=1000, JS ran in the page at 1400 for 28,000 ms, the lab had the answer at 30,000
+        expect(segmentsOf({ start: 1000, ms: 29000, pageStart: 1400, pageMs: 28000 })).toEqual({ before: 400, inPage: 28000, after: 600 });
+        expect(segmentsOf({ start: 1000, ms: 100, pageStart: null, pageMs: null })).toEqual({ before: null, inPage: null, after: null });
+        // clock noise never gives a negative segment
+        expect(segmentsOf({ start: 1000, ms: 50, pageStart: 990, pageMs: 80 })).toEqual({ before: 0, inPage: 80, after: 0 });
+    });
+
+    it("says which segment held the most time in each slow send", () => {
+        const sends = [
+            { start: 0, ms: 30000, pageStart: 300, pageMs: 29500 }, // in the page
+            { start: 0, ms: 12000, pageStart: 9000, pageMs: 2800 }, // before the page ran it
+            { start: 0, ms: 9000, pageStart: 100, pageMs: 200 }, // after the page was done
+            { start: 0, ms: 6000, pageStart: null, pageMs: null }, // no page figures
+            { start: 0, ms: 300, pageStart: 10, pageMs: 250 }, // not slow
+        ];
+        expect(slowSendBreakdown(sends)).toEqual({
+            slowSends: 4,
+            largestSegment: { before: 1, inPage: 1, after: 1, unknown: 1 },
+            maxBeforeMs: 9000,
+            maxInPageMs: 29500,
+            maxAfterMs: 8700,
+        });
     });
 });

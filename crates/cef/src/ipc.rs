@@ -224,7 +224,6 @@ async fn route_command(
         "get_health_signals" => Ok(crate::health_signals::snapshot(state)),
         "restart_backend" => commands::backend::restart_backend(state.clone()).await,
         "run_migrations" => commands::backend::run_migrations(state.clone()).await,
-        "run_saga_vacuum" => commands::backend::run_saga_vacuum(state.clone()).await,
         "close_window" => commands::window::close_window(state, args),
         // Issue #2977 Workstream 1 — the tray's "Quit AgentMux". Explicit,
         // user-initiated shutdown that bypasses the background-service gate

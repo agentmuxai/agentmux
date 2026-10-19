@@ -40,14 +40,7 @@ mod translation;
 // elsewhere in the crate (blockcontroller/mod.rs, acp, persistent, subprocess,
 // watchdog, agent_handlers/input, blockfile, app_api).
 pub use controller::ShellController;
-pub use file_ops::{
-    append_output_line, handle_append_block_file, persist_user_line, publish_transcript_changed,
-    with_transcript_order,
-};
-// These are `pub(crate)` at their definition (crate-internal API), so they must
-// be re-exported at the same visibility — `pub use` of a `pub(crate)` item is
-// rejected (E0364).
-pub(crate) use file_ops::resolve_global_output_zone;
+pub use file_ops::handle_append_block_file;
 pub(crate) use indexing::{extend_output_idx, output_index, output_now, read_via_index, read_via_stale_index};
 // A full rebuild from byte 0: the readers extend instead (`extend_output_idx`
 // falls back to one itself), so only tests call it directly.

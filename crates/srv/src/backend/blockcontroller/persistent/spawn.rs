@@ -759,7 +759,7 @@ impl PersistentSubprocessController {
         // once, from the block's `agentId` meta, so every `output` line is also
         // mirrored to the cross-channel store. `None` for non-agent blocks.
         let global_output_zone =
-            super::super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
+            crate::backend::transcript::append::resolve_global_output_zone(&self.mstore, &self.block_id);
         // Cloned before `global_output_zone` moves into the stdout-reader
         // task below — the process-waiter task (spawned further down) needs
         // its own copy for the segment-end record and to append the resume
