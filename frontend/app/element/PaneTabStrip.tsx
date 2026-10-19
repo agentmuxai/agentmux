@@ -683,14 +683,16 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
         props.docDrag ? isDraggedDocTab(props.docDrag.blockId, id()) : isDraggedPaneTab(id(), props.paneKey);
     const [dropSide, setDropSide] = createSignal<"before" | "after" | null>(null);
 
-    // Activity flash: click this pill on every tone from its own block,
-    // whether or not its window tab is showing. The color comes from the
+    // Activity flash: click this pill on every tone from its own block. Not while its window
+    // tab is hidden: nobody sees it, and each flash is a Web Animation of ~65 keyframes (the
+    // window tab's own flash still shows the activity). The color comes from the
     // pill's own `--pane-tab-underline` in the stylesheet, so no base
     // color is passed here.
+    const windowDisplayed = useWindowTabDisplayed();
     onMount(() => {
         if (!props.flashOnActivity) return;
         const unsubscribe = onActivityFlash((target) => {
-            if (target.blockId === id() && pillRef) flashElement(pillRef, target);
+            if (target.blockId === id() && pillRef && windowDisplayed()) flashElement(pillRef, target);
         });
         // The pane is flashing to show it was just selected: its pill does too.
         const unsubscribeLocate = onPaneLocatePlay((blockId, paneKey) => {
