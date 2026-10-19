@@ -78,6 +78,7 @@ import { SlashCommandPicker } from "./components/SlashCommandPicker";
 import { SlashHelpPanel } from "./components/SlashHelpPanel";
 import { usePaneReveal } from "./hooks/usePaneReveal";
 import { useLiveFeedRollOff } from "./hooks/useLiveFeedRollOff";
+import { useRenderDormant } from "./render-dormant";
 import { LIVE_FEED_RESTORE_BYTES } from "./live-feed";
 import { useShellLogBridge } from "./hooks/useShellLogBridge";
 import { useContextReading } from "./hooks/useContextReading";
@@ -153,6 +154,7 @@ export const AgentPresentationView = ({
     // (docs/analysis/REPORT_TIMERS_DEADLINES_AND_CLOCKS_AUDIT_2026_10_17.md §6.4).
     const visibility = usePaneTabVisibility(model.blockId);
     const hidden = (): boolean => visibility() !== "active";
+    const renderDormant = useRenderDormant(hidden); // `hidden`, or the window itself (minimized/covered)
     const providerKey = (): string => block()?.meta?.["agentProvider"] ?? agentId;
     const provider = () => getProvider(providerKey());
     const outputFormat = (): string => block()?.meta?.["agentOutputFormat"] ?? "claude-stream-json";
@@ -449,7 +451,7 @@ export const AgentPresentationView = ({
         outputFormat,
         block,
         agentAtoms,
-        hidden,
+        hidden: renderDormant,
         history,
     });
     const { liveFeedOn, gapsBefore, earlierHistoryAvailable, earlierTurnsKnown } = liveFeed;
@@ -1205,16 +1207,13 @@ export const AgentPresentationView = ({
     };
 
     return (
-        // Dormancy is provided at the SUBTREE root, not threaded as a prop:
-        // the expensive consumer (MarkdownBlock) sits four layers down, behind
-        // virtualization code that is performance-critical and deliberately
-        // tuned, and should not grow another prop it would only forward.
-        // See `agent-dormancy.tsx` for why rendering (not data) is what gets
-        // gated.
-        // `hidden` covers a dormant pane-stack member and a hidden window tab
-        // alike; this provider gates only rendering (the timers read `hidden`
-        // directly). The same providers carry the cwd for inline media.
-        <AgentPaneProviders dormant={hidden} block={block} agent={currentAgent} loadToolResult={liveFeed.loadToolResult}>
+        // Dormancy is provided at the SUBTREE root, not threaded as a prop: the expensive
+        // consumer (MarkdownBlock) sits four layers down, behind virtualization code that is
+        // performance-critical and deliberately tuned. See `agent-dormancy.tsx` for why
+        // rendering (not data) is what gets gated.
+        // `renderDormant` also covers a hidden window; this gates only rendering
+        // (the timers read `hidden`). The same providers carry the cwd for inline media.
+        <AgentPaneProviders dormant={renderDormant} block={block} agent={currentAgent} loadToolResult={liveFeed.loadToolResult}>
             {/* Pane-scope `<ModalLayer>` lives in AgentBlockContent (this
                 component's own parent) so it covers BOTH this presentation view
                 AND the picker fallback. Anything in this subtree that calls
