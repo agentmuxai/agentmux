@@ -3,7 +3,7 @@
 **Date:** 2026-10-19
 **Author:** Maricon@charlie
 **Type:** Spec (a storage contract change; behaviour for the user is unchanged)
-**Status:** active — step A1 (the readers that only look at the tail or the size) is in PR #PRNUM; remaining: A2 (the progress watcher, the block-level archive, the replace/delete announcements, a fenced writer), B (stop the block write behind a kill switch, with the lab A/B) and C (remove the dead paths). B needs the coordinator's and the operator's go.
+**Status:** active — step A1 (the readers that only look at the tail or the size) is in PR #5173; remaining: A2 (the progress watcher, the block-level archive, the replace/delete announcements, a fenced writer), B (stop the block write behind a kill switch, with the lab A/B) and C (remove the dead paths). B needs the coordinator's and the operator's go.
 **Issue:** #5141. Measured in `docs/reports/REPORT_FILESTORE_WRITE_VOLUME_2026_10_19.md`.
 **Platform:** all.
 
