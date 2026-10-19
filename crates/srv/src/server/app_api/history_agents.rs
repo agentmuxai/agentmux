@@ -90,6 +90,11 @@ fn locate(fs: &FileStore, zone: &str, at_ms: Option<u64>, at_byte: Option<u64>) 
         (Some(byte), _) => byte.min(size),
         (None, Some(ms)) => {
             let ts_size = fs.stat(zone, TSIDX_FILE).map_err(|e| format!("history.locate: {e}"))?.map_or(0, |f| f.size);
+            // History recorded before the receive-time sidecar existed has no
+            // times: say so, rather than land at the end.
+            if ts_size <= 0 && size > 0 {
+                return Err("history.locate: this conversation has no recorded times; jump to a session instead".to_string());
+            }
             let read = |off: i64, len: i64| fs.read_at(zone, TSIDX_FILE, off, len).map(|(_, data)| Some(data));
             stamps::byte_after_time(&read, ts_size, ms as i64)
                 .map_err(|e| format!("history.locate: {e}"))?

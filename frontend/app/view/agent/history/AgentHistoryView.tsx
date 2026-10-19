@@ -694,7 +694,9 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
                         : loadError()
                             ? `couldn't load history: ${loadError()}`
                             : mode() !== "live" && totalLines() > 0
-                              ? `${mode() === "archive" ? "archived conversation · " : ""}lines ${historyOffset() + 1}–${endLine()} of ${totalLines()}`
+                              ? endLine() <= historyOffset()
+                                  ? "nothing before this point"
+                                  : `${mode() === "archive" ? "archived conversation · " : ""}lines ${historyOffset() + 1}–${endLine()} of ${totalLines()}`
                               : historyOffset() === 0 && totalLines() > 0
                                 ? "full history loaded"
                                 : totalLines() > 0

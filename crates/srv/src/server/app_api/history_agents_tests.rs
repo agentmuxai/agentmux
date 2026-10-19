@@ -45,3 +45,13 @@ fn a_time_locates_the_lines_received_by_then() {
 fn neither_locates_the_end() {
     assert_eq!(at(&transcript(), None, None), (3, 3));
 }
+
+#[test]
+fn a_time_without_recorded_times_is_refused_not_placed_at_the_end() {
+    let fs = FileStore::open_in_memory().unwrap();
+    fs.make_file(ZONE, OUTPUT_FILE, FileMeta::default(), FileOpts::default()).unwrap();
+    fs.append_lines(ZONE, OUTPUT_FILE, b"a\nbb\n").unwrap();
+    let err = locate(&fs, ZONE, Some(100), None).unwrap_err();
+    assert!(err.contains("no recorded times"), "{err}");
+    assert_eq!(at(&fs, None, Some(2)), (1, 2), "a byte still locates");
+}

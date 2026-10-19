@@ -98,6 +98,17 @@ describe("HistoryNavigator", () => {
         expect(HistoryLocateCommand).toHaveBeenCalledWith({}, { block_id: "tab-1", at_byte: 400 });
     });
 
+    it("the jump list resets after a jump, so the same session can be picked again", async () => {
+        mount();
+        await waitFor(() => expect(screen.getByText("2 sessions")).toBeInTheDocument());
+        const jump = screen.getByRole("combobox", { name: "Jump to a session" }) as HTMLSelectElement;
+        fireEvent.change(jump, { target: { value: "400" } });
+        await waitFor(() => expect(onJump).toHaveBeenCalledTimes(1));
+        await waitFor(() => expect(jump.value).toBe(""));
+        fireEvent.change(jump, { target: { value: "400" } });
+        await waitFor(() => expect(onJump).toHaveBeenCalledTimes(2));
+    });
+
     it("jumps to the end of a date", async () => {
         mount();
         fireEvent.change(screen.getByLabelText("Jump to a date"), { target: { value: "2026-10-17" } });
@@ -140,5 +151,12 @@ describe("HistoryNavigator", () => {
         expect(onShowNewer).toHaveBeenCalled();
         fireEvent.click(screen.getByRole("button", { name: "Back to latest" }));
         expect(onLatest).toHaveBeenCalled();
+    });
+});
+
+describe("sessionLabel", () => {
+    it("says when a session has no recorded times", async () => {
+        const { sessionLabel } = await import("./HistoryNavigator");
+        expect(sessionLabel({ ...session("abcdef123456", "z", 0, 1), last_ms: 0 })).toBe("Session abcdef12 · no time recorded");
     });
 });

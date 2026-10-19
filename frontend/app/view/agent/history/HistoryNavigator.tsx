@@ -39,6 +39,8 @@ export interface HistoryNavigatorProps {
 }
 
 const CURRENT = "";
+/** The first read of a long record scans it: minutes for the largest. */
+export const SESSIONS_TIMEOUT_MS = 300_000;
 
 /** "Oct 17, 4:27 PM". */
 export function shortWhen(ms: number): string {
@@ -56,7 +58,10 @@ export function endOfDayMs(day: string): number | null {
 
 /** A session in the "Jump to" list. */
 export function sessionLabel(s: HistorySession): string {
-    return `Session ${s.session_id.slice(0, 8)} · ${shortWhen(s.first_ms)} – ${shortWhen(s.last_ms)}`;
+    const id = `Session ${s.session_id.slice(0, 8)}`;
+    // Sessions older than the receive-time sidecar have no times.
+    if (!s.first_ms && !s.last_ms) return `${id} · no time recorded`;
+    return `${id} · ${shortWhen(s.first_ms)} – ${shortWhen(s.last_ms)}`;
 }
 
 export function HistoryNavigator(props: HistoryNavigatorProps): JSX.Element {
@@ -65,21 +70,30 @@ export function HistoryNavigator(props: HistoryNavigatorProps): JSX.Element {
     const [error, setError] = createSignal<string | null>(null);
     const [jumping, setJumping] = createSignal(false);
     const [day, setDay] = createSignal("");
+    // The jump list goes back to its prompt after each jump, so the same
+    // session can be picked again.
+    const [picked, setPicked] = createSignal("");
+    const [counting, setCounting] = createSignal(false);
 
     createEffect(
         on(
             () => props.agentId,
             async (id) => {
                 if (!id) return;
+                // Separately: the archive list is quick, while the first read of
+                // a long record scans it (a 1 GB one takes well over the default
+                // RPC timeout); later reads only what was appended.
+                RpcApi.AgentSessionListArchivesCommand(TabRpcClient, { definition_id: id, limit: 100 })
+                    .then((rows) => setArchives(rows ?? []))
+                    .catch((e) => setError(String(e)));
+                setCounting(true);
                 try {
-                    const [rows, record] = await Promise.all([
-                        RpcApi.AgentSessionListArchivesCommand(TabRpcClient, { definition_id: id, limit: 100 }),
-                        RpcApi.HistoryAgentSessionsCommand(TabRpcClient, { definition_id: id }),
-                    ]);
-                    setArchives(rows ?? []);
+                    const record = await RpcApi.HistoryAgentSessionsCommand(TabRpcClient, { definition_id: id }, { timeout: SESSIONS_TIMEOUT_MS });
                     setSessions(record?.sessions ?? []);
                 } catch (e) {
                     setError(String(e));
+                } finally {
+                    setCounting(false);
                 }
             }
         )
@@ -106,6 +120,7 @@ export function HistoryNavigator(props: HistoryNavigatorProps): JSX.Element {
             setError(String(e));
         } finally {
             setJumping(false);
+            setPicked("");
         }
     };
 
@@ -132,14 +147,20 @@ export function HistoryNavigator(props: HistoryNavigatorProps): JSX.Element {
                     ariaLabel="Conversation"
                 />
             </Show>
+            <Show when={counting()}>
+                <span class="agent-history-nav-count">counting sessions…</span>
+            </Show>
             <Show when={sessions() !== null}>
                 <span class="agent-history-nav-count">
                     {shown().length} {shown().length === 1 ? "session" : "sessions"}
                 </span>
                 <Select
                     options={jumpOptions()}
-                    value=""
-                    onChange={(v) => v && void locate({ at_byte: Number(v) })}
+                    value={picked()}
+                    onChange={(v) => {
+                        setPicked(v);
+                        if (v) void locate({ at_byte: Number(v) });
+                    }}
                     density="compact"
                     disabled={jumping() || shown().length === 0}
                     ariaLabel="Jump to a session"

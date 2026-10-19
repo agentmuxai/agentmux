@@ -8,7 +8,7 @@
  * forward; Back to latest follows the current conversation again.
  */
 
-import { cleanup, render } from "@solidjs/testing-library";
+import { cleanup, render, screen } from "@solidjs/testing-library";
 import { Subject } from "rxjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DocumentNode } from "../types";
@@ -104,6 +104,13 @@ describe("AgentHistoryView modes", () => {
         subject.next({ fileop: "append", data64: btoa(text("live append") + "\n"), pos: [{ stream: STREAM, gen: "g1", line: 1500, lines: 1501 }] });
         await settle();
         expect(shownText()).toBe("archived 0archived 1");
+    });
+
+    it("a jump to before the first line shows nothing, and says so", async () => {
+        nav!.onJump(0);
+        await settle();
+        expect(shownText()).toBe("");
+        expect(screen.getByText("nothing before this point")).toBeTruthy();
     });
 
     it("a jump shows the conversation up to the line, Show newer pages forward, Back to latest follows again", async () => {

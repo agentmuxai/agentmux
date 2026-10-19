@@ -10,6 +10,7 @@ import { createEffect, createMemo, createSignal, For, Show, type JSX } from "sol
 import { Button, FilterInput, IconButton } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { SESSIONS_TIMEOUT_MS } from "@/app/view/agent/history/HistoryNavigator";
 import { openOrFocusHistoryTab } from "@/app/view/agent/open-history-tab";
 import { ageMs, formatAge } from "@/app/view/warden-shared/warden-shared";
 import type { HistoryAgent } from "@/types/rpc/HistoryAgent";
@@ -57,7 +58,7 @@ export const WardenHistoryAgents = (props: { wardenBlockId: string; visible: boo
         }
         setOpen({ ...open(), [id]: { loading: true } });
         try {
-            const data = await RpcApi.HistoryAgentSessionsCommand(TabRpcClient, { definition_id: id });
+            const data = await RpcApi.HistoryAgentSessionsCommand(TabRpcClient, { definition_id: id }, { timeout: SESSIONS_TIMEOUT_MS });
             if (open()[id]) setOpen({ ...open(), [id]: { loading: false, data } });
         } catch (e) {
             if (open()[id]) setOpen({ ...open(), [id]: { loading: false, error: String(e) } });
