@@ -37,6 +37,7 @@ import { runRecycle, recycleSaving } from "./lib/recycle.mjs";
 import { agentProcessesCountedAsApp, cpuLedger, forcedGcWindows, osSample, portBelongsTo, takeSample } from "./lib/sample.mjs";
 import { agentsWithoutTurns, cpuTable, groupSample, inMegabytes, steady, table, transcriptGrowthProblem, wallSummary } from "./lib/summary.mjs";
 import { cpuBetween, writtenBetween } from "./lib/cpu.mjs";
+import { storeLockOf } from "./lib/storelock.mjs";
 import { volumeOf } from "./lib/volume.mjs";
 import { parseEnvPairs } from "./lib/instanceenv.mjs";
 import { parseDiskLoad, startDiskLoad } from "./lib/diskload.mjs";
