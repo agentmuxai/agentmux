@@ -57,3 +57,24 @@ export function spreadMarkdown(results, wallSeconds = []) {
     }
     return lines.join("\n");
 }
+
+const ROWS = { app_mb: ["app", "memory"], renderer_mb: ["renderer", "memory"], srv_mb: ["srv", "memory"], app_cpu_s: ["app", "cpu"], srv_cpu_s: ["srv", "cpu"], renderer_cpu_s: ["renderer", "cpu"], gpu_cpu_s: ["gpu", "cpu"] };
+
+/**
+ * A `compareRuns` result as the history line's `measures` (SPEC_NIGHTLY_PERF_REGRESSION): each measure with `a` (the base's median),
+ * `b` (the head's), `change_pct` and `flag`, under the names `measuresOf` uses; and the names that flagged. Names are never renamed, only added.
+ */
+export function measuresComparison(cmp) {
+    const cell = (m) => (m ? { a: m.base.median ?? null, b: m.head.median ?? null, change_pct: m.pct ?? null, flag: Boolean(m.flagged) } : null);
+    const measures = {};
+    for (const [name, [group, kind]] of Object.entries(ROWS)) {
+        const row = cmp.rows.find((r) => r.group === group);
+        measures[name] = cell(row?.[kind]);
+    }
+    measures.round_ms = cell(cmp.wall);
+    measures.srv_written_mb = cell(cmp.written);
+    measures.store_lock_max_ms = cell(cmp.lock);
+    measures.slow_page_commands = cell(cmp.slowCommands);
+    const flags = Object.entries(measures).filter(([, v]) => v?.flag).map(([k]) => k);
+    return { measures, flags };
+}

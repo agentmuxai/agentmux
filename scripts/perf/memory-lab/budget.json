@@ -19,5 +19,17 @@
   },
   "limitsRound": {
     "roundMs": null
+  },
+  "margins": {
+    "cpuPct": {
+      "app": 10,
+      "srv": 10,
+      "renderer": 10,
+      "gpu": 20,
+      "default": 20
+    },
+    "wallPct": 20,
+    "writtenPct": 3,
+    "memoryPct": null
   }
 }

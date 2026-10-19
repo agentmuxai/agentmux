@@ -15,6 +15,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { measuresComparison } from "./lib/measures.mjs";
 import { compareRuns, DEFAULT_MARGINS, runsTable } from "./lib/summary.mjs";
 
 /** Why two results can't be compared, or null. */
@@ -50,7 +51,16 @@ function main() {
     // Default margins differ per metric (DEFAULT_MARGINS); a flag sets one number for all CPU, or for the round time.
     const cpuFlag = take("--cpu-margin");
     const wallFlag = take("--wall-margin");
-    const margins = { cpuPct: cpuFlag != null ? Number(cpuFlag) : DEFAULT_MARGINS.cpuPct, wallPct: wallFlag != null ? Number(wallFlag) : DEFAULT_MARGINS.wallPct };
+    // --margins <file>: a JSON file with the margins (budget.json's `margins`, or the margins themselves); the flags above override its CPU and round-time ones.
+    const marginsFile = take("--margins");
+    const json = take("--json");
+    const fromFile = marginsFile ? (() => { const j = JSON.parse(readFileSync(marginsFile, "utf8")); return j.margins ?? j; })() : {};
+    const margins = {
+        ...DEFAULT_MARGINS,
+        ...fromFile,
+        ...(cpuFlag != null ? { cpuPct: Number(cpuFlag) } : {}),
+        ...(wallFlag != null ? { wallPct: Number(wallFlag) } : {}),
+    };
     for (const [flag, v] of [["--cpu-margin", cpuFlag], ["--wall-margin", wallFlag]]) {
         if (v != null && !(Number.isFinite(Number(v)) && v.trim() !== "")) {
             console.error(`${flag} needs a number of percent (10, not "${v}")`);
@@ -100,6 +110,10 @@ function main() {
     ].join("\n");
     console.log(out);
     if (md) writeFileSync(md, out + "\n");
+    if (json) {
+        const cmp = compareRuns(base, head, margins);
+        writeFileSync(json, JSON.stringify({ base: base.map((r) => r.label), head: head.map((r) => r.label), margins, ...measuresComparison(cmp) }, null, 1));
+    }
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) main();

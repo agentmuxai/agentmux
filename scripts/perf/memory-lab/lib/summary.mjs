@@ -190,7 +190,7 @@ export const SLOW_COMMAND_MS = 10_000;
  * CPU and the round time move more (measured spread of identical runs: about 5%,
  * 3%, 13% and 15%).
  */
-export const DEFAULT_MARGINS = { cpuPct: { app: 10, srv: 10, default: 20 }, wallPct: 20, writtenPct: 10 };
+export const DEFAULT_MARGINS = { cpuPct: { app: 10, srv: 10, renderer: 10, gpu: 20, default: 20 }, wallPct: 20, writtenPct: 3, memoryPct: null };
 
 /** The CPU margin of a group; a single number means every group. */
 const marginFor = (margins, group) => {
@@ -226,7 +226,8 @@ export function compareRuns(baseRuns, headRuns, margins = DEFAULT_MARGINS) {
         const cpu = (r) => r.cpu?.seconds?.[g];
         const everyone = [...baseRuns, ...headRuns];
         if (side(everyone, mem).median === 0 && !side(everyone, cpu).median) continue; // a group that isn't there
-        rows.push({ group: g, memory: metric(g, "MB", mem), cpu: metric(g, "s", cpu, marginFor(margins, g)) });
+        // Memory is noisy on a runner (13 to 30% between identical runs), so it is report-only unless the margins name one (memoryPct).
+        rows.push({ group: g, memory: metric(g, "MB", mem, margins.memoryPct ?? null), cpu: metric(g, "s", cpu, marginFor(margins, g)) });
     }
     const wall = metric("round time", "ms", (r) => r.wall?.medianMs, margins.wallPct);
     const slow = [...baseRuns.map((r) => ["base", r]), ...headRuns.map((r) => ["head", r])]
@@ -235,7 +236,8 @@ export function compareRuns(baseRuns, headRuns, margins = DEFAULT_MARGINS) {
     const lock = metric("store lock", "ms", (r) => r.storeLock?.longestHeldMs);
     const written = metric("srv written", "MB", (r) => r.io?.writtenMB?.srv, margins.writtenPct ?? DEFAULT_MARGINS.writtenPct);
     const storageWritten = metric("srv reached storage", "MB", (r) => r.io?.storageWrittenMB?.srv, margins.writtenPct ?? DEFAULT_MARGINS.writtenPct);
-    return { rows, wall, slow, lock, written, storageWritten, margins, baseRuns: baseRuns.length, headRuns: headRuns.length };
+    const slowCommands = metric("slow page commands", "", (r) => r.slowEvals?.total);
+    return { rows, wall, slow, lock, written, storageWritten, slowCommands, margins, baseRuns: baseRuns.length, headRuns: headRuns.length };
 }
 
 /** A markdown table of `compareRuns`: memory and CPU side by side, then the round time. */
@@ -250,7 +252,7 @@ export function runsTable(cmp, baseLabel = "base", headLabel = "head") {
     for (const r of cmp.rows) {
         const m = r.memory;
         const c = r.cpu;
-        lines.push(`| ${r.group === "app" ? "**app total**" : r.group} | ${f(m.base.median)}${range(m.base)} | ${f(m.head.median)}${range(m.head)} | ${sign(m.pct)} | ${f(c.base.median)}${range(c.base)} | ${f(c.head.median)}${range(c.head)} | ${sign(c.pct)} | ${c.flagged ? `CPU over +${c.marginPct}%` : ""} |`);
+        lines.push(`| ${r.group === "app" ? "**app total**" : r.group} | ${f(m.base.median)}${range(m.base)} | ${f(m.head.median)}${range(m.head)} | ${sign(m.pct)} | ${f(c.base.median)}${range(c.base)} | ${f(c.head.median)}${range(c.head)} | ${sign(c.pct)} | ${[m.flagged ? `memory over +${m.marginPct}%` : "", c.flagged ? `CPU over +${c.marginPct}%` : ""].filter(Boolean).join("; ")} |`);
     }
     const w = cmp.wall;
     lines.push("", `Round time (send to all agents idle), median: ${baseLabel} ${f(w.base.median)} ms${range(w.base)}, ${headLabel} ${f(w.head.median)} ms${range(w.head)}, ${sign(w.pct)}${w.flagged ? ` (over +${w.marginPct}%)` : ""}.`);
