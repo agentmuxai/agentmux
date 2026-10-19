@@ -83,4 +83,21 @@ describe("install-check cache", () => {
         answerOld({ installed: false, version: null } as unknown as typeof ok);
         await expect(first).resolves.toBe(fresh);
     });
+
+    it("gives a caller the newer answer when its forgotten check fails late", async () => {
+        let failOld!: (e: Error) => void;
+        rpc.InstallCheckCommand.mockImplementationOnce(() => new Promise((_res, rej) => (failOld = rej)));
+        const first = checkProviderInstalled(claude, clock);
+        invalidateInstallCheck("claude");
+        const fresh = { installed: true, version: "2.0.0" };
+        rpc.InstallCheckCommand.mockResolvedValueOnce(fresh);
+        await expect(checkProviderInstalled(claude, clock)).resolves.toBe(fresh);
+        failOld(new Error("timed out"));
+        await expect(first).resolves.toBe(fresh);
+    });
+
+    it("still fails its callers when the current check fails", async () => {
+        rpc.InstallCheckCommand.mockRejectedValueOnce(new Error("backend down"));
+        await expect(checkProviderInstalled(claude, clock)).rejects.toThrow("backend down");
+    });
 });

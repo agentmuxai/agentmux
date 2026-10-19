@@ -37,13 +37,20 @@ export function checkProviderInstalled(req: InstallCheckReq, now: () => number =
     const rpc = RpcApi.InstallCheckCommand(TabRpcClient, req);
     const entry = { startedAt: now(), rpc } as Entry;
     // An answer forgotten while in flight (an install finished, a refresh)
-    // is stale: the caller gets the newer check's answer instead, asked now
-    // if none started, so a slow old answer can't overwrite a newer one.
-    entry.answer = rpc.then((result) => {
-        const current = entries.get(key);
-        if (current === entry) return result;
-        return current ? current.answer : checkProviderInstalled(req, now);
-    });
+    // is stale, a failure as much as a result: the caller gets the newer
+    // check's answer instead, asked now if none started, so a slow old
+    // answer can't overwrite a newer one.
+    // (Registered before the eviction below, so a current check that fails
+    // is still current here, and its failure goes to its callers.)
+    const superseded = () => entries.get(key) !== entry;
+    const newer = () => entries.get(key)?.answer ?? checkProviderInstalled(req, now);
+    entry.answer = rpc.then(
+        (result) => (superseded() ? newer() : result),
+        (err) => {
+            if (superseded()) return newer();
+            throw err;
+        },
+    );
     entries.set(key, entry);
     rpc.catch(() => {
         if (entries.get(key) === entry) entries.delete(key);
