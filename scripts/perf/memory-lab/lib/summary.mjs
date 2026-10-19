@@ -145,3 +145,94 @@ export function comparisonTable(cmp, baseLabel = "base", headLabel = "head") {
     lines.push(`| **app total** | ${a.baseMB} | ${a.headMB} | **${sign(a.deltaMB)}** | ${a.pct == null ? "-" : "**" + sign(a.pct) + "%**"} |`);
     return lines.join("\n");
 }
+
+/** The time the agents took to finish each round: the median, the slowest, and how many rounds could not be timed. */
+export function wallSummary(roundMs) {
+    const timed = roundMs.filter((x) => Number.isFinite(x));
+    return {
+        roundMs,
+        timedRounds: timed.length,
+        untimedRounds: roundMs.length - timed.length,
+        medianMs: timed.length ? Math.round(median(timed)) : null,
+        maxMs: timed.length ? Math.max(...timed) : null,
+    };
+}
+
+/** A markdown table of a run's CPU seconds per group and its round times. */
+export function cpuTable(cpu, wall) {
+    const lines = ["| group | CPU seconds |", "|---|---:|"];
+    for (const g of GROUPS) if (cpu.seconds[g]) lines.push(`| ${g} | ${cpu.seconds[g]} |`);
+    lines.push(`| **app total** | **${cpu.seconds.app}** |`);
+    lines.push("", `Round time (send to all agents idle): median ${wall.medianMs ?? "n/a"} ms, slowest ${wall.maxMs ?? "n/a"} ms, ${wall.untimedRounds} of ${wall.roundMs.length} rounds not timed.`);
+    return lines.join("\n");
+}
+
+const pctChange = (base, head) => (base == null || head == null || base === 0 ? null : Math.round(((head - base) / base) * 1000) / 10);
+
+/**
+ * The percent past which a change is flagged (report only: it decides nothing).
+ * Per metric, because the noise differs: app and srv CPU are steady, renderer
+ * CPU and the round time move more (measured spread of identical runs: about 5%,
+ * 3%, 13% and 15%).
+ */
+export const DEFAULT_MARGINS = { cpuPct: { app: 10, srv: 10, default: 20 }, wallPct: 20 };
+
+/** The CPU margin of a group; a single number means every group. */
+const marginFor = (margins, group) => {
+    const c = margins.cpuPct;
+    return typeof c === "number" ? c : (c[group] ?? c.default);
+};
+
+/**
+ * Several runs of a build against several of another: per metric the median
+ * of each side, the change in percent and, to judge the noise, each side's
+ * lowest and highest. A CPU or round-time change is flagged only when it is past
+ * its margin AND the two sides' ranges do not overlap (the lowest run of the
+ * head is still above the highest of the base).
+ * @param {object[]} baseRuns result.json contents
+ * @param {object[]} headRuns
+ * @param {{ cpuPct: number | Record<string, number>, wallPct: number }} margins
+ */
+export function compareRuns(baseRuns, headRuns, margins = DEFAULT_MARGINS) {
+    const side = (runs, get) => {
+        const v = runs.map(get).filter((x) => x != null && Number.isFinite(x));
+        return { median: median(v), min: v.length ? Math.min(...v) : null, max: v.length ? Math.max(...v) : null, n: v.length };
+    };
+    const metric = (name, unit, get, marginPct = null) => {
+        const base = side(baseRuns, get);
+        const head = side(headRuns, get);
+        const pct = pctChange(base.median, head.median);
+        const separate = base.min != null && head.min != null && head.min > base.max; // the ranges do not overlap
+        return { name, unit, base, head, pct, marginPct, flagged: marginPct != null && pct != null && pct > marginPct && separate };
+    };
+    const rows = [];
+    for (const g of ["app", ...GROUPS]) {
+        const mem = (r) => (g === "app" ? r.steady?.app?.privateMB : r.steady?.groups?.[g]?.privateMB);
+        const cpu = (r) => r.cpu?.seconds?.[g];
+        const everyone = [...baseRuns, ...headRuns];
+        if (side(everyone, mem).median === 0 && !side(everyone, cpu).median) continue; // a group that isn't there
+        rows.push({ group: g, memory: metric(g, "MB", mem), cpu: metric(g, "s", cpu, marginFor(margins, g)) });
+    }
+    const wall = metric("round time", "ms", (r) => r.wall?.medianMs, margins.wallPct);
+    return { rows, wall, margins, baseRuns: baseRuns.length, headRuns: headRuns.length };
+}
+
+/** A markdown table of `compareRuns`: memory and CPU side by side, then the round time. */
+export function runsTable(cmp, baseLabel = "base", headLabel = "head") {
+    const f = (x) => (x == null ? "n/a" : Math.round(x * 10) / 10);
+    const sign = (n) => (n == null ? "-" : n > 0 ? `+${n}%` : `${n}%`);
+    const range = (s) => (s.n > 1 ? ` (${f(s.min)}-${f(s.max)})` : "");
+    const lines = [
+        `| group | ${baseLabel} MB | ${headLabel} MB | memory | ${baseLabel} CPU s | ${headLabel} CPU s | CPU | |`,
+        "|---|---:|---:|---:|---:|---:|---:|---|",
+    ];
+    for (const r of cmp.rows) {
+        const m = r.memory;
+        const c = r.cpu;
+        lines.push(`| ${r.group === "app" ? "**app total**" : r.group} | ${f(m.base.median)}${range(m.base)} | ${f(m.head.median)}${range(m.head)} | ${sign(m.pct)} | ${f(c.base.median)}${range(c.base)} | ${f(c.head.median)}${range(c.head)} | ${sign(c.pct)} | ${c.flagged ? `CPU over +${c.marginPct}%` : ""} |`);
+    }
+    const w = cmp.wall;
+    lines.push("", `Round time (send to all agents idle), median: ${baseLabel} ${f(w.base.median)} ms${range(w.base)}, ${headLabel} ${f(w.head.median)} ms${range(w.head)}, ${sign(w.pct)}${w.flagged ? ` (over +${w.marginPct}%)` : ""}.`);
+    lines.push("", `${cmp.baseRuns} run(s) against ${cmp.headRuns}; medians, with the lowest-highest in brackets when there is more than one. A flag needs the change to pass the margin (${typeof cmp.margins.cpuPct === "number" ? `+${cmp.margins.cpuPct}%` : `+${cmp.margins.cpuPct.app}% app and srv CPU, +${cmp.margins.cpuPct.default}% other groups`} CPU, +${cmp.margins.wallPct}% round time) and the two sides' ranges not to overlap. Flags are report-only; the operator sets the real margins.`);
+    return lines.join("\n");
+}

@@ -15,7 +15,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { compare, comparisonTable } from "./lib/summary.mjs";
+import { compareRuns, DEFAULT_MARGINS, runsTable } from "./lib/summary.mjs";
 
 /** Why two results can't be compared, or null. */
 export function mismatch(base, head) {
@@ -29,6 +29,7 @@ export function mismatch(base, head) {
     // Asked for the same recycle, but one build didn't do it (it lacks the command, or refused): one final follows a recycle and the other doesn't.
     if ((base.recycleAfter ?? 0) > 0 && Boolean(base.recycle?.recycled) !== Boolean(head.recycle?.recycled)) return `only one of the runs recycled its window: ${base.recycle?.recycled ? head.label : base.label} did not (${base.recycle?.recycled ? head.recycle?.blocked : base.recycle?.blocked})`;
     if ((base.holdMinutes ?? 0) !== (head.holdMinutes ?? 0)) return `different idle holds: ${base.holdMinutes ?? 0} min vs ${head.holdMinutes ?? 0} min`;
+    if ((base.workloadVersion ?? 1) !== (head.workloadVersion ?? 1)) return `different workload versions (${base.workloadVersion ?? 1} vs ${head.workloadVersion ?? 1}): the rounds are paced differently`;
     if (base.settleSeconds !== head.settleSeconds) return `different settle delays: ${base.settleSeconds} s vs ${head.settleSeconds} s`;
     if (base.steady?.samples !== head.steady?.samples) return `different sample counts: ${base.steady?.samples} vs ${head.steady?.samples}`;
     if (base.gapSeconds !== head.gapSeconds) return `different round spacing: ${base.gapSeconds} s vs ${head.gapSeconds} s`;
@@ -38,26 +39,46 @@ export function mismatch(base, head) {
 
 function main() {
     const argv = process.argv.slice(2);
-    const mdAt = argv.indexOf("--md");
-    const md = mdAt >= 0 ? argv.splice(mdAt, 2)[1] : null;
-    const [basePath, headPath] = argv;
-    if (!basePath || !headPath) {
-        console.error("usage: compare.mjs <base result.json> <head result.json> [--md out.md]");
+    const take = (flag) => {
+        const i = argv.indexOf(flag);
+        return i >= 0 ? argv.splice(i, 2)[1] : null;
+    };
+    const md = take("--md");
+    // Default margins differ per metric (DEFAULT_MARGINS); a flag sets one number for all CPU, or for the round time.
+    const cpuFlag = take("--cpu-margin");
+    const wallFlag = take("--wall-margin");
+    const margins = { cpuPct: cpuFlag != null ? Number(cpuFlag) : DEFAULT_MARGINS.cpuPct, wallPct: wallFlag != null ? Number(wallFlag) : DEFAULT_MARGINS.wallPct };
+    for (const [flag, v] of [["--cpu-margin", cpuFlag], ["--wall-margin", wallFlag]]) {
+        if (v != null && !(Number.isFinite(Number(v)) && v.trim() !== "")) {
+            console.error(`${flag} needs a number of percent (10, not "${v}")`);
+            process.exit(2);
+        }
+    }
+    // `<base.json> <head.json>`, or comma-separated lists of runs of each side (several runs, interleaved, tell noise from change).
+    const [basePaths, headPaths] = [take("--base") ?? argv[0], take("--head") ?? argv[1]].map((x) => (x ? x.split(",") : []));
+    if (!basePaths.length || !headPaths.length) {
+        console.error("usage: compare.mjs <base result.json[,more]> <head result.json[,more]> [--md out.md] [--cpu-margin <pct for every group>] [--wall-margin <pct>]");
         process.exit(2);
     }
-    const base = JSON.parse(readFileSync(basePath, "utf8"));
-    const head = JSON.parse(readFileSync(headPath, "utf8"));
-    const why = mismatch(base, head);
-    if (why) {
-        console.error(`not comparable: ${why}`);
-        process.exit(2);
+    const base = basePaths.map((p) => JSON.parse(readFileSync(p, "utf8")));
+    const head = headPaths.map((p) => JSON.parse(readFileSync(p, "utf8")));
+    // Every run must be comparable with the first of its side and with the other side.
+    const all = [...base, ...head];
+    for (const r of all.slice(1)) {
+        const why = mismatch(all[0], r);
+        if (why) {
+            console.error(`not comparable: ${all[0].label} and ${r.label}: ${why}`);
+            process.exit(2);
+        }
     }
+    const baseLabel = base.length > 1 ? `${base[0].label}..` : base[0].label;
+    const headLabel = head.length > 1 ? `${head[0].label}..` : head[0].label;
     const out = [
-        `## ${head.label} against ${base.label}`,
+        `## ${headLabel} against ${baseLabel}`,
         "",
-        `${head.layout.panes} agents, ${head.rounds} rounds, forced GC, private working set (MB).`,
+        `${head[0].layout.panes} agents, ${head[0].rounds} rounds, forced GC, private working set (MB) and CPU seconds over the workload.`,
         "",
-        comparisonTable(compare(base.steady, head.steady), base.label, head.label),
+        runsTable(compareRuns(base, head, margins), baseLabel, headLabel),
     ].join("\n");
     console.log(out);
     if (md) writeFileSync(md, out + "\n");

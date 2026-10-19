@@ -32,14 +32,20 @@ import { fileURLToPath } from "node:url";
 
 import { generateConversation } from "./lib/conversation.mjs";
 import { connect, installScript, launch, layoutFor, portableExe } from "./lib/driver.mjs";
-import { withReplacedSrv } from "./lib/srv.mjs";
+import { driftWarning, withReplacedSrv } from "./lib/srv.mjs";
 import { runRecycle, recycleSaving } from "./lib/recycle.mjs";
-import { osSample, portBelongsTo, takeSample } from "./lib/sample.mjs";
-import { agentsWithoutTurns, groupSample, inMegabytes, steady, table, transcriptGrowthProblem } from "./lib/summary.mjs";
+import { cpuLedger, osSample, portBelongsTo, takeSample } from "./lib/sample.mjs";
+import { agentsWithoutTurns, cpuTable, groupSample, inMegabytes, steady, table, transcriptGrowthProblem, wallSummary } from "./lib/summary.mjs";
+import { cpuBetween } from "./lib/cpu.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..", "..");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** What to add to a failure when the srv was replaced: a srv from another commit than the portable can launch and still break the app. */
+function srvHint(args) {
+    return args.srv ? ". The srv was replaced (--srv): an srv built from a different commit than the portable can launch yet leave the frontend unable to create agents or play turns; build both from one commit, with only the change under test differing" : "";
+}
 
 /** A run that isn't the load it was asked for: not an error of the app, so the lab starts it over. */
 class InvalidRun extends Error {}
@@ -55,7 +61,7 @@ function parseArgs(argv) {
             continue;
         }
         const key = raw.replace(/^--/, "").replace(/-([a-z])/g, (_, c) => c.toUpperCase());
-        if (!raw.startsWith("--") || !(key in a || ["portable", "label", "memtree", "exe", "srv"].includes(key))) throw new Error(`unknown argument ${raw}`);
+        if (!raw.startsWith("--") || !(key in a || ["portable", "label", "memtree", "exe", "srv", "srvCommit"].includes(key))) throw new Error(`unknown argument ${raw}`);
         const value = argv[++i];
         if (value === undefined) throw new Error(`${raw} needs a value`);
         a[key] = num.has(key) ? Number(value) : value;
@@ -114,7 +120,44 @@ async function requireTurns(driver, args) {
         if (missing.length === 0) return;
         await sleep(5000);
     }
-    throw new InvalidRun(`${missing.length} of ${args.panes} agents never played their turn (no tool rows in their transcripts): ${missing.join(", ")}`);
+    throw new InvalidRun(`${missing.length} of ${args.panes} agents never played their turn (no tool rows in their transcripts): ${missing.join(", ")}${srvHint(args)}`);
+}
+
+/**
+ * How the workload is paced, stamped in every result: results of different
+ * versions are different loads and `compare.mjs` refuses to set them side by side.
+ * 1: a fixed gap after each send. 2: a round ends when its agents are idle (and
+ * not before the gap), and its time is recorded.
+ */
+export const WORKLOAD_VERSION = 2;
+
+/**
+ * Sends one round and waits for it: the milliseconds from the send until every
+ * agent is idle again (null when no agent was ever seen working, or they never
+ * went idle within `capS`), and at least `gapS` after the send either way.
+ */
+async function playRound(driver, args, capS = Math.max(180, args.gapS * 8)) {
+    const t0 = Date.now();
+    await driver.send();
+    let sawWorking = false;
+    let quiet = 0;
+    let doneAt = null;
+    while (Date.now() - t0 < capS * 1000) {
+        await sleep(500);
+        const busy = await driver.busy().catch(() => null);
+        if (busy == null) continue;
+        if (busy > 0) {
+            sawWorking = true;
+            quiet = 0;
+        } else if (sawWorking && ++quiet === 1) {
+            doneAt = Date.now() - t0; // idle for the first time; two polls (1 s) confirm it
+        } else if (sawWorking && quiet >= 2) break;
+        if (!sawWorking && Date.now() - t0 > 10_000) break; // never seen working: nothing to time
+    }
+    const took = sawWorking && quiet >= 2 ? doneAt : null;
+    const rest = args.gapS * 1000 - (Date.now() - t0);
+    if (rest > 0) await sleep(rest);
+    return took;
 }
 
 /** The last turns must be over before the final is taken, or a slow build is measured with fewer turns played. */
@@ -168,6 +211,7 @@ async function attempt(args, ctx) {
     const { exe, memtree, dir, home, script, layout, swapped } = ctx;
     const instance = await launch({ exe, home, port: args.port, script, log: join(dir, "instance.log") });
     const curve = [];
+    cpuLedger.reset();
     let driver;
     let succeeded = false;
     // The instance has its own process group on macOS and Linux, so Ctrl-C reaches only the lab: end the instance first.
@@ -184,9 +228,14 @@ async function attempt(args, ctx) {
         installScript(home, script);
         driver = await connect(args.port, home, join(dir, "work"));
         await driver.setupAccount();
-        await driver.build(layout);
-        await sleep(15_000);
-        await requireLayout(driver, args);
+        try {
+            await driver.build(layout);
+            await sleep(15_000);
+            await requireLayout(driver, args);
+        } catch (e) {
+            if (args.srv && e instanceof Error) e.message += srvHint(args);
+            throw e;
+        }
         const transcriptsBefore = transcriptBytes(home);
 
         const mark = async (round) => {
@@ -197,13 +246,15 @@ async function attempt(args, ctx) {
             console.log(`  round ${String(round).padStart(3)}: app ${row.appMB} MB  ${Object.entries(row.groupsMB).map(([k, v]) => `${k} ${v}`).join("  ")}`);
         };
         await mark(0);
+        // The CPU of the workload is what is spent after this point; startup and building the layout are before it.
+        const cpuAtStart = cpuLedger.totals();
+        const roundMs = [];
         let recycle = null;
         // With --hold-minutes the agents stop at the recycle round: what matters then is how long the window stays down.
         const playedRounds = args.holdMinutes > 0 ? args.recycleAfter : args.rounds;
         let hold = null;
         for (let r = 1; r <= playedRounds; r++) {
-            await driver.send();
-            await sleep(args.gapS * 1000);
+            roundMs.push(await playRound(driver, args));
             if (r === 1) await requireTurns(driver, args);
             if (r % args.every === 0 || r === playedRounds) await mark(r);
             if (r === args.recycleAfter) {
@@ -224,6 +275,8 @@ async function attempt(args, ctx) {
             samples.push(await osSample(memtree, instance.pid, args.port));
         }
         const summary = inMegabytes(steady(samples));
+        const cpu = { fromRound: 0, seconds: cpuBetween(cpuAtStart, cpuLedger.totals()), note: "highest CPU time seen per process, summed per group; includes the settle and the forced-GC final" };
+        const wall = wallSummary(roundMs);
 
         // The store of record: the agents' turns must be in it, whatever the page shows.
         const turnBytes = JSON.parse(readFileSync(script, "utf8")).turns.slice(0, playedRounds).map((t) => JSON.stringify(t).length);
@@ -248,6 +301,7 @@ async function attempt(args, ctx) {
             agents: driver.agents.map((a) => ({ name: a.name, id: a.id, tabId: a.tabId })),
             toolRows: await driver.toolRows(),
             // What was asked; `playedRounds` is how many were played (fewer with --hold-minutes).
+            workloadVersion: WORKLOAD_VERSION,
             rounds: args.rounds,
             gapSeconds: args.gapS,
             settleSeconds: args.settleS,
@@ -262,9 +316,11 @@ async function attempt(args, ctx) {
             recycle: recycle ? { ...recycle, afterRound: args.recycleAfter, saving: recycleSaving(recycle) } : null,
             final,
             steady: summary,
+            cpu,
+            wall,
         };
         writeFileSync(join(dir, "result.json"), JSON.stringify(result, null, 1));
-        const md = [`# ${args.label}`, "", `${args.panes} agents over ${layout.length} tab(s), ${playedRounds} rounds (${args.gapS} s apart)${args.holdMinutes > 0 ? `, then held idle ${args.holdMinutes} min` : ""}, forced GC, median of ${summary.samples} samples.`, "", table(summary), ...notes.map((n) => `\n> ${n}`)].join("\n");
+        const md = [`# ${args.label}`, "", `${args.panes} agents over ${layout.length} tab(s), ${playedRounds} rounds (${args.gapS} s apart)${args.holdMinutes > 0 ? `, then held idle ${args.holdMinutes} min` : ""}, forced GC, median of ${summary.samples} samples.`, "", table(summary), "", cpuTable(cpu, wall), ...notes.map((n) => `\n> ${n}`)].join("\n");
         writeFileSync(join(dir, "summary.md"), md + "\n");
         console.log("\n" + md);
         console.log(`\n-> ${join(dir, "result.json")}`);
@@ -289,7 +345,13 @@ async function main() {
     for (const old of ["result.json", "summary.md", ...readdirSync(dir).filter((f) => /^invalid-run-\d+\.txt$/.test(f))]) rmSync(join(dir, old), { force: true });
     // --srv: the portable with its srv swapped for the one under test (a copy; the original is untouched).
     const swapped = args.srv ? withReplacedSrv(args.portable, resolve(args.srv), dir) : null;
-    if (swapped) console.log(`srv replaced: ${swapped.replaced.file} <- ${swapped.replaced.from} (${swapped.replaced.sha256})`);
+    if (swapped) {
+        console.log(`srv replaced: ${swapped.replaced.file} <- ${swapped.replaced.from} (${swapped.replaced.sha256})`);
+        swapped.replaced.srvCommit = args.srvCommit ?? null;
+        const drift = driftWarning(args.portable, args.srvCommit);
+        if (drift) console.log(`  WARNING: ${drift}`);
+        else if (!args.srvCommit) console.log("  (give --srv-commit <sha> to have the lab check it against the portable's commit; the srv must be built from the same commit as the portable)");
+    }
     const exe = args.exe ?? portableExe(swapped ? swapped.portable : args.portable);
     if (!existsSync(exe)) throw new Error(`${exe} not found`);
 

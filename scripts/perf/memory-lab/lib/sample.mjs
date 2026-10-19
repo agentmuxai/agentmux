@@ -21,6 +21,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { connectBrowser, connectPage, listTargets } from "../../../ui-screenshots/lib/cdp-client.mjs";
+import { CpuLedger } from "./cpu.mjs";
 
 const hex = (v) => (typeof v === "string" ? parseInt(v, 16) : Number(v ?? 0));
 
@@ -55,6 +56,9 @@ export function withChromiumRoles(sample, processInfo) {
     return { ...sample, procs: sample.procs.map((p) => (p.role === "zygote-forked" && type.has(p.pid) ? { ...p, role: role(type.get(p.pid)) } : p)) };
 }
 
+/** Every sample of a run notes its processes' CPU time here (see lib/cpu.mjs). */
+export const cpuLedger = new CpuLedger();
+
 /**
  * OS numbers: one `memtree` sample of the tree under `rootPid`; with the CDP
  * `port`, a zygote-forked process gets its real role (`withChromiumRoles`).
@@ -65,10 +69,16 @@ export async function osSample(memtree, rootPid, port = null) {
     try {
         execFileSync(memtree, ["--pid", String(rootPid), "--samples", "1", "--extra-pane-roots", FAKE_CLI_ROOTS, "--json", file], { stdio: ["ignore", "ignore", "pipe"] });
         const sample = lastSample(readFileSync(file, "utf8"));
-        if (port == null || !sample.procs.some((p) => p.role === "zygote-forked")) return sample;
+        if (port == null || !sample.procs.some((p) => p.role === "zygote-forked")) {
+            cpuLedger.note(sample.procs);
+            return sample;
+        }
         const browser = await connectBrowser(port, { timeoutMs: 15_000 });
         try {
-            return withChromiumRoles(sample, (await browser.send("SystemInfo.getProcessInfo")).processInfo);
+            // The roles first: a CPU total grouped before them would count the renderers as "other".
+            const withRoles = withChromiumRoles(sample, (await browser.send("SystemInfo.getProcessInfo")).processInfo);
+            cpuLedger.note(withRoles.procs);
+            return withRoles;
         } finally {
             await browser.close();
         }

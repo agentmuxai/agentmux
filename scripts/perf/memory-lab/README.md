@@ -43,7 +43,59 @@ made into scripts. The budget it serves is 500 MB for the app's own processes.
    or operating system: the same conversation on the same OS is what makes the
    numbers comparable.
 
+## Before and after a change: memory, CPU and time
+
+A change that saves memory must not cost speed, so every run reports three things
+and `compare.mjs` puts them in one table:
+
+- **Memory:** private working set per process group, forced-GC median (as above).
+- **CPU seconds** per group (renderer, gpu, srv, host, utility) spent over the
+  workload: the highest CPU time seen for every process, summed, so a recycled
+  renderer keeps what it spent before it was replaced. Counted from the
+  round-0 sample to the end, so it includes the settle and the forced-GC final
+  (the same for both sides). A process that starts and exits between two
+  samples is missed.
+- **Round time:** milliseconds from sending a round until every agent is idle
+  again, the median over the rounds (`result.wall`). It is a coarse signal of
+  how long the build takes to play the same turns, not user-perceived latency.
+  A round starts when the previous one has finished (and not before the gap), so
+  a slow build is no longer overlapped with the next round.
+
+How to compare two builds (or the same build with and without a change):
+
+1. **One commit for both sides.** Build "before" and "after" from the same
+   commit, differing only in the change under test. Two builds from different
+   commits differ in everything that landed between them.
+2. **At least 4 runs of each side, interleaved** (A B A B A B A B), same options,
+   so drift in the machine's state hits both sides alike. One run of each
+   cannot tell a change from noise: CPU time and round time move with the
+   machine's load.
+3. `node scripts/perf/memory-lab/compare.mjs --base a1,a2,a3,a4 --head b1,b2,b3,b4`
+   (paths to the `result.json` files; two positional files still work). It
+   prints each side's median with its lowest-highest, the change in percent,
+   and flags CPU or round time past its margin. The default margins are per
+   metric, from the measured noise of identical runs: +10% for app and srv CPU,
+   +20% for the renderers' (and other groups') CPU and for the round time;
+   `--cpu-margin` / `--wall-margin` set one number for all CPU or for the round
+   time. A flag also needs the two sides' lowest-highest ranges not to overlap.
+   The flags are report-only and the margins are a starting point: the operator
+   sets the real ones.
+
+Results made with a different workload version (`result.workloadVersion`; the
+pacing of the rounds) are refused: the two are different loads.
+
 ### Measuring an srv change without building the app
+
+**Build the replacement srv from the same commit as the portable, with only the
+change under test differing.** The srv and the frontend share a protocol, but an
+srv from a different commit can still launch and then leave the frontend unable
+to create agents or play turns (seen on Linux with an srv built from `main`
+swapped into a portable built 12 commits earlier). Pass `--srv-commit <sha>` and
+the lab compares it with the commit in the portable's folder name
+(`agentmux-0.59.32+g<sha>...`) and warns when they differ; a run that then fails
+to create its agents or play its turns says the srv was replaced. The usual
+recipe: build the portable from a pinned commit C (its own srv is the "before"),
+build srv from C plus the change (the "after"), and swap only the srv.
 
 `--srv <path to an agentmux-srv executable>` (with `--portable`) runs a copy of
 the portable whose `agentmux-srv` is replaced by yours; the host, the

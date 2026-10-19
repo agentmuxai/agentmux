@@ -13,12 +13,13 @@ import { basename, join } from "node:path";
 
 import { mismatch } from "./compare.mjs";
 import { evaluate, report } from "./gate.mjs";
-import { srvTarget, withReplacedSrv } from "./lib/srv.mjs";
+import { driftWarning, portableCommit, srvTarget, withReplacedSrv } from "./lib/srv.mjs";
+import { CpuLedger, cpuBetween } from "./lib/cpu.mjs";
 import { generateConversation } from "./lib/conversation.mjs";
 import { portableExe } from "./lib/driver.mjs";
 import { draftText, recycleMark, recycleSaving, scrollArmed, scrollRestored } from "./lib/recycle.mjs";
 import { allocatorRoots, dumpedProcesses, lastSample, mainPage, withChromiumRoles } from "./lib/sample.mjs";
-import { agentsWithoutTurns, compare, comparisonTable, groupOf, groupSample, inMegabytes, median, MB, steady, table, transcriptGrowthProblem } from "./lib/summary.mjs";
+import { agentsWithoutTurns, compare, compareRuns, comparisonTable, cpuTable, runsTable, wallSummary, groupOf, groupSample, inMegabytes, median, MB, steady, table, transcriptGrowthProblem } from "./lib/summary.mjs";
 
 const proc = (pid, name, role, app, privateMB, commitMB = privateMB * 2) => ({ pid, name, role, app, private: privateMB * MB, commit: commitMB * MB });
 
@@ -339,7 +340,7 @@ describe("memory soak gate", () => {
         const out = evaluate(r, budget("enforce", { srv: 120 }));
         expect(out.over).toBe(true);
         expect(out.exitCode).toBe(2);
-        expect(report(out, r, budget("enforce", { srv: 120 }))).toMatch(/\| srv \| n\/a \| 120 \| not read \|/);
+        expect(report(out, r, budget("enforce", { srv: 120 }))).toMatch(/\| srv \| n\/a MB \| 120 MB \| not read \|/);
     });
 });
 
@@ -373,5 +374,103 @@ describe("replacing a portable's srv", () => {
         } finally {
             rmSync(root, { recursive: true, force: true });
         }
+    });
+});
+
+describe("CPU and round time", () => {
+    const proc = (pid, role, cpu_ns, name = "x.exe") => ({ pid, name, role, app: true, cpu_ns });
+
+    it("counts the highest CPU time seen per process, so a replaced renderer keeps what it spent", () => {
+        const ledger = new CpuLedger();
+        ledger.note([proc(1, "renderer", 2e9), proc(2, "main", 1e9, "agentmux-srv.exe")]);
+        const atStart = ledger.totals();
+        ledger.note([proc(1, "renderer", 5e9), proc(2, "main", 4e9, "agentmux-srv.exe")]);
+        // the renderer is recycled: pid 1 is gone, pid 3 is new and has used 1 s
+        ledger.note([proc(3, "renderer", 1e9), proc(2, "main", 6e9, "agentmux-srv.exe")]);
+        const spent = cpuBetween(atStart, ledger.totals());
+        expect(spent.renderer).toBe(4); // 5 - 2 for pid 1, plus 1 for pid 3
+        expect(spent.srv).toBe(5);
+        expect(spent.app).toBe(9);
+    });
+
+    it("ignores the panes' children and processes whose CPU could not be read", () => {
+        const ledger = new CpuLedger();
+        ledger.note([{ ...proc(1, "renderer", 9e9), app: false }, proc(2, "renderer", null)]);
+        expect(ledger.totals().app).toBe(0);
+    });
+
+    it("summarises round times and says how many could not be timed", () => {
+        const w = wallSummary([12000, null, 8000, 10000]);
+        expect(w).toMatchObject({ medianMs: 10000, maxMs: 12000, timedRounds: 3, untimedRounds: 1 });
+        expect(wallSummary([null, null]).medianMs).toBeNull();
+        expect(cpuTable({ seconds: { renderer: 30, srv: 5, app: 40 } }, w)).toMatch(/1 of 4 rounds not timed/);
+    });
+
+    const run = (label, app, renderer, cpuApp, cpuRenderer, roundMs) => ({
+        label,
+        steady: { app: { privateMB: app }, groups: { renderer: { privateMB: renderer } } },
+        cpu: { seconds: { app: cpuApp, renderer: cpuRenderer } },
+        wall: { medianMs: roundMs },
+    });
+
+    it("compares the medians of several runs and flags CPU or round time past the margin", () => {
+        const base = [run("b1", 900, 600, 100, 70, 10000), run("b2", 920, 610, 104, 72, 10400), run("b3", 910, 605, 102, 71, 10200)];
+        const head = [run("h1", 700, 450, 125, 90, 10100), run("h2", 710, 455, 127, 92, 10300)];
+        const cmp = compareRuns(base, head);
+        const app = cmp.rows.find((r) => r.group === "app");
+        expect(app.memory.pct).toBeLessThan(-20);
+        expect(app.cpu.flagged).toBe(true); // 102 -> 126, about +23%, past +10%, and the ranges are apart
+        expect(cmp.rows.find((r) => r.group === "renderer").cpu.flagged).toBe(true); // 71 -> 91, about +28%, past +20%
+        expect(cmp.wall.flagged).toBe(false);
+        const text = runsTable(cmp, "base", "head");
+        expect(text).toMatch(/CPU over \+10%/);
+        expect(text).toMatch(/CPU over \+20%/);
+        expect(text).toMatch(/3 run\(s\) against 2/);
+    });
+
+    it("does not flag a change inside the margin, and treats a missing number as unknown", () => {
+        const cmp = compareRuns([run("b", 900, 600, 100, 70, 10000)], [run("h", 800, 500, 105, 72, 10500)]);
+        expect(cmp.rows.find((r) => r.group === "app").cpu.flagged).toBe(false);
+        const old = compareRuns([{ label: "o", steady: { app: { privateMB: 900 }, groups: {} } }], [run("h", 800, 500, 105, 72, 10500)]);
+        expect(old.rows.find((r) => r.group === "app").cpu.base.n).toBe(0);
+        expect(old.rows.find((r) => r.group === "app").cpu.flagged).toBe(false);
+    });
+
+    it("applies the margin per metric and needs the ranges apart", () => {
+        // renderer CPU +15%: past 10 but not past its own 20; app CPU +15%: past 10
+        const base = [run("b1", 900, 600, 100, 70, 10000), run("b2", 900, 600, 101, 70.5, 10000)];
+        const head = [run("h1", 900, 600, 116, 81, 10000), run("h2", 900, 600, 117, 81.5, 10000)];
+        const cmp = compareRuns(base, head);
+        expect(cmp.rows.find((r) => r.group === "app").cpu.flagged).toBe(true);
+        expect(cmp.rows.find((r) => r.group === "renderer").cpu.flagged).toBe(false);
+        // the same +15% app CPU with overlapping ranges is noise, not a flag
+        const noisy = compareRuns([run("b1", 900, 600, 100, 70, 10000), run("b2", 900, 600, 120, 70, 10000)], [run("h1", 900, 600, 118, 70, 10000), run("h2", 900, 600, 140, 70, 10000)]);
+        expect(noisy.rows.find((r) => r.group === "app").cpu.pct).toBeGreaterThan(10);
+        expect(noisy.rows.find((r) => r.group === "app").cpu.flagged).toBe(false);
+        // a single number sets every CPU group
+        expect(compareRuns(base, head, { cpuPct: 10, wallPct: 20 }).rows.find((r) => r.group === "renderer").cpu.flagged).toBe(true);
+    });
+
+    it("refuses to compare different workload versions", () => {
+        const same = { layout: { panes: 4 }, rounds: 10, seed: 1, gapSeconds: 15, platform: "win32", settleSeconds: 20, steady: { samples: 3 } };
+        expect(mismatch({ ...same, workloadVersion: 1 }, { ...same, workloadVersion: 2 })).toMatch(/workload versions/);
+        expect(mismatch({ ...same }, { ...same, workloadVersion: 1 })).toBeNull(); // no stamp is version 1
+        expect(mismatch({ ...same, workloadVersion: 2 }, { ...same, workloadVersion: 2 })).toBeNull();
+    });
+});
+
+describe("srv drift", () => {
+    it("reads the commit from a portable's name", () => {
+        expect(portableCommit("C:/b/agentmux-0.59.32+gfe727c686.20261018T111038.865-x64-portable")).toBe("fe727c686");
+        expect(portableCommit("C:/b/some-folder")).toBeNull();
+    });
+
+    it("warns when the two commits are known and differ, not when they agree or one is unknown", () => {
+        const p = "C:/b/agentmux-0.59.32+gfe727c686.2026-x64-portable";
+        expect(driftWarning(p, "7c1730e0e")).toMatch(/may have drifted/);
+        expect(driftWarning(p, "fe727c686")).toBeNull();
+        expect(driftWarning(p, "fe727c686a1b2c3d4e5f")).toBeNull(); // a longer form of the same commit
+        expect(driftWarning(p, null)).toBeNull();
+        expect(driftWarning("C:/b/plain", "7c1730e0e")).toBeNull();
     });
 });

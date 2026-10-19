@@ -18,6 +18,21 @@ export function srvTarget(relPaths) {
     return found[0];
 }
 
+/** The commit a portable's folder name says it was built from (`agentmux-0.59.32+gfe727c686...`), or null. */
+export function portableCommit(portable) {
+    return /\+g([0-9a-f]{7,40})/i.exec(basename(portable))?.[1]?.toLowerCase() ?? null;
+}
+
+/** Why a replacement srv may not match the portable's frontend, or null: both commits known and different. */
+export function driftWarning(portable, srvCommit) {
+    const built = portableCommit(portable);
+    if (!built || !srvCommit) return null;
+    const a = built.toLowerCase();
+    const b = srvCommit.toLowerCase();
+    if (a.startsWith(b) || b.startsWith(a)) return null;
+    return `the portable was built from ${built} and the replacement srv from ${srvCommit}: the srv and the frontend may have drifted (a protocol-compatible srv can still leave the frontend unable to create agents). Build both from one commit, with only the change under test differing.`;
+}
+
 /**
  * Copies `portable` into `intoDir` and overwrites its srv with `srvPath`, keeping the
  * name the launcher looks for. Returns the copy's path and what was put in it.
@@ -34,5 +49,5 @@ export function withReplacedSrv(portable, srvPath, intoDir) {
     const target = srvTarget(files);
     copyFileSync(srvPath, join(copy, target));
     const sha256 = createHash("sha256").update(readFileSync(srvPath)).digest("hex").slice(0, 16);
-    return { portable: copy, replaced: { file: target, from: srvPath, bytes: statSync(srvPath).size, sha256 } };
+    return { portable: copy, replaced: { file: target, from: srvPath, bytes: statSync(srvPath).size, sha256, portableCommit: portableCommit(portable) } };
 }
