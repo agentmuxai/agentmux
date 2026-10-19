@@ -13,7 +13,7 @@ export function parseAbArgs(argv) {
     const dash = argv.indexOf("--");
     const own = dash >= 0 ? argv.slice(0, dash) : argv;
     const common = dash >= 0 ? argv.slice(dash + 1) : [];
-    const spec = { runs: 4, order: "ab", out: "ab-out", common, a: { env: [] }, b: { env: [] } };
+    const spec = { runs: 4, order: "ab", out: "ab-out", common, a: { env: [], setting: [] }, b: { env: [], setting: [] } };
     for (let i = 0; i < own.length; i++) {
         const raw = own[i];
         const value = () => {
@@ -21,10 +21,10 @@ export function parseAbArgs(argv) {
             if (v === undefined) throw new Error(`${raw} needs a value`);
             return v;
         };
-        const m = /^--(a|b)-(portable|srv|srv-commit|label|env)$/.exec(raw);
+        const m = /^--(a|b)-(portable|srv|srv-commit|label|env|setting)$/.exec(raw);
         if (m) {
             const [, side, what] = m;
-            if (what === "env") spec[side].env.push(value());
+            if (what === "env" || what === "setting") spec[side][what].push(value());
             else spec[side][what.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = value();
             continue;
         }
@@ -76,6 +76,7 @@ export function runArgs(run, spec) {
     if (side.srv) args.push("--srv", side.srv);
     if (side.srvCommit) args.push("--srv-commit", side.srvCommit);
     for (const pair of side.env) args.push("--env", pair);
+    for (const pair of side.setting) args.push("--setting", pair);
     return [...args, ...spec.common];
 }
 
