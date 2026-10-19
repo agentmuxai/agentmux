@@ -801,8 +801,7 @@ describe("PaneTabStrip activity flash", () => {
         expect(animate).not.toHaveBeenCalled();
     });
 
-    // Nobody sees a pill in a hidden window tab, and each flash is a ~65-keyframe Web Animation
-    // (7% of the page in a 12-agent lab, most of it for tabs that were not showing).
+    // Nobody sees a pill in a hidden window tab, and each flash is a Web Animation on its ::before.
     it("does not flash a pill whose window tab is hidden, and flashes again once it is shown", () => {
         const [displayed, setDisplayed] = createSignal(false);
         render(() => (
