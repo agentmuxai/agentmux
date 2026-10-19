@@ -1,7 +1,7 @@
 # Spec: Sysinfo text zoom, denser charts, and one zoom path for every pane
 
 **Date:** 2026-10-18
-**Status:** active — Part A (one zoom path) is built in the first PR; Parts B and C (Sysinfo text zoom, density) follow in a second PR.
+**Status:** active — Part A (one zoom path) is built in #5128; Parts B and C (Sysinfo text zoom, density) follow in a second PR.
 **Requested by:** the owner: "lets add zoom for the text of sysinfo. the charts would stay the same, but the text would change size on the same zoom system as the other panes. Also, look for any opportunities to tighten padding between panes, especially on the ones with many charts. so intelligent placement of text too"; then "lets also take this opportunity to DRY the zoom system. unless there is a good reason not to, it should be unified under a single path".
 **Author:** Manoz@Area54.
 **Builds on:** `SPEC_SYSINFO_CONTROLS_AND_EDGES_2026_10_16.md` (#5022: flush edges, floating control row), `SPEC_HANGAR_ZOOM_2026_10_08.md` (§5 lists the zoom duplication this spec removes), `SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md`, `zoom-architecture.md`, `per-pane-zoom-hover.md`.
