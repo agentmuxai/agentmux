@@ -63,7 +63,6 @@ export const cpuLedger = new CpuLedger();
  * OS numbers: one `memtree` sample of the tree under `rootPid`; with the CDP
  * `port`, a zygote-forked process gets its real role (`withChromiumRoles`).
  */
-
 export async function osSample(memtree, rootPid, port = null) {
     const dir = mkdtempSync(join(tmpdir(), "memory-lab-"));
     const file = join(dir, "memtree.jsonl");

@@ -48,6 +48,12 @@ function main() {
     const cpuFlag = take("--cpu-margin");
     const wallFlag = take("--wall-margin");
     const margins = { cpuPct: cpuFlag != null ? Number(cpuFlag) : DEFAULT_MARGINS.cpuPct, wallPct: wallFlag != null ? Number(wallFlag) : DEFAULT_MARGINS.wallPct };
+    for (const [flag, v] of [["--cpu-margin", cpuFlag], ["--wall-margin", wallFlag]]) {
+        if (v != null && !(Number.isFinite(Number(v)) && v.trim() !== "")) {
+            console.error(`${flag} needs a number of percent (10, not "${v}")`);
+            process.exit(2);
+        }
+    }
     // `<base.json> <head.json>`, or comma-separated lists of runs of each side (several runs, interleaved, tell noise from change).
     const [basePaths, headPaths] = [take("--base") ?? argv[0], take("--head") ?? argv[1]].map((x) => (x ? x.split(",") : []));
     if (!basePaths.length || !headPaths.length) {
