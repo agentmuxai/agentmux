@@ -115,8 +115,11 @@ function floorOf(floors: Floors, nodeId: string): number {
  * The narrowest (`axis` Row) or shortest (`axis` Column) `node` may be dragged
  * to, in CSS px. A pane: MinNodeSizePx, or MinBrowserPaneWidthPx across for a
  * pane holding a browser (in any of its in-pane tabs). A group of panes along
- * `axis`: its members' floors added up, with the gaps; across `axis`: the
- * largest member's. Minimized members take no room.
+ * `axis`: geometry shares a group's pixels among its members by their current
+ * weights, so the group is as narrow as its most demanding member allows: the
+ * largest `floor × (total weight ÷ member weight)`. (Adding the floors up
+ * would leave a browser beside a terminal in an equal row well under its own
+ * floor.) Across `axis`: the largest member's. Minimized members take no room.
  */
 export function minExtentPx(node: LayoutNode, axis: FlexDirection, isBrowser: (blockId: string) => boolean): number {
     const kids = (node.children ?? []).filter((c) => !isEffectivelyMinimized(c));
@@ -126,9 +129,10 @@ export function minExtentPx(node: LayoutNode, axis: FlexDirection, isBrowser: (b
         return browser ? Math.max(MinNodeSizePx, MinBrowserPaneWidthPx) : MinNodeSizePx;
     }
     const floors = kids.map((c) => minExtentPx(c, axis, isBrowser));
-    return node.flexDirection === axis
-        ? floors.reduce((a, b) => a + b, 0) + DefaultGapSizePx * (kids.length - 1)
-        : Math.max(...floors);
+    if (node.flexDirection !== axis) return Math.max(...floors);
+    const total = kids.reduce((sum, c) => sum + c.size, 0);
+    const byShare = kids.map((c, i) => (c.size > 0 && total > 0 ? (floors[i] * total) / c.size : floors[i]));
+    return Math.max(...byShare);
 }
 
 function isBrowserBlock(blockId: string): boolean {
