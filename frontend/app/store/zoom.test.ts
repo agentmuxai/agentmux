@@ -321,6 +321,15 @@ describe("zoomBlockByWheel / usePaneZoomWheel", () => {
         expect(currentZoom("t1")).toBeCloseTo(1.0, 5);
     });
 
+    // A headless shell draws at 13px: at 50%, a step must change that font, not a
+    // default 15px one (#5128).
+    it("skips steps by the font size the block says it draws at", () => {
+        blockMetas.set("sub1", { "term:zoom": 0.5 });
+        zoomBlockByWheel("sub1", -100, 13);
+        // round(13 × 0.55) = 7 is still 13 × 0.5's 7px, so it skips on to 0.58 (8px).
+        expect(currentZoom("sub1")).toBeCloseTo(0.58, 5);
+    });
+
     it("zooms a block with no pane capability (a headless sub-block)", () => {
         blockMetas.set("sub1", { "term:fontsize": 20 });
         zoomBlockByWheel("sub1", -100);

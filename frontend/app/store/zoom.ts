@@ -114,9 +114,10 @@ function stepZoom(
     zoom: number,
     step: number,
     direction: 1 | -1,
-    showIndicator: boolean = true
+    showIndicator: boolean = true,
+    baseFontSizeOverride?: number
 ): number {
-    const baseFontSize = getBaseFontSize(blockId);
+    const baseFontSize = baseFontSizeOverride ?? getBaseFontSize(blockId);
     const currentFontSize = computeEffectiveFontSize(baseFontSize, zoom);
     let newZoom = zoom + step * direction;
     const limit = direction === 1 ? MAX_ZOOM : MIN_ZOOM;
@@ -144,11 +145,13 @@ export function zoomBlockOut(blockId: string, step: number = WHEEL_STEP): void {
 /**
  * One Ctrl+scroll step on one block, by its own `term:zoom`: the shared wheel
  * step, the font-size skipping and the indicator. No capability check, so it
- * also zooms a headless sub-block (the agent pane's shell) that isn't a pane.
+ * also zooms a headless sub-block (the agent pane's shell) that isn't a pane;
+ * such a block passes the font size it draws at (`baseFontSize`), which its
+ * pane capability can't tell the stepper.
  */
-export function zoomBlockByWheel(blockId: string, deltaY: number): void {
+export function zoomBlockByWheel(blockId: string, deltaY: number, baseFontSize?: number): void {
     const meta = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta;
-    stepZoom(blockId, readZoom(meta), WHEEL_STEP, deltaY > 0 ? -1 : 1);
+    stepZoom(blockId, readZoom(meta), WHEEL_STEP, deltaY > 0 ? -1 : 1, true, baseFontSize);
 }
 
 /**
@@ -158,7 +161,11 @@ export function zoomBlockByWheel(blockId: string, deltaY: number): void {
  * all-panes handler. Every other pane needs nothing: the window handler zooms
  * the pane under the pointer. SPEC_SYSINFO_TEXT_ZOOM_DENSITY_AND_ONE_ZOOM_PATH_2026_10_18.md §3.
  */
-export function usePaneZoomWheel(el: () => HTMLElement | undefined, blockId: () => string | null | undefined): void {
+export function usePaneZoomWheel(
+    el: () => HTMLElement | undefined,
+    blockId: () => string | null | undefined,
+    baseFontSize?: number
+): void {
     onMount(() => {
         const target = el();
         if (!target) return;
@@ -169,7 +176,7 @@ export function usePaneZoomWheel(el: () => HTMLElement | undefined, blockId: () 
             // Also stops CEF's own Ctrl+scroll page zoom.
             ev.preventDefault();
             ev.stopPropagation();
-            zoomBlockByWheel(id, ev.deltaY);
+            zoomBlockByWheel(id, ev.deltaY, baseFontSize);
         };
         target.addEventListener("wheel", onWheel, { passive: false, capture: true });
         onCleanup(() => target.removeEventListener("wheel", onWheel, { capture: true }));

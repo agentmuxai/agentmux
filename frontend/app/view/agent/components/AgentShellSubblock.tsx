@@ -417,7 +417,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
     // Ctrl+scroll zooms THIS shell, by its own sub-block's `term:zoom`. The window's
     // handler would find no `data-blockid` on this headless sub-block and zoom the
     // whole agent pane instead.
-    usePaneZoomWheel(() => containerRef, subBlockId);
+    usePaneZoomWheel(() => containerRef, subBlockId, BASE_FONT_SIZE);
 
     onMount(() => {
         // Right-click in the terminal: the drawer's own Copy/Paste, and no
