@@ -794,7 +794,7 @@ use std::sync::Arc;
     /// stamp one `{off, ms}` tsidx record per batch, keyed at the batch's
     /// start byte offset.
     #[test]
-    fn tsidx_stamped_per_batch_for_agent_transcript_appends() {
+    fn tsidx_stamped_for_agent_transcript_appends_at_most_once_a_second() {
         use crate::backend::storage::filestore::FileStore;
         use std::sync::Arc;
 
@@ -810,12 +810,12 @@ use std::sync::Arc;
         handle_append_block_file(&broker, block_id, "output", line1, Some(&fs), Some("agent:tsidx-test:current"));
         handle_append_block_file(&broker, block_id, "output", line2, Some(&fs), Some("agent:tsidx-test:current"));
 
+        // Two batches inside a second share one record (a record costs a rewrite
+        // of the sidecar's last part): the first batch's, at its start offset.
         let entries = read_tsidx(&fs, block_id);
-        assert_eq!(entries.len(), 2);
+        assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0, 0);
-        assert_eq!(entries[1].0, line1.len() as u64);
         assert!(entries[0].1 > 0, "stamp must be a real unix-ms time");
-        assert!(entries[1].1 >= entries[0].1, "stamps monotonic");
     }
 
     /// PTY `term` data and non-agent blocks (global_output_zone = None) must
@@ -853,10 +853,10 @@ use std::sync::Arc;
         mirror_append_to_global(&gfs, zone, line1);
         mirror_append_to_global(&gfs, zone, line2);
 
+        // Both mirrored batches fall inside one second: one record, at the first batch's offset.
         let entries = read_tsidx(&gfs, zone);
-        assert_eq!(entries.len(), 2);
+        assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0, 0);
-        assert_eq!(entries[1].0, line1.len() as u64);
     }
 
     /// codex P2 on PR #2508: the tsidx stamp must be the offset the append
@@ -877,12 +877,19 @@ use std::sync::Arc;
         for l in lines {
             handle_append_block_file(&broker, block_id, "output", l, Some(&fs), Some("agent:tsidx-offsets:current"));
         }
+        // Records are at most one a second, so the three quick batches share
+        // the first one; every record that exists names the exact start of a batch.
         let entries = read_tsidx(&fs, block_id);
-        assert_eq!(entries.len(), 3);
+        assert!(!entries.is_empty() && entries.len() <= 3);
+        let mut starts = Vec::new();
         let mut expected = 0u64;
-        for (i, l) in lines.iter().enumerate() {
-            assert_eq!(entries[i].0, expected, "entry {i} offset");
+        for l in lines.iter() {
+            starts.push(expected);
             expected += l.len() as u64;
+        }
+        assert_eq!(entries[0].0, 0, "the first batch is stamped");
+        for (i, e) in entries.iter().enumerate() {
+            assert!(starts.contains(&e.0), "entry {i} offset {} is not the start of a batch", e.0);
         }
         // And the offsets agree with the output file's actual size.
         let stat = fs.stat(block_id, "output").unwrap().unwrap();

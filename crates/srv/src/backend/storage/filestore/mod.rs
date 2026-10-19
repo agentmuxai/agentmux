@@ -37,6 +37,8 @@ mod tests_counter;
 #[cfg(test)]
 mod tests_replace;
 #[cfg(test)]
+mod tests_stamp_throttle;
+#[cfg(test)]
 mod tests_readers;
 
 #[allow(unused_imports)]

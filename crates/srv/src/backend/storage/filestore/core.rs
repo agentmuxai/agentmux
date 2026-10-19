@@ -121,6 +121,8 @@ impl ReaderPool {
 /// SQLite-backed file storage with write-through cache.
 pub struct FileStore {
     pub(super) conn: Mutex<Connection>,
+    /// When this store last wrote a record to each receive-time sidecar `(zone, file)` (counter.rs).
+    pub(super) last_stamp: Mutex<HashMap<(String, String), i64>>,
     pub(super) cache: Mutex<HashMap<(String, String), CacheEntry>>,
     /// Total bytes currently accounted for across all cache entries.
     pub(super) cache_total_bytes: Mutex<usize>,
@@ -162,6 +164,7 @@ impl FileStore {
         conn.execute_batch("PRAGMA busy_timeout=5000;")?;
         Ok(Self {
             conn: Mutex::new(conn),
+            last_stamp: Mutex::new(HashMap::new()),
             cache: Mutex::new(HashMap::new()),
             cache_total_bytes: Mutex::new(0),
             cache_max_bytes: MAX_CACHE_BYTES,
@@ -273,6 +276,7 @@ impl FileStore {
         }
         Ok(Self {
             conn: Mutex::new(conn),
+            last_stamp: Mutex::new(HashMap::new()),
             cache: Mutex::new(HashMap::new()),
             cache_total_bytes: Mutex::new(0),
             cache_max_bytes: MAX_CACHE_BYTES,

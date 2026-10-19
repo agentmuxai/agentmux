@@ -173,6 +173,11 @@ impl Row {
     }
 }
 
+/// The least time between two records of a file's receive-time sidecar
+/// (`output.tsidx`). Lines arrive in bursts of hundreds a second, and a replayed
+/// line's time has no use below a second ("Batch granularity is deliberate").
+const STAMP_MIN_INTERVAL_MS: i64 = 1000;
+
 /// A transcript's counted state as one reader snapshot sees it: where its
 /// complete lines end, how many there are, and the epoch they were counted in.
 /// What `agent:open_tail` positions a slice by, without writing anything.
@@ -588,11 +593,66 @@ impl FileStore {
         data: &[u8],
         stamp_file: &str,
     ) -> Result<AppendPos, StoreError> {
-        let now = agentmux_common::time::now_ms();
+        self.append_lines_stamped_at(zone_id, name, data, stamp_file, agentmux_common::time::now_ms())
+    }
+
+    /// Whether a record is due for this sidecar at `now`: none yet from this
+    /// store, the last one is old enough, or the clock went backwards.
+    fn stamp_due(&self, zone_id: &str, stamp_file: &str, now: i64) -> bool {
+        let last = self.last_stamp.lock().unwrap_or_else(|e| e.into_inner());
+        match last.get(&(zone_id.to_string(), stamp_file.to_string())) {
+            Some(at) => now < *at || now - *at >= STAMP_MIN_INTERVAL_MS,
+            None => true,
+        }
+    }
+
+    /// A record's transaction failed: forget the time noted for it.
+    fn forget_stamped(&self, zone_id: &str, stamp_file: &str) {
+        self.last_stamp.lock().unwrap_or_else(|e| e.into_inner()).remove(&(zone_id.to_string(), stamp_file.to_string()));
+    }
+
+    /// A record was written, in a transaction about to commit, at `now`.
+    fn note_stamped(&self, zone_id: &str, stamp_file: &str, now: i64) {
+        let mut last = self.last_stamp.lock().unwrap_or_else(|e| e.into_inner());
+        if last.len() > 4096 {
+            last.clear(); // bounded: the next record per file is simply due
+        }
+        last.insert((zone_id.to_string(), stamp_file.to_string()), now);
+    }
+
+    /// [`Self::append_lines_stamped`] at a given time (tests drive the clock).
+    ///
+    /// The sidecar gets a record only when the last one for this file is at
+    /// least [`STAMP_MIN_INTERVAL_MS`] old (or this store hasn't stamped it yet,
+    /// or the line is the file's first, or the sidecar is missing or empty). A line without its own record takes the newest record at or
+    /// before it, which `stamps_for` already does, so it is at most that
+    /// interval early. A record costs a rewrite of the sidecar's last part
+    /// (up to 64 KB) however small it is, which made the sidecar as costly as
+    /// the transcript itself.
+    #[track_caller]
+    pub fn append_lines_stamped_at(
+        &self,
+        zone_id: &str,
+        name: &str,
+        data: &[u8],
+        stamp_file: &str,
+        now: i64,
+    ) -> Result<AppendPos, StoreError> {
         let opts_json = serde_json::to_string(&super::FileOpts::default())?;
-        let (pos, new_size, stamp_size) = self.write_txn(|tx| {
+        // Decided and recorded inside the transaction, which runs under the
+        // writer connection: two threads appending to the same sidecar (blocks of
+        // one agent share its global zone) cannot both find it due.
+        let noted = std::cell::Cell::new(false);
+        let written = self.write_txn(|tx| {
             let (pos, new_size) = Self::append_in_tx(tx, zone_id, name, data, AppendMode::Lines, now)?;
             if new_size == pos.offset {
+                return Ok((pos, new_size, None));
+            }
+            // The first line of a file is always stamped, and so is any line
+            // when the sidecar is missing or empty (it was deleted or replaced
+            // with the transcript): the in-memory clock knows nothing of that.
+            let sidecar_empty = read_row(tx, zone_id, stamp_file)?.map_or(true, |r| r.size == 0);
+            if !self.stamp_due(zone_id, stamp_file, now) && pos.offset > 0 && !sidecar_empty {
                 return Ok((pos, new_size, None));
             }
             // The sidecar is created on first use, like `make_file` (an empty
@@ -605,8 +665,20 @@ impl FileStore {
             )?;
             let stamp = format!("{{\"off\":{},\"ms\":{now}}}\n", pos.offset.max(0));
             let (_, stamp_size) = Self::append_in_tx(tx, zone_id, stamp_file, stamp.as_bytes(), AppendMode::Raw, now)?;
+            self.note_stamped(zone_id, stamp_file, now);
+            noted.set(true);
             Ok((pos, new_size, Some(stamp_size)))
-        })?;
+        });
+        // A transaction that did not commit wrote no record: the next line is due.
+        let (pos, new_size, stamp_size) = match written {
+            Ok(v) => v,
+            Err(e) => {
+                if noted.get() {
+                    self.forget_stamped(zone_id, stamp_file);
+                }
+                return Err(e);
+            }
+        };
         if new_size > pos.offset {
             self.note_appended(zone_id, name, new_size, now);
         }

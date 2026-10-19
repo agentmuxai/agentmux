@@ -366,7 +366,8 @@ fn stamps_reach_back_past_a_long_sidecar_to_the_oldest_line() {
     let (fs, dir) = file_store("oldstamps");
     // Each line its own batch, so the sidecar outgrows any fixed tail window.
     for i in 0..4000 {
-        fs.append_lines_stamped(BLOCK, "output", format!("{}\n", line(i, 20)).as_bytes(), "output.tsidx").unwrap();
+        // A second apart, so every line gets a record of its own.
+        fs.append_lines_stamped_at(BLOCK, "output", format!("{}\n", line(i, 20)).as_bytes(), "output.tsidx", 1_000_000 + i as i64 * 1000).unwrap();
     }
     let sidecar = fs.stat(BLOCK, "output.tsidx").unwrap().unwrap().size;
     assert!(sidecar > 100 * 1024, "the sidecar is {sidecar} bytes");
