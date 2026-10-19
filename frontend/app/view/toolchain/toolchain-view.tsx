@@ -10,7 +10,7 @@ import { getApi, createBlock } from "@/store/global";
 import { CORE_TOOLS, LOCAL_MODEL_TOOLS, cliCommandForPlatform, currentPlatform, rowIconClass, type CoreTool } from "@/app/store/toolchain-catalog";
 import { EXTERNAL_WIDGETS, widgetCliCommandForPlatform } from "@/app/view/agent/providers/widget-catalog";
 import { getProviderList } from "@/app/view/agent/providers";
-import { checkProviderInstalled, invalidateInstallCheck } from "@/app/view/agent/install-check-cache";
+import { checkProviderInstalled, invalidateInstallCheck, onInstallCheckInvalidated } from "@/app/view/agent/install-check-cache";
 import { resolveDrift } from "@/app/view/agent/providers/version-drift";
 import { ensureCapability, getCapability, isAvailable, watchCapability } from "@/app/store/toolchain-capabilities";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
@@ -255,6 +255,16 @@ export function ToolchainView(): JSX.Element {
     onMount(() => {
         RpcApi.ToolchainEnvCommand(TabRpcClient, { timeout: 8000 }).then(setEnv).catch(() => setEnv(null));
         rows.forEach((_, i) => void probe(i));
+        // A picker installed a CLI, or another view forgot an answer: re-ask
+        // for the provider rows it concerns, so this pane never keeps a stale
+        // "Not found" next to a card that says installed.
+        onCleanup(
+            onInstallCheckInvalidated((providerId) => {
+                rows.forEach((r, i) => {
+                    if (r.kind === "provider" && (providerId == null || r.id === providerId)) void probe(i);
+                });
+            }),
+        );
         // Answer "am I behind?" without the user having to ask. This used to
         // require clicking "Check latest versions", so drift was invisible
         // unless you already suspected it — which is backwards for the one

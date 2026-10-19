@@ -41,13 +41,28 @@ export function checkProviderInstalled(req: InstallCheckReq, now: () => number =
     return entry.result;
 }
 
+/** Told when answers are forgotten: `providerId`, or undefined for all. */
+const invalidationListeners = new Set<(providerId: string | undefined) => void>();
+
+/**
+ * Runs `cb` whenever cached answers are forgotten, so a mounted consumer (a
+ * picker's cards, the Toolchain's rows) asks again instead of keeping the
+ * answer it copied: an install in one, or a refresh that finds a CLI, shows in
+ * the other. Returns the unsubscribe.
+ */
+export function onInstallCheckInvalidated(cb: (providerId: string | undefined) => void): () => void {
+    invalidationListeners.add(cb);
+    return () => invalidationListeners.delete(cb);
+}
+
 /** Forget cached answers for `providerId` (every CLI of it), or for all providers. */
 export function invalidateInstallCheck(providerId?: string): void {
     if (providerId == null) {
         entries.clear();
-        return;
+    } else {
+        for (const key of [...entries.keys()]) {
+            if (key.startsWith(`${providerId}\u0000`)) entries.delete(key);
+        }
     }
-    for (const key of [...entries.keys()]) {
-        if (key.startsWith(`${providerId}\u0000`)) entries.delete(key);
-    }
+    for (const cb of [...invalidationListeners]) cb(providerId);
 }

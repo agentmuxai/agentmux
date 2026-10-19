@@ -55,7 +55,7 @@ import { resolveEffectiveLaunchProvider } from "../agent-launch-env";
 import { copyForkHistory } from "../quick-fork";
 import type { AgentViewModel } from "../agent-model";
 import { realAccountIdOrEmpty } from "../identity-carry-over";
-import { checkProviderInstalled, invalidateInstallCheck } from "../install-check-cache";
+import { checkProviderInstalled, invalidateInstallCheck, onInstallCheckInvalidated } from "../install-check-cache";
 import { mergeOpenDefinitions, openAgentLocations, type OpenAgentLocation } from "../open-agent-panes";
 import { openOrFocusHistoryTab } from "../open-history-tab";
 import { beginAgentOpen, finishAgentOpen } from "../open-trace";
@@ -372,11 +372,15 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // tier needs per-agent session probing, re-introduce the cache
     // there scoped to that tier's data source — not here.
 
+    /** Each checked agent's resolved provider, to re-check only the cards an
+     *  invalidation concerns. */
+    const providerOfAgent = new Map<string, string>();
     const checkInstalled = async (agent: AgentDefinition) => {
         // Same resolver as the launch (agent-model.ts), so the CLI checked
         // here is the one that will run (#2594).
         const providerId = await resolveEffectiveLaunchProvider(agent);
         const prov = getProvider(providerId);
+        if (prov) providerOfAgent.set(agent.id, prov.id);
         if (!prov) {
             setInstallState((s) => ({ ...s, [agent.id]: undefined }));
             return;
@@ -1081,6 +1085,17 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             if (!(agent.id in untrack(installState))) void checkInstalled(agent);
         }
     });
+    // Another picker or the Toolchain pane forgot an answer (an install
+    // finished, a refresh found a CLI): ask again for the cards it concerns,
+    // so a card never keeps a stale ribbon. One shared check per provider.
+    onCleanup(
+        onInstallCheckInvalidated((providerId) => {
+            for (const agent of untrack(agents)) {
+                const known = providerOfAgent.get(agent.id);
+                if (providerId == null || known === undefined || known === providerId) void checkInstalled(agent);
+            }
+        }),
+    );
 
     // Per-pane zoom — read `term:zoom` from block meta and apply CSS
     // `zoom` on the root, matching AgentPresentationView (chat mode).

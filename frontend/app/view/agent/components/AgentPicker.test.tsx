@@ -610,8 +610,12 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
             expect(installReq.kind).toBe("install-agent");
 
             // Simulate a successful install; onInstalled resolves the
-            // agent's bundle provider again to update the cache.
+            // agent's bundle provider again to update the cache. The backend
+            // now finds the CLI, and the invalidation the install makes has
+            // every card on that provider ask once more (Codex on #5130).
+            vi.mocked(RpcApi.InstallCheckCommand).mockResolvedValue({ installed: true, version: null, path: null, source: null });
             await installReq.onInstalled(true);
+            await waitFor(() => expect(RpcApi.InstallCheckCommand).toHaveBeenCalledTimes(2));
 
             // Continuing to launch opens the create-from-template modal —
             // a second `.open` call.
@@ -693,6 +697,22 @@ describe("AgentPicker — a CLI AgentMux doesn't install", () => {
         });
         render(() => <AgentPicker model={makeMockModel() as unknown as AgentViewModel} />);
         const card = await screen.findByTestId("agent-card-tpl-claude");
+        await waitFor(() => expect(card.dataset.installed).toBe("true"));
+    });
+
+    it("asks again when another view forgets the answer, so a stale ribbon goes", async () => {
+        vi.mocked(RpcApi.InstallCheckCommand).mockResolvedValue({ installed: false, version: null, path: null, source: null });
+        render(() => <AgentPicker model={makeMockModel() as unknown as AgentViewModel} />);
+        const card = await screen.findByTestId("agent-card-tpl-claude");
+        await waitFor(() => expect(card.dataset.installed).toBe("false"));
+        // The Toolchain pane's refresh (or another picker's install) found it.
+        vi.mocked(RpcApi.InstallCheckCommand).mockResolvedValue({
+            installed: true,
+            version: "1.0.0",
+            path: "/home/u/.local/bin/claude",
+            source: "system_path",
+        });
+        invalidateInstallCheck("claude");
         await waitFor(() => expect(card.dataset.installed).toBe("true"));
     });
 

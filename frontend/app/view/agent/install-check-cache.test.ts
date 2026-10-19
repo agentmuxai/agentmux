@@ -7,7 +7,7 @@ const rpc = vi.hoisted(() => ({ InstallCheckCommand: vi.fn() }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: rpc }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
-import { checkProviderInstalled, invalidateInstallCheck } from "./install-check-cache";
+import { checkProviderInstalled, invalidateInstallCheck, onInstallCheckInvalidated } from "./install-check-cache";
 
 const claude = { providerId: "claude", cliCommand: "claude", npmPackage: "@anthropic-ai/claude-code" };
 const codex = { providerId: "codex", cliCommand: "codex", npmPackage: "@openai/codex" };
@@ -57,5 +57,15 @@ describe("install-check cache", () => {
         await expect(checkProviderInstalled(claude, clock)).rejects.toThrow("rpc down");
         await expect(checkProviderInstalled(claude, clock)).resolves.toBe(ok);
         expect(rpc.InstallCheckCommand).toHaveBeenCalledTimes(2);
+    });
+
+    it("tells subscribers which provider was forgotten, until they unsubscribe", () => {
+        const seen: (string | undefined)[] = [];
+        const off = onInstallCheckInvalidated((id) => seen.push(id));
+        invalidateInstallCheck("grok");
+        invalidateInstallCheck();
+        off();
+        invalidateInstallCheck("codex");
+        expect(seen).toEqual(["grok", undefined]);
     });
 });
