@@ -3,7 +3,7 @@
 **Date:** 2026-10-19
 **Author:** Maricon@charlie
 **Type:** Spec (a scheduling change; no change to what is stored or read)
-**Status:** active — the change and its tests are in this PR; remaining: Posa's A/B on the stalling Windows machine, and the write-volume work that goes with it (`SPEC_FILESTORE_WRITE_VOLUME_AND_GROUP_COMMIT_2026_10_19.md`).
+**Status:** active — the change and its tests are in PR #5148; remaining: Posa's A/B on the stalling Windows machine, and the write-volume work that goes with it (`SPEC_FILESTORE_WRITE_VOLUME_AND_GROUP_COMMIT_2026_10_19.md`).
 **Issue:** #5141 (store stalls of 8–18 s when the disk stalls). Decided by Camper@narko as the first, independent fix.
 **Platform:** all.
 
