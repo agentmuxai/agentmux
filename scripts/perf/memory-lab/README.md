@@ -199,7 +199,8 @@ large files, synced chunk by chunk, to the same volume as the lab's data folder 
 last agent turn is over (it stops before the settle and the forced-GC sample, so memory is measured the same way). Pass
 the same flags on both sides of an A/B: `compare.mjs` refuses runs with a different load or cap, and `result.diskLoad`
 records the rate and what was written. It writes at most `--disk-load-cap-gb` (default 20) in a run: `max` on a fast disk
-writes hundreds of MB/s, and a stress run is wear on an SSD. A fast NVMe may not be stressed by one writer; a SATA SSD or a
+writes hundreds of MB/s, and a stress run is wear on an SSD. A run whose writer reaches the cap before the workload ends
+is rejected (the rest of it had no load): lower the rate or raise the cap. A fast NVMe may not be stressed by one writer; a SATA SSD or a
 hard disk is where it matters. `--out` picks the volume. `result.volume` records how full that volume was at the start and
 the end: an SSD slows badly as it fills, so a stall on a nearly full disk is a different finding from one on an empty disk.
 

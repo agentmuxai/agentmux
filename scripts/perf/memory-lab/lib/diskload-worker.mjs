@@ -69,8 +69,9 @@ for (;;) {
         fileNo++;
     }
     const now = Date.now();
+    // After every chunk (8 MiB): a stop between two reports then understates what was written by one chunk at most.
+    console.log(`written ${written}`);
     if (now - lastReport >= 1000) {
-        console.log(`written ${written}`);
         lastReport = now;
         if (!parentAlive()) leave();
     }

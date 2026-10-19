@@ -49,8 +49,9 @@ export function startDiskLoad({ dir, mbps, capGB = DEFAULT_CAP_GB }) {
     const exitedPromise = new Promise((resolve) => {
         child.once("exit", (code, signal) => {
             exited = { code, signal, at: Date.now() };
-            resolve(true);
         });
+        // "close" comes after the output has been read to its end: the last report is then in `written`.
+        child.once("close", () => resolve(true));
     });
     /** Whether the writer has exited within `ms`. */
     const waitExit = (ms) => Promise.race([exitedPromise, new Promise((r) => setTimeout(() => r(false), ms))]);
