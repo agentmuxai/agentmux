@@ -36,6 +36,27 @@ describe("useSettleOnShow", () => {
         expect(flow.settleOnShow).toHaveBeenCalledTimes(2);
     });
 
+    it("tells the flow when the pane is hidden and shown, so a hidden pane's follower and observer can rest", () => {
+        const [dormant, setDormant] = createSignal(true);
+        const flow = { settleOnShow: vi.fn(), setHidden: vi.fn() };
+        const Probe = () => {
+            useSettleOnShow(flow, () => true);
+            return null;
+        };
+        render(() => (
+            <AgentDormancyProvider dormant={dormant}>
+                <Probe />
+            </AgentDormancyProvider>
+        ));
+        expect(flow.setHidden).toHaveBeenLastCalledWith(true); // hidden from the start
+        setDormant(false);
+        expect(flow.setHidden).toHaveBeenLastCalledWith(false);
+        // It is shown before it settles, so settling is not itself held back.
+        expect(flow.setHidden.mock.invocationCallOrder.at(-1)!).toBeLessThan(flow.settleOnShow.mock.invocationCallOrder[0]);
+        setDormant(true);
+        expect(flow.setHidden).toHaveBeenLastCalledWith(true);
+    });
+
     it("leaves a pane the user scrolled up alone", () => {
         const { flow, setDormant } = mount(false);
         setDormant(false);

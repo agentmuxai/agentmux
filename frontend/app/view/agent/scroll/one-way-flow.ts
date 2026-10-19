@@ -121,6 +121,12 @@ export class OneWayFlow {
     private lastGeo = { scrollHeight: 0, clientHeight: 0 };
     private readonly follower: Follower;
     private disposed = false;
+    /**
+     * The pane is not on screen (its tab or window is hidden), told by `useSettleOnShow`. A kept-alive hidden tab
+     * stays laid out at full size, so its observers still fire and its follower would keep writing scrollTop every
+     * frame for a pane nobody sees: neither runs while this is true. `settleOnShow` brings the pane to its bottom.
+     */
+    private hidden = false;
     /** A re-check scheduled while the user touched a following pane (see onResize). */
     private recheckTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -265,13 +271,30 @@ export class OneWayFlow {
         return movedUp && this.host.following();
     }
 
+    setHidden(hidden: boolean): void {
+        this.hidden = hidden;
+        if (hidden) {
+            this.follower.stop();
+            this.baseline = null;
+        }
+    }
+
     private active(): boolean {
-        return !this.disposed && this.host.following() && !this.host.userActive();
+        return !this.disposed && !this.hidden && this.host.following() && !this.host.userActive();
     }
 
     private onResize(): void {
         const el = this.scroller;
         if (!el || this.disposed || !el.isConnected) return;
+        if (this.hidden) {
+            // Nothing to keep in place and no one to see a move: only the overflow state stays current.
+            this.host.observed?.({
+                scrollTop: el.scrollTop, // perf:allow-layout-read — ResizeObserver callback (layout clean)
+                scrollHeight: el.scrollHeight, // perf:allow-layout-read — ResizeObserver callback (layout clean)
+                clientHeight: el.clientHeight, // perf:allow-layout-read — ResizeObserver callback (layout clean)
+            });
+            return;
+        }
         this.host.prepare?.();
         // ResizeObserver callback: layout is clean, these reads are free.
         const ch = el.clientHeight; // perf:allow-layout-read — ResizeObserver callback (layout clean)
