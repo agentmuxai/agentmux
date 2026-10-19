@@ -130,6 +130,22 @@ pub fn payload(level: DiskLevel, r: &DiskReading, path: &str) -> serde_json::Val
     })
 }
 
+/// The shared transcript store's folder, where srv puts it
+/// (`registry/paths.rs`, `resolve_global_shared_root`): `<root>/shared`,
+/// unless `AGENTMUX_SHARED_DIR` names another and no home override is set.
+pub fn shared_transcripts_dir(
+    root: &std::path::Path,
+    home_override: Option<&std::ffi::OsStr>,
+    shared_dir: Option<&std::ffi::OsStr>,
+) -> std::path::PathBuf {
+    let override_set = home_override.is_some_and(|s| !s.is_empty());
+    let shared_root = match shared_dir {
+        Some(s) if !s.is_empty() && !override_set => std::path::PathBuf::from(s),
+        _ => root.join("shared"),
+    };
+    shared_root.join("agents").join("transcripts")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -190,5 +206,21 @@ mod tests {
     fn a_reading_from_bytes() {
         let r = DiskReading::from_bytes(50 * 1_073_741_824, 1000 * 1_073_741_824);
         assert!((r.free_gb - 50.0).abs() < 1e-9 && (r.free_pct - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_shared_store_is_found_where_srv_puts_it() {
+        use std::ffi::OsStr;
+        use std::path::Path;
+        let root = Path::new("/home/me/.agentmux");
+        let default = root.join("shared").join("agents").join("transcripts");
+        assert_eq!(shared_transcripts_dir(root, None, None), default);
+        assert_eq!(
+            shared_transcripts_dir(root, None, Some(OsStr::new("/data/shared"))),
+            Path::new("/data/shared").join("agents").join("transcripts")
+        );
+        // A home override wins: srv then uses <root>/shared.
+        assert_eq!(shared_transcripts_dir(root, Some(OsStr::new("/home/me/.agentmux")), Some(OsStr::new("/data/shared"))), default);
+        assert_eq!(shared_transcripts_dir(root, Some(OsStr::new("")), Some(OsStr::new(""))), default);
     }
 }

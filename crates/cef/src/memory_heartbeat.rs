@@ -111,13 +111,34 @@ fn pagefile_disk_context() -> Option<(bool, f64)> {
     None
 }
 
-/// Read the free space under `root` and push the low-disk signal when it
-/// changes, or while it is not normal. A failed read says nothing.
+/// The folders whose drives hold srv's stores: this version's data folder
+/// (its own stores; it can be a junction or mount on another drive) and the
+/// shared transcript store under the AgentMux root.
+fn store_folders(state: &crate::state::AppState, root: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut dirs: Vec<std::path::PathBuf> = state.version_data_dir.lock().iter().map(std::path::PathBuf::from).collect();
+    let shared = low_disk::shared_transcripts_dir(
+        root,
+        std::env::var_os("AGENTMUX_HOME_OVERRIDE").as_deref(),
+        std::env::var_os("AGENTMUX_SHARED_DIR").as_deref(),
+    );
+    dirs.push(if shared.exists() { shared } else { root.to_path_buf() });
+    dirs
+}
+
+/// Read the free space of each store folder's drive and push the low-disk
+/// signal for the fullest one, when it changes or while it is not normal. A
+/// failed read says nothing.
 fn check_low_disk(state: &std::sync::Arc<crate::state::AppState>, root: &std::path::Path, tracker: &mut low_disk::LowDiskTracker) {
-    let Some((free, total)) = agentmux_common::disk_space::volume_free_total_bytes(root) else {
+    let fullest = store_folders(state, root)
+        .into_iter()
+        .filter_map(|dir| {
+            let (free, total) = agentmux_common::disk_space::volume_free_total_bytes(&dir)?;
+            Some((low_disk::DiskReading::from_bytes(free, total), dir))
+        })
+        .min_by(|a, b| a.0.free_pct.total_cmp(&b.0.free_pct));
+    let Some((reading, dir)) = fullest else {
         return;
     };
-    let reading = low_disk::DiskReading::from_bytes(free, total);
     if let Some(level) = tracker.observe(&reading) {
         if level != low_disk::DiskLevel::Normal {
             tracing::warn!(
@@ -126,10 +147,11 @@ fn check_low_disk(state: &std::sync::Arc<crate::state::AppState>, root: &std::pa
                 level = level.as_str(),
                 free_gb = reading.free_gb,
                 free_pct = reading.free_pct,
+                dir = %dir.display(),
                 "low disk space on the data drive"
             );
         }
-        let path = root.to_string_lossy();
+        let path = dir.to_string_lossy();
         crate::health_signals::post_emit(state, low_disk::payload(level, &reading, &path));
     }
 }
