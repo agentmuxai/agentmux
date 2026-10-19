@@ -21,7 +21,9 @@ export function sysinfoPaneTab(view: "sysinfo" | "cpuplot"): PaneTabManifest {
         label: "Sysinfo",
         icon: "chart-line",
         ...(view === "sysinfo" ? { defaultHue: 300 } : { legacyOf: "sysinfo" }),
-        capabilities: { connection: true, noPadding: true },
+        // Its text zooms with the shared pane zoom (keys, Ctrl+scroll, all panes); its
+        // charts don't (sysinfo-plot.tsx). 11px: the charts' titles.
+        capabilities: { connection: true, noPadding: true, paneZoom: { baseFontSize: 11 } },
         // On a remote machine the pill says which ("CPU · devbox", the
         // remote's icon); on this one it keeps the plot type from liveTitle.
         tab: {

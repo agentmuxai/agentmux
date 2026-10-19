@@ -11,7 +11,7 @@
  */
 
 import type { JSX } from "solid-js";
-import { createEffect, createSignal, on, onCleanup, onMount, Show } from "solid-js";
+import { createContext, createEffect, createMemo, createSignal, on, onCleanup, onMount, Show, useContext } from "solid-js";
 import { throttle } from "throttle-debounce";
 import uPlot from "uplot";
 
@@ -30,6 +30,7 @@ import {
     xWindowSecs,
     yRange,
 } from "./sysinfo-chart";
+import { axisFontPx, BARE_AXIS_PX, minFullChartPx, TICK_GAP_PX, TICK_PX, timeAxisPx, topPaddingPx } from "./sysinfo-layout";
 import { figures, titled, unitFormat } from "./sysinfo-overview-data";
 import type { DataItem } from "./sysinfo-types";
 
@@ -38,23 +39,38 @@ const CHART_RESIZE_MS = 100;
 /** Least room per x label, so a narrow pane gets fewer of them. */
 const X_LABEL_SPACE_PX = 80;
 
-/** A chart's time axis: its labels and ticks, nothing more. */
-const X_AXIS_PX = 22;
 /** Text keeps this far from the pane's edges; graphics (the plot, the line) touch them. */
 const TEXT_INSET_PX = 1;
+/** Least room between y ticks at 100% zoom (uPlot's default), so a short chart shows fewer labels. */
+const Y_LABEL_SPACE_PX = 30;
 
-/** Width of a y axis that fits its widest label (uPlot's own sizing recipe), at least `min`. */
-const yAxisSize = (min: number) => (self: uPlot, values: string[] | null, axisIdx: number, cycleNum: number) => {
-    const axis = self.axes[axisIdx];
-    if (cycleNum > 1) return (axis as any)._size;
-    let size = (axis.ticks?.size ?? 0) + (axis.gap ?? 0);
-    const longest = (values ?? []).reduce((a, v) => (v.length > a.length ? v : a), "");
-    if (longest !== "") {
-        self.ctx.font = (axis as any).font[0];
-        size += self.ctx.measureText(longest).width / devicePixelRatio;
-    }
-    return Math.max(min, Math.ceil(size));
-};
+/**
+ * The pane's zoom (`term:zoom`) for Sysinfo's text: the charts' axis labels and
+ * the room they take scale with it, their lines and fills don't. Provided by the
+ * view (sysinfo-view.tsx); 1 outside it.
+ */
+export const SysinfoZoomContext = createContext<() => number>(() => 1);
+
+/**
+ * Width of a y axis that fits its widest label (uPlot's own sizing recipe). It
+ * reports that width (`report`) and takes at least `min()`: its column's widest,
+ * so the plots in a column line up.
+ */
+const yAxisSize =
+    (min: () => number, report: (w: number) => void) =>
+    (self: uPlot, values: string[] | null, axisIdx: number, cycleNum: number) => {
+        const axis = self.axes[axisIdx];
+        if (cycleNum > 1) return (axis as any)._size;
+        let size = (axis.ticks?.size ?? 0) + (axis.gap ?? 0);
+        const longest = (values ?? []).reduce((a, v) => (v.length > a.length ? v : a), "");
+        if (longest !== "") {
+            self.ctx.font = (axis as any).font[0];
+            size += self.ctx.measureText(longest).width / devicePixelRatio;
+        }
+        const natural = Math.ceil(size);
+        report(natural);
+        return Math.max(min(), natural);
+    };
 
 /**
  * The time labels, with the ones that would cross the plot's right edge left
@@ -88,7 +104,15 @@ export type TimeChartProps = {
     sparkline?: boolean;
     /** `false`: no time labels, for a chart stacked above another that has them. */
     timeAxis?: boolean;
-    /** The chart's name, over its top-left corner. */
+    /** `false`: tick marks but no y labels, for a chart whose row neighbour on the left has the same range. */
+    yLabels?: boolean;
+    /** Least y-axis width: its column's widest, so the plots line up. */
+    axisWidth?: number;
+    /** The y-axis width this chart's own labels need. */
+    onAxisWidth?: (width: number) => void;
+    /** In the pane's top row: the title keeps clear of the floating buttons. */
+    top?: boolean;
+    /** The chart's name and figures, centred over the top of the plot. */
     title?: string;
     class?: string;
 };
@@ -104,6 +128,11 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
     let tip!: HTMLDivElement;
     let chart: uPlot | null = null;
     const [size, setSize] = createSignal({ width: 0, height: 0 });
+    const zoom = useContext(SysinfoZoomContext);
+    // Too short for axes at this zoom: drawn bare, title and tooltip kept (§5 C.2 rule 8).
+    const bare = createMemo(
+        () => !!props.sparkline || (size().height > 0 && size().height < minFullChartPx(zoom(), props.timeAxis !== false))
+    );
     // What the scales read; updated before each setData.
     let xWindow: [number, number] = [0, 1];
     let yWindow: [number, number] = [0, 100];
@@ -139,16 +168,19 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
     const options = (width: number, height: number): uPlot.Options => {
         const muted = resolveCssColor(container, "var(--grey-text-color)");
         const grid = { stroke: withAlpha(muted, 0.25), width: 1 };
-        const ticks = { stroke: withAlpha(muted, 0.4), width: 1, size: 3 };
-        const gap = 3;
+        const ticks = { stroke: withAlpha(muted, 0.4), width: 1, size: TICK_PX };
+        const gap = TICK_GAP_PX;
         const single = props.series.length === 1;
+        const z = zoom();
+        const font = `${axisFontPx(z)}px ${getComputedStyle(container).fontFamily || "sans-serif"}`;
+        const timeLabels = props.timeAxis !== false;
         return {
             width,
             height,
             legend: { show: false },
             // Nothing on the right: the plot ends at the edge (a label that would
             // cross it is dropped, see `edgeSafe`). The top keeps room for the top y label.
-            ...(props.sparkline ? {} : { padding: [7, 0, null, TEXT_INSET_PX] as uPlot.Padding }),
+            ...(bare() ? {} : { padding: [topPaddingPx(z), 0, null, TEXT_INSET_PX] as uPlot.Padding }),
             cursor: {
                 // Only the time is shared: each chart has its own y scale, and by
                 // default uPlot would also draw the hovered chart's y value on the others.
@@ -160,29 +192,39 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
                 x: { time: true, range: () => xWindow },
                 y: { range: () => yWindow },
             },
-            axes: props.sparkline
+            axes: bare()
                 ? [{ show: false }, { show: false }]
                 : [
                       {
                           stroke: muted,
+                          font,
                           grid,
                           ticks,
                           gap,
-                          space: X_LABEL_SPACE_PX,
+                          space: Math.round(X_LABEL_SPACE_PX * z),
                           values: (u, splits, _axisIdx, _space, incr) =>
-                              props.timeAxis === false
-                                  ? splits.map(() => "")
-                                  : edgeSafe(u, splits, timeAxisLabels(splits, incr)),
-                          size: props.timeAxis === false ? 4 : X_AXIS_PX,
+                              timeLabels ? edgeSafe(u, splits, timeAxisLabels(splits, incr)) : splits.map(() => ""),
+                          size: timeAxisPx(z, timeLabels),
                       },
                       {
                           stroke: muted,
+                          font,
                           grid,
                           ticks,
                           gap,
-                          size: yAxisSize(0),
+                          space: Math.round(Y_LABEL_SPACE_PX * z),
+                          size:
+                              props.yLabels === false
+                                  ? BARE_AXIS_PX
+                                  : yAxisSize(
+                                        () => props.axisWidth ?? 0,
+                                        (w) => queueMicrotask(() => props.onAxisWidth?.(w))
+                                    ),
                           // Below the axis is still an amount: no minus signs.
-                          values: (_u, splits) => splits.map((v) => (props.axisFormat ?? props.format)(Math.abs(v))),
+                          values: (_u, splits) =>
+                              props.yLabels === false
+                                  ? splits.map(() => "")
+                                  : splits.map((v) => (props.axisFormat ?? props.format)(Math.abs(v))),
                       },
                   ],
             series: [
@@ -226,6 +268,8 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
         const { width, height } = size();
         if (width <= 0 || height <= 0) return;
         chart = new uPlot(options(width, height), windows(), container);
+        // No y labels to measure: say so, so an old width doesn't keep the column wide.
+        if (bare() || props.yLabels === false) queueMicrotask(() => props.onAxisWidth?.(0));
     };
 
     onMount(() => {
@@ -248,7 +292,7 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
     // has none yet; otherwise only a new size, or new data.
     createEffect(
         on(
-            [() => props.series, () => props.sparkline, () => props.timeAxis, appliedWindowTheme],
+            [() => props.series, bare, () => props.timeAxis, () => props.yLabels, zoom, appliedWindowTheme],
             () => build(),
             { defer: true }
         )
@@ -264,16 +308,15 @@ export function TimeChart(props: TimeChartProps): JSX.Element {
             defer: true,
         })
     );
+    // The column's y-axis width changed: lay the axes out again, keeping the paths.
+    createEffect(on(() => props.axisWidth, () => chart?.redraw(false, true), { defer: true }));
 
     return (
-        <div class={`sysinfo-chart ${props.class ?? ""}`}>
+        <div class={`sysinfo-chart ${props.top ? "sysinfo-chart--top" : ""} ${props.class ?? ""}`}>
             <Show when={props.title}>
                 <div class="sysinfo-chart-title">{props.title}</div>
             </Show>
-            <div
-                ref={container}
-                classList={{ "sysinfo-chart-canvas": true, "sysinfo-chart-canvas--titled": !!props.title }}
-            />
+            <div ref={container} class="sysinfo-chart-canvas" />
             <div ref={tip} class="sysinfo-chart-tip" style={{ display: "none" }} />
         </div>
     );
@@ -289,7 +332,7 @@ type SingleLinePlotProps = {
     targetLen: number;
     intervalSecs: number;
     syncKey?: string;
-};
+} & Pick<TimeChartProps, "timeAxis" | "yLabels" | "top" | "axisWidth" | "onAxisWidth">;
 
 /**
  * One metric, as a simple view shows it: titled with its figures now and over
@@ -316,7 +359,12 @@ export function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
             syncKey={props.syncKey}
             sparkline={props.sparkline}
             title={props.sparkline ? undefined : titled(name(), figures(props.plotData, props.yval, format))}
-            class="min-h-[100px]"
+            timeAxis={props.timeAxis}
+            yLabels={props.yLabels}
+            top={props.top}
+            axisWidth={props.axisWidth}
+            onAxisWidth={props.onAxisWidth}
+            class="sysinfo-grid-chart"
         />
     );
 }

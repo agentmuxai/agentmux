@@ -16,7 +16,7 @@
  */
 
 import type { JSX } from "solid-js";
-import { Show } from "solid-js";
+import { onCleanup, onMount, Show } from "solid-js";
 
 import { IconButton, SegmentedControl } from "@/app/element/ui";
 
@@ -39,9 +39,21 @@ export type SysinfoBarProps = {
     /** The figures as a table instead of the charts. */
     table: boolean;
     onTable: (table: boolean) => void;
+    /** The action buttons' on-screen width, so the charts' titles can keep clear of them. */
+    onActionsWidth?: (width: number) => void;
 };
 
 export function SysinfoBar(props: SysinfoBarProps): JSX.Element {
+    let actions!: HTMLDivElement;
+    onMount(() => {
+        // On-screen width (the row is zoomed), not the element's own CSS width.
+        const report = () => props.onActionsWidth?.(Math.ceil(actions.getBoundingClientRect().width));
+        report();
+        if (typeof ResizeObserver === "undefined") return;
+        const observer = new ResizeObserver(report);
+        observer.observe(actions);
+        onCleanup(() => observer.disconnect());
+    });
     return (
         <div class="sysinfo-bar" classList={{ "sysinfo-bar--in-flow": props.table }}>
             <Show when={props.controls}>
@@ -65,7 +77,7 @@ export function SysinfoBar(props: SysinfoBarProps): JSX.Element {
                     />
                 </div>
             </Show>
-            <div class="sysinfo-bar-actions">
+            <div class="sysinfo-bar-actions" ref={actions}>
                 <Show when={props.paused}>
                     <span class="sysinfo-bar-paused">Paused</span>
                 </Show>
