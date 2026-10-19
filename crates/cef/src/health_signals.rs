@@ -1,10 +1,12 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Performance health signals (low RAM, low page file, slow backend): the
-//! host keeps each kind's current level so a window opened mid-episode can
-//! catch up, and pushes every change to the open windows as `health-signal`.
-//! docs/reports/REPORT_PERFORMANCE_INDICATORS_TO_STATUS_BAR_2026_10_08.md §3.2.
+//! Performance health signals (low RAM, low page file, slow backend, low disk
+//! space): the host keeps each kind's current level so a window opened
+//! mid-episode can catch up, and pushes every change to the open windows as
+//! `health-signal`.
+//! docs/reports/REPORT_PERFORMANCE_INDICATORS_TO_STATUS_BAR_2026_10_08.md
+//! §3.2.
 
 use std::collections::BTreeMap;
 

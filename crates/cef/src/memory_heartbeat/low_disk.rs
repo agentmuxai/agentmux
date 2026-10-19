@@ -87,6 +87,27 @@ pub fn classify(r: &DiskReading, prev: DiskLevel) -> DiskLevel {
     }
 }
 
+fn severity(level: DiskLevel) -> u8 {
+    match level {
+        DiskLevel::Normal => 0,
+        DiskLevel::Warn => 1,
+        DiskLevel::Critical => 2,
+    }
+}
+
+/// Of several drives, the one to report: the worst level (classified as the
+/// tracker would, given the level before), then the least free share. A
+/// drive can be low on gigabytes while another is low on share, so neither
+/// figure alone picks it.
+pub fn worst(readings: &[DiskReading], prev: DiskLevel) -> Option<usize> {
+    (0..readings.len()).max_by(|&a, &b| {
+        let (ra, rb) = (&readings[a], &readings[b]);
+        severity(classify(ra, prev))
+            .cmp(&severity(classify(rb, prev)))
+            .then(rb.free_pct.total_cmp(&ra.free_pct))
+    })
+}
+
 /// What the heartbeat does with each reading.
 #[derive(Debug)]
 pub struct LowDiskTracker {
@@ -102,6 +123,11 @@ impl Default for LowDiskTracker {
 impl LowDiskTracker {
     pub fn new() -> Self {
         LowDiskTracker { level: DiskLevel::Normal }
+    }
+
+    /// The level after the last reading.
+    pub fn level(&self) -> DiskLevel {
+        self.level
     }
 
     /// Fold in a reading. Returns the level to push: on every change, and on
@@ -222,5 +248,17 @@ mod tests {
         // A home override wins: srv then uses <root>/shared.
         assert_eq!(shared_transcripts_dir(root, Some(OsStr::new("/home/me/.agentmux")), Some(OsStr::new("/data/shared"))), default);
         assert_eq!(shared_transcripts_dir(root, Some(OsStr::new("")), Some(OsStr::new(""))), default);
+    }
+
+    #[test]
+    fn the_drive_to_report_is_the_worst_by_level_not_by_share() {
+        // A small data drive low on gigabytes (9 GB, 14%) next to a large
+        // shared-store drive at 9% that is fine: the small one is reported.
+        let small = gb(9.0, 64.0);
+        let large = gb(333.0, 3700.0);
+        assert_eq!(worst(&[large, small], DiskLevel::Normal), Some(1));
+        // Same level: the smaller share wins.
+        assert_eq!(worst(&[gb(222.0, 3700.0), gb(9.5, 100.0)], DiskLevel::Normal), Some(0));
+        assert_eq!(worst(&[], DiskLevel::Normal), None);
     }
 }
