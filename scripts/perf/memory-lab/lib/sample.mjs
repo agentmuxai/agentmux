@@ -186,7 +186,7 @@ async function pageStats(port, target) {
         const metrics = Object.fromEntries(perf.metrics.map((m) => [m.name, m.value]));
         let probe = null;
         try {
-            probe = await session.evaluate(PAGE_PROBE, { timeout: 10_000 });
+            probe = await session.evaluate(PAGE_PROBE, { timeout: 60_000 });
         } catch (e) {
             probe = { error: String(e.message) };
         }

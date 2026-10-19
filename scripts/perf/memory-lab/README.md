@@ -7,6 +7,11 @@ made into scripts. The budget it serves is 500 MB for the app's own processes.
 
 ## Measure a build
 
+Run the lab from a checkout of the repo, after `npm ci` (the CDP client needs the
+`ws` package; a copied-out `scripts/perf` folder has no `node_modules` and the
+lab says so and stops) and with a Rust toolchain (memtree is built on every run).
+
+
 1. Build a portable of the branch: `task package` (a **production** build; a
    `task dev` build runs Vite and SolidJS in dev mode and inflates every number).
 2. Run the lab on it:

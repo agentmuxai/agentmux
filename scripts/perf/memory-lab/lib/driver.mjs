@@ -31,6 +31,8 @@ export function layoutFor(panes) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** How long a CDP command may take before the driver gives up on it. */
+const EVAL_TIMEOUT_MS = 90_000;
 
 /**
  * The executable of a packaged build, from the folder (or bundle) `task package` made:
@@ -160,13 +162,26 @@ export function installScript(home, scriptPath) {
 /** The driver of one running instance. */
 export async function connect(port, home, workDir) {
     let session = await CdpSession.connect((await findMainTarget(port)).webSocketDebuggerUrl);
-    const ev = (expr) => session.evaluate(expr);
+    // The page's main thread is shared by every agent pane: with 12 agents starting a turn at once (and a slower machine), one RPC
+    // from the page can take longer than the 10 s the screenshot scripts allow. A hang is still caught, at 90 s.
+    session.defaultTimeoutMs = EVAL_TIMEOUT_MS;
+    // The slowest page evaluation of the run, so a machine that is close to the limit shows in the result before it fails.
+    let slowestEvalMs = 0;
+    const ev = async (expr) => {
+        const t0 = Date.now();
+        try {
+            return await session.evaluate(expr);
+        } finally {
+            slowestEvalMs = Math.max(slowestEvalMs, Date.now() - t0);
+        }
+    };
     const rpc = (command, data) => ev(`TabRpcClient.rpcCall(${JSON.stringify(command)}, ${JSON.stringify(data)})`);
     const activeTab = () => ev(`document.querySelector('.tab.active')?.getAttribute('data-tab-id') ?? null`);
     const agents = [];
     mkdirSync(workDir, { recursive: true });
 
     return {
+        slowestEvalMs: () => slowestEvalMs,
         get session() {
             return session;
         },
@@ -180,6 +195,7 @@ export async function connect(port, home, workDir) {
             for (;;) {
                 try {
                     session = await CdpSession.connect((await findMainTarget(port)).webSocketDebuggerUrl);
+                    session.defaultTimeoutMs = EVAL_TIMEOUT_MS;
                     await session.evaluate("1");
                     return;
                 } catch (e) {
