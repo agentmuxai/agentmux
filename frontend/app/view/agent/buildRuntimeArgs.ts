@@ -208,7 +208,7 @@ export function buildRuntimeArgs(
  * to this provider's launch args at all (via `--model`, through either
  * the plain claude branch above or codex's own dedicated branch below).
  * The single source of truth a model PICKER (AgentRuntimeDropup,
- * AgentCreateFromTemplateModal) should gate on before offering a choice
+ * AgentCreateForm) should gate on before offering a choice
  * — otherwise a provider with a `models` list in the catalog (e.g.
  * antigravity) but no `--model` wiring here lets the user pick a model
  * that's silently discarded at launch (ReAgent P2 on PR #2618).

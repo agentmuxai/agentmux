@@ -1,0 +1,166 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+@use "../../../element/ui/line";
+
+// The new-agent panel below a harness card (SPEC_AGENT_PICKER_INLINE_CREATE_2026_10_18.md
+// §2.3, pattern P1 of SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §5.7),
+// and its Tools step's list (SPEC_PROVIDER_SYSTEM_PREREQS_2026_05_18.md).
+
+
+.agent-create-tool-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.agent-create-tool-row {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    @include line.notice(warning, $text: null, $bg: var(--warning-bg-subtle));
+    border-radius: 0;
+
+    &.is-ok {
+        background: var(--success-bg-subtle);
+        border-color: var(--success-line);
+    }
+}
+
+
+.agent-create-tool-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+}
+
+.agent-create-tool-tool {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--main-text-color);
+}
+
+.agent-create-tool-tool-status {
+    font-weight: 400;
+    color: var(--secondary-text-color);
+
+    &.agent-create-tool-tool-status-ok {
+        color: var(--success-color);
+    }
+}
+
+.agent-create-tool-link {
+    font-size: var(--text-sm);
+    color: var(--accent-color);
+    text-decoration: none;
+    width: fit-content;
+
+    &:hover {
+        text-decoration: underline;
+    }
+}
+
+.agent-create-tool-link-arrow {
+    color: color-mix(in srgb, var(--accent-color) 70%, transparent);
+    font-size: 0.9em;
+}
+
+.agent-create-tool-hint {
+    font-size: var(--text-sm);
+    color: var(--secondary-text-color);
+    line-height: 1.4;
+    margin: 0;
+
+    code {
+        padding: 1px 4px;
+        background: var(--tint-2);
+        border-radius: 0;
+        font-size: 0.9em;
+    }
+}
+
+.agent-create-panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+}
+
+.agent-create-panel-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-2);
+}
+
+.agent-create-panel-title {
+    margin: 0;
+    font-size: var(--text-md);
+    font-weight: var(--font-weight-medium);
+    color: var(--main-text-color);
+}
+
+.agent-create-panel-text,
+.agent-create-form-hint {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--secondary-text-color);
+}
+
+// "Tools · Install · Create": only the steps that apply.
+.agent-create-steps {
+    display: flex;
+    gap: var(--space-3);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
+.agent-create-step--current {
+    color: var(--main-text-color);
+    box-shadow: inset 0 -2px 0 var(--accent-color);
+}
+
+.agent-create-form,
+.agent-create-tools,
+.agent-create-install {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    min-width: 0;
+}
+
+// The main action last: [Cancel] [Main].
+.agent-create-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--space-2);
+}
+
+// A vendor installer's command, with Copy beside it.
+.agent-create-command {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+
+    code {
+        flex: 1;
+        min-width: 0;
+        overflow-x: auto;
+        padding: var(--space-1) var(--space-2);
+        border: 1px solid var(--border-color);
+        font: var(--fixed-font);
+        white-space: pre;
+    }
+}

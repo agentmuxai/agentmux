@@ -14,7 +14,7 @@
  * (tracking issue #2940).
  *
  * Probed pre-launch via the `resolve.prereqs` RPC. Missing prereqs
- * open the `AgentPrereqModal` with platform-aware install links.
+ * show as the Tools step of the new-agent panel, with platform-aware install links.
  * See docs/specs/SPEC_PROVIDER_SYSTEM_PREREQS_2026_05_18.md.
  */
 export interface SystemPrereq {

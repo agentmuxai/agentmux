@@ -10,18 +10,14 @@ import type { JSX } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { AgentLaunchModalPanel } from "@/app/view/agent/components/AgentLaunchModal";
-import { AgentInstallModalPanel } from "@/app/view/agent/components/AgentInstallModal";
-import { AgentPrereqModalPanel } from "@/app/view/agent/components/AgentPrereqModal";
 import { AgentAddAccountModalPanel } from "@/app/view/agent/components/AgentNewIdentityModal";
 import { AgentNewBundleModalPanel } from "@/app/view/agent/components/AgentNewBundleModal";
-import { AgentCreateFromTemplateModalPanel } from "@/app/view/agent/components/AgentCreateFromTemplateModal";
 import { BrowserAuthModalPanel } from "@/app/view/browser/components/BrowserAuthModal";
 import { AgentIdentityModalPanel } from "@/app/view/agent/components/AgentIdentityModal";
 import { AgentNativeMemoryModal } from "@/app/view/agent/components/AgentNativeMemoryModal";
 import { BundleImportSelectModalPanel } from "@/app/view/bundle/components/BundleImportSelectModal";
 import { BundleImportPreviewModalPanel } from "@/app/view/bundle/components/BundleImportPreviewModal";
 import { BundleImportConfirmModalPanel } from "@/app/view/bundle/components/BundleImportConfirmModal";
-import "@/app/view/agent/components/AgentPrereqModal.scss";
 import "@/app/view/agent/components/AgentNewBundleModal.scss";
 import "@/app/view/agent/components/AgentIdentityModal.scss";
 import "@/app/view/agent/components/AgentStashModal.scss";
@@ -38,12 +34,6 @@ export function requestLabel(req: ModalLayerRequest): string {
             return "Add Account";
         case "new-memory":
             return "New Bundle";
-        case "agent-prereqs":
-            return `Install required tools for ${req.agent.name}`;
-        case "install-agent":
-            return `Install ${req.agent.name}`;
-        case "create-from-template":
-            return `Create new agent from ${req.template.name}`;
         case "browser-auth":
             return req.isProxy ? "Proxy authentication required" : "Authentication required";
         case "agent-identity":
@@ -161,102 +151,6 @@ export function renderRequest(
                             }
                         }}
                         onCancel={req.onCancel}
-                    />
-                ),
-            };
-        case "agent-prereqs":
-            return {
-                label: requestLabel(req),
-                panel: (
-                    <AgentPrereqModalPanel
-                        agent={req.agent}
-                        missing={req.missing}
-                        installedPendingRestart={req.installedPendingRestart}
-                        onToolInstalled={(tool) => req.onToolInstalled(tool)}
-                        onRefresh={() => req.onRefresh()}
-                        onProceed={() => req.onProceed()}
-                        onCancel={() => {
-                            req.onCancel();
-                            api.close();
-                        }}
-                    />
-                ),
-            };
-        case "install-agent":
-            return {
-                label: requestLabel(req),
-                panel: (
-                    <AgentInstallModalPanel
-                        agent={req.agent}
-                        onCancel={api.close}
-                        onInstalled={(continueToLaunch: boolean) => {
-                            // Hand off to the picker — it owns whether
-                            // to call `modalLayer.replace(launchReq)`
-                            // (continueToLaunch=true) or `modalLayer.close()`
-                            // (continueToLaunch=false). Don't tear down
-                            // the shell here — that would break the
-                            // install→launch crossfade for the chain
-                            // path. SPEC_MODAL_TRANSITIONS_2026_05_18.md.
-                            req.onInstalled(continueToLaunch);
-                        }}
-                    />
-                ),
-            };
-        case "create-from-template":
-            return {
-                label: requestLabel(req),
-                panel: (
-                    <AgentCreateFromTemplateModalPanel
-                        template={req.template}
-                        // The layer owns the create-then-launch chain
-                        // (spec note on CreateFromTemplateRequest) so
-                        // `submitting()` covers both RPC steps and ESC
-                        // / backdrop dismiss stay blocked end-to-end.
-                        onSubmit={async ({ name, accountId, bundleIds, agentType, modelVendorBaseUrl, model }) => {
-                            setSubmitting(true);
-                            try {
-                                const resp = await RpcApi.AgentDefCreateFromTemplateCommand(
-                                    TabRpcClient,
-                                    {
-                                        template_id: req.template.id,
-                                        name,
-                                        identity_id: accountId,
-                                        // Only echoed back, for the
-                                        // launch's record of a bundle
-                                        // (first pick); the agent still
-                                        // gets a fresh bundle of its own.
-                                        memory_id: bundleIds[0] ?? "",
-                                        bundle_ids: bundleIds,
-                                        // Persist the chosen runtime on the
-                                        // new user-owned definition so later
-                                        // reattach/auto-continue uses it too.
-                                        agent_type: agentType,
-                                        // Always sent explicitly (never
-                                        // omitted) — the form always has a
-                                        // concrete value in scope (defaults
-                                        // to the template's own), so there's
-                                        // no "leave untouched" case to
-                                        // distinguish here.
-                                        model_vendor_base_url: modelVendorBaseUrl,
-                                    },
-                                );
-                                await req.onCreatedAndLaunch(
-                                    resp.definition_id,
-                                    resp.identity_id,
-                                    resp.memory_id,
-                                    name,
-                                    agentType,
-                                    model,
-                                    resp.slug,
-                                );
-                                setSubmitting(false);
-                                api.close();
-                            } catch (e) {
-                                setSubmitting(false);
-                                throw e;
-                            }
-                        }}
-                        onCancel={api.close}
                     />
                 ),
             };

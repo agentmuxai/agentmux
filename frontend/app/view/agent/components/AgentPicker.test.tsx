@@ -98,6 +98,11 @@ vi.mock("@/util/platformutil", () => ({
 }));
 
 vi.mock("../providers", () => ({
+    // For the "AgentMux manages its own CLIs" note: one CLI it installs, one it doesn't.
+    getProviderList: () => [
+        { id: "codex", displayName: "Codex", npmPackage: "@openai/codex-cli", docsUrl: "https://example.test/codex" },
+        { id: "grok", displayName: "Grok Build", npmPackage: "", docsUrl: "https://example.test/grok" },
+    ],
     getProvider: (id: string) => {
         if (id === "claude") {
             return {
@@ -143,6 +148,7 @@ vi.mock("./AgentCard", () => ({
             data-has-session={String(!!props.hasCurrentSession)}
             data-launching={String(!!props.launching)}
             data-installed={String(props.installed)}
+            data-expanded={String(!!props.expanded)}
             data-block-id={props.blockId}
             data-has-ctx-menu={String(typeof props.onContextMenu === "function")}
             onClick={(e) => props.onLaunch(props.agent, e)}
@@ -153,6 +159,18 @@ vi.mock("./AgentCard", () => ({
             {props.agent.name}
         </button>
     ),
+}));
+
+// The new-agent panel has its own tests (AgentCreatePanel.test.tsx); here a
+// stub records what the picker hands it, so these tests cover the picker's
+// side: which card opens, what launching does, and the busy and re-check
+// wiring.
+const { panelProps } = vi.hoisted(() => ({ panelProps: { current: null as any } }));
+vi.mock("./AgentCreatePanel", () => ({
+    AgentCreatePanel: (props: any) => {
+        panelProps.current = props;
+        return <div data-testid="create-panel-stub" data-template={props.template.id} data-installed={String(props.installed)} />;
+    },
 }));
 
 vi.mock("./HiddenTemplatesSection", () => ({
@@ -314,20 +332,46 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         expect(hint.textContent).not.toMatch(/model[a-z]/i);
     });
 
-    it("clicks on a template open the create-from-template modal", async () => {
+    it("says AgentMux manages its own CLIs, and links only the ones it doesn't install", async () => {
+        render(() => <AgentPicker model={makeMockModel() as any} />);
+        const note = await screen.findByTestId("agent-templates-managed-note");
+        expect(note.textContent).toContain("its own copy of each agent CLI");
+        const links = [...note.querySelectorAll("a")].map((a) => [a.textContent, a.getAttribute("href")]);
+        expect(links).toEqual([["Grok Build", "https://example.test/grok"]]);
+    });
+
+    it("a click on a template opens its panel below it, and a second click closes it", async () => {
         const model = makeMockModel();
         render(() => <AgentPicker model={model as any} />);
         const card = await screen.findByTestId("agent-card-tpl-claude");
         fireEvent.click(card);
-        await waitFor(() => expect(modalLayerOpen).toHaveBeenCalled());
 
-        const req = modalLayerOpen.mock.calls[0][0];
-        expect(req.kind).toBe("create-from-template");
-        expect(req.template.id).toBe("tpl-claude");
-        // Template clicks never go through launchAgentDefinition
-        // directly — the modal's onCreatedAndLaunch handles that after
-        // the create RPC.
+        const panel = await screen.findByTestId("create-panel-stub");
+        expect(panel.dataset.template).toBe("tpl-claude");
+        expect(card.dataset.expanded).toBe("true");
+        // No modal any more, and nothing launches until the panel creates the agent.
+        expect(modalLayerOpen).not.toHaveBeenCalled();
         expect(model.launchAgentDefinition).not.toHaveBeenCalled();
+
+        fireEvent.click(card);
+        await waitFor(() => expect(screen.queryByTestId("create-panel-stub")).toBeNull());
+        expect(card.dataset.expanded).toBe("false");
+    });
+
+    it("keeps the panel open while it creates an agent", async () => {
+        render(() => <AgentPicker model={makeMockModel() as any} />);
+        const card = await screen.findByTestId("agent-card-tpl-claude");
+        fireEvent.click(card);
+        await screen.findByTestId("create-panel-stub");
+
+        panelProps.current.onBusyChange(true);
+        fireEvent.click(card);
+        expect(panelProps.current.onClose()).toBe(false);
+        expect(screen.queryByTestId("create-panel-stub")).not.toBeNull();
+
+        panelProps.current.onBusyChange(false);
+        expect(panelProps.current.onClose()).toBe(true);
+        await waitFor(() => expect(screen.queryByTestId("create-panel-stub")).toBeNull());
     });
 
     it("template card suppresses the '+ New session' pill", async () => {
@@ -409,20 +453,24 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         expect(screen.queryByTestId("agent-card-user-maks")).toBeNull();
     });
 
-    it("modal onCreatedAndLaunch fires launchAgentDefinition with the picked bindings", async () => {
+    it("launching the agent the panel created carries the picked bindings", async () => {
         const model = makeMockModel();
         render(() => <AgentPicker model={model as any} />);
         const card = await screen.findByTestId("agent-card-tpl-claude");
         fireEvent.click(card);
-        await waitFor(() => expect(modalLayerOpen).toHaveBeenCalled());
+        await screen.findByTestId("create-panel-stub");
 
-        const req = modalLayerOpen.mock.calls[0][0];
-        // Pass an explicit runtime (5th arg) and model (6th arg) — the
-        // modal always supplies both; exercise the threading so the stub
-        // + override carry the user's picks rather than silently falling
-        // back (reagent P2 on #1576; model threading added #2594 follow-
-        // up work).
-        await req.onCreatedAndLaunch("new-def-id", "id-work", "mem-notes", "Mary", "container", "opus", "mary-2");
+        // The form always supplies a runtime and a model; the stub and the
+        // launch override must carry them rather than fall back (#1576, #2594).
+        await panelProps.current.onCreated({
+            definitionId: "new-def-id",
+            identityId: "id-work",
+            memoryId: "mem-notes",
+            name: "Mary",
+            agentType: "container",
+            model: "opus",
+            slug: "mary-2",
+        });
         expect(model.launchAgentDefinition).toHaveBeenCalledTimes(1);
         const [stubAgent, overrides] = model.launchAgentDefinition.mock.calls[0];
         expect(stubAgent.id).toBe("new-def-id");
@@ -444,7 +492,7 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         expect(overrides.model).toBe("opus");
     });
 
-    // Identity M4b-3 follow-up (ReAgent on #3585): an aborted launch shows the
+    // Identity M4b-3 follow-up (#3585): an aborted launch shows the
     // "Launch aborted" notice, and a later launch that did not abort clears
     // it instead of leaving it up.
     it("shows the launch-aborted notice, and clears it after a later launch that did not abort", async () => {
@@ -458,27 +506,75 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         render(() => <AgentPicker model={model as any} />);
         const card = await screen.findByTestId("agent-card-tpl-claude");
         fireEvent.click(card);
-        await waitFor(() => expect(modalLayerOpen).toHaveBeenCalled());
-        const req = modalLayerOpen.mock.calls[0][0];
+        await screen.findByTestId("create-panel-stub");
+        const created = {
+            definitionId: "new-def-id",
+            identityId: "id-work",
+            memoryId: "mem-notes",
+            name: "Mary",
+            agentType: "host",
+            model: "opus",
+            slug: "mary",
+        };
 
-        await req.onCreatedAndLaunch("new-def-id", "id-work", "mem-notes", "Mary", "host", "opus", "mary");
+        await panelProps.current.onCreated(created);
         expect(await screen.findByText("Launch aborted")).toBeTruthy();
         expect(screen.getByText(/db locked/)).toBeTruthy();
         expect(model.launchError).toBeNull();
 
-        await req.onCreatedAndLaunch("new-def-id", "id-work", "mem-notes", "Mary", "host", "opus", "mary");
+        await panelProps.current.onCreated(created);
         await waitFor(() => expect(screen.queryByText("Launch aborted")).toBeNull());
     });
 
-    it("modal onCreatedAndLaunch omits the model override when the modal supplied none (harness has no models list)", async () => {
+    it("closes the panel and drops the draft once the agent exists, even when its launch stops short", async () => {
+        const model = makeMockModel();
+        // A missing Node.js: the launch returns without throwing.
+        model.launchAgentDefinition.mockImplementationOnce(async () => {
+            model.nodejsError = "Node.js isn't installed";
+            return false;
+        });
+        render(() => <AgentPicker model={model as any} />);
+        const card = await screen.findByTestId("agent-card-tpl-claude");
+        fireEvent.click(card);
+        await screen.findByTestId("create-panel-stub");
+        const draft = panelProps.current.draft;
+        draft.setName("Mary");
+
+        await panelProps.current.onCreated({
+            definitionId: "new-def-id",
+            identityId: "id-work",
+            memoryId: "mem-notes",
+            name: "Mary",
+            agentType: "host",
+            model: "opus",
+            slug: "mary",
+        });
+        await waitFor(() => expect(screen.queryByTestId("create-panel-stub")).toBeNull());
+        expect(await screen.findByText(/Node.js isn't installed/)).toBeTruthy();
+
+        // Opening the card again starts from an empty draft.
+        fireEvent.click(card);
+        await screen.findByTestId("create-panel-stub");
+        expect(panelProps.current.draft).not.toBe(draft);
+        expect(panelProps.current.draft.name()).toBe("");
+    });
+
+    it("omits the model override when the form supplied none (harness has no models list)", async () => {
         const model = makeMockModel();
         render(() => <AgentPicker model={model as any} />);
         const card = await screen.findByTestId("agent-card-tpl-claude");
         fireEvent.click(card);
-        await waitFor(() => expect(modalLayerOpen).toHaveBeenCalled());
+        await screen.findByTestId("create-panel-stub");
 
-        const req = modalLayerOpen.mock.calls[0][0];
-        await req.onCreatedAndLaunch("new-def-id", "id-work", "mem-notes", "Mary", "host", "", "mary");
+        await panelProps.current.onCreated({
+            definitionId: "new-def-id",
+            identityId: "id-work",
+            memoryId: "mem-notes",
+            name: "Mary",
+            agentType: "host",
+            model: "",
+            slug: "mary",
+        });
         const [, overrides] = model.launchAgentDefinition.mock.calls[0];
         expect(overrides.model).toBeUndefined();
     });
@@ -584,54 +680,32 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
             render(() => <AgentPicker model={model as any} />);
             const card = await screen.findByTestId("agent-card-tpl-drift");
             fireEvent.click(card);
+            await screen.findByTestId("create-panel-stub");
+            await panelProps.current.probePrereqs(false);
 
             await waitFor(() => expect(RpcApi.ResolvePrereqsCommand).toHaveBeenCalled());
             const call = vi.mocked(RpcApi.ResolvePrereqsCommand).mock.calls[0][1];
             expect(call).toEqual({ tools: ["git"] });
         });
 
-        it("marks the just-installed (drifted) agent's own install cache via the resolved provider", async () => {
+        it("re-checks the drifted agent's CLI through the resolved provider once the panel has installed it", async () => {
             vi.mocked(RpcApi.InstallCheckCommand).mockResolvedValue({ installed: false, version: null, path: null, source: null });
-            // Explicit no-missing-prereqs default — `vi.clearAllMocks()`
-            // in the outer `beforeEach` clears call history but not a
-            // prior test's `.mockResolvedValue`, so this can't rely on
-            // the module-level default surviving test order.
-            vi.mocked(RpcApi.ResolvePrereqsCommand).mockResolvedValue({
-                results: [{ tool: "git", found: true }],
-            } as any);
             const model = makeMockModel();
             render(() => <AgentPicker model={model as any} />);
             const card = await screen.findByTestId("agent-card-tpl-drift");
+            await waitFor(() => expect(card.dataset.installed).toBe("false"));
             fireEvent.click(card);
+            const panel = await screen.findByTestId("create-panel-stub");
+            expect(panel.dataset.installed).toBe("false");
 
-            // installed === false → the install-agent modal opens.
-            await waitFor(() => expect(modalLayerOpen).toHaveBeenCalled());
-            const installReq = modalLayerOpen.mock.calls[0][0];
-            expect(installReq.kind).toBe("install-agent");
-
-            // Simulate a successful install; onInstalled resolves the
-            // agent's bundle provider again to update the cache. The backend
-            // now finds the CLI, and the invalidation the install makes has
-            // every card on that provider ask once more (#5130).
+            // The panel's install finished: the backend now finds the CLI.
             vi.mocked(RpcApi.InstallCheckCommand).mockResolvedValue({ installed: true, version: null, path: null, source: null });
-            await installReq.onInstalled(true);
-            await waitFor(() => expect(RpcApi.InstallCheckCommand).toHaveBeenCalledTimes(2));
-
-            // Continuing to launch opens the create-from-template modal —
-            // a second `.open` call.
-            expect(modalLayerOpen).toHaveBeenCalledTimes(2);
-            expect(modalLayerOpen.mock.calls[1][0].kind).toBe("create-from-template");
-
-            // The real proof: clicking the SAME card again must not
-            // re-check install state — under the bug, `onInstalled`'s
-            // cache write compared the drifted `agent.provider` ("claude")
-            // against the resolved canonical ("codex") and never matched,
-            // so the agent's own cache entry stayed unset and every
-            // subsequent click re-triggered InstallCheckCommand.
-            vi.mocked(RpcApi.InstallCheckCommand).mockClear();
-            fireEvent.click(card);
-            await waitFor(() => expect(modalLayerOpen).toHaveBeenCalledTimes(3));
-            expect(RpcApi.InstallCheckCommand).not.toHaveBeenCalled();
+            await panelProps.current.recheckInstalled();
+            await waitFor(() => expect(card.dataset.installed).toBe("true"));
+            // Asked for the RESOLVED provider (codex), not the drifted column (claude).
+            const asked = vi.mocked(RpcApi.InstallCheckCommand).mock.calls.map((c) => c[1].providerId);
+            expect(asked.every((id) => id === "codex")).toBe(true);
+            expect(screen.getByTestId("create-panel-stub").dataset.installed).toBe("true");
         });
     });
 });
@@ -716,14 +790,14 @@ describe("AgentPicker — a CLI AgentMux doesn't install", () => {
         await waitFor(() => expect(card.dataset.installed).toBe("true"));
     });
 
-    it("never opens the npm install modal for it", async () => {
+    it("opens its panel telling it the CLI wasn't found, and no modal", async () => {
         vi.mocked(RpcApi.InstallCheckCommand).mockResolvedValue({ installed: false, version: null, path: null, source: null });
         render(() => <AgentPicker model={makeMockModel() as unknown as AgentViewModel} />);
         const card = await screen.findByTestId("agent-card-tpl-claude");
         await waitFor(() => expect(card.dataset.installed).toBe("false"));
         fireEvent.click(card);
-        await waitFor(() => expect(modalLayerOpen).toHaveBeenCalled());
-        expect(modalLayerOpen.mock.calls.map((c) => c[0].kind)).toEqual(["create-from-template"]);
+        expect((await screen.findByTestId("create-panel-stub")).dataset.installed).toBe("false");
+        expect(modalLayerOpen).not.toHaveBeenCalled();
     });
 });
 

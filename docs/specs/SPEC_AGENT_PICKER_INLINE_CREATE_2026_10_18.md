@@ -1,6 +1,6 @@
 # SPEC: start a new agent inline, below the harness card, and one CLI-detection truth for picker and Toolchain
 
-**Status:** active. Part A (§1) in #5130; Part B (§2) to follow.
+**Status:** active. Part A (§1) in #5130; Part B (§2) in the PR that follows it.
 
 Written 2026-10-18 (AgentX@narko) at the operator's request:
 - "the agent pane should essentially reflect what the toolchain knows .. are those paths DRY? if grok isn't in the path or
@@ -128,13 +128,22 @@ A small step line at the top of the panel ("Install · Create", the steps that a
 - `AgentPicker.tsx`: the `agent-picker-list` `<For>` becomes `CardGrid` with `selectedKey`/`renderDetail`;
   `handleTemplateSelect` stops opening modals and sets the selected card; the `modalLayer.open/replace` chains for
   `agent-prereqs`, `install-agent` and `create-from-template` go.
-- New `AgentCreatePanel.tsx` (the panel and its steps). The bodies move out of the three modals into components the panel
-  composes: the prereq rows, the install stream (from `InstallDialog`), and the create form (from
-  `AgentCreateFromTemplateModal`). The modal kinds are removed once nothing opens them; check other openers first
-  (`modal-dispatch.tsx:205-262`).
-- `CardGrid`: the reveal animation, and a way for the panel to block close while busy (an `onClose` that can refuse).
-- Tests: `AgentPicker.test.tsx` (the grid opens a panel, steps show and skip correctly, the ribbon follows the store),
-  `CardGrid` (close refused while busy), and the moved form keeps its existing assertions.
+- New `AgentCreatePanel.tsx` (the panel and its steps) and `AgentCreateForm.tsx` (the create modal's form, its state in
+  a per-harness `CreateDraft`). The panel shows the install stream with `InstallProgress`; the run itself lives in
+  `install-sessions.ts` (one session per provider under its own root, so it outlives the panel; it toasts its end when
+  no panel shows it).
+- Removed: the `agent-prereqs`, `install-agent` and `create-from-template` modal kinds (nothing else opened them),
+  `AgentPrereqModal`, `AgentInstallModal`, `AgentCreateFromTemplateModal`, and `InstallDialog` with its stylesheet
+  (its only user was the install modal). The prereq list's styles moved to `AgentCreatePanel.scss`.
+- `CardGrid`: a short reveal (motion category `transition`, so the reduced tier drops it); `onClose` may return `false`
+  to keep the panel open while it commits; Escape returns focus to the card even when the card isn't a `Card`.
+- `AgentCard`: `expanded` (accent border, `aria-expanded`) and `installing` (the ribbon reads "Installing…").
+- Tests: the picker (a click opens the card's panel and a second closes it, the panel refuses to close while busy,
+  launching carries the picks, re-checking after an install), `CardGrid` (refused close, focus to a non-`Card` card),
+  `AgentCreateForm` and `AgentCreatePanel` (ported from the three modals' tests), `install-sessions`.
+- **`AgentLaunchModal` is unreachable** (nothing calls `openLaunchModal`, as the operator said: existing agents have no
+  launch modal). It is deleted in its own PR, with the `launch-agent` kind and the sub-modals only it opens, to keep this
+  one reviewable.
 
 ## 3. Order
 
@@ -145,8 +154,8 @@ A small step line at the top of the panel ("Install · Create", the steps that a
 
 ## 4. Open questions
 
-1. The account: does today's create modal show an account picker when there are several accounts? If so it moves into the
-   Create step as is; if not, keep auto-pick.
+None open. The account has no field (the form takes the provider's first account; it is changed later in the Stash), as
+in the modal.
 
 Settled 2026-10-18 by the operator: keep a per-harness draft; keep an install running after the panel closes and toast
 its end. Existing agents have no launch modal (only creating an agent leads to one), so nothing else follows.

@@ -53,9 +53,8 @@ interface AgentShellSubblockProps {
      * activity-log lines into the shell instead of a separate log panel —
      * see agent-view.tsx's `log` wrapper.
      *
-     * Unlike `AgentInstallModal.tsx`'s synthetic terminal (which has exactly
-     * one writer — no PTY, no live stream), THIS `Terminal` instance also has
-     * a second, independent writer: TermWrap's own `doTerminalWrite`, driven
+     * Unlike a terminal with exactly one writer (no PTY, no live stream),
+     * THIS `Terminal` instance also has a second, independent writer: TermWrap's own `doTerminalWrite`, driven
      * by live PTY output arriving over the WS file-subject. `Terminal.write`
      * is safe to call from multiple sites — xterm.js internally queues and
      * processes writes strictly in call order (single `_innerWrite` in

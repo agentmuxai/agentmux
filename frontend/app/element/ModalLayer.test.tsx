@@ -11,8 +11,7 @@
 import { cleanup, render, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/app/platform/pane-overlay", () => ({
-    useHiddenTabMarker: () => () => undefined, usePaneOverlay: () => {} }));
+vi.mock("@/app/platform/pane-overlay", () => ({ usePaneOverlay: () => {} }));
 vi.mock("./modal-dispatch", () => ({
     requestLabel: (req: { kind: string }) => req.kind,
     // Each fake panel's primary button is its initial-focus target.
@@ -56,30 +55,30 @@ const req = (kind: string) => ({ kind }) as unknown as ModalLayerRequest;
 describe("ModalLayer", () => {
     it("tags the panel with the request kind", async () => {
         const { api, container } = renderLayer();
-        api().open(req("install-agent"));
-        await waitFor(() => expect(container.querySelector(".modal-panel--install-agent")).not.toBeNull());
-        api().replace(req("agent-prereqs"));
-        await waitFor(() => expect(container.querySelector(".modal-panel--agent-prereqs")).not.toBeNull());
-        expect(container.querySelector(".modal-panel--install-agent")).toBeNull();
+        api().open(req("add-account"));
+        await waitFor(() => expect(container.querySelector(".modal-panel--add-account")).not.toBeNull());
+        api().replace(req("new-memory"));
+        await waitFor(() => expect(container.querySelector(".modal-panel--new-memory")).not.toBeNull());
+        expect(container.querySelector(".modal-panel--add-account")).toBeNull();
     });
 
     it("focuses the panel's initial-focus control on open", async () => {
         const { api } = renderLayer();
-        api().open(req("agent-prereqs"));
-        await waitFor(() => expect(document.activeElement?.textContent).toBe("primary agent-prereqs"));
+        api().open(req("new-memory"));
+        await waitFor(() => expect(document.activeElement?.textContent).toBe("primary new-memory"));
     });
 
     it("resets the panel's scroll and moves focus when content is replaced", async () => {
         const { api, container } = renderLayer();
-        api().open(req("agent-prereqs"));
+        api().open(req("new-memory"));
         await waitFor(() => expect(container.querySelector(".modal-panel")).not.toBeNull());
         await nextFrame();
         const panel = container.querySelector<HTMLElement>(".modal-panel")!;
         panel.scrollTop = 250;
         expect(panel.scrollTop).toBe(250);
 
-        api().replace(req("install-agent"));
-        await waitFor(() => expect(document.activeElement?.textContent).toBe("primary install-agent"));
+        api().replace(req("add-account"));
+        await waitFor(() => expect(document.activeElement?.textContent).toBe("primary add-account"));
         // Same panel element survived the swap; its scroll was reset.
         expect(container.querySelector(".modal-panel")).toBe(panel);
         expect(panel.scrollTop).toBe(0);

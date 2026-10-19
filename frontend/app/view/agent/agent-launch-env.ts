@@ -21,7 +21,7 @@ import { effortFromFlags, modelFromFlags, modelTakesEffort, permissionModeFromFl
 
 /**
  * Check that Node.js and npm are available for a provider installed via
- * `npm install -g <npmPackage>` (AgentInstallModal -> install.start ->
+ * `npm install <npmPackage>` (the new-agent panel's Install step -> install.start ->
  * agentmux-srv's install_handlers.rs) — every provider except kimi
  * (pip-based, `npmPackage: ""`).
  *
@@ -177,7 +177,7 @@ export async function resolveEffectiveLaunchProvider(agent: AgentDefinition): Pr
  * the user opened the model picker and chose a real one.
  *
  * Precedence: an explicit `overrides.model` (e.g. a choice made in
- * AgentCreateFromTemplateModal) wins; otherwise the effective provider's
+ * the new-agent panel's AgentCreateForm) wins; otherwise the effective provider's
  * own `default: true` model; otherwise `DEFAULT_RUNTIME_CONFIG.model` as
  * the last-resort fallback (a provider that declares no `models` list at
  * all — e.g. one still on the raw-passthrough output format).

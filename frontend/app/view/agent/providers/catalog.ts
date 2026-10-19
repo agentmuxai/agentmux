@@ -23,13 +23,13 @@ const GIT_PREREQ: SystemPrereq = {
 
 /** Shared Node.js prereq. Every provider below except kimi (pip-based) and
  *  antigravity (a native binary from Google's own installer) is
- *  installed via `npm install -g <npmPackage>` (AgentInstallModal ->
+ *  installed via `npm install <npmPackage>` (the new-agent panel's Install step ->
  *  install.start -> `Command::new("npm.cmd"/"npm")`, agentmux-srv's
  *  install_handlers.rs) — on a machine with no Node.js/npm, that spawn
  *  fails immediately with a raw, unfriendly OS error and no recovery path
  *  (confirmed live: fresh-PC onboarding investigation, tracking issue
  *  #2940). `git`/`node`/`npm`/`python` are already fully wired as
- *  one-click-installable ids in AgentPrereqModal's SYSTEM_INSTALLABLE_IDS
+ *  one-click-installable ids in AgentCreatePanel's SYSTEM_INSTALLABLE_IDS
  *  and agentmux-srv's system_install_handlers.rs (winget/brew/pkexec) —
  *  this constant just routes providers through that already-working gate
  *  instead of letting them hit the raw npm-spawn failure. */

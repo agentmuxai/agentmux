@@ -315,9 +315,7 @@
         //
         // Color: success-green, not warning-yellow. Installing is a
         // *forward* action (the user wants this agent, the system can
-        // get it), not a warning. Matches the green "Install now"
-        // button in AgentInstallModal so the visual chain reads as
-        // one continuous CTA.
+        // get it), not a warning.
         .agent-card-install-ribbon {
             position: absolute;
             right: 0;            // anchored fully inside the card so
@@ -414,6 +412,11 @@
             // Subtle accent on the card border to reinforce the
             // ribbon's "needs action" signal.
             border-color: color-mix(in srgb, var(--warning-color) 40%, var(--border-color));
+        }
+
+        // Its new-agent panel is open below its row (the caret points here).
+        &.agent-card--open {
+            border-color: var(--accent-color);
         }
 
         .agent-card-icon {

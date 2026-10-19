@@ -190,6 +190,50 @@ describe("CardGrid", () => {
         spy.mockRestore();
     });
 
+    it("stays open when onClose refuses (busy), and keeps focus in the details", () => {
+        const spy = widthOf(406);
+        const [sel] = createSignal<string | null>("b");
+        render(() => (
+            <CardGrid
+                items={items}
+                keyOf={(i) => i}
+                selectedKey={sel()}
+                onClose={() => false}
+                renderCard={(i) => <Card title={i} aria-label={i} />}
+                renderDetail={() => <input aria-label="nickname" />}
+            />
+        ));
+        const input = screen.getByLabelText("nickname");
+        input.focus();
+        fireEvent.keyDown(input, { key: "Escape" });
+        expect(screen.getByLabelText("nickname")).toBe(input);
+        expect(document.activeElement).toBe(input);
+        spy.mockRestore();
+    });
+
+    it("gives focus back to a card that isn't a Card (a view's own focusable card)", () => {
+        const spy = widthOf(406);
+        const [sel, setSel] = createSignal<string | null>("b");
+        render(() => (
+            <CardGrid
+                items={items}
+                keyOf={(i) => i}
+                selectedKey={sel()}
+                onClose={() => setSel(null)}
+                renderCard={(i) => (
+                    <div role="button" tabIndex={0} aria-label={`own ${i}`}>
+                        {i}
+                    </div>
+                )}
+                renderDetail={() => <input aria-label="nickname" />}
+            />
+        ));
+        fireEvent.keyDown(screen.getByLabelText("nickname"), { key: "Escape" });
+        expect(sel()).toBeNull();
+        expect(document.activeElement).toBe(screen.getByRole("button", { name: "own b" }));
+        spy.mockRestore();
+    });
+
     it("finds a card whose key holds characters CSS.escape rewrites", () => {
         const spy = widthOf(406);
         const key = "agent\u0000github";

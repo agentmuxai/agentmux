@@ -18,11 +18,8 @@ import type { AgentDefinition, BundleImportCommitResponse, BundleImportPreviewRe
 
 export type ModalLayerRequest =
     | LaunchAgentRequest
-    | InstallAgentRequest
-    | AgentPrereqRequest
     | AddAccountRequest
     | NewBundleRequest
-    | CreateFromTemplateRequest
     | BrowserAuthRequest
     | AgentIdentityRequest
     | AgentMemoryRequest
@@ -90,72 +87,6 @@ export interface LaunchAgentSubmit {
 }
 
 /**
- * Install-agent modal — opens when the user picks an agent whose CLI
- * isn't installed in the per-version cache. Streams the npm-install
- * output live inside the modal. On success the layer auto-transitions
- * to the launch-agent modal (via `onInstalled`). Per
- * SPEC_AGENT_INSTALL_STAGE_2026_05_17.md §6.
- */
-export interface InstallAgentRequest {
-    kind: "install-agent";
-    agent: AgentDefinition;
-    originBlockId: string;
-    /**
-     * Called by the modal once the install completes successfully. The
-     * boolean reflects which terminal button the user clicked:
-     *  - `true`  — "Continue to Launch": flip install state AND open
-     *    the launch modal as the natural next step.
-     *  - `false` — "Close": flip install state but do not chain.
-     *
-     * Callers MUST flip cached install state in both branches — the Close
-     * path skipping the flip strands users on a stale ribbon.
-     */
-    onInstalled: (continueToLaunch: boolean) => void;
-}
-
-/**
- * Pre-launch system prerequisite check. Opened when one or more of
- * the provider's `systemPrereqs` are missing from PATH (e.g. Claude
- * Code requires `git` to start a session — anthropics/claude-code#29898).
- * See docs/specs/SPEC_PROVIDER_SYSTEM_PREREQS_2026_05_18.md.
- */
-export interface AgentPrereqRequest {
-    kind: "agent-prereqs";
-    agent: AgentDefinition;
-    originBlockId: string;
-    /** Missing prereqs to display. Each row is rendered with its
-     *  platform-appropriate install link. */
-    missing: Array<{
-        tool: string;
-        label: string;
-        installUrl: string;
-        installLinkText: string;
-    }>;
-    /** Tools successfully installed via the inline system-tool installer
-     *  in THIS prereq flow, kept alive across `modalLayer.replace()` calls
-     *  by the caller (`AgentPicker.tsx`) — `ModalLayer` remounts the whole
-     *  panel subtree on every `replace`, so any state owned by
-     *  `AgentPrereqModalPanel` itself would be wiped the moment a
-     *  post-install refresh (which routinely still reports the tool
-     *  missing — srv's own PATH is stale until restart) replaces this
-     *  request. reagent + Codex, PR #2966. */
-    installedPendingRestart: ReadonlySet<string>;
-    /** Fires once per successful install (before the caller's own
-     *  `onRefresh` re-probe) so the caller can add the tool to
-     *  `installedPendingRestart` in the SAME persistent set it threads
-     *  through every subsequent `replace` call. */
-    onToolInstalled: (tool: string) => void;
-    /** User clicked "Refresh" — caller re-probes and either closes
-     *  this modal (no missing) or replaces it with an updated list. */
-    onRefresh: () => void;
-    /** "Launch anyway" — proceed to install/launch despite the missing
-     *  tool. Useful when the tool is at a non-standard PATH. */
-    onProceed: () => void;
-    /** "Cancel" — close the modal, do not launch. */
-    onCancel: () => void;
-}
-
-/**
  * "+ Add account" affordance on the Launch modal's Identity row —
  * creates a manual/API-key `IdentityAccount` directly (no bundle).
  * OAuth Connect no longer routes through this modal (issue #1624
@@ -210,54 +141,6 @@ export interface NewBundleRequest {
     onCreated: (bundleId: string, bundleName: string) => void;
     /** Caller routes (replace vs close). Layer does NOT close. */
     onCancel: () => void;
-}
-
-/**
- * Two-tier picker — Phase 1 (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md).
- * Opens when the user clicks a card in the picker's Templates section.
- * On submit the layer chains:
- *  1. `agentdefcreatefromtemplate` to clone the template into a new
- *     user-owned definition,
- *  2. `launchAgentDefinition` with the picked bindings to spawn the
- *     new agent immediately.
- *
- * Why the layer owns the chain (not the picker): the modal's
- * `submitting()` gate must track BOTH the create RPC and the launch
- * await so ESC + backdrop dismiss are blocked across the whole flow.
- * Splitting them would leave a window where the create succeeded but
- * the launch hadn't fired, and ESC would lose the user's just-created
- * agent without launching it.
- */
-export interface CreateFromTemplateRequest {
-    kind: "create-from-template";
-    /** Seeded template the user clicked. Its `is_seeded` field MUST be
-     *  1; the backend rejects non-template ids defensively. */
-    template: AgentDefinition;
-    /** Block id of the pane that opened the modal. */
-    originBlockId: string;
-    /** Called by the layer after `agentdefcreatefromtemplate` returns.
-     *  The picker uses this to fire `launchAgentDefinition` with the
-     *  freshly-minted user-agent definition. Returns a promise so the
-     *  layer can keep `submitting()` true across the launch await. */
-    onCreatedAndLaunch: (
-        newDefinitionId: string,
-        accountId: string,
-        bundleId: string,
-        name: string,
-        /** Runtime the user picked in the modal. The launch override
-         *  uses this directly instead of re-reading the (template-
-         *  derived) `agent_type`, so the choice actually takes effect. */
-        agentType: "host" | "container",
-        /** Model the user picked in the modal (from the harness's own
-         *  models list) — seeds the new instance's first-launch
-         *  `agent:runtime` block meta via LaunchOverrides.model. Empty
-         *  string when the harness declares no models list. */
-        model: string,
-        /** Slug the backend assigned the new row. The launch must use it
-         *  for AGENTMUX_AGENT_ID rather than derive one from `name` — a
-         *  collision suffix or punctuation makes the two differ (#3573). */
-        slug: string,
-    ) => Promise<void>;
 }
 
 /**
