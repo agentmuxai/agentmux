@@ -34,6 +34,10 @@ vi.mock("uplot", () => {
         setSize(s: any) {
             this.sizes.push(s);
         }
+        redraws: any[] = [];
+        redraw(...args: any[]) {
+            this.redraws.push(args);
+        }
         destroy() {
             this.destroyed = true;
         }
@@ -44,19 +48,23 @@ vi.mock("uplot/dist/uPlot.min.css", () => ({}));
 
 import { markWindowThemeApplied } from "@/app/store/window-appearance";
 import { sampleReducer } from "./sysinfo-model";
-import { SingleLinePlot } from "./sysinfo-plot";
+import { SingleLinePlot, SysinfoZoomContext } from "./sysinfo-plot";
 import type { DataItem } from "./sysinfo-types";
+
+/** The size every chart is laid out at; a test can make it smaller. */
+let observed = { width: 600, height: 200 };
 
 class FixedSizeObserver {
     constructor(private cb: ResizeObserverCallback) {}
     observe(el: Element) {
-        this.cb([{ target: el, contentRect: { width: 600, height: 200 } } as ResizeObserverEntry], this as any);
+        this.cb([{ target: el, contentRect: observed } as ResizeObserverEntry], this as any);
     }
     unobserve() {}
     disconnect() {}
 }
 
 beforeEach(() => {
+    observed = { width: 600, height: 200 };
     made.charts.length = 0;
     vi.useFakeTimers();
     vi.stubGlobal("ResizeObserver", FixedSizeObserver);
@@ -175,5 +183,84 @@ describe("SingleLinePlot on uPlot", () => {
         await vi.advanceTimersByTimeAsync(200);
         unmount();
         expect(made.charts[0].destroyed).toBe(true);
+    });
+});
+
+// Text zoom and placement (SPEC_SYSINFO_TEXT_ZOOM_DENSITY_AND_ONE_ZOOM_PATH_2026_10_18.md §4, §5).
+describe("SingleLinePlot text zoom and placement", () => {
+    const base = 1_791_900_000_000;
+    type Extra = Partial<Parameters<typeof SingleLinePlot>[0]>;
+
+    function mountWith(zoom: number, extra: Extra = {}) {
+        return render(() => (
+            <SysinfoZoomContext.Provider value={() => zoom}>
+                <SingleLinePlot
+                    plotData={series(sample(base, 40), sample(base + 1000, 42))}
+                    yval="cpu"
+                    yvalMeta={META}
+                    blockId="b"
+                    defaultColor="#a3e635"
+                    targetLen={300}
+                    intervalSecs={1}
+                    {...extra}
+                />
+            </SysinfoZoomContext.Provider>
+        ));
+    }
+
+    it("scales the axis font and the room text takes with the zoom, not the line", async () => {
+        mountWith(1.5);
+        await vi.advanceTimersByTimeAsync(200);
+        const { opts } = made.charts[0];
+        expect(opts.axes[0].font).toMatch(/^18px /);
+        expect(opts.axes[1].font).toMatch(/^18px /);
+        // Time axis: ceil(18 * 1.25) + tick 3 + gap 3; top padding: half a label + 1.
+        expect(opts.axes[0].size).toBe(29);
+        expect(opts.padding).toEqual([10, 0, null, 1]);
+        expect(opts.axes[1].space).toBe(45);
+        // The drawing itself doesn't zoom.
+        expect(opts.series[1].width).toBe(2);
+        expect(opts.axes[0].ticks.size).toBe(3);
+    });
+
+    it("draws ticks without labels where a neighbour shows them", async () => {
+        mountWith(1, { timeAxis: false, yLabels: false });
+        await vi.advanceTimersByTimeAsync(200);
+        const [x, y] = made.charts[0].opts.axes;
+        expect(x.size).toBe(4);
+        expect(y.size).toBe(4);
+        expect(x.values(null, [1, 2], 0, 80, 1)).toEqual(["", ""]);
+        expect(y.values(null, [0, 50])).toEqual(["", ""]);
+    });
+
+    it("drops its axes when too short for them, keeping its title", async () => {
+        observed = { width: 600, height: 40 };
+        const { container } = mountWith(1);
+        await vi.advanceTimersByTimeAsync(200);
+        const { opts } = made.charts[0];
+        expect(opts.axes).toEqual([{ show: false }, { show: false }]);
+        expect(opts.padding).toBeUndefined();
+        expect(container.querySelector(".sysinfo-chart-title")?.textContent).toMatch(/^CPU/);
+    });
+
+    it("marks a top-row chart, so its title keeps clear of the floating buttons", async () => {
+        const { container } = mountWith(1, { top: true });
+        await vi.advanceTimersByTimeAsync(200);
+        expect(container.querySelector(".sysinfo-chart")?.classList.contains("sysinfo-chart--top")).toBe(true);
+    });
+
+    it("reports its own y-axis width and takes its column's widest", async () => {
+        const reported: number[] = [];
+        mountWith(1, { axisWidth: 50, onAxisWidth: (w) => reported.push(w) });
+        await vi.advanceTimersByTimeAsync(200);
+        const y = made.charts[0].opts.axes[1];
+        const self = {
+            axes: [{}, { ticks: { size: 3 }, gap: 3, font: ["12px sans-serif"] }],
+            ctx: { font: "", measureText: (t: string) => ({ width: t.length * 7 * devicePixelRatio }) },
+        };
+        // "100%": 4 × 7 + 6 = 34, under the column's 50.
+        expect(y.size(self, ["0%", "100%"], 1, 0)).toBe(50);
+        await Promise.resolve();
+        expect(reported).toEqual([34]);
     });
 });
