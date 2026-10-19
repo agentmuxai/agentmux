@@ -587,6 +587,25 @@
     }
   },
   {
+    "command": "agent:open_tail",
+    "request": "agentmux_srv::backend::rpc_types::session::CommandAgentOpenTailData",
+    "requestName": "CommandAgentOpenTailData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentOpenTailData"
+      ],
+      "name": "CommandAgentOpenTailData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::session::AgentOpenTailResult",
+    "responseName": "AgentOpenTailResult",
+    "responseTs": {
+      "imports": [
+        "AgentOpenTailResult"
+      ],
+      "name": "AgentOpenTailResult"
+    }
+  },
+  {
     "command": "agent:session:append_output",
     "request": "agentmux_srv::backend::rpc_types::session::CommandAgentSessionAppendOutputData",
     "requestName": "CommandAgentSessionAppendOutputData",

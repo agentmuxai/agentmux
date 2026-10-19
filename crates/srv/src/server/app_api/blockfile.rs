@@ -610,7 +610,7 @@ pub(crate) fn last_turns_start(lines: &[String], turns: usize) -> Option<usize> 
 
 /// `tail_turns`: drop everything before the last `turns` turns (stamps
 /// with it) and record where `lines` now starts.
-fn trim_to_last_turns(result: &mut BlockfileReadRangeResult, first_line: u64, turns: usize) {
+pub(super) fn trim_to_last_turns(result: &mut BlockfileReadRangeResult, first_line: u64, turns: usize) {
     if result.gen_mismatch.is_some() {
         return;
     }
@@ -629,7 +629,7 @@ fn trim_to_last_turns(result: &mut BlockfileReadRangeResult, first_line: u64, tu
 /// newline), then move the start up to the first turn start among them, if
 /// there is one, so the pane doesn't open on the tail of a turn. Lines before
 /// `first_line` were already trimmed (`tail_turns`): `result.offset` wins.
-fn trim_to_tail_bytes(result: &mut BlockfileReadRangeResult, first_line: u64, max_bytes: usize) {
+pub(super) fn trim_to_tail_bytes(result: &mut BlockfileReadRangeResult, first_line: u64, max_bytes: usize) {
     if result.gen_mismatch.is_some() {
         return;
     }

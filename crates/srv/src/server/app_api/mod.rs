@@ -58,6 +58,7 @@ pub(crate) mod dev_server;
 pub(crate) mod mcp_health;
 // pub(crate): the viewer feed reads transcripts through `read_range`.
 pub(crate) mod blockfile;
+mod open_tail;
 pub(crate) mod session;
 mod identity;
 pub(crate) mod bundle;
@@ -106,6 +107,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     agent_define::register(engine, state);
     pane::register(engine, state);
     blockfile::register(engine, state);
+    open_tail::register(engine, state);
     session::register(engine, state);
     identity::register(engine, state);
     bundle::register(engine, state);

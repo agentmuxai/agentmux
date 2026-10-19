@@ -24,6 +24,7 @@ import type { AgentKillResult } from "@/types/rpc/AgentKillResult";
 import type { AgentKillTreeCommand } from "@/types/rpc/AgentKillTreeCommand";
 import type { AgentLastRuntime } from "@/types/rpc/AgentLastRuntime";
 import type { AgentOpenPanesResult } from "@/types/rpc/AgentOpenPanesResult";
+import type { AgentOpenTailResult } from "@/types/rpc/AgentOpenTailResult";
 import type { AgentProcessListCommand } from "@/types/rpc/AgentProcessListCommand";
 import type { AgentProcessListResult } from "@/types/rpc/AgentProcessListResult";
 import type { AgentSessionAppendOutputResult } from "@/types/rpc/AgentSessionAppendOutputResult";
@@ -63,6 +64,7 @@ import type { CommandAgentDefCreateFromTemplateData } from "@/types/rpc/CommandA
 import type { CommandAgentDefHideData } from "@/types/rpc/CommandAgentDefHideData";
 import type { CommandAgentInputData } from "@/types/rpc/CommandAgentInputData";
 import type { CommandAgentLastRuntimeData } from "@/types/rpc/CommandAgentLastRuntimeData";
+import type { CommandAgentOpenTailData } from "@/types/rpc/CommandAgentOpenTailData";
 import type { CommandAgentSessionAppendOutputData } from "@/types/rpc/CommandAgentSessionAppendOutputData";
 import type { CommandAgentSessionArchiveData } from "@/types/rpc/CommandAgentSessionArchiveData";
 import type { CommandAgentSessionListArchivesData } from "@/types/rpc/CommandAgentSessionListArchivesData";
@@ -552,6 +554,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<AgentProcessListResult> {
     return client.rpcCall("agent.process-list", data, opts);
+  },
+  // command "agent:open_tail"
+  AgentOpenTailCommand(
+    client: RpcClient,
+    data: CommandAgentOpenTailData,
+    opts?: RpcOpts
+  ): Promise<AgentOpenTailResult> {
+    return client.rpcCall("agent:open_tail", data, opts);
   },
   // command "agent:session:append_output"
   AgentSessionAppendOutputCommand(

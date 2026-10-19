@@ -232,6 +232,89 @@ pub struct AgentSessionReadResult {
     pub modts: Option<i64>,
 }
 
+/// Request for `agent:open_tail`: an agent pane's first screen from one small
+/// read (the open-first-screen design, #5156, under #5141).
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandAgentOpenTailData {
+    pub block_id: String,
+    /// Only `output` (the transcript) has a tail to open.
+    pub filename: String,
+    /// With it, the agent's session snapshot comes back too (`agent:session:read`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub definition_id: Option<String>,
+    /// How much of the end to return; default 64 KiB. The newest line always comes back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub tail_bytes: Option<u64>,
+    /// The same trimming as `blockfile:read_range`'s `tail_turns`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tail_turns: Option<u32>,
+    /// Answer `gen_mismatch` instead of lines of another generation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub expect_gen: Option<String>,
+}
+
+/// Response for `agent:open_tail`. The line positions (`stream`, `gen`,
+/// `start_line`, `end_line`, `total_lines`) all come from ONE reader snapshot
+/// and are absent when the transcript has no counter epoch: the pane then opens
+/// the way it did before.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AgentOpenTailResult {
+    /// Contiguous from `start_line`, cut at line boundaries.
+    pub lines: Vec<String>,
+    /// Receive-time stamps (unix ms) parallel to `lines`; absent without a sidecar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number[]")]
+    pub stamps: Option<Vec<i64>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub stream: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub gen: Option<String>,
+    /// The line number of `lines[0]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub start_line: Option<u64>,
+    /// One past the last line: `start_line + lines.len()`, the live cursor's next.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub end_line: Option<u64>,
+    /// Lines the stream held at that snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub total_lines: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub start_byte: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub end_byte: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub has_more_before: Option<bool>,
+    /// `agent:session:read`'s content and modts, when `definition_id` was given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub snapshot: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub snapshot_modts: Option<i64>,
+    /// `expect_gen` was given and the transcript is now another generation:
+    /// `lines` is empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub gen_mismatch: Option<bool>,
+}
+
 /// Request for `agent:session:write_state`. Writes `output.state.json`
 /// into `agent:<definition_id>:current` (creates the zone if missing).
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
