@@ -175,6 +175,9 @@ const pctChange = (base, head) => (base == null || head == null || base === 0 ? 
  * CPU and the round time move more (measured spread of identical runs: about 5%,
  * 3%, 13% and 15%).
  */
+/** A page command that took longer than this during a run is itself a responsiveness signal. */
+export const SLOW_COMMAND_MS = 10_000;
+
 export const DEFAULT_MARGINS = { cpuPct: { app: 10, srv: 10, default: 20 }, wallPct: 20 };
 
 /** The CPU margin of a group; a single number means every group. */
@@ -214,7 +217,10 @@ export function compareRuns(baseRuns, headRuns, margins = DEFAULT_MARGINS) {
         rows.push({ group: g, memory: metric(g, "MB", mem), cpu: metric(g, "s", cpu, marginFor(margins, g)) });
     }
     const wall = metric("round time", "ms", (r) => r.wall?.medianMs, margins.wallPct);
-    return { rows, wall, margins, baseRuns: baseRuns.length, headRuns: headRuns.length };
+    const slow = [...baseRuns.map((r) => ["base", r]), ...headRuns.map((r) => ["head", r])]
+        .filter(([, r]) => r.slowestEvalMs > SLOW_COMMAND_MS)
+        .map(([side, r]) => ({ side, label: r.label, ms: r.slowestEvalMs }));
+    return { rows, wall, slow, margins, baseRuns: baseRuns.length, headRuns: headRuns.length };
 }
 
 /** A markdown table of `compareRuns`: memory and CPU side by side, then the round time. */
@@ -233,6 +239,7 @@ export function runsTable(cmp, baseLabel = "base", headLabel = "head") {
     }
     const w = cmp.wall;
     lines.push("", `Round time (send to all agents idle), median: ${baseLabel} ${f(w.base.median)} ms${range(w.base)}, ${headLabel} ${f(w.head.median)} ms${range(w.head)}, ${sign(w.pct)}${w.flagged ? ` (over +${w.marginPct}%)` : ""}.`);
+    for (const s of cmp.slow ?? []) lines.push("", `SLOW PAGE COMMAND: ${s.label} (${s.side}) had a page command that took ${Math.round(s.ms / 100) / 10} s (over ${SLOW_COMMAND_MS / 1000} s): the window was unresponsive for that long during a round.`);
     lines.push("", `${cmp.baseRuns} run(s) against ${cmp.headRuns}; medians, with the lowest-highest in brackets when there is more than one. A flag needs the change to pass the margin (${typeof cmp.margins.cpuPct === "number" ? `+${cmp.margins.cpuPct}%` : `+${cmp.margins.cpuPct.app}% app and srv CPU, +${cmp.margins.cpuPct.default}% other groups`} CPU, +${cmp.margins.wallPct}% round time) and the two sides' ranges not to overlap. Flags are report-only; the operator sets the real margins.`);
     return lines.join("\n");
 }

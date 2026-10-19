@@ -85,6 +85,9 @@ How to compare two builds (or the same build with and without a change):
    time. A flag also needs the two sides' lowest-highest ranges not to overlap.
    The flags are report-only and the margins are a starting point: the operator
    sets the real ones.
+   A run whose slowest page command (`result.slowestEvalMs`) took over 10 s is
+   named in the output too: the window was unresponsive for that long during a
+   round.
 
 Results made with a different workload version (`result.workloadVersion`; the
 pacing of the rounds) are refused: the two are different loads.
