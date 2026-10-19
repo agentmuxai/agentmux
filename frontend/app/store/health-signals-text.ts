@@ -15,6 +15,7 @@ const LABEL: Record<HealthKind, string> = {
     ram: "Low RAM",
     pagefile: "Low page file",
     backend: "Slow backend",
+    disk: "Low disk space",
 };
 
 const RAM_MESSAGE: Record<ActiveHealthLevel, string> = {
@@ -70,11 +71,31 @@ export function backendMessage(level: ActiveHealthLevel, avgMs?: number): string
         : `AgentMux is responding slowly${avgPart}. Heavy CPU use by other processes, including agents' builds, can cause this.`;
 }
 
+/** The low-disk advice: which drive, how much is left, and why it matters
+ *  (srv's stores slow down and stall on a nearly full drive, issue #5141). */
+export function diskMessage(level: ActiveHealthLevel, payload: HealthPayload): string {
+    const where = payload.disk_path ? ` (${payload.disk_path})` : "";
+    const free =
+        payload.disk_free_gb !== undefined && payload.disk_free_pct !== undefined
+            ? `${formatGb(payload.disk_free_gb)} free, ${payload.disk_free_pct.toFixed(1)}%`
+            : "";
+    const left = free ? ` ${free}.` : "";
+    return level === "critical"
+        ? `The drive with AgentMux's data${where} is almost full:${left} AgentMux may pause for seconds at a time or fail to save. Free up space now.`
+        : `The drive with AgentMux's data${where} is running low:${left} On a nearly full drive, writes slow down and AgentMux can pause for seconds at a time. Freeing up space will help.`;
+}
+
+/** "222 GB" or "9.5 GB": one decimal under 100. */
+export function formatGb(gb: number): string {
+    return gb < 100 ? `${gb.toFixed(1)} GB` : `${Math.round(gb)} GB`;
+}
+
 /** The full advice for a kind and level. RAM never gets disk guidance (the
  *  concept doesn't apply to physical RAM). */
 export function messageFor(kind: HealthKind, level: ActiveHealthLevel, payload: HealthPayload): string {
     if (kind === "ram") return RAM_MESSAGE[level];
     if (kind === "backend") return backendMessage(level, payload.avg_ms);
+    if (kind === "disk") return diskMessage(level, payload);
     return PAGEFILE_MESSAGE[level] + pagefileGuidance(payload.system_managed, payload.disk_free_pct);
 }
 

@@ -1,12 +1,16 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Performance health signals (low RAM, low page file, slow backend): the
-//! host keeps each kind's current level so a window opened mid-episode can
-//! catch up, and pushes every change to the open windows as `health-signal`.
-//! docs/reports/REPORT_PERFORMANCE_INDICATORS_TO_STATUS_BAR_2026_10_08.md §3.2.
+//! Performance health signals (low RAM, low page file, slow backend, low disk
+//! space): the host keeps each kind's current level so a window opened
+//! mid-episode can catch up, and pushes every change to the open windows as
+//! `health-signal`.
+//! docs/reports/REPORT_PERFORMANCE_INDICATORS_TO_STATUS_BAR_2026_10_08.md
+//! §3.2.
 
 use std::collections::BTreeMap;
+
+use cef::*;
 
 use crate::state::AppState;
 
@@ -37,6 +41,30 @@ pub fn emit(state: &AppState, payload: serde_json::Value) {
     let now_ms = agentmux_common::time::now_ms_u64();
     let payload = record(&mut state.health_signals.lock(), payload, now_ms);
     crate::events::emit_event_to_top_level_windows(state, EVENT, &payload);
+}
+
+wrap_task! {
+    // A payload built off the UI thread, carried as JSON text so the task
+    // holds only plain fields.
+    struct EmitPayloadTask {
+        state: std::sync::Arc<AppState>,
+        payload_json: String,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            if let Ok(payload) = serde_json::from_str(&self.payload_json) {
+                emit(&self.state, payload);
+            }
+        }
+    }
+}
+
+/// `emit` from any thread: posts it to the UI thread. The low-disk check runs
+/// on the memory heartbeat's thread.
+pub fn post_emit(state: &std::sync::Arc<AppState>, payload: serde_json::Value) {
+    let mut task = EmitPayloadTask::new(state.clone(), payload.to_string());
+    post_task(ThreadId::UI, Some(&mut task));
 }
 
 /// Every kind that is not normal right now, for a window that just opened.

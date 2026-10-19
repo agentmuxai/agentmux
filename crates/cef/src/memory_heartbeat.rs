@@ -4,8 +4,11 @@
 // Memory heartbeat — logs system and process memory stats every 20 seconds.
 // Designed to provide forensic data for OOM / VA exhaustion crash analysis.
 
+
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+
+mod low_disk;
 
 /// Latest observed system commit-free (available page file) in MB. Published by
 /// the heartbeat loop and by the on-demand probe; read by the gated renderer
@@ -109,6 +112,53 @@ fn pagefile_disk_context() -> Option<(bool, f64)> {
     None
 }
 
+/// The folders whose drives hold srv's stores: this version's data folder
+/// (its own stores; it can be a junction or mount on another drive) and the
+/// shared transcript store under the AgentMux root.
+fn store_folders(state: &crate::state::AppState, root: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut dirs: Vec<std::path::PathBuf> = state.version_data_dir.lock().iter().map(std::path::PathBuf::from).collect();
+    let shared = low_disk::shared_transcripts_dir(
+        root,
+        std::env::var_os("AGENTMUX_HOME_OVERRIDE").as_deref(),
+        std::env::var_os("AGENTMUX_SHARED_DIR").as_deref(),
+    );
+    dirs.push(if shared.exists() { shared } else { root.to_path_buf() });
+    dirs
+}
+
+/// Read the free space of each store folder's drive and push the low-disk
+/// signal for the worst one (`low_disk::worst`), when it changes or while it is not normal. A
+/// failed read says nothing.
+fn check_low_disk(state: &std::sync::Arc<crate::state::AppState>, root: &std::path::Path, tracker: &mut low_disk::LowDiskTracker) {
+    let read: Vec<(low_disk::DiskReading, std::path::PathBuf)> = store_folders(state, root)
+        .into_iter()
+        .filter_map(|dir| {
+            let (free, total) = agentmux_common::disk_space::volume_free_total_bytes(&dir)?;
+            Some((low_disk::DiskReading::from_bytes(free, total), dir))
+        })
+        .collect();
+    let readings: Vec<low_disk::DiskReading> = read.iter().map(|(r, _)| *r).collect();
+    let Some(i) = low_disk::worst(&readings, tracker.level()) else {
+        return;
+    };
+    let (reading, dir) = &read[i];
+    if let Some(level) = tracker.observe(reading) {
+        if level != low_disk::DiskLevel::Normal {
+            tracing::warn!(
+                target: "mem_pressure",
+                kind = "disk",
+                level = level.as_str(),
+                free_gb = reading.free_gb,
+                free_pct = reading.free_pct,
+                dir = %dir.display(),
+                "low disk space on the data drive"
+            );
+        }
+        let path = dir.to_string_lossy();
+        crate::health_signals::post_emit(state, low_disk::payload(level, reading, &path));
+    }
+}
+
 /// Spawn a background thread that logs memory stats at a fixed interval.
 /// Also refreshes the log pointer file on UTC date rollover.
 /// Runs for the lifetime of the process — no shutdown signal needed.
@@ -127,9 +177,20 @@ pub fn start(state: std::sync::Arc<crate::state::AppState>) {
             let mut commit_pressure = crate::memory_pressure::PressureTracker::new();
             let mut ram_pressure = crate::memory_pressure::PressureTracker::new();
             let mut pool_refill = crate::memory_pressure::PoolRefillGate::new();
+            // Low disk space on the drive with AgentMux's data, read every
+            // third tick (once a minute): low_disk.rs.
+            let data_root = agentmux_common::data_paths::agentmux_root().ok();
+            let mut low_disk = low_disk::LowDiskTracker::new();
+            let mut tick: u64 = 0;
             loop {
                 std::thread::sleep(Duration::from_secs(20));
                 log_memory_stats();
+                tick += 1;
+                if tick % 3 == 1 {
+                    if let Some(root) = data_root.as_deref() {
+                        check_low_disk(&state, root, &mut low_disk);
+                    }
+                }
                 // Feed the debounced memory-pressure trackers from the just-
                 // sampled readings; on a level transition, log it AND push
                 // the new level to the frontend low-memory banner
