@@ -32,7 +32,7 @@ import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { createSignalAtom } from "@/util/util";
 import type { SignalAtom } from "@/util/util";
-import { isModKey } from "@/util/platformutil";
+import { usePaneZoomWheel } from "@/app/store/zoom";
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
 
 // TermResyncHandler: watches connection status changes and resyncs the terminal controller.
@@ -231,26 +231,8 @@ function TerminalView(props: { model: TermViewModel }): JSX.Element {
         });
     });
 
-    // Ctrl+Wheel zoom: capture phase so we intercept before xterm's bubble-phase
-    // wheel listener. stopPropagation() prevents xterm from scrolling the buffer.
-    // preventDefault() suppresses CEF's native Ctrl+Scroll page zoom.
-    onMount(() => {
-        const handleCtrlWheel = (ev: WheelEvent) => {
-            // Ctrl+Shift+Scroll is AppAllPanesZoomHandler's all-panes gesture
-            // (app.tsx) — let it bubble there instead of zooming just this
-            // pane. See SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md.
-            if (!isModKey(ev) || ev.shiftKey) return;
-            ev.preventDefault();
-            ev.stopPropagation();
-            const currentZoom = model.termZoomAtom();
-            const STEP = 0.1;
-            const delta = ev.deltaY > 0 ? -STEP : STEP; // scroll down = zoom out
-            const next = Math.max(0.5, Math.min(2.0, Math.round((currentZoom + delta) * 100) / 100));
-            void model.setMeta({ "term:zoom": next === 1.0 ? null : next });
-        };
-        viewRef.addEventListener("wheel", handleCtrlWheel, { passive: false, capture: true });
-        onCleanup(() => viewRef.removeEventListener("wheel", handleCtrlWheel, { capture: true }));
-    });
+    // Ctrl+scroll zoom, before xterm's own wheel handling scrolls the buffer.
+    usePaneZoomWheel(() => viewRef, () => blockId);
 
     // Update font size AND font family in-place when either changes — both
     // affect character-cell geometry (a font-family swap can change glyph

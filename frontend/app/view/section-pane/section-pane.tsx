@@ -8,13 +8,12 @@
  * point open the pane on a given section (panes.ts).
  */
 
-import { createMemo, For, onCleanup, onMount, type Accessor, type JSX } from "solid-js";
+import { createMemo, For, type Accessor, type JSX } from "solid-js";
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { TabbedPane } from "@/app/element/ui";
 import { readZoom } from "@/app/store/zoom-factor";
 import "./section-pane.scss";
-import { isModKey } from "@/util/platformutil";
 
 export interface PaneSection<Id extends string> {
     id: Id;
@@ -81,24 +80,8 @@ export function SectionPaneView<Id extends string>(props: { model: SectionPaneMo
     const section = model.sectionAtom;
     let viewRef: HTMLDivElement | undefined;
 
-    // Ctrl+Wheel zooms this pane, as in the editor (editor-view.tsx). Capture
-    // phase, so it runs before anything scrollable inside; preventDefault stops
-    // CEF's own page zoom. Ctrl+Shift+Wheel is the all-panes gesture (app.tsx),
-    // so it's left to bubble.
-    onMount(() => {
-        if (!viewRef) return;
-        const handleCtrlWheel = (ev: WheelEvent) => {
-            if (!isModKey(ev) || ev.shiftKey) return;
-            ev.preventDefault();
-            ev.stopPropagation();
-            const STEP = 0.1;
-            const current = model.zoomAtom();
-            const next = Math.max(0.5, Math.min(2.0, Math.round((current + (ev.deltaY > 0 ? -STEP : STEP)) * 100) / 100));
-            model.setMeta({ "term:zoom": next === 1.0 ? null : next });
-        };
-        viewRef.addEventListener("wheel", handleCtrlWheel, { passive: false, capture: true });
-        onCleanup(() => viewRef?.removeEventListener("wheel", handleCtrlWheel, { capture: true }));
-    });
+    // Ctrl+scroll and Ctrl/Cmd +/-/0 zoom this pane through the shared handlers
+    // (app.tsx, keymodel.ts): the `paneZoom` capability is all it needs.
 
     return (
         // The container carries container-type, so the managers inside can

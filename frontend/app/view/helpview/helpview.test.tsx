@@ -2,14 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Tests for the Help pane's Ctrl+Wheel zoom (helpview.tsx).
- *
- * This handler was missed entirely by the original research/spec for
- * SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md — Codex caught it on
- * PR #3090's review, after the other six duplicated Ctrl+Wheel handlers
- * (term/editor/armory/warden/swarm/AgentShellSubblock) had already been
- * fixed and tested. This file exists so a future change to this same class
- * of gesture doesn't have to rediscover this pane the same way twice.
+ * The Help pane's zoom (helpview.tsx): the shared pane zoom (`term:zoom`), which it
+ * joins with its `paneZoom` capability, and the one-time move of the level it used
+ * to keep in its own `help:zoom`.
+ * SPEC_SYSINFO_TEXT_ZOOM_DENSITY_AND_ONE_ZOOM_PATH_2026_10_18.md §3 (A.5).
  */
 
 import { cleanup, render } from "@solidjs/testing-library";
@@ -19,11 +15,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // and writes its block only through the host context.
 const setMetaMock = vi.fn((..._args: unknown[]) => Promise.resolve(undefined));
 
-const showZoomIndicatorMock = vi.fn();
-vi.mock("@/app/store/zoom", () => ({
-    showZoomIndicator: (...args: unknown[]) => showZoomIndicatorMock(...args),
-}));
-
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { helpPaneTab, HelpView } from "./helpview";
 
@@ -31,7 +22,6 @@ describe("HelpView zoom", () => {
     afterEach(() => {
         cleanup();
         setMetaMock.mockClear();
-        showZoomIndicatorMock.mockClear();
     });
 
     function renderHelp(meta: Record<string, unknown> = {}) {
@@ -45,18 +35,44 @@ describe("HelpView zoom", () => {
         return render(() => <HelpView ctx={ctx} />);
     }
 
-    it("Ctrl+Wheel writes help:zoom through the host context", () => {
-        const { container } = renderHelp();
-        const root = container.querySelector("[tabindex]") as HTMLElement;
-        root.dispatchEvent(new WheelEvent("wheel", { ctrlKey: true, deltaY: -100, bubbles: true, cancelable: true }));
-        expect(setMetaMock).toHaveBeenCalledWith({ "help:zoom": 1.05 });
+    const tips = (container: Element) => container.querySelector("div[style*='zoom']") as HTMLElement;
+
+    it("takes part in the shared pane zoom", () => {
+        expect(helpPaneTab.capabilities?.paneZoom).toEqual({});
     });
 
-    it("starts at the zoom saved in the block's meta", () => {
-        const { container } = renderHelp({ "help:zoom": 1.5 });
-        const root = container.querySelector("[tabindex]") as HTMLElement;
-        root.dispatchEvent(new WheelEvent("wheel", { ctrlKey: true, deltaY: -100, bubbles: true, cancelable: true }));
-        expect(setMetaMock).toHaveBeenCalledWith({ "help:zoom": 1.55 });
+    it("applies term:zoom to the tips, not to the filter bar", () => {
+        const { container } = renderHelp({ "term:zoom": 1.3 });
+        expect(tips(container).style.zoom).toBe("1.3");
+        expect((container.querySelector(".help-filter-bar") as HTMLElement).style.zoom).toBe("");
+    });
+
+    const settle = () => new Promise((r) => setTimeout(r, 0));
+
+    it("moves a saved help:zoom to term:zoom, then clears help:zoom", async () => {
+        renderHelp({ "help:zoom": 1.5 });
+        await settle();
+        expect(setMetaMock.mock.calls.map((c) => c[0])).toEqual([{ "term:zoom": 1.5 }, { "help:zoom": null }]);
+    });
+
+    it("keeps a term:zoom already set, and still clears help:zoom", async () => {
+        renderHelp({ "help:zoom": 1.5, "term:zoom": 0.8 });
+        await settle();
+        expect(setMetaMock.mock.calls.map((c) => c[0])).toEqual([{ "help:zoom": null }]);
+    });
+
+    // The old key goes only after the new one is written (#5128).
+    it("leaves help:zoom in place when writing term:zoom fails", async () => {
+        setMetaMock.mockImplementationOnce(() => Promise.reject(new Error("offline")));
+        renderHelp({ "help:zoom": 1.5 });
+        await settle();
+        expect(setMetaMock).toHaveBeenCalledTimes(1);
+        expect(setMetaMock).not.toHaveBeenCalledWith({ "help:zoom": null });
+    });
+
+    it("writes nothing when there is no help:zoom", () => {
+        renderHelp({ "term:zoom": 1.2 });
+        expect(setMetaMock).not.toHaveBeenCalled();
     });
 
     it("registers as a native pane tab with Help's label and icon", () => {
@@ -66,24 +82,16 @@ describe("HelpView zoom", () => {
         expect(helpPaneTab.create).toBeTypeOf("function");
     });
 
-    it("plain wheel (no Ctrl) does not trigger a zoom RPC call", () => {
+    // No zoom handler of its own: Ctrl+wheel reaches the window's shared handler.
+    it("leaves Ctrl+Wheel to the window's shared zoom handler", () => {
         const { container } = renderHelp();
-        const root = container.querySelector("[tabindex]") as HTMLElement;
-        root.dispatchEvent(new WheelEvent("wheel", { ctrlKey: false, deltaY: -100, bubbles: true, cancelable: true }));
-        expect(setMetaMock).not.toHaveBeenCalled();
-    });
-
-    // Codex review, PR #3090: this handler had no shiftKey guard at all,
-    // so Ctrl+Shift+Scroll over the Help pane zoomed only Help (via
-    // stopPropagation()) instead of reaching AppAllPanesZoomHandler
-    // (app.tsx) and zooming every pane in the window. This was a real gap
-    // missed by the original six-view fix.
-    it("Ctrl+Shift+Wheel does not trigger this pane's own zoom RPC call", () => {
-        const { container } = renderHelp();
-        const root = container.querySelector("[tabindex]") as HTMLElement;
-        root.dispatchEvent(
-            new WheelEvent("wheel", { ctrlKey: true, shiftKey: true, deltaY: -100, bubbles: true, cancelable: true })
-        );
+        const seen = vi.fn();
+        window.addEventListener("wheel", seen);
+        const ev = new WheelEvent("wheel", { ctrlKey: true, deltaY: -100, bubbles: true, cancelable: true });
+        (container.querySelector("[tabindex]") as HTMLElement).dispatchEvent(ev);
+        window.removeEventListener("wheel", seen);
+        expect(seen).toHaveBeenCalledTimes(1);
+        expect(ev.defaultPrevented).toBe(false);
         expect(setMetaMock).not.toHaveBeenCalled();
     });
 });

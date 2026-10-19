@@ -79,7 +79,7 @@ fn seeded_store() -> Store {
         "url": "https://example.com/docs/page?token=abc123&x=1#frag",
     }));
     block(&store, "b-edit", json!({ "view": "editor", "file": under_home("notes/todo.md") }));
-    block(&store, "b-sys", json!({ "view": "sysinfo", "sysinfo:type": "Overview", "sysinfo:focus": "net", "graph:windowsecs": 900 }));
+    block(&store, "b-sys", json!({ "view": "sysinfo", "sysinfo:type": "Overview", "sysinfo:focus": "net", "graph:windowsecs": 900, "sysinfo:showcontrols": true, "term:zoom": 1.5 }));
 
     let main_tree = LayoutNode {
         id: "n-root".into(),
@@ -215,6 +215,9 @@ fn views_are_written_from_the_allowlist_only() {
     assert_eq!(sys.config["sysinfo_type"], "Overview");
     assert_eq!(sys.config["sysinfo_focus"], "net");
     assert_eq!(sys.config["window_secs"], 900);
+    assert_eq!(sys.config["show_controls"], true);
+    // A pane's zoom is `term:*` runtime state, not written (SPEC_LAYOUT_FILES §3.3).
+    assert!(!sys.config.contains_key("zoom"));
 }
 
 #[test]
@@ -718,4 +721,19 @@ fn a_sysinfo_pane_opens_on_its_plot_type_area_and_window() {
         let plan = plan_from_doc(&store, &one_pane(view), &opts(home.path(), false));
         assert!(block_meta(&plan, 0, 0).get("graph:windowsecs").is_none(), "{bad}");
     }
+}
+
+#[test]
+fn a_restored_sysinfo_pane_keeps_its_view_buttons_shown_or_hidden() {
+    let home = tempfile::tempdir().unwrap();
+    let store = Store::open_in_memory().unwrap();
+    for shown in [true, false] {
+        let view = json!({ "type": "sysinfo", "config": { "show_controls": shown } });
+        let plan = plan_from_doc(&store, &one_pane(view), &opts(home.path(), false));
+        assert_eq!(block_meta(&plan, 0, 0)["sysinfo:showcontrols"], shown);
+    }
+    // Not a boolean: left out, so the pane starts with the buttons hidden.
+    let view = json!({ "type": "sysinfo", "config": { "show_controls": "yes" } });
+    let plan = plan_from_doc(&store, &one_pane(view), &opts(home.path(), false));
+    assert!(block_meta(&plan, 0, 0).get("sysinfo:showcontrols").is_none());
 }

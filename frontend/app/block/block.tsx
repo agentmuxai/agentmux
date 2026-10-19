@@ -49,6 +49,8 @@ import { BlockErrorBoundary } from "./BlockErrorBoundary";
 import { MissingWidget } from "./missing-widget";
 import { BlockFrame } from "./blockframe";
 import { blockViewToIcon, blockViewToName } from "./blockutil";
+import { paneTabCapability } from "./pane-tab-registry";
+import { readZoom } from "@/app/store/zoom-factor";
 import { useSubagentBackfillGate } from "@/app/view/agent/hooks/useSubagentBackfillGate";
 
 // Matches BrainSpinner.scss's own `.is-fading` opacity transition duration —
@@ -249,6 +251,11 @@ function BlockFull({ nodeModel, viewModel, covered }: FullBlockProps): JSX.Eleme
         const retVal: JSX.CSSProperties = {
             "pointer-events": disablePointerEvents() ? "none" : undefined,
         };
+        // A pane in the shared zoom gets its level as `--pane-zoom`, for a view
+        // that scales only part of itself (Sysinfo: its text, not its charts).
+        if (paneTabCapability(blockData()?.meta?.view, "paneZoom")) {
+            (retVal as Record<string, string>)["--pane-zoom"] = String(readZoom(blockData()?.meta));
+        }
         const rect = innerRect();
         const offset = blockContentOffset();
         if (rect?.width && rect?.height && offset) {
