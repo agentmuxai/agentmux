@@ -898,13 +898,21 @@ jobs:
   # 2026-10-18 and nobody heard (docs/specs/SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19.md
   # §5 Phase 5). One issue per red streak, a comment per failing push. Found
   # by label, not search, which can lag behind a just-created issue. A
-  # cancelled run (a newer push superseded it) says nothing.
+  # cancelled run says nothing. Pushes to main run CI concurrently, so:
+  # - only a run whose commit is still main's head acts, so an older run
+  #   finishing late can't close a newer failure's issue or reopen one after
+  #   main went green (the newer push's run reports instead);
+  # - one main status at a time (queued, never cancelled), so two failing runs
+  #   can't both create an issue; a green one closes every open main-red issue.
   main-status:
     name: main status
     needs: [ci-required]
     if: ${{ always() && github.event_name == 'push' }}
     runs-on: ubuntu-latest
     timeout-minutes: 3
+    concurrency:
+      group: ci-pr-main-status
+      cancel-in-progress: false
     permissions:
       contents: read
       issues: write
@@ -921,15 +929,20 @@ jobs:
         run: |
           set -euo pipefail
           [ "$RESULT" = "failure" ] || [ "$RESULT" = "success" ] || { echo "CI required: $RESULT, nothing to say."; exit 0; }
-          open=$(gh issue list --repo "$REPO" --label main-red --state open --json number --jq '.[0].number // empty')
+          head=$(gh api "repos/$REPO/git/ref/heads/main" --jq .object.sha)
+          if [ "$head" != "$SHA" ]; then
+            echo "main has moved on to ${head:0:9}; that push's run reports main's state."; exit 0
+          fi
+          open=$(gh issue list --repo "$REPO" --label main-red --state open --json number --jq '.[].number')
           subject=$(gh api "repos/$REPO/commits/$SHA" --jq '.commit.message | split("\n")[0]')
           at="\`${SHA:0:9}\` ($subject)"
           if [ "$RESULT" = "success" ]; then
-            if [ -n "$open" ]; then
-              gh issue close "$open" --repo "$REPO" --comment "Green again at $at: $RUN_URL"
-            fi
+            for n in $open; do
+              gh issue close "$n" --repo "$REPO" --comment "Green again at $at: $RUN_URL"
+            done
             exit 0
           fi
+          open=$(printf '%s\n' "$open" | head -1)
           failing=$(gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/jobs" --jq '.jobs[] | select(.conclusion == "failure") | "- " + .name' | grep -v -- '- CI required$' || true)
           note="CI failed on main at $at: $RUN_URL"$'\n\n'"Failing jobs:"$'\n'"${failing:-- (see the run)}"
           if [ -n "$open" ]; then
