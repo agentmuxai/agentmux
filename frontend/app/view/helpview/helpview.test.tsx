@@ -61,7 +61,7 @@ describe("HelpView zoom", () => {
         expect(setMetaMock.mock.calls.map((c) => c[0])).toEqual([{ "help:zoom": null }]);
     });
 
-    // Codex review, #5128: the old key goes only after the new one is written.
+    // The old key goes only after the new one is written (#5128).
     it("leaves help:zoom in place when writing term:zoom fails", async () => {
         setMetaMock.mockImplementationOnce(() => Promise.reject(new Error("offline")));
         renderHelp({ "help:zoom": 1.5 });
