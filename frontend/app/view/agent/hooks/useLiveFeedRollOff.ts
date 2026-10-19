@@ -21,6 +21,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { readToolResult, type ToolResultLoader } from "../tool-result-loader";
 import type { AgentAtoms } from "../state";
 import { userIsInteracting } from "../stream-scheduler";
+import { withBodyHeights } from "../body-height-cache";
 
 /**
  * How long a pane stays hidden before its held-open rows' results may leave
@@ -79,10 +80,15 @@ export function useLiveFeedRollOff(opts: {
         // the live feed off (#4126). A pane hidden past HIDDEN_HELD_UNLOAD_MS
         // lets held rows' results go too; the rows stay open and reload on show.
         const keepHeld = !heldResultsUnloadable;
-        paneModel.dispatchDoc({
-            type: "UnloadToolResults",
-            keepIds: keepHeld ? new Set([...pinnedIds, ...untrack(docState).heldOpenNodes]) : new Set(pinnedIds),
-        });
+        const unloadKeep = keepHeld ? new Set([...pinnedIds, ...untrack(docState).heldOpenNodes]) : new Set(pinnedIds);
+        // The open bodies about to unload are measured together first: each row would otherwise read its own height
+        // mid-update, a layout per row (body-height-cache.ts).
+        withBodyHeights(
+            typeof document === "undefined" ? null : document.querySelector(`[data-blockid="${opts.blockId}"]`),
+            untrack(paneModel.document),
+            unloadKeep,
+            () => paneModel.dispatchDoc({ type: "UnloadToolResults", keepIds: unloadKeep })
+        );
         if (!liveFeedOn()) return;
         const events = paneModel.dispatchDoc({
             type: "RollOff",
