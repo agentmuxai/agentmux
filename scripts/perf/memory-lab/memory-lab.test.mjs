@@ -17,6 +17,8 @@ import { driftWarning, portableCommit, srvTarget, withReplacedSrv } from "./lib/
 import { mergeLongTaskRecords, slowSendsAgainstLongTasks, summariseLongTasks } from "./lib/longtasks.mjs";
 import { parseDiskLoad, sleepNeededMs, startDiskLoad } from "./lib/diskload.mjs";
 import { volumeOf } from "./lib/volume.mjs";
+import { buildInstanceEnv, parseEnvPairs, RESERVED } from "./lib/instanceenv.mjs";
+import { spawnSync } from "node:child_process";
 import { measuresOf, spreadMarkdown, spreadOf, spreadTable } from "./lib/measures.mjs";
 import { segmentsOf, slowSendBreakdown, timedCall } from "./lib/sendsegments.mjs";
 import { arrivalTotals, arrivalsBetween, arrivalsDuringSlowSends } from "./lib/wsarrivals.mjs";
@@ -890,5 +892,52 @@ describe("the measures the nightly performance check watches", () => {
         const md = spreadMarkdown(runs, [420, 431, 425]);
         expect(md).toMatch(/\| app_mb \| 3 \| 800 \| 810 \| 820 \|/);
         expect(md).toMatch(/420 s, 431 s, 425 s; median 425 s/);
+    });
+});
+
+describe("the instance's environment", () => {
+    it("reads NAME=value pairs, with the value as given", () => {
+        expect(parseEnvPairs(["AGENTMUX_EXP_A=1", "OTHER=a=b", "EMPTY="])).toEqual({ AGENTMUX_EXP_A: "1", OTHER: "a=b", EMPTY: "" });
+        expect(parseEnvPairs(undefined)).toEqual({});
+        expect(() => parseEnvPairs(["nope"])).toThrow(/NAME=value/);
+        expect(() => parseEnvPairs(["=x"])).toThrow(/NAME=value/);
+        expect(() => parseEnvPairs(["1BAD=x"])).toThrow(/NAME=value/);
+        for (const name of RESERVED) expect(() => parseEnvPairs([`${name}=x`])).toThrow(/sets that itself/);
+    });
+
+    it("drops the shell's AGENTMUX_* variables, adds the lab's own, then the --env ones, and records all three", () => {
+        const shell = { PATH: "/bin", AGENTMUX_AGENT_ID: "me", AGENTMUX_HOME_OVERRIDE: "/mine", KEEP: "1" };
+        const { env, record } = buildInstanceEnv(shell, { AGENTMUX_HOME_OVERRIDE: "/lab", AGENTMUX_CDP_PORT: "9333" }, { AGENTMUX_EXP_X: "on" });
+        expect(env).toEqual({ PATH: "/bin", KEEP: "1", AGENTMUX_HOME_OVERRIDE: "/lab", AGENTMUX_CDP_PORT: "9333", AGENTMUX_EXP_X: "on" });
+        expect(record).toEqual({ passed: { AGENTMUX_EXP_X: "on" }, labSet: ["AGENTMUX_CDP_PORT", "AGENTMUX_HOME_OVERRIDE"], droppedFromShell: ["AGENTMUX_AGENT_ID", "AGENTMUX_HOME_OVERRIDE"] });
+    });
+
+    it("compare.mjs reads the same variables in another order as one environment, notes a difference between sides and refuses one within a side", () => {
+        const dir = mkdtempSync(join(tmpdir(), "lab-envcmp-"));
+        try {
+            const base = { label: "x", layout: { panes: 4, tabs: [4] }, rounds: 10, seed: 1, gapSeconds: 15, platform: "win32", settleSeconds: 20, steady: { samples: 3, app: { privateMB: 800 }, groups: {} } };
+            const write = (name, passed) => {
+                const path = join(dir, name);
+                writeFileSync(path, JSON.stringify({ ...base, label: name, instanceEnv: { passed } }));
+                return path;
+            };
+            const a = write("a", { B: "2", A: "1" });
+            const b = write("b", { A: "1", B: "2" });
+            const c = write("c", { A: "9" });
+            const compare = (...args) => spawnSync(process.execPath, [join(process.cwd(), "scripts/perf/memory-lab/compare.mjs"), ...args], { encoding: "utf8" });
+            expect(compare(a, b).stdout).not.toMatch(/Instance environment given/);
+            expect(compare(a, c).stdout).toMatch(/Instance environment given with --env: a \{"A":"1","B":"2"\}, c \{"A":"9"\}/);
+            const within = compare("--base", `${a},${c}`, "--head", b);
+            expect(within.status).toBe(2);
+            expect(within.stderr).toMatch(/base runs were given different --env values/);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    it("reaches a real child process", () => {
+        const { env } = buildInstanceEnv(process.env, {}, { AGENTMUX_EXP_PROBE: "arrived" });
+        const out = spawnSync(process.execPath, ["-e", "process.stdout.write(process.env.AGENTMUX_EXP_PROBE ?? 'missing')"], { env, encoding: "utf8" });
+        expect(out.stdout).toBe("arrived");
     });
 });
