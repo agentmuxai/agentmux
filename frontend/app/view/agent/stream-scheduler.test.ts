@@ -79,10 +79,21 @@ describe("the lab's flush counter", () => {
 
     it("counts a pane whose flush throws, and ignores a frame in which nothing flushed", () => {
         install();
+        // The scheduler reports a pane's error on a microtask; catch it here so it isn't an unhandled error.
+        const errors: unknown[] = [];
+        const qm = vi.spyOn(globalThis, "queueMicrotask").mockImplementation((cb) => {
+            try {
+                cb();
+            } catch (e) {
+                errors.push(e);
+            }
+        });
         requestStreamFlush("a", () => {
             throw new Error("boom");
         });
-        expect(() => frame()).not.toThrow(); // reported on a microtask, not here
+        expect(() => frame()).not.toThrow();
+        expect(errors).toHaveLength(1);
+        qm.mockRestore();
         expect(counter().hist[1]).toBe(1);
         requestStreamFlush("b", () => {});
         cancelStreamFlush("b"); // nothing pending and the frame is not armed
