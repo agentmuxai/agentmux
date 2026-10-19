@@ -291,7 +291,7 @@ async function attempt(args, ctx) {
         const incomplete = cpuLedger.writeIncomplete();
         const writtenMB = writtenBetween(writtenAtStart, cpuLedger.writtenTotals());
         for (const g of incomplete) writtenMB[g] = null;
-        const io = !Object.values(writtenMB).some((v) => v != null) ? null : { fromRound: 0, writtenMB, incompleteGroups: incomplete, note: "highest write counter seen per process, summed per group (Windows: bytes passed to write calls; Linux and macOS: bytes sent to storage)" };
+        const io = !Object.values(writtenMB).some((v) => v != null) ? null : { fromRound: 0, writtenMB, incompleteGroups: incomplete, note: "highest write counter seen per process, summed per group (Windows and Linux: bytes passed to write calls; macOS: bytes written to disk)" };
 
         // The store of record: the agents' turns must be in it, whatever the page shows.
         const turnBytes = JSON.parse(readFileSync(script, "utf8")).turns.slice(0, playedRounds).map((t) => JSON.stringify(t).length);

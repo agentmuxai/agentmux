@@ -166,7 +166,7 @@ pub fn command_line_of(key: ProcKey) -> Option<String> {
 
 /// Bytes this process has written so far (cumulative; a rate needs two reads), read on demand.
 /// Windows: the bytes it passed to write calls (`WriteTransferCount`, which includes writes that
-/// stay in the cache). Linux: the bytes it sent to storage (`write_bytes` in `/proc/<pid>/io`).
+/// stay in the cache). Linux: the same, `wchar` in `/proc/<pid>/io`.
 /// macOS: the bytes it wrote to disk (`ri_diskio_byteswritten`). `None` when the OS won't say
 /// (the process has exited, or belongs to another user).
 pub fn write_bytes(pid: u32) -> Option<u64> {
@@ -260,8 +260,8 @@ mod tests {
     fn this_process_reports_the_bytes_it_has_written() {
         let me = std::process::id();
         let before = write_bytes(me);
-        // macOS and Linux count what reaches storage, which a test can't force; Windows counts what is passed to write calls.
-        #[cfg(windows)]
+        // Windows and Linux count what is passed to write calls; macOS counts what reaches disk, which a test can't force.
+        #[cfg(any(windows, target_os = "linux"))]
         {
             use std::io::Write;
             let path = std::env::temp_dir().join(format!("procstats-write-{me}.bin"));
@@ -273,7 +273,7 @@ mod tests {
             let after = write_bytes(me).expect("write counters");
             assert!(after >= before.expect("write counters") + 4 * 1024 * 1024, "{before:?} -> {after}");
         }
-        #[cfg(not(windows))]
+        #[cfg(not(any(windows, target_os = "linux")))]
         let _ = before;
     }
 
