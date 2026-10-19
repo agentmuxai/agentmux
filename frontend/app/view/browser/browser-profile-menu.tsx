@@ -72,7 +72,12 @@ export function ProfileBadge(props: { name: string; color: string }): JSX.Elemen
 
 type Row = { kind: "header"; sub: string } | { kind: "identity"; current: boolean };
 
-export function BrowserProfileButton(props: { model: BrowserViewModel; home: () => string }): JSX.Element {
+export function BrowserProfileButton(props: {
+    model: BrowserViewModel;
+    home: () => string;
+    /** The pane its menu stays inside (it opens leftward, from the right end). */
+    containWithin?: () => HTMLElement | null | undefined;
+}): JSX.Element {
     const model = props.model;
     ensureBrowserProfiles();
     const identity = createMemo(() => parseIdentity(model.meta()?.[IDENTITY_META_KEY]));
@@ -144,6 +149,8 @@ export function BrowserProfileButton(props: { model: BrowserViewModel; home: () 
         <FlyoutMenu
             items={items()}
             placement="bottom-start"
+            containWithin={props.containWithin}
+            alignToAnchorSide
             onOpenChange={(open) => {
                 // Another window may have added or renamed one.
                 if (open) void loadBrowserProfiles();

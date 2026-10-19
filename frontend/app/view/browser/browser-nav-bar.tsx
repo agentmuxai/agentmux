@@ -75,6 +75,10 @@ export function BrowserNavBar(props: {
 
     const [addressBar, setAddressBar] = createSignal(model.urlAtom() || "");
     let addressInputRef: HTMLInputElement | undefined;
+    // The bar's menus stay inside the pane when they fit
+    // (SPEC_BROWSER_PANE_THIN_BAR_AND_MENUS_IN_PANE_2026_10_18.md §5).
+    let barRef: HTMLDivElement | undefined;
+    const pane = () => barRef?.closest<HTMLElement>(".browser-view");
     // The click that focuses the bar selects the whole address, as in Chrome.
     const firstClickSelectAll = createFirstClickSelectAll();
 
@@ -472,6 +476,7 @@ export function BrowserNavBar(props: {
     return (
         <Show when={model.showControlsAtom()}>
             <div
+                ref={barRef}
                 class="browser-nav-bar"
                 // The bar follows chrome zoom like the pane header above it, so
                 // Ctrl+wheel over it zooms chrome too (store/chrome-zoom-target.ts).
@@ -485,10 +490,13 @@ export function BrowserNavBar(props: {
                     openIncognitoTab(model, home());
                 }}
             >
-                {/* One row in a wide pane, two in a thin one (buttons, then the address bar):
-                    only the grid's areas change (browser-view.scss), never the DOM,
-                    so a resize while typing keeps focus, the IME and the suggestions.
-                    SPEC_BROWSER_PANE_NAV_BAR_RESPONSIVE_AND_CHROME_ZOOM_2026_10_14.md §3. */}
+                {/* One row in a wide pane, two in a thin one (buttons, a line, then the
+                    address bar): only the grid's areas change (browser-view.scss), never
+                    the DOM, so a resize while typing keeps focus, the IME and the
+                    suggestions. Bookmarks is its own cell: after Home when wide, next to
+                    Profile when thin.
+                    SPEC_BROWSER_PANE_NAV_BAR_RESPONSIVE_AND_CHROME_ZOOM_2026_10_14.md §3,
+                    SPEC_BROWSER_PANE_THIN_BAR_AND_MENUS_IN_PANE_2026_10_18.md §3-§4. */}
                 <div class="browser-nav-bar-grid">
                     <div class="browser-nav-group browser-nav-group--nav">
                         <button
@@ -528,9 +536,13 @@ export function BrowserNavBar(props: {
                                 );
                             }}
                         />
+                    </div>
+                    <div class="browser-nav-group browser-nav-group--bookmarks">
                         <FlyoutMenu
                             items={bookmarkMenuItems()}
                             placement="bottom-start"
+                            containWithin={pane}
+                            alignToAnchorSide
                             onOpenChange={(open) => {
                                 if (open) void loadBookmarks();
                             }}
@@ -576,6 +588,7 @@ export function BrowserNavBar(props: {
                             </button>
                         </FlyoutMenu>
                     </div>
+                    <div class="browser-nav-break" aria-hidden="true" />
                     <div class="browser-address-wrap">
                         <input
                             ref={addressInputRef}
@@ -671,7 +684,7 @@ export function BrowserNavBar(props: {
                         </Show>
                     </div>
                     <div class="browser-nav-group browser-nav-group--profile">
-                        <BrowserProfileButton model={model} home={home} />
+                        <BrowserProfileButton model={model} home={home} containWithin={pane} />
                     </div>
                 </div>
             </div>

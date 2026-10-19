@@ -44,6 +44,20 @@ export interface MenuPositionRequest {
     offsetAlignmentAxis?: number;
     /** Treat native browser-pane rects as boundaries. Default true. */
     avoidNativePanes?: boolean;
+    /**
+     * Keep the menu inside this element's rect when it fits (a browser pane's
+     * menus stay in their pane), and inside the window when it doesn't. Never
+     * flips above the anchor. Default: the window only.
+     * SPEC_BROWSER_PANE_THIN_BAR_AND_MENUS_IN_PANE_2026_10_18.md §5.
+     */
+    containWithin?: HTMLElement;
+    /**
+     * With `containWithin`: open from the side the anchor is on, `-start` in
+     * the container's left half and `-end` in its right half, so a button at
+     * the right edge opens its menu leftward. An `-end` menu lines its right
+     * edge up with the container's right edge, not the button's.
+     */
+    alignToAnchorSide?: boolean;
 }
 
 export interface MenuPositionResult {
@@ -58,6 +72,12 @@ export interface MenuPositionResult {
 }
 
 const DEFAULT_GUTTER = 8;
+/** Space kept between a contained menu and its container's bottom edge. Its
+ *  sides line up with the container's own edges. */
+const CONTAIN_MARGIN = 4;
+/** Room below the anchor a contained menu needs before it may run past the
+ *  container's bottom instead (or less, if the menu is shorter). */
+const CONTAIN_MIN_ROOM = 240;
 
 // ── Native-pane rectangles (spec §5.3) ───────────────────────────────────────
 
@@ -230,6 +250,7 @@ export async function computeMenuPosition(
     request: MenuPositionRequest,
     floatingEl: HTMLElement,
 ): Promise<MenuPositionResult> {
+    if (request.containWithin) return computeContainedPosition(request, request.containWithin, floatingEl);
     const gutter = request.gutter ?? DEFAULT_GUTTER;
     const avoidNativePanes = request.avoidNativePanes ?? true;
     const placement = request.placement ?? "bottom-start";
@@ -290,6 +311,94 @@ export async function computeMenuPosition(
             left: `${Math.round(computed.x)}px`,
             top: `${Math.round(computed.y)}px`,
         },
+        placement: computed.placement,
+        maxHeight,
+        maxWidth,
+    };
+}
+
+/** `side-start` or `side-end` by which half of `container` the anchor's centre is in. */
+export function placementBySide(placement: Placement, anchor: DOMRect, container: DOMRect): Placement {
+    const side = placement.split("-")[0];
+    const centre = anchor.left + anchor.width / 2;
+    return `${side}-${centre > container.left + container.width / 2 ? "end" : "start"}` as Placement;
+}
+
+/**
+ * The boundary a contained menu is positioned in: the container (less a
+ * margin, and within the window) on each axis the menu fits in, the window on
+ * an axis it doesn't. Too wide, it keeps its anchored edge and runs past the
+ * container on the far side; too little room below, it runs past the bottom.
+ */
+export function containedBoundary(
+    container: DOMRect,
+    viewport: DOMRect,
+    anchor: DOMRect,
+    menu: { width: number; height: number },
+    gutter: number,
+): DOMRect {
+    const left = Math.max(viewport.left, container.left);
+    const right = Math.min(viewport.right, container.right);
+    const top = Math.max(viewport.top, container.top);
+    const bottom = Math.min(viewport.bottom, container.bottom - CONTAIN_MARGIN);
+    const fitsAcross = menu.width <= right - left;
+    const roomBelow = bottom - (anchor.bottom + gutter);
+    const fitsBelow = roomBelow >= Math.min(CONTAIN_MIN_ROOM, menu.height);
+    const l = fitsAcross ? left : viewport.left;
+    const r = fitsAcross ? right : viewport.right;
+    const t = fitsBelow ? top : viewport.top;
+    const b = fitsBelow ? bottom : viewport.bottom;
+    return makeRect(l, t, r - l, b - t);
+}
+
+async function computeContainedPosition(
+    request: MenuPositionRequest,
+    container: HTMLElement,
+    floatingEl: HTMLElement,
+): Promise<MenuPositionResult> {
+    const gutter = request.gutter ?? DEFAULT_GUTTER;
+    const anchorRect = resolveAnchorRect(request.anchor);
+    const viewport = makeRect(0, 0, window.innerWidth, window.innerHeight);
+    const containerRect = container.getBoundingClientRect();
+    let placement = request.placement ?? "bottom-start";
+    if (request.alignToAnchorSide) placement = placementBySide(placement, anchorRect, containerRect);
+    // Opening leftward, the menu's right edge is the container's right edge
+    // (the pane's border), not the button's: the anchor is stretched to it.
+    const toPaneEdge = Math.max(anchorRect.width, containerRect.right - anchorRect.left);
+    const reference = placement.endsWith("-end")
+        ? virtualReference(makeRect(anchorRect.left, anchorRect.top, toPaneEdge, anchorRect.height))
+        : request.anchor instanceof HTMLElement
+          ? request.anchor
+          : virtualReference(anchorRect);
+    // The menu's own size, not its last capped one: scrollHeight is the
+    // content's height even when the last update's max-height clips it.
+    const menu = { width: floatingEl.offsetWidth, height: floatingEl.scrollHeight };
+    const boundary = containedBoundary(containerRect, viewport, anchorRect, menu, gutter);
+    let maxHeight = viewport.height;
+    let maxWidth = viewport.width;
+    // No flip: above a pane's bar is its header, and the button that opened it.
+    const computed = await computePosition(reference as Element, floatingEl, {
+        strategy: "fixed",
+        placement,
+        middleware: [
+            offset({
+                mainAxis: gutter,
+                crossAxis: request.offsetCrossAxis ?? 0,
+                alignmentAxis: request.offsetAlignmentAxis,
+            }),
+            shift({ boundary: { ...boundary } as DOMRect, padding: 0 }),
+            size({
+                boundary: { ...boundary } as DOMRect,
+                padding: 0,
+                apply({ availableWidth, availableHeight }) {
+                    maxHeight = Math.max(0, Math.floor(availableHeight));
+                    maxWidth = Math.max(0, Math.floor(availableWidth));
+                },
+            }),
+        ],
+    });
+    return {
+        style: { position: "fixed", left: `${Math.round(computed.x)}px`, top: `${Math.round(computed.y)}px` },
         placement: computed.placement,
         maxHeight,
         maxWidth,

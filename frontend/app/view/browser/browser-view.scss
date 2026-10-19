@@ -58,8 +58,8 @@ $browser-nav-stack-below: 388px;
 
 .browser-nav-bar-grid {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    grid-template-areas: "nav address profile";
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+    grid-template-areas: "nav bookmarks address profile";
     align-items: center;
     gap: var(--space-1);
     padding: var(--space-1) var(--space-2);
@@ -76,6 +76,12 @@ $browser-nav-stack-below: 388px;
         grid-area: nav;
     }
 
+    // After Home in a wide pane (the grid's gap is the group's own), next to
+    // Profile in a thin one.
+    &--bookmarks {
+        grid-area: bookmarks;
+    }
+
     // At the right end in both layouts.
     &--profile {
         grid-area: profile;
@@ -83,14 +89,32 @@ $browser-nav-stack-below: 388px;
     }
 }
 
-// Thin pane: the buttons on top (navigation on the left, Profile on the
-// right), the address bar under them at full width. There is no Go button:
-// Enter submits.
+// The line between a thin bar's two rows: hidden in a wide one.
+.browser-nav-break {
+    display: none;
+    grid-area: break;
+}
+
+// Thin pane: the buttons on top (navigation on the left, Bookmarks and
+// Profile on the right), a line, then the address bar at full width. There is
+// no Go button: Enter submits.
 @container browser-nav (max-width: #{$browser-nav-stack-below - 0.02px}) {
     .browser-nav-bar-grid {
+        grid-template-columns: auto minmax(0, 1fr) auto auto;
         grid-template-areas:
-            "nav     .       profile"
-            "address address address";
+            "nav     .       bookmarks profile"
+            "break   break   break     break"
+            "address address address   address";
+    }
+
+    // Full width, the bar's own border colour and weight: the rows read as two
+    // bands of one bar (Material 3: full-width dividers separate sections).
+    // It crosses the grid's side padding to reach the bar's edges.
+    .browser-nav-break {
+        display: block;
+        height: 1px;
+        background: var(--border-color);
+        margin-inline: calc(-1 * var(--space-2));
     }
 }
 
@@ -124,14 +148,35 @@ $browser-nav-stack-below: 388px;
     color: var(--accent-color);
 }
 
+// The header row's label is two lines (the name, then what it means), so the
+// row aligns to the top and the icon is one name-line tall: it sits beside the
+// name, not between the two lines.
 .browser-profile-header {
     cursor: default;
+    align-items: flex-start;
 
     .label {
         display: flex;
         flex-direction: column;
         font-weight: 600;
+        line-height: 1.4;
     }
+
+    .menu-item-icon {
+        height: calc(var(--text-sm) * 1.4);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+}
+
+// A profile's badge (18px) is wider than the menu's 14px icon slot: give it
+// its own width so it doesn't run into the name.
+.menu-item-icon:has(> .browser-profile-badge) {
+    width: auto;
+    min-width: 14px;
+    display: flex;
+    align-items: center;
 }
 
 .browser-profile-sub {

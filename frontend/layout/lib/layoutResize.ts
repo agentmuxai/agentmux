@@ -14,6 +14,8 @@ import {
     ResizeNodeOperation,
 } from "./types";
 import type { LayoutModel } from "./layoutModel";
+import type { LayoutNode } from "./types";
+import { getObjectValue, makeORef } from "@/app/store/mos";
 import { markEnd, markStart } from "@/perf";
 
 export interface ResizeContext {
@@ -56,6 +58,12 @@ export interface ResizeContext {
      * baseline: what the user actually SEES at the moment of a toggle.
      */
     stagedSizes: Map<string, number>;
+    /**
+     * Each sibling's floor in the parent's size units (`minExtentPx`): a
+     * browser pane, or a group holding one, can't be dragged narrower than
+     * MinBrowserPaneWidthPx. Absent: MinNodeSizePx for every sibling.
+     */
+    floors?: Map<string, number>;
 }
 
 /**
@@ -91,6 +99,41 @@ export const DefaultGapSizePx = 3;
 // Exported for the Shift+window-edge resize path (windowEdgeResize.ts), which
 // applies the same floor directly in CSS px.
 export const MinNodeSizePx = 128;
+// A browser pane is no narrower than this when a splitter is dragged: its bar
+// (back, forward, reload, home, bookmarks, profile) and a readable page need
+// it (SPEC_BROWSER_PANE_THIN_BAR_AND_MENUS_IN_PANE_2026_10_18.md §5.5).
+export const MinBrowserPaneWidthPx = 250;
+
+/** A floor per node, in the parent's size units, or one floor for all. */
+type Floors = number | Map<string, number>;
+
+function floorOf(floors: Floors, nodeId: string): number {
+    return typeof floors === "number" ? floors : (floors.get(nodeId) ?? 0);
+}
+
+/**
+ * The narrowest (`axis` Row) or shortest (`axis` Column) `node` may be dragged
+ * to, in CSS px. A pane: MinNodeSizePx, or MinBrowserPaneWidthPx across for a
+ * pane holding a browser (in any of its in-pane tabs). A group of panes along
+ * `axis`: its members' floors added up, with the gaps; across `axis`: the
+ * largest member's. Minimized members take no room.
+ */
+export function minExtentPx(node: LayoutNode, axis: FlexDirection, isBrowser: (blockId: string) => boolean): number {
+    const kids = (node.children ?? []).filter((c) => !isEffectivelyMinimized(c));
+    if (kids.length === 0) {
+        const blocks = node.data?.blockStack?.length ? node.data.blockStack : node.data?.blockId ? [node.data.blockId] : [];
+        const browser = axis === FlexDirection.Row && blocks.some(isBrowser);
+        return browser ? Math.max(MinNodeSizePx, MinBrowserPaneWidthPx) : MinNodeSizePx;
+    }
+    const floors = kids.map((c) => minExtentPx(c, axis, isBrowser));
+    return node.flexDirection === axis
+        ? floors.reduce((a, b) => a + b, 0) + DefaultGapSizePx * (kids.length - 1)
+        : Math.max(...floors);
+}
+
+function isBrowserBlock(blockId: string): boolean {
+    return getObjectValue<Block>(makeORef("block", blockId))?.meta?.view === "browser";
+}
 
 /**
  * Shrinks `block` by `amount` in total, distributed proportionally to each
@@ -105,7 +148,7 @@ export const MinNodeSizePx = 128;
 function shrinkBlockBy(
     block: ResizeNodeOperation[],
     amount: number,
-    minNodeSize: number,
+    minNodeSize: Floors,
     result: Map<string, number>
 ): number {
     // A member already at/under the floor has zero shrink headroom to give up.
@@ -120,7 +163,7 @@ function shrinkBlockBy(
     // SPEC_SHIFT_DRAG_GROUP_RESIZE_DIRECTION_FIX_2026_08_17.md). Excluded
     // members are simply left at their current (possibly already-undersized)
     // size, never touched.
-    let pool = block.filter((s) => s.size > minNodeSize).map((s) => ({ id: s.nodeId, size: s.size }));
+    let pool = block.filter((s) => s.size > floorOf(minNodeSize, s.nodeId)).map((s) => ({ id: s.nodeId, size: s.size }));
     let remaining = amount;
     while (remaining > 1e-6 && pool.length > 0) {
         const poolSum = pool.reduce((sum, p) => sum + result.get(p.id)!, 0);
@@ -131,9 +174,10 @@ function shrinkBlockBy(
             const cur = result.get(p.id)!;
             const share = remaining * (cur / poolSum);
             const proposed = cur - share;
-            if (proposed < minNodeSize) {
-                takenThisRound += cur - minNodeSize;
-                result.set(p.id, minNodeSize);
+            const floor = floorOf(minNodeSize, p.id);
+            if (proposed < floor) {
+                takenThisRound += cur - floor;
+                result.set(p.id, floor);
             } else {
                 result.set(p.id, proposed);
                 takenThisRound += share;
@@ -217,7 +261,7 @@ export function computeGroupResizeSizes(
     siblings: ResizeNodeOperation[],
     drivenNodeId: string,
     drivenDesiredSize: number,
-    minNodeSize: number
+    minNodeSize: Floors
 ): Map<string, number> {
     const result = new Map<string, number>(siblings.map((s) => [s.nodeId, s.size]));
     const drivenIndex = siblings.findIndex((s) => s.nodeId === drivenNodeId);
@@ -230,7 +274,7 @@ export function computeGroupResizeSizes(
     if (beforeBlock.length === 0) {
         // No block to redistribute with — driven alone is floored directly (degenerate
         // fallback; cannot happen via onResizeMove in production, see the doc comment above).
-        result.set(drivenNodeId, Math.max(drivenDesiredSize, minNodeSize));
+        result.set(drivenNodeId, Math.max(drivenDesiredSize, floorOf(minNodeSize, drivenNodeId)));
         return result;
     }
 
@@ -324,6 +368,15 @@ export function onResizeMove(
             const groupSiblingStartSizes: ResizeNodeOperation[] = (parentNode.children ?? [])
                 .filter((child) => !isEffectivelyMinimized(child))
                 .map((child) => ({ nodeId: child.id, size: child.size }));
+            // Each sibling's own floor (a browser pane, or a group holding
+            // one, is wider than the rest), in the parent's size units.
+            const axis = parentIsRow ? FlexDirection.Row : FlexDirection.Column;
+            const floors = new Map(
+                (parentNode.children ?? []).map((child) => [
+                    child.id,
+                    minExtentPx(child, axis, isBrowserBlock) * pixelToSizeRatio,
+                ])
+            );
             model.resizeContext = {
                 handleId: resizeHandle.id,
                 displayContainerRect: model.displayContainerRef.current?.getBoundingClientRect(),
@@ -336,6 +389,7 @@ export function onResizeMove(
                 groupSiblingStartSizes,
                 lastGroupResize: groupResize,
                 stagedSizes: new Map(groupSiblingStartSizes.map((s) => [s.nodeId, s.size])),
+                floors,
             };
         } else {
             console.error(
@@ -354,7 +408,7 @@ export function onResizeMove(
         rebaseResizeContextForModeSwitch(model.resizeContext, clientPoint, groupResize);
     }
     const clientDiff = (model.resizeContext.resizeHandleStartPx - clientPoint) * model.resizeContext.pixelToSizeRatio;
-    const minNodeSize = MinNodeSizePx * model.resizeContext.pixelToSizeRatio;
+    const floors = model.resizeContext.floors ?? MinNodeSizePx * model.resizeContext.pixelToSizeRatio;
     const afterNodeSize = model.resizeContext.afterNodeStartSize + clientDiff;
 
     let resizeOperations: ResizeNodeOperation[];
@@ -371,12 +425,15 @@ export function onResizeMove(
             model.resizeContext.groupSiblingStartSizes,
             model.resizeContext.afterNodeId,
             afterNodeSize,
-            minNodeSize
+            floors
         );
         resizeOperations = Array.from(sizes.entries()).map(([nodeId, size]) => ({ nodeId, size }));
     } else {
         const beforeNodeSize = model.resizeContext.beforeNodeStartSize - clientDiff;
-        if (beforeNodeSize < minNodeSize || afterNodeSize < minNodeSize) {
+        if (
+            beforeNodeSize < floorOf(floors, model.resizeContext.beforeNodeId) ||
+            afterNodeSize < floorOf(floors, model.resizeContext.afterNodeId)
+        ) {
             return;
         }
         resizeOperations = [

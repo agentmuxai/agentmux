@@ -66,6 +66,14 @@ type MenuProps = {
      * menu keeps the standard left-to-right layout.
      */
     mirrored?: boolean;
+    /**
+     * Keep the menu inside this element (a browser pane) when it fits, and
+     * with `alignToAnchorSide` open it from the side its button is on:
+     * SPEC_BROWSER_PANE_THIN_BAR_AND_MENUS_IN_PANE_2026_10_18.md §5. Other
+     * menus are kept inside the window only.
+     */
+    containWithin?: () => HTMLElement | null | undefined;
+    alignToAnchorSide?: boolean;
     onOpenChange?: (isOpen: boolean) => void;
     /**
      * Receives a function that closes the menu, for an owner that must close
@@ -115,7 +123,13 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
         // slack/webview pane sat under the anchor). Matches showJsContextMenu
         // and the statusbar popovers.
         const pos = await computeMenuPosition(
-            { anchor: referenceEl, placement: props.placement ?? "bottom-start", avoidNativePanes: false },
+            {
+                anchor: referenceEl,
+                placement: props.placement ?? "bottom-start",
+                avoidNativePanes: false,
+                containWithin: props.containWithin?.() ?? undefined,
+                alignToAnchorSide: props.alignToAnchorSide,
+            },
             floatingEl,
         );
         setFloatingStyle(styleToString(pos));
