@@ -31,7 +31,9 @@ export class CpuLedger {
                 ns: Math.max(before.ns, p.cpu_ns ?? 0),
                 written: Math.max(before.written, p.write_bytes ?? 0),
                 hasWritten: before.hasWritten || p.write_bytes != null,
-                storage: Math.max(before.storage, p.storage_write_bytes ?? 0),
+                // The latest reading, not the highest: on Linux it is write_bytes less cancelled_write_bytes, which falls when data is
+                // truncated or deleted after it was counted, so a later sample can legitimately be lower than an earlier one.
+                storage: p.storage_write_bytes ?? before.storage,
                 hasStorage: before.hasStorage || p.storage_write_bytes != null,
                 group: before.group,
             });

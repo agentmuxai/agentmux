@@ -601,6 +601,10 @@ describe("bytes written", () => {
         expect(ledger.writtenTotals().srv).toBe(900 * MiB2); // asked to write
         expect(ledger.storageTotals().srv).toBe(120 * MiB2); // reached storage
         expect(ledger.storageIncomplete()).toEqual([]);
+        // a later truncate cancels writeback that was counted: the storage figure may fall, and the ledger follows it
+        ledger.note([p(1, 950 * MiB2, 60 * MiB2)]);
+        expect(ledger.storageTotals().srv).toBe(60 * MiB2);
+        expect(ledger.writtenTotals().srv).toBe(950 * MiB2); // the write counter only grows
         const windows = new CpuLedger(); // Windows: no storage counter at all
         windows.note([p(1, 100 * MiB2, undefined)]);
         expect(windows.writeIncomplete()).toEqual([]);
