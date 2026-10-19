@@ -15,6 +15,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, openSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { DETACH_LONG_TASKS, LONG_TASK_OBSERVER, mergeLongTaskRecords, READ_LONG_TASKS } from "./longtasks.mjs";
 import { installFakeClaude } from "../../../ui-screenshots/install-fake-claude.mjs";
 import { CdpSession, findMainTarget } from "../../../ui-screenshots/lib/session.mjs";
 import { openNewTab } from "../../../ui-screenshots/widget-shots.mjs";
@@ -173,6 +174,7 @@ export async function connect(port, home, workDir) {
     session.defaultTimeoutMs = EVAL_TIMEOUT_MS;
     // The slowest page evaluation of the run, so a machine that is close to the limit shows in the result before it fails.
     let slowestEvalMs = 0;
+    const longTaskArchive = []; // the records of documents a reload has since replaced
     // The commands that took 5 s or more, the 30 slowest if there are more (slowEvalsTotal says how many there were).
     let slowEvals = [];
     let slowEvalsTotal = 0;
@@ -217,6 +219,7 @@ export async function connect(port, home, workDir) {
                     session = await CdpSession.connect((await findMainTarget(port)).webSocketDebuggerUrl);
                     session.defaultTimeoutMs = EVAL_TIMEOUT_MS;
                     await session.evaluate("1");
+                    await session.evaluate(LONG_TASK_OBSERVER).catch(() => {}); // the reload dropped the observer
                     return;
                 } catch (e) {
                     if (Date.now() > end) throw new Error(`no main window page on port ${port} after ${timeoutMs / 1000} s: ${e.message}`);
@@ -299,11 +302,34 @@ export async function connect(port, home, workDir) {
 
         /** One message to every agent (or to `blockIds`): each plays the next scripted turn. `staggerMs` offsets them, as real agents aren't in lockstep. */
         async send(blockIds = agents.map((a) => a.blockId), { staggerMs = 0, text = "Continue with the next step of the refactor." } = {}) {
+            // Each send's start (epoch ms, as srv's log timestamps are UTC) and how long the command took, to set beside srv's lines.
+            const timings = [];
             for (const b of blockIds) {
                 const mid = `lab-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-                await ev(`RpcApi.AgentInputCommand(TabRpcClient, { blockid: ${JSON.stringify(b)}, message: ${JSON.stringify(text)}, message_id: ${JSON.stringify(mid)} })`);
+                const start = Date.now();
+                try {
+                    await ev(`RpcApi.AgentInputCommand(TabRpcClient, { blockid: ${JSON.stringify(b)}, message: ${JSON.stringify(text)}, message_id: ${JSON.stringify(mid)} })`);
+                } finally {
+                    timings.push({ start, ms: Date.now() - start });
+                }
                 if (staggerMs) await sleep(staggerMs);
             }
+            return timings;
+        },
+        /** Starts recording the page's long tasks (main-thread tasks of 50 ms or more); a reload loses it, so call again after one. */
+        async installLongTasks() {
+            return ev(LONG_TASK_OBSERVER);
+        },
+        /** The long tasks recorded since `installLongTasks`, across any reloads archived with `archiveLongTasks`, or null. */
+        async longTasks() {
+            return mergeLongTaskRecords([...longTaskArchive, await ev(READ_LONG_TASKS)]);
+        },
+        /** Keeps what the page has recorded so far and starts a fresh record: call before a reload, which would destroy it. */
+        async archiveLongTasks() {
+            const current = await ev(READ_LONG_TASKS);
+            if (current) longTaskArchive.push(current);
+            await ev(DETACH_LONG_TASKS);
+            await ev(LONG_TASK_OBSERVER);
         },
 
         /**
