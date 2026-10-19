@@ -1131,15 +1131,9 @@ pub async fn run_sysinfo_loop(
     conn_name: String,
     panes: crate::backend::sampler::panes::PaneSampler,
 ) {
-    // The machine's CPU and memory counters, which is all this loop reads from it
-    // (`new_all()` also took a full-detail snapshot of every process on the
-    // machine at start, command lines and environments included, and kept it
-    // for the life of srv without ever reading it).
-    let mut sys = sysinfo::System::new_with_specifics(
-        sysinfo::RefreshKind::nothing()
-            .with_cpu(sysinfo::CpuRefreshKind::everything())
-            .with_memory(sysinfo::MemoryRefreshKind::everything()),
-    );
+    // CPU and memory only: `new_all()` also kept a full snapshot of every process.
+    let kind = sysinfo::RefreshKind::everything().without_processes();
+    let mut sys = sysinfo::System::new_with_specifics(kind);
     let mut networks = Networks::new_with_refreshed_list();
     let mut net_state = NetState::new();
     let mut disks = Disks::new_with_refreshed_list();
