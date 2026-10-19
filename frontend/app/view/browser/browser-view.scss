@@ -314,25 +314,54 @@ $browser-nav-stack-below: 388px;
     }
 }
 
+// The message reads as one line of text and the buttons stay together at the
+// right. When the pane is too narrow for both, the buttons move to a row of
+// their own, still at the right, rather than squeezing the message into a
+// column a word wide.
 .browser-driven-by {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-2);
+    column-gap: var(--space-2);
+    row-gap: var(--space-1);
     padding: var(--space-1) var(--space-4);
     background: var(--highlight-bg-color);
     color: var(--main-text-color);
     font-size: var(--text-sm);
+    line-height: 1.4;
     border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
+
+    > i {
+        flex: none;
+    }
+
+    // Text, wrapping like a sentence; it gives up its width to the buttons
+    // only down to about 18 characters, then the buttons wrap instead.
+    .browser-driven-by-message {
+        flex: 1 1 18em;
+        min-width: 0;
+
+        > * + * {
+            margin-left: var(--space-2);
+        }
+    }
+
+    .browser-driven-by-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: var(--space-1);
+        margin-left: auto;
+
+        > * {
+            white-space: nowrap;
+        }
+    }
 
     .browser-limited-to,
     .browser-bypass-ended {
         color: var(--secondary-text-color);
-    }
-
-    // Log, Pause, Auto-approve and Take over sit together at the right end.
-    .browser-actions-log-button {
-        margin-left: auto;
     }
 
     .browser-bypass-strip-error {
@@ -468,6 +497,7 @@ $browser-nav-stack-below: 388px;
     .browser-bypass-confirm-minutes,
     .browser-bypass-confirm-actions {
         display: flex;
+        flex-wrap: wrap;
         gap: var(--space-2);
     }
 

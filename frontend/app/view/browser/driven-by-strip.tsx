@@ -11,11 +11,11 @@
 // layered on it, and the panels must stay inside the pane's DOM, where no
 // other agent's UI click can reach (spec §5).
 
-import { createSignal, For, Show, type JSX } from "solid-js";
 import { Button } from "@/app/element/ui";
+import { createSignal, For, Show, type JSX } from "solid-js";
 import { actionFailed, actionKind, actionTime, shortUrl } from "./action-log";
-import { BYPASS_MINUTES, minutesLabel, siteLabel } from "./bypass";
 import type { BrowserViewModel } from "./browser-model";
+import { BYPASS_MINUTES, minutesLabel, siteLabel } from "./bypass";
 
 export function DrivenByStrip(props: { model: BrowserViewModel; agent: string }): JSX.Element {
     const model = props.model;
@@ -100,50 +100,57 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
                         role="status"
                     >
                         <i class={model.pausedAtom() ? "fa-solid fa-pause" : "fa-solid fa-robot"} aria-hidden="true" />
-                        <Show
-                            when={!model.pausedAtom()}
-                            fallback={
+                        <div class="browser-driven-by-message">
+                            <Show
+                                when={!model.pausedAtom()}
+                                fallback={
+                                    <span>
+                                        <b>Paused:</b> <b>{props.agent}</b>'s actions here wait until you resume
+                                    </span>
+                                }
+                            >
                                 <span>
-                                    <b>Paused:</b> <b>{props.agent}</b>'s actions here wait until you resume
+                                    Driven by <b>{props.agent}</b>
                                 </span>
-                            }
-                        >
-                            <span>
-                                Driven by <b>{props.agent}</b>
-                            </span>
-                        </Show>
-                        <Show when={model.allowedOriginsAtom().length > 0}>
-                            <span class="browser-limited-to" title={`Limited to: ${model.allowedOriginsAtom().join(", ")}`}>
-                                Limited to {model.allowedOriginsAtom().length}{" "}
-                                {model.allowedOriginsAtom().length === 1 ? "site" : "sites"}
-                            </span>
-                        </Show>
-                        <Show when={model.bypassEndedAtom()}>
-                            {(why) => <span class="browser-bypass-ended">Auto-approve ended: {why()}</span>}
-                        </Show>
-                        {pauseErrorLine()}
-                        {controls()}
-                        <Button
-                            density="compact"
-                            tone="danger"
-                            class="browser-bypass-button"
-                            pressed={confirming()}
-                            title={`Let ${props.agent}'s clicks in this pane go through without asking you first.`}
-                            onClick={() => {
-                                setError(undefined);
-                                setConfirming(!confirming());
-                            }}
-                        >
-                            Auto-approve
-                        </Button>
-                        <Button
-                            density="compact"
-                            class="browser-take-over"
-                            title="End the agent's control of this pane; its next action here will fail."
-                            onClick={() => model.takeOver().catch(() => {})}
-                        >
-                            Take over
-                        </Button>
+                            </Show>
+                            <Show when={model.allowedOriginsAtom().length > 0}>
+                                <span
+                                    class="browser-limited-to"
+                                    title={`Limited to: ${model.allowedOriginsAtom().join(", ")}`}
+                                >
+                                    Limited to {model.allowedOriginsAtom().length}{" "}
+                                    {model.allowedOriginsAtom().length === 1 ? "site" : "sites"}
+                                </span>
+                            </Show>
+                            <Show when={model.bypassEndedAtom()}>
+                                {(why) => <span class="browser-bypass-ended">Auto-approve ended: {why()}</span>}
+                            </Show>
+                            {pauseErrorLine()}
+                        </div>
+                        <div class="browser-driven-by-actions">
+                            {controls()}
+                            <Button
+                                density="compact"
+                                tone="danger"
+                                class="browser-bypass-button"
+                                pressed={confirming()}
+                                title={`Let ${props.agent}'s clicks in this pane go through without asking you first.`}
+                                onClick={() => {
+                                    setError(undefined);
+                                    setConfirming(!confirming());
+                                }}
+                            >
+                                Auto-approve
+                            </Button>
+                            <Button
+                                density="compact"
+                                class="browser-take-over"
+                                title="End the agent's control of this pane; its next action here will fail."
+                                onClick={() => model.takeOver().catch(() => {})}
+                            >
+                                Take over
+                            </Button>
+                        </div>
                     </div>
                 }
             >
@@ -156,48 +163,53 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
                         role="status"
                     >
                         <i class={model.pausedAtom() ? "fa-solid fa-pause" : "fa-solid fa-bolt"} aria-hidden="true" />
-                        <Show
-                            when={!model.pausedAtom()}
-                            fallback={
-                                <span>
-                                    <b>Paused:</b> <b>{b().agent}</b>'s actions here wait until you resume · auto-approve's
-                                    clock is stopped at {model.bypassMinutesLeft()} min left
-                                </span>
-                            }
-                        >
+                        <div class="browser-driven-by-message">
                             <Show
-                                when={!model.bypassPaused()}
+                                when={!model.pausedAtom()}
                                 fallback={
                                     <span>
-                                        <b>Auto-approve paused:</b> the page left {b().origins.map(siteLabel).join(", ")},
-                                        so <b>{b().agent}</b> asks again here
+                                        <b>Paused:</b> <b>{b().agent}</b>'s actions here wait until you resume ·
+                                        auto-approve's clock is stopped at {model.bypassMinutesLeft()} min left
                                     </span>
                                 }
                             >
-                                <span>
-                                    <b>Auto-approve on:</b> <b>{b().agent}</b>'s clicks go through without asking on{" "}
-                                    {b().origins.map(siteLabel).join(", ")} · {model.bypassMinutesLeft()} min left
+                                <Show
+                                    when={!model.bypassPaused()}
+                                    fallback={
+                                        <span>
+                                            <b>Auto-approve paused:</b> the page left{" "}
+                                            {b().origins.map(siteLabel).join(", ")}, so <b>{b().agent}</b> asks again
+                                            here
+                                        </span>
+                                    }
+                                >
+                                    <span>
+                                        <b>Auto-approve on:</b> <b>{b().agent}</b>'s clicks go through without asking on{" "}
+                                        {b().origins.map(siteLabel).join(", ")} · {model.bypassMinutesLeft()} min left
+                                    </span>
+                                </Show>
+                            </Show>
+                            <Show when={error()}>
+                                <span class="browser-bypass-strip-error" role="alert">
+                                    {error()}
                                 </span>
                             </Show>
-                        </Show>
-                        <Show when={error()}>
-                            <span class="browser-bypass-strip-error" role="alert">
-                                {error()}
-                            </span>
-                        </Show>
-                        {pauseErrorLine()}
-                        {controls()}
-                        <Button density="compact" tone="danger" class="browser-bypass-end" onClick={end}>
-                            Stop auto-approve
-                        </Button>
-                        <Button
-                            density="compact"
-                            class="browser-take-over-inline"
-                            title="End the agent's control of this pane; its next action here will fail."
-                            onClick={() => model.takeOver().catch(() => {})}
-                        >
-                            Take over
-                        </Button>
+                            {pauseErrorLine()}
+                        </div>
+                        <div class="browser-driven-by-actions">
+                            {controls()}
+                            <Button density="compact" tone="danger" class="browser-bypass-end" onClick={end}>
+                                Stop auto-approve
+                            </Button>
+                            <Button
+                                density="compact"
+                                class="browser-take-over-inline"
+                                title="End the agent's control of this pane; its next action here will fail."
+                                onClick={() => model.takeOver().catch(() => {})}
+                            >
+                                Take over
+                            </Button>
+                        </div>
                     </div>
                 )}
             </Show>
@@ -218,9 +230,9 @@ export function DrivenByStrip(props: { model: BrowserViewModel; agent: string })
                     >
                         <div class="browser-bypass-confirm-text">
                             In this pane, on <b>{sites().map(siteLabel).join(", ")}</b>, {props.agent}'s clicks that
-                            submit forms, delete or send go through <b>without asking you first</b>, and so does the page's own
-                            "Are you sure?" that follows one. It still can't type
-                            passwords or codes or run scripts, and payments still ask.
+                            submit forms, delete or send go through <b>without asking you first</b>, and so does the
+                            page's own "Are you sure?" that follows one. It still can't type passwords or codes or run
+                            scripts, and payments still ask.
                         </div>
                         <div class="browser-bypass-confirm-minutes" role="radiogroup" aria-label="For how long">
                             <For each={BYPASS_MINUTES}>
@@ -280,10 +292,7 @@ function ActionLogPanel(props: { model: BrowserViewModel; agent: string; onClose
                     Close
                 </Button>
             </div>
-            <Show
-                when={newestFirst().length > 0}
-                fallback={<div class="browser-action-log-empty">Nothing yet.</div>}
-            >
+            <Show when={newestFirst().length > 0} fallback={<div class="browser-action-log-empty">Nothing yet.</div>}>
                 <ol class="browser-action-log-list">
                     <For each={newestFirst()}>
                         {(e) => (
@@ -326,18 +335,22 @@ export function ActionLogStrip(props: { model: BrowserViewModel }): JSX.Element 
         <>
             <div class="browser-driven-by browser-driven-by--ended" role="status">
                 <i class="fa-solid fa-list" aria-hidden="true" />
-                <span>
-                    <b>{agent()}</b>'s actions here
-                </span>
-                <Button
-                    density="compact"
-                    class="browser-actions-log-button"
-                    pressed={showLog()}
-                    title={`What ${agent()} did in this pane`}
-                    onClick={() => setShowLog(!showLog())}
-                >
-                    Log ({props.model.actionsAtom().count})
-                </Button>
+                <div class="browser-driven-by-message">
+                    <span>
+                        <b>{agent()}</b>'s actions here
+                    </span>
+                </div>
+                <div class="browser-driven-by-actions">
+                    <Button
+                        density="compact"
+                        class="browser-actions-log-button"
+                        pressed={showLog()}
+                        title={`What ${agent()} did in this pane`}
+                        onClick={() => setShowLog(!showLog())}
+                    >
+                        Log ({props.model.actionsAtom().count})
+                    </Button>
+                </div>
             </div>
             <Show when={showLog()}>
                 <ActionLogPanel model={props.model} agent={agent()} onClose={() => setShowLog(false)} />
