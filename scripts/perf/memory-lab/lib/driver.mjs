@@ -174,8 +174,8 @@ export async function connect(port, home, workDir) {
     session.defaultTimeoutMs = EVAL_TIMEOUT_MS;
     // The slowest page evaluation of the run, so a machine that is close to the limit shows in the result before it fails.
     let slowestEvalMs = 0;
-    // The commands that took 5 s or more, the 30 slowest if there are more (slowEvalsTotal says how many there were).
     const longTaskArchive = []; // the records of documents a reload has since replaced
+    // The commands that took 5 s or more, the 30 slowest if there are more (slowEvalsTotal says how many there were).
     let slowEvals = [];
     let slowEvalsTotal = 0;
     const ev = async (expr) => {
