@@ -16,7 +16,7 @@ import { evaluate, report } from "./gate.mjs";
 import { driftWarning, portableCommit, srvTarget, withReplacedSrv } from "./lib/srv.mjs";
 import { CpuLedger, cpuBetween } from "./lib/cpu.mjs";
 import { generateConversation } from "./lib/conversation.mjs";
-import { portableExe } from "./lib/driver.mjs";
+import { commandName, portableExe } from "./lib/driver.mjs";
 import { draftText, recycleMark, recycleSaving, scrollArmed, scrollRestored } from "./lib/recycle.mjs";
 import { allocatorRoots, dumpedProcesses, lastSample, mainPage, withChromiumRoles } from "./lib/sample.mjs";
 import { agentsWithoutTurns, compare, compareRuns, comparisonTable, cpuTable, runsTable, wallSummary, groupOf, groupSample, inMegabytes, median, MB, steady, table, transcriptGrowthProblem } from "./lib/summary.mjs";
@@ -466,6 +466,15 @@ describe("CPU and round time", () => {
         expect(mismatch({ ...same, workloadVersion: 1 }, { ...same, workloadVersion: 2 })).toMatch(/workload versions/);
         expect(mismatch({ ...same }, { ...same, workloadVersion: 1 })).toBeNull(); // no stamp is version 1
         expect(mismatch({ ...same, workloadVersion: 2 }, { ...same, workloadVersion: 2 })).toBeNull();
+    });
+});
+
+describe("naming the driver's commands", () => {
+    it("names an RPC by its command, and anything else by its first characters", () => {
+        expect(commandName("RpcApi.AgentInputCommand(TabRpcClient, { blockid: 'x' })")).toBe("AgentInput");
+        expect(commandName('TabRpcClient.rpcCall("agent.open", {"agent_id":"a"})')).toBe("agent.open");
+        expect(commandName('TabRpcClient.rpcCall("createagent", {})')).toBe("createagent");
+        expect(commandName("document.querySelectorAll('.agent-working-row').length")).toMatch(/^document\.querySelectorAll/);
     });
 });
 

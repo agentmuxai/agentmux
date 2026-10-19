@@ -31,6 +31,12 @@ export function layoutFor(panes) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** A short name for a page expression the driver evaluates: the RPC it calls, or its first characters. */
+export function commandName(expr) {
+    const text = String(expr);
+    return /RpcApi\.(\w+?)(?:Command)?\(/.exec(text)?.[1] ?? /rpcCall\(\s*"([^"]+)"/.exec(text)?.[1] ?? text.replace(/\s+/g, " ").slice(0, 60);
+}
+
 /** How long a CDP command may take before the driver gives up on it. */
 const EVAL_TIMEOUT_MS = 90_000;
 
@@ -167,12 +173,19 @@ export async function connect(port, home, workDir) {
     session.defaultTimeoutMs = EVAL_TIMEOUT_MS;
     // The slowest page evaluation of the run, so a machine that is close to the limit shows in the result before it fails.
     let slowestEvalMs = 0;
+    const slowEvals = []; // every command that took 5 s or more: what a failure of this kind needs to be told apart
     const ev = async (expr) => {
         const t0 = Date.now();
         try {
             return await session.evaluate(expr);
+        } catch (e) {
+            // Which command it was: a timeout from srv ("EC-TIME") and one from the driver look alike without it.
+            if (e instanceof Error && !e.message.includes("[command: ")) e.message += ` [command: ${commandName(expr)}, after ${Date.now() - t0} ms]`;
+            throw e;
         } finally {
-            slowestEvalMs = Math.max(slowestEvalMs, Date.now() - t0);
+            const ms = Date.now() - t0;
+            slowestEvalMs = Math.max(slowestEvalMs, ms);
+            if (ms >= 5000 && slowEvals.length < 30) slowEvals.push({ command: commandName(expr), ms });
         }
     };
     const rpc = (command, data) => ev(`TabRpcClient.rpcCall(${JSON.stringify(command)}, ${JSON.stringify(data)})`);
@@ -182,6 +195,7 @@ export async function connect(port, home, workDir) {
 
     return {
         slowestEvalMs: () => slowestEvalMs,
+        slowEvals: () => slowEvals,
         get session() {
             return session;
         },
