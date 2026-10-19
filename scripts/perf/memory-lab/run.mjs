@@ -291,7 +291,11 @@ async function attempt(args, ctx) {
             if (r === args.recycleAfter) {
                 console.log(`  recycling the window after round ${r}: ${args.recycleCommand}`);
                 // With a hold, or when this is the last round, the agents stop here: the writer ends with their last turn, before the recycle samples.
-                if ((args.holdMinutes > 0 || r === playedRounds) && diskLoad) diskLoadResult = await diskLoad.stop();
+                if ((args.holdMinutes > 0 || r === playedRounds) && diskLoad) {
+                    // The last turns are the slow tail under a saturated disk: they must run under the load, so wait for them first.
+                    await requireIdle(driver);
+                    diskLoadResult = await diskLoad.stop();
+                }
                 recycle = await runRecycle({ driver, memtree, port: args.port, rootPid: instance.pid, label: args.label, command: args.recycleCommand });
                 reportRecycle(recycle);
                 if (args.holdMinutes > 0) hold = await holdIdle(args, memtree, instance.pid);
