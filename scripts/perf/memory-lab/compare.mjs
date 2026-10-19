@@ -76,8 +76,13 @@ function main() {
     }
     const baseLabel = base.length > 1 ? `${base[0].label}..` : base[0].label;
     const headLabel = head.length > 1 ? `${head[0].label}..` : head[0].label;
+    // Conditions that differ only by an environment switch look identical in every other line: say when the two sides were given different variables.
+    const passedOf = (r) => JSON.stringify(r.instanceEnv?.passed ?? {});
+    const envNote = passedOf(base[0]) !== passedOf(head[0]) ? [`Instance environment given with --env: ${baseLabel} ${passedOf(base[0])}, ${headLabel} ${passedOf(head[0])}.`, ""] : [];
     const out = [
         `## ${headLabel} against ${baseLabel}`,
+        "",
+        ...envNote,
         "",
         `${head[0].layout.panes} agents, ${head[0].rounds} rounds, forced GC, private working set (MB) and CPU seconds over the workload.`,
         "",

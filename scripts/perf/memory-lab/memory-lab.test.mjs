@@ -17,6 +17,8 @@ import { driftWarning, portableCommit, srvTarget, withReplacedSrv } from "./lib/
 import { mergeLongTaskRecords, slowSendsAgainstLongTasks, summariseLongTasks } from "./lib/longtasks.mjs";
 import { parseDiskLoad, sleepNeededMs, startDiskLoad } from "./lib/diskload.mjs";
 import { volumeOf } from "./lib/volume.mjs";
+import { buildInstanceEnv, parseEnvPairs, RESERVED } from "./lib/instanceenv.mjs";
+import { spawnSync } from "node:child_process";
 import { segmentsOf, slowSendBreakdown, timedCall } from "./lib/sendsegments.mjs";
 import { mergeStoreLock, parseStoreLock } from "./lib/storelock.mjs";
 import { CpuLedger, cpuBetween, writtenBetween } from "./lib/cpu.mjs";
@@ -826,5 +828,29 @@ describe("where a slow send's time went", () => {
             maxInPageMs: 29500,
             maxAfterMs: 8700,
         });
+    });
+});
+
+describe("the instance's environment", () => {
+    it("reads NAME=value pairs, with the value as given", () => {
+        expect(parseEnvPairs(["AGENTMUX_EXP_A=1", "OTHER=a=b", "EMPTY="])).toEqual({ AGENTMUX_EXP_A: "1", OTHER: "a=b", EMPTY: "" });
+        expect(parseEnvPairs(undefined)).toEqual({});
+        expect(() => parseEnvPairs(["nope"])).toThrow(/NAME=value/);
+        expect(() => parseEnvPairs(["=x"])).toThrow(/NAME=value/);
+        expect(() => parseEnvPairs(["1BAD=x"])).toThrow(/NAME=value/);
+        for (const name of RESERVED) expect(() => parseEnvPairs([`${name}=x`])).toThrow(/sets that itself/);
+    });
+
+    it("drops the shell's AGENTMUX_* variables, adds the lab's own, then the --env ones, and records all three", () => {
+        const shell = { PATH: "/bin", AGENTMUX_AGENT_ID: "me", AGENTMUX_HOME_OVERRIDE: "/mine", KEEP: "1" };
+        const { env, record } = buildInstanceEnv(shell, { AGENTMUX_HOME_OVERRIDE: "/lab", AGENTMUX_CDP_PORT: "9333" }, { AGENTMUX_EXP_X: "on" });
+        expect(env).toEqual({ PATH: "/bin", KEEP: "1", AGENTMUX_HOME_OVERRIDE: "/lab", AGENTMUX_CDP_PORT: "9333", AGENTMUX_EXP_X: "on" });
+        expect(record).toEqual({ passed: { AGENTMUX_EXP_X: "on" }, labSet: ["AGENTMUX_CDP_PORT", "AGENTMUX_HOME_OVERRIDE"], droppedFromShell: ["AGENTMUX_AGENT_ID", "AGENTMUX_HOME_OVERRIDE"] });
+    });
+
+    it("reaches a real child process", () => {
+        const { env } = buildInstanceEnv(process.env, {}, { AGENTMUX_EXP_PROBE: "arrived" });
+        const out = spawnSync(process.execPath, ["-e", "process.stdout.write(process.env.AGENTMUX_EXP_PROBE ?? 'missing')"], { env, encoding: "utf8" });
+        expect(out.stdout).toBe("arrived");
     });
 });

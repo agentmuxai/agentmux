@@ -17,6 +17,7 @@ import { join } from "node:path";
 
 import { DETACH_LONG_TASKS, LONG_TASK_OBSERVER, mergeLongTaskRecords, READ_LONG_TASKS } from "./longtasks.mjs";
 import { timedCall } from "./sendsegments.mjs";
+import { buildInstanceEnv } from "./instanceenv.mjs";
 import { installFakeClaude } from "../../../ui-screenshots/install-fake-claude.mjs";
 import { CdpSession, findMainTarget } from "../../../ui-screenshots/lib/session.mjs";
 import { openNewTab } from "../../../ui-screenshots/widget-shots.mjs";
@@ -80,17 +81,17 @@ export async function portInUse(port) {
  * other instance.
  * @returns {Promise<{ pid: number, port: number, home: string, stop: () => void }>}
  */
-export async function launch({ exe, home, port, script, log, env = process.env }) {
+export async function launch({ exe, home, port, script, log, env = process.env, extraEnv = {} }) {
     if (Number(port) === 9222) throw new Error("port 9222 is the production instance's");
     if (await portInUse(port)) {
         throw new Error(`something already answers on CDP port ${port} (another instance, or one a lab run left behind); stop it or pick another --port`);
     }
     rmSync(home, { recursive: true, force: true });
     mkdirSync(home, { recursive: true });
-    const clean = Object.fromEntries(Object.entries(env).filter(([k]) => !k.startsWith("AGENTMUX_")));
+    const built = buildInstanceEnv(env, { AGENTMUX_HOME_OVERRIDE: home, AGENTMUX_CDP_PORT: String(port), FAKE_CLAUDE_SCRIPT: script }, extraEnv);
     const out = openSync(log, "a");
     const child = spawn(exe, [], {
-        env: { ...clean, AGENTMUX_HOME_OVERRIDE: home, AGENTMUX_CDP_PORT: String(port), FAKE_CLAUDE_SCRIPT: script },
+        env: built.env,
         stdio: ["ignore", out, out],
         windowsHide: false,
         detached: process.platform !== "win32", // its own process group, so stopTree reaches everything under it
@@ -117,7 +118,7 @@ export async function launch({ exe, home, port, script, log, env = process.env }
         await stopTree(child.pid); // don't leave it holding the port and the data folder
         throw e;
     }
-    return { pid: child.pid, port, home, stop: () => stopTree(child.pid) };
+    return { pid: child.pid, port, home, envRecord: built.record, stop: () => stopTree(child.pid) };
 }
 
 /** Whether anything is left in the process group `pid` leads. */

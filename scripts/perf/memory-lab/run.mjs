@@ -37,9 +37,9 @@ import { runRecycle, recycleSaving } from "./lib/recycle.mjs";
 import { agentProcessesCountedAsApp, cpuLedger, forcedGcWindows, osSample, portBelongsTo, takeSample } from "./lib/sample.mjs";
 import { agentsWithoutTurns, cpuTable, groupSample, inMegabytes, steady, table, transcriptGrowthProblem, wallSummary } from "./lib/summary.mjs";
 import { cpuBetween, writtenBetween } from "./lib/cpu.mjs";
-import { storeLockOf } from "./lib/storelock.mjs";
-import { parseDiskLoad, startDiskLoad } from "./lib/diskload.mjs";
 import { volumeOf } from "./lib/volume.mjs";
+import { parseEnvPairs } from "./lib/instanceenv.mjs";
+import { parseDiskLoad, startDiskLoad } from "./lib/diskload.mjs";
 import { slowSendsAgainstLongTasks, summariseLongTasks } from "./lib/longtasks.mjs";
 import { segmentsOf, slowSendBreakdown } from "./lib/sendsegments.mjs";
 
@@ -61,6 +61,12 @@ function parseArgs(argv) {
     const flags = { "--keep": "keep" };
     for (let i = 0; i < argv.length; i++) {
         const raw = argv[i];
+        if (raw === "--env") {
+            const value = argv[++i];
+            if (value === undefined) throw new Error("--env needs NAME=value");
+            (a.envPairs ??= []).push(value);
+            continue;
+        }
         if (flags[raw]) {
             a[flags[raw]] = true;
             continue;
@@ -72,6 +78,7 @@ function parseArgs(argv) {
         a[key] = num.has(key) ? Number(value) : value;
     }
     if (!a.portable && !a.exe) throw new Error("give --portable <dir> (a `task package` folder), or --exe <path>");
+    a.instanceEnv = parseEnvPairs(a.envPairs);
     a.diskLoadRate = parseDiskLoad(a.diskLoad);
     if (a.diskLoadCapGb !== undefined && !(Number.isFinite(a.diskLoadCapGb) && a.diskLoadCapGb > 0)) {
         throw new Error(`--disk-load-cap-gb needs a positive number of GB (got "${a.diskLoadCapGb}"): it is what keeps a stress run from wearing out the disk`);
@@ -221,7 +228,7 @@ async function holdIdle(args, memtree, rootPid) {
 /** One try: starts the instance, runs the load, measures, writes the result. */
 async function attempt(args, ctx) {
     const { exe, memtree, dir, home, script, layout, swapped } = ctx;
-    const instance = await launch({ exe, home, port: args.port, script, log: join(dir, "instance.log") });
+    const instance = await launch({ exe, home, port: args.port, script, log: join(dir, "instance.log"), extraEnv: args.instanceEnv });
     const curve = [];
     let diskLoad = null; // stopped in the outer finally on any path out of this attempt: a retry must not start a second writer beside it
     cpuLedger.reset();
@@ -367,6 +374,8 @@ async function attempt(args, ctx) {
             // What was asked; `playedRounds` is how many were played (fewer with --hold-minutes).
             workloadVersion: WORKLOAD_VERSION,
             diskLoad: diskLoadResult,
+            // What the instance was given (see lib/instanceenv.mjs): the --env variables, what the lab set, and the shell's AGENTMUX_* it dropped.
+            instanceEnv: instance.envRecord,
             // How full the volume was (see lib/volume.mjs): a stall on a nearly full disk is not the same finding as one on an empty disk.
             volume: { atStart: volumeAtStart, atEnd: volumeOf(dir) },
             rounds: args.rounds,

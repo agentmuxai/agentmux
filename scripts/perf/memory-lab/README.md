@@ -191,6 +191,15 @@ Locally: `node scripts/perf/memory-lab/gate.mjs memory-lab-out/<label>/result.js
 (it says the result is not the gated workload unless it was run with
 `--panes 12 --rounds 10 --seed 1`).
 
+## Passing a setting to the instance
+
+The lab drops every `AGENTMUX_*` variable of your shell before starting the instance, so a switch with that prefix never
+arrives. Pass one on purpose with `--env NAME=value` (repeat it for several): it is given to the instance after the
+lab's own, and cannot override `AGENTMUX_HOME_OVERRIDE`, `AGENTMUX_CDP_PORT` or `FAKE_CLAUDE_SCRIPT`. `result.instanceEnv`
+records what was passed, what the lab set and which `AGENTMUX_*` names of your shell were dropped, and `compare.mjs` says
+when its two sides were given different `--env` values (two conditions that differ only by a switch look identical in every
+other line, and a switch that never arrived makes a condition run as the baseline). The values are recorded as given.
+
 ## Background disk load
 
 A lab run on an idle disk does not show what a busy machine does: srv's transcript store can be held for seconds while
