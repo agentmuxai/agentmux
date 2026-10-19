@@ -405,6 +405,9 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
                     return (
                         <div
                             class="pane-leaf-keepalive-slot"
+                            // Overlays in a dormant member cut no hole through the
+                            // browser panes on screen (pane-overlay.ts DORMANT_SLOT_ATTR).
+                            data-pane-dormant={id === activeBlockId() ? undefined : ""}
                             style={{
                                 position: "absolute",
                                 inset: "0",
