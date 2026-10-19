@@ -110,6 +110,7 @@ pub mod agent_bundle_sidecar;
 pub mod continuity_state;
 pub mod memory_delivery;
 pub mod shellexec;
+pub mod transcript;
 pub mod transcript_backfill;
 pub mod blocking;
 pub mod gh_guard;

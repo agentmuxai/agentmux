@@ -155,7 +155,7 @@ impl MspController {
             broker: self.broker.clone(),
             filestore: self.filestore.clone(),
             health: self.health_monitor.clone(),
-            zone: super::shell::resolve_global_output_zone(&self.mstore, &self.block_id),
+            zone: crate::backend::transcript::append::resolve_global_output_zone(&self.mstore, &self.block_id),
         }
     }
 

@@ -647,7 +647,7 @@ impl PersistentSubprocessController {
     /// `agent-message-accepted` path (UUID node), so it doesn't add a second
     /// node, but its stream keeps no gap where this record sits.
     pub(super) fn persist_message_to_blockfile(&self, json_str: &str) {
-        let global_zone = super::super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
+        let global_zone = crate::backend::transcript::append::resolve_global_output_zone(&self.mstore, &self.block_id);
         // A line with inline image attachments is stored without the base64:
         // its text still lists every image, and every reader of stored user
         // lines expects string content.
@@ -660,7 +660,7 @@ impl PersistentSubprocessController {
         // the I/O driver and srv stops answering sockets for the duration.
         // Synchronous on purpose — messages must persist in delivery order.
         crate::backend::blocking::off_async_worker(|| {
-            super::super::shell::persist_user_line(
+            crate::backend::transcript::append::persist_user_line(
                 self.broker.as_deref(),
                 &self.block_id,
                 line_with_newline.as_bytes(),

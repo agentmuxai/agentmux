@@ -362,7 +362,7 @@ impl SubprocessController {
                         // Into the agent's global zone too, like every other
                         // record: that is what the pane reads on reload
                         // (Phase 5a-3c).
-                        let global_zone = shell::resolve_global_output_zone(&mstore, &block_id);
+                        let global_zone = crate::backend::transcript::append::resolve_global_output_zone(&mstore, &block_id);
                         shell::handle_append_block_file(
                             b, &block_id, SUBPROCESS_OUTPUT_SUBJECT,
                             format!("{error_frame}\n").as_bytes(),
@@ -458,7 +458,7 @@ impl SubprocessController {
             // so every container-exec `output` line is also mirrored to the
             // cross-channel store. `None` for non-agent blocks.
             let global_output_zone =
-                shell::resolve_global_output_zone(&mstore, &block_id);
+                crate::backend::transcript::append::resolve_global_output_zone(&mstore, &block_id);
 
             tracing::info!(block_id = %block_id, "container exec output reader started");
 
@@ -712,7 +712,7 @@ impl SubprocessController {
         }).to_string();
         // Into the agent's global zone too: that is what the pane reads on
         // reload (Phase 5a-3c).
-        let global_zone = shell::resolve_global_output_zone(mstore, block_id);
+        let global_zone = crate::backend::transcript::append::resolve_global_output_zone(mstore, block_id);
         shell::handle_append_block_file(
             broker,
             block_id,
@@ -773,7 +773,7 @@ impl SubprocessController {
         }
 
         if let Some(ref broker) = broker {
-            shell::append_output_line(broker, block_id, trimmed, filestore.as_ref(), global_output_zone);
+            crate::backend::transcript::append::append_output_line(broker, block_id, trimmed, filestore.as_ref(), global_output_zone);
         }
     }
 }

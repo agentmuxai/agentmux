@@ -194,7 +194,7 @@ impl AppServerController {
         let weak = self.self_ref.lock().unwrap().clone();
         // The agent's global transcript zone, resolved once for this process
         // (as the host and container spawn paths do), not per frame.
-        let global_zone = super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
+        let global_zone = crate::backend::transcript::append::resolve_global_output_zone(&self.mstore, &self.block_id);
         tokio::spawn(async move {
             // The running turn's figures, for its ledger: summed over its model
             // calls, reset when a call reports a different turn.

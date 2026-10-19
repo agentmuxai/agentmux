@@ -205,7 +205,7 @@ fn register_session_archive_handler(engine: &Arc<WshRpcEngine>, state: &AppState
                 // transcript order lock, so no in-flight append's write and
                 // event can interleave with them (review of #3636).
                 let (archived_bytes, archived_at) =
-                    crate::backend::blockcontroller::shell::with_transcript_order(&cmd.block_id, || {
+                    crate::backend::transcript::append::with_transcript_order(&cmd.block_id, || {
                         let archived = session_archive::archive_session_output(
                             &mstore,
                             &filestore,
@@ -213,7 +213,7 @@ fn register_session_archive_handler(engine: &Arc<WshRpcEngine>, state: &AppState
                             &archive_dir,
                         )?;
                         // The block's transcript is gone: open panes resync now.
-                        crate::backend::blockcontroller::shell::publish_transcript_changed(
+                        crate::backend::transcript::append::publish_transcript_changed(
                             &broker,
                             &cmd.block_id,
                             crate::backend::mps::FILE_OP_DELETE,
@@ -253,14 +253,14 @@ fn register_session_restore_handler(engine: &Arc<WshRpcEngine>, state: &AppState
                 // event of the old generation, then the replace, then the
                 // new generation's.
                 let restored_bytes =
-                    crate::backend::blockcontroller::shell::with_transcript_order(&cmd.block_id, || {
+                    crate::backend::transcript::append::with_transcript_order(&cmd.block_id, || {
                         let restored = session_archive::restore_session_output(
                             &mstore,
                             &filestore,
                             &cmd.block_id,
                         )?;
                         // Replaced content, a new generation: open panes resync now.
-                        crate::backend::blockcontroller::shell::publish_transcript_changed(
+                        crate::backend::transcript::append::publish_transcript_changed(
                             &broker,
                             &cmd.block_id,
                             crate::backend::mps::FILE_OP_REPLACE,

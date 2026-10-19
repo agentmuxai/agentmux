@@ -726,7 +726,7 @@ impl PersistentSubprocessController {
             if let Some(ref broker) = broker_read {
                 if release_parked_notices {
                     for notice in crate::server::memory_delivery_handlers::take_parked_notices(&block_id_read) {
-                        super::super::shell::append_output_line(
+                        crate::backend::transcript::append::append_output_line(
                             broker,
                             &block_id_read,
                             &notice,
@@ -735,7 +735,7 @@ impl PersistentSubprocessController {
                         );
                     }
                 }
-                super::super::shell::append_output_line(
+                crate::backend::transcript::append::append_output_line(
                     broker,
                     &block_id_read,
                     &line,

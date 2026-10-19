@@ -23,7 +23,8 @@ use crate::backend::storage::store::Store;
 use crate::backend::mps;
 
 // Private / non-flat-re-exported helpers reached through their owning submodule.
-use super::file_ops::{handle_truncate_block_file, mirror_append_to_global};
+use super::file_ops::handle_truncate_block_file;
+use crate::backend::transcript::append::{append_output_line, mirror_append_to_global, resolve_global_output_zone};
 use super::translation::{extract_agent_events, AGENT_LINE_BUFFER_CAP};
 
 use std::sync::Arc;
@@ -899,7 +900,7 @@ use std::sync::Arc;
         let block_id = "tsidx-silent-block";
         let line = b"{\"type\":\"user_message\"}\n";
 
-        super::file_ops::persist_user_line(
+        crate::backend::transcript::append::persist_user_line(
             None,
             block_id,
             line,
