@@ -67,10 +67,50 @@ pub fn write_bytes(pid: u32) -> Option<u64> {
     io.lines().find_map(|l| l.strip_prefix("wchar:")).and_then(|v| v.trim().parse().ok())
 }
 
-/// `write_bytes` of `/proc/<pid>/io`: the bytes the process caused to be sent to the block layer. Same user only.
+/// `write_bytes` of `/proc/<pid>/io` less `cancelled_write_bytes`: the bytes the process caused to be sent to the block
+/// layer, minus the writeback the kernel avoided because the data was truncated or the file deleted before it was
+/// written (a process that writes 1 MB and then deletes the file is accounted 1 MB in `write_bytes` and the same in
+/// `cancelled_write_bytes`, and does no storage I/O). Same user only.
 pub fn storage_write_bytes(pid: u32) -> Option<u64> {
     let io = std::fs::read_to_string(format!("/proc/{pid}/io")).ok()?;
-    io.lines().find_map(|l| l.strip_prefix("write_bytes:")).and_then(|v| v.trim().parse().ok())
+    storage_bytes_from_io(&io)
+}
+
+fn storage_bytes_from_io(io: &str) -> Option<u64> {
+    let field = |name: &str| io.lines().find_map(|l| l.strip_prefix(name)).and_then(|v| v.trim().parse::<u64>().ok());
+    Some(field("write_bytes:")?.saturating_sub(field("cancelled_write_bytes:").unwrap_or(0)))
+}
+
+#[cfg(test)]
+mod storage_bytes_tests {
+    use super::storage_bytes_from_io;
+
+    const IO: &str = "rchar: 1
+wchar: 9000
+syscr: 1
+syscw: 1
+read_bytes: 0
+write_bytes: 4096
+cancelled_write_bytes: 1024
+";
+
+    #[test]
+    fn storage_bytes_leave_out_cancelled_writeback() {
+        assert_eq!(storage_bytes_from_io(IO), Some(3072));
+        // a file that was written and deleted: nothing reached storage
+        assert_eq!(storage_bytes_from_io("write_bytes: 4096
+cancelled_write_bytes: 4096
+"), Some(0));
+        // more cancelled than written (the kernel counts them per page): never negative
+        assert_eq!(storage_bytes_from_io("write_bytes: 100
+cancelled_write_bytes: 4096
+"), Some(0));
+        // an old kernel without the line, or no write_bytes at all
+        assert_eq!(storage_bytes_from_io("write_bytes: 4096
+"), Some(4096));
+        assert_eq!(storage_bytes_from_io("rchar: 1
+"), None);
+    }
 }
 
 pub fn cpu_count() -> usize {

@@ -305,7 +305,7 @@ async function attempt(args, ctx) {
         const storageWrittenMB = writtenBetween(storageAtStart, cpuLedger.storageTotals());
         for (const g of storageIncomplete) storageWrittenMB[g] = null;
         const hasStorage = cpuLedger.sawStorageCounters();
-        const io = !Object.values(writtenMB).some((v) => v != null) ? null : { fromRound: 0, writtenMB, incompleteGroups: incomplete, storageWrittenMB: hasStorage ? storageWrittenMB : null, note: "highest write counter seen per process, summed per group (Windows and Linux: bytes passed to write calls; macOS: bytes written to disk). storageWrittenMB: the part that reached storage (Linux write_bytes, macOS disk bytes; none on Windows)" };
+        const io = !Object.values(writtenMB).some((v) => v != null) ? null : { fromRound: 0, writtenMB, incompleteGroups: incomplete, storageWrittenMB: hasStorage ? storageWrittenMB : null, note: "highest write counter seen per process, summed per group (Windows and Linux: bytes passed to write calls; macOS: bytes written to disk). storageWrittenMB: the part that reached storage (Linux write_bytes less cancelled_write_bytes, macOS disk bytes; none on Windows)" };
         const rawLong = await driver.longTasks().catch(() => null);
         const pageLongTasks = summariseLongTasks(rawLong, roundWindows, forcedGcWindows);
         const sendsVsLong = slowSendsAgainstLongTasks(sendLog, rawLong);

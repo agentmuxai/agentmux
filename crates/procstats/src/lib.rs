@@ -178,7 +178,8 @@ pub fn write_bytes(pid: u32) -> Option<u64> {
 
 /// Bytes this process has caused to be written to storage so far (cumulative), read on demand: the part of
 /// [`write_bytes`] that reached the disk, so it leaves out writes the page cache coalesced or dropped. Linux:
-/// `write_bytes` in `/proc/<pid>/io`. macOS: `ri_diskio_byteswritten`. Windows has no such counter (`None`).
+/// `write_bytes` less `cancelled_write_bytes` in `/proc/<pid>/io` (writeback avoided by truncating or deleting).
+/// macOS: `ri_diskio_byteswritten`. Windows has no such counter (`None`).
 pub fn storage_write_bytes(pid: u32) -> Option<u64> {
     os::storage_write_bytes(pid)
 }
