@@ -16,7 +16,7 @@ impl PersistentSubprocessController {
     /// flushed rather than dropped.
     pub(super) fn flush_error_line_now(&self, line: String) {
         let Some(ref broker) = self.broker else { return };
-        let global_output_zone = super::super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
+        let global_output_zone = crate::backend::transcript::append::resolve_global_output_zone(&self.mstore, &self.block_id);
         super::super::shell::handle_append_block_file(
             broker,
             &self.block_id,
@@ -64,7 +64,7 @@ impl PersistentSubprocessController {
     ) {
         let Some(ref broker) = self.broker else { return };
         let line = session_outcome_line_with(outcome, attempted_sid, actual_sid, continued, idle_start);
-        let global_output_zone = super::super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
+        let global_output_zone = crate::backend::transcript::append::resolve_global_output_zone(&self.mstore, &self.block_id);
         super::super::shell::handle_append_block_file(
             broker,
             &self.block_id,

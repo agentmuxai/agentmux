@@ -426,7 +426,7 @@ fn user_line(text: &str) -> String {
 }
 
 fn append(state: &AppState, block_id: &str, line: &str) {
-    crate::backend::blockcontroller::shell::append_output_line(&state.broker, block_id, line, Some(&state.filestore), None);
+    crate::backend::transcript::append::append_output_line(&state.broker, block_id, line, Some(&state.filestore), None);
 }
 
 async fn open_feed(state: &AppState, name: &str, token: &str, last_event_id: Option<&str>) -> (StatusCode, DataStream) {
@@ -557,9 +557,9 @@ async fn a_replaced_transcript_resets_and_sends_a_fresh_snapshot() {
     let (_, _, first) = next_event(&mut body).await.unwrap();
     let old_gen = first["gen"].as_str().unwrap().to_string();
 
-    crate::backend::blockcontroller::shell::with_transcript_order(&block, || {
+    crate::backend::transcript::append::with_transcript_order(&block, || {
         state.filestore.write_file(&block, "output", b"{\"new\":1}\n{\"new\":2}\n").unwrap();
-        crate::backend::blockcontroller::shell::publish_transcript_changed(
+        crate::backend::transcript::append::publish_transcript_changed(
             &state.broker,
             &block,
             crate::backend::mps::FILE_OP_REPLACE,

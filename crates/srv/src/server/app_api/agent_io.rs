@@ -341,7 +341,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // PR #2164 round 2). And to the agent's global zone,
                         // which is what a pane with an agentId reloads from
                         // (Phase 5a-3c).
-                        let global_zone = crate::backend::blockcontroller::shell::resolve_global_output_zone(
+                        let global_zone = crate::backend::transcript::append::resolve_global_output_zone(
                             &Some(mstore.clone()),
                             &cmd.block_id,
                         );

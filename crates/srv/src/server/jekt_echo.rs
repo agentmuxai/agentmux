@@ -153,7 +153,7 @@ pub(super) fn echo_jekt_to_sender_with_files(
         "message": { "role": "user", "content": wrapped }
     });
     let data = format!("{line}\n");
-    let global_zone = crate::backend::blockcontroller::shell::resolve_global_output_zone(
+    let global_zone = crate::backend::transcript::append::resolve_global_output_zone(
         &Some(state.mstore.clone()),
         &sender_reg.block_id,
     );

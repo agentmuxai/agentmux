@@ -877,7 +877,7 @@ pub async fn run_agent_turn_joining(
             // the agent's global zone: a pane with an agentId reads
             // that on reload, so without it the frame still vanished
             // (Phase 5a-3c).
-            let global_zone = crate::backend::blockcontroller::shell::resolve_global_output_zone(
+            let global_zone = crate::backend::transcript::append::resolve_global_output_zone(
                 &Some(mstore.clone()),
                 &block_id,
             );
