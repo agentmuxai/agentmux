@@ -873,6 +873,29 @@ describe("the instance's environment", () => {
         expect(record).toEqual({ passed: { AGENTMUX_EXP_X: "on" }, labSet: ["AGENTMUX_CDP_PORT", "AGENTMUX_HOME_OVERRIDE"], droppedFromShell: ["AGENTMUX_AGENT_ID", "AGENTMUX_HOME_OVERRIDE"] });
     });
 
+    it("compare.mjs reads the same variables in another order as one environment, notes a difference between sides and refuses one within a side", () => {
+        const dir = mkdtempSync(join(tmpdir(), "lab-envcmp-"));
+        try {
+            const base = { label: "x", layout: { panes: 4, tabs: [4] }, rounds: 10, seed: 1, gapSeconds: 15, platform: "win32", settleSeconds: 20, steady: { samples: 3, app: { privateMB: 800 }, groups: {} } };
+            const write = (name, passed) => {
+                const path = join(dir, name);
+                writeFileSync(path, JSON.stringify({ ...base, label: name, instanceEnv: { passed } }));
+                return path;
+            };
+            const a = write("a", { B: "2", A: "1" });
+            const b = write("b", { A: "1", B: "2" });
+            const c = write("c", { A: "9" });
+            const compare = (...args) => spawnSync(process.execPath, [join(process.cwd(), "scripts/perf/memory-lab/compare.mjs"), ...args], { encoding: "utf8" });
+            expect(compare(a, b).stdout).not.toMatch(/Instance environment given/);
+            expect(compare(a, c).stdout).toMatch(/Instance environment given with --env: a \{"A":"1","B":"2"\}, c \{"A":"9"\}/);
+            const within = compare("--base", `${a},${c}`, "--head", b);
+            expect(within.status).toBe(2);
+            expect(within.stderr).toMatch(/base runs were given different --env values/);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
     it("reaches a real child process", () => {
         const { env } = buildInstanceEnv(process.env, {}, { AGENTMUX_EXP_PROBE: "arrived" });
         const out = spawnSync(process.execPath, ["-e", "process.stdout.write(process.env.AGENTMUX_EXP_PROBE ?? 'missing')"], { env, encoding: "utf8" });
