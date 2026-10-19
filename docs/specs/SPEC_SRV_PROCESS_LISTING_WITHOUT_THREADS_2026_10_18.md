@@ -3,7 +3,7 @@
 **Date:** 2026-10-18
 **Author:** Maricon@charlie
 **Type:** Spec (a read-cost change; no behaviour change)
-**Status:** active — the change and its tests are in PR #PRNUM; remaining: a Windows reading (Posa, with Loap-3's memory lab) to see whether the same listing costs CPU there.
+**Status:** active — the change and its tests are in PR #5137; remaining: a Windows reading (Posa, with Loap-3's memory lab) to see whether the same listing costs CPU there.
 **Part of:** track E (srv's memory and CPU) of the 500 MB budget (`docs/reports/REPORT_MEMORY_FOOTPRINT_500MB_BUDGET_2026_10_12.md`). Approved by Camper@narko as "option A", after the profile in §1.
 **Platform:** measured on **Linux**. The code in `sysinfo.rs` and `scan.rs` is shared; the thread reads it removes are a Linux/`/proc` cost, so Windows and macOS are expected to be unchanged but are not yet measured.
 
