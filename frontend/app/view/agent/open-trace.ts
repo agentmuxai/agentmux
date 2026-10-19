@@ -43,9 +43,11 @@ const OPEN_PHASES = [
     "history_start",
     "history_read",
     "parsed",
+    "first_screen",
     "painted",
     "revealed",
     "quiet",
+    "rest_loaded",
 ] as const;
 export type OpenPhase = (typeof OPEN_PHASES)[number];
 
@@ -115,6 +117,21 @@ export function markAgentOpen(blockId: string, phase: OpenPhase, notes?: Record<
     if (!l || l.trace.marks[phase] !== undefined) return;
     l.trace.marks[phase] = openTraceEnv.now() - l.trace.start;
     noteAgentOpen(blockId, notes);
+}
+
+/**
+ * The background history fill's end, as its own line: it usually finishes after
+ * the open's line was logged (at quiet), so `rest_loaded` can't reach that one.
+ * `muxlog` reads only `[agent-open]` lines.
+ */
+export function logAgentOpenRest(
+    blockId: string,
+    outcome: string,
+    stats: { pages: number; lines: number; bytes: number; ms: number },
+): void {
+    openTraceEnv.log(
+        `[agent-open-rest] block=${blockId.slice(0, 8)} outcome=${outcome} pages=${stats.pages} lines=${stats.lines} bytes=${stats.bytes} ms=${stats.ms}`,
+    );
 }
 
 /** Attach notes (`key=value`) to the trace without marking a phase. */

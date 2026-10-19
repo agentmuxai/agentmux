@@ -411,8 +411,8 @@ export const AgentPresentationView = ({
         // K + the turn in flight; Claude only. Read after this body runs.
         restoreTurns: () =>
             liveFeed.liveFeedOn() && outputFormat() === "claude-stream-json" && Number.isFinite(liveFeed.liveFeedTurns) ? liveFeed.liveFeedTurns + 1 : undefined,
-        // And about what the feed keeps by size, for every live-feed pane.
-        restoreBytes: () => (liveFeed.liveFeedOn() ? LIVE_FEED_RESTORE_BYTES : undefined),
+        restoreBytes: () => (liveFeed.liveFeedOn() ? LIVE_FEED_RESTORE_BYTES : undefined), // what the feed keeps, by size
+        paneHidden: hidden, // the background history fill waits while it is
         onHistoryReady: () => {
             historyReadyFn?.();
             // A pane opens with K turns, not the load window's worth (§6.9).
