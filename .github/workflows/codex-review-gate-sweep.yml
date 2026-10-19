@@ -32,9 +32,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      # A schedule only ever runs on the default branch, so this is main's copy.
+      # Always the default branch's script, and the default branch's gate
+      # dispatched below: a schedule runs there anyway, and a manual dispatch
+      # from another branch must not run that branch's copy.
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.repository.default_branch }}
           sparse-checkout: |
             scripts/ci-codex-review-gate.mjs
             scripts/lib/github-rest.mjs
@@ -45,5 +48,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           SWEEP: "1"
-          DISPATCH_REF: ${{ github.ref_name }}
+          DISPATCH_REF: ${{ github.event.repository.default_branch }}
         run: node scripts/ci-codex-review-gate.mjs
