@@ -6,7 +6,7 @@
 
 ## 1. What shipped
 
-- `.github/workflows/memory-soak.yml`: every night, after the nightly artifacts build, a Windows runner downloads that build's portable, runs the memory lab on it (12 agents over 4 tabs, 10 rounds, seed 1) and runs the gate. The numbers are kept as an artifact for 90 days and printed in the job summary.
+- `.github/workflows/memory-soak.yml` (since 2026-10-19 a manual run only; the nightly is `perf-regression.yml`, which compares two builds): every night, after the nightly artifacts build, a Windows runner downloads that build's portable, runs the memory lab on it (12 agents over 4 tabs, 10 rounds, seed 1) and runs the gate. The numbers are kept as an artifact for 90 days and printed in the job summary.
 - `scripts/perf/memory-lab/gate.mjs` and `budget.json`: the lines. `budget.json` names the gated workload, a line in MB for the app total, the renderers and srv, and a mode. As shipped, every line is `null` and the mode is `report`, so the job reports and cannot fail on a number. In `enforce` mode it exits 1 over a line, and 2 when the result is not the gated workload or a line's number could not be read: a gate that passes on missing data is not one.
 - It is not a required check and does not run on PRs. The PR CI builds no CEF app (it compiles and tests), so a per-PR soak would need a full ~25 minute build per push on top of a ~10 minute run.
 

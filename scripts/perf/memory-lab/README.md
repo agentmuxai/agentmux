@@ -186,12 +186,19 @@ layout objects, listeners, tool blocks and the text inside them), so a restored
 page can be set against a live one at the same point: a restore that mounts tool
 bodies a live page had unloaded shows in `toolTextKB`.
 
-## The nightly gate
+## The nightly check
 
-`.github/workflows/memory-soak.yml` runs the lab nightly on the latest Windows
-portable (12 agents, 10 rounds) and `gate.mjs` checks the result against
-`budget.json`. Every line there is `null` and the mode is `report`, so it
-cannot fail on a number until the operator sets them; see
+`.github/workflows/perf-regression.yml` runs every day after the nightly artifacts build. It takes the latest build
+that still has its Windows portable (B) and the newest older one with a different commit (A), runs the lab on them
+interleaved (A B A B ..., 4 runs a side, 12 agents, 10 rounds) with `ab.mjs`, and prints the comparison (medians, ranges
+and the figures that moved by more than their margin in `budget.json`) with the list of what was merged between the two
+builds in the job summary. With no earlier build to compare with it measures B alone. It is report only: it fails on no
+number and is not a required check. `node scripts/perf/memory-lab/nightly.mjs plan` picks the builds (it needs `gh`);
+`lib/nightlyplan.mjs` holds the rules.
+
+`.github/workflows/memory-soak.yml` stays as a manual run of one build, and `gate.mjs` checks its result against
+`budget.json`. Every line there is `null` and the mode is `report`, so it cannot fail on a number until the operator
+sets them; see
 [`REPORT_MEMORY_SOAK_GATE_2026_10_18.md`](../../../docs/reports/REPORT_MEMORY_SOAK_GATE_2026_10_18.md).
 Locally: `node scripts/perf/memory-lab/gate.mjs memory-lab-out/<label>/result.json`
 (it says the result is not the gated workload unless it was run with

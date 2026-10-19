@@ -17,7 +17,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { outcomeOf, parseAbArgs, planRuns, runArgs } from "./lib/abplan.mjs";
+import { compareArgs, outcomeOf, parseAbArgs, planRuns, runArgs } from "./lib/abplan.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -54,10 +54,7 @@ async function main() {
         console.error("no run finished on at least one side: nothing to compare");
         process.exit(1);
     }
-    const path = (label) => join(spec.out, label, "result.json");
-    const args = ["--base", outcome.done.a.map(path).join(","), "--head", outcome.done.b.map(path).join(","), "--md", join(spec.out, "compare.md")];
-    if (spec.margins) args.push(...spec.margins.split(" "));
-    const code = await runNode(join(here, "compare.mjs"), args);
+    const code = await runNode(join(here, "compare.mjs"), compareArgs(spec, outcome));
     process.exit(code);
 }
 
