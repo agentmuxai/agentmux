@@ -1,6 +1,8 @@
 # SPEC: start a new agent inline, below the harness card, and one CLI-detection truth for picker and Toolchain
 
-Status: spec only, nothing implemented. Written 2026-10-18 (AgentX@narko) at the operator's request:
+**Status:** active. Part A (§1) in #5130; Part B (§2) to follow.
+
+Written 2026-10-18 (AgentX@narko) at the operator's request:
 - "the agent pane should essentially reflect what the toolchain knows .. are those paths DRY? if grok isn't in the path or
   appears not installed, simply put the green, otherwise not."
 - "the UX of starting an agent: pivot away from modals, to fields that appear by offsetting neighbouring cards. When adding
