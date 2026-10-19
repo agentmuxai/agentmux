@@ -323,7 +323,7 @@ async function attempt(args, ctx) {
             wall,
             // The slowest page command of the run: a machine near the driver's limit (90 s) shows here before it fails.
             slowestEvalMs: driver.slowestEvalMs(),
-            slowEvals: driver.slowEvals(),
+            slowEvals: driver.slowEvals(), // { total, slowest }: every command that took 5 s or more, the 30 slowest listed
         };
         writeFileSync(join(dir, "result.json"), JSON.stringify(result, null, 1));
         const md = [`# ${args.label}`, "", `${args.panes} agents over ${layout.length} tab(s), ${playedRounds} rounds (${args.gapS} s apart)${args.holdMinutes > 0 ? `, then held idle ${args.holdMinutes} min` : ""}, forced GC, median of ${summary.samples} samples.`, "", table(summary), "", cpuTable(cpu, wall), ...notes.map((n) => `\n> ${n}`)].join("\n");

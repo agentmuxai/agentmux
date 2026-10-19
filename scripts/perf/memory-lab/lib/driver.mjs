@@ -173,7 +173,9 @@ export async function connect(port, home, workDir) {
     session.defaultTimeoutMs = EVAL_TIMEOUT_MS;
     // The slowest page evaluation of the run, so a machine that is close to the limit shows in the result before it fails.
     let slowestEvalMs = 0;
-    const slowEvals = []; // every command that took 5 s or more: what a failure of this kind needs to be told apart
+    // The commands that took 5 s or more, the 30 slowest if there are more (slowEvalsTotal says how many there were).
+    let slowEvals = [];
+    let slowEvalsTotal = 0;
     const ev = async (expr) => {
         const t0 = Date.now();
         try {
@@ -185,7 +187,11 @@ export async function connect(port, home, workDir) {
         } finally {
             const ms = Date.now() - t0;
             slowestEvalMs = Math.max(slowestEvalMs, ms);
-            if (ms >= 5000 && slowEvals.length < 30) slowEvals.push({ command: commandName(expr), ms });
+            if (ms >= 5000) {
+                slowEvalsTotal++;
+                slowEvals.push({ command: commandName(expr), ms });
+                if (slowEvals.length > 30) slowEvals = slowEvals.sort((a, b) => b.ms - a.ms).slice(0, 30);
+            }
         }
     };
     const rpc = (command, data) => ev(`TabRpcClient.rpcCall(${JSON.stringify(command)}, ${JSON.stringify(data)})`);
@@ -195,7 +201,7 @@ export async function connect(port, home, workDir) {
 
     return {
         slowestEvalMs: () => slowestEvalMs,
-        slowEvals: () => slowEvals,
+        slowEvals: () => ({ total: slowEvalsTotal, slowest: [...slowEvals].sort((a, b) => b.ms - a.ms) }),
         get session() {
             return session;
         },
