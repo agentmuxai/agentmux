@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { emitActivityFlash, type FlashTarget } from "@/app/notification/activity-flash";
 import { emitPaneLocate, emitPaneLocatePlay } from "@/app/util/pane-locate";
+import { WindowTabDisplayedProvider } from "@/app/workspace/window-tab-visibility";
 import { dropPositionForPointerX, foreignDropHighlightFor, foreignDropRootFor, PaneTabStrip } from "./PaneTabStrip";
 
 const flashFrom = (blockId: string): FlashTarget => ({
@@ -798,6 +799,28 @@ describe("PaneTabStrip activity flash", () => {
         renderStrip(false);
         emitActivityFlash(flashFrom("b"));
         expect(animate).not.toHaveBeenCalled();
+    });
+
+    // Nobody sees a pill in a hidden window tab, and each flash is a Web Animation on its ::before.
+    it("does not flash a pill whose window tab is hidden, and flashes again once it is shown", () => {
+        const [displayed, setDisplayed] = createSignal(false);
+        render(() => (
+            <WindowTabDisplayedProvider value={displayed}>
+                <PaneTabStrip
+                    tabs={TABS}
+                    activeId="a"
+                    getId={(t: T) => t.id}
+                    getLabel={(t: T) => t.label}
+                    onActivate={vi.fn()}
+                    flashOnActivity={true}
+                />
+            </WindowTabDisplayedProvider>
+        ));
+        for (let i = 0; i < 20; i++) emitActivityFlash(flashFrom("b"));
+        expect(animate).not.toHaveBeenCalled();
+        setDisplayed(true);
+        emitActivityFlash(flashFrom("b"));
+        expect(animate).toHaveBeenCalledTimes(1);
     });
 });
 
