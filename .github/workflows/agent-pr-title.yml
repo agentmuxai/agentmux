@@ -10,6 +10,11 @@ name: PR title names the agent
 on:
   pull_request:
     types: [opened, edited, reopened, synchronize]
+  # A merge queue group (docs/specs/SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19.md
+  # §5 Phase 1): a title belongs to a PR, which the PR's own run checked, so here it
+  # passes.
+  merge_group:
+    types: [checks_requested]
 
 permissions: {}
 
@@ -19,7 +24,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
+      - name: In a merge queue
+        if: github.event_name == 'merge_group'
+        run: echo "A title belongs to a PR. Each PR in this group passed it before it could join the queue."
       - name: Shared-identity PRs start with <Agent>@<host>
+        if: github.event_name != 'merge_group'
         env:
           AUTHOR: ${{ github.event.pull_request.user.login }}
           TITLE: ${{ github.event.pull_request.title }}

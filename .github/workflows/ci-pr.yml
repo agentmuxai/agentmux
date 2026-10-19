@@ -64,6 +64,12 @@ on:
   pull_request:
   push:
     branches: [main]
+  # The merge queue's run on each group's commit: the fast gates only, so a
+  # check that depends on the rest of main (the size ratchet, the specs index,
+  # a rename in one PR and a call in another) sees what will actually land.
+  # docs/specs/SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19.md §5 Phase 1.
+  merge_group:
+    types: [checks_requested]
 
 # Cancel a superseded run for the same PR/branch instead of letting it run to
 # completion alongside the new one. Without this, every push to a PR spawns a
@@ -131,6 +137,12 @@ jobs:
       docs_only: ${{ steps.classify.outputs.docs_only }}
       docs_index: ${{ steps.classify.outputs.docs_index }}
       version_only: ${{ steps.classify.outputs.version_only }}
+      # Set only in a merge queue (below); every other run uses the defaults
+      # each job's matrix falls back to.
+      queue: ${{ steps.classify.outputs.queue }}
+      rust_os: ${{ steps.classify.outputs.rust_os }}
+      frontend_shards: ${{ steps.classify.outputs.frontend_shards }}
+      docs_index_os: ${{ steps.classify.outputs.docs_index_os }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -159,6 +171,17 @@ jobs:
 
           # R4: only pull requests are eligible. Post-merge runs on main always
           # do the full job — low volume, and the last gate before a release.
+          # A merge queue group: the fast gates only (SPEC_CI_MERGE_QUEUE_AND_FAST_GATES
+          # §5 Phase 1): docs gates in full, `cargo check --tests` on ubuntu, tsc
+          # and the generated-file checks on one frontend leg. Tests ran on each
+          # PR and run again on the push to main.
+          if [ "${{ github.event_name }}" = "merge_group" ]; then
+            printf 'rust=true\nfrontend=true\ndocs_only=false\ndocs_index=true\nversion_only=false\nqueue=true\n' >> "$GITHUB_OUTPUT"
+            printf 'rust_os=["ubuntu-latest"]\nfrontend_shards=[1]\ndocs_index_os=["ubuntu-latest"]\n' >> "$GITHUB_OUTPUT"
+            echo "::notice::merge queue: fast gates only"
+            exit 0
+          fi
+
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             run_everything "not a pull_request (R4)"
             exit 0
@@ -201,7 +224,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        os: ${{ fromJSON(needs.changes.outputs.rust_os || '["windows-latest", "ubuntu-latest"]') }}
     runs-on: ${{ matrix.os }}
     # Both legs block, per SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21.md R2.
     # Ubuntu used to be `continue-on-error` — it spent ~6 min on every PR and
@@ -321,6 +344,9 @@ jobs:
           sudo apt-get install -y libwayland-dev libxkbcommon-dev libdbus-1-dev pkg-config libxcb1-dev
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          # A queue group's cache would only evict a PR's.
+          save-if: ${{ github.event_name != 'merge_group' }}
 
       # CEF-free crates only — see the workflow header comment for why
       # agentmux-cef is excluded. Still compiles `#[cfg(test)]` code for
@@ -355,14 +381,14 @@ jobs:
       # `cargo test -- --test-threads=1` whose srv binary alone ran 174 s
       # (docs/specs/PLAN_CI_TEST_SPEED_AND_DRY_FOLLOWUPS_2026_10_09.md step 4).
       - name: Install cargo-nextest
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-latest' && needs.changes.outputs.queue != 'true'
         uses: taiki-e/install-action@nextest
       - name: cargo nextest (CEF-free crates)
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-latest' && needs.changes.outputs.queue != 'true'
         run: cargo nextest run --profile ci -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
       # nextest does not run doctests. Only these three have a library target.
       - name: cargo test --doc (CEF-free crates)
-        if: matrix.os != 'windows-latest'
+        if: matrix.os != 'windows-latest' && needs.changes.outputs.queue != 'true'
         run: cargo test --doc -p agentmux-common -p agentmux-remote -p agentmux-procstats
 
       # frontend/types/rpc/*.ts is generated from the Rust request/response
@@ -385,7 +411,7 @@ jobs:
       # to have just run, which only the ubuntu leg does.
       # See scripts/check-rpc-bindings.sh.
       - name: RPC bindings are current
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && needs.changes.outputs.queue != 'true'
         run: bash scripts/check-rpc-bindings.sh --check-only
 
       # Three checks the gate above CANNOT make: it verifies a generated file
@@ -397,7 +423,7 @@ jobs:
       # Ubuntu only — pure node over generated files, platform-independent, so
       # a second run on Windows adds nothing but time.
       - name: RPC codegen hygiene
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && needs.changes.outputs.queue != 'true'
         run: node scripts/check-rpc-codegen-hygiene.mjs
 
       # ts-rs ignores a serde attribute item it can't parse, so the generated
@@ -407,7 +433,7 @@ jobs:
       # so cargo only replays that build's warnings; nothing recompiles.
       # See scripts/check-tsrs-serde-warnings.mjs and #4802.
       - name: ts-rs parses every serde attribute
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && needs.changes.outputs.queue != 'true'
         run: node scripts/check-tsrs-serde-warnings.mjs -- check --tests -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
 
   # macOS compile check, non-blocking for now (PLAN_MACOS_COMPILE_GATE_2026_10_09.md
@@ -420,7 +446,7 @@ jobs:
     name: cargo check --tests (macos-latest)
     needs: changes
     # Same condition as `rust`, for the same reasons (see its comment).
-    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' }}
+    if: ${{ !cancelled() && needs.changes.outputs.rust != 'false' && needs.changes.outputs.queue != 'true' }}
     runs-on: macos-latest
     continue-on-error: true
     timeout-minutes: 35
@@ -699,7 +725,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: ${{ fromJSON(needs.changes.outputs.docs_index_os || '["ubuntu-latest", "windows-latest", "macos-latest"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -731,7 +757,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: ${{ fromJSON(needs.changes.outputs.frontend_shards || '[1, 2]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -806,6 +832,7 @@ jobs:
         if: matrix.shard == 2
         run: npm run lint:theme-colors
       - name: vitest run
+        if: ${{ needs.changes.outputs.queue != 'true' }}
         run: npx vitest run --shard=${{ matrix.shard }}/2
 
   # Single context for branch protection to point at, instead of pinning
