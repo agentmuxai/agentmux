@@ -17,6 +17,7 @@ import { join } from "node:path";
 
 import { findOpenLines, OPEN_TAP, READ_OPENS } from "./agentopen.mjs";
 import { writeSettings } from "./settings.mjs";
+import { CAPTURE_SUBSCRIPTIONS, READ_WORKER, startWorkerScript, STOP_WORKER } from "./wsworker.mjs";
 import { DETACH_FRAMES, FRAME_PROBE, mergeFrameRecords, READ_FRAMES } from "./frames.mjs";
 import { DETACH_LONG_TASKS, LONG_TASK_OBSERVER, mergeLongTaskRecords, READ_LONG_TASKS } from "./longtasks.mjs";
 import { timedCall } from "./sendsegments.mjs";
@@ -395,6 +396,19 @@ export async function connect(port, home, workDir) {
             }
             return timings;
         },
+        /**
+         * Starts the worker probe (lib/wsworker.mjs): the page re-subscribes on a forced reconnect (captured), then a Web Worker opens a second
+         * socket with the page's auth key and replays those subscriptions. Returns { ok } or { error }; a reload loses it.
+         */
+        async startWsWorker(pingMs = 250) {
+            const captured = await ev(CAPTURE_SUBSCRIPTIONS);
+            if (captured?.error) return captured;
+            if (!captured?.subs) return { error: `the page re-sent no subscriptions after a reconnect (${JSON.stringify(captured)})` };
+            return await ev(startWorkerScript({ pingMs }));
+        },
+        /** What the worker has recorded so far, or null. */
+        readWsWorker: () => ev(READ_WORKER),
+        stopWsWorker: () => ev(STOP_WORKER),
         /** Starts recording the page's long tasks (main-thread tasks of 50 ms or more); a reload loses it, so call again after one. */
         async installLongTasks() {
             const installed = await ev(LONG_TASK_OBSERVER);

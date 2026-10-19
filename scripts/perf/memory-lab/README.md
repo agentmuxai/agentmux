@@ -200,6 +200,30 @@ folder: srv reads the setting at its own start, never after. That costs about 20
 value; `false`: another one; `null`: the key isn't in its config). `compare.mjs` notes when the two sides were given different settings and refuses a side whose runs were not
 all given the same. Note that `seenInAppConfig` says the setting was loaded into the app's config, not that the build uses it: the config holds any key, so a build that does not know the setting reports it too (checked on a build from before `agent:transcriptsinglecopy` existed). Whether the effect is there is for the measurement to show. `ab.mjs` takes `--a-setting` and `--b-setting` for the two sides, and `--setting` after the lone `--` for both.
 
+## Where does a slow answer wait? (`--ws-worker`)
+
+When a send's answer reaches the page's JS seconds after srv wrote it (`toArrival` in `result.sends`), it can have waited in
+srv's queue for that connection, on the socket, or for the page's main thread. From inside the page the last two look alike.
+`--ws-worker` adds a probe that doesn't ride the main thread: a Web Worker (a Blob worker started from the page, so it has the
+page's origin and reads its auth key) opens a second websocket, replays the 80-odd event subscriptions the page re-sends when
+its own socket is closed and reopened, counts what arrives per 100 ms, and every 250 ms makes a cheap RPC (an `eventsub` for an
+event nobody publishes) and times the answer on that socket.
+
+`result.wsWorker` has both streams' totals, the worker's RPC latency, and for the slow sends (5 s or more, else the 8 slowest of
+1 s or more) how far the page's stream was behind the worker's in the send's window and the worker's slowest RPC then. Read it
+as: a worker RPC of a few ms while the page's stream is seconds behind says srv answers promptly and the lateness is on the
+page's side; a slow worker RPC says srv's egress or the socket. The lag compares cumulative message counts of two streams that
+differ by a few messages (the page also receives its own RPC answers), so it is good to about 100 ms. The second subscriber makes
+srv do a little more work: use it to find a cause, not for a figure to compare between builds. It needs the window to stay as it
+is (not with `--recycle-after`). The forced reconnect that captures the subscriptions can take seconds on a window with many
+agents just created (srv completes the close handshake slowly); the lab waits up to a minute for it.
+
+`sends[].eventAgeMs` (how old the message event was when the page's handler ran) is always about 0: the browser creates the
+event just before dispatching it, so it cannot show queueing. Use `respArrival` and `toArrival`.
+
+While opening agents (`--open-agents`), the page's slow frames during the opens are reported apart from the workload's, in
+`result.opens.frames` (the scripts that filled them, with their bundle positions, and the forced layout) and a summary line.
+
 ## Opening an agent again
 
 `--open-agents N` closes the first N agents' panes after everything else has been measured, then opens each again with the
