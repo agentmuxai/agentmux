@@ -35,6 +35,7 @@ pub mod frames;
 pub mod page_state;
 pub mod resolver;
 pub mod routes;
+pub mod secret;
 pub mod shortcuts;
 pub mod snapshot;
 pub mod types;

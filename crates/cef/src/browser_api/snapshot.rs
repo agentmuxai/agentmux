@@ -14,7 +14,9 @@
 use std::collections::HashMap;
 
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{json, Value};
+
+pub use super::secret::{is_secret, secret_reason};
 
 /// Snapshot text is capped so one page can't flood an agent's context.
 pub const MAX_SNAPSHOT_BYTES: usize = 40_000;
@@ -84,96 +86,13 @@ impl DomFacts {
         self
     }
 
-    fn attr(&self, name: &str) -> &str {
+    pub(super) fn attr(&self, name: &str) -> &str {
         self.attrs.get(name).map(String::as_str).unwrap_or("")
     }
 
     pub fn is_file_input(&self) -> bool {
         self.local_name == "input" && self.attr("type").eq_ignore_ascii_case("file")
     }
-}
-
-/// Split a field name or label into lower-case words at spaces, punctuation,
-/// camelCase and letter/digit boundaries: `taxpayerTIN` → `taxpayer`, `tin`;
-/// `SSNInput` → `ssn`, `input`; `last4ssn` → `last`, `4`, `ssn`.
-fn words_of(text: &str) -> Vec<String> {
-    let chars: Vec<char> = text.chars().collect();
-    let mut words = Vec::new();
-    let mut cur = String::new();
-    for (i, &c) in chars.iter().enumerate() {
-        if !c.is_alphanumeric() {
-            if !cur.is_empty() {
-                words.push(std::mem::take(&mut cur).to_lowercase());
-            }
-            continue;
-        }
-        if let Some(prev) = cur.chars().last() {
-            let next_is_lower = chars.get(i + 1).is_some_and(|n| n.is_lowercase());
-            let boundary = (prev.is_lowercase() && c.is_uppercase())
-                || (prev.is_uppercase() && c.is_uppercase() && next_is_lower)
-                || (prev.is_alphabetic() != c.is_alphabetic());
-            if boundary {
-                words.push(std::mem::take(&mut cur).to_lowercase());
-            }
-        }
-        cur.push(c);
-    }
-    if !cur.is_empty() {
-        words.push(cur.to_lowercase());
-    }
-    words
-}
-
-/// Does any of these names a person's taxpayer identification number: an SSN,
-/// ITIN or TIN? A guard for mistakes and page tricks, so a false alarm (a
-/// field about tin cans) only means the user fills it. A company's EIN isn't
-/// one: it is printed on public filings.
-fn names_a_tax_id(texts: &[&str]) -> bool {
-    texts.iter().any(|t| {
-        let words = words_of(t);
-        let squashed: String = words.concat();
-        words.iter().any(|w| w == "ssn" || w == "itin" || w == "tin")
-            || squashed.contains("socialsecurity")
-            || squashed.contains("taxpayerid")
-    })
-}
-
-/// A field the agent must never type into or read: passwords, one-time codes,
-/// card details and taxpayer identification numbers (spec §5.1). A guard against mistakes and page tricks,
-/// not a sandbox.
-pub fn is_secret(f: &DomFacts) -> bool {
-    if f.local_name == "input" && f.attr("type").eq_ignore_ascii_case("password") {
-        return true;
-    }
-    let autocomplete = f.attr("autocomplete").to_ascii_lowercase();
-    if autocomplete.split_whitespace().any(|t| {
-        t == "current-password" || t == "new-password" || t == "one-time-code" || t.starts_with("cc-")
-    }) {
-        return true;
-    }
-    // A person's tax identification number: named by the markup or by what a
-    // person reads next to the field.
-    if names_a_tax_id(&[f.attr("name"), f.attr("id"), f.attr("aria-label"), f.attr("placeholder"), &f.label]) {
-        return true;
-    }
-    // Named like one: password, passcode, otp, one-time code, cvc/cvv, card number.
-    let names = [f.attr("name"), f.attr("id")].join(" ").to_ascii_lowercase();
-    let squashed: String = names.chars().filter(|c| c.is_ascii_alphanumeric() || *c == ' ').collect();
-    squashed.split_whitespace().any(|w| {
-        w.contains("password")
-            || w.contains("passwd")
-            || w.contains("passcode")
-            || w == "otp"
-            || w.starts_with("otp")
-            || w.contains("onetimecode")
-            || w.contains("onetimepassword")
-            // card_cvc, payment-cvv and card[cvc] squash to one word.
-            || w.contains("cvc")
-            || w.contains("cvv")
-            || w.contains("cardnumber")
-            || w.contains("ccnumber")
-            || w.contains("securitycode")
-    }) || names.contains("one-time") || names.contains("one_time") || names.contains("card-number") || names.contains("card_number")
 }
 
 /// The limits a field puts on what can be typed, as the browser enforces
@@ -319,6 +238,66 @@ pub fn subtree(nodes: &[Value], backend_id: i64) -> Vec<&Value> {
         }
     }
     out
+}
+
+/// A checkbox or radio input the page hides (`display: none`) behind a
+/// `<label>` drawn as the box, a common styling pattern. The accessibility
+/// tree leaves such an input out, so it would get no reference.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HiddenChoice {
+    pub input_backend: i64,
+    pub label_backend: i64,
+    pub radio: bool,
+    /// The label's text, or the input's own aria-label.
+    pub name: String,
+    pub checked: bool,
+    pub disabled: bool,
+}
+
+/// Add each hidden choice to `nodes` as a checkbox or radio node, named by its
+/// label, carrying the input's backend id, first inside its label's node (or
+/// last in the root when the label isn't in the tree). It then gets a line and
+/// a reference like any checkbox; `check` and `click` reach the input through
+/// its label (`act.rs`'s `CLICK_POINT`).
+pub fn add_hidden_choices(nodes: &mut Vec<Value>, choices: &[HiddenChoice]) {
+    for (i, c) in choices.iter().enumerate() {
+        let id = format!("agentmux-hidden-choice-{i}");
+        let holder = nodes
+            .iter()
+            .position(|n| n.get("backendDOMNodeId").and_then(|v| v.as_i64()) == Some(c.label_backend));
+        let (holder, first) = match holder {
+            Some(h) => (h, true),
+            None => match nodes.iter().position(|n| n.get("parentId").is_none()) {
+                Some(root) => (root, false),
+                None => continue,
+            },
+        };
+        let parent = nodes[holder].get("nodeId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let kids = nodes[holder]
+            .as_object_mut()
+            .map(|o| o.entry("childIds").or_insert_with(|| json!([])));
+        if let Some(Value::Array(kids)) = kids {
+            if first {
+                kids.insert(0, json!(id));
+            } else {
+                kids.push(json!(id));
+            }
+        }
+        let mut properties = vec![json!({ "name": "checked", "value": { "type": "tristate", "value": if c.checked { "true" } else { "false" } } })];
+        if c.disabled {
+            properties.push(json!({ "name": "disabled", "value": { "type": "boolean", "value": true } }));
+        }
+        nodes.push(json!({
+            "nodeId": id,
+            "parentId": parent,
+            "ignored": false,
+            "role": { "type": "role", "value": if c.radio { "radio" } else { "checkbox" } },
+            "name": { "type": "computedString", "value": c.name },
+            "properties": properties,
+            "backendDOMNodeId": c.input_backend,
+            "childIds": [],
+        }));
+    }
 }
 
 /// Render `Accessibility.getFullAXTree`'s `nodes` as an indented list, one
@@ -504,7 +483,7 @@ fn line_for(
     frames: &[FrameTree],
 ) -> String {
     let fact = backend.and_then(|b| facts.get(&b));
-    let secret = fact.is_some_and(is_secret);
+    let secret = fact.and_then(secret_reason);
     let mut line = format!("- {}", shown_role(role, fact));
     if !name.is_empty() {
         line.push(' ');
@@ -556,8 +535,8 @@ fn line_for(
             line.push_str(&limits_of(f));
         }
     }
-    if secret {
-        line.push_str(" [secret: ask the user to fill this]");
+    if let Some(why) = secret {
+        line.push_str(&format!(" [secret: ask the user to fill this; {why}]"));
     } else if VALUE_ROLES.contains(&role) {
         match (fact, value_text(node)) {
             (Some(_), Some(v)) => line.push_str(&format!(" value={}", quote(&v))),
@@ -911,63 +890,52 @@ mod tests {
     }
 
     #[test]
-    fn secret_fields_are_recognized_by_type_autocomplete_and_name() {
-        let f = |tag: &str, attrs: &[(&str, &str)]| DomFacts {
-            local_name: tag.into(),
-            attrs: attrs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
-            label: String::new(),
+    fn a_checkbox_hidden_behind_its_label_gets_a_line_and_a_reference() {
+        // <label><input type=checkbox style="display:none"><span class=cr></span><b>Short Form Good Standing</b></label>
+        let mut nodes = vec![
+            n("1", None, "RootWebArea", "", Some(1), &["2"]),
+            n("2", Some("1"), "cell", "Short Form Good Standing (Check if Additional Language Required)", Some(2), &["3", "5"]),
+            n("3", Some("2"), "LabelText", "", Some(20), &["4"]),
+            n("4", Some("3"), "StaticText", "Short Form Good Standing", None, &[]),
+            n("5", Some("2"), "link", "", Some(30), &[]),
+        ];
+        let choice = |label_backend| HiddenChoice {
+            input_backend: 21,
+            label_backend,
+            radio: false,
+            name: "Short Form Good Standing".into(),
+            checked: false,
+            disabled: false,
         };
-        assert!(is_secret(&f("input", &[("type", "password")])));
-        assert!(is_secret(&f("input", &[("autocomplete", "one-time-code")])));
-        assert!(is_secret(&f("input", &[("autocomplete", "section-pay cc-number")])));
-        assert!(is_secret(&f("input", &[("name", "user_password")])));
-        assert!(is_secret(&f("input", &[("id", "otp-input")])));
-        assert!(is_secret(&f("input", &[("name", "card-number")])));
-        assert!(is_secret(&f("input", &[("name", "cvc")])));
-        assert!(is_secret(&f("input", &[("name", "card_cvc")])));
-        assert!(is_secret(&f("input", &[("name", "payment-cvv")])));
-        assert!(is_secret(&f("input", &[("name", "card[cvc]")])));
-        assert!(!is_secret(&f("input", &[("type", "email"), ("name", "email")])));
-        assert!(!is_secret(&f("input", &[("name", "detection_name"), ("autocomplete", "off")])));
-        assert!(!is_secret(&f("textarea", &[("name", "comments")])));
+        add_hidden_choices(&mut nodes, &[choice(20)]);
+        let s = render(&nodes, &HashMap::new(), None, "");
+        assert!(s.text.contains("  - checkbox \"Short Form Good Standing\" [ref=e1] [checked=false]\n"), "{}", s.text);
+        assert_eq!(s.refs[0], ("e1".to_string(), 21), "the reference is the input's");
+        // The checkbox comes before the help link beside it.
+        assert!(s.text.find("checkbox").unwrap() < s.text.find("- link").unwrap(), "{}", s.text);
+
+        // A label missing from the tree: the checkbox still gets a line, at the end.
+        let mut nodes = vec![n("1", None, "RootWebArea", "", Some(1), &["2"]), n("2", Some("1"), "button", "Next", Some(2), &[])];
+        add_hidden_choices(&mut nodes, &[HiddenChoice { radio: true, checked: true, ..choice(99) }]);
+        let s = render(&nodes, &HashMap::new(), None, "");
+        let lines: Vec<&str> = s.text.lines().collect();
+        assert_eq!(lines.last().copied(), Some("- radio \"Short Form Good Standing\" [ref=e2] [checked]"), "{}", s.text);
     }
 
     #[test]
-    fn taxpayer_identification_numbers_are_secret_fields() {
-        let f = |attrs: &[(&str, &str)], label: &str| DomFacts {
-            local_name: "input".into(),
-            attrs: attrs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
-            label: label.into(),
-        };
-        // By what a person reads next to the field, by markup, in any casing.
-        assert!(is_secret(&f(&[("type", "text")], "Taxpayer's TIN")));
-        assert!(is_secret(&f(&[], "Social Security Number (SSN)")));
-        assert!(is_secret(&f(&[], "Taxpayer identification number")));
-        assert!(is_secret(&f(&[("name", "taxpayerTIN")], "")));
-        assert!(is_secret(&f(&[("id", "payer_tin")], "")));
-        assert!(is_secret(&f(&[("name", "SSNInput")], "")));
-        assert!(is_secret(&f(&[("name", "last4ssn")], "")));
-        assert!(is_secret(&f(&[("name", "ssn-1")], "")));
-        assert!(is_secret(&f(&[("aria-label", "ITIN")], "")));
-        assert!(is_secret(&f(&[("placeholder", "Enter your SSN")], "")));
-        assert!(is_secret(&f(&[("name", "socialSecurityNumber")], "")));
-        assert!(is_secret(&f(&[("name", "taxpayer-id")], "")));
-        // Words that merely contain the letters, and a company's EIN, are not.
-        assert!(!is_secret(&f(&[("name", "setting")], "Settings")));
-        assert!(!is_secret(&f(&[("name", "routing")], "Routing preference")));
-        assert!(!is_secret(&f(&[("name", "destination")], "Destination")));
-        assert!(!is_secret(&f(&[("name", "ein")], "Employer identification number (EIN)")));
-        assert!(!is_secret(&f(&[("name", "street")], "Street address")));
-    }
-
-    #[test]
-    fn words_split_at_case_digit_and_punctuation_boundaries() {
-        assert_eq!(words_of("taxpayerTIN"), ["taxpayer", "tin"]);
-        assert_eq!(words_of("SSNInput"), ["ssn", "input"]);
-        assert_eq!(words_of("last4ssn"), ["last", "4", "ssn"]);
-        assert_eq!(words_of("Taxpayer's TIN"), ["taxpayer", "s", "tin"]);
-        assert_eq!(words_of("card[cvc]"), ["card", "cvc"]);
-        assert!(words_of("").is_empty());
+    fn a_secret_mark_says_why() {
+        let nodes = vec![
+            n("root", None, "RootWebArea", "", None, &["pw"]),
+            n("pw", Some("root"), "textbox", "Your SSN", Some(7), &[]),
+        ];
+        let mut facts = HashMap::new();
+        facts.insert(7, DomFacts { local_name: "input".into(), attrs: HashMap::new(), label: "Your SSN".into() });
+        let s = render(&nodes, &facts, None, "");
+        assert!(
+            s.text.contains("[secret: ask the user to fill this; its name or label says Social Security or taxpayer ID number]"),
+            "{}",
+            s.text
+        );
     }
 
     #[test]
@@ -986,7 +954,7 @@ mod tests {
             DomFacts { local_name: "input".into(), attrs: HashMap::new(), label: "Taxpayer's TIN".into() },
         );
         let s = render(&nodes, &facts, None, "");
-        assert!(s.text.contains("[secret: ask the user to fill this]"), "{}", s.text);
+        assert!(s.text.contains("[secret: ask the user to fill this;"), "{}", s.text);
         assert!(!s.text.contains("123456789"), "{}", s.text);
     }
 
@@ -1044,7 +1012,7 @@ mod tests {
     fn a_secret_field_inside_a_frame_is_marked_and_its_value_hidden() {
         let (top, frame) = frame_page();
         let s = render_with_frames(&top, &HashMap::new(), None, "", &[frame]);
-        assert!(s.text.contains("[secret: ask the user to fill this]"), "{}", s.text);
+        assert!(s.text.contains("[secret: ask the user to fill this;"), "{}", s.text);
         assert!(!s.text.contains("123456789"), "{}", s.text);
     }
 
@@ -1205,7 +1173,7 @@ mod tests {
     fn find_masks_secret_fields_like_a_snapshot() {
         let (nodes, f) = find_page();
         let pw = find(&nodes, &f, &q(None, "password", false), "n1");
-        assert!(pw.text.contains("[secret: ask the user to fill this]"), "{}", pw.text);
+        assert!(pw.text.contains("[secret: ask the user to fill this;"), "{}", pw.text);
         assert!(!pw.text.contains("hunter2"), "{}", pw.text);
         // A field whose markup wasn't read keeps its value hidden.
         let unread = find(&nodes, &HashMap::new(), &q(None, "title", false), "n1");

@@ -484,6 +484,8 @@ pub async fn read_frames(root: &mut CdpSession, describes_left: &mut usize) -> (
         match on.call("Accessibility.getFullAXTree", params).await {
             Ok(t) => {
                 tree.nodes = t.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
+                let hidden = super::act::hidden_choices(&mut on, Some(fl.raw.id.as_str())).await;
+                super::snapshot::add_hidden_choices(&mut tree.nodes, &hidden);
                 for (backend, name) in nodes_needing_facts(&tree.nodes) {
                     if *describes_left == 0 {
                         break;
