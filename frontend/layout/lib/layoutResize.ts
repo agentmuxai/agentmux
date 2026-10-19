@@ -121,14 +121,21 @@ function floorOf(floors: Floors, nodeId: string): number {
  * would leave a browser beside a terminal in an equal row well under its own
  * floor.) Across `axis`: the largest member's. Minimized members take no room.
  */
-export function minExtentPx(node: LayoutNode, axis: FlexDirection, isBrowser: (blockId: string) => boolean): number {
+export function minExtentPx(
+    node: LayoutNode,
+    axis: FlexDirection,
+    isBrowser: (blockId: string) => boolean,
+    gapPx: number = DefaultGapSizePx
+): number {
     const kids = (node.children ?? []).filter((c) => !isEffectivelyMinimized(c));
     if (kids.length === 0) {
         const blocks = node.data?.blockStack?.length ? node.data.blockStack : node.data?.blockId ? [node.data.blockId] : [];
         const browser = axis === FlexDirection.Row && blocks.some(isBrowser);
-        return browser ? Math.max(MinNodeSizePx, MinBrowserPaneWidthPx) : MinNodeSizePx;
+        // A tile is drawn its allocation less the gap (layoutNodeModels.ts), so a
+        // browser pane needs the gap on top of its 250px to be 250px wide.
+        return browser ? Math.max(MinNodeSizePx, MinBrowserPaneWidthPx + gapPx) : MinNodeSizePx;
     }
-    const floors = kids.map((c) => minExtentPx(c, axis, isBrowser));
+    const floors = kids.map((c) => minExtentPx(c, axis, isBrowser, gapPx));
     if (node.flexDirection !== axis) return Math.max(...floors);
     const total = kids.reduce((sum, c) => sum + c.size, 0);
     const byShare = kids.map((c, i) => (c.size > 0 && total > 0 ? (floors[i] * total) / c.size : floors[i]));
@@ -378,7 +385,7 @@ export function onResizeMove(
             const floors = new Map(
                 (parentNode.children ?? []).map((child) => [
                     child.id,
-                    minExtentPx(child, axis, isBrowserBlock) * pixelToSizeRatio,
+                    minExtentPx(child, axis, isBrowserBlock, model.gapSizePx()) * pixelToSizeRatio,
                 ])
             );
             model.resizeContext = {

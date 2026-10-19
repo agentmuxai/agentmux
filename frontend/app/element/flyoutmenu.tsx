@@ -52,6 +52,9 @@ function styleToString(pos: MenuPositionResult): string {
 // levels, so a still-open descendant closes naturally via Solid unmounting
 // it when its own ancestor's <Show> flips off, not through this registry.
 
+// Where a menu is until its position is computed: in the DOM, not visible.
+const HIDDEN_FLOATING_STYLE = "position:absolute;left:0px;top:0px;visibility:hidden";
+
 type MenuProps = {
     items: MenuItem[];
     className?: string;
@@ -92,9 +95,7 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
     const [subMenuPosition, setSubMenuPosition] = createSignal<SubMenuPositionMap>({});
 
     const [isOpen, setIsOpen] = createSignal(false);
-    const [floatingStyle, setFloatingStyle] = createSignal(
-        "position:absolute;left:0px;top:0px;visibility:hidden",
-    );
+    const [floatingStyle, setFloatingStyle] = createSignal(HIDDEN_FLOATING_STYLE);
 
     let referenceEl: HTMLElement | null = null;
     let floatingEl: HTMLElement | null = null;
@@ -107,6 +108,9 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
             cleanupAutoUpdate?.();
             cleanupAutoUpdate = null;
             floatingEl = null;
+            // Reopened later, it starts hidden until its position is computed,
+            // not at wherever it was last shown.
+            setFloatingStyle(HIDDEN_FLOATING_STYLE);
             setVisibleSubMenus({});
             setHoveredItems([]);
             setSubMenuPosition({});

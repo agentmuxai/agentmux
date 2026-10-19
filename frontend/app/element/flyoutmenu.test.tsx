@@ -147,4 +147,25 @@ describe("FlyoutMenu", () => {
         expect(vi.mocked(computeMenuPosition).mock.calls.length).toBe(afterClose);
         vi.unstubAllGlobals();
     });
+
+    it("is hidden again when reopened, until its position is recomputed", async () => {
+        const { autoUpdate } = await import("@floating-ui/dom");
+        // The first open computes its position at once; the reopen waits for it.
+        vi.mocked(autoUpdate).mockImplementationOnce(((_r: unknown, _f: unknown, update: () => void) => {
+            update();
+            return () => {};
+        }) as never);
+        render(() => (
+            <FlyoutMenu items={[{ label: "Plain" }]}>
+                <button type="button">Open menu</button>
+            </FlyoutMenu>
+        ));
+        open();
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        await new Promise((r) => setTimeout(r, 0));
+        expect(document.querySelector<HTMLElement>(".menu")!.style.visibility).not.toBe("hidden");
+        fireEvent.mouseDown(document.body);
+        open();
+        expect(document.querySelector<HTMLElement>(".menu")!.style.visibility).toBe("hidden");
+    });
 });

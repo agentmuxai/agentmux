@@ -5,8 +5,17 @@
 // (SPEC_BROWSER_PANE_THIN_BAR_AND_MENUS_IN_PANE_2026_10_18.md §5.5).
 
 import { assert, test } from "vitest";
-import { computeGroupResizeSizes, MinBrowserPaneWidthPx, minExtentPx, MinNodeSizePx } from "../lib/layoutResize";
+import {
+    computeGroupResizeSizes,
+    DefaultGapSizePx,
+    MinBrowserPaneWidthPx,
+    minExtentPx,
+    MinNodeSizePx,
+} from "../lib/layoutResize";
 import { FlexDirection, type LayoutNode } from "../lib/types";
+
+// A tile is drawn its allocation less the gap, so a browser pane is allocated 250px plus the gap.
+const BROWSER = MinBrowserPaneWidthPx + DefaultGapSizePx;
 
 const browsers = new Set(["web", "web2"]);
 const isBrowser = (id: string) => browsers.has(id);
@@ -16,7 +25,12 @@ function leaf(id: string, blockId: string, extra: Partial<LayoutNode> = {}): Lay
 }
 
 test("a browser pane's floor is 250px across and the usual floor down", () => {
-    assert.equal(minExtentPx(leaf("a", "web"), FlexDirection.Row, isBrowser), MinBrowserPaneWidthPx);
+    assert.equal(minExtentPx(leaf("a", "web"), FlexDirection.Row, isBrowser), BROWSER);
+    assert.equal(
+        minExtentPx(leaf("a", "web"), FlexDirection.Row, isBrowser, 20),
+        MinBrowserPaneWidthPx + 20,
+        "the configured gap, up to 20px"
+    );
     assert.equal(minExtentPx(leaf("a", "web"), FlexDirection.Column, isBrowser), MinNodeSizePx);
     assert.equal(minExtentPx(leaf("a", "term"), FlexDirection.Row, isBrowser), MinNodeSizePx);
 });
@@ -25,7 +39,7 @@ test("a pane counts as a browser when any of its in-pane tabs is one", () => {
     const stacked = leaf("a", "term", {
         data: { blockId: "term", blockStack: ["term", "web"], activeBlockId: "term" },
     });
-    assert.equal(minExtentPx(stacked, FlexDirection.Row, isBrowser), MinBrowserPaneWidthPx);
+    assert.equal(minExtentPx(stacked, FlexDirection.Row, isBrowser), BROWSER);
 });
 
 test("a group's floor follows its members' weights along its own direction and takes the widest across it", () => {
@@ -37,13 +51,13 @@ test("a group's floor follows its members' weights along its own direction and t
     };
     // Equal weights: the browser gets half the group, so the group needs twice its floor
     // (the terminal's 2 x 128 is less). Adding the floors up (381) left it at about 190.
-    assert.equal(minExtentPx(row, FlexDirection.Row, isBrowser), 2 * MinBrowserPaneWidthPx);
+    assert.equal(minExtentPx(row, FlexDirection.Row, isBrowser), 2 * BROWSER);
     // A 3:1 row: the browser holds 3/4 of the group, the terminal 1/4 (needs 4 x 128).
     const skewed: LayoutNode = { ...row, children: [leaf("a", "web", { size: 3 }), leaf("b", "term", { size: 1 })] };
-    // The browser needs 250 x 4/3 = 333; the terminal needs 4 x 128 = 512: the terminal decides.
+    // The browser needs 253 x 4/3 = 337; the terminal needs 4 x 128 = 512: the terminal decides.
     assert.equal(minExtentPx(skewed, FlexDirection.Row, isBrowser), 4 * MinNodeSizePx);
     const column: LayoutNode = { ...row, id: "c", flexDirection: FlexDirection.Column };
-    assert.equal(minExtentPx(column, FlexDirection.Row, isBrowser), MinBrowserPaneWidthPx);
+    assert.equal(minExtentPx(column, FlexDirection.Row, isBrowser), BROWSER);
     assert.equal(minExtentPx(column, FlexDirection.Column, isBrowser), 2 * MinNodeSizePx);
 });
 
@@ -62,7 +76,7 @@ test("a nested row inside a column keeps its browser at 250 when the column is a
     };
     const floor = minExtentPx(outer, FlexDirection.Row, isBrowser);
     // At that width the browser is half the inner row: exactly its floor.
-    assert.isAtLeast(floor / 2, MinBrowserPaneWidthPx);
+    assert.isAtLeast(floor / 2, BROWSER);
 });
 
 test("a minimized member takes no room in its group's floor", () => {
