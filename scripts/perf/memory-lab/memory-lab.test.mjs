@@ -7,7 +7,7 @@
 // needs a build and isn't tested here.
 
 import { describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
@@ -15,6 +15,8 @@ import { mismatch } from "./compare.mjs";
 import { evaluate, report } from "./gate.mjs";
 import { driftWarning, portableCommit, srvTarget, withReplacedSrv } from "./lib/srv.mjs";
 import { mergeLongTaskRecords, slowSendsAgainstLongTasks, summariseLongTasks } from "./lib/longtasks.mjs";
+import { parseDiskLoad, sleepNeededMs, startDiskLoad } from "./lib/diskload.mjs";
+import { volumeOf } from "./lib/volume.mjs";
 import { segmentsOf, slowSendBreakdown, timedCall } from "./lib/sendsegments.mjs";
 import { mergeStoreLock, parseStoreLock } from "./lib/storelock.mjs";
 import { CpuLedger, cpuBetween, writtenBetween } from "./lib/cpu.mjs";
@@ -129,6 +131,11 @@ describe("memory lab summary", () => {
         expect(mismatch(did(true), did(true))).toBeNull();
         expect(mismatch(did(false, "a"), did(false, "b"))).toBeNull();
         expect(mismatch({ ...same }, { ...same, recycleAfter: 0, recycleCommand: null })).toBeNull();
+        const load = (rateMBps, capGB) => ({ ...same, diskLoad: { rateMBps, capGB } });
+        expect(mismatch(load(50, 20), load(50, 20))).toBeNull();
+        expect(mismatch(load(50, 20), same)).toMatch(/different background disk loads/);
+        expect(mismatch(load(50, 20), load(100, 20))).toMatch(/different background disk loads/);
+        expect(mismatch(load(50, 20), load(50, 5))).toMatch(/capped at 20 GB vs .*capped at 5 GB/);
         expect(mismatch({ ...same, holdMinutes: 10 }, { ...same, holdMinutes: 0 })).toMatch(/different idle holds/);
         expect(mismatch({ ...same, holdMinutes: 10 }, { ...same, holdMinutes: 10 })).toBeNull();
         expect(mismatch({ ...run, gapSeconds: 15, platform: "win32" }, { ...run, gapSeconds: 15, platform: "linux" })).toMatch(/different operating systems/);
@@ -704,6 +711,87 @@ describe("the page's long tasks", () => {
         ];
         expect(slowSendsAgainstLongTasks(sends, raw)).toEqual({ slowSends: 2, overlappingLongTask: 1 });
         expect(slowSendsAgainstLongTasks(sends, null)).toEqual({ slowSends: 2, overlappingLongTask: 0 });
+    });
+});
+
+describe("the background disk load", () => {
+    it("reads the requested rate", () => {
+        expect(parseDiskLoad(undefined)).toBeNull();
+        expect(parseDiskLoad("0")).toBeNull();
+        expect(parseDiskLoad("50")).toBe(50);
+        expect(parseDiskLoad("2.5")).toBe(2.5);
+        expect(parseDiskLoad("max")).toBe(Infinity);
+        expect(parseDiskLoad("MAX")).toBe(Infinity);
+        expect(() => parseDiskLoad("fast")).toThrow(/positive number/);
+        expect(() => parseDiskLoad("-5")).toThrow(/positive number/);
+    });
+
+    it("reports a writer that died on its own, and one that reached its cap", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "lab-diskload-"));
+        try {
+            const dying = startDiskLoad({ dir, mbps: 5 });
+            await new Promise((r) => setTimeout(r, 800));
+            process.kill(dying.pid, "SIGKILL");
+            await new Promise((r) => setTimeout(r, 800));
+            expect(dying.diedEarly()).toMatch(/exited on its own/);
+            const report = await dying.stop();
+            expect(report.diedEarly).toMatch(/volume may be full/);
+
+            const capped = startDiskLoad({ dir, mbps: Infinity, capGB: 0.02 }); // 20 MB
+            await new Promise((r) => setTimeout(r, 2500));
+            const done = await capped.stop();
+            expect(done.capReached).toBe(true);
+            expect(done.diedEarly).toBeUndefined();
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    }, 30000);
+
+    it("stops once and returns the same report when asked again", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "lab-diskload-"));
+        try {
+            const load = startDiskLoad({ dir, mbps: 5 });
+            const first = await load.stop();
+            expect(await load.stop()).toBe(first);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    }, 20000);
+
+    it("sleeps to hold the rate, and not at all when behind or unthrottled", () => {
+        // 100 MiB written after 1 s at 50 MB/s is a second ahead of schedule
+        expect(sleepNeededMs(100 * 1048576, 1000, 50)).toBe(1000);
+        expect(sleepNeededMs(10 * 1048576, 1000, 50)).toBe(0); // behind
+        expect(sleepNeededMs(1e12, 1, Infinity)).toBe(0);
+    });
+
+    it("writes to the folder while it runs, reports what it wrote and cleans up", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "lab-diskload-"));
+        try {
+            const load = startDiskLoad({ dir, mbps: 20 });
+            await new Promise((r) => setTimeout(r, 3500));
+            const result = await load.stop();
+            expect(result.rateMBps).toBe(20);
+            expect(result.writtenMB).toBeGreaterThan(8);
+            expect(result.writtenMB).toBeLessThan(400);
+            expect(existsSync(join(dir, "diskload"))).toBe(false);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    }, 20000);
+});
+
+describe("the volume under the data folder", () => {
+    it("reports total, free and percent free", () => {
+        const v = volumeOf(tmpdir());
+        expect(v.totalGB).toBeGreaterThan(0);
+        expect(v.freeGB).toBeLessThanOrEqual(v.totalGB);
+        expect(v.freePct).toBeGreaterThanOrEqual(0);
+        expect(v.freePct).toBeLessThanOrEqual(100);
+    });
+
+    it("says nothing for a path that does not exist", () => {
+        expect(volumeOf(join(tmpdir(), "no-such-folder-for-the-lab", "x"))).toBeNull();
     });
 });
 
