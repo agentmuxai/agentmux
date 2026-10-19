@@ -107,4 +107,39 @@ describe("FlyoutMenu", () => {
         expect(screen.getByText("B").closest(".menu-item")).toBe(rowB);
         expect(checkOf(screen.getByText("A").closest(".menu-item")!)).toBe(false);
     });
+
+    it("re-positions when the container it is kept inside resizes, and stops watching when it closes", async () => {
+        const observed: Element[] = [];
+        const disconnect = vi.fn();
+        let fire: () => void = () => {};
+        vi.stubGlobal(
+            "ResizeObserver",
+            class {
+                constructor(cb: () => void) {
+                    fire = cb;
+                }
+                observe(el: Element) {
+                    observed.push(el);
+                }
+                disconnect = disconnect;
+            }
+        );
+        const { computeMenuPosition } = await import("@/app/util/menu-position");
+        const pane = document.createElement("div");
+        render(() => (
+            <FlyoutMenu items={[{ label: "Plain" }]} containWithin={() => pane}>
+                <button type="button">Open menu</button>
+            </FlyoutMenu>
+        ));
+        open();
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        expect(observed).toEqual([pane]);
+        const before = vi.mocked(computeMenuPosition).mock.calls.length;
+        fire();
+        expect(vi.mocked(computeMenuPosition).mock.calls.length).toBeGreaterThan(before);
+        fireEvent.mouseDown(document.body);
+        cleanup();
+        expect(disconnect).toHaveBeenCalled();
+        vi.unstubAllGlobals();
+    });
 });

@@ -140,7 +140,17 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
         requestAnimationFrame(() => {
             if (!(referenceEl instanceof Element) || !(floatingEl instanceof Element)) return;
             cleanupAutoUpdate?.();
-            cleanupAutoUpdate = autoUpdate(referenceEl, floatingEl, updatePosition);
+            const stopAutoUpdate = autoUpdate(referenceEl, floatingEl, updatePosition);
+            // A menu kept inside a container must follow the container's own
+            // resize (a pane's splitter dragged under an open menu), which
+            // autoUpdate doesn't watch: it sees only the anchor and the menu.
+            const container = props.containWithin?.();
+            const observer = container && typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => void updatePosition()) : undefined;
+            if (container) observer?.observe(container);
+            cleanupAutoUpdate = () => {
+                stopAutoUpdate();
+                observer?.disconnect();
+            };
             // Dev-only paintable-area guard (spec §6.1); gated so it is
             // zero-cost in release builds.
             assertMenuInPaintableArea(el, "flyout-menu");
