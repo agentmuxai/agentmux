@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const openTail = vi.hoisted(() => vi.fn());
 const scrolledUp = vi.hoisted(() => ({ value: false }));
-const paneHidden = vi.hoisted(() => ({ value: false }));
+const fillPaused = vi.hoisted(() => ({ value: false }));
 
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
@@ -72,7 +72,7 @@ const mount = (over: Record<string, unknown> = {}) => {
             definitionId: "def-claude",
             log: () => {},
             transcriptSettle: { settle: (o: any) => settled.push(o) } as any,
-            paneHidden: () => paneHidden.value,
+            fillPaused: () => fillPaused.value,
             ...over,
         });
     });
@@ -87,7 +87,7 @@ beforeEach(async () => {
     vi.clearAllMocks();
     openTail.mockReset();
     scrolledUp.value = false;
-    paneHidden.value = false;
+    fillPaused.value = false;
     __resetOpenTailForTests();
     ({ RpcApi } = await import("@/app/store/rpc-api"));
     // The user is busy, so the background fill waits unless a test releases it.
@@ -336,16 +336,16 @@ describe("the rest of the restore window", () => {
         expect(hook().historyOffset()).toBe(FLOOR_END - 3);
     });
 
-    it("waits while the pane is hidden", async () => {
+    it("waits while the pane is hidden or the reader is scrolled off the bottom, and resumes after", async () => {
         openTail.mockResolvedValue(tailOf(3, FLOOR_END));
         vi.mocked(RpcApi.BlockfileReadRangeCommand).mockImplementation(async () => page(2));
-        paneHidden.value = true;
+        fillPaused.value = true;
         const { hook } = mount();
         await flush();
         release();
         await sleep(600);
         expect(RpcApi.BlockfileReadRangeCommand).not.toHaveBeenCalled();
-        paneHidden.value = false;
+        fillPaused.value = false;
         await vi.waitFor(() => expect(hook().historyOffset()).toBeLessThan(FLOOR_END - 3), { timeout: 4000 });
     });
 

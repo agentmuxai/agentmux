@@ -121,10 +121,13 @@ export interface UseHistoryPaginationOptions {
      */
     restoreBytes?: () => number | undefined;
     /**
-     * The pane can't be seen (a hidden tab or pane-stack member). The
-     * background history fill waits while it is true.
+     * The background history fill waits while this is true: the pane can't be
+     * seen (a hidden tab or pane-stack member), or the reader has scrolled off
+     * the bottom. At the bottom a prepend above the rows changes nothing on
+     * screen; scrolled up it would move them, and the view's anchoring covers
+     * only a prepend it starts itself (a scroll-up's `loadOlder`).
      */
-    paneHidden?: () => boolean;
+    fillPaused?: () => boolean;
 }
 
 export interface UseHistoryPagination {
@@ -488,7 +491,7 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                     }
                 },
                 stopped: () => !mounted,
-                holding: () => opts.paneHidden?.() === true || msSinceLastInput() < FILL_QUIET_MS,
+                holding: () => opts.fillPaused?.() === true || msSinceLastInput() < FILL_QUIET_MS,
                 idle: whenIdle,
                 wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
             });
