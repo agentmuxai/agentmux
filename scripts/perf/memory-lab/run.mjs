@@ -234,6 +234,9 @@ async function measureOpens(driver, args, home, { memtree, rootPid }) {
         console.log(`  open ${agent.name} (${kind}): ${o.outcome === "no-line" ? "no [agent-open] line" : `first screen ${o.firstScreenMs} ms (${o.firstScreenPhase}), revealed ${o.revealedMs} ms, history ${o.historyLines ?? "?"} lines`}`);
         opens.push(o);
     }
+    // An open without its line has no figure, and a median over the others would hide it: the run does not stand.
+    const missing = opens.filter((o) => o.outcome === "no-line");
+    if (missing.length) throw new InvalidRun(`${missing.length} of ${opens.length} opens logged no [agent-open] line within 60 s: ${missing.map((o) => o.agent).join(", ")}`);
     const tasks = (await driver.longTasks().catch(() => null))?.tasks ?? [];
     const withTasks = withLongTasks(opens, tasks);
     const storeAfter = storeLockOf(home);
@@ -248,7 +251,7 @@ async function measureOpens(driver, args, home, { memtree, rootPid }) {
     };
 }
 
-/** One agent's turn is over: it was seen working, and has been idle for two polls (a fast version of `requireIdle`, for many turns in a row). */
+/** One agent's turn is over: it was seen working, and has been idle for two polls (a fast version of `requireIdle`, for many turns in a row). A turn that never starts is an invalid run. */
 async function waitTurnDone(driver, capS = 180) {
     let sawWorking = false;
     let quiet = 0;
@@ -260,7 +263,7 @@ async function waitTurnDone(driver, capS = 180) {
             sawWorking = true;
             quiet = 0;
         } else if (sawWorking && ++quiet >= 2) return;
-        else if (!sawWorking && t > 20) return; // never started: the idle check after the loop reports it
+        else if (!sawWorking && t > 30) throw new InvalidRun("a heavy turn never started (the agent was not seen working 15 s after the message): the long conversation would be shorter than asked");
     }
     throw new InvalidRun(`a heavy turn was still playing ${capS} s after it was sent`);
 }
