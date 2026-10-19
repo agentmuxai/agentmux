@@ -4,6 +4,8 @@
 // An A/B run of the lab: the same flags on both sides, the runs interleaved (A B A B ...) so the machine's drift
 // (temperature, background load, a disk filling) falls on both alike. The nightly performance check uses the same code.
 
+import { join } from "node:path";
+
 const SIDE_KEYS = ["portable", "srv", "srvCommit", "label"];
 
 /** Parses `ab.mjs` arguments: its own options before a lone `--`, and the flags both sides get after it. */
@@ -82,4 +84,12 @@ export function outcomeOf(plan, finished) {
     const done = { a: [], b: [] };
     for (const run of plan) if (finished.has(run.label)) done[run.side].push(run.label);
     return { done, comparable: done.a.length > 0 && done.b.length > 0 };
+}
+
+/** The arguments of `compare.mjs` for the finished runs: both sides' result files, the markdown and json outputs, and the margins file when given. */
+export function compareArgs(spec, outcome) {
+    const path = (label) => join(spec.out, label, "result.json");
+    const args = ["--base", outcome.done.a.map(path).join(","), "--head", outcome.done.b.map(path).join(","), "--md", join(spec.out, "compare.md"), "--json", join(spec.out, "compare.json")];
+    if (spec.margins) args.push("--margins", spec.margins);
+    return args;
 }

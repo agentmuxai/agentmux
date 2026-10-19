@@ -2,9 +2,11 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
-import { outcomeOf, parseAbArgs, planRuns, runArgs } from "./lib/abplan.mjs";
+import { compareArgs, outcomeOf, parseAbArgs, planRuns, runArgs } from "./lib/abplan.mjs";
 
 describe("an interleaved A/B run", () => {
     const base = ["--portable", "P", "--runs", "3", "--out", "out"];
@@ -42,5 +44,17 @@ describe("an interleaved A/B run", () => {
         const plan = planRuns(parseAbArgs(base));
         expect(outcomeOf(plan, new Set(["a1", "b1", "a2", "b3"]))).toEqual({ done: { a: ["a1", "a2"], b: ["b1", "b3"] }, comparable: true });
         expect(outcomeOf(plan, new Set(["a1", "a2", "a3"])).comparable).toBe(false);
+    });
+
+    it("hands the finished runs, the outputs and the margins file to the comparison", () => {
+        const spec = parseAbArgs([...base, "--margins", "budget.json"]);
+        const outcome = outcomeOf(planRuns(spec), new Set(["a1", "b1", "b2"]));
+        expect(compareArgs(spec, outcome)).toEqual([
+            "--base", join("out", "a1", "result.json"),
+            "--head", [join("out", "b1", "result.json"), join("out", "b2", "result.json")].join(","),
+            "--md", join("out", "compare.md"), "--json", join("out", "compare.json"),
+            "--margins", "budget.json",
+        ]);
+        expect(compareArgs(parseAbArgs(base), outcome)).not.toContain("--margins");
     });
 });
