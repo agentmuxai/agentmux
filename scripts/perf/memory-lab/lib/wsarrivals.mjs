@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // What the page's websocket received while a slow send waited (see the tap in lib/longtasks.mjs). `ws` is a list of
-// 100 ms buckets, [start in epoch ms, messages, bytes, biggest message in bytes], for the buckets with any traffic.
+// 100 ms buckets, [start in epoch ms, messages, bytes, biggest message in bytes, the page's processing time in ms (absent in older records)], for the buckets with any traffic.
 
 const BUCKET_MS = 100;
 
