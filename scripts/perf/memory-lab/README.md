@@ -201,6 +201,9 @@ the same flag on both sides of an A/B: `compare.mjs` refuses runs with different
 rate and what was written. It writes at most `--disk-load-cap-gb` (default 20) in a run: `max` on a fast disk writes
 hundreds of MB/s, and a stress run is wear on an SSD. A fast NVMe may not be stressed by one writer (a `max` run here wrote
 600 MB/s and srv's store was never held for 500 ms); a SATA SSD or a hard disk is where it matters. `--out` picks the volume.
+`result.volume` records how full that volume was at the start and the end: an SSD slows badly as it fills (the operator's longest
+store-lock holds, 5 to 11.6 s on 14-17 October, fell on days the drive had 4 to 6% free, and none came after 238 GB was freed),
+so a stall on a nearly full disk is a different finding from one on an empty disk.
 
 ## A run that isn't the load it was asked for
 

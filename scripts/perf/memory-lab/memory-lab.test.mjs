@@ -16,6 +16,7 @@ import { evaluate, report } from "./gate.mjs";
 import { driftWarning, portableCommit, srvTarget, withReplacedSrv } from "./lib/srv.mjs";
 import { mergeLongTaskRecords, slowSendsAgainstLongTasks, summariseLongTasks } from "./lib/longtasks.mjs";
 import { parseDiskLoad, sleepNeededMs, startDiskLoad } from "./lib/diskload.mjs";
+import { volumeOf } from "./lib/volume.mjs";
 import { mergeStoreLock, parseStoreLock } from "./lib/storelock.mjs";
 import { CpuLedger, cpuBetween, writtenBetween } from "./lib/cpu.mjs";
 import { generateConversation } from "./lib/conversation.mjs";
@@ -711,6 +712,17 @@ describe("the background disk load", () => {
         expect(() => parseDiskLoad("-5")).toThrow(/positive number/);
     });
 
+    it("stops once and returns the same report when asked again", async () => {
+        const dir = mkdtempSync(join(tmpdir(), "lab-diskload-"));
+        try {
+            const load = startDiskLoad({ dir, mbps: 5 });
+            const first = await load.stop();
+            expect(await load.stop()).toBe(first);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    }, 20000);
+
     it("sleeps to hold the rate, and not at all when behind or unthrottled", () => {
         // 100 MiB written after 1 s at 50 MB/s is a second ahead of schedule
         expect(sleepNeededMs(100 * 1048576, 1000, 50)).toBe(1000);
@@ -732,4 +744,18 @@ describe("the background disk load", () => {
             rmSync(dir, { recursive: true, force: true });
         }
     }, 20000);
+});
+
+describe("the volume under the data folder", () => {
+    it("reports total, free and percent free", () => {
+        const v = volumeOf(tmpdir());
+        expect(v.totalGB).toBeGreaterThan(0);
+        expect(v.freeGB).toBeLessThanOrEqual(v.totalGB);
+        expect(v.freePct).toBeGreaterThanOrEqual(0);
+        expect(v.freePct).toBeLessThanOrEqual(100);
+    });
+
+    it("says nothing for a path that does not exist", () => {
+        expect(volumeOf(join(tmpdir(), "no-such-folder-for-the-lab", "x"))).toBeNull();
+    });
 });

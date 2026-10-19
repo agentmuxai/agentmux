@@ -39,6 +39,7 @@ import { agentsWithoutTurns, cpuTable, groupSample, inMegabytes, steady, table, 
 import { cpuBetween, writtenBetween } from "./lib/cpu.mjs";
 import { storeLockOf } from "./lib/storelock.mjs";
 import { parseDiskLoad, startDiskLoad } from "./lib/diskload.mjs";
+import { volumeOf } from "./lib/volume.mjs";
 import { slowSendsAgainstLongTasks, summariseLongTasks } from "./lib/longtasks.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -55,7 +56,7 @@ class InvalidRun extends Error {}
 
 function parseArgs(argv) {
     const a = { panes: 4, rounds: 10, port: 9333, every: 5, gapS: 15, settleS: 20, samples: 3, seed: 1, attempts: 2, recycleAfter: 0, holdMinutes: 0, recycleCommand: "Reload Window (Free Memory)", out: "memory-lab-out", keep: false };
-    const num = new Set(["panes", "rounds", "port", "every", "gapS", "settleS", "samples", "seed", "attempts", "recycleAfter", "holdMinutes"]);
+    const num = new Set(["panes", "rounds", "port", "every", "gapS", "settleS", "samples", "seed", "attempts", "recycleAfter", "holdMinutes", "diskLoadCapGb"]);
     const flags = { "--keep": "keep" };
     for (let i = 0; i < argv.length; i++) {
         const raw = argv[i];
@@ -71,6 +72,10 @@ function parseArgs(argv) {
     }
     if (!a.portable && !a.exe) throw new Error("give --portable <dir> (a `task package` folder), or --exe <path>");
     a.diskLoadRate = parseDiskLoad(a.diskLoad);
+    if (a.diskLoadCapGb !== undefined && !(Number.isFinite(a.diskLoadCapGb) && a.diskLoadCapGb > 0)) {
+        throw new Error(`--disk-load-cap-gb needs a positive number of GB (got "${a.diskLoadCapGb}"): it is what keeps a stress run from wearing out the disk`);
+    }
+    if (a.diskLoadCapGb !== undefined && !a.diskLoadRate) throw new Error("--disk-load-cap-gb needs --disk-load");
     if (a.srv && (!a.portable || a.exe)) throw new Error("--srv replaces the srv of a --portable folder: give --portable and not --exe (an --exe has no srv beside it to replace, and would be launched instead of the copy)");
     if (a.recycleAfter !== 0 && !(Number.isInteger(a.recycleAfter) && a.recycleAfter >= 1 && a.recycleAfter <= a.rounds)) {
         throw new Error(`--recycle-after ${a.recycleAfter} is not a round of this run: a whole number from 1 to --rounds (${a.rounds}), or leave it out`);
@@ -217,6 +222,7 @@ async function attempt(args, ctx) {
     const { exe, memtree, dir, home, script, layout, swapped } = ctx;
     const instance = await launch({ exe, home, port: args.port, script, log: join(dir, "instance.log") });
     const curve = [];
+    let diskLoad = null; // stopped in the outer finally on any path out of this attempt: a retry must not start a second writer beside it
     cpuLedger.reset();
     forcedGcWindows.length = 0;
     let driver;
@@ -267,8 +273,9 @@ async function attempt(args, ctx) {
         const roundWindows = [];
         const sendLog = [];
         await driver.installLongTasks();
+        const volumeAtStart = volumeOf(dir);
         // The background disk load starts with the workload and ends with its last turn, before the settle and the forced-GC final.
-        const diskLoad = args.diskLoadRate ? startDiskLoad({ dir, mbps: args.diskLoadRate, capGB: args.diskLoadCapGb ? Number(args.diskLoadCapGb) : undefined }) : null;
+        diskLoad = args.diskLoadRate ? startDiskLoad({ dir, mbps: args.diskLoadRate, capGB: args.diskLoadCapGb }) : null;
         let diskLoadResult = null;
         let recycle = null;
         // With --hold-minutes the agents stop at the recycle round: what matters then is how long the window stays down.
@@ -344,6 +351,8 @@ async function attempt(args, ctx) {
             // What was asked; `playedRounds` is how many were played (fewer with --hold-minutes).
             workloadVersion: WORKLOAD_VERSION,
             diskLoad: diskLoadResult,
+            // How full the volume was (see lib/volume.mjs): a stall on a nearly full disk is not the same finding as one on an empty disk.
+            volume: { atStart: volumeAtStart, atEnd: volumeOf(dir) },
             rounds: args.rounds,
             gapSeconds: args.gapS,
             settleSeconds: args.settleS,
@@ -372,7 +381,7 @@ async function attempt(args, ctx) {
             slowEvals: driver.slowEvals(), // { total, slowest }: every command that took 5 s or more, the 30 slowest listed
         };
         writeFileSync(join(dir, "result.json"), JSON.stringify(result, null, 1));
-        const md = [`# ${args.label}`, "", `${args.panes} agents over ${layout.length} tab(s), ${playedRounds} rounds (${args.gapS} s apart)${args.holdMinutes > 0 ? `, then held idle ${args.holdMinutes} min` : ""}, forced GC, median of ${summary.samples} samples.`, "", table(summary), "", cpuTable(cpu, wall, io), ...(pageLongTasks ? ["", `Page main thread: ${pageLongTasks.count} long task(s) of 50 ms or more, ${pageLongTasks.totalMs} ms in all, longest ${pageLongTasks.maxMs} ms, ${pageLongTasks.over1s} over 1 s; ${sendsVsLong.slowSends} send(s) took over 5 s, ${sendsVsLong.overlappingLongTask} of them while a long task of 500 ms or more ran.${pageLongTasks.truncated ? ` Only the first ${pageLongTasks.recorded} long tasks were timed: the totals, rounds and overlaps cover those.` : ""}`] : []), ...(result.storeLock ? ["", `Store lock: longest hold of srv's transcript store connection ${result.storeLock.longestHeldMs} ms${result.storeLock.longestHeldSite ? ` (${result.storeLock.longestHeldSite})` : ""}, ${result.storeLock.holds} hold(s) and ${result.storeLock.waits} wait(s) of 500 ms or more.`] : []), ...notes.map((n) => `\n> ${n}`)].join("\n");
+        const md = [`# ${args.label}`, "", `${args.panes} agents over ${layout.length} tab(s), ${playedRounds} rounds (${args.gapS} s apart)${args.holdMinutes > 0 ? `, then held idle ${args.holdMinutes} min` : ""}, forced GC, median of ${summary.samples} samples.`, "", table(summary), "", cpuTable(cpu, wall, io), ...(pageLongTasks ? ["", `Page main thread: ${pageLongTasks.count} long task(s) of 50 ms or more, ${pageLongTasks.totalMs} ms in all, longest ${pageLongTasks.maxMs} ms, ${pageLongTasks.over1s} over 1 s; ${sendsVsLong.slowSends} send(s) took over 5 s, ${sendsVsLong.overlappingLongTask} of them while a long task of 500 ms or more ran.${pageLongTasks.truncated ? ` Only the first ${pageLongTasks.recorded} long tasks were timed: the totals, rounds and overlaps cover those.` : ""}`] : []), ...(volumeAtStart ? ["", `Volume under the data folder: ${volumeAtStart.freePct}% free (${volumeAtStart.freeGB} of ${volumeAtStart.totalGB} GB) at the start.`] : []), ...(result.storeLock ? ["", `Store lock: longest hold of srv's transcript store connection ${result.storeLock.longestHeldMs} ms${result.storeLock.longestHeldSite ? ` (${result.storeLock.longestHeldSite})` : ""}, ${result.storeLock.holds} hold(s) and ${result.storeLock.waits} wait(s) of 500 ms or more.`] : []), ...notes.map((n) => `\n> ${n}`)].join("\n");
         writeFileSync(join(dir, "summary.md"), md + "\n");
         console.log("\n" + md);
         console.log(`\n-> ${join(dir, "result.json")}`);
@@ -380,6 +389,7 @@ async function attempt(args, ctx) {
     } finally {
         process.off("SIGINT", interrupted);
         process.off("SIGTERM", interrupted);
+        if (diskLoad) await diskLoad.stop(); // a no-op when the workload already stopped it
         driver?.close();
         // --keep leaves a good run's instance for inspection; a run about to be retried must free its port.
         if (!(args.keep && succeeded)) await instance.stop();
