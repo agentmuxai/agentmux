@@ -290,5 +290,6 @@ export function useLiveFeedRollOff(opts: {
         earlierHistoryAvailable,
         earlierTurnsKnown,
         setFollowingBottom,
+        followingBottom,
     };
 }

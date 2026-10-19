@@ -22,6 +22,18 @@ on:
         description: 'Run of "CI — nightly artifacts" whose windows-portable artifact to measure (blank: the latest successful one)'
         required: false
         default: ''
+      panes:
+        description: 'Agents (the nightly standard is 12)'
+        required: false
+        default: '12'
+      rounds:
+        description: 'Rounds (the nightly standard is 10)'
+        required: false
+        default: '10'
+      runs:
+        description: 'Runs of the lab in a row, to size the job and see the spread (the nightly does 1)'
+        required: false
+        default: '1'
 
 concurrency:
   group: memory-soak
@@ -93,16 +105,36 @@ jobs:
           workspaces: ". -> target"
           prefix-key: memory-soak
 
-      - name: Run the lab (12 agents, 10 rounds)
+      - name: Run the lab
         shell: bash
+        env:
+          PANES: ${{ inputs.panes || '12' }}
+          ROUNDS: ${{ inputs.rounds || '10' }}
+          RUNS: ${{ inputs.runs || '1' }}
         run: |
-          node scripts/perf/memory-lab/run.mjs --portable "$PORTABLE" --label nightly \
-            --panes 12 --rounds 10 --seed 1 --port 9333 --out memory-lab-out
+          # The first run is labelled "nightly" (the gate and the artifact read it); the others nightly-2, nightly-3 ...
+          # The wall time of each run is kept, to size the job.
+          : > memory-lab-out-walls.txt
+          for n in $(seq 1 "$RUNS"); do
+            label=nightly
+            [ "$n" -gt 1 ] && label="nightly-$n"
+            start=$(date +%s)
+            node scripts/perf/memory-lab/run.mjs --portable "$PORTABLE" --label "$label" \
+              --panes "$PANES" --rounds "$ROUNDS" --seed 1 --port 9333 --out memory-lab-out
+            echo $(( $(date +%s) - start )) >> memory-lab-out-walls.txt
+          done
 
       - name: Gate
         shell: bash
         run: |
           node scripts/perf/memory-lab/gate.mjs memory-lab-out/nightly/result.json --md gate.md | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Spread over the runs
+        if: ${{ inputs.runs != '' && inputs.runs != '1' }}
+        shell: bash
+        run: |
+          walls=$(paste -sd, memory-lab-out-walls.txt)
+          node scripts/perf/memory-lab/spread.mjs memory-lab-out/nightly*/result.json --wall "$walls" --md spread.md | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Keep the numbers
         if: always()
@@ -110,9 +142,11 @@ jobs:
         with:
           name: memory-soak-${{ github.run_id }}
           path: |
-            memory-lab-out/nightly/result.json
-            memory-lab-out/nightly/summary.md
+            memory-lab-out/nightly*/result.json
+            memory-lab-out/nightly*/summary.md
             memory-lab-out/nightly/instance.log
+            memory-lab-out-walls.txt
             gate.md
+            spread.md
           if-no-files-found: warn
           retention-days: 90
