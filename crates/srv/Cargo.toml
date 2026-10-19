@@ -104,6 +104,10 @@ curve25519-dalek = { version = "5", default-features = false }
 # messaging/whatsapp/webhook.rs.
 hmac = "0.12"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+# The Windows portable release is an LZMA2 + BCJ2 .7z, which Windows' own
+# tar.exe can't read (no liblzma): the updater decodes it itself. Decompression
+# only (docs/specs/SPEC_UPDATE_UNPACK_7Z_IN_RUST_2026_10_19.md).
+sevenz-rust2 = { version = "0.24", default-features = false }
 tar = "0.4"
 tempfile = "3"
 bollard = { version = "0.18", features = ["chrono"] }
