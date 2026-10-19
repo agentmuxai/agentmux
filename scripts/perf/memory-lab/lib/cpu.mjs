@@ -27,7 +27,8 @@ export class CpuLedger {
         for (const p of procs ?? []) {
             if (!p.app || (p.cpu_ns == null && p.write_bytes == null)) continue;
             if (p.write_bytes != null) this.#sawWrites = true;
-            const key = `${p.pid}|${p.name}`;
+            // The start time tells a process from a later one that reuses its PID (a recycled renderer, a restarted srv).
+            const key = `${p.pid}|${p.start_key ?? ""}|${p.name}`;
             const before = this.#seen.get(key) ?? { ns: 0, written: 0, group: groupOf(p) };
             this.#seen.set(key, {
                 ns: Math.max(before.ns, p.cpu_ns ?? 0),

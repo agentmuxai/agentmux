@@ -583,6 +583,14 @@ describe("bytes written", () => {
         expect(written.app).toBe(84);
     });
 
+    it("counts a process that reuses a PID with the same name as another process", () => {
+        const ledger = new CpuLedger();
+        ledger.note([{ ...proc(7, "renderer", 30 * MiB), start_key: 111 }]);
+        // the renderer exits and a new one starts under the same PID and name, then writes 5 MiB
+        ledger.note([{ ...proc(7, "renderer", 5 * MiB), start_key: 222 }]);
+        expect(writtenBetween({ app: 0, renderer: 0 }, ledger.writtenTotals()).renderer).toBe(35);
+    });
+
     it("leaves out the panes' children and a process whose counter could not be read", () => {
         const ledger = new CpuLedger();
         ledger.note([{ ...proc(1, "renderer", 900 * MiB), app: false }, proc(2, "renderer", undefined)]);
