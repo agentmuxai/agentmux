@@ -1,6 +1,6 @@
 # Spec: the Windows upgrade unpacks the release's .7z itself, not with tar.exe
 
-**Status:** proposed. Nothing here is built yet.
+**Status:** active. Built in #5124 (srv decodes the .7z with sevenz-rust2; the real 0.59.33 portable unpacks byte-identical to 7-Zip). Left: the first release with it says, in its notes, that older installs upgrade once by hand (§5).
 **Date:** 2026-10-19
 **Author:** Lazo
 **Verified against:** `agentmux` `main` @ `8313c3a0c` (2026-10-19), and an upgrade from v0.59.32 to v0.59.33 on Windows 10 (19045).
