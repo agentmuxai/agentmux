@@ -262,6 +262,26 @@ once, is kept in `result.json` under `final.footprint`.
 `result.json` has the whole run (the curve, the final's per-process numbers and
 allocator roots, the pages); `summary.md` is the table.
 
+## What fills the page's slow frames
+
+`result.pageFrames` (and one line in `summary.md`) says what filled the page's slow frames, so a stall can be
+told apart as script or as the rendering step, and a script can be named. It uses the Long Animation Frames API (a
+frame of 50 ms or more; Chromium 123 and later, an older one records nothing and says so) and observes only: it
+changes no behaviour in the app. `lib/frames.mjs` has the page script and the summary.
+
+- The frames' time split into script and rendering (style and layout), and how much of the script time was
+  **forced** style and layout: a script reading layout after writing the DOM.
+- The longest script of each frame, and the script that forced the most layout, as the invoker and its position in
+  the page's bundle. The production bundle is minified, so look the position up in the build's `index-*.js`. Only the
+  script that forced the most in each frame is named, so `forcedAttributedMs` is part of the forced total, not all of it.
+- How long the page's websocket handler took per message size, and the biggest messages with their handling time:
+  a big message is one task that everything behind it waits for.
+- Panes flushed per frame, from a counter in the app's stream scheduler that the lab switches on
+  (`globalThis.__labFrameCounter`). A build without the counter says "not available", so old portables still run.
+
+Frames in the lab's own forced-GC windows are left out and counted. The page keeps at most 5,000 frames; past that
+they are counted, not kept, and `truncated` is set.
+
 ## Reading the numbers
 
 - Compare **the final**, taken after a forced GC. The curve is not forced:

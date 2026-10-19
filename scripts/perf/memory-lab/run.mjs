@@ -41,6 +41,7 @@ import { storeLockOf } from "./lib/storelock.mjs";
 import { volumeOf } from "./lib/volume.mjs";
 import { parseEnvPairs } from "./lib/instanceenv.mjs";
 import { parseDiskLoad, startDiskLoad } from "./lib/diskload.mjs";
+import { framesLine, summariseFrames } from "./lib/frames.mjs";
 import { slowSendsAgainstLongTasks, summariseLongTasks } from "./lib/longtasks.mjs";
 import { segmentsOf, slowSendBreakdown } from "./lib/sendsegments.mjs";
 import { arrivalTotals, arrivalsDuringSlowSends } from "./lib/wsarrivals.mjs";
@@ -350,6 +351,7 @@ async function attempt(args, ctx) {
         const rawLong = await driver.longTasks().catch(() => null);
         const pageLongTasks = summariseLongTasks(rawLong, roundWindows, forcedGcWindows);
         const sendsVsLong = slowSendsAgainstLongTasks(sendLog, rawLong);
+        const pageFrames = summariseFrames(await driver.frames().catch(() => null), roundWindows, forcedGcWindows);
 
         // The store of record: the agents' turns must be in it, whatever the page shows.
         const turnBytes = JSON.parse(readFileSync(script, "utf8")).turns.slice(0, playedRounds).map((t) => JSON.stringify(t).length);
@@ -403,6 +405,8 @@ async function attempt(args, ctx) {
             storeLock: storeLockOf(home),
             // The page's main thread (tasks of 50 ms or more) and each send's time, to tell a busy page from a waiting srv.
             pageLongTasks,
+            // What filled the page's slow frames (50 ms or more): script or rendering, which script, how long the handler took per message size, panes flushed per frame (lib/frames.mjs).
+            pageFrames,
             sendsVsLongTasks: sendsVsLong,
             sends: sendLog.map((s) => ({ ...s, start: new Date(s.start).toISOString(), pageStart: s.pageStart == null ? null : new Date(s.pageStart).toISOString(), respArrival: s.respArrival == null ? null : new Date(s.respArrival).toISOString(), ...segmentsOf(s) })),
             sendBreakdown: slowSendBreakdown(sendLog),
@@ -411,7 +415,7 @@ async function attempt(args, ctx) {
             slowEvals: driver.slowEvals(), // { total, slowest }: every command that took 5 s or more, the 30 slowest listed
         };
         writeFileSync(join(dir, "result.json"), JSON.stringify(result, null, 1));
-        const md = [`# ${args.label}`, "", `${args.panes} agents over ${layout.length} tab(s), ${playedRounds} rounds (${args.gapS} s apart)${args.holdMinutes > 0 ? `, then held idle ${args.holdMinutes} min` : ""}, forced GC, median of ${summary.samples} samples.`, "", table(summary), "", cpuTable(cpu, wall, io), ...(pageLongTasks ? ["", `Page main thread: ${pageLongTasks.count} long task(s) of 50 ms or more, ${pageLongTasks.totalMs} ms in all, longest ${pageLongTasks.maxMs} ms, ${pageLongTasks.over1s} over 1 s; ${sendsVsLong.slowSends} send(s) took over 5 s, ${sendsVsLong.overlappingLongTask} of them while a long task of 500 ms or more ran. The page's 100 ms timer was up to ${pageLongTasks.timerLag.maxMs} ms late (${pageLongTasks.timerLag.over1s} times over 1 s).${pageLongTasks.truncated ? ` Only the first ${pageLongTasks.recorded} long tasks were timed: the totals, rounds and overlaps cover those.` : ""}`] : []), ...(volumeAtStart ? ["", `Volume under the data folder: ${volumeAtStart.freePct}% free (${volumeAtStart.freeGB} of ${volumeAtStart.totalGB} GB) at the start.`] : []), ...(result.storeLock ? ["", `Store lock: longest hold of srv's transcript store connection ${result.storeLock.longestHeldMs} ms${result.storeLock.longestHeldSite ? ` (${result.storeLock.longestHeldSite})` : ""}, ${result.storeLock.holds} hold(s) and ${result.storeLock.waits} wait(s) of 500 ms or more.`] : []), ...notes.map((n) => `\n> ${n}`)].join("\n");
+        const md = [`# ${args.label}`, "", `${args.panes} agents over ${layout.length} tab(s), ${playedRounds} rounds (${args.gapS} s apart)${args.holdMinutes > 0 ? `, then held idle ${args.holdMinutes} min` : ""}, forced GC, median of ${summary.samples} samples.`, "", table(summary), "", cpuTable(cpu, wall, io), ...(pageLongTasks ? ["", `Page main thread: ${pageLongTasks.count} long task(s) of 50 ms or more, ${pageLongTasks.totalMs} ms in all, longest ${pageLongTasks.maxMs} ms, ${pageLongTasks.over1s} over 1 s; ${sendsVsLong.slowSends} send(s) took over 5 s, ${sendsVsLong.overlappingLongTask} of them while a long task of 500 ms or more ran. The page's 100 ms timer was up to ${pageLongTasks.timerLag.maxMs} ms late (${pageLongTasks.timerLag.over1s} times over 1 s).${pageLongTasks.truncated ? ` Only the first ${pageLongTasks.recorded} long tasks were timed: the totals, rounds and overlaps cover those.` : ""}`] : []), ...(pageFrames ? ["", framesLine(pageFrames)] : []), ...(volumeAtStart ? ["", `Volume under the data folder: ${volumeAtStart.freePct}% free (${volumeAtStart.freeGB} of ${volumeAtStart.totalGB} GB) at the start.`] : []), ...(result.storeLock ? ["", `Store lock: longest hold of srv's transcript store connection ${result.storeLock.longestHeldMs} ms${result.storeLock.longestHeldSite ? ` (${result.storeLock.longestHeldSite})` : ""}, ${result.storeLock.holds} hold(s) and ${result.storeLock.waits} wait(s) of 500 ms or more.`] : []), ...notes.map((n) => `\n> ${n}`)].join("\n");
         writeFileSync(join(dir, "summary.md"), md + "\n");
         console.log("\n" + md);
         console.log(`\n-> ${join(dir, "result.json")}`);

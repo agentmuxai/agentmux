@@ -15,6 +15,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, openSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { DETACH_FRAMES, FRAME_PROBE, mergeFrameRecords, READ_FRAMES } from "./frames.mjs";
 import { DETACH_LONG_TASKS, LONG_TASK_OBSERVER, mergeLongTaskRecords, READ_LONG_TASKS } from "./longtasks.mjs";
 import { timedCall } from "./sendsegments.mjs";
 import { buildInstanceEnv } from "./instanceenv.mjs";
@@ -177,6 +178,7 @@ export async function connect(port, home, workDir) {
     // The slowest page evaluation of the run, so a machine that is close to the limit shows in the result before it fails.
     let slowestEvalMs = 0;
     const longTaskArchive = []; // the records of documents a reload has since replaced
+    const frameArchive = []; // and the slow-frame probe's, the same way
     // The commands that took 5 s or more, the 30 slowest if there are more (slowEvalsTotal says how many there were).
     let slowEvals = [];
     let slowEvalsTotal = 0;
@@ -222,6 +224,7 @@ export async function connect(port, home, workDir) {
                     session.defaultTimeoutMs = EVAL_TIMEOUT_MS;
                     await session.evaluate("1");
                     await session.evaluate(LONG_TASK_OBSERVER).catch(() => {}); // the reload dropped the observer
+                    await session.evaluate(FRAME_PROBE).catch(() => {}); // and the slow-frame probe
                     return;
                 } catch (e) {
                     if (Date.now() > end) throw new Error(`no main window page on port ${port} after ${timeoutMs / 1000} s: ${e.message}`);
@@ -323,11 +326,18 @@ export async function connect(port, home, workDir) {
         },
         /** Starts recording the page's long tasks (main-thread tasks of 50 ms or more); a reload loses it, so call again after one. */
         async installLongTasks() {
-            return ev(LONG_TASK_OBSERVER);
+            const installed = await ev(LONG_TASK_OBSERVER);
+            // The slow-frame probe goes in beside it. Report-only: on a Chromium without Long Animation Frames it records none and says so.
+            await ev(FRAME_PROBE).catch(() => {});
+            return installed;
         },
         /** The long tasks recorded since `installLongTasks`, across any reloads archived with `archiveLongTasks`, or null. */
         async longTasks() {
             return mergeLongTaskRecords([...longTaskArchive, await ev(READ_LONG_TASKS)]);
+        },
+        /** The slow frames recorded since `installLongTasks`, across any reloads archived with `archiveLongTasks`, or null. */
+        async frames() {
+            return mergeFrameRecords([...frameArchive, await ev(READ_FRAMES)]);
         },
         /** Keeps what the page has recorded so far and starts a fresh record: call before a reload, which would destroy it. */
         async archiveLongTasks() {
@@ -335,6 +345,10 @@ export async function connect(port, home, workDir) {
             if (current) longTaskArchive.push(current);
             await ev(DETACH_LONG_TASKS);
             await ev(LONG_TASK_OBSERVER);
+            const frames = await ev(READ_FRAMES).catch(() => null);
+            if (frames) frameArchive.push(frames);
+            await ev(DETACH_FRAMES).catch(() => {});
+            await ev(FRAME_PROBE).catch(() => {});
         },
 
         /**
