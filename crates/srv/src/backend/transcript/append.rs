@@ -33,10 +33,8 @@ pub fn install_config(config: Arc<crate::backend::wconfig::ConfigState>) {
 }
 
 fn single_copy_enabled() -> bool {
-    CONFIG
-        .get()
-        .and_then(|c| c.get_settings().extra.get(SETTING_SINGLE_COPY).and_then(serde_json::Value::as_bool))
-        .unwrap_or(false)
+    // Read per transcript line: one key under the read lock, no clone of the settings.
+    CONFIG.get().and_then(|c| c.extra_bool(SETTING_SINGLE_COPY)).unwrap_or(false)
 }
 
 /// Whether `zone` is a defined agent's own zone (`agent:<id>:current`), whose
