@@ -335,18 +335,22 @@ export function ActionLogStrip(props: { model: BrowserViewModel }): JSX.Element 
         <>
             <div class="browser-driven-by browser-driven-by--ended" role="status">
                 <i class="fa-solid fa-list" aria-hidden="true" />
-                <span>
-                    <b>{agent()}</b>'s actions here
-                </span>
-                <Button
-                    density="compact"
-                    class="browser-actions-log-button"
-                    pressed={showLog()}
-                    title={`What ${agent()} did in this pane`}
-                    onClick={() => setShowLog(!showLog())}
-                >
-                    Log ({props.model.actionsAtom().count})
-                </Button>
+                <div class="browser-driven-by-message">
+                    <span>
+                        <b>{agent()}</b>'s actions here
+                    </span>
+                </div>
+                <div class="browser-driven-by-actions">
+                    <Button
+                        density="compact"
+                        class="browser-actions-log-button"
+                        pressed={showLog()}
+                        title={`What ${agent()} did in this pane`}
+                        onClick={() => setShowLog(!showLog())}
+                    >
+                        Log ({props.model.actionsAtom().count})
+                    </Button>
+                </div>
             </div>
             <Show when={showLog()}>
                 <ActionLogPanel model={props.model} agent={agent()} onClose={() => setShowLog(false)} />
