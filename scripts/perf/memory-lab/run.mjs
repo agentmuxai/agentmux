@@ -286,8 +286,12 @@ async function attempt(args, ctx) {
         const summary = inMegabytes(steady(samples));
         const cpu = { fromRound: 0, seconds: cpuBetween(cpuAtStart, cpuLedger.totals()), note: "highest CPU time seen per process, summed per group; includes the settle and the forced-GC final" };
         const wall = wallSummary(roundMs);
-        // null when no process reported a write counter (a memtree without it, or an OS that would not say): not "0 MB written".
-        const io = !cpuLedger.sawWriteCounters() ? null : { fromRound: 0, writtenMB: writtenBetween(writtenAtStart, cpuLedger.writtenTotals()), note: "highest write counter seen per process, summed per group (Windows: bytes passed to write calls; Linux and macOS: bytes sent to storage)" };
+        // A group with a process whose counter was never readable has no total (null, not a short sum or "0 MB"); with no counter
+        // anywhere (a memtree without it, or an OS that would not say) there is no `io` at all.
+        const incomplete = cpuLedger.writeIncomplete();
+        const writtenMB = writtenBetween(writtenAtStart, cpuLedger.writtenTotals());
+        for (const g of incomplete) writtenMB[g] = null;
+        const io = !Object.values(writtenMB).some((v) => v != null) ? null : { fromRound: 0, writtenMB, incompleteGroups: incomplete, note: "highest write counter seen per process, summed per group (Windows: bytes passed to write calls; Linux and macOS: bytes sent to storage)" };
 
         // The store of record: the agents' turns must be in it, whatever the page shows.
         const turnBytes = JSON.parse(readFileSync(script, "utf8")).turns.slice(0, playedRounds).map((t) => JSON.stringify(t).length);

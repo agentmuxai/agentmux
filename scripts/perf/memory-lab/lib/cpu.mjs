@@ -15,32 +15,36 @@ import { GROUPS, groupOf } from "./summary.mjs";
 
 export class CpuLedger {
     #seen = new Map();
-    #sawWrites = false;
 
     reset() {
-        this.#sawWrites = false;
         this.#seen.clear();
     }
 
     /** Takes the `cpu_ns` of every app process of one memtree sample. */
     note(procs) {
         for (const p of procs ?? []) {
-            if (!p.app || (p.cpu_ns == null && p.write_bytes == null)) continue;
-            if (p.write_bytes != null) this.#sawWrites = true;
+            if (!p.app) continue; // a process with nothing readable is still noted: its group's write total is then incomplete
             // The start time tells a process from a later one that reuses its PID (a recycled renderer, a restarted srv).
             const key = `${p.pid}|${p.start_key ?? ""}|${p.name}`;
-            const before = this.#seen.get(key) ?? { ns: 0, written: 0, group: groupOf(p) };
+            const before = this.#seen.get(key) ?? { ns: 0, written: 0, hasWritten: false, group: groupOf(p) };
             this.#seen.set(key, {
                 ns: Math.max(before.ns, p.cpu_ns ?? 0),
                 written: Math.max(before.written, p.write_bytes ?? 0),
+                hasWritten: before.hasWritten || p.write_bytes != null,
                 group: before.group,
             });
         }
     }
 
-    /** Whether any app process reported a write counter: without one, "0 bytes written" would be a false number, not a measurement. */
-    sawWriteCounters() {
-        return this.#sawWrites;
+    /**
+     * The groups (and `app`) with a process whose write counter was never readable: a total over them
+     * is short by that process's writes, so it is not a measurement. A group with no process at all is not listed.
+     */
+    writeIncomplete() {
+        const groups = new Set();
+        for (const { hasWritten, group } of this.#seen.values()) if (!hasWritten) groups.add(group);
+        if (groups.size) groups.add("app");
+        return [...groups];
     }
 
     /** Bytes written so far, per group and `app`, counting every process seen. */

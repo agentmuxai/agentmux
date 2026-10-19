@@ -170,7 +170,10 @@ export function cpuTable(cpu, wall, io = null) {
     const lines = ["| group | CPU seconds |", "|---|---:|"];
     for (const g of GROUPS) if (cpu.seconds[g]) lines.push(`| ${g} | ${cpu.seconds[g]} |`);
     lines.push(`| **app total** | **${cpu.seconds.app}** |`);
-    if (io) lines.push("", `Bytes written during the workload: srv ${io.writtenMB.srv} MB, renderers ${io.writtenMB.renderer} MB, app total ${io.writtenMB.app} MB.`);
+    if (io) {
+        const mbOrNA = (v) => (v == null ? "n/a" : `${v} MB`);
+        lines.push("", `Bytes written during the workload: srv ${mbOrNA(io.writtenMB.srv)}, renderers ${mbOrNA(io.writtenMB.renderer)}, app total ${mbOrNA(io.writtenMB.app)}${io.incompleteGroups?.length ? ` (n/a: a process in ${io.incompleteGroups.filter((g) => g !== "app").join(", ")} gave no counter)` : ""}.`);
+    }
     lines.push("", `Round time (send to all agents idle): median ${wall.medianMs ?? "n/a"} ms, slowest ${wall.maxMs ?? "n/a"} ms, ${wall.untimedRounds} of ${wall.roundMs.length} rounds not timed.`);
     return lines.join("\n");
 }

@@ -595,9 +595,19 @@ describe("bytes written", () => {
         const ledger = new CpuLedger();
         ledger.note([{ ...proc(1, "renderer", 900 * MiB), app: false }, proc(2, "renderer", undefined)]);
         expect(ledger.writtenTotals().app).toBe(0);
-        expect(ledger.sawWriteCounters()).toBe(false); // so a run records no figure, not "0 MB"
-        ledger.note([proc(3, "renderer", 0)]);
-        expect(ledger.sawWriteCounters()).toBe(true);
+        expect(ledger.writeIncomplete().sort()).toEqual(["app", "renderer"]); // process 2 never gave a counter: no total for its group
+        const fine = new CpuLedger();
+        fine.note([proc(3, "renderer", 0)]);
+        expect(fine.writeIncomplete()).toEqual([]);
+    });
+
+    it("says which groups lack a counter when one process in a group is readable and another is not", () => {
+        const ledger = new CpuLedger();
+        ledger.note([proc(1, "main", 10 * MiB, "agentmux-srv.exe"), proc(2, "main", undefined, "agentmux-srv.exe"), proc(3, "renderer", 5 * MiB)]);
+        expect(ledger.writeIncomplete().sort()).toEqual(["app", "srv"]);
+        // the counter of process 2 turns up on a later sample: the group is complete again
+        ledger.note([proc(2, "main", 1 * MiB, "agentmux-srv.exe")]);
+        expect(ledger.writeIncomplete()).toEqual([]);
     });
 
     it("compares what srv wrote on each side, flagged past +10% when the ranges are apart", () => {
