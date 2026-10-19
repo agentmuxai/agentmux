@@ -802,17 +802,19 @@ describe("the volume under the data folder", () => {
 describe("where a slow send's time went", () => {
     it("wraps the call so the page reports its own clock and stopwatch", () => {
         const src = timedCall("RpcApi.X()");
-        expect(src).toContain("await RpcApi.X()");
+        expect(src).toContain("const pending = RpcApi.X()");
+        expect(src).toContain("await pending");
+        expect(src).toContain("respArrival");
         expect(src).toContain("pageStart");
         expect(src).toContain("performance.now()");
     });
 
     it("splits a send into before, in the page, and after", () => {
         // the lab started at t=1000, JS ran in the page at 1400 for 28,000 ms, the lab had the answer at 30,000
-        expect(segmentsOf({ start: 1000, ms: 29000, pageStart: 1400, pageMs: 28000 })).toEqual({ before: 400, inPage: 28000, after: 600 });
-        expect(segmentsOf({ start: 1000, ms: 100, pageStart: null, pageMs: null })).toEqual({ before: null, inPage: null, after: null });
+        expect(segmentsOf({ start: 1000, ms: 29000, pageStart: 1400, pageMs: 28000 })).toEqual({ before: 400, inPage: 28000, after: 600, toArrival: null, afterArrival: null });
+        expect(segmentsOf({ start: 1000, ms: 100, pageStart: null, pageMs: null })).toEqual({ before: null, inPage: null, after: null, toArrival: null, afterArrival: null });
         // clock noise never gives a negative segment
-        expect(segmentsOf({ start: 1000, ms: 50, pageStart: 990, pageMs: 80 })).toEqual({ before: 0, inPage: 80, after: 0 });
+        expect(segmentsOf({ start: 1000, ms: 50, pageStart: 990, pageMs: 80 })).toMatchObject({ before: 0, inPage: 80, after: 0 });
     });
 
     it("says which segment held the most time in each slow send", () => {
@@ -829,6 +831,9 @@ describe("where a slow send's time went", () => {
             maxBeforeMs: 9000,
             maxInPageMs: 29500,
             maxAfterMs: 8700,
+            inPageSplit: { toArrival: 0, afterArrival: 0, unknown: 4 },
+            maxToArrivalMs: null,
+            maxAfterArrivalMs: null,
         });
     });
 });
@@ -838,10 +843,10 @@ describe("what the page's websocket received", () => {
     const ws = [[1000, 5, 5000, 2000], [1100, 3, 900, 400], [4000, 1, 80, 80], [4100, 2, 200, 150]];
 
     it("totals the traffic in a window and finds the longest silence", () => {
-        expect(arrivalsBetween(ws, 1000, 5000)).toEqual({ messages: 11, bytes: 6180, biggestMessageBytes: 2000, longestSilenceMs: 2800 });
+        expect(arrivalsBetween(ws, 1000, 5000)).toMatchObject({ messages: 11, bytes: 6180, biggestMessageBytes: 2000, longestSilenceMs: 2800 });
         // nothing arrived at all: the whole window is silence
-        expect(arrivalsBetween(ws, 2000, 3500)).toEqual({ messages: 0, bytes: 0, biggestMessageBytes: 0, longestSilenceMs: 1500 });
-        expect(arrivalsBetween(undefined, 0, 1000)).toEqual({ messages: 0, bytes: 0, biggestMessageBytes: 0, longestSilenceMs: 1000 });
+        expect(arrivalsBetween(ws, 2000, 3500)).toMatchObject({ messages: 0, bytes: 0, biggestMessageBytes: 0, longestSilenceMs: 1500 });
+        expect(arrivalsBetween(undefined, 0, 1000)).toMatchObject({ messages: 0, bytes: 0, biggestMessageBytes: 0, longestSilenceMs: 1000 });
     });
 
     it("reports what arrived during each slow send's time in the page", () => {
@@ -853,7 +858,7 @@ describe("what the page's websocket received", () => {
         const out = arrivalsDuringSlowSends(ws, sends);
         expect(out).toHaveLength(1);
         expect(out[0]).toMatchObject({ round: 2, agent: 3, inPageMs: 3900, messages: 11, longestSilenceMs: 2800 });
-        expect(arrivalTotals(ws)).toEqual({ messages: 11, bytes: 6180, biggestMessageBytes: 2000 });
+        expect(arrivalTotals(ws)).toMatchObject({ messages: 11, bytes: 6180, biggestMessageBytes: 2000 });
     });
 });
 

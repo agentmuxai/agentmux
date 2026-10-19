@@ -315,7 +315,7 @@ export async function connect(port, home, workDir) {
                     if (page?.error) throw new Error(`AgentInput failed: ${page.error}`);
                 } finally {
                     // the page's own clock and stopwatch for this call: see lib/sendsegments.mjs
-                    timings.push({ start, ms: Date.now() - start, pageStart: page?.pageStart ?? null, pageMs: page?.pageMs ?? null });
+                    timings.push({ start, ms: Date.now() - start, pageStart: page?.pageStart ?? null, pageMs: page?.pageMs ?? null, respArrival: page?.respArrival ?? null, eventAgeMs: page?.eventAgeMs ?? null });
                 }
                 if (staggerMs) await sleep(staggerMs);
             }

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // What the page's websocket received while a slow send waited (see the tap in lib/longtasks.mjs). `ws` is a list of
-// 100 ms buckets, [start in epoch ms, messages, bytes, biggest message in bytes], for the buckets with any traffic.
+// 100 ms buckets, [start in epoch ms, messages, bytes, biggest message in bytes, the page's processing time in ms (absent in older records)], for the buckets with any traffic.
 
 const BUCKET_MS = 100;
 
@@ -12,10 +12,12 @@ export function arrivalsBetween(ws, from, to) {
     let messages = 0;
     let bytes = 0;
     let biggest = 0;
-    for (const [, n, b, max] of inside) {
+    let processingMs = 0;
+    for (const [, n, b, max, proc] of inside) {
         messages += n;
         bytes += b;
         biggest = Math.max(biggest, max);
+        processingMs += proc ?? 0;
     }
     // Silence: the gaps between consecutive arrivals, and from the window's start / to its end.
     let longestSilenceMs = 0;
@@ -25,7 +27,9 @@ export function arrivalsBetween(ws, from, to) {
         prevEnd = Math.max(prevEnd, t + BUCKET_MS);
     }
     longestSilenceMs = Math.max(longestSilenceMs, to - prevEnd);
-    return { messages, bytes, biggestMessageBytes: biggest, longestSilenceMs: Math.max(0, Math.round(longestSilenceMs)) };
+    // processingMs: the page's own time handling these messages; as a share of the window it says whether the page keeps up with what arrives.
+    const windowMs = Math.max(1, to - from);
+    return { messages, bytes, biggestMessageBytes: biggest, longestSilenceMs: Math.max(0, Math.round(longestSilenceMs)), processingMs, processingShare: Math.round((processingMs / windowMs) * 1000) / 1000 };
 }
 
 /** For each send at or over `slowMs` that has page figures: what arrived during its time in the page. */
@@ -40,10 +44,12 @@ export function arrivalTotals(ws) {
     let messages = 0;
     let bytes = 0;
     let biggest = 0;
-    for (const [, n, b, max] of ws ?? []) {
+    let processingMs = 0;
+    for (const [, n, b, max, proc] of ws ?? []) {
         messages += n;
         bytes += b;
         biggest = Math.max(biggest, max);
+        processingMs += proc ?? 0;
     }
-    return { messages, bytes, biggestMessageBytes: biggest };
+    return { messages, bytes, biggestMessageBytes: biggest, processingMs };
 }

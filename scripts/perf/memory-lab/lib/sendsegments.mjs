@@ -11,21 +11,41 @@
 
 /** The expression evaluated in the page for one send; `call` is the RpcApi call, as source. Returns { pageStart, pageMs, error }. */
 export function timedCall(call) {
+    // After the call is made (the RPC registers itself in TabRpcClient.openRpcs at once), the newest open request is this one:
+    // the tap in lib/longtasks.mjs stamps the moment its answer reaches the page's JS (respArrival).
     return `(async () => {
   const pageStart = Date.now();
   const t0 = performance.now();
   let error = null;
-  try { await ${call}; } catch (e) { error = String(e && e.message ? e.message : e); }
-  return { pageStart, pageMs: Math.round((performance.now() - t0) * 10) / 10, error };
+  let watch = null;
+  try {
+    const pending = ${call};
+    try {
+      const open = [...(window.TabRpcClient?.openRpcs?.values?.() ?? [])].filter((v) => v.startTs >= pageStart - 5);
+      const mine = open[open.length - 1];
+      if (mine) watch = window.__labWatch = { reqId: mine.reqId, arrival: null, eventAgeMs: null };
+    } catch {}
+    await pending;
+  } catch (e) { error = String(e && e.message ? e.message : e); }
+  const pageMs = Math.round((performance.now() - t0) * 10) / 10;
+  const w = window.__labWatch === watch ? watch : null;
+  window.__labWatch = null;
+  return { pageStart, pageMs, respArrival: w?.arrival ?? null, eventAgeMs: w?.eventAgeMs ?? null, error };
 })()`;
 }
 
-/** One send's three segments, in ms; any that cannot be worked out (no page figures) are null. */
-export function segmentsOf({ start, ms, pageStart, pageMs }) {
-    if (pageStart == null || pageMs == null) return { before: null, inPage: null, after: null };
+/**
+ * One send's segments, in ms; any that cannot be worked out (no page figures) are null. `inPage` splits further when the
+ * page saw the answer arrive: `toArrival` (the call made -> the answer reached the page's JS) and `afterArrival` (the answer
+ * reached JS -> the call's promise resolved). A large `toArrival` is an answer that was late reaching the page's handler (the
+ * browser's queue or the connection); a large `afterArrival` is the RPC layer in the page taking its time once it had it.
+ */
+export function segmentsOf({ start, ms, pageStart, pageMs, respArrival }) {
+    if (pageStart == null || pageMs == null) return { before: null, inPage: null, after: null, toArrival: null, afterArrival: null };
     const before = Math.max(0, pageStart - start);
     const after = Math.max(0, start + ms - (pageStart + pageMs));
-    return { before: Math.round(before), inPage: Math.round(pageMs), after: Math.round(after) };
+    const split = respArrival == null ? { toArrival: null, afterArrival: null } : { toArrival: Math.max(0, Math.round(respArrival - pageStart)), afterArrival: Math.max(0, Math.round(pageStart + pageMs - respArrival)) };
+    return { before: Math.round(before), inPage: Math.round(pageMs), after: Math.round(after), ...split };
 }
 
 /** For the sends at or over `slowMs`: how many, and which segment held the most time in each (ties go to the earlier one). */
@@ -43,5 +63,13 @@ export function slowSendBreakdown(sends, slowMs = 5000) {
     }
     const pick = (k) => slow.map((s) => segmentsOf(s)[k]).filter((v) => v != null).sort((a, b) => a - b);
     const max = (a) => (a.length ? a[a.length - 1] : null);
-    return { slowSends: slow.length, largestSegment: largest, maxBeforeMs: max(pick("before")), maxInPageMs: max(pick("inPage")), maxAfterMs: max(pick("after")) };
+    // Within the page: did the answer reach JS late, or did the page take its time once it had it?
+    const split = { toArrival: 0, afterArrival: 0, unknown: 0 };
+    for (const s of slow) {
+        const seg = segmentsOf(s);
+        if (seg.toArrival == null) split.unknown++;
+        else if (seg.toArrival >= seg.afterArrival) split.toArrival++;
+        else split.afterArrival++;
+    }
+    return { slowSends: slow.length, largestSegment: largest, inPageSplit: split, maxBeforeMs: max(pick("before")), maxInPageMs: max(pick("inPage")), maxAfterMs: max(pick("after")), maxToArrivalMs: max(pick("toArrival")), maxAfterArrivalMs: max(pick("afterArrival")) };
 }
