@@ -10,7 +10,28 @@
 /** Installed in the page. Keeps every long task (start as epoch ms, duration) and the ten longest with what Chromium says about them. */
 export const LONG_TASK_OBSERVER = `(() => {
   if (window.__labLong) return true;
-  const L = (window.__labLong = { n: 0, tasks: [], top: [], lag: [] });
+  const L = (window.__labLong = { n: 0, tasks: [], top: [], lag: [], ws: {} });
+  // What arrives on the page's websocket, per 100 ms: messages, bytes, the biggest one. Wraps the instance's onmessage (which the socket's
+  // handler calls by name, so a reconnect keeps it) and parses nothing. Told apart with it: an answer that is late because other
+  // messages were ahead of it (arrivals during the wait), or because the page was not reading (none).
+  const wsm = window.globalWS;
+  if (wsm && !wsm.__labTapped) {
+    wsm.__labTapped = true;
+    const orig = wsm.onmessage.bind(wsm);
+    wsm.onmessage = function (e) {
+      const cur = window.__labLong;
+      if (cur) {
+        const t = Date.now();
+        const key = t - (t % 100);
+        const b = (cur.ws[key] ??= [0, 0, 0]);
+        const len = typeof e.data === "string" ? e.data.length : (e.data && e.data.byteLength) || 0;
+        b[0]++;
+        b[1] += len;
+        if (len > b[2]) b[2] = len;
+      }
+      return orig(e);
+    };
+  }
   // How late a 100 ms timer fires: the wait a task queued behind the page's other work has (a long task is one task; a queue of short ones shows here).
   let last = performance.now();
   window.__labLagTimer = setInterval(() => {
@@ -40,7 +61,7 @@ export const LONG_TASK_OBSERVER = `(() => {
 })()`;
 
 /** Reads the observer's record back (null when it was never installed, e.g. after a reload). */
-export const READ_LONG_TASKS = `window.__labLong ? { n: window.__labLong.n, tasks: window.__labLong.tasks, top: window.__labLong.top, lag: window.__labLong.lag } : null`;
+export const READ_LONG_TASKS = `window.__labLong ? { n: window.__labLong.n, tasks: window.__labLong.tasks, top: window.__labLong.top, lag: window.__labLong.lag, ws: Object.entries(window.__labLong.ws).map(([k, v]) => [Number(k), v[0], v[1], v[2]]) } : null`;
 
 /** Stops the observer and forgets the page's record, so the next install starts a fresh one and the old one collects nothing more. */
 export const DETACH_LONG_TASKS = `(window.__labLongObserver && window.__labLongObserver.disconnect(), window.__labLongObserver = null, clearInterval(window.__labLagTimer), window.__labLong = null, true)`;
@@ -54,6 +75,7 @@ export function mergeLongTaskRecords(records) {
         tasks: list.flatMap((r) => r.tasks),
         top: list.flatMap((r) => r.top).sort((a, b) => b.ms - a.ms).slice(0, 10),
         lag: list.flatMap((r) => r.lag ?? []),
+        ws: list.flatMap((r) => r.ws ?? []),
     };
 }
 
