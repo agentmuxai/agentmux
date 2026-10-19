@@ -38,7 +38,7 @@
  * sync (unlike `provider`, the bundle has no base-url column at all), so
  * every save silently diverged the agent from whatever its bundle was
  * actually provisioned with. The definition-time editor in
- * `AgentCreateFromTemplateModal.tsx` is unaffected — it still sets the
+ * `AgentCreateForm.tsx` (the new-agent panel) is unaffected — it still sets the
  * value once, before/at bundle provisioning, which is the correct place
  * for it.
  *

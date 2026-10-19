@@ -56,10 +56,15 @@ import { copyForkHistory } from "../quick-fork";
 import type { AgentViewModel } from "../agent-model";
 import { realAccountIdOrEmpty } from "../identity-carry-over";
 import { checkProviderInstalled, invalidateInstallCheck, onInstallCheckInvalidated } from "../install-check-cache";
+import { isAgentInstalling } from "../install-sessions";
+import { AgentCreatePanel } from "./AgentCreatePanel";
+import { createCreateDraft, type CreateDraft, type CreatedAgent } from "./AgentCreateForm";
+import { CardGrid } from "@/app/element/ui/CardGrid";
 import { mergeOpenDefinitions, openAgentLocations, type OpenAgentLocation } from "../open-agent-panes";
 import { openOrFocusHistoryTab } from "../open-history-tab";
 import { beginAgentOpen, finishAgentOpen } from "../open-trace";
-import { getProvider } from "../providers";
+import { getProvider, getProviderList } from "../providers";
+import { getApi } from "@/app/store/global";
 import { needsProbe, prereqShortfall, shortfallLabel, type PrereqProbe } from "../providers/prereq-check";
 import { resolveDrift, type PinDrift } from "../providers/version-drift";
 import { AgentCard } from "./AgentCard";
@@ -355,10 +360,6 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     //               CLI AgentMux doesn't install
     //   false     = not found — card shows the bottom-right ribbon
     const [installState, setInstallState] = createSignal<Record<string, boolean | undefined>>({});
-    /** Agents whose CLI AgentMux doesn't install (no npm package: Kimi,
-     *  Goose, Grok, …): the user installs it, so the npm install modal never
-     *  opens for them. */
-    const [userInstalled, setUserInstalled] = createSignal<Record<string, boolean>>({});
     /** Per-definition CLI drift, resolved alongside the install check (same
      *  round-trip). Absent = not checked yet, or a provider with no pin. */
     const [driftState, setDriftState] = createSignal<Record<string, PinDrift | undefined>>({});
@@ -385,7 +386,6 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             setInstallState((s) => ({ ...s, [agent.id]: undefined }));
             return;
         }
-        setUserInstalled((s) => ({ ...s, [agent.id]: !prov.npmPackage }));
         try {
             // One check per provider CLI, shared across agents, pickers and
             // the Toolchain pane. A CLI AgentMux doesn't install is checked
@@ -644,28 +644,10 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         });
     };
 
-    // (`buildInstallRequest` — the generic, pre-two-tier install
-    // request builder — was removed 2026-08-16 as dead code: the
-    // Phase 1 rewrite left `handleSelect`, its only caller, deleted
-    // (see the `handleSelect` removal note below), and nothing else
-    // ever called it. `buildTemplateInstallRequest` below is the only
-    // live install-request builder now.)
-
-    // Clicking the card opens either the install or launch modal in
-    // the tab-scoped layer, depending on whether the agent's CLI is
-    // already installed in the per-version cache. Phase α of
-    // SPEC_AGENT_INSTALL_STAGE_2026_05_17.md.
-    //
-    // Re-entry guard: handleSelect awaits an IPC round-trip when
-    // install state is still undefined. Without the in-flight set,
-    // a double-click during the await would spawn two install
-    // modals — the second mount replaces the first, and its
-    // onCleanup fires `install.cancel` on the session the first one
-    // had just kicked off.
-    // System-tool prereq probe + modal. Phase α of
+    // System-tool prereq probe. Phase α of
     // SPEC_PROVIDER_SYSTEM_PREREQS_2026_05_18.md. Caches per-tool
     // probe results for the session (PATH doesn't change mid-session
-    // unless the user installs a new tool — `Refresh` clears).
+    // unless the user installs a new tool; the panel's Check again clears).
     const prereqCache = new Map<string, PrereqProbe>();
     const platformKey = (): "windows" | "macos" | "linux" => {
         // Read from the CEF host's authoritative `getPlatform()` IPC
@@ -799,216 +781,104 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // unreachable. Re-introduce when a tier renders my-agent rows
     // with the pill.)
 
-    // Phase 1 two-tier picker: clicking a template card opens the
-    // "Create new agent from {Template}" modal. The layer chains
-    // `agentdefcreatefromtemplate` → `launchAgentDefinition` so both
-    // RPCs are covered by a single `submitting()` gate (ESC + backdrop
-    // dismiss stay blocked until the new agent is fully launched).
-    const openCreateFromTemplateModal = (template: AgentDefinition) => {
-        modalLayer.open({
-            kind: "create-from-template" as const,
-            template,
-            originBlockId: props.model.blockId,
-            onCreatedAndLaunch: async (newDefId, accountIdSel, bundleIdSel, name, agentType, modelSel, slug) => {
-                // The new definition is user-owned and carries the
-                // template's provider + cmd config. Build an
-                // AgentDefinition stub good enough for the launch flow
-                // — it only reads `id`, `name`, `agent_type`. (The
-                // canonical row will be re-fetched by the launch
-                // pipeline via SQL; we don't need every column here.)
-                setLaunching(newDefId);
-                try {
-                    // Reagent P1 on #1011 round 2: the previous stub
-                    // spread `template` directly, which leaked the
-                    // template's `slug` and `working_directory` into
-                    // the launch path. Backend `agentdefcreatefromtemplate`
-                    // deliberately initialises those fields empty on
-                    // the new row so per-agent values are derived
-                    // server-side; the stub MUST match that contract,
-                    // otherwise the new agent inherits template-scoped
-                    // state (e.g. shared `GH_CONFIG_DIR`, cwd path).
-                    // The slug is the one the backend gave the NEW row —
-                    // deriving it from `name` here can differ (#3573).
-                    const stubAgent: AgentDefinition = {
-                        ...template,
-                        id: newDefId,
-                        name,
-                        is_seeded: 0,
-                        parent_id: template.id,
-                        slug,
-                        working_directory: "",
-                        // Reflect the runtime the user picked in the
-                        // modal, not the template's — the template is
-                        // runtime-agnostic and the backend persisted this
-                        // choice on the new row.
-                        agent_type: agentType,
-                        environment: agentType === "container" ? "docker" : "local",
-                    };
-                    await props.model.launchAgentDefinition(stubAgent, {
-                        instanceName: name,
-                        agentType,
-                        environment: agentType === "container" ? "docker" : "local",
-                        accountId: accountIdSel,
-                        bundleId: bundleIdSel,
-                        // No `continueOfInstanceId` — the new definition
-                        // has no prior session; its agent-anchored zone
-                        // is empty and the pane will start fresh.
-                        // Model the user picked in the modal (empty when
-                        // the harness declares no models list) — seeds
-                        // the first launch's agent:runtime block meta.
-                        // See resolveInitialRuntimeConfig's own doc
-                        // comment for the fallback when this is empty.
-                        model: modelSel || undefined,
-                    });
-                    if (props.model.nodejsError) {
-                        setNodejsError(props.model.nodejsError);
-                        props.model.nodejsError = null;
-                    }
-                    takeLaunchError();
-                } finally {
-                    setLaunching(null);
-                }
-            },
-        });
+    // ── New agent, inline ─────────────────────────────────────────────
+    // A harness card opens its panel below its row, pushing the cards below
+    // it down; one panel at a time. It walks through the tools the harness
+    // needs, its CLI's install and the new agent's settings, in place of the
+    // three modals it used to take (SPEC_AGENT_PICKER_INLINE_CREATE_2026_10_18.md
+    // §2). What the user typed is kept per harness while the picker lives.
+    const [openTemplate, setOpenTemplate] = createSignal<string | null>(null);
+    /** The harnesses whose CLI AgentMux doesn't install (no npm package). */
+    const userInstalledProviders = () => getProviderList().filter((p) => !p.npmPackage && p.docsUrl);
+    // The open panel is creating an agent: it can't close or move meanwhile.
+    const [panelBusy, setPanelBusy] = createSignal(false);
+    const drafts = new Map<string, CreateDraft>();
+    const draftFor = (template: AgentDefinition): CreateDraft => {
+        let draft = drafts.get(template.id);
+        if (!draft) {
+            draft = createCreateDraft(template);
+            drafts.set(template.id, draft);
+        }
+        return draft;
     };
 
-    // Cross-tier re-entry guard. Both `handleSelect` (My Agents) and
-    // `handleTemplateSelect` (Templates) check + insert into this set
-    // so a rapid double-click across tiers can't spawn two parallel
-    // install/launch flows for the same definition.
-    const pendingSelect = new Set<string>();
+    const handleTemplateSelect = (agent: AgentDefinition, _evt?: MouseEvent | KeyboardEvent) => {
+        if (panelBusy()) return;
+        setNodejsError(null);
+        if (openTemplate() === agent.id) {
+            setOpenTemplate(null);
+            return;
+        }
+        // `checkInstalled` resolves through the bundle (#2594); the mount-time
+        // check has normally answered already.
+        if (installState()[agent.id] === undefined) void checkInstalled(agent);
+        setOpenTemplate(agent.id);
+    };
 
-    // Phase 1 two-tier picker: template-card click path. Mirrors
-    // `handleSelect` for the install + prereq gates (a template's CLI
-    // can still need installing) but drops the auto-continue branch —
-    // templates carry no session zone post-migration. On success it
-    // hands off to `openCreateFromTemplateModal` instead of
-    // `openLaunchModal`.
-    const handleTemplateSelect = async (agent: AgentDefinition, _evt?: MouseEvent | KeyboardEvent) => {
-        if (pendingSelect.has(agent.id)) return;
-        pendingSelect.add(agent.id);
+    /** Escape or Cancel in the open panel; refused while it creates an agent. */
+    const closePanel = (): boolean => {
+        if (panelBusy()) return false;
+        setOpenTemplate(null);
+        return true;
+    };
+
+    /** The system tools `agent`'s harness needs that aren't on PATH; `fresh` asks again. */
+    const prereqsFor = async (agent: AgentDefinition, fresh: boolean) => {
+        if (fresh) prereqCache.clear();
+        return probeMissingPrereqs(agent);
+    };
+
+    /** Check `agent`'s CLI again, for every card and the Toolchain pane. */
+    const recheckInstalled = async (agent: AgentDefinition) => {
+        const providerId =
+            providerOfAgent.get(agent.id) ?? getProvider(await resolveEffectiveLaunchProvider(agent))?.id;
+        if (providerId) invalidateInstallCheck(providerId);
+        await checkInstalled(agent);
+    };
+
+    /** Launch the agent the panel's form created from `template`. */
+    const launchCreated = async (template: AgentDefinition, created: CreatedAgent) => {
+        setLaunching(created.definitionId);
         try {
-            setNodejsError(null);
-
-            let installed = installState()[agent.id];
-            if (installed === undefined) {
-                // `checkInstalled` already resolves through the bundle
-                // and records whether AgentMux installs this CLI — no need to
-                // duplicate that check here with a second, un-resolved
-                // `agent.provider` read (#2594: two places deciding "does
-                // this need installing" from two different provider
-                // values is exactly the drift class #2592/#2596 fixed).
-                await checkInstalled(agent);
-                installed = installState()[agent.id];
+            // A stub good enough for the launch flow (it reads `id`, `name`,
+            // `agent_type`; the pipeline re-fetches the row). It must not
+            // spread the template's `slug` or `working_directory`: the backend
+            // leaves them empty on the new row so per-agent values are derived
+            // server-side (#1011). The slug is the one the backend gave the new
+            // row, not one derived from the name (#3573).
+            const stubAgent: AgentDefinition = {
+                ...template,
+                id: created.definitionId,
+                name: created.name,
+                is_seeded: 0,
+                parent_id: template.id,
+                slug: created.slug,
+                working_directory: "",
+                // The runtime the user picked; the template is runtime-agnostic
+                // and the backend persisted the choice on the new row.
+                agent_type: created.agentType,
+                environment: created.agentType === "container" ? "docker" : "local",
+            };
+            await props.model.launchAgentDefinition(stubAgent, {
+                instanceName: created.name,
+                agentType: created.agentType,
+                environment: created.agentType === "container" ? "docker" : "local",
+                accountId: created.identityId,
+                bundleId: created.memoryId,
+                // No `continueOfInstanceId`: the new definition has no session.
+                // The model the user picked (empty when the harness has no
+                // list) seeds the first launch's agent:runtime block meta.
+                model: created.model || undefined,
+            });
+            if (props.model.nodejsError) {
+                setNodejsError(props.model.nodejsError);
+                props.model.nodejsError = null;
             }
-            // A CLI AgentMux doesn't install has no npm install to run: the
-            // launch names its own installer (AMX-CLI-004) until the inline
-            // install step (SPEC_AGENT_PICKER_INLINE_CREATE_2026_10_18.md §2.3).
-            const needsNpmInstall = installed === false && !userInstalled()[agent.id];
-
-            const missing = await probeMissingPrereqs(agent);
-            if (missing.length > 0) {
-                const proceedWithFlow = () => {
-                    if (needsNpmInstall) {
-                        // Open the same template-aware install request
-                        // the non-prereq branch below uses: an install
-                        // whose success path launched the seeded
-                        // template directly (`buildLaunchRequest(agent)`)
-                        // would defeat the template-clone migration.
-                        modalLayer.replace(buildTemplateInstallRequest(agent));
-                    } else {
-                        openCreateFromTemplateModal(agent);
-                    }
-                };
-                // Lives OUTSIDE `openPrereqModal` (not re-created per call)
-                // specifically so it survives every `modalLayer.replace()`
-                // in the `refresh` loop below — `ModalLayer` remounts the
-                // whole `AgentPrereqModalPanel` subtree on each replace, so
-                // any state the panel owned itself would be wiped right
-                // when a post-install refresh (which routinely still
-                // reports the tool missing — srv's own PATH is stale until
-                // restart) replaces the request. reagent + Codex, PR #2966.
-                const installedPendingRestart = new Set<string>();
-                const openPrereqModal = (currentMissing: typeof missing, op: "open" | "replace"): void => {
-                    const refresh = async () => {
-                        for (const m of currentMissing) prereqCache.delete(m.tool);
-                        const fresh = await probeMissingPrereqs(agent);
-                        if (fresh.length === 0) {
-                            proceedWithFlow();
-                        } else {
-                            openPrereqModal(fresh, "replace");
-                        }
-                    };
-                    const req = {
-                        kind: "agent-prereqs" as const,
-                        agent,
-                        originBlockId: props.model.blockId,
-                        missing: currentMissing,
-                        installedPendingRestart,
-                        onToolInstalled: (tool: string) => {
-                            installedPendingRestart.add(tool);
-                            void refresh();
-                        },
-                        onRefresh: () => void refresh(),
-                        onProceed: proceedWithFlow,
-                        onCancel: () => {},
-                    };
-                    if (op === "open") modalLayer.open(req);
-                    else modalLayer.replace(req);
-                };
-                openPrereqModal(missing, "open");
-                return;
-            }
-
-            if (needsNpmInstall) {
-                modalLayer.open(buildTemplateInstallRequest(agent));
-                return;
-            }
-
-            openCreateFromTemplateModal(agent);
+            takeLaunchError();
         } finally {
-            pendingSelect.delete(agent.id);
+            setLaunching(null);
         }
     };
-
-    // Template-aware install request. Routes the success path into
-    // `openCreateFromTemplateModal` so the install→create-clone→launch
-    // chain stays correct (#1011); launching the seeded template
-    // directly via `buildLaunchRequest(agent)` would defeat the
-    // template-clone migration.
-    const buildTemplateInstallRequest = (agent: AgentDefinition) => ({
-        kind: "install-agent" as const,
-        agent,
-        originBlockId: props.model.blockId,
-        onInstalled: async (continueToLaunch: boolean) => {
-            // Resolve THIS agent's effective provider (#2594): for an agent
-            // with no provider of its own that's its bundle's, which
-            // `agent.provider` alone would miss, skipping the exact row this
-            // cache update exists to set. Other agents in the bulk loop below
-            // are compared via their own `.provider` as a cache-priming
-            // heuristic only; one that misses gets a resolved answer the next
-            // time it hits `checkInstalled`, never a wrong CLI.
-            const canonicalId = await resolveEffectiveLaunchProvider(agent);
-            const canonical = getProvider(canonicalId)?.id ?? canonicalId;
-            // Other pickers must not keep serving the pre-install answer.
-            invalidateInstallCheck(canonical);
-            setInstallState((s) => {
-                const next = { ...s };
-                for (const a of agents()) {
-                    const aProviderId = a.id === agent.id ? canonical : (getProvider(a.provider)?.id ?? a.provider);
-                    if (aProviderId === canonical) {
-                        next[a.id] = true;
-                    }
-                }
-                return next;
-            });
-            if (continueToLaunch) {
-                openCreateFromTemplateModal(agent);
-            } else {
-                modalLayer.close();
-            }
-        },
-    });
 
     // Note: the legacy `handleSelect` (Option E PR-2 default-click
     // handler) was removed in the Phase 1 cleanup. Every rendered
@@ -1166,34 +1036,79 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                             Each card is a <strong>harness</strong> (the CLI that runs the agent, e.g. Claude Code,
                             Codex) — you'll pick which <strong>model</strong> it uses next.
                         </p>
-                        <div class="agent-picker-list" data-testid="agent-templates-list">
-                            <For each={templates()}>
-                                {(agent, index) => (
+                        {/* SPEC_AGENT_CLI_ISOLATION_NOTE_2026_10_18.md §4.1. The exceptions are
+                            the catalog's providers with no npm package, so the note can't
+                            drift from what AgentMux actually installs. */}
+                        <p class="agent-picker-templates-hint" data-testid="agent-templates-managed-note">
+                            AgentMux installs and runs its own copy of each agent CLI, kept apart from any you installed
+                            yourself, and keeps each agent's login and settings in its own folders. The exceptions use
+                            the copy on your PATH, so install them yourself first:{" "}
+                            <For each={userInstalledProviders()}>
+                                {(p, i) => (
+                                    <>
+                                        {i() > 0 ? ", " : ""}
+                                        <a
+                                            href={p.docsUrl}
+                                            onClick={(e) => {
+                                                e.preventDefault();
+                                                getApi().openExternal(p.docsUrl);
+                                            }}
+                                        >
+                                            {p.displayName}
+                                        </a>
+                                    </>
+                                )}
+                            </For>
+                            . This isolates the tools, not what an agent can do on your computer.
+                        </p>
+                        <div data-testid="agent-templates-list">
+                            {/* Pattern P1 (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md
+                                §5.7): a card's panel opens below its row. */}
+                            <CardGrid
+                                class="agent-picker-list"
+                                ariaLabel="New agent"
+                                items={templates()}
+                                keyOf={(agent) => agent.id}
+                                minCardWidth={240}
+                                selectedKey={openTemplate()}
+                                onClose={closePanel}
+                                renderCard={(agent) => (
                                     <AgentCard
                                         agent={agent}
                                         launching={launching() === agent.id}
                                         disabled={busy()}
                                         installed={installState()[agent.id]}
+                                        installing={
+                                            installState()[agent.id] === false &&
+                                            isAgentInstalling(providerOfAgent.get(agent.id) ?? "")
+                                        }
+                                        expanded={openTemplate() === agent.id}
                                         drift={driftState()[agent.id]}
                                         onLaunch={handleTemplateSelect}
-                                        // Phase 2: right-click → Hide
-                                        // template (Q2 Decision Y). Only
-                                        // attached for template cards;
-                                        // my-agent rows live in
-                                        // MyAgentsList and have a
-                                        // different action surface.
+                                        // Right-click → Hide template. Only
+                                        // template cards; my-agent rows live in
+                                        // MyAgentsList.
                                         onContextMenu={handleTemplateContextMenu}
-                                        // Templates by invariant have
-                                        // no session zone — suppress
-                                        // the "+ New" pill (no
-                                        // `onNewSession` needed; the
-                                        // pill never appears).
+                                        // Templates have no session zone: no
+                                        // "+ New" pill.
                                         hasCurrentSession={false}
-                                        defaultFocus={index() === 0}
+                                        defaultFocus={templates()[0]?.id === agent.id}
                                         blockId={props.model.blockId}
                                     />
                                 )}
-                            </For>
+                                renderDetail={(agent) => (
+                                    <AgentCreatePanel
+                                        template={agent}
+                                        draft={draftFor(agent)}
+                                        installed={installState()[agent.id]}
+                                        probePrereqs={(fresh) => prereqsFor(agent, fresh)}
+                                        recheckInstalled={() => recheckInstalled(agent)}
+                                        onCreated={(created) => launchCreated(agent, created)}
+                                        onClose={closePanel}
+                                        onBusyChange={setPanelBusy}
+                                    />
+                                )}
+                            />
                         </div>
                         {/* Phase 2 (Q2 Decision Y): collapsible
                             "Hidden templates" section, lazy-loaded so

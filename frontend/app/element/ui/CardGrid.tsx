@@ -13,8 +13,9 @@ export interface CardGridProps<T> {
     /** The open card's key; its details show below its row. */
     selectedKey?: string | null;
     renderDetail?: (item: T) => JSX.Element;
-    /** Escape inside the details: close them (focus returns to the card). */
-    onClose?: () => void;
+    /** Escape inside the details: close them (focus returns to the card).
+     *  Return `false` to keep them open, e.g. while they commit a change. */
+    onClose?: () => unknown;
     /** Narrowest a card gets before the grid drops a column. Default 200. */
     minCardWidth?: number;
     /** `chip`: the denser grid of an Add gallery. */
@@ -109,9 +110,11 @@ export function CardGrid<T>(props: CardGridProps<T>): JSX.Element {
         if (e.key !== "Escape" || !props.onClose) return;
         e.stopPropagation();
         const key = props.selectedKey;
-        props.onClose();
+        if (props.onClose() === false) return;
         if (key != null) {
-            cellOf(key)?.querySelector<HTMLElement>(".ui-card")?.focus();
+            // A `Card`, else the cell's own focusable card (a view's card component).
+            const cell = cellOf(key);
+            (cell?.querySelector<HTMLElement>(".ui-card") ?? cell?.querySelector<HTMLElement>('[tabindex="0"], button'))?.focus();
         }
     };
 

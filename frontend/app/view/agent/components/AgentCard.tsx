@@ -30,10 +30,15 @@ interface AgentCardProps {
     agent: AgentDefinition;
     launching: boolean;
     disabled: boolean;
-    /** undefined = not yet checked / non-npm provider (no install needed).
-     *  true = CLI present in the per-version cache.
-     *  false = needs install — render the bottom-right ribbon. */
+    /** undefined = not yet checked.
+     *  true = the CLI was found (AgentMux's install, or the user's own copy of
+     *  a CLI AgentMux doesn't install).
+     *  false = not found — render the bottom-right ribbon. */
     installed: boolean | undefined;
+    /** Its CLI is being installed (the run outlives its panel): the ribbon says so. */
+    installing?: boolean;
+    /** Its new-agent panel is open below its row. */
+    expanded?: boolean;
     /**
      * How the installed CLI relates to the version AgentMux pins. Only
      * `"behind-pin"` renders anything; every other state (including
@@ -44,7 +49,7 @@ interface AgentCardProps {
      */
     drift?: PinDrift;
     /**
-     * Opens the AgentLaunchModal (or Install modal) for this definition.
+     * Opens or closes this template's new-agent panel.
      * The synthetic `MouseEvent` is forwarded so the parent can read
      * modifier keys (Shift/Ctrl/Alt) — used by Option E to force the
      * launch modal even when the agent has an in-progress session
@@ -158,6 +163,7 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
             classList={{
                 "agent-card--disabled": props.disabled,
                 "agent-card--needs-install": props.installed === false,
+                "agent-card--open": !!props.expanded,
             }}
             onClick={handleCardClick}
             onContextMenu={handleContextMenu}
@@ -165,6 +171,7 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
             role="button"
             tabIndex={props.disabled ? -1 : 0}
             aria-disabled={props.disabled}
+            aria-expanded={props.expanded === undefined ? undefined : props.expanded}
             aria-label={`Launch ${title()}`}
         >
             {/* Harness icon only — no vendor badge. This section is
@@ -187,7 +194,7 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
                 (MyAgentsList), where the runtime is concrete. */}
             <Show when={props.installed === false}>
                 <span class="agent-card-install-ribbon" aria-hidden="true">
-                    Click to install
+                    {props.installing ? "Installing…" : "Click to install"}
                 </span>
             </Show>
             {/* Upgrade hint — only when the managed CLI is OLDER than the

@@ -416,6 +416,11 @@
             border-color: color-mix(in srgb, var(--warning-color) 40%, var(--border-color));
         }
 
+        // Its new-agent panel is open below its row (the caret points here).
+        &.agent-card--open {
+            border-color: var(--accent-color);
+        }
+
         .agent-card-icon {
             @include mixins.flex-center;
             flex-shrink: 0;

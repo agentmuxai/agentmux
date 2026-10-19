@@ -328,6 +328,34 @@ Add `role="menu"` and `role="menuitem"` while there. Phases 2–5 of that spec (
 
 The mapping also removes the lime hover. After the migration PRs, call sites move to `tone=` and the regex is deleted. `ConfirmModal` maps `destructive` to `danger` and everything else to `accent`.
 
+### 5.7 Patterns
+
+Patterns are how components combine into a flow. Each has a name, when to use it, its anatomy and behaviour, and the component that builds it, so a new screen reuses it rather than inventing one. (Added 2026-10-18, operator: "pivot away from modals, to fields that appear by offsetting neighbouring cards".)
+
+**Rule M1. Inline before modal.** Creating, configuring or installing something that a card or row stands for happens inline, in P1 below that card. A modal is for a confirmation (destructive or irreversible, `ConfirmModal`), or for a flow that belongs to no card and must block the rest of the pane. A modal never opens another modal.
+
+**P1. Details below the card.** Built by `CardGrid` with `selectedKey` and `renderDetail` (`frontend/app/element/ui/CardGrid.tsx`), first written for Connectors (`SPEC_CONNECTORS_CARDS_2026_10_13.md` §3.4).
+- **Use for:** a card's details, its edit form, a "new X" form started from a card, and multi-step work tied to the card (install, then configure, then create).
+- **Anatomy:**
+  - The cards are in an auto-fill grid.
+  - The open card is selected (`aria-expanded`).
+  - A full-width panel (`grid-column: 1 / -1`) sits after the last card of the open card's row, with a caret pointing at the card.
+  - The panel body is made of `Field`s and line-style `Button`s, with its main action last, `[Cancel: neutral] [Main: accent]`.
+  - A multi-step panel shows a one-line step trail with only the steps that apply.
+- **Behaviour:**
+  - The panel pushes the rows below it down and never overlays them. The card's row stays together.
+  - One panel per grid. Clicking another card moves it, and clicking the open card closes it.
+  - It scrolls its bottom into view without the card's top leaving the view.
+  - It survives list refreshes. A half-filled form is kept per card while the view lives.
+  - Work in progress (an install) keeps running if the panel closes, and the card shows its state.
+  - A short reveal uses the motion tokens, with none under `prefers-reduced-motion`.
+- **Keyboard and focus:**
+  - Enter or Space opens a card, and focus moves to the panel's first actionable control.
+  - Escape closes the panel and returns focus to the card. Escape is refused while the panel is committing (busy main action).
+- **Errors:** on the field (`Field error`) or as a line in the panel, not in a toast or a second dialog.
+- **Don't:** open a modal from a card for anything above, put the panel straight after the card (it splits the row), or have two panels open in one grid.
+- **In use:** Accounts, MCP servers (including "New server"), Remotes; the agent picker's New Agent tier (`SPEC_AGENT_PICKER_INLINE_CREATE_2026_10_18.md`).
+
 ---
 
 ## 6. Every solid-filled control on main

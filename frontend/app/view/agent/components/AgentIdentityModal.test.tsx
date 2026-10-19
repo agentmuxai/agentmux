@@ -16,7 +16,7 @@
  * value to "resolve through" the way #2592/#2607 fixed provider drift —
  * the only consistent fix is to stop writing a second, divergent copy of
  * this field after creation at all. The definition-time UI
- * (`AgentCreateFromTemplateModal.tsx`) is unaffected; it still sets the
+ * (`AgentCreateForm.tsx`, the new-agent panel) is unaffected; it still sets the
  * value once, before/at bundle provisioning.
  */
 
