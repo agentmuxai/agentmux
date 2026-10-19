@@ -22,15 +22,17 @@ async fn longest_tick_gap(callers: usize, hold: Duration, call: impl Fn(&FileSto
     fs.make_file(ZONE, "f", FileMeta::new(), FileOpts::default()).unwrap();
     let call = Arc::new(call);
 
+    let (held_tx, held_rx) = std::sync::mpsc::channel();
     let holder = {
         let fs = fs.clone();
         std::thread::spawn(move || {
             let _conn = fs.lock_conn();
+            held_tx.send(()).unwrap();
             std::thread::sleep(hold);
         })
     };
-    // Let the holder take the connection before anyone asks for it.
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    // Nobody asks for the connection until the holder has it.
+    tokio::task::spawn_blocking(move || held_rx.recv().unwrap()).await.unwrap();
 
     let tasks: Vec<_> = (0..callers)
         .map(|_| {
