@@ -18,7 +18,7 @@ import { CpuLedger, cpuBetween } from "./lib/cpu.mjs";
 import { generateConversation } from "./lib/conversation.mjs";
 import { portableExe } from "./lib/driver.mjs";
 import { draftText, recycleMark, recycleSaving, scrollArmed, scrollRestored } from "./lib/recycle.mjs";
-import { allocatorRoots, dumpedProcesses, lastSample, mainPage, withChromiumRoles } from "./lib/sample.mjs";
+import { agentProcessesCountedAsApp, allocatorRoots, dumpedProcesses, FAKE_CLI_ROOTS, lastSample, mainPage, withChromiumRoles } from "./lib/sample.mjs";
 import { agentsWithoutTurns, compare, compareRuns, comparisonTable, cpuTable, runsTable, wallSummary, groupOf, groupSample, inMegabytes, median, MB, steady, table, transcriptGrowthProblem } from "./lib/summary.mjs";
 
 const proc = (pid, name, role, app, privateMB, commitMB = privateMB * 2) => ({ pid, name, role, app, private: privateMB * MB, commit: commitMB * MB });
@@ -485,6 +485,26 @@ describe("Linux process roles", () => {
         expect(role("main", "agentmux-launcher")).toBe("host");
         expect(role("main", "agentmux-srv")).toBe("srv");
         expect(role("crashpad-handler")).toBe("other");
+    });
+});
+
+describe("an agent's process is never the app", () => {
+    const proc = (name, app) => ({ pid: 1, name, role: "main", app });
+
+    it("names the agent CLI's process on each platform among the panes' roots", () => {
+        const roots = FAKE_CLI_ROOTS.split(",");
+        expect(roots).toContain("node"); // Windows (node.exe is matched without its extension) and macOS
+        expect(roots).toContain("MainThread"); // Linux: a node process's name reads MainThread
+    });
+
+    it("finds an agent CLI that was counted as the app, by any of those names", () => {
+        const counted = agentProcessesCountedAsApp([proc("node.exe", true), proc("MainThread", true), proc("node", true), proc("claude", true)]);
+        expect(counted).toHaveLength(4);
+    });
+
+    it("leaves the app's own processes and the panes' children alone", () => {
+        expect(agentProcessesCountedAsApp([proc("agentmux.exe", true), proc("agentmux-cef", true), proc("agentmux-srv", true), proc("node.exe", false), proc("MainThread", false)])).toEqual([]);
+        expect(agentProcessesCountedAsApp(undefined)).toEqual([]);
     });
 });
 

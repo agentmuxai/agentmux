@@ -46,6 +46,18 @@ export function lastSample(text) {
  */
 export const FAKE_CLI_ROOTS = "node,MainThread";
 
+/** The names an agent's own CLI process can have (the scripted one is a Node script; a real one is `claude`), compared lower-case without `.exe`. */
+const AGENT_CLI_NAMES = new Set(["node", "mainthread", "claude", "codex", "gemini"]);
+
+/**
+ * The processes counted as the app that are an agent's provider process: the lab runs those as the panes' children and the
+ * budget does not count them. A platform that names the process differently (Linux: `MainThread`) would otherwise inflate
+ * the app total silently, so the lab stops on this at its first sample instead of reporting it.
+ */
+export function agentProcessesCountedAsApp(procs) {
+    return (procs ?? []).filter((p) => p.app && AGENT_CLI_NAMES.has(String(p.name ?? "").toLowerCase().replace(/\.exe$/, "")));
+}
+
 /**
  * `memtree` labels a process by its command line's `--type=`; on Linux a
  * renderer or the GPU process forked from the zygote keeps the zygote's, and
