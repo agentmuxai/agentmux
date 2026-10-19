@@ -27,7 +27,7 @@ made into scripts. The budget it serves is 500 MB for the app's own processes.
    something already answers on: pick another when two labs run at once),
    `--attempts 2` (see "A run that isn't the load"), `--out <dir>`
    (default `memory-lab-out/`), `--keep` (leave the instance running),
-   `--memtree <path>` (default: built from `crates/procstats` on first use).
+   `--memtree <path>` (default: built from `crates/procstats` every run; cargo makes it a no-op when current).
 
    It takes about 3 minutes for 4 agents and 10 rounds, and needs nothing else
    running on the CDP port.
