@@ -14,6 +14,7 @@ import { basename, join } from "node:path";
 import { mismatch } from "./compare.mjs";
 import { evaluate, report } from "./gate.mjs";
 import { driftWarning, portableCommit, srvTarget, withReplacedSrv } from "./lib/srv.mjs";
+import { mergeStoreLock, parseStoreLock } from "./lib/storelock.mjs";
 import { CpuLedger, cpuBetween } from "./lib/cpu.mjs";
 import { generateConversation } from "./lib/conversation.mjs";
 import { commandName, portableExe } from "./lib/driver.mjs";
@@ -530,5 +531,38 @@ describe("srv drift", () => {
         expect(driftWarning(p, "fe727c686a1b2c3d4e5f")).toBeNull(); // a longer form of the same commit
         expect(driftWarning(p, null)).toBeNull();
         expect(driftWarning("C:/b/plain", "7c1730e0e")).toBeNull();
+    });
+});
+
+describe("the store lock in srv's log", () => {
+    const line = (message, fields) => JSON.stringify({ timestamp: "2026-10-19T08:30:12Z", level: "WARN", fields: { message, ...fields }, target: "agentmux_srv::backend::storage::filestore::core" });
+
+    it("finds the longest hold, with where it was taken, and the longest wait", () => {
+        const text = [
+            line("filestore: connection held a long time", { site: "crates\\srv\\src\\backend\\agent_session\\helpers.rs:31:21", held_ms: 4707 }),
+            line("filestore: connection held a long time", { site: "crates\\srv\\src\\backend\\blockcontroller\\shell\\file_ops.rs:291:16", held_ms: 9445 }),
+            line("filestore: slow to get the connection", { site: "x", waited_ms: 3059 }),
+            line("filestore: slow to get the connection", { site: "x", waited_ms: 9444 }),
+            JSON.stringify({ fields: { message: "something else", held_ms: 99999 } }),
+            "not json at all, but mentions filestore: ",
+        ].join("\n");
+        expect(parseStoreLock(text)).toEqual({ longestHeldMs: 9445, longestHeldSite: "backend/blockcontroller/shell/file_ops.rs:291:16", holds: 2, longestWaitedMs: 9444, waits: 2 });
+    });
+
+    it("reads a log with none as zero, and merges several logs", () => {
+        expect(parseStoreLock(line("agentmuxsrv starting", {}))).toMatchObject({ longestHeldMs: 0, holds: 0, waits: 0 });
+        const a = { longestHeldMs: 900, longestHeldSite: "a", holds: 1, longestWaitedMs: 100, waits: 1 };
+        const b = { longestHeldMs: 5200, longestHeldSite: "b", holds: 2, longestWaitedMs: 50, waits: 3 };
+        expect(mergeStoreLock([a, b])).toEqual({ longestHeldMs: 5200, longestHeldSite: "b", holds: 3, longestWaitedMs: 100, waits: 4 });
+    });
+
+    it("shows the longest hold of each side in the comparison, report only", () => {
+        const run = (label, held) => ({ label, steady: { app: { privateMB: 900 }, groups: {} }, storeLock: { longestHeldMs: held } });
+        const cmp = compareRuns([run("b1", 800), run("b2", 1200)], [run("h1", 6000), run("h2", 9000)]);
+        expect(cmp.lock.head.median).toBe(7500);
+        const text = runsTable(cmp, "base", "head");
+        expect(text).toMatch(/Longest hold of srv's transcript store connection .*base 1000 ms.*head 7500 ms/);
+        // runs from before this was recorded add nothing
+        expect(runsTable(compareRuns([{ label: "o", steady: { app: { privateMB: 1 }, groups: {} } }], [{ label: "p", steady: { app: { privateMB: 1 }, groups: {} } }]), "a", "b")).not.toMatch(/Longest hold/);
     });
 });
