@@ -40,12 +40,11 @@ import { installHintFor, isLspSupportedLanguage } from "./lsp/install-hints";
 import { redactSecrets } from "@/app/errors/redact";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import "./editor-view.scss";
-import { setBlockMeta } from "@/app/store/block-meta";
 import { codeMirrorKeys, keyLabel, paneCommandFor } from "@/app/keybindings";
 import { keybindingsVersion } from "@/app/keybindings/registry";
 import { noteResolved, registerPaneCommandRunner } from "@/app/keybindings/app-api";
 import { OpenFromRemoteModal } from "./open-from-remote-modal";
-import { isModKey } from "@/util/platformutil";
+import { usePaneZoomWheel } from "@/app/store/zoom";
 
 // ── Language loader ─────────────────────────────────────────────────────────
 // Lazy-load language extensions to keep initial bundle small.
@@ -201,28 +200,12 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
         else giveBlockFocus(model.blockId);
     };
 
-    // Ctrl+Wheel zoom — plugs into the universal zoom system (term:zoom on
-    // block meta, same path used by terminal/agent/swarm). Capture phase so
-    // we intercept before CodeMirror's bubble-phase wheel; preventDefault
-    // suppresses CEF's native Ctrl+Scroll page zoom. The resulting zoom
-    // factor is applied as a CSS `zoom` property on .editor-view (see below),
-    // scaling the entire subtree uniformly.
+    // Ctrl+scroll zoom, before CodeMirror's own wheel handling. The level is
+    // applied as CSS `zoom` on .editor-view (below).
+    usePaneZoomWheel(() => rootRef, () => model.blockId);
+
     onMount(() => {
         if (!rootRef) return;
-        const handleCtrlWheel = (ev: WheelEvent) => {
-            // Ctrl+Shift+Scroll is AppAllPanesZoomHandler's all-panes gesture
-            // (app.tsx) — let it bubble there instead of zooming just this
-            // pane. See SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md.
-            if (!isModKey(ev) || ev.shiftKey) return;
-            ev.preventDefault();
-            ev.stopPropagation();
-            const STEP = 0.1;
-            const current = model.zoomAtom();
-            const next = Math.max(0.5, Math.min(2.0, Math.round((current + (ev.deltaY > 0 ? -STEP : STEP)) * 100) / 100));
-            void setBlockMeta(model.blockId, { "term:zoom": next === 1.0 ? null : next });
-        };
-        rootRef.addEventListener("wheel", handleCtrlWheel, { passive: false, capture: true });
-        onCleanup(() => rootRef?.removeEventListener("wheel", handleCtrlWheel, { capture: true }));
 
         // Editor-pane key handling, capture phase. We intercept here so the
         // app-wide Cmd/Ctrl+F binding (keymodel.ts → universal block-search,

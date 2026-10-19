@@ -87,7 +87,7 @@ describe("built-in pane tabs (block-registry.ts)", () => {
         expect(holders("hueBorder")).toEqual(["term"]);
         expect(holders("nativeSurface")).toEqual(["browser"]);
         // 5b: zoom.ts's allowlist and editor's base size, paste, Ctrl+F, cwd.
-        expect(holders("paneZoom")).toEqual(["agent", "connectors", "editor", "memory", "swarm", "term", "warden"]);
+        expect(holders("paneZoom")).toEqual(["agent", "connectors", "editor", "help", "memory", "swarm", "term", "warden"]);
         expect(paneTabCapability("editor", "paneZoom")?.baseFontSize).toBe(13);
         expect(paneTabCapability("files", "paneZoom")?.baseFontSize).toBe(12);
         expect(paneTabCapability("term", "paneZoom")?.baseFontSize).toBeUndefined();

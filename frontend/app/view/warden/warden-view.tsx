@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { onCleanup, onMount, type JSX } from "solid-js";
+import { type JSX } from "solid-js";
 
 import { TabbedPane, type TabItem } from "@/app/element/ui";
 import { WardenHostManager } from "@/app/view/warden-host/warden-host-manager";
@@ -11,7 +11,6 @@ import { WardenAuditManager } from "@/app/view/warden-audit/warden-audit-manager
 import { WardenHistoryManager } from "@/app/view/warden-history/warden-history-manager";
 import { WARDEN_SECTION_LABELS, type WardenSection, type WardenViewModel } from "./warden-model";
 import "./warden-view.scss";
-import { isModKey } from "@/util/platformutil";
 
 const RAIL: TabItem<WardenSection>[] = [
     { id: "host",     label: WARDEN_SECTION_LABELS.host,     icon: "server" },
@@ -31,26 +30,8 @@ export function WardenView(props: { model: WardenViewModel }): JSX.Element {
         model.setMeta({ "warden:section": id });
     let viewRef: HTMLDivElement | undefined;
 
-    // Ctrl+Wheel zoom — identical pipeline to the section panes' (section-pane.tsx is
-    // the direct precedent for this exact capture-phase-listener + CSS-zoom-
-    // on-root shape).
-    onMount(() => {
-        if (!viewRef) return;
-        const handleCtrlWheel = (ev: WheelEvent) => {
-            // Ctrl+Shift+Scroll is AppAllPanesZoomHandler's all-panes gesture
-            // (app.tsx) — let it bubble there instead of zooming just this
-            // pane. See SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md.
-            if (!isModKey(ev) || ev.shiftKey) return;
-            ev.preventDefault();
-            ev.stopPropagation();
-            const STEP = 0.1;
-            const current = model.zoomAtom();
-            const next = Math.max(0.5, Math.min(2.0, Math.round((current + (ev.deltaY > 0 ? -STEP : STEP)) * 100) / 100));
-            model.setMeta({ "term:zoom": next === 1.0 ? null : next });
-        };
-        viewRef.addEventListener("wheel", handleCtrlWheel, { passive: false, capture: true });
-        onCleanup(() => viewRef?.removeEventListener("wheel", handleCtrlWheel, { capture: true }));
-    });
+    // Ctrl+scroll and Ctrl/Cmd +/-/0 zoom this pane through the shared handlers
+    // (app.tsx, keymodel.ts): the `paneZoom` capability is all it needs.
 
     return (
         // warden-container carries container-type so the managers inside can

@@ -69,8 +69,9 @@ for (const view of ["term", "agent", "swarm", "memory", "warden"]) {
 registerPaneTab(stubPaneTab("editor", { capabilities: { paneZoom: { baseFontSize: 13 } } }));
 registerPaneTab(stubPaneTab("browser"));
 
+import { setPlatform } from "@/util/platformutil";
 import { chromeZoomAtom } from "./chrome-zoom";
-import { chromeZoomIn, initChromeZoom, zoomAllPanesIn, zoomAllPanesOut, zoomBlockIn, zoomIndicatorTextAtom } from "./zoom";
+import { chromeZoomIn, initChromeZoom, usePaneZoomWheel, zoomAllPanesIn, zoomAllPanesOut, zoomBlockByWheel, zoomBlockIn, zoomIndicatorTextAtom } from "./zoom";
 
 // term:fontsize is pinned to 20 for every test block so effective font size
 // (round(base * zoom)) changes by exactly 1px per 0.05 WHEEL_STEP, with no
@@ -304,5 +305,59 @@ describe("chrome zoom across a reload", () => {
     it("starts at 100% in a new session", () => {
         initChromeZoom();
         expect(chromeZoomAtom()).toBe(1);
+    });
+});
+
+// The one Ctrl+scroll path for content that would stop the wheel before the window
+// sees it (xterm, CodeMirror, the agent pane's shell).
+// SPEC_SYSINFO_TEXT_ZOOM_DENSITY_AND_ONE_ZOOM_PATH_2026_10_18.md §3.
+describe("zoomBlockByWheel / usePaneZoomWheel", () => {
+    it("steps the block by the shared wheel step and shows the indicator", () => {
+        setBlock("t1", "term");
+        zoomBlockByWheel("t1", -100);
+        expect(currentZoom("t1")).toBeCloseTo(1.05, 5);
+        expect(zoomIndicatorTextAtom()).toBe("105%");
+        zoomBlockByWheel("t1", 100);
+        expect(currentZoom("t1")).toBeCloseTo(1.0, 5);
+    });
+
+    it("zooms a block with no pane capability (a headless sub-block)", () => {
+        blockMetas.set("sub1", { "term:fontsize": 20 });
+        zoomBlockByWheel("sub1", -100);
+        expect(currentZoom("sub1")).toBeCloseTo(1.05, 5);
+    });
+
+    function mountWheel(blockId: string) {
+        const el = document.createElement("div");
+        document.body.appendChild(el);
+        const dispose = createRoot((d) => {
+            usePaneZoomWheel(() => el, () => blockId);
+            return d;
+        });
+        return { el, dispose };
+    }
+
+    it("takes Ctrl+wheel first and stops it, so the content and the window don't also act", async () => {
+        setPlatform("win32"); // mod+wheel: Ctrl here, Cmd on macOS
+        setBlock("t1", "term");
+        const { el, dispose } = mountWheel("t1");
+        await Promise.resolve();
+        const ev = new WheelEvent("wheel", { ctrlKey: true, deltaY: -100, bubbles: true, cancelable: true });
+        el.dispatchEvent(ev);
+        expect(ev.defaultPrevented).toBe(true);
+        expect(currentZoom("t1")).toBeCloseTo(1.05, 5);
+        dispose();
+        el.remove();
+    });
+
+    it("leaves a plain wheel and Ctrl+Shift+wheel (all panes) alone", async () => {
+        setBlock("t1", "term");
+        const { el, dispose } = mountWheel("t1");
+        await Promise.resolve();
+        el.dispatchEvent(new WheelEvent("wheel", { deltaY: -100, bubbles: true, cancelable: true }));
+        el.dispatchEvent(new WheelEvent("wheel", { ctrlKey: true, shiftKey: true, deltaY: -100, bubbles: true, cancelable: true }));
+        expect(setMetaMock).not.toHaveBeenCalled();
+        dispose();
+        el.remove();
     });
 });

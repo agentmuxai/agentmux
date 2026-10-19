@@ -34,9 +34,10 @@ import { paneTabCapability } from "@/app/block/pane-tab-registry";
 import { getAllBlockComponentModelEntries } from "@/app/store/block-component-registry";
 import { getBlockComponentModel, getFocusedBlockId, MOS } from "@/app/store/global";
 import { fireAndForget } from "@/util/util";
-import { createSignal } from "solid-js";
+import { isModKey } from "@/util/platformutil";
+import { createSignal, onCleanup, onMount } from "solid-js";
 import { chromeZoomAtom, setChromeZoomSignal } from "./chrome-zoom";
-import { clampZoom, DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM } from "./zoom-factor";
+import { clampZoom, DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM, readZoom, writePaneZoom } from "./zoom-factor";
 import { setBlockMeta } from "@/app/store/block-meta";
 
 // Zoom constants
@@ -98,12 +99,7 @@ function getBlockZoom(blockId: string): number | null {
 // getBlockZoom() call immediately after this one would read the STALE
 // pre-write value, not the one just computed here (ReAgent P1, PR #3090).
 function setBlockZoom(blockId: string, factor: number, showIndicator: boolean = true): number {
-    const newZoom = clampZoom(roundZoom(factor));
-    const metaValue = Math.abs(newZoom - 1.0) < 0.01 ? null : newZoom;
-
-    fireAndForget(() =>
-        setBlockMeta(blockId, { "term:zoom": metaValue })
-    );
+    const newZoom = writePaneZoom((meta) => fireAndForget(() => setBlockMeta(blockId, meta)), factor);
 
     // Suppressed by the all-panes stepper below, which shows one summary
     // toast for the whole gesture instead of one per pane.
@@ -143,6 +139,41 @@ export function zoomBlockOut(blockId: string, step: number = WHEEL_STEP): void {
     const zoom = getBlockZoom(blockId);
     if (zoom == null) return;
     stepZoom(blockId, zoom, step, -1);
+}
+
+/**
+ * One Ctrl+scroll step on one block, by its own `term:zoom`: the shared wheel
+ * step, the font-size skipping and the indicator. No capability check, so it
+ * also zooms a headless sub-block (the agent pane's shell) that isn't a pane.
+ */
+export function zoomBlockByWheel(blockId: string, deltaY: number): void {
+    const meta = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta;
+    stepZoom(blockId, readZoom(meta), WHEEL_STEP, deltaY > 0 ? -1 : 1);
+}
+
+/**
+ * Ctrl+scroll zoom for content that handles the wheel itself and would stop it
+ * before the window's handler (`AppZoomHandler`, app.tsx) sees it: xterm,
+ * CodeMirror. Capture phase, so it runs first; Ctrl+Shift+scroll is left to the
+ * all-panes handler. Every other pane needs nothing: the window handler zooms
+ * the pane under the pointer. SPEC_SYSINFO_TEXT_ZOOM_DENSITY_AND_ONE_ZOOM_PATH_2026_10_18.md §3.
+ */
+export function usePaneZoomWheel(el: () => HTMLElement | undefined, blockId: () => string | null | undefined): void {
+    onMount(() => {
+        const target = el();
+        if (!target) return;
+        const onWheel = (ev: WheelEvent) => {
+            if (!isModKey(ev) || ev.shiftKey) return;
+            const id = blockId();
+            if (!id) return;
+            // Also stops CEF's own Ctrl+scroll page zoom.
+            ev.preventDefault();
+            ev.stopPropagation();
+            zoomBlockByWheel(id, ev.deltaY);
+        };
+        target.addEventListener("wheel", onWheel, { passive: false, capture: true });
+        onCleanup(() => target.removeEventListener("wheel", onWheel, { capture: true }));
+    });
 }
 
 // ── All-panes zoom (Ctrl+Shift+Scroll) ──────────────────────────────

@@ -1,7 +1,7 @@
 # Spec: Sysinfo text zoom, denser charts, and one zoom path for every pane
 
 **Date:** 2026-10-18
-**Status:** proposed — not built. Three parts, three PRs (§7).
+**Status:** active — Part A (one zoom path) is built in the first PR; Parts B and C (Sysinfo text zoom, density) follow in a second PR.
 **Requested by:** the owner: "lets add zoom for the text of sysinfo. the charts would stay the same, but the text would change size on the same zoom system as the other panes. Also, look for any opportunities to tighten padding between panes, especially on the ones with many charts. so intelligent placement of text too"; then "lets also take this opportunity to DRY the zoom system. unless there is a good reason not to, it should be unified under a single path".
 **Author:** Manoz@Area54.
 **Builds on:** `SPEC_SYSINFO_CONTROLS_AND_EDGES_2026_10_16.md` (#5022: flush edges, floating control row), `SPEC_HANGAR_ZOOM_2026_10_08.md` (§5 lists the zoom duplication this spec removes), `SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md`, `zoom-architecture.md`, `per-pane-zoom-hover.md`.
@@ -48,51 +48,39 @@ What is still duplicated (the Hangar spec's §5 list, re-checked today):
 - **CSS zoom** for ordinary DOM panes (Files, Swarm, Warden, Memory, the section panes, Help): everything scales together.
 - **Selective** for panes that must keep part of their content at 1:1: the agent pane (its own `--agent-pane-zoom` on chosen layers) and, after Part B, Sysinfo (text only, charts fixed).
 
-So the single path ends in a declared **apply mode**, not in per-pane code:
+So the single path covers the level, its storage, its steps and every gesture, and stops where a pane applies the level. **As built:**
 
-### A.1 The capability says how the pane applies zoom
+### A.1 Where each pane applies the level stays in the pane
 
-```ts
-paneZoom?: {
-    baseFontSize?: number;              // as today: the step-skipping reference size
-    apply?: "css" | "font" | "custom";  // default "css"
-};
-```
+Planned here first: a declared `apply: "css" | "font" | "custom"` mode, with the host applying `zoom` for the `"css"` panes. Dropped while building, because the element that zooms is not the same in each pane, and moving it would change behaviour:
 
-- `"css"`: the host applies it (A.2). The pane does nothing.
-- `"font"`: the pane reads the level and sets its own font size (terminal, editor). It reads it through `paneZoomLevel(ctx)` (A.3), never `meta["term:zoom"]` directly.
-- `"custom"`: the pane uses the CSS variable the host sets (A.2) where it wants it (agent, Sysinfo).
+- Warden and the section panes zoom an inner element, so their container queries keep measuring the outer one.
+- Help zooms its tips but not the filter bar pinned above them.
+- Files and Swarm zoom their root; the editor zooms `.editor-view` and also divides pointer deltas by the level (its splitters).
+- `.block-content` itself can't take `zoom`: it has its own pixel width and height, which `zoom` would scale too.
+
+So each pane keeps one line that applies `readZoom(meta)` on its own element; there is no apply mode in the capability.
 
 ### A.2 The host exposes the level once
 
-`block.tsx`'s `.block-content` (the wrapper every pane's content sits in) gets, for any pane with `paneZoom`:
+`block.tsx`'s `.block-content` (the wrapper every pane's content sits in) sets `--pane-zoom: <level>` for any pane with the `paneZoom` capability, so a pane can scale only part of itself in CSS, e.g. `calc(var(--text-xs) * var(--pane-zoom))` (Sysinfo, Part B). The pane header and tab strip are outside `.block-content`, so they still zoom only with chrome zoom.
 
-- `--pane-zoom: <level>` always, so a pane's CSS can use `calc(var(--text-xs) * var(--pane-zoom))`, and
-- `zoom: var(--pane-zoom)` when `apply` is `"css"`.
-
-Files, Swarm, Warden, Memory and the section panes then drop their own `style={{ zoom }}`. The agent pane's `--agent-pane-zoom` becomes `--pane-zoom` (one name).
-
-The zoom must stay inside the content: the pane header and its tab strip zoom only with chrome zoom (`SPEC_PANE_TAB_STRIP_CHROME_ZOOM_AND_SCROLL_CLEARANCE_2026_08_12.md`). `.block-content` is below the header, so that holds; the PR checks it.
+The agent pane keeps its own `--agent-pane-zoom`: its peek overlay reads it from the row it anchors to, and its history view sets it outside `.block-content`. Renaming it buys nothing.
 
 ### A.3 One way to read and write it
 
-In `store/zoom-factor.ts` (a leaf module, so views can import it):
-
-- `paneZoomLevel(meta)`: the existing `readZoom`, kept under that name too.
-- `writePaneZoom(setMeta, level)`: clamps, rounds to 0.01, writes `null` at 1.0. Every writer uses it: the six local copies go away, and so do `zoom.ts`'s own.
+In `store/zoom-factor.ts` (a leaf module, so views can import it): `readZoom(meta)` (unchanged) and `writePaneZoom(setMeta, level)`, which clamps, rounds to 0.01, writes `null` at 100% and returns the level. `zoom.ts`'s `setBlockZoom` writes through it; the six local copies of the write are gone with their handlers (A.4).
 
 ### A.4 One gesture path
 
-- **Keys:** only the global `view:zoom:*` commands. Swarm's local `keydown` and Help's go away.
-- **Wheel:** the global `AppZoomHandler` for every pane. The only good reason for a local handler is content that handles the wheel itself and may stop it before it reaches the window: the terminal (xterm) and the editor (CodeMirror) are the candidates. The PR confirms this per pane by removing the local handler and checking whether the global one still fires; where it doesn't, the pane uses one shared hook in `zoom.ts`:
-  `usePaneZoomWheel(el: () => HTMLElement | undefined, blockId: () => string)`: a capture-phase listener that ignores Ctrl+Shift (the all-panes gesture), calls `zoomBlockIn/Out(blockId, WHEEL_STEP)` and so gets the shared step, the font-size skipping and the indicator.
-  - Expected users: the terminal, the editor, `AgentShellSubblock` (its terminal).
-  - Deleted with no replacement (the global handler already covers them): the section panes, Warden, Swarm.
-- Result: Ctrl+scroll steps by 0.05 and shows the indicator **in every pane**.
+- **Keys:** only the global `view:zoom:*` commands. Swarm's local `keydown` and Help's are gone.
+- **Wheel:** the window's `AppZoomHandler` for every pane. Panes whose content handles the wheel itself and may stop it before the window (the terminal's xterm, the editor's CodeMirror, and the agent pane's shell, a headless sub-block with no `data-blockid` of its own) use one shared hook in `zoom.ts`, `usePaneZoomWheel(el, blockId)`: capture phase, Ctrl+Shift left to the all-panes handler, and `zoomBlockByWheel(blockId, deltaY)`, which steps the block's own `term:zoom` by the shared wheel step with the font-size skipping and the indicator.
+- **Deleted with no replacement** (the window handler covers them): the section panes, Warden, Swarm.
+- Result: Ctrl+scroll steps by 0.05 and shows the indicator **in every pane** (it was 0.1 with no indicator in those six).
 
 ### A.5 Help joins
 
-Help declares `paneZoom: {}` (`apply: "css"`), reads `term:zoom`, and its local keys, wheel and indicator call go. On first load, a pane with `help:zoom` set and no `term:zoom` moves the value across once (`writePaneZoom`, then `help:zoom: null`), so nobody's saved Help zoom is lost. `help:zoom` is then dropped from `MetaType`.
+Help declares `paneZoom: {}`, applies `term:zoom` to its tips (the filter bar stays at 100%), and its local keys, wheel and indicator call are gone. On mount, a `help:zoom` left from before moves across once: written to `term:zoom` unless the pane already has one, then `help:zoom: null`. `help:zoom` stays in `MetaType` for that read.
 
 ### A.6 Zoom levels are retained
 
@@ -111,7 +99,7 @@ Requirement (owner, 2026-10-18): "we want to retain the zoom levels of the panes
 
 ## 4. Part B: Sysinfo text zoom
 
-Sysinfo becomes a `paneZoom` holder with `apply: "custom"` and `baseFontSize: 11` (its titles are `--text-xs`, 11 px), so the shared keys, wheel, all-panes batch and reset reach it with no Sysinfo-specific handlers.
+Sysinfo becomes a `paneZoom` holder with `baseFontSize: 11`, applying the level itself from `--pane-zoom` (A.2), (its titles are `--text-xs`, 11 px), so the shared keys, wheel, all-panes batch and reset reach it with no Sysinfo-specific handlers.
 
 ### B.1 What scales
 
@@ -133,7 +121,7 @@ Plot line widths, fills, the heatmap's cells and row hairlines, sparkline height
 ### B.3 How
 
 - `--pane-zoom` comes from the host (A.2). Sysinfo's SCSS uses it through one mixin, `@include sysinfo-text(--text-xs)`, which sets `font-size` and the matching line-height, so the zoom rule is written once.
-- `TimeChart` takes `textZoom` (from `paneZoomLevel(ctx.meta())`, passed down like `intervalSecs`). It is one of the inputs that rebuilds the chart (with `series`, `timeAxis` and the theme), because uPlot reads fonts and axis sizes only when it builds. A zoom step is a user action, so one rebuild per step is fine.
+- `TimeChart` takes `textZoom` (from `readZoom(ctx.meta())`, passed down like `intervalSecs`). It is one of the inputs that rebuilds the chart (with `series`, `timeAxis` and the theme), because uPlot reads fonts and axis sizes only when it builds. A zoom step is a user action, so one rebuild per step is fine.
 - The text-inset rule from #5022 stays: text 1px from the pane's edges, graphics 0px, at any zoom.
 
 ## 5. Part C: denser charts and smarter text placement
@@ -183,21 +171,22 @@ Practice behind these (2026-10-18, dataviz guidance plus standard small-multiple
 
 ## 6. Tests
 
-- **Zoom core:** `zoom-factor.test.ts`: `writePaneZoom` clamps, rounds and writes `null` at 1.0. `zoom.test.ts`: `usePaneZoomWheel` steps by `WHEEL_STEP`, shows the indicator, ignores Ctrl+Shift. `block` test: `.block-content` carries `--pane-zoom` for a holder and `zoom` only for `apply: "css"`. `block-registry.test.ts`: the holder list gains Help and Sysinfo, with their modes.
+- **Zoom core:** `zoom-factor.test.ts`: `writePaneZoom` clamps, rounds and writes `null` at 1.0. `zoom.test.ts`: `zoomBlockByWheel` and `usePaneZoomWheel` step by `WHEEL_STEP`, show the indicator, zoom a headless sub-block, ignore a plain wheel and Ctrl+Shift. `block-registry.test.ts`: the holder list gains Help (Part A) and Sysinfo (Part B).
 - **Each migrated pane:** its own Ctrl+scroll test now asserts the shared step and indicator (or, for the panes whose handler is deleted, that the global handler zooms them). Help: the one-time `help:zoom` → `term:zoom` move.
 - **Sysinfo:** a zoomed pane builds its axes with the scaled font and a larger x axis; titles carry the zoomed size; the plot's line width is unchanged. `showsTimeAxis` and the shared-y rule, for 1, 2 and 3 columns. The title's end padding follows the action group's width.
 - **By hand, in `task dev`:** each pane zooms by keys, Ctrl+scroll (with the indicator) and Ctrl+Shift+scroll; Help keeps a previously saved zoom; Sysinfo at 50%, 100%, 150%, 200% in All CPU, CPU + Mem + Net, Everything and each focus view, narrow and wide.
 
-## 7. Phases (one PR each)
+## 7. Phases (two PRs)
 
-1. **Part A, the zoom path.** No visible change except that Ctrl+scroll in the terminal, editor, section panes, Warden and Swarm now steps by 0.05 with the indicator, like everywhere else, and Help joins the all-panes zoom.
-2. **Part B, Sysinfo text zoom**, on top of 1.
-3. **Part C, density and text placement.** Independent of 1 and 2 except C.3's heatmap band; could go first if wanted.
+1. **Part A, the zoom path**, with this spec. No visible change except that Ctrl+scroll in the terminal, editor, the agent pane's shell, section panes, Warden and Swarm now steps by 0.05 with the indicator, like everywhere else, and Help joins the all-panes zoom and reset.
+2. **Parts B and C, Sysinfo text zoom and density**, on top of 1 (B needs `--pane-zoom`; C's sizes are written in its terms).
 
 ## 8. Open questions
 
-1. **Ctrl+scroll step:** the unified step is the global 0.05 with the indicator (Part A). The terminal and editor have stepped by 0.1 until now; fine to change, or should the wheel step be 0.1 everywhere?
-2. ~~Does the control row zoom?~~ **Decided 2026-10-18:** yes, and the chart rows' minimum heights zoom too ("a naturally contracting experience"), B.1.
-3. **Gap value:** 2px everywhere, or 1px with a hairline (`--border-color`) between charts?
-4. **A new pane's starting zoom:** a new pane starts at 100% (except an agent, which starts at its saved level). Should a new pane of a kind (terminal, Sysinfo, …) start at the last zoom used for that kind instead?
-5. **"Between panes":** this spec reads it as between the charts inside a Sysinfo pane. The gap between AgentMux panes themselves is a layout-wide setting, out of scope here.
+Taken with the recommended defaults when the owner said to build it (2026-10-18, "do the sysinfo unified zoom, take it to the end"); each is easy to change later:
+
+1. **Ctrl+scroll step:** the shared 0.05 with the indicator, everywhere (A.4).
+2. ~~Does the control row zoom?~~ **Decided:** yes, and the chart rows' minimum heights zoom too (B.1).
+3. **Gap:** 2px everywhere (C.3).
+4. **A new pane's starting zoom:** 100%, as now; an agent still starts at its saved level.
+5. **"Between panes":** the charts inside a Sysinfo pane; the gap between AgentMux panes is out of scope.

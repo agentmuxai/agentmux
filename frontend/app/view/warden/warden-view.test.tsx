@@ -200,18 +200,21 @@ describe("WardenView zoom", () => {
         expect(view.style.zoom).toBe("1");
     });
 
-    it("Ctrl+Wheel down writes a decreased term:zoom through the host context", () => {
+    // No zoom handler of its own: Ctrl+wheel is not stopped here, so it reaches the
+    // window's shared handler (AppZoomHandler, app.tsx), which steps every pane the
+    // same way and shows the indicator. SPEC_SYSINFO_TEXT_ZOOM_DENSITY_AND_ONE_ZOOM_PATH_2026_10_18.md §3.
+    it("leaves Ctrl+Wheel to the window's shared zoom handler", () => {
+        setPlatform("win32");
         const { container } = renderWarden();
-        const view = container.querySelector(".warden-view") as HTMLElement;
-        view.dispatchEvent(new WheelEvent("wheel", { ctrlKey: true, deltaY: 100, bubbles: true, cancelable: true }));
-        expect(setMetaMock).toHaveBeenCalledWith({ "term:zoom": 0.9 });
-    });
-
-    it("Ctrl+Wheel up writes an increased term:zoom through the host context", () => {
-        const { container } = renderWarden();
-        const view = container.querySelector(".warden-view") as HTMLElement;
-        view.dispatchEvent(new WheelEvent("wheel", { ctrlKey: true, deltaY: -100, bubbles: true, cancelable: true }));
-        expect(setMetaMock).toHaveBeenCalledWith({ "term:zoom": 1.1 });
+        const view = container.querySelector(".warden-view")!;
+        const seen = vi.fn();
+        window.addEventListener("wheel", seen);
+        const ev = new WheelEvent("wheel", { ctrlKey: true, deltaY: 100, bubbles: true, cancelable: true });
+        view.dispatchEvent(ev);
+        window.removeEventListener("wheel", seen);
+        expect(seen).toHaveBeenCalledTimes(1);
+        expect(ev.defaultPrevented).toBe(false);
+        expect(setMetaMock).not.toHaveBeenCalled();
     });
 
     it("plain wheel (no Ctrl) does not trigger a zoom RPC call", () => {
@@ -235,16 +238,4 @@ describe("WardenView zoom", () => {
         expect(setMetaMock).not.toHaveBeenCalled();
     });
 
-    it("returning to 1.0 clears the metadata key (writes null)", () => {
-        const model = new WardenViewModel({ blockId: "test-block", meta: blockMeta as any, setMeta: setMetaMock, isFocused: () => false, visibility: () => "active" });
-        (model as any).zoomAtom = () => 0.9;
-        const { container } = render(() => (
-            <WardenView
-                model={model}
-            />
-        ));
-        const view = container.querySelector(".warden-view") as HTMLElement;
-        view.dispatchEvent(new WheelEvent("wheel", { ctrlKey: true, deltaY: -100, bubbles: true, cancelable: true }));
-        expect(setMetaMock).toHaveBeenCalledWith({ "term:zoom": null });
-    });
 });

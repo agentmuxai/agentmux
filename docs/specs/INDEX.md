@@ -709,6 +709,7 @@ partial list.
 | [`SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20`](SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20.md) | SPEC — live subagent reconciliation + Retire action (best-practices plan) |
 | [`SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02`](SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md) | SPEC: The Swarm shows the agents of every other instance this one knows about |
 | [`SPEC_SWARM_REFINEMENTS_2026_10_17`](SPEC_SWARM_REFINEMENTS_2026_10_17.md) | Spec: Swarm refinements — the selection count, provider icons on remote agents, broadcast to remote agents |
+| [`SPEC_SYSINFO_TEXT_ZOOM_DENSITY_AND_ONE_ZOOM_PATH_2026_10_18`](SPEC_SYSINFO_TEXT_ZOOM_DENSITY_AND_ONE_ZOOM_PATH_2026_10_18.md) | Spec: Sysinfo text zoom, denser charts, and one zoom path for every pane |
 | [`SPEC_TEAROFF_PAINT_LATENCY_2026_09_30`](SPEC_TEAROFF_PAINT_LATENCY_2026_09_30.md) | SPEC: Tear-off paint latency: show the torn-off content as fast as the window |
 | [`SPEC_TERMINAL_INPUT_PRIORITY_OVER_SYSINFO_2026_06_16`](SPEC_TERMINAL_INPUT_PRIORITY_OVER_SYSINFO_2026_06_16.md) | SPEC: Terminal I/O Has Complete Priority Over Perf Monitoring |
 | [`SPEC_TERM_STATS_BADGE_TOP_OFFSET_AND_TOGGLE_2026_09_17`](SPEC_TERM_STATS_BADGE_TOP_OFFSET_AND_TOGGLE_2026_09_17.md) | SPEC: Terminal CPU%/Mem badge — fix top-right offset, add a Settings toggle |
@@ -873,7 +874,6 @@ partial list.
 | [`SPEC_SWARM_ROW_AGENT_COLOR_AND_SELECT_TO_FOCUS_2026_09_25`](SPEC_SWARM_ROW_AGENT_COLOR_AND_SELECT_TO_FOCUS_2026_09_25.md) | SPEC: Swarm rows use the agent's own pane-tab color, and selecting a row focuses its pane instead of the Swarm pane |
 | [`SPEC_SYSINFO_CHART_ROBUSTNESS_2026_06_21`](SPEC_SYSINFO_CHART_ROBUSTNESS_2026_06_21.md) | Spec: Sysinfo CPU Chart Robustness |
 | [`SPEC_SYSINFO_GPU_RENDERING_AND_3D_CHARTS_2026_09_26`](SPEC_SYSINFO_GPU_RENDERING_AND_3D_CHARTS_2026_09_26.md) | SPEC: GPU-accelerated rendering and 3D charts for Sysinfo |
-| [`SPEC_SYSINFO_TEXT_ZOOM_DENSITY_AND_ONE_ZOOM_PATH_2026_10_18`](SPEC_SYSINFO_TEXT_ZOOM_DENSITY_AND_ONE_ZOOM_PATH_2026_10_18.md) | Spec: Sysinfo text zoom, denser charts, and one zoom path for every pane |
 | [`SPEC_TAB_TEAROFF_NATIVE_DRAG_LOOP_2026-05-07`](SPEC_TAB_TEAROFF_NATIVE_DRAG_LOOP_2026-05-07.md) | Tab tear-off — native drag loop (Chrome's Win32/X11 model) |
 | [`SPEC_TAB_UI_REFINEMENTS_2026_06_20`](SPEC_TAB_UI_REFINEMENTS_2026_06_20.md) | SPEC: Tab UI Refinements |
 | [`SPEC_TAB_WINDOW_RENDER_ARCHITECTURE_2026_08_31`](SPEC_TAB_WINDOW_RENDER_ARCHITECTURE_2026_08_31.md) | Tab / window render architecture — coherent-frame design |
