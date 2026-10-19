@@ -116,6 +116,9 @@ export const AgentCreatePanel = (props: AgentCreatePanelProps): JSX.Element => {
         });
     });
     const [checkingAgain, setCheckingAgain] = createSignal(false);
+    // The install finished here and the user chose Continue: go on to Create
+    // even if the re-check hasn't caught up yet (the launch looks again).
+    const [installDone, setInstallDone] = createSignal(false);
     const checkAgain = async () => {
         setCheckingAgain(true);
         try {
@@ -141,7 +144,7 @@ export const AgentCreatePanel = (props: AgentCreatePanelProps): JSX.Element => {
     const step = createMemo<Step>(() => {
         if (missing() === null) return "tools";
         if (stillMissing().length > 0 && !skipTools()) return "tools";
-        if (props.installed === false || session()?.state() === "running") return "install";
+        if ((props.installed === false && !installDone()) || session()?.state() === "running") return "install";
         return "create";
     });
     const STEP_LABEL: Record<Step, string> = { tools: "Tools", install: "Install", create: "Create" };
@@ -358,7 +361,17 @@ export const AgentCreatePanel = (props: AgentCreatePanelProps): JSX.Element => {
                                         </Button>
                                     </Match>
                                     <Match when={s().state() === "done"}>
-                                        <Button tone="accent" busy={checkingAgain()} onClick={() => void checkAgain()}>
+                                        <Button tone="neutral" onClick={() => props.onClose()}>
+                                            Close
+                                        </Button>
+                                        <Button
+                                            tone="accent"
+                                            onClick={() => {
+                                                setInstallDone(true);
+                                                void props.recheckInstalled();
+                                            }}
+                                            data-testid="agent-create-install-continue"
+                                        >
                                             Continue
                                         </Button>
                                     </Match>

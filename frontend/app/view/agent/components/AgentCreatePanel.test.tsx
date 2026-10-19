@@ -439,15 +439,18 @@ describe("AgentCreatePanel — Install step, a CLI AgentMux installs (npm)", () 
         expect(pushNotification).not.toHaveBeenCalled();
     });
 
-    it("offers Continue after the install when the re-check hasn't caught up", async () => {
+    it("Continue after the install goes on to Create even when the re-check hasn't caught up", async () => {
         const recheckInstalled = vi.fn().mockResolvedValue(undefined);
         const { container } = renderPanel({ installed: false, recheckInstalled });
         const send = await startAndSubscribe();
         send({ line: "added 1 package in 1s", stream: "stdout" });
         send({ op: "done", ok: true });
         await waitFor(() => expect(stepStatus(container).map(([, st]) => st)).toEqual(["done", "done", "done", "skipped", "done"]));
-        fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+        // `installed` is still false (the picker's re-check hasn't answered yet).
+        expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
+        fireEvent.click(screen.getByTestId("agent-create-install-continue"));
         expect(recheckInstalled).toHaveBeenCalledTimes(2);
+        expect(await screen.findByTestId("agent-create-form")).toBeInTheDocument();
     });
 
     it("on failure explains it in the step list, offers Retry, and opens Details at the first error", async () => {

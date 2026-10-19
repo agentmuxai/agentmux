@@ -526,6 +526,39 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         await waitFor(() => expect(screen.queryByText("Launch aborted")).toBeNull());
     });
 
+    it("closes the panel and drops the draft once the agent exists, even when its launch stops short", async () => {
+        const model = makeMockModel();
+        // A missing Node.js: the launch returns without throwing.
+        model.launchAgentDefinition.mockImplementationOnce(async () => {
+            model.nodejsError = "Node.js isn't installed";
+            return false;
+        });
+        render(() => <AgentPicker model={model as any} />);
+        const card = await screen.findByTestId("agent-card-tpl-claude");
+        fireEvent.click(card);
+        await screen.findByTestId("create-panel-stub");
+        const draft = panelProps.current.draft;
+        draft.setName("Mary");
+
+        await panelProps.current.onCreated({
+            definitionId: "new-def-id",
+            identityId: "id-work",
+            memoryId: "mem-notes",
+            name: "Mary",
+            agentType: "host",
+            model: "opus",
+            slug: "mary",
+        });
+        await waitFor(() => expect(screen.queryByTestId("create-panel-stub")).toBeNull());
+        expect(await screen.findByText(/Node.js isn't installed/)).toBeTruthy();
+
+        // Opening the card again starts from an empty draft.
+        fireEvent.click(card);
+        await screen.findByTestId("create-panel-stub");
+        expect(panelProps.current.draft).not.toBe(draft);
+        expect(panelProps.current.draft.name()).toBe("");
+    });
+
     it("omits the model override when the form supplied none (harness has no models list)", async () => {
         const model = makeMockModel();
         render(() => <AgentPicker model={model as any} />);

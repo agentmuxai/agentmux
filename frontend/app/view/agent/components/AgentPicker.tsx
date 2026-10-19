@@ -877,6 +877,13 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             takeLaunchError();
         } finally {
             setLaunching(null);
+            // The agent exists now, whether or not it started (a launch can
+            // stop short, e.g. for a missing Node.js, without throwing): close
+            // the panel and forget what was typed, so a second Create can't
+            // collide with it. It is in My Agents, and the notice above says
+            // why it didn't start.
+            drafts.delete(template.id);
+            if (openTemplate() === template.id) setOpenTemplate(null);
         }
     };
 
