@@ -154,3 +154,34 @@ async fn uncontended_call_cost_on_a_worker() {
     .unwrap();
     println!("MEASURE uncontended on a worker: append {append_us:.1} us/call, list_files {list_us:.1} us/call");
 }
+
+/// The holder, not only the waiters: a write that stalls inside the transaction
+/// (the disk) must not pin its worker either. One worker, so a pinned holder
+/// would stop the ticker entirely.
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn a_write_that_stalls_inside_the_transaction_leaves_the_worker_free() {
+    let fs = Arc::new(FileStore::open_in_memory().unwrap());
+    fs.make_file(ZONE, "f", FileMeta::new(), FileOpts::default()).unwrap();
+    let stall = Duration::from_millis(600);
+    let writer = {
+        let fs = fs.clone();
+        tokio::spawn(async move {
+            fs.write_txn(|tx| {
+                tx.execute_batch("UPDATE db_wave_file SET modts = modts + 1")?;
+                std::thread::sleep(stall); // the disk
+                Ok(())
+            })
+            .unwrap();
+        })
+    };
+    let started = Instant::now();
+    let mut last = Instant::now();
+    let mut longest = Duration::ZERO;
+    while started.elapsed() < stall {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        longest = longest.max(last.elapsed());
+        last = Instant::now();
+    }
+    writer.await.unwrap();
+    assert!(longest < Duration::from_millis(250), "the runtime stalled for {longest:?} while one write stalled on a one-worker runtime");
+}
