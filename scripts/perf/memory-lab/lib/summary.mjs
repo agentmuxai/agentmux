@@ -169,15 +169,15 @@ export function cpuTable(cpu, wall) {
 
 const pctChange = (base, head) => (base == null || head == null || base === 0 ? null : Math.round(((head - base) / base) * 1000) / 10);
 
+/** A page command that took longer than this during a run is itself a responsiveness signal. */
+export const SLOW_COMMAND_MS = 10_000;
+
 /**
  * The percent past which a change is flagged (report only: it decides nothing).
  * Per metric, because the noise differs: app and srv CPU are steady, renderer
  * CPU and the round time move more (measured spread of identical runs: about 5%,
  * 3%, 13% and 15%).
  */
-/** A page command that took longer than this during a run is itself a responsiveness signal. */
-export const SLOW_COMMAND_MS = 10_000;
-
 export const DEFAULT_MARGINS = { cpuPct: { app: 10, srv: 10, default: 20 }, wallPct: 20 };
 
 /** The CPU margin of a group; a single number means every group. */
