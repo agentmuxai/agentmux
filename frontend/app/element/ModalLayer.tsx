@@ -57,8 +57,8 @@ export const ModalLayer: Component<ModalLayerProps> = (props) => {
 
     // Pure browse/view modals have no in-flight submit or form input a
     // backdrop click could destroy, unlike the form-like kinds this guard
-    // exists for (launch/install/create-from-template/agent-prereqs/
-    // add-account/new-memory) — so clicking outside should just close
+    // exists for (launch-agent/add-account/new-memory) — so clicking
+    // outside should just close
     // them, like any other dismissible overlay.
     //
     // CURRENTLY EMPTY. Its only member was "agent-stash" (the per-agent

@@ -124,7 +124,7 @@ describe("curated catalog", () => {
 
 describe("familyKey (exported for selection migration)", () => {
     it("groups versions of the same family so a stale selection can be migrated", () => {
-        // AgentCreateFromTemplateModal and AgentRuntimeDropup both use this to
+        // AgentCreateForm and AgentRuntimeDropup both use this to
         // move a selection when the overlay replaces a concrete value.
         expect(overlay.familyKey("claude-fable-5")).toBe(overlay.familyKey("claude-fable-5-1"));
         expect(overlay.familyKey("claude-fable-5")).not.toBe(overlay.familyKey("claude-opus-5"));
