@@ -5,8 +5,10 @@ name: Performance check (nightly, Windows)
 # figure moved by more than its margin in scripts/perf/memory-lab/budget.json, and the list of what was merged between
 # the two builds. Where a build sits is decided by `nightly.mjs plan`.
 #
-# REPORT ONLY. Nothing here fails on a number, and it is not a required check for any PR. The result is the job summary
-# and the uploaded artifact. Later phases add the issue for a flagged change and the history on a data branch.
+# REPORT ONLY. Nothing here fails on a number, and it is not a required check for any PR. The result is the job summary,
+# the uploaded artifact and, when a change is flagged, the `perf-regression` issue (SPEC_NIGHTLY_PERF_REGRESSION §4.5): if
+# the first matrix flags anything, one more A/B pair is run, and the issue is opened (or commented on) only when the flag
+# holds on all the runs together. A clean night closes it. Later phases add the history on a data branch.
 #
 # Runs after the nightly artifacts build (which GitHub starts between 10:28 and 11:36 UTC and which takes about
 # 25 minutes). It looks that build up rather than using a workflow_run trigger, which has not fired reliably in this
@@ -33,6 +35,11 @@ on:
         description: 'Rounds (the nightly standard is 10)'
         required: false
         default: '10'
+      dry-run-issue:
+        description: 'Print what the issue step would do instead of doing it'
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: perf-regression
@@ -41,6 +48,7 @@ concurrency:
 permissions:
   contents: read
   actions: read
+  issues: write
 
 jobs:
   compare:
@@ -139,12 +147,56 @@ jobs:
           done
           node scripts/perf/memory-lab/spread.mjs perf-out/b*/result.json --md perf-out/spread.md
 
+      # A flag in the first matrix is confirmed by one more A/B pair, in the other order so a drift in the runner's speed
+      # during the job falls on the other side this time.
+      - name: Did the first matrix flag anything
+        id: first
+        if: ${{ steps.plan.outputs.a-run != '' }}
+        shell: bash
+        run: node scripts/perf/memory-lab/nightly.mjs flagged --compare perf-out/compare.json
+
+      - name: Confirmation pair
+        if: ${{ steps.first.outputs.flagged == 'true' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          PANES: ${{ inputs.panes || '12' }}
+          ROUNDS: ${{ inputs.rounds || '10' }}
+        run: |
+          node scripts/perf/memory-lab/ab.mjs --a-portable "$A_PORTABLE" --b-portable "$B_PORTABLE"             --a-label a --b-label b --runs 1 --order ba --out perf-confirm             --margins scripts/perf/memory-lab/budget.json             -- --panes "$PANES" --rounds "$ROUNDS" --seed 1 --port 9333 --open-agents 3 --heavy-turns 1 --heavy-kb 600
+
+      # The comparison over every run that finished, first matrix and confirmation pair together. Without a confirmation
+      # it is the first matrix again.
+      - name: Compare all the runs
+        if: ${{ steps.first.outputs.flagged == 'true' }}
+        shell: bash
+        run: |
+          commas() { local IFS=,; echo "$*"; }
+          a=(perf-out/a*/result.json perf-confirm/a*/result.json)
+          b=(perf-out/b*/result.json perf-confirm/b*/result.json)
+          a=($(ls "${a[@]}" 2>/dev/null)); b=($(ls "${b[@]}" 2>/dev/null))
+          if [ ${#a[@]} -gt 0 ] && [ ${#b[@]} -gt 0 ]; then
+            node scripts/perf/memory-lab/compare.mjs --base "$(commas "${a[@]}")" --head "$(commas "${b[@]}")"               --md perf-out/compare-all.md --json perf-out/final.json --margins scripts/perf/memory-lab/budget.json
+          fi
+
+      - name: Perf-regression issue
+        if: ${{ always() && steps.plan.outputs.a-run != '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ inputs.dry-run-issue && '1' || '' }}
+        run: |
+          final=perf-out/final.json
+          [ -f "$final" ] || final=perf-out/compare.json
+          node scripts/perf/memory-lab/nightly.mjs issue --plan plan.json --initial perf-out/compare.json --final "$final"
+
       - name: Report
         if: always()
         shell: bash
         run: |
           args=(--plan plan.json)
-          [ -f perf-out/compare.md ] && args+=(--compare perf-out/compare.md)
+          if [ -f perf-out/compare-all.md ]; then args+=(--compare perf-out/compare-all.md)
+          elif [ -f perf-out/compare.md ]; then args+=(--compare perf-out/compare.md); fi
           [ -f perf-out/spread.md ] && args+=(--spread perf-out/spread.md)
           node scripts/perf/memory-lab/nightly.mjs report "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
 
@@ -158,6 +210,12 @@ jobs:
             perf-out/ab.json
             perf-out/compare.md
             perf-out/compare.json
+            perf-out/compare-all.md
+            perf-out/final.json
+            perf-confirm/ab.json
+            perf-confirm/*/result.json
+            perf-confirm/*/summary.md
+            perf-confirm/*/instance.log
             perf-out/spread.md
             perf-out/*/result.json
             perf-out/*/summary.md

@@ -276,6 +276,14 @@ builds in the job summary. With no earlier build to compare with it measures B a
 number and is not a required check. `node scripts/perf/memory-lab/nightly.mjs plan` picks the builds (it needs `gh`);
 `lib/nightlyplan.mjs` holds the rules.
 
+When the first matrix flags a measure, the job runs one more A/B pair (one run a side, B first) and compares all the
+runs together; the `perf-regression` issue is opened only if a flag holds over all of them, so one noisy run opens
+nothing. Later flagged nights comment on the open issue (the oldest, if there are several) and a clean night closes
+it. A night with nothing to compare, or where the lab did not write its comparison, leaves the issue as it is.
+`nightly.mjs flagged` and `nightly.mjs issue` do this and `lib/perfissue.mjs` holds the text and the rule (the
+open/comment/close decision is `decide` from `scripts/ci-nightly-status.mjs`, shared with the `nightly-red` issue).
+To see what the issue step would do without writing anything, dispatch the workflow with `dry-run-issue` set.
+
 `.github/workflows/memory-soak.yml` stays as a manual run of one build, and `gate.mjs` checks its result against
 `budget.json`. Every line there is `null` and the mode is `report`, so it cannot fail on a number until the operator
 sets them; see
