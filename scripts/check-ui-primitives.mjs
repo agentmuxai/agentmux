@@ -26,7 +26,8 @@
 //
 //   5. durations    raw times (`120ms`, `0.5s`) in transition and animation
 //                   declarations, where a `--duration-*` token belongs
-//   6. fontSizes    `font-size` given as a raw px value, not a `--text-*` token
+//   6. fontSizes    `font-size` given as a raw px or rem value, not a
+//                   `--text-*` token
 //   7. fallbacks    `var(--x, …)` where `--x` is set on `:root` itself, outside
 //                   any at-rule: the fallback can never apply, and a wrong one
 //                   misleads (`var(--radius-sm, 4px)` renders 0)
@@ -35,6 +36,16 @@
 //                   outline or box-shadow) instead of `@include
 //                   mixins.focus-ring`. `outline: none` alone doesn't count,
 //                   nor does the shared ring: mixin bodies are skipped.
+//
+// And one for the colour scheme (docs/reports/REPORT_TOOLCHAIN_PANE_THEME_
+// INTEGRATION_2026_10_19.md §6), per file, in SCSS/CSS outside the theme files:
+//
+//  10. colours      colour literals (`#ef4444`, `rgba(245, 158, 11, 0.1)`,
+//                   `hsl(…)`) where a theme token belongs: a literal is one
+//                   colour in all twelve themes, light ones included. Pure
+//                   black and white (shadows, scrims) and colours built from
+//                   a token (`rgba(var(--x-rgb), 0.2)`, `rgb(from var(…) …)`)
+//                   don't count.
 //
 // A count above the base's fails: use the element/ui/ components instead. A
 // count below it is reported and passes. There is no checked-in baseline:
@@ -266,7 +277,55 @@ export function rawDurations(scss) {
 }
 
 export function rawFontSizes(scss) {
-    return declarations(scss, { includeMixins: true }).filter((d) => d.property === "font-size" && /^\d*\.?\d+px$/.test(unimportant(d.value)));
+    return declarations(scss, { includeMixins: true }).filter((d) => d.property === "font-size" && /^\d*\.?\d+(px|rem)$/.test(unimportant(d.value)));
+}
+
+// Functions are the ones that take literal channels; `rgb(from var(--x) …)` and
+// `rgba(var(--x-rgb), 0.2)` are built from a token and are skipped.
+const COLOUR_LITERAL =
+    /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\((?!\s*(?:var\(|from\b))[^)]*\)/gi;
+
+const NAMED_COLOURS = (
+    "aliceblue antiquewhite aqua aquamarine azure beige bisque blanchedalmond blue blueviolet brown burlywood cadetblue " +
+    "chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen " +
+    "darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue " +
+    "darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick " +
+    "floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink " +
+    "indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan " +
+    "lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray " +
+    "lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue " +
+    "mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred " +
+    "midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid " +
+    "palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple " +
+    "rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue " +
+    "slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet wheat " +
+    "whitesmoke yellow yellowgreen"
+).split(" ");
+const NAMED_COLOUR = new RegExp(`(?<![\\w-])(?:${NAMED_COLOURS.join("|")})(?![\\w-])`, "gi");
+// Properties whose value can be a colour. Others (`font-family: tan`, a `grid-area` name) are not looked at.
+const COLOUR_PROPERTY =
+    /^(?:--.+|color|fill|stroke|caret-color|accent-color|scrollbar-color|background(?:-color|-image)?|border(?:-(?:top|right|bottom|left))?(?:-color)?|outline(?:-color)?|text-decoration(?:-color)?|column-rule(?:-color)?|box-shadow|text-shadow)$/;
+
+/** The named colours in a value, leaving out names inside `var(…)`, `url(…)` and strings. */
+function namedColours(property, value) {
+    if (!COLOUR_PROPERTY.test(property)) return [];
+    const bare = value.replace(/var\([^)]*\)|url\([^)]*\)|"[^"]*"|'[^']*'/g, " ");
+    return bare.match(NAMED_COLOUR) ?? [];
+}
+
+/** Pure black or white, with or without alpha: a shadow or a scrim, the same on every theme. */
+function isNeutral(literal) {
+    if (literal.startsWith("#")) return /^#(?:0{3,8}|f{3}|f{6}|f{8})$/i.test(literal) || /^#(?:000|fff|000000|ffffff)[0-9a-f]{1,2}$/i.test(literal);
+    const [r, g, b] = (literal.match(/\d*\.?\d+%?/g) ?? []).slice(0, 3);
+    return (r === "0" && g === "0" && b === "0") || (r === "255" && g === "255" && b === "255");
+}
+
+/** Colour literals in a stylesheet's declarations, other than pure black and white. */
+export function colourLiterals(scss) {
+    return declarations(scss, { includeMixins: true }).flatMap((d) =>
+        [...(d.value.match(COLOUR_LITERAL) ?? []).filter((literal) => !isNeutral(literal)), ...namedColours(d.property, d.value)]
+            .map((literal) => ({ selector: d.selector, property: d.property, literal, line: d.line }))
+    );
 }
 
 export function rawZIndexes(scss) {
@@ -298,6 +357,8 @@ export function deadFallbacks(scss, tokens) {
 
 // ── Collect ─────────────────────────────────────────────────────────────────
 
+const THEME_FILE = /^frontend\/(tailwindsetup\.css|app\/(theme\.scss|themes\/))/;
+
 export function collect(files) {
     const buttons = {};
     const fills = new Set();
@@ -308,6 +369,7 @@ export function collect(files) {
     const fontSizes = {};
     const zIndex = {};
     const focusRings = {};
+    const colours = {};
     const styles = [];
 
     for (const { path, source } of files) {
@@ -332,6 +394,8 @@ export function collect(files) {
             countInto(fontSizes, path, rawFontSizes(source).length);
             countInto(zIndex, path, rawZIndexes(source).length);
             countInto(focusRings, path, handFocusRings(source).length);
+            // The theme files are where colours are defined.
+            if (!THEME_FILE.test(path)) countInto(colours, path, colourLiterals(source).length);
         }
     }
 
@@ -354,6 +418,7 @@ export function collect(files) {
         fallbacks: sortObject(fallbacks),
         zIndex: sortObject(zIndex),
         focusRings: sortObject(focusRings),
+        colours: sortObject(colours),
     };
 }
 
@@ -367,7 +432,7 @@ function sortObject(obj) {
 
 // ── Compare ─────────────────────────────────────────────────────────────────
 
-const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex", "focusRings"];
+const PER_FILE = ["buttons", "radius", "durations", "fontSizes", "fallbacks", "zIndex", "focusRings", "colours"];
 
 /** How `current` differs from `baseline` (the base branch), as human-readable lines. */
 export function compare(current, baseline) {
@@ -481,7 +546,8 @@ if (isMain(import.meta.url)) {
         console.log("frontend/app/element/ui/, a line instead of a solid fill, a --radius-* token,");
         console.log("only custom properties that are defined, --duration-*, --text-* and --z-* tokens");
         console.log("instead of raw values, no fallback on a token :root always sets, and");
-        console.log("`@include mixins.focus-ring` for a focus ring.");
+        console.log("`@include mixins.focus-ring` for a focus ring, and theme tokens (--error-color,");
+        console.log("--success-bg, --tint-2, …) instead of a colour literal.");
         process.exit(1);
     }
     const total = (o) => Object.values(o).reduce((a, b) => a + b, 0);
@@ -490,7 +556,8 @@ if (isMain(import.meta.url)) {
             `${current.solidFills.length} solid fills, ${total(current.radius)} off-token radii, ` +
             `${current.undefinedVars.length} undefined variables, ${total(current.durations)} raw durations, ` +
             `${total(current.fontSizes)} raw px font sizes, ${total(current.fallbacks)} fallbacks on always-defined ` +
-            `tokens, ${total(current.zIndex)} raw z-indexes, ${total(current.focusRings)} hand-written focus rings.`
+            `tokens, ${total(current.zIndex)} raw z-indexes, ${total(current.focusRings)} hand-written focus rings, ` +
+            `${total(current.colours)} colour literals.`
     );
     if (shrank.length > 0) {
         console.log(`Down from the base branch (${shrank.length}):`);
