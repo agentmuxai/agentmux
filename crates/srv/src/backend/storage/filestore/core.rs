@@ -222,6 +222,14 @@ impl FileStore {
         &self.conn
     }
 
+    /// Forgets every cached file, so the next read goes to the database: a test that
+    /// damages the database file under a store that has just written to it.
+    #[cfg(test)]
+    pub(crate) fn drop_cache_for_test(&self) {
+        self.cache.lock().unwrap().clear();
+        *self.cache_total_bytes.lock().unwrap() = 0;
+    }
+
     /// Run `PRAGMA wal_checkpoint(TRUNCATE)` on the filestore connection.
     /// Same semantics as `Store::checkpoint` — 5s busy_timeout, partial
     /// truncate on contention is safe.

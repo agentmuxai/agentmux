@@ -177,8 +177,17 @@ pub(super) fn global_output_source(
         return None;
     }
     let zone = crate::backend::agent_session::agent_zone_for_block_meta(&block.meta)?;
+    // A zone found corrupt is not read again in this process: the per-channel
+    // copy answers (`damage`).
+    if crate::backend::transcript::damage::is_damaged(&zone) {
+        return None;
+    }
     match gfs.stat(&zone, filename) {
         Ok(Some(ref wf)) if wf.size > 0 => Some((gfs.clone(), zone)),
+        Err(e) => {
+            crate::backend::transcript::damage::note_corrupt(&zone, "tail read", &e);
+            None
+        }
         _ => None,
     }
 }

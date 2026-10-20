@@ -200,3 +200,38 @@ async fn an_older_builds_rewrite_is_read_through_a_rebuilt_index_not_an_extended
     assert_eq!(r["lines"], serde_json::json!(["{\"x\":1}", "{\"y\":2}", "{\"z\":3}"]));
     assert_eq!(r["total"], serde_json::json!(3));
 }
+
+#[tokio::test]
+async fn a_pane_opened_on_a_corrupt_shared_zone_reads_its_own_copy_and_the_zone_is_damaged() {
+    use crate::backend::transcript::damage::{self, test_support};
+    let mut state = crate::server::tests::test_state();
+    let gfs = Arc::new(FileStore::open_in_memory().unwrap());
+    state.global_transcript_store = Some(gfs.clone());
+    let block_id = uuid::Uuid::new_v4().to_string();
+    let mut meta = crate::backend::obj::MetaMapType::new();
+    meta.insert("view".to_string(), serde_json::json!("agent"));
+    meta.insert("agentId".to_string(), serde_json::json!("def-rpc-corrupt"));
+    let mut block = Block { oid: block_id.clone(), parentoref: String::new(), version: 1, runtimeopts: None, stickers: None, meta, subblockids: None };
+    state.mstore.insert(&mut block).unwrap();
+    let zone = "agent:def-rpc-corrupt:current";
+    seed_lines(&gfs, zone, b"{\"g\":1}
+{\"g\":2}
+");
+    seed_lines(&state.filestore, &block_id, b"{\"own\":1}
+{\"own\":2}
+{\"own\":3}
+");
+    // The zone was sized (and cached) before the damage: the read of the database finds out.
+    let _shared = test_support::register(&gfs);
+    test_support::corrupt_behind_the_cache(&gfs);
+
+    let r = call(&state, COMMAND_BLOCKFILE_READ_RANGE, read(&block_id, 0, None)).await;
+    assert!(damage::is_damaged(zone));
+    assert_eq!(r["lines"], serde_json::json!(["{\"own\":1}", "{\"own\":2}", "{\"own\":3}"]), "the read is answered from the block's own copy, not failed");
+    assert_eq!(r["stream"], serde_json::json!(format!("b:{block_id}")));
+
+    // The next open does not go near the shared zone.
+    let count = call(&state, COMMAND_BLOCKFILE_LINE_COUNT, serde_json::json!({"block_id": block_id, "filename": "output"})).await;
+    assert_eq!(count["count"], serde_json::json!(3));
+    assert_eq!(count["stream"], serde_json::json!(format!("b:{block_id}")));
+}

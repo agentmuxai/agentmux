@@ -434,7 +434,7 @@ fn a_replace_announcement_names_the_zone_when_the_block_has_no_copy() {
     let (broker, rec, fs, gfs) = setup(block);
     gfs.make_file(ZONE, "output", Default::default(), Default::default()).unwrap();
     gfs.append_lines(ZONE, "output", b"{\"a\":1}\n{\"b\":2}\n").unwrap();
-    let source = TranscriptSource { fs: &gfs, zone: ZONE.to_string(), global: true };
+    let source = TranscriptSource { fs: &gfs, zone: ZONE.to_string(), global: true, own: None };
     crate::backend::transcript::append::publish_transcript_changed_from(&broker, block, mps::FILE_OP_REPLACE, &fs, &source);
     let seen = rec.seen.lock().unwrap();
     let ev = &seen[0].0;

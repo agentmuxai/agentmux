@@ -22,7 +22,13 @@ const IDX: &str = "output.idx";
 /// A counter only behind (an older build appended since) is caught up first,
 /// so its generation holds across those appends (`filestore/counter.rs`).
 pub(crate) fn output_now(fs: &FileStore, zone: &str) -> Option<(u64, Option<String>)> {
-    let state = fs.catch_up_line_counter(zone, "output").ok()??;
+    let state = match fs.catch_up_line_counter(zone, "output") {
+        Ok(state) => state?,
+        Err(e) => {
+            crate::backend::transcript::damage::note_if_shared(fs, zone, "index read", &e);
+            return None;
+        }
+    };
     Some((state.size.max(0) as u64, state.counted.map(|c| c.gen)))
 }
 
@@ -179,6 +185,7 @@ fn read_indexed(fs: &FileStore, zone: &str, offset: u64, limit: u64, stale_ok: b
         };
         Ok(Some(read))
     })
+    .map_err(|e| crate::backend::transcript::damage::note_if_shared(fs, zone, "index read", &e))
     .ok()
     .flatten()
 }
@@ -310,6 +317,9 @@ fn try_extend(fs: &FileStore, block_id: &str) -> Extend {
         };
         Ok(Some((out, idx, ends)))
     });
+    if let Err(e) = &base {
+        crate::backend::transcript::damage::note_if_shared(fs, block_id, "index rebuild", e);
+    }
     let Ok(Some((out, idx, ends))) = base else { return Extend::Done(None) };
     let output_size = out.size.max(0) as u64;
     let output_gen = out.gen;
@@ -437,6 +447,7 @@ fn build_output_idx_from(
         let chunk = match fs.read_bytes_db(block_id, "output", read_pos, len) {
             Ok(v) => v,
             Err(e) => {
+                crate::backend::transcript::damage::note_if_shared(fs, block_id, "index rebuild", &e);
                 // codex P2 on #2724: every exit path must log a terminal
                 // event (with duration) — an unmatched "starting" event with
                 // no completion reads as "still running," easy to mistake
@@ -512,6 +523,7 @@ fn build_output_idx_from(
             Some(line_count)
         }
         Err(e) => {
+            crate::backend::transcript::damage::note_if_shared(fs, block_id, "index rebuild", &e);
             tracing::warn!(
                 block_id = %block_id,
                 error = %e,
