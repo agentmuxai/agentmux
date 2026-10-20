@@ -65,6 +65,8 @@ import { installFileDropController } from "@/app/drag/file-drop";
 import { installWindowDragEvents } from "@/app/drag/window-drag-events";
 import { MuxInitFatalError, requireLoaded } from "@/app/init/require-loaded";
 import { installFocusFollowsSelection } from "@/app/store/focusManager";
+import { installPaneHistory } from "@/app/store/pane-history";
+import { installSideButtons } from "@/app/store/side-buttons";
 import { reopenRestoredWindows } from "@/app/init/restored-windows";
 
 // Deferred — assigned inside initApp() after window.api is ready.
@@ -1025,6 +1027,9 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     registerGlobalKeys();
     // The caret follows the selected pane (window tab switches, the <body> safety net).
     installFocusFollowsSelection();
+    // The mouse side buttons walk the panes the window selected, across tabs.
+    installPaneHistory();
+    installSideButtons();
     registerUserKeybindings();
     registerDefaultCommands();
     registerControlShiftTracking();

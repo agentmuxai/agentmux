@@ -279,6 +279,35 @@ pub unsafe fn install_browser_pane_subclass(
             }
         }
 
+        // The mouse side buttons over a pane's page never reach the app's DOM
+        // either. Ctrl + button is the page's own Back / Forward; the plain
+        // button belongs to the window's selection history. Both are taken
+        // here, so Chromium doesn't also navigate the page. Press and release
+        // are swallowed; the release acts.
+        const WM_XBUTTONDOWN: u32 = 0x020B;
+        const WM_XBUTTONUP: u32 = 0x020C;
+        const WM_XBUTTONDBLCLK: u32 = 0x020D;
+        if matches!(msg, WM_XBUTTONDOWN | WM_XBUTTONUP | WM_XBUTTONDBLCLK) {
+            use crate::side_buttons::{decode_xbutton, emit, SideButton};
+            if let Some((button, ctrl)) = decode_xbutton(wparam) {
+                if msg == WM_XBUTTONUP {
+                    if let Some(ctx) = find_context(hwnd) {
+                        if let Some(state) = ctx.state.upgrade() {
+                            if ctrl {
+                                match button {
+                                    SideButton::Back => state.browser_panes.go_back(&ctx.block_id, &state),
+                                    SideButton::Forward => state.browser_panes.go_forward(&ctx.block_id, &state),
+                                }
+                            } else if let Some(window) = state.browser_pane_window_label(&ctx.block_id) {
+                                emit(&state, &window, button, false, "pane", Some(&ctx.block_id));
+                            }
+                        }
+                    }
+                }
+                return 1;
+            }
+        }
+
         match msg {
             WM_MOUSEWHEEL | WM_MOUSEHWHEEL => {
                 tracing::debug!("[pane-wndproc] mouse-wheel hwnd={:p} msg=0x{:x}", hwnd, msg);
