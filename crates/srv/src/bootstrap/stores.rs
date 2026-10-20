@@ -374,7 +374,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                     tracing::warn!(dir = %dir.display(), error = %e, "global transcripts: failed to create dir — disabled, falling back to per-channel store");
                     None
                 } else {
-                    match FileStore::open(&dir.join("filestore.db")) {
+                    match FileStore::open_global_transcripts(&dir.join("filestore.db")) {
                         Ok(fs) => {
                             tracing::info!(dir = %dir.display(), "global transcripts: store attached");
                             Some(Arc::new(fs))
