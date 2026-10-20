@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { createEffect, createSignal, on, onCleanup, onMount, type Accessor } from "solid-js";
 import { getApi } from "@/app/store/app-api";
 import { FLOATER_EDGE_RESIZE_BORDER } from "@/app/workspace/floater-resize";
 import { registerPaneRect, unregisterPaneRect } from "@/app/platform/pane-rect-registry";
@@ -72,8 +72,12 @@ export function usePaneRectSync(params: {
     placeholderRef: () => HTMLDivElement | undefined;
     windowLabel: string;
     diag: (msg: string) => void;
+    /** The pane is hibernated: it has no native page until this turns false
+     *  (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md §4). */
+    asleep?: Accessor<boolean>;
 }): PaneRectSync {
     const { model, placeholderRef, windowLabel, diag } = params;
+    const asleep = params.asleep ?? (() => false);
     // The tab's one visibility signal (Pane Tab contract Phase 3): the native
     // page is collapsed whenever the tab isn't "active".
     const visibility = usePaneTabVisibility(model.blockId);
@@ -213,7 +217,10 @@ export function usePaneRectSync(params: {
                 model.blockId,
                 url || "about:blank",
                 windowLabel,
-                paneRect(),
+                // A pane that can't be seen (a wake on hover, a tab loaded
+                // hidden) is created collapsed, so its page never shows over
+                // the tab that is; the first sync on show lays it out.
+                visibility() === "active" ? paneRect() : { x: 0, y: 0, width: 0, height: 0 },
                 {
                     // Only while an agent drives the pane: Take over ends the
                     // limit but leaves the meta key behind.
@@ -222,7 +229,7 @@ export function usePaneRectSync(params: {
                     identity: model.identityAtom(),
                 },
             );
-            if (disposed) {
+            if (disposed || asleep()) {
                 if (releaseNativePane(model.blockId, token)) {
                     diag(`createPane finished after unmount — closing the orphan`);
                     getApi().browserPanes.close(model.blockId, windowLabel).catch(() => {});
@@ -276,8 +283,38 @@ export function usePaneRectSync(params: {
             onCleanup(() => window.removeEventListener("floating-pane-js-drag-ended", onJsDragEnded));
         }
         const url = model.urlAtom();
-        if (url) createPane(url);
+        if (url && !asleep()) createPane(url);
     });
+
+    // Hibernation: going to sleep closes the native page (its renderer ends);
+    // waking creates it again from the pane's address, with its jar.
+    const closeNative = (why: string) => {
+        if (!paneCreated()) return;
+        diag(`close-native why=${why}`);
+        unregisterPaneRect(model.blockId);
+        if (releaseNativePane(model.blockId, ownerToken)) {
+            rects.forget(model.blockId);
+            getApi().browserPanes.close(model.blockId, windowLabel).catch(() => {});
+        }
+        ownerToken = null;
+        lastSentRect = null;
+        setPaneCreated(false);
+    };
+    createEffect(
+        on(
+            asleep,
+            (isAsleep) => {
+                if (isAsleep) {
+                    closeNative("asleep");
+                    return;
+                }
+                if (paneCreated()) return;
+                const url = model.urlAtom();
+                if (url) void createPane(url);
+            },
+            { defer: true },
+        ),
+    );
 
     // Re-sync when the tab's visibility changes (see syncPosition): hiding
     // or showing doesn't change the placeholder's geometry, so the

@@ -700,3 +700,75 @@ $browser-nav-stack-below: 388px;
     justify-content: center;
     color: var(--secondary-text-color);
 }
+
+// A hibernated pane waking: what is restoring, about how long, and why it
+// slept (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md §7). Opaque, like the
+// loading overlay, so the page loading under it never shows through.
+.browser-sleep-card {
+    @include mixins.abs-fill;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    overflow: auto;
+    background-color: rgb(from var(--block-bg-color) r g b);
+    color: var(--main-text-color);
+}
+
+.browser-sleep-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-width: 420px;
+    min-width: 0;
+    font-size: 13px;
+    line-height: 1.45;
+
+    p {
+        margin: 0;
+    }
+}
+
+.browser-sleep-card-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    font-weight: 600;
+}
+
+.browser-sleep-card-icon {
+    width: 16px;
+    height: 16px;
+    flex: none;
+}
+
+.browser-sleep-card-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.browser-sleep-card-eta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.browser-sleep-card-spinner {
+    width: 18px;
+    height: 18px;
+    flex: none;
+}
+
+.browser-sleep-card-why,
+.browser-sleep-card-lost {
+    color: var(--secondary-text-color);
+}
+
+.browser-sleep-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}

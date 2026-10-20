@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createEffect, createSignal, For, Match, onCleanup, Show, Switch, type JSX } from "solid-js";
+import { createEffect, createSignal, For, Match, on, onCleanup, Show, Switch, type JSX } from "solid-js";
 import { isAnyUnderway } from "@/app/drag/drag-session";
 import { hostHas } from "@/app/host/host-caps";
 import { getApi } from "@/app/store/app-api";
@@ -20,6 +20,19 @@ import { BrowserNavBar } from "./browser-nav-bar";
 import { ActionLogStrip, DrivenByStrip } from "./driven-by-strip";
 import { minutesLabel, siteLabel } from "./bypass";
 import { attentionLook, dialogMessage } from "./attention-kinds";
+import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
+import { useWindowTabId } from "@/app/workspace/window-tab-visibility";
+import {
+    etaLabel,
+    HOVER_WAKE_GIVE_UP_MS,
+    isOverdue,
+    NOT_KEPT_TEXT,
+    prewakeTabId,
+    registerHibernatablePane,
+    sleepName,
+    sleepReasonText,
+    type BrowserSleep,
+} from "./hibernation";
 import "./browser-view.scss";
 
 // Matches BrainSpinner.scss's `.is-fading` transition duration — the DOM
@@ -124,6 +137,47 @@ export function BrowserViewComponent(props: { model: BrowserViewModel }): JSX.El
     );
 }
 
+/**
+ * Shown in place of a hibernated pane's page while it wakes: what is
+ * restoring, about how long it takes, and why it slept
+ * (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md §7). A `data-pane-overlay`, so
+ * it stays above the native page that is loading under it.
+ */
+function BrowserSleepCard(props: { sleep: BrowserSleep; startedAt: () => number; onKeepAwake: () => void }): JSX.Element {
+    const [now, setNow] = createSignal(performance.now());
+    const tick = setInterval(() => setNow(performance.now()), 250);
+    onCleanup(() => clearInterval(tick));
+    const eta = () =>
+        props.startedAt() > 0 && isOverdue(props.sleep.loadMs, now() - props.startedAt())
+            ? "Still loading…"
+            : etaLabel(props.sleep.loadMs);
+    return (
+        <div class="browser-sleep-card" role="status" data-pane-overlay>
+            <div class="browser-sleep-card-body">
+                <div class="browser-sleep-card-head">
+                    <Show when={props.sleep.favicon} fallback={<i class="fa-solid fa-moon" aria-hidden="true" />}>
+                        <img class="browser-sleep-card-icon" src={props.sleep.favicon} alt="" />
+                    </Show>
+                    <span class="browser-sleep-card-title" title={props.sleep.url}>
+                        Restoring {sleepName(props.sleep)}
+                    </span>
+                </div>
+                <div class="browser-sleep-card-eta">
+                    <BrainSpinner class="browser-sleep-card-spinner" />
+                    <span>{eta()}</span>
+                </div>
+                <p class="browser-sleep-card-why">{sleepReasonText(props.sleep.reason)}</p>
+                <p class="browser-sleep-card-lost">{NOT_KEPT_TEXT}</p>
+                <div class="browser-sleep-card-actions">
+                    <Button density="compact" onClick={props.onKeepAwake}>
+                        Keep this pane awake
+                    </Button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function BrowserPaneUnavailable(): JSX.Element {
     return (
         <div class="browser-view browser-pane-unavailable">
@@ -149,6 +203,76 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
 
     let placeholderRef: HTMLDivElement | undefined;
 
+    // Hibernation (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md): while the
+    // pane's sleep record is set it has no native page, until a wake creates
+    // it again; the record clears once the page has loaded.
+    const tabId = useWindowTabId();
+    const visibility = usePaneTabVisibility(model.blockId);
+    const visible = () => visibility() === "active";
+    const sleeping = () => model.sleepAtom() != null;
+    const [wakeRequested, setWakeRequested] = createSignal(false);
+    const [wakeStartedAt, setWakeStartedAt] = createSignal(0);
+    // A wake on intent (a hover or press on the tab's pill) that has loaded
+    // before the pane is shown: the sleep record stays until it is, so a hover
+    // with no switch puts it back to sleep instead of leaving it awake.
+    const [wakeLoadedMs, setWakeLoadedMs] = createSignal(0);
+    let wakeWhy = "";
+    let wakeGiveUp: ReturnType<typeof setTimeout> | undefined;
+    onCleanup(() => clearTimeout(wakeGiveUp));
+    const backToSleep = () => {
+        setWakeRequested(false);
+        setWakeStartedAt(0);
+        setWakeLoadedMs(0);
+    };
+    const wake = (why: string) => {
+        if (!sleeping() || wakeRequested()) return;
+        wakeWhy = why;
+        setWakeStartedAt(performance.now());
+        setWakeRequested(true);
+        diag(`[hibernate] wake-start why=${why} visible=${visible()}`);
+        clearTimeout(wakeGiveUp);
+        if (why === "intent") {
+            // No switch followed: back to sleep, loaded or not.
+            wakeGiveUp = setTimeout(() => {
+                if (sleeping() && !visible()) {
+                    diag(`[hibernate] wake-abandoned loaded=${wakeLoadedMs() > 0}`);
+                    backToSleep();
+                }
+            }, HOVER_WAKE_GIVE_UP_MS);
+        }
+    };
+    createEffect(() => {
+        if (!sleeping()) {
+            clearTimeout(wakeGiveUp);
+            backToSleep();
+        }
+    });
+    createEffect(() => {
+        if (!sleeping() || !visible()) return;
+        if (!wakeRequested()) wake("show");
+        else if (wakeLoadedMs() > 0) {
+            // Loaded while hidden, now shown: awake, with no card.
+            clearTimeout(wakeGiveUp);
+            diag(`[hibernate] wake-shown-ready ms=${Math.round(wakeLoadedMs())}`);
+            void model.endSleep(wakeLoadedMs()).catch(() => {});
+        }
+    });
+    createEffect(() => {
+        if (sleeping() && tabId != null && prewakeTabId() === tabId) wake("intent");
+    });
+    onCleanup(
+        registerHibernatablePane({
+            blockId: model.blockId,
+            isVisible: visible,
+            isAsleep: sleeping,
+            hibernate: (reason) => {
+                if (model.keepAwakeAtom()) return;
+                void model.hibernate(reason).catch(() => {});
+            },
+            wake,
+        }),
+    );
+
     // Construction ORDER matters: freeze-frame reads paneRect()/paneCreated()
     // owned by the rect-sync hook, so rect-sync must be built first.
     const rectSync = usePaneRectSync({
@@ -156,6 +280,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
         placeholderRef: () => placeholderRef,
         windowLabel,
         diag,
+        asleep: () => sleeping() && !wakeRequested(),
     });
     const freeze = useFreezeFrame({
         model,
@@ -230,6 +355,58 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
         if (wasLoading && !loading) setHasPaintedOnce(true);
         wasLoading = loading;
     });
+
+    // How long a load takes from the page's creation (or the wake's start),
+    // for the card's next estimate; a wake ends when it has loaded.
+    let loadClockFrom = 0;
+    let sawLoading = false;
+    createEffect(
+        on(rectSync.paneCreated, (created) => {
+            if (!created) {
+                loadClockFrom = 0;
+                return;
+            }
+            loadClockFrom = sleeping() && wakeStartedAt() > 0 ? wakeStartedAt() : performance.now();
+            sawLoading = model.loadingAtom();
+        }),
+    );
+    createEffect(
+        on(model.loadingAtom, (loading) => {
+            if (!loadClockFrom) return;
+            if (loading) {
+                sawLoading = true;
+                return;
+            }
+            if (!sawLoading) return;
+            const ms = performance.now() - loadClockFrom;
+            loadClockFrom = 0;
+            if (sleeping()) {
+                diag(`[hibernate] wake-loaded ms=${Math.round(ms)} why=${wakeWhy} visible=${visible()}`);
+                if (visible() || wakeWhy === "command") void model.endSleep(ms).catch(() => {});
+                else setWakeLoadedMs(ms);
+            } else {
+                void model.recordLoadMs(ms).catch(() => {});
+            }
+        }),
+    );
+    const sleepCard = () => (visible() && wakeLoadedMs() === 0 ? model.sleepAtom() : undefined);
+    let cardShownAt = 0;
+    createEffect(
+        on(
+            () => sleepCard() != null,
+            (shown) => {
+                if (shown && cardShownAt) return;
+                if (shown) {
+                    cardShownAt = performance.now();
+                    diag(`[hibernate] card-shown`);
+                } else if (cardShownAt) {
+                    diag(`[hibernate] card-hidden after=${Math.round(performance.now() - cardShownAt)}`);
+                    cardShownAt = 0;
+                }
+            },
+            { defer: true },
+        ),
+    );
 
     return (
         <div class="browser-view">
@@ -497,7 +674,16 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                     its `data-pane-overlay` rect is tiny, so even a flip
                     layer 1 doesn't catch can only punch a small hole, never
                     hide the whole visible page. */}
-                <Show when={spinnerMounted()}>
+                <Show when={sleepCard()}>
+                    {(s) => (
+                        <BrowserSleepCard
+                            sleep={s()}
+                            startedAt={wakeStartedAt}
+                            onKeepAwake={() => void model.keepAwake().catch(() => {})}
+                        />
+                    )}
+                </Show>
+                <Show when={spinnerMounted() && !sleepCard()}>
                     <Show
                         when={!hasPaintedOnce()}
                         fallback={
