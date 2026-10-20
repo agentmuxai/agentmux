@@ -34,6 +34,8 @@ pub const IDLE_MS: i64 = 2 * 60 * 1000;
 pub const RELEASED_WINDOW_MS: i64 = 60 * 60 * 1000;
 /// How often the reminder looks.
 const TICK_MS: u64 = 30_000;
+/// How often the history of long-finished tasks is pruned (`EVENTS_RETENTION_MS`).
+const PRUNE_EVERY_MS: i64 = 60 * 60 * 1000;
 /// The most tasks one reminder names.
 const MAX_NAMED: usize = 3;
 
@@ -165,17 +167,29 @@ fn tick(ctx: &Context, idle_since: &mut HashMap<String, i64>, now_ms: i64) -> Ve
     out
 }
 
-/// The reminder loop. Started once, after [`install`].
+/// The reminder loop, which also prunes the history of tasks finished more
+/// than 30 days ago, once an hour. Started once, after [`install`].
 pub async fn run_reminder_loop() {
     let mut idle_since: HashMap<String, i64> = HashMap::new();
+    let mut last_prune = 0i64;
     loop {
         tokio::time::sleep(std::time::Duration::from_millis(TICK_MS)).await;
         let Some(ctx) = CONTEXT.get() else { continue };
+        let now = agentmux_common::time::now_ms();
+        if now - last_prune >= PRUNE_EVERY_MS {
+            last_prune = now;
+            let identity = ctx.identity.clone();
+            let pruned = tokio::task::spawn_blocking(move || identity.work_events_prune(now)).await;
+            if let Ok(Ok(n)) = pruned.as_ref() {
+                if *n > 0 {
+                    tracing::info!(lines = n, "kanban: pruned the history of long-finished tasks");
+                }
+            }
+        }
         if !reminders_enabled(&ctx.config.get_settings().extra) {
             idle_since.clear();
             continue;
         }
-        let now = agentmux_common::time::now_ms();
         let mut state = std::mem::take(&mut idle_since);
         let joined = tokio::task::spawn_blocking(move || {
             let due = tick(ctx, &mut state, now);
