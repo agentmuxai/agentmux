@@ -9,6 +9,7 @@ import { decide, timedOut } from "../../../ci-nightly-status.mjs";
 
 export const PERF_LABEL = "perf-regression";
 export const PERF_TITLE = "nightly performance regression";
+export const DRIFT_TITLE = "nightly performance drift";
 
 /** The measures in a compare.json (`measuresComparison`) that are flagged, in the order they appear. */
 export function flaggedMeasures(compareJson) {
@@ -39,7 +40,7 @@ const fmt = (x) => (x == null ? "n/a" : String(Math.round(x * 10) / 10));
 const sign = (n) => (n == null ? "n/a" : n > 0 ? `+${n}%` : `${n}%`);
 
 /** The issue's body, or a comment's: what is flagged, between which builds, what was merged between them, and where the numbers are. */
-export function issueBody({ plan, initial, final, runUrl, kind = "regression" }) {
+export function issueBody({ plan, initial, final, runUrl, kind = "regression", drift = [] }) {
     const flagged = flaggedMeasures(final);
     const pair = confirmationRan(initial, final);
     const run = (r) => `\`${r.sha.slice(0, 9)}\` (nightly artifacts run ${r.id}, ${String(r.createdAt).slice(0, 10)})`;
@@ -49,8 +50,13 @@ export function issueBody({ plan, initial, final, runUrl, kind = "regression" })
             ? "The nightly performance check sees a slow drift: no single night flagged, but the last 7 nights' median is more than 15% above the 30 nights before it for the measures below."
             : `The nightly performance check flagged ${flagged.length === 1 ? "a measure" : `${flagged.length} measures`} on all of its runs together${pair ? " (a confirmation pair was run)" : ""}: B is worse than A by more than the margin in \`scripts/perf/memory-lab/budget.json\`, and the two sides' ranges do not overlap.`
     );
-    lines.push("", "| measure | A | B | change |", "|---|---:|---:|---:|");
-    for (const f of flagged) lines.push(`| ${f.name} | ${fmt(f.a)} | ${fmt(f.b)} | ${sign(f.changePct)} |`);
+    if (kind === "drift") {
+        lines.push("", "| measure | the 30 nights before | the last 7 nights | change |", "|---|---:|---:|---:|");
+        for (const d of drift) lines.push(`| ${d.name} | ${fmt(d.before)} | ${fmt(d.recent)} | ${sign(d.changePct)} |`);
+    } else {
+        lines.push("", "| measure | A | B | change |", "|---|---:|---:|---:|");
+        for (const f of flagged) lines.push(`| ${f.name} | ${fmt(f.a)} | ${fmt(f.b)} | ${sign(f.changePct)} |`);
+    }
     lines.push("", `- **A:** ${plan.a ? run(plan.a) : "none"}`, `- **B:** ${run(plan.b)}`);
     if (plan.merges?.total) {
         lines.push("", `Merged between A and B (${plan.merges.total}${plan.merges.truncated ? `, newest ${plan.merges.shown.length} shown` : ""}):`);
@@ -71,26 +77,30 @@ export const ISSUE_FOOTER =
 /**
  * The whole issue step. `gh(args)` runs one gh command and returns its stdout; returns the writes it made (or would make with DRY_RUN).
  * `env`: REPO, RUN_URL, DRY_RUN. `plan`: `nightly.mjs plan`'s plan.json. `initial` / `final`: compare.json of the first matrix and of all runs.
+ * `drift`: `{ current, onset }` from `driftOnset` (lib/perfhistory.mjs): a night that flags nothing but sits in a drift does not close the
+ * issue, and comments on it (or opens one, titled as a drift) on the night the drift starts, not on every night it lasts.
  */
-export function reportIssue({ env, plan, initial, final, gh, log = console.log }) {
+export function reportIssue({ env, plan, initial, final, drift = { current: [], onset: [] }, gh, log = console.log }) {
     const { REPO, RUN_URL, DRY_RUN } = env;
     const writes = [];
     const state = perfState({ hasA: Boolean(plan?.a), initial, final });
     const open = JSON.parse(gh(["issue", "list", "--repo", REPO, "--label", PERF_LABEL, "--state", "open", "--json", "number"])).map((i) => i.number);
-    const action = decide(state, open);
-    log(`The nightly performance check is ${state}; open ${PERF_LABEL} issues: [${open.join(", ")}]; action: ${action.action}.`);
+    const drifting = state === "green" && drift.current.length > 0;
+    const action = drifting ? (drift.onset.length ? (open.length ? { action: "comment", issues: [Math.min(...open)] } : { action: "create" }) : { action: "none" }) : decide(state, open);
+    log(`The nightly performance check is ${state}${drifting ? ` with a drift in ${drift.current.map((d) => d.name).join(", ")}` : ""}; open ${PERF_LABEL} issues: [${open.join(", ")}]; action: ${action.action}.`);
     const write = (args) => {
         writes.push(args);
         if (DRY_RUN) log(`[dry run] gh ${args.join(" ")}`);
         else gh(args);
     };
+    const kind = drifting ? "drift" : "regression";
     if (action.action === "close") {
         for (const n of action.issues) write(["issue", "close", String(n), "--repo", REPO, "--comment", closeNote({ plan, runUrl: RUN_URL })]);
     } else if (action.action === "comment") {
-        write(["issue", "comment", String(action.issues[0]), "--repo", REPO, "--body", issueBody({ plan, initial, final, runUrl: RUN_URL })]);
+        write(["issue", "comment", String(action.issues[0]), "--repo", REPO, "--body", issueBody({ plan, initial, final, runUrl: RUN_URL, kind, drift: drift.current })]);
     } else if (action.action === "create") {
         write(["label", "create", PERF_LABEL, "--repo", REPO, "--color", "D93F0B", "--description", "The nightly performance check flagged a regression", "--force"]);
-        write(["issue", "create", "--repo", REPO, "--title", PERF_TITLE, "--label", PERF_LABEL, "--body", `${issueBody({ plan, initial, final, runUrl: RUN_URL })}\n\n${ISSUE_FOOTER}`]);
+        write(["issue", "create", "--repo", REPO, "--title", drifting ? DRIFT_TITLE : PERF_TITLE, "--label", PERF_LABEL, "--body", `${issueBody({ plan, initial, final, runUrl: RUN_URL, kind, drift: drift.current })}\n\n${ISSUE_FOOTER}`]);
     }
     return writes;
 }
