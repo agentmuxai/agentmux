@@ -1,5 +1,53 @@
 # AgentMux Version History
 
+## 0.59.35 — 2026-10-19
+
+- The memory lab reports CPU seconds per process group and round time next to memory, compares several runs per side, and checks that a swapped srv comes from the portable's commit
+- The memory lab always builds the current memtree and refuses one that reports no CPU time
+- Linux: srv uses about 17% less CPU under agent load, because its process listings no longer read every thread of every process
+- The memory lab waits up to 90 seconds for a page command (12 agents on a slower machine exceeded 10), records the slowest one, and says when the ws package is missing
+- The memory lab on Linux no longer counts the agents' CLI processes as the app, and groups Chromium's GPU and helper processes like on Windows
+- The memory lab names the command in a timeout failure and records every page command that took 5 seconds or more
+- The memory lab records the longest hold of srv's transcript store connection per run and shows it in compare
+- The memory lab records how many bytes srv and the other process groups wrote during the workload, and compares them
+- srv: a stalled disk no longer freezes the rest of srv: store calls waiting for the transcript database connection no longer hold a worker thread
+- Hidden pre-warmed windows no longer animate their loading splash, which kept the GPU process busy (about 6–15% of a CPU core) while the app sat idle
+- The memory lab records the page's main-thread long tasks and every send's timing, to tell a busy window from a waiting srv
+- The nightly memory soak runs after the nightly build has finished, so it measures that morning's build
+- On Linux the lab counts the bytes srv passed to write calls (wchar), the same quantity as on Windows, instead of the bytes that reached the block layer
+- The memory lab also records how many of the bytes written reached storage (Linux and macOS), next to the bytes passed to write calls
+- The memory lab can run a background disk writer on the same volume while the agents work, to reproduce the store stalls an idle disk never shows
+- The Maintenance panel no longer has a Vacuum row (its Run button did nothing, the saga log it cleaned is now in memory), and the "checked …" line beside Check for update wraps instead of being cut off.
+- Browser pane: in a thin pane the nav bar puts Bookmarks next to Profile, with a line between its two rows. Its menus open from their button's side and stay inside the pane (leftward ones flush with the pane's right edge), the profile icon lines up with its name, and a browser pane can't be dragged narrower than 250px.
+- A Low disk space warning now appears in the status bar's backend panel when the drive holding AgentMux's data runs low; on a nearly full drive AgentMux can pause for seconds at a time
+- The memory lab splits each send into time before the page ran it, in the page and after, and records the page's timer lag
+- Opening an agent can show its latest messages from one small read and let you send at once, loading the rest of the history in the background; it takes effect once the server supports it
+- The memory lab records what the page's websocket receives, to tell an answer stuck behind other messages from a page that is not reading
+- The memory lab passes --env NAME=value settings to the instance it starts and records what the instance was given
+- The memory soak job can run the lab several times in a row with a chosen size and prints the spread between the runs
+- The memory lab stamps when each send's answer reaches the page's code and how long the page spends handling websocket messages
+- The performance lab can count how many agent panes each frame's stream flush covered; nothing changes in the app unless the lab turns it on
+- srv: a new agent:open_tail command returns an agent transcript's newest lines and where they sit from one read that never takes the store's write lock; the pane starts using it in a follow-up
+- An interleaved A/B helper for the memory lab runs two builds, srv binaries or settings alternately with the same flags and compares them
+- The memory lab's comparison flags srv bytes written at +3%, CPU at +10% or +20%, can read its margins from a file and writes the measures a nightly history line needs
+- The memory lab reports what fills the page's slow frames: script or rendering, which script forces layout, and the websocket handler's time by message size
+- The nightly performance check compares the latest nightly build with the previous one on the memory lab and prints what moved and what was merged between them (report only)
+- srv writes about 46% fewer bytes while agents run and uses about 30% less CPU: the receive-time record next to each transcript line is now written at most once a second, so a replayed line's fallback time can be up to a second early
+- Agent panes no longer pile up rendered tool output while the window is minimized (or covered, where the platform reports it); the extra memory they held is released as it would be for a hidden tab
+- The memory lab can measure how long opening an agent takes, from the request to the first screen, for ordinary and very long conversations (--open-agents, --heavy-turns)
+- srv: the ambient digest (titles, summaries, next-prompt suggestions, supervisor and worker notes), the activity watcher, muxspect and the agent progress feed read a defined agent's transcript from the agent's own zone through the reader pool; no visible change yet
+- A minimized window no longer accumulates tab-flash animations, which held hundreds of MB while the window stayed minimized
+- The memory lab no longer loses an agent open whose block id is all digits
+- The memory lab can give the instance an app setting (--setting NAME=value, and --a-setting/--b-setting in an A/B) and records it
+- srv: a new setting, agent:transcriptsinglecopy (off by default), writes a defined agent's transcript to the agent's own zone only instead of also to the block's store, halving what is written to disk while agents run
+- The agent open log line now says when the first-screen read returned and when the pane fell back to the usual open, and why
+- Unloading tool results from an open pane no longer forces a layout for every open tool body: their heights are read together first (about 175 ms off opening an agent)
+- The memory lab has a Web Worker probe (--ws-worker) that tells whether a slow answer waited in srv or in the page, and reports the page's slow frames while agents are opened
+- The memory lab records the heavy turns' write volume (heavyIo) and can check that every agent's transcript is intact after the agents are reopened (--verify-transcripts)
+- Pane pills in a hidden window tab no longer start an activity flash that nobody can see
+- The Swarm no longer rebuilds its agent rows for a status or progress update that changed nothing
+- Agent panes in a hidden window tab no longer keep scrolling themselves to the bottom frame by frame while nobody can see them
+
 ## 0.59.34 — 2026-10-18
 
 - Browser: wait finds text inside iframes, an approved click says the user approved it and after how long, and date, time, month and week fields fill from a date like "October 15, 2026"
