@@ -171,8 +171,8 @@ static MINIMIZED: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet
 /// the user's selection after CEF's own activation handling. Also hands
 /// activation back from an invisible pool window (`invisible_activation`).
 ///
-/// SAFE on the main CEF Views window: this hook only observes, and ALWAYS
-/// passes the message through to the original WndProc.
+/// SAFE on the main CEF Views window: this hook passes every message through
+/// to the original WndProc, except a mouse side button's `WM_APPCOMMAND`.
 ///
 /// Idempotent: re-calling on an already-hooked HWND is a no-op.
 #[cfg(target_os = "windows")]
@@ -286,6 +286,22 @@ pub(crate) unsafe fn install_top_level_focus_restore_hook(
         }
         if msg == windows_sys::Win32::UI::WindowsAndMessaging::WM_NCDESTROY {
             crate::commands::taskbar_attention::forget(hwnd as isize);
+        }
+
+        // A mouse side button nothing below handled: Windows turns it into
+        // WM_APPCOMMAND, and Chromium would navigate the app's own page. The
+        // frontend gets it as a `side-button` event (its DOM listener and
+        // this one share a debounce). A keyboard's browser keys pass through.
+        if msg == windows_sys::Win32::UI::WindowsAndMessaging::WM_APPCOMMAND {
+            use crate::side_buttons::{ctrl_down, decode_appcommand, emit};
+            if let Some((button, true)) = decode_appcommand(lparam) {
+                if let Some(state) = crate::input_owner::windows::app_state() {
+                    if let Some(window) = state.label_for_hwnd(hwnd) {
+                        emit(&state, &window, button, ctrl_down(), "appcommand", None);
+                    }
+                }
+                return 1;
+            }
         }
 
         // ALWAYS pass through. We observe WM_ACTIVATE; CEF still owns it.

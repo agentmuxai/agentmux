@@ -130,6 +130,7 @@ Gestures that aren't plain keys: modifier + mouse, double- and middle-click, dra
 | Move only the border between the two panes beside it (a plain drag resizes the whole group) | on a pane border | ⇧ + drag | Shift + drag |
 | Maximize the pane, or restore it | on a pane's header | double-click | double-click |
 | Move the pane somewhere else in the layout | a pane by its header | drag | drag |
+| Mouse Back / Forward: select the pane you had selected before / after, in any tab, with the caret in it |  | sidebutton | sidebutton |
 | Number every pane, for ⌃⇧1 / Ctrl+Shift+1 to ⌃⇧9 / Ctrl+Shift+9 |  | hold ⌃ + ⇧ | hold Ctrl + Shift |
 | Zoom that pane; over the title bar, status bar or a pane's header, zoom the app's frame instead | over a pane | ⌘ + scroll | Ctrl + scroll |
 | Zoom every pane in the window together (over a browser pane's page, only that page zooms) | over a pane | ⌘ + ⇧ + scroll | Ctrl + Shift + scroll |
@@ -213,6 +214,7 @@ Gestures that aren't plain keys: modifier + mouse, double- and middle-click, dra
 | What it does | Where | macOS | Windows / Linux |
 |---|---|---|---|
 | Address bar / reload / back / forward | in a browser pane | ⌘ + L or ⌘ + R or ⌥ + ← or ⌥ + → | Ctrl + L or Ctrl + R or Alt + ← or Alt + → |
+| Back / forward in that page (a plain side button re-selects panes) | over a browser pane | ⌃ + sidebutton | Ctrl + sidebutton |
 
 ## Your own shortcuts
 

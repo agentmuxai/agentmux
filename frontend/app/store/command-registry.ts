@@ -27,6 +27,7 @@ import { redockThisFloater } from "@/app/block/floating-redock";
 import { userInThisWindow } from "@/app/store/input-owner";
 import { openConnectors, openMemory } from "@/app/view/section-pane/panes";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
+import { paneHistoryBack, paneHistoryForward } from "@/app/store/pane-history";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -345,6 +346,20 @@ export function registerDefaultCommands(): void {
                 layoutModel.magnifyNodeToggle(focusedNode.id);
             }
         },
+    });
+    commandRegistry.register({
+        id: "pane:history:back",
+        label: "Back to Previous Pane",
+        category: "Pane",
+        icon: "arrow-left",
+        execute: () => paneHistoryBack(),
+    });
+    commandRegistry.register({
+        id: "pane:history:forward",
+        label: "Forward to Next Pane",
+        category: "Pane",
+        icon: "arrow-right",
+        execute: () => paneHistoryForward(),
     });
     commandRegistry.register({
         id: "pane:focus:right",

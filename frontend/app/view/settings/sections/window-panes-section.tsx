@@ -32,6 +32,13 @@ export const WINDOW_SETTINGS = {
         section: "window",
         keywords: ["pane jump", "pane numbers", "quick switch", "app:showoverlayblocknums"],
     },
+    mouseSideButtons: {
+        id: "window.mouse_side_buttons",
+        label: "Mouse side buttons select the previous / next pane",
+        description: "Back and Forward re-select the pane you had selected before or after, in any tab. Ctrl + button is page back / forward over a browser pane",
+        section: "window",
+        keywords: ["mouse", "side button", "back", "forward", "history", "mouse:sidebuttons"],
+    },
     confirmTabClose: {
         id: "window.confirm_tab_close",
         label: "Confirm before closing a tab",
@@ -81,6 +88,17 @@ export function WindowPanesSection(): JSX.Element {
                     <ToggleControl
                         checked={(s()["app:showoverlayblocknums"] as boolean | undefined) ?? true}
                         onChange={(v) => set("app:showoverlayblocknums", v)}
+                    />
+                }
+            />
+            <SettingRow
+                id={WINDOW_SETTINGS.mouseSideButtons.id}
+                label={WINDOW_SETTINGS.mouseSideButtons.label}
+                description={WINDOW_SETTINGS.mouseSideButtons.description}
+                control={
+                    <ToggleControl
+                        checked={(s()["mouse:sidebuttons"] ?? true) as boolean}
+                        onChange={(v) => set("mouse:sidebuttons", v)}
                     />
                 }
             />
