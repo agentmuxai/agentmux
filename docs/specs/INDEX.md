@@ -690,6 +690,7 @@ partial list.
 | [`SPEC_MUXSH_FULL_COLLECTION_2026_09_16`](SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md) | SPEC: The full `muxsh` collection — a consistent, wsh-familiar CLI over MuxAPI |
 | [`SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21`](SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md) | Spec: Cross-tier conversation visibility for `muxspect` (host / cross-channel / LAN / WAN) |
 | [`SPEC_MY_AGENTS_TILES_AUTH_AND_HISTORY_2026_10_03`](SPEC_MY_AGENTS_TILES_AUTH_AND_HISTORY_2026_10_03.md) | SPEC: My Agents tiles — larger tiles, an honest auth line, real history summaries, and no ambient credentials |
+| [`SPEC_NIGHTLY_PERF_REGRESSION_2026_10_19`](SPEC_NIGHTLY_PERF_REGRESSION_2026_10_19.md) | Spec: a nightly performance regression check |
 | [`SPEC_NINE_NEW_HARNESSES_2026_10_14`](SPEC_NINE_NEW_HARNESSES_2026_10_14.md) | Spec: Nine new harnesses — OpenCode, Kilo Code, Cline, goose, Grok Build, DeepSeek Harness, Muse Code, Crush, Aider |
 | [`SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15`](SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15.md) | Node.js 24 LTS standardization across agentmuxai repos |
 | [`SPEC_NO_WINDOW_SPAWN_AND_META_ROW_TYPE_SCALE_DRY_2026_10_01`](SPEC_NO_WINDOW_SPAWN_AND_META_ROW_TYPE_SCALE_DRY_2026_10_01.md) | Spec: DRY the no-window spawn flag, and the meta-row type scale |

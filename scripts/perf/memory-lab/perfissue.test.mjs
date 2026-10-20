@@ -65,7 +65,9 @@ describe("the issue text", () => {
     });
 
     it("words a drift as a drift", () => {
-        expect(issueBody({ plan, initial: worse, final: worse, runUrl: "u", kind: "drift" })).toContain("slow drift");
+        const body = issueBody({ plan, initial: clean, final: clean, runUrl: "u", kind: "drift", drift: [{ name: "app_mb", before: 640, recent: 760, changePct: 18.8 }] });
+        expect(body).toContain("slow drift");
+        expect(body).toContain("| app_mb | 640 | 760 | +18.8% |");
     });
 
     it("closes with the two commits", () => {
@@ -175,5 +177,31 @@ describe("a night that did not finish", () => {
     it("does nothing for a plain cancel, or a finished night with no open issue", () => {
         expect(run("cancelled", [4], [{ id: 1, conclusion: "cancelled" }], [{ message: "The operation was canceled." }]).writes).toEqual([]);
         expect(run("success", []).writes).toEqual([]);
+    });
+});
+
+describe("a drift in the issue step", () => {
+    const drift = { current: [{ name: "app_mb", before: 640, recent: 760, changePct: 18.8 }], onset: [{ name: "app_mb", before: 640, recent: 760, changePct: 18.8 }] };
+    const run = (open, d) => {
+        const gh = (a) => (a[0] === "issue" && a[1] === "list" ? JSON.stringify(open.map((number) => ({ number }))) : "");
+        return reportIssue({ env: { REPO: "o/r", RUN_URL: "u" }, plan, initial: clean, final: clean, drift: d, gh, log: () => {} });
+    };
+
+    it("opens an issue titled as a drift on the night it starts", () => {
+        const writes = run([], drift);
+        expect(writes.map((w) => w.slice(0, 2).join(" "))).toEqual(["label create", "issue create"]);
+        expect(writes[1]).toContain("nightly performance drift");
+    });
+
+    it("comments on an open issue on the night it starts", () => {
+        expect(run([5], drift).map((w) => w.slice(0, 3).join(" "))).toEqual(["issue comment 5"]);
+    });
+
+    it("says nothing on a night the drift only continues, and does not close the issue while it lasts", () => {
+        expect(run([5], { ...drift, onset: [] })).toEqual([]);
+    });
+
+    it("closes the issue again once the drift is gone and the night is clean", () => {
+        expect(run([5], { current: [], onset: [] }).map((w) => w.slice(0, 3).join(" "))).toEqual(["issue close 5"]);
     });
 });
