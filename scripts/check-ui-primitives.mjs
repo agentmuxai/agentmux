@@ -44,8 +44,9 @@
 //                   `hsl(…)`) where a theme token belongs: a literal is one
 //                   colour in all twelve themes, light ones included. Pure
 //                   black and white (shadows, scrims) and colours built from
-//                   a token (`rgba(var(--x-rgb), 0.2)`, `rgb(from var(…) …)`)
-//                   don't count.
+//                   a token (`rgba(var(--x-rgb), 0.2)`, `rgb(from var(…) …)`),
+//                   a palette token set on `:root`, and lines under a
+//                   `stylelint-disable color-no-hex` don't count.
 //
 // A count above the base's fails: use the element/ui/ components instead. A
 // count below it is reported and passes. There is no checked-in baseline:
@@ -320,12 +321,43 @@ function isNeutral(literal) {
     return (r === "0" && g === "0" && b === "0") || (r === "255" && g === "255" && b === "255");
 }
 
-/** Colour literals in a stylesheet's declarations, other than pure black and white. */
+/**
+ * Lines a stylesheet has marked as meant to be a fixed colour, the way stylelint
+ * is already told: `stylelint-disable color-no-hex` … `stylelint-enable` around
+ * a block (vendor swatches, the macOS traffic lights), or `-disable-line` /
+ * `-disable-next-line` on one.
+ */
+function allowedColourLines(scss) {
+    const allowed = new Set();
+    let open = false;
+    scss.split("\n").forEach((text, i) => {
+        const n = i + 1;
+        if (/stylelint-enable.*color-no-hex/.test(text)) open = false;
+        if (open) allowed.add(n);
+        if (/stylelint-disable-line.*color-no-hex/.test(text)) allowed.add(n);
+        if (/stylelint-disable-next-line.*color-no-hex/.test(text)) allowed.add(n + 1);
+        if (/stylelint-disable(?!-).*color-no-hex/.test(text)) {
+            open = true;
+            allowed.add(n);
+        }
+    });
+    return allowed;
+}
+
+/**
+ * Colour literals in a stylesheet's declarations, other than pure black and
+ * white, a palette token defined on `:root` (that is where a colour is set),
+ * and the lines marked fixed above.
+ */
 export function colourLiterals(scss) {
-    return declarations(scss, { includeMixins: true }).flatMap((d) =>
-        [...(d.value.match(COLOUR_LITERAL) ?? []).filter((literal) => !isNeutral(literal)), ...namedColours(d.property, d.value)]
-            .map((literal) => ({ selector: d.selector, property: d.property, literal, line: d.line }))
-    );
+    const allowed = allowedColourLines(scss);
+    return declarations(scss, { includeMixins: true })
+        .filter((d) => !allowed.has(d.line) && !(d.property.startsWith("--") && d.selector.includes(":root")))
+        .flatMap((d) =>
+            [...(d.value.match(COLOUR_LITERAL) ?? []).filter((literal) => !isNeutral(literal)), ...namedColours(d.property, d.value)].map(
+                (literal) => ({ selector: d.selector, property: d.property, literal, line: d.line })
+            )
+        );
 }
 
 export function rawZIndexes(scss) {

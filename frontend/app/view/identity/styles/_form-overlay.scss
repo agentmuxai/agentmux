@@ -85,8 +85,8 @@
     gap: 6px;
     padding: var(--space-1-5) 10px;
     font-size: var(--text-sm);
-    background: rgba(239, 68, 68, 0.1);
-    border: 1px solid rgba(239, 68, 68, 0.3);
+    background: var(--error-bg);
+    border: 1px solid var(--error-line);
     border-radius: 0;
     color: var(--error-color);
 }
@@ -118,8 +118,8 @@
 .identity-form-warning {
     padding: var(--space-1-5) 10px;
     font-size: var(--text-xs);
-    background: rgba(245, 158, 11, 0.1);
-    border: 1px solid rgba(245, 158, 11, 0.3);
+    background: var(--warning-bg);
+    border: 1px solid var(--warning-line);
     border-radius: 0;
     color: var(--warning-color);
 }

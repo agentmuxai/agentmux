@@ -99,8 +99,8 @@
     bottom: -28px;
     left: 12px;
     right: 12px;
-    background: color-mix(in srgb, #ef4444 12%, transparent);
-    color: #ef4444;
+    background: var(--error-bg);
+    color: var(--error-color);
     padding: 4px 8px;
     font-size: var(--text-xs);
     border-radius: 0;
@@ -420,8 +420,8 @@
     font-size: var(--text-xs);
     align-items: center;
     border-bottom: 1px solid color-mix(in srgb, var(--border-color) 50%, transparent);
-    &--ok .drone-runpanel-status { color: #10b981; }
-    &--err .drone-runpanel-status { color: #ef4444; }
+    &--ok .drone-runpanel-status { color: var(--success-color); }
+    &--err .drone-runpanel-status { color: var(--error-color); }
 }
 
 .drone-runpanel-status {

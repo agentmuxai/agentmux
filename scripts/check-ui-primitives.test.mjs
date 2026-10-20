@@ -151,6 +151,21 @@ describe("rules 5-9: the shared scales", () => {
         ]);
     });
 
+    it("leaves out lines marked fixed for stylelint, and palette tokens set on :root", () => {
+        const scss = `
+            :root { --palette: #e5484d; }
+            .a { color: #ef4444; }
+            /* stylelint-disable color-no-hex -- vendor colours */
+            .b { color: #21262d; background: #161b22; }
+            /* stylelint-enable color-no-hex */
+            .c { color: #fff1a2; /* stylelint-disable-line color-no-hex */ background: #123456; }
+            // stylelint-disable-next-line color-no-hex
+            .d { color: #abcdef; }
+            .e { color: #fedcba; }
+        `;
+        expect(colourLiterals(scss).map((c) => c.literal)).toEqual(["#ef4444", "#fedcba"]);
+    });
+
     it("takes tokens set on :root, alone or in a list, and not inside an at-rule", () => {
         const scss = `
             :root { --text-2xs: 10px; --a: 1; }

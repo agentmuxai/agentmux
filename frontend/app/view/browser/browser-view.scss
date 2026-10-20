@@ -268,10 +268,10 @@ $browser-nav-stack-below: 388px;
 
 .browser-error {
     padding: var(--space-3) var(--space-4);
-    background: rgba(255, 80, 80, 0.1);
+    background: var(--error-bg);
     color: var(--error-color);
     font-size: var(--text-base);
-    border-bottom: 1px solid rgba(255, 80, 80, 0.2);
+    border-bottom: 1px solid var(--error-line);
     flex-shrink: 0;
 }
 
