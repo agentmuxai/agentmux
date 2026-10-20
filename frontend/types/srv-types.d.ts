@@ -864,6 +864,8 @@ declare global {
         "vault:section"?: "personal" | "cards" | "api-keys" | "logins" | "notes" | "kept" | "activity";
         // An agent's Vault request to open the form for (vault-model.ts); cleared once shown.
         "vault:request"?: string | null;
+        // The note on what may ask the person, dismissed (vault-model.ts).
+        "vault:prompts-read"?: boolean | null;
         // Set once by quick-fork.ts right after a fork lands on a provider
         // with no --fork-session equivalent and a parent session existed to
         // lose; ForkProviderFallbackBanner (agent-view.tsx) reads it.

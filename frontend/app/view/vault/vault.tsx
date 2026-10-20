@@ -21,6 +21,14 @@ export const vaultPaneTab: PaneTabManifest = {
         return {
             component: () => <VaultView model={model} />,
             liveTitle: () => ({ text: model.viewName() }),
+            headerActions: () => [
+                {
+                    elemtype: "iconbutton",
+                    icon: "circle-info",
+                    title: "What the Vault may ask you",
+                    click: () => model.setMeta({ "vault:prompts-read": null }),
+                },
+            ],
         };
     },
 };
