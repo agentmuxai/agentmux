@@ -268,6 +268,7 @@ async fn app_main() {
     let state_for_exit = state.clone();
     let wal_mstore = Arc::clone(&state.mstore);
     let wal_filestore = Arc::clone(&state.filestore);
+    let wal_global_transcripts = state.global_transcript_store.clone();
     let config_watcher_for_lan = Arc::clone(&state.config_watcher);
     let dev_proxy_registry = state.dev_proxy.clone();
     let fleet_feed = Arc::clone(&state.fleet_feed);
@@ -339,6 +340,7 @@ async fn app_main() {
     // Periodic WAL checkpoint — prevents unbounded WAL file growth during
     // long-running sessions.
     bootstrap::spawn_wal_checkpoint_loop(stdin_token.clone(), wal_mstore, wal_filestore);
+    bootstrap::spawn_global_transcripts_truncate_loop(stdin_token.clone(), wal_global_transcripts);
 
     // The fleet feed's change detection (`backend::fleet_feed`): compares the
     // reachable agents, their kinds and states and this machine's channel
