@@ -1031,8 +1031,13 @@ mod swarm_broadcast_entry_tests {
         assert!(text.contains(after_time), "pause note drifted: {after_time}");
         assert!(text.contains("Cloud messages are paused since "));
         assert!(text.contains("Cloud messages resumed at "));
+        let outage = notes::outage_note(0, 0, "MuxBus needs a sign-in", false);
+        let after_times = &outage[outage.find(" (").unwrap()..];
+        assert!(text.contains(after_times), "outage note drifted: {after_times}");
+        assert!(text.contains("Cloud messages were paused 14:22\u{2013}16:31 "));
+        assert!(text.contains("never starts a turn"), "says where a held note comes");
         assert!(notes::delayed_prefix(Some(0), notes::DELAYED_AFTER_MS + 1).starts_with("(sent "));
         assert!(text.contains("(sent 14:30, delivered 14:41)"));
-        assert!(manifest.version >= 12);
+        assert!(manifest.version >= 28);
     }
 }

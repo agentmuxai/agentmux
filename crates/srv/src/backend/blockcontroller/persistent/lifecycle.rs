@@ -357,7 +357,9 @@ impl PersistentSubprocessController {
     }
 
     /// The `[AgentMux]` note that AgentMux gave up, so the agent tells the
-    /// operator and knows its tools are gone. By UID when the pane has one.
+    /// operator and knows its tools are gone: in its running turn, else with
+    /// its next one, never a turn of its own. Audited by UID when the pane
+    /// has one.
     fn tell_agent_mcp_is_down(&self) {
         let error = crate::backend::mcp_health::snapshot(&self.block_id).and_then(|s| s.last_error);
         let text = crate::backend::mcp_health::give_up_note(error.as_deref());
@@ -371,8 +373,7 @@ impl PersistentSubprocessController {
             tracing::info!(block_id = %self.block_id, "MCP self-heal: no registered agent to tell");
             return;
         };
-        if let Err(e) = handler.deliver_system_note(&target, &text) {
-            tracing::info!(block_id = %self.block_id, error = %e, "MCP self-heal note not delivered");
-        }
+        let joined = self.note_into_turn_or_hold("mcp-down", &text);
+        handler.audit_system_note(&target, &self.block_id, &text, joined);
     }
 }
