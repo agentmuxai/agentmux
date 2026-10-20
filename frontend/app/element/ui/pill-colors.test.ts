@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The Toolchain pane's status pills read in every theme. A pill is a 12% wash
- * of the theme's own success or warning colour (`--success-bg`,
- * `--warning-bg`, theme.scss) with the main text colour on it. This
+ * The shared `Pill` reads in every theme. A tone is a wash of the theme's own
+ * semantic colour (`--success-bg`, `--warning-bg`, `--error-bg`,
+ * `--accent-bg`, theme.scss) with the main text colour on it. This
  * reads the theme files themselves, resolves the tokens the way the cascade
  * does (the theme's value, then the light polarity's, then `:root`'s), and
  * checks the main text colour against the wash laid over the theme's surface, so a later
@@ -67,7 +67,7 @@ const AA = 4.5;
 // pill, which uses it, is pinned there rather than measured against AA.
 const SECONDARY_TEXT_BELOW_AA = new Set(["solarized-light"]);
 
-describe("the Toolchain status pills", () => {
+describe("the shared pills", () => {
     const themes = readdirSync(new URL("../../themes/", import.meta.url))
         .filter((f) => f.endsWith(".scss") && f !== "index.scss")
         .map((f) => f.replace(/\.scss$/, ""));
@@ -122,7 +122,7 @@ describe("the Toolchain status pills", () => {
             const plain = contrast(secondary!, washOf("tint-3", surface!));
             if (SECONDARY_TEXT_BELOW_AA.has(id)) expect(plain).toBeLessThan(AA); // leaves the list when the theme is fixed
             else expect(plain, `plain pill text in ${id}`).toBeGreaterThanOrEqual(AA);
-            for (const kind of ["success", "warning"] as const) {
+            for (const kind of ["success", "warning", "error", "accent"] as const) {
                 const wash = washOf(`${kind}-bg`, surface!);
                 expect(contrast(text!, wash), `pill text on the ${kind} wash in ${id}`).toBeGreaterThanOrEqual(AA);
             }

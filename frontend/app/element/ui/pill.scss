@@ -1,0 +1,56 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// A text status chip (Pill.tsx). The washes and lines are the theme's own
+// semantic ones (theme.scss); the text is the main text colour, so it reads on
+// every wash in every theme (pill-colors.test.ts). Colour never carries the
+// status alone: the words and the icon do too.
+
+.ui-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: var(--text-xs);
+    font-weight: 500;
+    padding: 0 var(--space-2);
+    border: 1px solid transparent;
+    border-radius: var(--radius-full);
+    background: var(--tint-3);
+    color: var(--secondary-text-color);
+
+    &--ok {
+        background: var(--success-bg);
+        border-color: var(--success-line);
+        color: var(--main-text-color);
+        i {
+            color: var(--success-color);
+        }
+    }
+
+    &--warn {
+        background: var(--warning-bg);
+        border-color: var(--warning-line);
+        color: var(--main-text-color);
+        i {
+            color: var(--warning-color);
+        }
+    }
+
+    &--error {
+        background: var(--error-bg);
+        border-color: var(--error-line);
+        color: var(--main-text-color);
+        i {
+            color: var(--error-color);
+        }
+    }
+
+    &--accent {
+        background: var(--accent-bg);
+        border-color: var(--accent-line);
+        color: var(--main-text-color);
+        i {
+            color: var(--accent-color);
+        }
+    }
+}

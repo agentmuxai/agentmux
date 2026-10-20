@@ -187,42 +187,12 @@
     margin-top: var(--space-0-5);
 }
 
-// ── Pills ─────────────────────────────────────────────────────────────
+// ── Running dot ───────────────────────────────────────────────────────
 
-// A text status chip. The wash and the line are the theme's own semantic
-// ones, so a pill takes each theme's success or warning colour; the text stays
-// the main text colour, because those colours were not tuned for 11px text on a
-// wash of themselves (toolchain-pill-colors.test.ts measures it), and the
-// status is carried by the wash, the line and the icon as well as the words.
-.toolchain-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1);
-    font-size: var(--text-xs);
-    font-weight: 500;
-    padding: 0 var(--space-2);
-    border: 1px solid transparent;
-    border-radius: var(--radius-full);
-    background: var(--tint-3);
-    color: var(--secondary-text-color);
-
-    &--ok {
-        background: var(--success-bg);
-        border-color: var(--success-line);
-        color: var(--main-text-color);
-        i {
-            color: var(--success-color);
-        }
-    }
-    // Needs attention: not found, or behind the version AgentMux validates against.
-    &--warn {
-        background: var(--warning-bg);
-        border-color: var(--warning-line);
-        color: var(--main-text-color);
-        i {
-            color: var(--warning-color);
-        }
-    }
+// The "Running" pill's dot is smaller than a pill icon (the pills are the
+// shared Pill, element/ui).
+.toolchain-running i {
+    font-size: 0.5em;
 }
 
 // ── Buttons ───────────────────────────────────────────────────────────
