@@ -19,6 +19,7 @@ mod ijson;
 mod lines;
 mod off_worker;
 mod offset_ops;
+mod parts;
 mod replace;
 mod types;
 mod zone_txn;

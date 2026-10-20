@@ -704,21 +704,9 @@ impl FileStore {
         let num_parts = ((start_idx + data_len - 1) / PART_DATA_SIZE as i64 + 1) as i32;
         let start_part = (start_idx / PART_DATA_SIZE as i64) as i32;
 
-        // Load parts from DB
+        // Load parts from DB, past a damaged one (parts.rs).
         let conn = self.lock_conn();
-        let mut stmt = conn.prepare(
-            "SELECT partidx, data FROM db_file_data WHERE zoneid = ?1 AND name = ?2 ORDER BY partidx",
-        )?;
-        let rows = stmt.query_map(params![zone_id, name], |row| {
-            Ok((row.get::<_, i32>(0)?, row.get::<_, Vec<u8>>(1)?))
-        })?;
-
-        let mut parts_map: HashMap<i32, Vec<u8>> = HashMap::new();
-        for row in rows {
-            let (idx, data) = row?;
-            parts_map.insert(idx, data);
-        }
-        drop(stmt);
+        let parts_map = super::parts::load_parts(&conn, zone_id, name, start_part, start_part + num_parts - 1, file.size)?;
         drop(conn);
 
         // Assemble data
