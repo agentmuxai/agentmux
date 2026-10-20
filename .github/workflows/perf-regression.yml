@@ -172,9 +172,10 @@ jobs:
         shell: bash
         run: |
           commas() { local IFS=,; echo "$*"; }
+          # nullglob: a side with no confirmation run (the pair failed, or only one side finished) simply contributes nothing.
+          shopt -s nullglob
           a=(perf-out/a*/result.json perf-confirm/a*/result.json)
           b=(perf-out/b*/result.json perf-confirm/b*/result.json)
-          a=($(ls "${a[@]}" 2>/dev/null)); b=($(ls "${b[@]}" 2>/dev/null))
           if [ ${#a[@]} -gt 0 ] && [ ${#b[@]} -gt 0 ]; then
             node scripts/perf/memory-lab/compare.mjs --base "$(commas "${a[@]}")" --head "$(commas "${b[@]}")"               --md perf-out/compare-all.md --json perf-out/final.json --margins scripts/perf/memory-lab/budget.json
           fi
@@ -184,7 +185,8 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          DRY_RUN: ${{ inputs.dry-run-issue && '1' || '' }}
+          # Only a run on main writes to the real issues; a dispatch from another branch prints what it would have done.
+          DRY_RUN: ${{ (inputs.dry-run-issue || github.ref != 'refs/heads/main') && '1' || '' }}
         run: |
           final=perf-out/final.json
           [ -f "$final" ] || final=perf-out/compare.json
