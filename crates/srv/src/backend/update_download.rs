@@ -320,6 +320,10 @@ async fn run_appimage(asset: &ReleaseAsset, version: &str, appimage: &Path) -> R
     let channel = crate::backend::reactive::registry::local_channel_id();
     let instance_dir = agentmux_common::DataPaths::from_env().map(|p| p.instance_dir);
     let fallback = fallback_parent(instance_dir.as_deref(), version, &updates.join(version));
+    // A download cut short in the fallback leaves its `<pid>-` file there.
+    if let Some(root) = fallback.parent().filter(|r| *r != updates) {
+        remove_abandoned_downloads(root).await;
+    }
     let mut last = String::new();
     for dir in [appimage.parent().map(Path::to_path_buf), Some(fallback)].into_iter().flatten() {
         match fetch_file(asset, version, &dir, Some(&channel)).await {
