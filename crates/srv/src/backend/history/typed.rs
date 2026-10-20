@@ -7,9 +7,11 @@
 //! reads first), never ones found by folder or account alone, which may be
 //! another agent's. Only what a person typed: a user message that is a jekt,
 //! an `[AgentMux]` note, a broadcast's header, a hook's or the CLI's own
-//! injected text is left out.
+//! injected text is left out, as are the `[AgentMux]` notes that followed
+//! what the person typed (`reactive::held_notes`).
 
 use super::{index, record_meta, HistoryOwner, HistorySearchError, HistoryService};
+use crate::backend::reactive::held_notes;
 
 /// The longest entry kept (as `storage::agent_input_history`).
 const MAX_TEXT: usize = 64 * 1024;
@@ -77,7 +79,7 @@ impl HistoryService {
                     .messages
                     .into_iter()
                     .filter(|m| m.role == "user" && typed_by_a_person(&m.content))
-                    .map(|m| (m.timestamp, m.content.trim().to_string())),
+                    .map(|m| (m.timestamp, held_notes::strip_attached(&m.content).trim().to_string())),
             );
         }
         typed.sort_by_key(|(at, _)| *at);

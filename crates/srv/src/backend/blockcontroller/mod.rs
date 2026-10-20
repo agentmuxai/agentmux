@@ -791,19 +791,25 @@ pub fn deliver_agent_message_from(
 ) -> Result<AgentDelivery, String> {
     let ctrl =
         get_controller(block_id).ok_or_else(|| format!("no controller for block {block_id}"))?;
+    // srv's held `[AgentMux]` notes go with this message; they are held
+    // again if it doesn't go, or goes as keystrokes.
+    let (message, held) = crate::backend::reactive::held_notes::attach(block_id, message);
 
     if let Some(persistent_ctrl) = ctrl
         .as_any()
         .downcast_ref::<persistent::PersistentSubprocessController>()
     {
-        return Ok(match persistent_ctrl.send_user_message_with_images_from(message.to_string(), origin, inline.to_vec())? {
+        let outcome = persistent_ctrl.send_user_message_with_images_from(message, origin, inline.to_vec())?;
+        held.delivered();
+        return Ok(match outcome {
             SendOutcome::Sent => AgentDelivery::Structured,
             SendOutcome::Deferred => AgentDelivery::StructuredDeferred,
         });
     }
 
     if session_agent::is_session_agent_type(ctrl.controller_type()) {
-        ctrl.send_input(BlockInputUnion::data(message.as_bytes().to_vec()), None)?;
+        ctrl.send_input(BlockInputUnion::data(message.into_bytes()), None)?;
+        held.delivered();
         return Ok(AgentDelivery::Structured);
     }
 
@@ -811,7 +817,8 @@ pub fn deliver_agent_message_from(
         .as_any()
         .downcast_ref::<app_server_controller::AppServerController>()
     {
-        app_server_ctrl.send_message(message.to_string())?;
+        app_server_ctrl.send_message(message)?;
+        held.delivered();
         return Ok(AgentDelivery::Structured);
     }
 

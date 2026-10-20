@@ -10,8 +10,9 @@
 //! directly, other channels' through [`super::cross_channel`] with its
 //! timeouts), each edit is matched ([`super::overlap`]), and a match becomes
 //! one `[AgentMux]` system note to the agent that edited, rate-limited by
-//! [`super::overlap::RateLimiter`]. Delivery is best-effort: a failure is
-//! logged, never retried, and never reaches the watcher.
+//! [`super::overlap::RateLimiter`]. It goes into the agent's turn if one is
+//! running, else waits for its next one ([`tell`]). Delivery is best-effort:
+//! a failure is logged, never retried, and never reaches the watcher.
 //!
 //! The PR half (§3.3): when the watcher sees an agent open a PR
 //! ([`on_new_prs`]), the files its branch changes are compared with other
@@ -171,7 +172,7 @@ async fn check_and_notify(ctx: &'static Context, edits: Vec<NewEdit>) {
             .find(|r| r.block_id == edit.block_id)
             .and_then(|r| r.uid.clone())
             .unwrap_or_else(|| edit.agent_id.clone());
-        if let Err(e) = handler.deliver_system_note(&target, &text) {
+        if let Err(e) = tell(&target, &edit.block_id, &text) {
             tracing::info!(agent = %edit.agent_id, error = %e, "overlap note not delivered");
         }
     }
@@ -298,8 +299,23 @@ async fn check_pr(ctx: &'static Context, pr: NewPr) {
         .find(|r| r.block_id == pr.block_id)
         .and_then(|r| r.uid.clone())
         .unwrap_or_else(|| pr.agent_id.clone());
-    if let Err(e) = handler.deliver_system_note(&target, &text) {
+    if let Err(e) = tell(&target, &pr.block_id, &text) {
         tracing::info!(agent = %pr.agent_id, error = %e, "PR overlap note not delivered");
+    }
+}
+
+/// Give `target` (in `block_id`) the note `text` in its running turn, where
+/// it is about the work at hand; with none running, hold it for the next
+/// turn rather than start one.
+fn tell(target: &str, block_id: &str, text: &str) -> Result<(), String> {
+    let handler = crate::backend::reactive::get_global_handler();
+    let in_turn = crate::backend::blockcontroller::get_controller(block_id)
+        .and_then(|c| c.turn_tracker())
+        .is_some_and(|t| t.is_active_turn());
+    if in_turn {
+        handler.deliver_system_note(target, text)
+    } else {
+        handler.hold_system_note(target, &format!("overlap:{text}"), text)
     }
 }
 

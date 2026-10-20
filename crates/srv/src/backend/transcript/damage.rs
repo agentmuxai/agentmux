@@ -255,7 +255,8 @@ fn announce(zone: &str, op: &str) {
     let text = agent_note();
     let tell = move || {
         let handler = crate::backend::reactive::get_global_handler();
-        if let Err(e) = handler.deliver_system_note(&id, &text) {
+        // It asks nothing of the agent, so it waits for its next turn.
+        if let Err(e) = handler.hold_system_note(&id, "transcript-damage", &text) {
             // Not running, or not registered yet: the incident has told the user.
             tracing::info!(agent = %id, error = %e, "shared transcript store: the agent wasn't told about the damage");
         }

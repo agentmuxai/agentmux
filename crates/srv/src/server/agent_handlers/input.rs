@@ -996,6 +996,7 @@ pub async fn run_agent_turn_joining(
         inline_images = prepared.inline;
         crate::backend::attachments::prompt::append(&message, &prepared.list)
     };
+    let (message, held_notes) = crate::backend::reactive::held_notes::attach(&block_id, &message);
 
     // App Server owns a persistent thread/turn process and has its own typed
     // protocol path. Keep it ahead of the legacy stream-json branches.
@@ -1258,6 +1259,7 @@ pub async fn run_agent_turn_joining(
                 .to_string(),
         );
     }
+    held_notes.delivered();
 
     // Registration is skipped on the reactive-delivery path — see
     // `TurnRegistration::Skip` for why that is both redundant AND a hard
