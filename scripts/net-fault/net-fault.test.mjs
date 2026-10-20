@@ -256,6 +256,34 @@ describe("fault proxy", () => {
         }
     });
 
+    it("a plain-HTTP origin that drops mid-response ends the client's response too", async () => {
+        await start();
+        const origin = http.createServer((_req, res) => {
+            res.writeHead(200, { "content-length": "100" });
+            res.write("part");
+            setTimeout(() => res.socket.destroy(), 50);
+        });
+        await new Promise((r) => origin.listen(0, "127.0.0.1", r));
+        try {
+            const outcome = new Promise((resolve) => {
+                const req = http.get(
+                    { host: "127.0.0.1", port: proxy.port, path: `http://127.0.0.1:${origin.address().port}/` },
+                    (res) => {
+                        res.on("error", () => {});
+                        res.on("close", () => resolve(res.complete ? "complete" : "cut"));
+                    }
+                );
+                req.on("error", () => resolve("cut"));
+                req.on("socket", (socket) => sockets.push(socket));
+            });
+            const result = await Promise.race([outcome, new Promise((r) => setTimeout(() => r("hung"), 1500))]);
+            expect(result).toBe("cut");
+        } finally {
+            origin.closeAllConnections();
+            await new Promise((r) => origin.close(r));
+        }
+    });
+
     it("switching to refuse cuts tunnels that are already open", async () => {
         await start();
         const r = track(await connectVia(proxy.port, echoTarget));

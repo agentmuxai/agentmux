@@ -202,6 +202,9 @@ export async function startProxy({
         const up = http.request(url, { method: req.method, headers: req.headers }, (ur) => {
             res.writeHead(ur.statusCode ?? 502, ur.headers);
             ur.pipe(res);
+            // pipe() doesn't pass on an origin that drops mid-response; cut the client too.
+            ur.on("error", () => {});
+            ur.on("close", () => ur.complete || res.destroy());
         });
         up.on("error", (err) =>
             res.headersSent ? res.destroy() : res.writeHead(502).end(`${err.code ?? err.message}\n`)
