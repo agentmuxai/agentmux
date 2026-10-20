@@ -533,6 +533,7 @@ impl FeedSource {
             expect_gen: Some(expect_gen.to_string()),
             tail_turns: tail.then_some(SNAPSHOT_TAIL_TURNS),
             tail_bytes: tail.then_some(SNAPSHOT_TAIL_BYTES),
+            archive_zone: None,
         };
         let result = super::app_api::blockfile::read_range(
             self.broker.clone(),

@@ -80,7 +80,7 @@ describe("Warden History section", () => {
         await waitFor(() => expect(screen.getByText("Parent")).toBeInTheDocument());
         fireEvent.click(screen.getAllByRole("button", { name: "Show sessions" })[0]);
         await waitFor(() => expect(screen.getByText("s1234567")).toBeInTheDocument());
-        expect(HistoryAgentSessionsCommand).toHaveBeenCalledWith({}, { definition_id: "parent-1" });
+        expect(HistoryAgentSessionsCommand).toHaveBeenCalledWith({}, { definition_id: "parent-1" }, { timeout: 300_000 });
         expect(screen.getByRole("cell", { name: "Archived" })).toBeInTheDocument();
         expect(screen.getByText("/work/a")).toBeInTheDocument();
     });

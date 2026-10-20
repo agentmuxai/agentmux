@@ -884,6 +884,13 @@ pub struct PaneTabEditResult {
 pub struct CommandBlockfileLineCountData {
     pub block_id: String,
     pub filename: String,
+    /// Read this archived conversation of the block's agent
+    /// (`agent:<agentId>:archive:<ms>`, from `agent:session:list_archives`)
+    /// instead of its current one. The Agent History view's archives. Refused
+    /// unless it names an archive of the agent in the block's own `agentId`.
+    #[serde(default)]
+    #[ts(optional)]
+    pub archive_zone: Option<String>,
 }
 
 /// Response from blockfile:line_count.
@@ -941,6 +948,13 @@ pub struct CommandBlockfileReadRangeData {
     #[serde(default)]
     #[ts(optional, type = "number")]
     pub tail_bytes: Option<u64>,
+    /// Read this archived conversation of the block's agent
+    /// (`agent:<agentId>:archive:<ms>`, from `agent:session:list_archives`)
+    /// instead of its current one. The Agent History view's archives. Refused
+    /// unless it names an archive of the agent in the block's own `agentId`.
+    #[serde(default)]
+    #[ts(optional)]
+    pub archive_zone: Option<String>,
 }
 
 /// Response from blockfile:read_range.

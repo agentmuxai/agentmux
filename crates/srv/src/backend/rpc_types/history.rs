@@ -115,6 +115,11 @@ pub struct HistorySession {
     pub bytes: u64,
     /// All of it is in archived conversations.
     pub archived: bool,
+    /// The zone holding its last lines, and the byte where they end: where
+    /// the Agent History view's "Jump to" loads up to (`history.locate`).
+    pub zone: String,
+    #[ts(type = "number")]
+    pub end_byte: u64,
 }
 
 /// What `history.agent_sessions` answers.
@@ -125,4 +130,34 @@ pub struct HistoryAgentSessions {
     pub sessions: Vec<HistorySession>,
     /// What couldn't be read, if anything.
     pub problems: Vec<String>,
+}
+
+/// `history.locate`'s request: the line the Agent History view loads up to,
+/// for a time (`at_ms`) or a byte (`at_byte`, from a session's `end_byte`) in
+/// the block's transcript, or in its agent's archived conversation `archive_zone`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct HistoryLocateReq {
+    pub block_id: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub archive_zone: Option<String>,
+    #[serde(default)]
+    #[ts(optional, type = "number")]
+    pub at_ms: Option<u64>,
+    #[serde(default)]
+    #[ts(optional, type = "number")]
+    pub at_byte: Option<u64>,
+}
+
+/// What `history.locate` answers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct HistoryLocation {
+    /// Lines before the point: a reader showing up to it reads lines `[.., line)`.
+    #[ts(type = "number")]
+    pub line: u64,
+    /// Lines in the transcript.
+    #[ts(type = "number")]
+    pub total: u64,
 }

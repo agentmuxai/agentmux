@@ -523,6 +523,8 @@ pub const COMMAND_HISTORY_USAGE: &str = "history.usage";
 // agent's sessions from its record. The window's, not agent APIs.
 pub const COMMAND_HISTORY_AGENTS: &str = "history.agents";
 pub const COMMAND_HISTORY_AGENT_SESSIONS: &str = "history.agent_sessions";
+// The line the Agent History view loads up to for a time or a session's end.
+pub const COMMAND_HISTORY_LOCATE: &str = "history.locate";
 /// The shells installed here, and which one a new local terminal starts with (`backend::shells`).
 pub const COMMAND_SHELL_LIST: &str = "shell.list";
 

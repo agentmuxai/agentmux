@@ -41,7 +41,7 @@ mod translation;
 // watchdog, agent_handlers/input, blockfile, app_api).
 pub use controller::ShellController;
 pub use file_ops::handle_append_block_file;
-pub(crate) use indexing::{extend_output_idx, output_index, output_now, read_via_index, read_via_stale_index};
+pub(crate) use indexing::{extend_output_idx, lines_before_byte, output_index, output_now, read_via_index, read_via_stale_index};
 // A full rebuild from byte 0: the readers extend instead (`extend_output_idx`
 // falls back to one itself), so only tests call it directly.
 #[cfg(test)]

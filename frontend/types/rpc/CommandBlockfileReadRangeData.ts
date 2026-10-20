@@ -27,4 +27,11 @@ tail_turns?: number,
  * line count (SPEC_AGENT_OPEN_LATENCY_2026_09_27.md §4.5). The newest
  * line always comes back, however large.
  */
-tail_bytes?: number, };
+tail_bytes?: number, 
+/**
+ * Read this archived conversation of the block's agent
+ * (`agent:<agentId>:archive:<ms>`, from `agent:session:list_archives`)
+ * instead of its current one. The Agent History view's archives. Refused
+ * unless it names an archive of the agent in the block's own `agentId`.
+ */
+archive_zone?: string, };
