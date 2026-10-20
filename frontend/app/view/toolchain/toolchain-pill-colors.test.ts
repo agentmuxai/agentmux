@@ -55,7 +55,6 @@ function token(scss: string, name: string): string | undefined {
 
 const base = read("../../theme.scss");
 const lightBlock = base.slice(base.indexOf('[data-theme-polarity="light"]'));
-const WASH = 0.12; // theme.scss: --success-bg / --warning-bg
 
 // WCAG AA for body text. The pills are 11px, so 4.5:1 is the bar. The themes'
 // own success and warning colours do not reach it as text on a wash of
@@ -85,31 +84,46 @@ describe("the Toolchain status pills", () => {
             // a value that is `var(--other)` is looked up again from the top, as the
             // browser does (`--success-text-color: var(--success-color)`).
             const layers = [own, ...(light ? [lightBlock] : []), base];
-            const pick = (name: string, depth = 0): Rgb | null => {
+            const rawValue = (name: string): string | undefined => {
                 for (const layer of layers) {
                     const value = token(layer, name);
-                    if (value === undefined) continue;
-                    const ref = value.match(/^\s*var\(--([a-z0-9-]+)\)\s*$/i);
-                    if (ref && depth < 5) return pick(ref[1], depth + 1);
-                    return parse(value);
+                    if (value !== undefined) return value;
                 }
-                return null;
+                return undefined;
+            };
+            const pick = (name: string, depth = 0): Rgb | null => {
+                const value = rawValue(name);
+                if (value === undefined) return null;
+                const ref = value.match(/^\s*var\(--([a-z0-9-]+)\)\s*$/i);
+                if (ref && depth < 5) return pick(ref[1], depth + 1);
+                return parse(value);
+            };
+            // A wash token as the theme resolves it, laid over the theme's surface:
+            // `color-mix(in srgb, var(--x) N%, transparent)` is `--x` at N%, and an
+            // `rgba(r, g, b, a)` is its colour at `a`. Read from the token itself, so
+            // a theme that overrides it or a shared change of its percentage is what
+            // gets measured.
+            const washOf = (name: string, surfaceRgb: Rgb): Rgb => {
+                const value = rawValue(name) ?? "";
+                const mix = value.match(/color-mix\(\s*in srgb\s*,\s*var\(--([a-z0-9-]+)\)\s+([\d.]+)%/i);
+                if (mix) return over(pick(mix[1])!, surfaceRgb, Number(mix[2]) / 100);
+                const rgba = value.match(/rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)/);
+                if (rgba) return over([Number(rgba[1]), Number(rgba[2]), Number(rgba[3])], surfaceRgb, Number(rgba[4]));
+                throw new Error(`--${name} is neither a color-mix nor an rgba(): ${value}`);
             };
             const surface = pick("main-bg-color");
             expect(surface, "the theme's surface resolves").toBeTruthy();
             const text = pick("main-text-color");
             expect(text, "the theme's text colour resolves").toBeTruthy();
             // The plain pill (checking, managed, up to date, optional): the secondary
-            // text colour on a faint wash of the text colour (`--tint-3`, 8%).
+            // text colour on `--tint-3`.
             const secondary = pick("secondary-text-color");
             expect(secondary, "the secondary text colour resolves").toBeTruthy();
-            const plain = contrast(secondary!, over(text!, surface!, 0.08));
+            const plain = contrast(secondary!, washOf("tint-3", surface!));
             if (SECONDARY_TEXT_BELOW_AA.has(id)) expect(plain).toBeLessThan(AA); // leaves the list when the theme is fixed
             else expect(plain, `plain pill text in ${id}`).toBeGreaterThanOrEqual(AA);
             for (const kind of ["success", "warning"] as const) {
-                const color = pick(`${kind}-color`);
-                expect(color, `${kind} colour resolves`).toBeTruthy();
-                const wash = over(color!, surface!, WASH);
+                const wash = washOf(`${kind}-bg`, surface!);
                 expect(contrast(text!, wash), `pill text on the ${kind} wash in ${id}`).toBeGreaterThanOrEqual(AA);
             }
         });
