@@ -67,6 +67,7 @@ import { MuxInitFatalError, requireLoaded } from "@/app/init/require-loaded";
 import { installFocusFollowsSelection } from "@/app/store/focusManager";
 import { installPaneHistory } from "@/app/store/pane-history";
 import { installSideButtons } from "@/app/store/side-buttons";
+import { reopenRestoredWindows } from "@/app/init/restored-windows";
 
 // Deferred — assigned inside initApp() after window.api is ready.
 // Do NOT call getApi() at module level: this file is statically imported by
@@ -146,22 +147,6 @@ async function initInstanceTracking(): Promise<void> {
  *  "main" (the main window's URL carries no label param). */
 function currentWindowLabel(): string {
     return new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
-}
-
-/**
- * Open the windows a restore rebuilt beside this one: the rest of the last
- * session's windows, each in a window of its own where it was. Best-effort:
- * one that fails to open leaves the others, and this window, as they are.
- */
-async function reopenRestoredWindows(): Promise<void> {
-    try {
-        const restored = await WindowService.TakeRestoredWindows();
-        for (const w of restored ?? []) {
-            await getApi().openRestoredWindow(w);
-        }
-    } catch (e) {
-        console.warn("[session-restore] couldn't reopen the last session's other windows", e);
-    }
 }
 
 async function initHostMux(): Promise<void> {
@@ -286,6 +271,9 @@ async function initHostMux(): Promise<void> {
         })();
         // What AgentMux recovered from, until the user closes it (SPEC_RECOVERY_NOTICES_AND_TOASTS §4.2).
         void import("@/app/init/incidents").then(({ surfaceIncidents }) => surfaceIncidents());
+        // A window that came up with the default layout because there was
+        // nothing to restore offers the layout another build saved (srv decides).
+        void import("@/app/window/restore-other-build").then((m) => m.offerLayoutFromOtherBuild());
 
         benchDump(); // emit full startup timeline to log
 

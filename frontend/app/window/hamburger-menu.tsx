@@ -32,6 +32,7 @@ import { THEME_OPTIONS } from "@/app/menu/base-menus";
 import { shortcutFor } from "@/app/keybindings";
 import { saveCurrentLayout } from "./save-layout";
 import { openLayoutFromFile } from "./open-layout";
+import { chooseLayoutFromOtherBuild } from "./restore-other-build";
 import { createMemo, onCleanup, type JSX } from "solid-js";
 import "./hamburger-menu.scss";
 
@@ -152,6 +153,11 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
                         label: "Open layout…",
                         icon: "folder-open",
                         onClick: () => fireAndForget(openLayoutFromFile),
+                    },
+                    {
+                        label: "Restore layout from another build…",
+                        icon: "clock-rotate-left",
+                        onClick: () => fireAndForget(chooseLayoutFromOtherBuild),
                     },
                 ],
             },

@@ -3579,6 +3579,25 @@
     }
   },
   {
+    "command": "layout.otherBuilds",
+    "request": "agentmux_srv::backend::rpc_types::layout::CommandOtherBuildLayoutsData",
+    "requestName": "CommandOtherBuildLayoutsData",
+    "requestTs": {
+      "imports": [
+        "CommandOtherBuildLayoutsData"
+      ],
+      "name": "CommandOtherBuildLayoutsData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::layout::OtherBuildLayoutsResult",
+    "responseName": "OtherBuildLayoutsResult",
+    "responseTs": {
+      "imports": [
+        "OtherBuildLayoutsResult"
+      ],
+      "name": "OtherBuildLayoutsResult"
+    }
+  },
+  {
     "command": "layout.preview",
     "request": "agentmux_srv::backend::rpc_types::layout::CommandLayoutPreviewData",
     "requestName": "CommandLayoutPreviewData",
@@ -3595,6 +3614,25 @@
         "LayoutPreviewResult"
       ],
       "name": "LayoutPreviewResult"
+    }
+  },
+  {
+    "command": "layout.restoreOtherBuild",
+    "request": "agentmux_srv::backend::rpc_types::layout::CommandRestoreOtherBuildLayoutData",
+    "requestName": "CommandRestoreOtherBuildLayoutData",
+    "requestTs": {
+      "imports": [
+        "CommandRestoreOtherBuildLayoutData"
+      ],
+      "name": "CommandRestoreOtherBuildLayoutData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::layout::RestoreOtherBuildLayoutResult",
+    "responseName": "RestoreOtherBuildLayoutResult",
+    "responseTs": {
+      "imports": [
+        "RestoreOtherBuildLayoutResult"
+      ],
+      "name": "RestoreOtherBuildLayoutResult"
     }
   },
   {
