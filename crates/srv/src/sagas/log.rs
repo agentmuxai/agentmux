@@ -527,6 +527,22 @@ impl SagaLog {
         Ok(out)
     }
 
+    /// Delete sagas that finished cleanly (`completed`, `compensated`) more
+    /// than `age` ago, with their steps. Nothing else deleted rows, so
+    /// sagas.db grew forever. `failed` sagas stay: startup recovery
+    /// compensates them. Returns the sagas deleted.
+    pub fn prune_finished_older_than(&self, age: std::time::Duration) -> Result<usize, StoreError> {
+        let cutoff = now_ms() - age.as_millis() as i64;
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let finished = "SELECT saga_id FROM saga
+             WHERE state IN ('completed', 'compensated') AND terminal_at IS NOT NULL AND terminal_at < ?1";
+        tx.execute(&format!("DELETE FROM saga_step WHERE saga_id IN ({finished})"), params![cutoff])?;
+        let deleted = tx.execute(&format!("DELETE FROM saga WHERE saga_id IN ({finished})"), params![cutoff])?;
+        tx.commit()?;
+        Ok(deleted)
+    }
+
     /// Return up to `limit` recent sagas for `--diag sagas`. Sorted
     /// most-recent-first. `step_count` is the count of `succeeded`
     /// or `compensated` steps (i.e. progress through the saga).
@@ -1002,5 +1018,52 @@ mod tests {
             .map(|s| s.step_index)
             .collect();
         assert_eq!(to_compensate, vec![0]);
+    }
+
+    #[test]
+    fn pruning_drops_only_old_cleanly_finished_sagas_and_their_steps() {
+        let log = SagaLog::open_in_memory().unwrap();
+        let day_ms = 24 * 60 * 60 * 1000_i64;
+        let old = now_ms() - 40 * day_ms;
+        {
+            let conn = log.conn.lock().unwrap();
+            for (id, state, terminal_at) in [
+                (1, "completed", Some(old)),
+                (2, "compensated", Some(old)),
+                (3, "failed", Some(old)),
+                (4, "completed", Some(now_ms())),
+                (5, "running", None),
+            ] {
+                conn.execute(
+                    "INSERT INTO saga (saga_id, name, state, started_at, terminal_at, input_json)
+                     VALUES (?1, 'T', ?2, ?3, ?4, '{}')",
+                    params![id, state, old, terminal_at],
+                )
+                .unwrap();
+                conn.execute(
+                    "INSERT INTO saga_step (saga_id, step_index, name, state, cmd_json, started_at)
+                     VALUES (?1, 0, 'S', 'succeeded', '{}', ?2)",
+                    params![id, old],
+                )
+                .unwrap();
+            }
+        }
+
+        let deleted = log.prune_finished_older_than(std::time::Duration::from_secs(30 * 24 * 60 * 60)).unwrap();
+        assert_eq!(deleted, 2);
+
+        let conn = log.conn.lock().unwrap();
+        let ids: Vec<i64> = conn
+            .prepare("SELECT saga_id FROM saga ORDER BY saga_id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(ids, vec![3, 4, 5], "failed, recent and unfinished sagas stay");
+        let orphan_steps: i64 = conn
+            .query_row("SELECT COUNT(*) FROM saga_step WHERE saga_id NOT IN (SELECT saga_id FROM saga)", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(orphan_steps, 0, "a deleted saga's steps go with it");
     }
 }
