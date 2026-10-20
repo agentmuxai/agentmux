@@ -57,7 +57,21 @@ pub fn from_snapshot(snap: &TowerSnapshot) -> Vec<PaneStat> {
 /// The live sampler: Tower's sample of this machine, with each pane named by
 /// `labels` (a pane `labels` doesn't know, such as one that was closed, is left out).
 pub fn tower_sampler(labels: impl Fn(&str) -> Option<BlockLabel> + Send + Sync + 'static) -> PaneSampler {
-    Arc::new(move || Ok(from_snapshot(&tower_snapshot(&labels)?)))
+    Arc::new(move || {
+        // No pane, no sample: the process table would only hold the backend itself
+        // (left out of the stats), and reading it every pass is the whole cost of an idle srv.
+        let tracked = crate::backend::process_tracker::registry::global().is_some_and(|r| r.has_tracked_blocks());
+        if !has_panes(pidregistry::get_all().len(), tracked) {
+            return Ok(Vec::new());
+        }
+        Ok(from_snapshot(&tower_snapshot(&labels)?))
+    })
+}
+
+/// Whether there is any pane to measure: a registered shell, or a block with a
+/// process tracker.
+fn has_panes(registered_shells: usize, tracked_blocks: bool) -> bool {
+    registered_shells > 0 || tracked_blocks
 }
 
 /// Tower's sample of this machine's panes, each named by `labels`. Blocking:
@@ -77,6 +91,21 @@ pub fn tower_snapshot(labels: impl Fn(&str) -> Option<BlockLabel>) -> std::io::R
 mod tests {
     use super::*;
     use crate::backend::rpc_types::{TowerProcess, TowerTask};
+
+    #[test]
+    fn an_instance_with_no_pane_takes_no_process_snapshot() {
+        assert!(!has_panes(0, false), "nothing registered and nothing tracked: nothing to measure");
+        assert!(has_panes(1, false), "a registered shell");
+        assert!(has_panes(0, true), "a tracked agent pane");
+        // And through the sampler: with no pane registered (this test binary has none),
+        // it answers at once with no stats and without reading the process table.
+        if pidregistry::get_all().is_empty() && !crate::backend::process_tracker::registry::global().is_some_and(|r| r.has_tracked_blocks()) {
+            let asked = std::time::Instant::now();
+            let stats = (tower_sampler(|_| None))().unwrap();
+            assert!(stats.is_empty());
+            assert!(Tower::global().live_pids_since(asked).is_none(), "no snapshot was taken");
+        }
+    }
 
     fn process(pid: u32, role: TowerProcessRole, started: u64) -> TowerProcess {
         TowerProcess {

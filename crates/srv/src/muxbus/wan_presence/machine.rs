@@ -368,6 +368,12 @@ impl Machine {
                 self.dirty = true;
                 Action::Wait
             }
+            // Nothing is due while off, but a deadline left in the past makes the
+            // next wait zero and the driver loop at full speed.
+            Event::Due => {
+                self.due_ms = now.mono_ms + ms(self.config.interval);
+                Action::Wait
+            }
             _ => Action::Wait,
         }
     }
@@ -735,6 +741,22 @@ mod tests {
 
     fn secs(d: Duration) -> u64 {
         d.as_secs()
+    }
+
+    #[test]
+    fn an_off_machine_sleeps_between_looks_instead_of_spinning() {
+        // Off nothing is sent, but the driver still wakes at each Due. If a Due left
+        // the deadline in the past the next wait would be zero and the driver would
+        // loop at full speed, which an isolated home, a dev build, a headless srv or
+        // a user who turned publishing off all paid for.
+        let mut m = machine();
+        let step = m.next(Event::Policy { off: Some(PresenceOffReason::IsolatedHome) }, at(0));
+        assert_eq!((step.action, step.wait), (Action::Wait, Duration::from_secs(60)));
+        for minute in 1..=3 {
+            let step = m.next(Event::Due, at(minute * MIN));
+            assert_eq!(step.action, Action::Wait);
+            assert_eq!(step.wait, Duration::from_secs(60), "after the Due at minute {minute}");
+        }
     }
 
     #[test]
