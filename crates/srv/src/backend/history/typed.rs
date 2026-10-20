@@ -7,7 +7,7 @@
 //! reads first), never ones found by folder or account alone, which may be
 //! another agent's. Only what a person typed: a user message that is a jekt,
 //! an `[AgentMux]` note, a broadcast's header, a hook's or the CLI's own
-//! injected text is left out, as are the `[AgentMux]` notes that followed
+//! injected text is left out, as are the `[AgentMux]` notes srv attached after
 //! what the person typed (`reactive::held_notes`).
 
 use super::{index, record_meta, HistoryOwner, HistorySearchError, HistoryService};
@@ -49,6 +49,12 @@ pub(crate) fn typed_by_a_person(content: &str) -> bool {
         && !INJECTED.iter().any(|p| text.starts_with(p) || after_delay.starts_with(p))
 }
 
+/// What a person typed in a user message, without the notes srv attached
+/// to it; `None` when the message isn't a person's.
+fn person_typed(content: &str) -> Option<String> {
+    typed_by_a_person(content).then(|| held_notes::strip_attached(content).trim().to_string())
+}
+
 impl HistoryService {
     /// Every message the user typed to the agent `owner`, oldest first, with
     /// when it was sent (unix ms); a repeat of the one before is left out, and
@@ -78,8 +84,8 @@ impl HistoryService {
                 session
                     .messages
                     .into_iter()
-                    .filter(|m| m.role == "user" && typed_by_a_person(&m.content))
-                    .map(|m| (m.timestamp, held_notes::strip_attached(&m.content).trim().to_string())),
+                    .filter(|m| m.role == "user")
+                    .filter_map(|m| Some((m.timestamp, person_typed(&m.content)?))),
             );
         }
         typed.sort_by_key(|(at, _)| *at);
@@ -91,7 +97,7 @@ impl HistoryService {
 
 #[cfg(test)]
 mod tests {
-    use super::typed_by_a_person;
+    use super::{person_typed, typed_by_a_person};
 
     #[test]
     fn only_what_a_person_typed_is_kept() {
@@ -114,5 +120,13 @@ mod tests {
             assert!(!typed_by_a_person(injected), "{injected}");
         }
         assert!(!typed_by_a_person(&"x".repeat(64 * 1024 + 1)), "a pasted file isn't history");
+    }
+
+    #[test]
+    fn agentmux_text_a_person_pasted_is_kept() {
+        let pasted = "explain this:\n\n[AgentMux] Cloud messages are paused since 14:22 (MuxBus needs a sign-in).";
+        assert_eq!(person_typed(pasted).as_deref(), Some(pasted));
+        assert_eq!(person_typed("  fix the build \n").as_deref(), Some("fix the build"));
+        assert_eq!(person_typed("[AgentMux] AgentMux was upgraded"), None);
     }
 }

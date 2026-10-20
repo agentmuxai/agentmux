@@ -18,7 +18,9 @@
 //! A note the agent must get now (a worker's report to its leader, the answer
 //! to its own request) goes through `Handler::deliver_system_note` instead.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::io::Write;
+use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use super::handler::{Handler, ReactiveHandler, TargetResolution};
@@ -29,8 +31,7 @@ pub const MAX_PER_PANE: usize = 8;
 /// pane is most likely closed).
 pub const MAX_PANES: usize = 512;
 
-/// Between a message and the notes that go with it. A line that starts a
-/// note always follows it: see [`strip_attached`].
+/// Between a message and the notes that go with it.
 const SEPARATOR: &str = "\n\n";
 
 /// Held notes, per pane (block id): `(key, text)`, oldest first.
@@ -113,6 +114,13 @@ fn held() -> MutexGuard<'static, HeldNotes> {
     HELD.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Hold `text` for the pane `block_id` under `key`, replacing a note held
+/// under it. For a caller that already knows the pane; an agent's name or
+/// UID goes through [`ReactiveHandler::hold_system_note`].
+pub fn hold(block_id: &str, key: &str, text: &str) {
+    held().hold(block_id, key, text);
+}
+
 /// `message`, then the notes held for its pane, one per line.
 pub fn with_notes(message: &str, notes: &[(String, String)]) -> String {
     if notes.is_empty() {
@@ -123,11 +131,96 @@ pub fn with_notes(message: &str, notes: &[(String, String)]) -> String {
 }
 
 /// What a person wrote in a message that may carry held notes: the text
-/// before them.
+/// before notes srv attached to it ([`AttachedLog`]). Text that only looks
+/// like attached notes, a pasted note say, is kept.
 pub fn strip_attached(text: &str) -> &str {
-    let marker = format!("{SEPARATOR}{} ", crate::muxbus::delivery_status::notes::NOTE_MARKER);
-    text.split_once(&marker).map_or(text, |(own, _)| own)
+    let mut log = ATTACHED.lock().unwrap_or_else(|e| e.into_inner());
+    strip_logged(text, &mut log)
 }
+
+fn strip_logged<'a>(text: &'a str, log: &mut AttachedLog) -> &'a str {
+    let start = format!("{SEPARATOR}{} ", crate::muxbus::delivery_status::notes::NOTE_MARKER);
+    text.match_indices(&start)
+        .map(|(at, _)| at)
+        .find(|&at| log.contains(&text[at..]))
+        .map_or(text, |at| &text[..at])
+}
+
+/// The exact text srv appended to messages that went (the separator and the
+/// notes), as hashes, so input history takes off exactly that and never
+/// what a person wrote ([`strip_attached`]). Kept in the channel folder, one
+/// hash a line: history is read from past conversations, across restarts.
+#[derive(Debug, Default)]
+struct AttachedLog {
+    path: Option<PathBuf>,
+    /// Read from `path` on first use.
+    hashes: Option<(VecDeque<String>, HashSet<String>)>,
+}
+
+/// The file [`AttachedLog`] is kept in.
+const ATTACHED_FILE: &str = "held-notes-attached.txt";
+/// Hashes [`AttachedLog`] keeps; the file is cut back to this many once it
+/// holds twice as many.
+const ATTACHED_KEPT: usize = 2000;
+
+fn suffix_hash(suffix: &str) -> String {
+    use sha2::Digest;
+    hex::encode(&sha2::Sha256::digest(suffix.as_bytes())[..16])
+}
+
+impl AttachedLog {
+    fn loaded(&mut self) -> &mut (VecDeque<String>, HashSet<String>) {
+        let path = self.path.clone();
+        self.hashes.get_or_insert_with(|| {
+            let lines: Vec<String> = path
+                .and_then(|p| std::fs::read_to_string(p).ok())
+                .map(|t| t.lines().map(str::to_string).collect())
+                .unwrap_or_default();
+            let order: VecDeque<String> = lines.into_iter().rev().take(ATTACHED_KEPT).rev().collect();
+            let set = order.iter().cloned().collect();
+            (order, set)
+        })
+    }
+
+    fn contains(&mut self, suffix: &str) -> bool {
+        self.loaded().1.contains(&suffix_hash(suffix))
+    }
+
+    fn record(&mut self, suffix: &str) {
+        let hash = suffix_hash(suffix);
+        let (order, set) = self.loaded();
+        if !set.insert(hash.clone()) {
+            return;
+        }
+        order.push_back(hash.clone());
+        let mut rewrite = false;
+        if order.len() > ATTACHED_KEPT {
+            if let Some(old) = order.pop_front() {
+                set.remove(&old);
+            }
+            rewrite = true;
+        }
+        let Some(path) = &self.path else { return };
+        let written = if rewrite && std::fs::metadata(path).is_ok_and(|m| m.len() > (ATTACHED_KEPT as u64) * 2 * 33) {
+            let all: String = self.hashes.iter().flat_map(|(o, _)| o.iter()).map(|h| format!("{h}\n")).collect();
+            std::fs::write(path, all)
+        } else {
+            std::fs::OpenOptions::new().create(true).append(true).open(path).and_then(|mut f| writeln!(f, "{hash}"))
+        };
+        if let Err(e) = written {
+            tracing::warn!(path = %path.display(), error = %e, "held notes: couldn't record attached notes");
+        }
+    }
+}
+
+static ATTACHED: LazyLock<Mutex<AttachedLog>> = LazyLock::new(|| {
+    let path = if cfg!(test) {
+        None
+    } else {
+        agentmux_common::DataPaths::from_env().map(|p| p.instance_dir.join(ATTACHED_FILE))
+    };
+    Mutex::new(AttachedLog { path, hashes: None })
+});
 
 /// The notes taken for one message: held again when this is dropped, unless
 /// the message went ([`Attached::delivered`]).
@@ -135,12 +228,17 @@ pub fn strip_attached(text: &str) -> &str {
 pub struct Attached {
     block_id: String,
     notes: Vec<(String, String)>,
+    /// What was appended to the message's own text, if it had any.
+    suffix: Option<String>,
 }
 
 impl Attached {
     /// The message carrying the notes went to the agent.
     pub fn delivered(mut self) {
         self.notes.clear();
+        if let Some(suffix) = self.suffix.take() {
+            ATTACHED.lock().unwrap_or_else(|e| e.into_inner()).record(&suffix);
+        }
     }
 }
 
@@ -156,7 +254,9 @@ impl Drop for Attached {
 /// holds them again if the message doesn't go.
 pub fn attach(block_id: &str, message: &str) -> (String, Attached) {
     let notes = held().take(block_id);
-    (with_notes(message, &notes), Attached { block_id: block_id.to_string(), notes })
+    let full = with_notes(message, &notes);
+    let suffix = (!notes.is_empty() && !message.trim().is_empty()).then(|| full[message.len()..].to_string());
+    (full, Attached { block_id: block_id.to_string(), notes, suffix })
 }
 
 impl Handler {
@@ -171,9 +271,9 @@ impl Handler {
         }
     }
 
-    fn audit_held(&mut self, target_agent: &str, block_id: &str, text: &str) {
+    fn audit_note(&mut self, target_agent: &str, block_id: &str, text: &str, outcome: &str) {
         let request_id = uuid::Uuid::new_v4().to_string();
-        self.log_audit(Some("agentmux"), target_agent, block_id, text, true, None, &request_id, Some("system_note_held"), None);
+        self.log_audit(Some("agentmux"), target_agent, block_id, text, true, None, &request_id, Some(outcome), None);
     }
 }
 
@@ -185,7 +285,7 @@ impl ReactiveHandler {
         let mut handler = self.inner.lock().unwrap();
         let block_id = handler.note_target(target_agent)?;
         held().hold(&block_id, key, text);
-        handler.audit_held(target_agent, &block_id, text);
+        handler.audit_note(target_agent, &block_id, text, "system_note_held");
         Ok(())
     }
 
@@ -196,9 +296,17 @@ impl ReactiveHandler {
         let block_id = handler.note_target(target_agent)?;
         let replaced = held().replace(&block_id, old_key, key, text);
         if replaced {
-            handler.audit_held(target_agent, &block_id, text);
+            handler.audit_note(target_agent, &block_id, text, "system_note_held");
         }
         Ok(replaced)
+    }
+
+    /// Audit a note `block_id` was given without this handler
+    /// (`blockcontroller::system_note_into_turn_or_hold`): as `system_note`
+    /// when it joined the running turn, else as `system_note_held`.
+    pub fn audit_system_note(&self, target_agent: &str, block_id: &str, text: &str, joined: bool) {
+        let outcome = if joined { "system_note" } else { "system_note_held" };
+        self.inner.lock().unwrap().audit_note(target_agent, block_id, text, outcome);
     }
 
     /// Whether a note is held for `target_agent` under `key`.
@@ -275,8 +383,49 @@ mod tests {
         assert_eq!(message, "[JEKT:FROM=a TIER=coord]\nreview PR 12\n\n[AgentMux] one\n[AgentMux] two");
         assert_eq!(with_notes("fix the build", &[]), "fix the build");
         assert_eq!(with_notes("", &notes[..1]), "[AgentMux] one");
-        assert_eq!(strip_attached(&with_notes("fix the build", &notes)), "fix the build");
+    }
+
+    /// Input history takes off exactly the notes srv attached to a message
+    /// that went, never `[AgentMux]` text a person typed or pasted.
+    #[test]
+    fn only_notes_srv_attached_are_taken_off_what_a_person_typed() {
+        let block = "held-notes-test-strip";
+        let note = "[AgentMux] Cloud messages are paused since 03:12 (held-notes-test-strip).";
+        let pasted = format!("explain this:\n\n{note}");
+        assert_eq!(strip_attached(&pasted), pasted, "nothing attached yet: all of it is the person's");
+        held().hold(block, "k", note);
+        let (not_sent, notes) = attach(block, "explain this:");
+        drop(notes);
+        assert_eq!(not_sent, pasted);
+        assert_eq!(strip_attached(&pasted), pasted, "that message didn't go");
+        let (sent, notes) = attach(block, "fix the build");
+        notes.delivered();
+        assert_eq!(strip_attached(&sent), "fix the build");
+        let both = format!("{pasted}\n\n{note}");
+        assert_eq!(strip_attached(&both), pasted, "the pasted copy stays, the attached one goes");
         assert_eq!(strip_attached("fix the build"), "fix the build");
+    }
+
+    #[test]
+    fn what_was_attached_is_remembered_across_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(ATTACHED_FILE);
+        let mut log = AttachedLog { path: Some(path.clone()), hashes: None };
+        log.record("\n\n[AgentMux] one");
+        log.record("\n\n[AgentMux] one");
+        let mut again = AttachedLog { path: Some(path.clone()), hashes: None };
+        assert!(again.contains("\n\n[AgentMux] one"));
+        assert!(!again.contains("\n\n[AgentMux] two"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap().lines().count(), 1, "once");
+        assert_eq!(strip_logged("hi\n\n[AgentMux] one", &mut again), "hi");
+        for i in 0..ATTACHED_KEPT * 2 + 1 {
+            again.record(&format!("\n\n[AgentMux] n{i}"));
+        }
+        let lines = std::fs::read_to_string(&path).unwrap().lines().count();
+        assert!(lines <= ATTACHED_KEPT * 2 + 1, "the file is cut back: {lines}");
+        let mut reread = AttachedLog { path: Some(path), hashes: None };
+        assert!(reread.contains(&format!("\n\n[AgentMux] n{}", ATTACHED_KEPT * 2)));
+        assert!(!reread.contains("\n\n[AgentMux] one"), "the oldest went");
     }
 
     #[test]

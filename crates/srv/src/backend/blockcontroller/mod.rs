@@ -825,6 +825,22 @@ pub fn deliver_agent_message_from(
     Ok(AgentDelivery::Pty)
 }
 
+/// srv's own note `text` for the agent in `block_id`, about the work at hand:
+/// into its running turn where the controller can join one atomically (a
+/// persistent agent: `PersistentSubprocessController::note_into_turn_or_hold`),
+/// else held under `key` for its next turn. It never starts a turn; the other
+/// controllers can only queue a message as a turn of its own, so theirs is
+/// always held. Returns whether it joined a turn.
+pub fn system_note_into_turn_or_hold(block_id: &str, key: &str, text: &str) -> bool {
+    if let Some(ctrl) = get_controller(block_id) {
+        if let Some(p) = ctrl.as_any().downcast_ref::<persistent::PersistentSubprocessController>() {
+            return p.note_into_turn_or_hold(key, text);
+        }
+    }
+    crate::backend::reactive::held_notes::hold(block_id, key, text);
+    false
+}
+
 /// Is this forced replace merely a runtime-config change (model / effort /
 /// permission) on a controller that stays persistent — i.e. the one case that
 /// may be deferred to the end of an in-flight turn rather than killing it?
