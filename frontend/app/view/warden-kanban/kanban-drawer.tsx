@@ -65,9 +65,10 @@ export function KanbanDrawer(props: {
 }): JSX.Element {
     const t = () => props.task;
     // Re-read the history whenever the task changes on the board.
+    // A string, so an equal task after a refresh is the same source and isn't fetched again.
     const [detail] = createResource(
-        () => [t().id, t().updated_at, t().card.updated_at] as const,
-        ([id]) => props.model.detail(id)
+        () => `${t().id}|${t().updated_at}|${t().card.updated_at}`,
+        (key) => props.model.detail(key.split("|")[0])
     );
     const [text, setText] = createSignal("");
     const [startOn, setStartOn] = createSignal("");

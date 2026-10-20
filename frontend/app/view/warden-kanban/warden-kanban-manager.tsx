@@ -138,6 +138,7 @@ export const WardenKanbanManager = (props: { visible: boolean; onNeedsCount?: (n
     const holding = (agent: string) =>
         (board()?.tasks ?? []).find((t) => (t.state === "claimed" || t.state === "blocked") && t.claimed_by === agent);
     const untracked = createMemo(() => (showUntracked() ? untrackedAgents(agents(), board()?.tasks ?? []) : []));
+    const groups = createMemo(() => backlogGroups(tasks(), agents()));
     const review = createMemo(() => reviewLoad(tasks(), now()));
     const open = (t: KanbanTask) => setOpenId(t.id);
     const openAgent = (blockId: string) => void revealBlock(blockId, { source: "kanban" });
@@ -225,10 +226,16 @@ export const WardenKanbanManager = (props: { visible: boolean; onNeedsCount?: (n
                                 >
                                     {columnHead(col.id, col.label, columnTasks(tasks(), "backlog").length)}
                                     <div class="kanban-column__list">
-                                        <For each={backlogGroups(tasks(), agents())}>
-                                            {(g) => <BacklogGroupView group={g} model={model} now={now()} agents={agents()} holding={holding} onOpen={open} />}
+                                        {/* Keyed by the group's agent name (a string), so a group, and its drop
+                                            target, stays mounted when the board refreshes. */}
+                                        <For each={groups().map((g) => g.key)}>
+                                            {(key) => (
+                                                <Show when={groups().find((g) => g.key === key)}>
+                                                    {(g) => <BacklogGroupView group={g()} model={model} now={now()} agents={agents()} holding={holding} onOpen={open} />}
+                                                </Show>
+                                            )}
                                         </For>
-                                        <Show when={!backlogGroups(tasks(), agents()).some((g) => g.key === "")}>
+                                        <Show when={!groups().some((g) => g.key === "")}>
                                             <BacklogGroupView
                                                 group={{ key: "", label: "Anyone", agent: undefined, tasks: [] }}
                                                 model={model}

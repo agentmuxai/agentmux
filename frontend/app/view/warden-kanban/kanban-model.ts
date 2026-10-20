@@ -20,6 +20,25 @@ import type { KanbanActRequest, KanbanActResult, KanbanBoard, KanbanTaskDetail }
 const POLL_MS = 15_000;
 const DEBOUNCE_MS = 150;
 
+/** The new board, keeping each task and agent object that didn't change, so the cards showing them stay
+ *  mounted across a refresh: a focused card keeps focus, a drag keeps its source, an open drawer doesn't
+ *  refetch. Exported for its test. */
+export function keepUnchanged(prev: KanbanBoard | null, next: KanbanBoard): KanbanBoard {
+    if (!prev) return next;
+    const same = <T,>(old: T[], fresh: T[], key: (x: T) => string): T[] => {
+        const byKey = new Map(old.map((x) => [key(x), x]));
+        return fresh.map((x) => {
+            const o = byKey.get(key(x));
+            return o !== undefined && JSON.stringify(o) === JSON.stringify(x) ? o : x;
+        });
+    };
+    return {
+        ...next,
+        tasks: same(prev.tasks, next.tasks, (t) => t.id),
+        agents: same(prev.agents, next.agents, (a) => a.block_id),
+    };
+}
+
 export class KanbanModel {
     readonly board: Accessor<KanbanBoard | null>;
     readonly error: Accessor<string | null>;
@@ -80,7 +99,7 @@ export class KanbanModel {
         this.inflight = true;
         try {
             const board = await RpcApi.KanbanListCommand(TabRpcClient, {});
-            this.setBoard(board);
+            this.setBoard(keepUnchanged(this.board(), board));
             this.setError(null);
         } catch (e) {
             this.setError(`Couldn't load the Kanban: ${String((e as Error)?.message ?? e)}`);
