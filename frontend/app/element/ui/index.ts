@@ -22,6 +22,7 @@ export {
     type SwitchProps,
     type TextInputProps,
 } from "./inputs";
+export { Pill, type PillProps, type PillTone } from "./Pill";
 export { SegmentedControl, type SegmentedControlProps, type SegmentedOption } from "./SegmentedControl";
 export { densityClass, type UiDensity, type UiTone } from "./shared";
 export { StatusDot, type StatusDotProps, type StatusTone } from "./StatusDot";

@@ -17,7 +17,7 @@ import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { SystemToolInstallInline } from "./SystemToolInstallInline";
 import { CliDiskSpace } from "./CliDiskSpace";
 import "./toolchain-view.scss";
-import { Button } from "@/app/element/ui";
+import { Button, Pill } from "@/app/element/ui";
 
 // ── Port/localStorage helpers (unchanged from modal) ─────────────────────────
 
@@ -403,22 +403,19 @@ export function ToolchainView(): JSX.Element {
                 <div class="toolchain-row-title">
                     <span class="toolchain-row-name">{row.label}</span>
                     <Show when={row.loading}>
-                        <span class="toolchain-pill">Checking…</span>
+                        <Pill>Checking…</Pill>
                     </Show>
                     <Show when={!row.loading && row.found}>
-                        <span class="toolchain-pill toolchain-pill--ok">
-                            <i class="fa-solid fa-check" /> {row.version ?? "installed"}
-                        </span>
+                        <Pill tone="ok" icon="check">
+                            {row.version ?? "installed"}
+                        </Pill>
                         <Show when={row.source === "local_install"}>
-                            <span class="toolchain-pill">managed</span>
+                            <Pill>managed</Pill>
                         </Show>
                         <Show when={row.kind === "provider" && row.source === "system_path"}>
-                            <span
-                                class="toolchain-pill"
-                                title="AgentMux doesn't install this CLI: it runs the copy you installed"
-                            >
+                            <Pill title="AgentMux doesn't install this CLI: it runs the copy you installed">
                                 your install
-                            </span>
+                            </Pill>
                         </Show>
                         {/* Drift, split by who can act on it. `behind-pin` is
                             the user's — loud, and paired with the install
@@ -434,43 +431,39 @@ export function ToolchainView(): JSX.Element {
                             return (
                                 <>
                                     <Show when={d.drift === "behind-pin"}>
-                                        <span
-                                            class="toolchain-pill toolchain-pill--warn"
+                                        <Pill
+                                            tone="warn"
+                                            icon="circle-up"
                                             title={`AgentMux is validated against ${d.pinned}; you have ${d.installed}`}
                                         >
-                                            <i class="fa-solid fa-circle-up" />{" "}
                                             {d.pinned} available
-                                        </span>
+                                        </Pill>
                                     </Show>
                                     <Show when={d.drift === "current"}>
-                                        <span class="toolchain-pill">
-                                            <i class="fa-solid fa-circle-check" /> up to date
-                                        </span>
+                                        <Pill icon="circle-check">up to date</Pill>
                                     </Show>
                                     <Show when={d.drift === "ahead-of-pin"}>
-                                        <span
-                                            class="toolchain-pill"
+                                        <Pill
                                             title={`Newer than the ${d.pinned} AgentMux validates against — not a problem, just untested here`}
                                         >
                                             ahead of pin
-                                        </span>
+                                        </Pill>
                                     </Show>
                                     <Show when={d.currency === "pin-behind-upstream"}>
-                                        <span
-                                            class="toolchain-pill"
+                                        <Pill
                                             title={`AgentMux pins ${d.pinned}; upstream has ${d.latest}. Nothing for you to do — this is ours to bump.`}
                                         >
                                             pin {d.pinned} · upstream {d.latest}
-                                        </span>
+                                        </Pill>
                                     </Show>
                                 </>
                             );
                         })()}
                     </Show>
                     <Show when={!row.loading && !row.found}>
-                        <span class="toolchain-pill" classList={{ "toolchain-pill--warn": !row.optional }}>
+                        <Pill tone={row.optional ? "neutral" : "warn"}>
                             {row.optional ? "Not installed (optional)" : "Not found"}
-                        </span>
+                        </Pill>
                     </Show>
                 </div>
                 <Show when={row.found && row.path}>
@@ -545,10 +538,9 @@ export function ToolchainView(): JSX.Element {
                     deliberately excluded, so this never nags about something
                     they cannot fix. */}
                 <Show when={behindCount() > 0}>
-                    <span class="toolchain-pill toolchain-pill--warn" title="Reinstall from each row to move to the version AgentMux validates against">
-                        <i class="fa-solid fa-circle-up" />{" "}
+                    <Pill tone="warn" icon="circle-up" title="Reinstall from each row to move to the version AgentMux validates against">
                         {behindCount()} {behindCount() === 1 ? "tool is" : "tools are"} behind
-                    </span>
+                    </Pill>
                 </Show>
             </div>
             <div class="toolchain-body">
@@ -563,12 +555,17 @@ export function ToolchainView(): JSX.Element {
                                 </div>
                                 <div class="toolchain-env-line">
                                     <span class="toolchain-env-key">PATH source</span>
-                                    <span class="toolchain-pill" classList={{
-                                        "toolchain-pill--ok": e().pathSource === "login-shell",
-                                        "toolchain-pill--warn": e().pathSource === "inherited" && plat !== "windows",
-                                    }}>
+                                    <Pill
+                                        tone={
+                                            e().pathSource === "login-shell"
+                                                ? "ok"
+                                                : e().pathSource === "inherited" && plat !== "windows"
+                                                  ? "warn"
+                                                  : "neutral"
+                                        }
+                                    >
                                         {pathSourceLabel(e().pathSource)}
-                                    </span>
+                                    </Pill>
                                 </div>
                                 <Button tone="quiet" class="toolchain-path-toggle" onClick={() => setShowPath((v) => !v)}>
                                     {showPath() ? "Hide" : "Show"} effective PATH
@@ -610,20 +607,18 @@ export function ToolchainView(): JSX.Element {
                                     <div class="toolchain-row-title">
                                         <span class="toolchain-row-name">{row.label}</span>
                                         <Show when={row.running}>
-                                            <span class="toolchain-pill toolchain-pill--ok">
-                                                <i class="fa-solid fa-circle fa-2xs" aria-hidden="true" /> Running
-                                            </span>
+                                            <Pill tone="ok" icon="circle" class="toolchain-running">
+                                                Running
+                                            </Pill>
                                         </Show>
                                         <Show when={!row.cliLoading && row.cliFound && !row.running}>
-                                            <span class="toolchain-pill">Installed</span>
+                                            <Pill>Installed</Pill>
                                         </Show>
                                         <Show when={row.cliLoading || row.healthLoading}>
-                                            <span class="toolchain-pill">Checking…</span>
+                                            <Pill>Checking…</Pill>
                                         </Show>
                                         <Show when={!row.cliLoading && !row.healthLoading && !row.cliFound && !row.running}>
-                                            <span class="toolchain-pill">
-                                                {row.installKind === "manual" ? "Not detected" : "Not installed"}
-                                            </span>
+                                            <Pill>{row.installKind === "manual" ? "Not detected" : "Not installed"}</Pill>
                                         </Show>
                                     </div>
                                     <div class="toolchain-row-path toolchain-widget-desc">{row.description}</div>
