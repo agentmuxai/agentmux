@@ -283,6 +283,19 @@ describe("AgentRow — a press selects", () => {
         expect(focusBlockMock).not.toHaveBeenCalled();
     });
 
+    it("a press on the chevron does not select; its click still collapses", () => {
+        seedSleepingPane();
+        const toggle = vi.fn();
+        const { container } = renderRow(false, modelStub(false, toggle));
+        const chevron = container.querySelector(".swarm-agent-expand-icon")!;
+
+        pointer("pointerdown", chevron);
+        fireEvent.click(chevron);
+
+        expect(focusBlockMock).not.toHaveBeenCalled();
+        expect(toggle).toHaveBeenCalledTimes(1);
+    });
+
     it("Enter and Space on the focused card select; other keys do not", () => {
         registerPane(BLOCK);
         const { container } = renderRow(false);

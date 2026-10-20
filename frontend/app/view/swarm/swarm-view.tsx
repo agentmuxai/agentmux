@@ -498,6 +498,7 @@ export function AgentRow({
                 onPointerDown={(e) => {
                     pressSelected = false;
                     if (e.pointerType !== "mouse" || e.button !== 0 || pressedOnControl(e)) return;
+                    if ((e.target as Element | null)?.closest(".swarm-agent-expand-icon")) return;
                     pressSelected = true;
                     selectAgent();
                 }}
