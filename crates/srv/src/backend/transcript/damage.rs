@@ -150,6 +150,11 @@ fn is_shared(fs: &crate::backend::storage::filestore::FileStore) -> bool {
 }
 
 /// The agent's id in an `agent:<id>:current` (or `:archive:`) zone.
+///
+/// A transcript zone is keyed by the agent's id (`agentId` in the block's meta, the
+/// agent's own `definition_id`) and a segment log by its `AGENTMUX_AGENT_UID`
+/// (`db_agents.id`, see `Controller::stable_agent_uid`). The code names both as the
+/// agent's own id; if they ever differ for an agent, it gets a notice for each.
 fn agent_of(zone: &str) -> Option<&str> {
     zone.strip_prefix("agent:")
         .or_else(|| zone.strip_prefix("agent-uid:"))?
@@ -182,6 +187,18 @@ pub fn incident_for(zone: &str, op: &str) -> agentmux_common::incidents::Inciden
 /// (its transcript, segment log and archives), else the zone.
 fn zone_tag(zone: &str) -> String {
     agent_of(zone).map_or_else(|| format!("zone {zone}"), |id| format!("agent {id}"))
+}
+
+static TOLD: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// True the first time `tag` is asked: the agent is told once for all of its zones.
+fn first_to_tell(tag: &str) -> bool {
+    let mut told = TOLD.lock().unwrap_or_else(|e| e.into_inner());
+    if told.iter().any(|t| t == tag) {
+        return false;
+    }
+    told.push(tag.to_string());
+    true
 }
 
 /// What the agent is told, once.
@@ -232,6 +249,9 @@ fn announce(zone: &str, op: &str) {
         None => tracing::warn!(zone = %zone, "shared transcript store: no data folder to record the damage in"),
     }
     let Some(id) = agent_of(zone).map(str::to_string) else { return };
+    if !first_to_tell(&zone_tag(zone)) {
+        return;
+    }
     let text = agent_note();
     let tell = move || {
         let handler = crate::backend::reactive::get_global_handler();
@@ -460,6 +480,14 @@ mod tests {
         assert_eq!(data["what"], incident.what);
         assert_eq!(data["did"].as_array().unwrap().len(), incident.did.len());
         assert!(data.get("acknowledged_at_ms").is_none(), "{data}");
+    }
+
+    #[test]
+    fn an_agent_is_told_once_for_all_of_its_zones() {
+        assert!(first_to_tell(&zone_tag("agent:told-once-1:current")));
+        assert!(!first_to_tell(&zone_tag("agent:told-once-1:archive:17")), "its archive zone: same agent");
+        assert!(!first_to_tell(&zone_tag("agent-uid:told-once-1:segments")), "its segment log: same agent id");
+        assert!(first_to_tell(&zone_tag("agent:told-once-2:current")), "another agent is told");
     }
 
     #[test]

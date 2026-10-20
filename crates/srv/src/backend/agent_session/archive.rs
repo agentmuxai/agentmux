@@ -52,11 +52,7 @@ pub(crate) fn archive_session_in(
     // shared store. A failure that is the corruption is not retried here: the move may have
     // cleared this channel's current already, so the next call is the one that takes the other path.
     let global = global.filter(|_| !damage::is_damaged(&zone));
-    let result = archive_session_with(filestore, global, definition_id);
-    if let (Err(e), true) = (&result, global.is_some()) {
-        damage::note_corrupt_text(&zone, "archive", e);
-    }
-    result
+    archive_session_with(filestore, global, definition_id)
 }
 
 fn archive_session_with(
@@ -83,7 +79,12 @@ fn archive_session_with(
         // is cleared first: a crash before the move leaves the conversation
         // current and readable from the global store, never a stale local copy
         // with no global current to win over it.
-        match archive_global_current(gfs, definition_id, || clear_local_current_zone(filestore, &current_zone))? {
+        // Only what the shared store answered is looked at for corruption: an error of this
+        // channel's own store, further down, says nothing about the shared zone.
+        let archived = archive_global_current(gfs, definition_id, || clear_local_current_zone(filestore, &current_zone)).inspect_err(|e| {
+            crate::backend::transcript::damage::note_corrupt_text(&current_zone, "archive", e);
+        })?;
+        match archived {
             GlobalArchive::Archived(zone, ts) => {
                 clear_global_current_zone_in(gfs, definition_id);
                 return Ok(Some((zone, ts)));
@@ -554,6 +555,19 @@ mod damage_tests {
         let (archive_zone, _) = archive_session_in(&own, Some(&gfs), def).unwrap().expect("archived from this channel's copy");
         assert!(archive_zone.starts_with(&format!("agent:{def}:archive:")));
         assert!(own.stat(&archive_zone, SNAPSHOT_FILE).unwrap().is_some_and(|f| f.size > 0), "the archive is in this channel's store");
+    }
+
+    #[test]
+    fn a_corrupt_channel_store_does_not_mark_a_healthy_shared_zone() {
+        let def = "def-arch-damage-3";
+        let zone = agent_current_zone(def);
+        let (own, gfs) = (FileStore::open_in_memory().unwrap(), FileStore::open_in_memory().unwrap());
+        let _shared = test_support::register(&gfs);
+        test_support::corrupt(&own);
+        // The shared store has nothing to archive; this channel's own store is what fails.
+        let err = archive_session_in(&own, Some(&gfs), def).unwrap_err();
+        assert!(err.contains("malformed"), "{err}");
+        assert!(!damage::is_damaged(&zone), "the failure was in the channel's store, not the shared zone");
     }
 
     #[test]
