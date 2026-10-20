@@ -46,7 +46,7 @@ const lightIndex = base.indexOf('[data-theme-polarity="light"]');
 const darkBlock = base.slice(0, lightIndex);
 const lightBlock = base.slice(lightIndex);
 
-const NAMES = ["keyword", "name", "function", "constant", "plain", "type", "operator", "comment", "string"];
+const NAMES = ["keyword", "name", "function", "constant", "plain", "type", "operator", "comment", "string", "invalid"];
 
 // The text colours are 4.5:1 or better on a light page. One Dark's are not all
 // that high on a dark one (its comment grey is the lowest, deliberately

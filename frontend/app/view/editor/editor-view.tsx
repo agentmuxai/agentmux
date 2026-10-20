@@ -525,6 +525,10 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             state: state ?? EditorState.create({ doc: content, extensions }),
             parent: container,
         });
+        // The extensions were built before the language loaded; the theme may
+        // have changed polarity since (a state moved in from another editor
+        // carries its own too).
+        cmView.dispatch({ effects: themeCompartment.reconfigure(themeExtension()) });
         setLiveDoc(content); // seed preview from the freshly-built doc
         // giveFocus() (focusManager.ts's shared pane-selection contract)
         // was a stub returning false until this ref existed — see
