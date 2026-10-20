@@ -50,11 +50,11 @@ fn previous_db_dir(versions_dir: &Path, current: (u64, u64, u64)) -> Option<Path
         .map(|(_, db)| db)
 }
 
-/// On the first start of `version` (no `objects.db` in `db_dir` yet), copy
-/// the databases of the newest older version in the same channel. Returns
-/// the version directory copied from, or `None` when there was nothing to do
-/// or the copy failed (logged; the version then starts fresh).
-pub(crate) fn from_previous_version(db_dir: &Path, version: &str) -> Option<PathBuf> {
+/// The `data/db` of the newest older version in the same channel that the
+/// first start of `version` would copy from: `None` once `db_dir` has an
+/// `objects.db`, or outside a `versions/<v>/data/db` layout, or with nothing
+/// older. Read-only; srv's boot gate asks it too (`migrations/gate.rs`).
+pub(crate) fn source_for(db_dir: &Path, version: &str) -> Option<PathBuf> {
     if db_dir.join("objects.db").exists() {
         return None;
     }
@@ -65,7 +65,15 @@ pub(crate) fn from_previous_version(db_dir: &Path, version: &str) -> Option<Path
     if versions_dir.file_name()? != "versions" {
         return None;
     }
-    let source = previous_db_dir(versions_dir, current)?;
+    previous_db_dir(versions_dir, current)
+}
+
+/// On the first start of `version` (no `objects.db` in `db_dir` yet), copy
+/// the databases of the newest older version in the same channel. Returns
+/// the version directory copied from, or `None` when there was nothing to do
+/// or the copy failed (logged; the version then starts fresh).
+pub(crate) fn from_previous_version(db_dir: &Path, version: &str) -> Option<PathBuf> {
+    let source = source_for(db_dir, version)?;
     let from = source.parent()?.parent()?.to_path_buf();
     if let Err(e) = std::fs::create_dir_all(db_dir) {
         tracing::warn!(error = %e, "carry-forward: can't create {}; starting fresh", db_dir.display());

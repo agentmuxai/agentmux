@@ -93,6 +93,11 @@ pub enum SrvSpawnError {
     /// show the user a real message instead of "timeout (30s)" — and so it
     /// can do it immediately rather than 30s later.
     MigrationFailed(String),
+    /// srv found data that needs `agentmux-srv migrate --prepare` and exited
+    /// before writing anything (`AGENTMUXSRV-NEEDS-PREPARE`). [`spawn_srv`]
+    /// handles it itself; it reaches a caller only if srv still asks after a
+    /// prepare, which `spawn_srv` turns into `MigrationFailed`.
+    NeedsPrepare(String),
 }
 
 impl std::fmt::Display for SrvSpawnError {
@@ -109,6 +114,7 @@ impl std::fmt::Display for SrvSpawnError {
                 write!(f, "ESTART channel closed before srv signalled ready")
             }
             Self::MigrationFailed(s) => write!(f, "database migration failed: {}", s),
+            Self::NeedsPrepare(s) => write!(f, "srv's data needs preparing: {}", s),
         }
     }
 }
@@ -153,6 +159,7 @@ enum EstartWait {
     Ready(Option<SrvSpawnResult>),
     Timeout,
     MigrationFailed(String),
+    NeedsPrepare(String),
 }
 
 /// Second guard for the ESTART-vs-failure race (reagent P1, post-merge on
@@ -213,179 +220,117 @@ mod estart_race_tests {
     }
 }
 
-/// Run `agentmux-srv migrate` as a standalone subprocess.
-///
-/// The migration runner exits 0 (success / nothing to do) or 1 (failure).
-/// On failure the caller should surface an error and not bring srv back up.
-/// stdout lines are newline-delimited JSON progress events — consumed inline
-/// so sub-events are delivered to the splash before `stage_end` is sent.
-///
-/// NOT called during ordinary startup — migrations run in-process inside srv
-/// via `run_pending_migrations` before ESTART is emitted for the normal
-/// zero-pending boot. This is the explicit-upgrade path instead: its real
-/// caller is `upgrade::run_migration_upgrade`, part of the fast-startup
-/// redesign (`docs/specs/SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md`,
-/// issue #3258) — was dead code with no callers before that.
-pub async fn run_migrate(
+/// One of srv's progress lines (a data-preparation step or a migration, in
+/// the `agentmux_common::srv_stderr` protocol) as a splash sub-row of `stage`.
+/// `false` if `line` is not one. Shared by srv's own startup ("backend") and
+/// `migrate --prepare` ("prepare").
+fn forward_progress_line(line: &str, stage: &'static str, sink: &crate::startup_events::StartupEventSink) -> bool {
+    use agentmux_common::srv_stderr as p;
+    let ok = crate::startup_events::StartupStatus::Ok;
+    if let Some(b) = p::parse_step_begin_line(line) {
+        sink.sub_begin(stage, b.id, b.label);
+    } else if let Some(e) = p::parse_step_end_line(line) {
+        sink.sub_end(stage, e.id, e.duration_ms, ok, None);
+    } else if let Some(b) = p::parse_migration_begin_line(line) {
+        sink.sub_begin(stage, b.id, b.description);
+    } else if let Some(e) = p::parse_migration_end_line(line) {
+        sink.sub_end(stage, e.id, e.duration_ms, ok, None);
+    } else {
+        return false;
+    }
+    true
+}
+
+/// Run `agentmux-srv migrate --prepare` while srv is stopped, as the splash's
+/// "Updating your data" stage: copy the previous version's data forward,
+/// back up, run the pending migrations, each a sub-row. The upgrade step of
+/// `docs/specs/SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md`
+/// §10, run by [`spawn_srv`] when srv reports `AGENTMUXSRV-NEEDS-PREPARE`.
+async fn run_prepare(
     launcher_exe_dir: &Path,
     paths: &DataPaths,
     sink: &crate::startup_events::StartupEventSink,
 ) -> Result<(), SrvSpawnError> {
-    sink.stage_begin("migrations", "Migrations");
+    sink.stage_begin("prepare", "Updating your data");
     let t = std::time::Instant::now();
-
     let backend_path = resolve_srv_binary(launcher_exe_dir)?;
-
-    let mut cmd = tokio::process::Command::new(&backend_path);
-    cmd.args([
-        "--wavedata",
-        &paths.data_dir.to_string_lossy(),
-        "migrate",
-    ])
-    .envs(paths.common.to_env_vars())
-    // Auth key is not needed for migrate but the binary may check for it
-    // before dispatching. Provide a placeholder so argument parsing passes.
-    .env("AGENTMUX_AUTH_KEY", "migrate-placeholder")
-    .stdout(std::process::Stdio::piped())
-    .stderr(std::process::Stdio::piped())
-    .kill_on_drop(true);
-
+    let mut cmd = Command::new(&backend_path);
+    cmd.args(["--wavedata", &paths.data_dir.to_string_lossy(), "migrate", "--prepare"])
+        .envs(paths.common.to_env_vars())
+        // Argument parsing wants an auth key; migrate never uses it.
+        .env("AGENTMUX_AUTH_KEY", "migrate-placeholder")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
     #[cfg(target_os = "windows")]
-    cmd.no_window(); // CREATE_NO_WINDOW
+    cmd.no_window();
+    let mut child = cmd.spawn().map_err(|e| SrvSpawnError::SpawnFailed(format!("migrate --prepare: {e}")))?;
 
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| SrvSpawnError::SpawnFailed(format!("migrate spawn: {}", e)))?;
-
-    // Stderr to log only (non-blocking task).
-    if let Some(stderr) = child.stderr.take() {
+    // stdout carries only the NDJSON summary: logged.
+    if let Some(stdout) = child.stdout.take() {
         tokio::spawn(async move {
-            let mut reader = tokio::io::BufReader::new(stderr).lines();
-            while let Ok(Some(line)) = reader.next_line().await {
-                crate::log(&format!("[migrate stderr] {}", line));
+            let mut lines = BufReader::new(stdout).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                crate::log(&format!("[prepare] {line}"));
             }
         });
     }
-
-    // Read stdout inline so sub-events arrive before stage_end is sent.
-    // We break as soon as we see the "complete" event — the process may hang
-    // in Tokio shutdown (crash-monitor task) after flushing its last line,
-    // so waiting for stdout EOF would block forever.
-    let mut applied = 0u32;
-    let mut skipped = 0u32;
-    let mut migration_complete = false;
-    if let Some(stdout) = child.stdout.take() {
-        let mut reader = tokio::io::BufReader::new(stdout).lines();
-        while let Ok(Some(line)) = reader.next_line().await {
-            crate::log(&format!("[migrate] {}", line));
-            match parse_migration_line(&line) {
-                Some(MigrationLine::Start { id, label }) => {
-                    sink.sub_begin("migrations", id, label);
-                }
-                Some(MigrationLine::Done { id, duration_ms }) => {
-                    sink.sub_end(
-                        "migrations",
-                        id,
-                        duration_ms,
-                        crate::startup_events::StartupStatus::Ok,
-                        None,
-                    );
-                }
-                Some(MigrationLine::Complete { applied: a, skipped: s }) => {
-                    applied = a;
-                    skipped = s;
-                    migration_complete = true;
-                    break; // Don't wait for EOF — kill below.
-                }
-                None => {}
+    let mut failure = None;
+    if let Some(stderr) = child.stderr.take() {
+        let mut lines = BufReader::new(stderr).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            if let Some(reason) = agentmux_common::srv_stderr::parse_migration_failed_line(&line) {
+                failure = Some(reason);
+            } else if !forward_progress_line(&line, "prepare", sink) {
+                crate::log(&format!("[prepare stderr] {line}"));
             }
         }
     }
-
-    // If the process signalled complete via stdout we know it succeeded.
-    // Kill it now so we don't hang on wait() if its Tokio runtime shutdown
-    // stalls (crash-monitor interaction, background tasks with long timeouts).
-    if migration_complete {
-        let _ = child.start_kill();
-    }
-
-    let status = child
-        .wait()
-        .await
-        .map_err(|e| SrvSpawnError::SpawnFailed(format!("migrate wait: {}", e)))?;
-
-    let duration_ms = t.elapsed().as_millis() as u64;
-    // migration_complete means the process emitted {"event":"complete"} on
-    // stdout before we killed it — that is the authoritative success signal.
-    // status.success() may be false when we force-killed the process after
-    // seeing complete (crash-monitor Tokio shutdown hung).
-    if migration_complete || status.success() {
-        let detail = if applied > 0 {
-            Some(format!("{} applied, {} current", applied, skipped))
-        } else if skipped > 0 {
-            Some(format!("all {} current", skipped))
-        } else {
-            None
-        };
-        sink.stage_end("migrations", duration_ms, crate::startup_events::StartupStatus::Ok, detail);
+    let status = child.wait().await.map_err(|e| SrvSpawnError::SpawnFailed(format!("migrate --prepare wait: {e}")))?;
+    let ms = t.elapsed().as_millis() as u64;
+    if status.success() {
+        sink.stage_end("prepare", ms, crate::startup_events::StartupStatus::Ok, None);
+        crate::log(&format!("prepare: done in {ms} ms"));
         Ok(())
     } else {
-        sink.stage_end(
-            "migrations",
-            duration_ms,
-            crate::startup_events::StartupStatus::Error,
-            Some("failed; see migration-error.log".into()),
-        );
-        Err(SrvSpawnError::SpawnFailed(format!(
-            "agentmux-srv migrate exited with status {}; see ~/.agentmux/logs/migration-error.log",
-            status.code().unwrap_or(-1)
-        )))
+        sink.stage_end("prepare", ms, crate::startup_events::StartupStatus::Error, Some("failed".into()));
+        Err(SrvSpawnError::MigrationFailed(
+            failure.unwrap_or_else(|| format!("agentmux-srv migrate --prepare exited with {status}")),
+        ))
     }
 }
 
-// ── Migration JSON parser ────────────────────────────────────────────────────
-
-enum MigrationLine {
-    Start { id: String, label: String },
-    Done { id: String, duration_ms: u64 },
-    Complete { applied: u32, skipped: u32 },
-}
-
-fn parse_migration_line(s: &str) -> Option<MigrationLine> {
-    let event = json_str(s, "event")?;
-    match event.as_str() {
-        "migration_start" => Some(MigrationLine::Start {
-            id: json_str(s, "id")?,
-            label: json_str(s, "description")
-                .unwrap_or_else(|| json_str(s, "id").unwrap_or_default()),
-        }),
-        "migration_done" => Some(MigrationLine::Done {
-            id: json_str(s, "id")?,
-            duration_ms: json_u64(s, "duration_ms").unwrap_or(0),
-        }),
-        "complete" => Some(MigrationLine::Complete {
-            applied: json_u64(s, "applied").unwrap_or(0) as u32,
-            skipped: json_u64(s, "skipped").unwrap_or(0) as u32,
-        }),
-        _ => None,
+/// Start srv and wait for it to be ready ([`spawn_srv_once`]). If srv finds
+/// data that needs preparing (a new version's first start, pending
+/// migrations), it exits before writing anything; this then runs
+/// `migrate --prepare` on the splash and starts srv once more. A second
+/// "needs preparing" is a failure, never a loop.
+pub async fn spawn_srv(
+    launcher_exe_dir: &Path,
+    paths: &DataPaths,
+    srv_pipe_path: &str,
+    #[cfg(target_os = "windows")] job_handle: windows_sys::Win32::Foundation::HANDLE,
+    sink: &crate::startup_events::StartupEventSink,
+    restart_id: Option<&str>,
+) -> Result<(SrvSpawnResult, Child), SrvSpawnError> {
+    #[cfg(target_os = "windows")]
+    let attempt = || spawn_srv_once(launcher_exe_dir, paths, srv_pipe_path, job_handle, sink, restart_id);
+    #[cfg(not(target_os = "windows"))]
+    let attempt = || spawn_srv_once(launcher_exe_dir, paths, srv_pipe_path, sink, restart_id);
+    match attempt().await {
+        Err(SrvSpawnError::NeedsPrepare(reason)) => {
+            crate::log(&format!("srv: data needs preparing ({reason}); running migrate --prepare"));
+            run_prepare(launcher_exe_dir, paths, sink).await?;
+            match attempt().await {
+                Err(SrvSpawnError::NeedsPrepare(reason)) => Err(SrvSpawnError::MigrationFailed(format!(
+                    "the data still needs preparing after migrate --prepare: {reason}"
+                ))),
+                other => other,
+            }
+        }
+        other => other,
     }
-}
-
-fn json_str(s: &str, key: &str) -> Option<String> {
-    let prefix = format!("\"{}\":\"", key);
-    let start = s.find(&prefix)? + prefix.len();
-    let rest = &s[start..];
-    let end = rest.find('"')?;
-    Some(rest[..end].to_string())
-}
-
-fn json_u64(s: &str, key: &str) -> Option<u64> {
-    let prefix = format!("\"{}\":", key);
-    let start = s.find(&prefix)? + prefix.len();
-    let rest = s[start..].trim_start();
-    let end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
-    if end == 0 { return None; }
-    rest[..end].parse().ok()
 }
 
 /// Spawn srv as a child of the launcher, assigned to launcher's
@@ -405,7 +350,7 @@ fn json_u64(s: &str, key: &str) -> Option<u64> {
 // (same data-dir hash as launcher's own pipe, different leaf name).
 // Passed via `AGENTMUX_SRV_PIPE_PATH` so srv doesn't have to
 // recompute the hash; launcher is the single source of truth.
-pub async fn spawn_srv(
+async fn spawn_srv_once(
     launcher_exe_dir: &Path,
     paths: &DataPaths,
     srv_pipe_path: &str,
@@ -458,6 +403,9 @@ pub async fn spawn_srv(
     .envs(paths.common.to_env_vars())
     .env("AGENTMUX_APP_PATH", &app_path_str)
     .env("AGENTMUX_SRV_PIPE_PATH", srv_pipe_path)
+    // srv checks its data read-only and, if it needs preparing, exits for
+    // `spawn_srv` to run `migrate --prepare` (`srv_stderr::NEEDS_PREPARE_PREFIX`).
+    .env(agentmux_common::srv_stderr::SUPERVISOR_PREPARES_ENV, "1")
     .stdin(Stdio::piped())
     .stdout(Stdio::piped())
     .stderr(Stdio::piped())
@@ -571,6 +519,8 @@ pub async fn spawn_srv(
     // 1 without ESTART. Without this the waiter would only notice via the 30s
     // timeout, and the user would see "timeout" instead of the actual error.
     let (failure_tx, mut failure_rx) = mpsc::channel::<String>(1);
+    // srv's data needs `migrate --prepare`; srv exits right after the line.
+    let (prepare_tx, mut prepare_rx) = mpsc::channel::<String>(1);
     let auth_key_for_estart = auth_key.clone();
     let host_reg_secret_for_estart = host_reg_secret.clone();
     let started_at_for_estart = started_at.clone();
@@ -599,6 +549,9 @@ pub async fn spawn_srv(
                 ));
                 let _ = tx.send(result).await;
                 estart_sent = true;
+            } else if let Some(reason) = agentmux_common::srv_stderr::parse_needs_prepare_line(&line) {
+                crate::log(&format!("[srv {} needs prepare] {}", pid_for_log, reason));
+                let _ = prepare_tx.send(reason).await;
             } else if let Some(reason) =
                 agentmux_common::srv_stderr::parse_migration_failed_line(&line)
             {
@@ -607,27 +560,12 @@ pub async fn spawn_srv(
             } else if agentmux_common::srv_stderr::is_migrating_line(&line) {
                 crate::log(&format!("[srv {} migrating] {}", pid_for_log, line));
                 let _ = migration_tx.send(()).await;
-            } else if let Some(b) = agentmux_common::srv_stderr::parse_migration_begin_line(&line) {
-                // Sub-row against the already-open "backend" stage — a
-                // migration is not a separate top-level stage, it happens
-                // entirely inside that one. See
+            } else if forward_progress_line(&line, "backend", &sink_for_migrations) {
+                // A migration, or a copy-forward / snapshot / lock wait / backup
+                // step: a sub-row of the already-open "backend" stage, not a
+                // stage of its own. See
                 // docs/reports/REPORT_SPLASH_SCREEN_ARCHITECTURE_RETHINK_2026_09_14.md
                 // §2.1/§4 Phase 3.1.
-                sink_for_migrations.sub_begin("backend", b.id, b.description);
-            } else if let Some(e) = agentmux_common::srv_stderr::parse_migration_end_line(&line) {
-                sink_for_migrations.sub_end(
-                    "backend",
-                    e.id,
-                    e.duration_ms,
-                    crate::startup_events::StartupStatus::Ok,
-                    None,
-                );
-            } else if let Some(s) = agentmux_common::srv_stderr::parse_step_begin_line(&line) {
-                // Copy-forward, snapshot, lock wait, backup: sub-rows of
-                // "backend" like the migrations they come with.
-                sink_for_migrations.sub_begin("backend", s.id, s.label);
-            } else if let Some(e) = agentmux_common::srv_stderr::parse_step_end_line(&line) {
-                sink_for_migrations.sub_end("backend", e.id, e.duration_ms, crate::startup_events::StartupStatus::Ok, None);
             } else if let Some(req) = agentmux_common::srv_stderr::parse_upgrade_line(&line) {
                 crate::log(&format!("[srv {} upgrade] {}", pid_for_log, line));
                 crate::upgrade_restart::forward(req);
@@ -673,6 +611,7 @@ pub async fn spawn_srv(
             // #3043). `prefer_buffered_failure` below is the second guard.
             biased;
             Some(reason) = failure_rx.recv() => break EstartWait::MigrationFailed(reason),
+            Some(reason) = prepare_rx.recv() => break EstartWait::NeedsPrepare(reason),
             result = rx.recv() => break EstartWait::Ready(result),
             _ = &mut sleep => break EstartWait::Timeout,
             Some(()) = migration_rx.recv() => {
@@ -710,6 +649,22 @@ pub async fn spawn_srv(
                 Some("migration failed".into()),
             );
             Err(SrvSpawnError::MigrationFailed(reason))
+        }
+        EstartWait::NeedsPrepare(reason) => {
+            // srv exits by itself right after the line; `migrate --prepare`
+            // must not start while it may still hold the data, so wait for
+            // the real exit, forcing it only if it hangs.
+            if tokio::time::timeout(std::time::Duration::from_secs(10), child.wait()).await.is_err() {
+                let _ = child.start_kill();
+                let _ = child.wait().await;
+            }
+            sink.stage_end(
+                "backend",
+                srv_t.elapsed().as_millis() as u64,
+                crate::startup_events::StartupStatus::Ok,
+                Some("data needs updating".into()),
+            );
+            Err(SrvSpawnError::NeedsPrepare(reason))
         }
         EstartWait::Ready(None) => {
             let _ = child.start_kill();

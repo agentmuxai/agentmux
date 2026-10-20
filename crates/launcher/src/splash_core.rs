@@ -69,7 +69,7 @@ pub const GAP_MIN_MS: u64 = 150;
 pub fn gap_label_after(stage: &str) -> Option<&'static str> {
     match stage {
         "paint" => None,
-        "prep" | "migrations" => Some("Starting the backend"),
+        "prep" | "migrations" | "prepare" => Some("Starting the backend"),
         "backend" => Some("Starting the window"),
         "host" => Some("Connecting the window"),
         "dlopen" => Some("Starting the browser engine"),
