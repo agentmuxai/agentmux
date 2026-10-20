@@ -20,7 +20,7 @@ import {
 const NOW = 1_791_000_000_000;
 
 function at(state: MuxBusDeliveryStatus["state"], extra: Partial<MuxBusDeliveryStatus> = {}): MuxBusDeliveryStatus {
-    return { state, since_ms: NOW - 60_000, ...extra };
+    return { state, since_ms: NOW - 60_000, sign_in_unreachable: false, ...extra };
 }
 
 describe("muxbusIndicator", () => {
@@ -83,6 +83,12 @@ describe("muxbusSignOutWarning", () => {
             expect(muxbusSignOutWarning(at(state))).toBeNull();
         }
         expect(muxbusSignOutWarning(null)).toBeNull();
+    });
+
+    it("warns while connected if the sign-in server can't be reached", () => {
+        const text = muxbusSignOutWarning(at("connected", { sign_in_unreachable: true }));
+        expect(text).toContain("sign-in server");
+        expect(muxbusSignOutWarning(at("connected", { sign_in_unreachable: false }))).toBeNull();
     });
 });
 

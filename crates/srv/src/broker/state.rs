@@ -58,6 +58,8 @@ pub enum CredentialState {
     Failed {
         consecutive_failures: u32,
         last_error: String,
+        /// The last attempt got no answer at all (`RefreshErrorKind::Unreachable`).
+        offline: bool,
     },
     /// Either `consecutive_failures` crossed `NEEDS_REAUTH_THRESHOLD`, or a
     /// refresh closure explicitly reported
@@ -287,6 +289,7 @@ pub fn update(
                     None => CredentialState::Failed {
                         consecutive_failures: prior_failures,
                         last_error: reason.clone(),
+                        offline: true,
                     },
                 };
                 states.insert(id.clone(), back);
@@ -309,6 +312,7 @@ pub fn update(
                     CredentialState::Failed {
                         consecutive_failures,
                         last_error: reason.clone(),
+                        offline: false,
                     },
                 );
                 vec![Event::BecameFailed {
@@ -481,6 +485,7 @@ mod tests {
             Some(&CredentialState::Failed {
                 consecutive_failures: 1,
                 last_error: "network blip".into(),
+                offline: false,
             })
         );
     }
@@ -588,6 +593,7 @@ mod tests {
             Some(&CredentialState::Failed {
                 consecutive_failures: 0,
                 last_error: format!("connect error {}", NEEDS_REAUTH_THRESHOLD * 4),
+                offline: true,
             })
         );
     }
