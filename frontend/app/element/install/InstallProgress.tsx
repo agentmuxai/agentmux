@@ -21,6 +21,7 @@ import { writeText as clipboardWriteText } from "@/util/clipboard";
 import type { InstallSession } from "./install-session";
 import { InstallSteps } from "./InstallSteps";
 import { LogView, type LogViewApi } from "./LogView";
+import { Button } from "@/app/element/ui";
 import "./install-progress-view.scss";
 
 // Details open/closed per install kind, for the session (spec §4.2).
@@ -86,9 +87,9 @@ export const InstallProgress = (props: InstallProgressProps): JSX.Element => {
             >
                 <summary>Details</summary>
                 <div class="install-details-toolbar">
-                    <button
-                        type="button"
-                        class="install-details-copy"
+                    <Button
+                        tone="quiet"
+                        density="compact"
                         disabled={props.session.lines().length === 0}
                         onClick={() =>
                             // SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md §5 — moved to the redacted path.
@@ -98,7 +99,7 @@ export const InstallProgress = (props: InstallProgressProps): JSX.Element => {
                         }
                     >
                         Copy all
-                    </button>
+                    </Button>
                 </div>
                 <LogView
                     lines={props.session.lines}
