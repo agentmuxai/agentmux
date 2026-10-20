@@ -551,7 +551,10 @@ mod tests {
         tl.apply_tick(vec![begin("dlopen"), end("dlopen", 500)]);
         tl.apply_tick(vec![]);
         let stages: Vec<&str> = tl.stages.iter().map(|r| r.stage).collect();
-        assert_eq!(stages, vec!["host", "dlopen"]);
+        // No gap is left before dlopen; the one after it is the open wait for
+        // CEF initialize.
+        assert_eq!(stages, vec!["host", "dlopen", GAP_STAGE]);
+        assert!(tl.stages[2].done.is_none());
     }
 
     #[test]
