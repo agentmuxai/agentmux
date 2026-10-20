@@ -106,7 +106,7 @@ This is the main defence against a stale or hallucinated coordinate hitting the 
 
 ### 5.5 The blocklist
 
-Matched on executable name and window title, from `desktop:blocklist` in settings. The default list, which the user can edit:
+Matched on executable name and window title. The default list is below; `desktop:blocklist` adds names to it, and `desktop:allowlist` takes names off it (AgentMux itself cannot be taken off). An entry matches an app's name exactly, or any part of a window's title:
 
 - **password managers** (KeePass, 1Password, Bitwarden and similar);
 - **web browsers** (use `Browser`);
@@ -125,8 +125,9 @@ A blocked window is listed by `apps` with the reason and refused by every other 
 
 ### 5.7 Switching it on
 
-- `desktop:enabled`: global, **default false**.
-- The tool is listed for an agent only when it is enabled for that agent. The per-agent switch follows the existing mechanism that decides which MCP tools an agent gets; Phase 1 confirms where that lives and uses it.
+- `desktop:enabled`: global, **default false**. While it is false every `Desktop` action is refused with "Desktop driving is off; the user turns it on in Settings", and nothing is captured or injected.
+- The tool list is the same for every agent (`tools/list` is static in `crates/mcp`, and no per-agent tool switch exists today), so the tool is advertised even when off. Its description is kept short for that reason.
+- A per-agent switch is open question 2. Until then the per-app prompt (§5.4) is the per-agent control: no agent drives anything the user has not allowed, for that agent.
 - Container agents never get it (they have no desktop).
 
 ### 5.8 Secrets
@@ -165,7 +166,7 @@ crates/srv  server/app_api/desktop.rs
 - **Windows input:** `SendInput` through `windows-sys`, which srv already depends on at version 0.59. Add `Win32_UI_Input_KeyboardAndMouse` as a feature flag (Phase 2 picks between `windows-sys` and the `windows` 0.61 crate already in the tree for UI Automation), and a `windows-sys` target dependency in `crates/mcp` at the same version, so the lockfile gains no new package.
 - **Frontend:** an approval prompt component in the agent pane, a "Driving" badge with Stop, and a Settings section (`desktop:*`).
 
-New settings keys, in `schema/settings.json`: `desktop:enabled` (bool, false), `desktop:blocklist` (list of names), `desktop:grantminutes` (number, 30).
+New settings keys, in `schema/settings.json`: `desktop:enabled` (bool, false), `desktop:blocklist` and `desktop:allowlist` (lists of names), `desktop:grantminutes` (number, 30).
 
 ## 7. Failure modes
 
@@ -200,7 +201,7 @@ New settings keys, in `schema/settings.json`: `desktop:enabled` (bool, false), `
 ## 10. Open questions
 
 1. **The global stop hotkey.** Which chord does not collide with common apps on all three platforms? Phase 2 picks one after a conflict check; Phase 1 relies on the Stop button and the command palette.
-2. **Per-agent enablement.** Phase 1 confirms which existing mechanism decides which MCP tools an agent gets, and uses it rather than adding a second one.
+2. **Per-agent enablement.** Phase 1 found no per-agent tool switch (the tool list is static for all agents). Either add one for MCP tools generally, or accept the per-app prompt as the only per-agent control. A static, always-advertised tool also costs every agent a little context; if that matters, `tools/list` could ask srv for `desktop:enabled` and leave `Desktop` out while it is off.
 3. **Grant default.** 30 minutes is a guess. The audit log will show how long real sessions run.
 4. **Trading and crypto names.** A name list is a convenience, not coverage. It should be easy to extend and the docs should not promise more.
 5. **Pixels vs the accessibility tree.** `tree` (Phase 2) may turn out to be the better first step for most apps. If so, the tool description should tell agents to call `tree` before `look`.

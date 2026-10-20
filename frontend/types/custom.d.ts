@@ -153,6 +153,10 @@ declare global {
          *  host, which srv trusts and agents can't impersonate.
          *  SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md §5.1. */
         decideUpgrade?(id: string, version: string, accept: boolean): Promise<void>;
+        /** The user's answer to an agent's request to drive a native app: `timed`, `session` or `deny`. */
+        decideDesktop?(id: string, choice: "timed" | "session" | "deny"): Promise<void>;
+        /** The user's Stop for the agent in this pane: its desktop grants end. */
+        stopDesktop?(blockId: string): Promise<void>;
         /** The version panel's Download, Upgrade & restart (`now`: Restart now)
          *  and Cancel. Relayed by the host, which srv trusts and agents can't
          *  impersonate; answers srv's update status after the action. */

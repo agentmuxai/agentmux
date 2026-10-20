@@ -1061,6 +1061,8 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     void import("@/app/block/widget-install-requests").then((m) => m.startWidgetInstallRequests());
     // An agent's request to upgrade AgentMux opens a prompt here.
     void import("@/app/block/upgrade-requests").then((m) => m.startUpgradeRequests());
+    // An agent's request to drive a native app opens a prompt here.
+    void import("@/app/block/desktop-requests").then((m) => m.startDesktopRequests());
     // An agent's request for a Vault entry opens a prompt here.
     void import("@/app/view/vault/vault-request-prompts").then((m) => m.startVaultRequestPrompts());
     // srv's calls to action (browser, SSH consent, widget installs) join the

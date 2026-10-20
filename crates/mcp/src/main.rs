@@ -65,6 +65,7 @@ struct LoopEntry {
 /// when the agent pane closes.
 type LoopRegistry = Mutex<HashMap<String, LoopEntry>>;
 
+mod desktop_input;
 mod doctor;
 mod self_keys;
 mod tool_schemas;

@@ -193,6 +193,8 @@ export const WpsEvent = {
     AppUpdateStatus: "app:updatestatus",
     /** Agents' requests to upgrade AgentMux, waiting for the user (crates/srv/src/backend/upgrade_request.rs). */
     AppUpgradeRequests: "app:upgraderequests",
+    /** Agents' requests to drive a native app, and the grants in force (crates/srv/src/backend/desktop_gate.rs). */
+    AppDesktop: "app:desktop",
     AgentInputHistoryChanged: "agent:inputhistory",
     AgentShutdown: "agent:shutdown",
     AgentShutdownPending: "agent:shutdown-pending",

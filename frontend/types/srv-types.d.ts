@@ -1141,6 +1141,10 @@ declare global {
         "kanban:reminders"?: boolean;
         "agent:mcpselfheal"?: boolean;
         "agent:transcriptsinglecopy"?: boolean;
+        "desktop:enabled"?: boolean;
+        "desktop:blocklist"?: string[];
+        "desktop:allowlist"?: string[];
+        "desktop:grantminutes"?: number;
         "agent:turnscopedtail"?: boolean;
         "agent:onewayflow"?: boolean;
         "agent:followcontroller"?: boolean;

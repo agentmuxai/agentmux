@@ -32,6 +32,7 @@ pub mod bundle_import;
 pub mod bundle_widgets;
 pub mod bundle_validate;
 pub mod background_task_feed;
+pub mod desktop_gate;
 pub mod dock_snapshot;
 pub mod fleet_feed;
 pub mod fleet_source;

@@ -277,6 +277,32 @@ pub(crate) fn backend_upgrade_request(
         .map_err(|e| format!("srv refused the answer: {e}"))
 }
 
+/// Relay the user's answer to an agent's request to drive a native app, as
+/// the host. Blocking: run it off the UI thread.
+pub(crate) fn backend_desktop_request(
+    web_endpoint: &str,
+    auth_key: &str,
+    ipc_token: &str,
+    body: &serde_json::Value,
+) -> Result<(), String> {
+    post_as_host(web_endpoint, auth_key, ipc_token, "/api/v1/host/desktop_request", body)
+        .map(|_| ())
+        .map_err(|e| format!("srv refused the answer: {e}"))
+}
+
+/// Relay the user's Stop for an agent driving a native app, as the host.
+/// Blocking: run it off the UI thread.
+pub(crate) fn backend_desktop_stop(
+    web_endpoint: &str,
+    auth_key: &str,
+    ipc_token: &str,
+    body: &serde_json::Value,
+) -> Result<(), String> {
+    post_as_host(web_endpoint, auth_key, ipc_token, "/api/v1/host/desktop_stop", body)
+        .map(|_| ())
+        .map_err(|e| format!("srv refused the stop: {e}"))
+}
+
 /// Relay a click in the version panel (`download`, `restart`, `cancel`), as
 /// the host, and return srv's status after it. Blocking: run it off the UI
 /// thread.
