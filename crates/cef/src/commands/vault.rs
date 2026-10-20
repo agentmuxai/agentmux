@@ -127,6 +127,18 @@ async fn fetch_value(state: &Arc<AppState>, id: &str, part: &str, action: &str) 
     data.get("value").and_then(Value::as_str).map(|s| zeroize::Zeroizing::new(s.to_string())).ok_or_else(|| "srv sent no value".to_string())
 }
 
+/// Tells srv whether a copy reached the clipboard, so its audit trail is true.
+async fn report_copy(state: &Arc<AppState>, id: &str, part: &str, done: bool) {
+    let body = json!({ "op": "record_copy", "id": id, "part": part, "done": done });
+    let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
+    let auth_key = state.auth_key.lock().clone();
+    let ipc_token = state.ipc_token.clone();
+    let sent = tokio::task::spawn_blocking(move || crate::client::backend_vault(&web_endpoint, &auth_key, &ipc_token, &body)).await;
+    if !matches!(sent, Ok(Ok(_))) {
+        tracing::warn!("[vault] couldn't tell srv how a copy went");
+    }
+}
+
 async fn confirmed(message: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || verify_person(&message)).await.map_err(|e| format!("vault: {e}"))?
 }
@@ -191,7 +203,11 @@ pub async fn copy(state: &Arc<AppState>, args: &Value) -> Result<Value, String> 
     let value = fetch_value(state, &id, &part, "copied").await?;
     let n = {
         let _one_at_a_time = COPY_LOCK.lock().await;
-        super::clipboard::write_secret_text(&value)?;
+        if let Err(e) = super::clipboard::write_secret_text(&value) {
+            report_copy(state, &id, &part, false).await;
+            return Err(e);
+        }
+        report_copy(state, &id, &part, true).await;
         let n = COPY_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
         *PENDING_CLEAR.lock().unwrap_or_else(|e| e.into_inner()) = Some((n, value));
         n

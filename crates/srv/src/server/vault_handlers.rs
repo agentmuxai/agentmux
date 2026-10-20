@@ -119,6 +119,12 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                 let value = vault::reveal(&store, &s("id"), &s("part"), &s("action"))?;
                 Ok((json!({ "value": value.as_str() }), true))
             }
+            // The host's report on a copy, after it tried the clipboard.
+            "record_copy" => {
+                let s = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+                vault::record_copy(&store, &s("id"), &s("part"), body.get("done").and_then(Value::as_bool).unwrap_or(false))?;
+                Ok((json!({}), true))
+            }
             "delete" => {
                 let id = body.get("id").and_then(Value::as_str).unwrap_or("");
                 vault::delete(&store, id)?;

@@ -104,6 +104,22 @@ describe("Reveal and Copy", () => {
         await waitFor(() => expect(part("number").textContent).not.toContain("4111"));
     });
 
+    it("hides a value shown earlier as soon as Windows Hello takes focus for another part", async () => {
+        vaultReveal.mockResolvedValueOnce({ value: "4111111111111111" });
+        open();
+        await screen.findByRole("dialog");
+        fireEvent.click(within(part("number")).getByRole("button", { name: /Reveal/ }));
+        await waitFor(() => expect(part("number").textContent).toContain("4111111111111111"));
+        let answer: (v: unknown) => void = () => {};
+        vaultReveal.mockReturnValueOnce(new Promise((r) => (answer = r)));
+        fireEvent.click(within(part("cvc")).getByRole("button", { name: /Reveal/ }));
+        await waitFor(() => expect(vaultReveal).toHaveBeenCalledTimes(2));
+        window.dispatchEvent(new Event("blur"));
+        expect(part("number").textContent).not.toContain("4111");
+        answer({ value: "123" });
+        await waitFor(() => expect(part("cvc").textContent).toContain("123"));
+    });
+
     it("shows nothing when the dialog was closed while Windows Hello was still open", async () => {
         let answer: (v: unknown) => void = () => {};
         vaultReveal.mockReturnValue(new Promise((r) => (answer = r)));

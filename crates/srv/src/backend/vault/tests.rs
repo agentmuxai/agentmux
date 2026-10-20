@@ -128,12 +128,33 @@ fn a_reveal_returns_the_part_and_logs_the_use_without_the_value() {
     let s = store();
     let id = create(&s, ssn("Alex", "123-45-6789")).unwrap();
     assert_eq!(&*reveal(&s, &id, "value", "revealed").unwrap(), "123-45-6789");
-    assert_eq!(&*reveal(&s, &id, "value", "copied").unwrap(), "123-45-6789");
     let log = activity(&s, 10).unwrap();
-    assert_eq!(log.iter().map(|a| a.action.as_str()).take(2).collect::<Vec<_>>(), ["copied", "revealed"]);
+    assert_eq!(log[0].action, "revealed");
     assert_eq!(log[0].target, "value");
     assert!(!serde_json::to_string(&log).unwrap().contains("6789"));
     assert!(s.vault_get(&id).unwrap().unwrap().last_used_at > 0, "the use is noted on the entry");
+}
+
+// The trail never says copied when nothing was: a copy is logged when the host reports it.
+#[test]
+fn a_copy_is_logged_only_once_the_host_says_the_clipboard_has_it() {
+    let s = store();
+    let id = create(&s, ssn("Alex", "123-45-6789")).unwrap();
+    assert_eq!(&*reveal(&s, &id, "value", "copied").unwrap(), "123-45-6789");
+    assert!(activity(&s, 10).unwrap().iter().all(|a| a.action != "copied"), "fetching isn't copying");
+    assert_eq!(s.vault_get(&id).unwrap().unwrap().last_used_at, 0);
+
+    record_copy(&s, &id, "value", false).unwrap();
+    let log = activity(&s, 10).unwrap();
+    assert_eq!((log[0].action.as_str(), log[0].outcome.as_str()), ("copied", "failed"));
+    assert_eq!(s.vault_get(&id).unwrap().unwrap().last_used_at, 0, "a failed copy isn't a use");
+
+    record_copy(&s, &id, "value", true).unwrap();
+    let log = activity(&s, 10).unwrap();
+    assert_eq!((log[0].action.as_str(), log[0].outcome.as_str()), ("copied", "done"));
+    assert!(s.vault_get(&id).unwrap().unwrap().last_used_at > 0);
+    assert!(!serde_json::to_string(&log).unwrap().contains("6789"));
+    assert!(record_copy(&s, "nope", "value", true).is_err());
 }
 
 #[test]

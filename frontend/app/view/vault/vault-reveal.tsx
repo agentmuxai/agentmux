@@ -48,11 +48,10 @@ export function VaultRevealDialog(props: { entry: VaultEntryInfo; onClose: () =>
     // then finds it changed and shows nothing.
     let closed = 0;
     const hideAll = () => parts.forEach((p) => hide(p.name));
-    // Losing focus hides what is shown. Not while a Reveal or Copy is waiting:
-    // the Windows Hello prompt takes focus from this window, and that is expected.
-    const onBlur = () => {
-        if (busy() === null) hideAll();
-    };
+    // Losing focus hides what is shown, including while a Reveal or Copy waits:
+    // the Windows Hello prompt takes focus from this window, which must not leave
+    // an earlier value on screen. The pending Reveal still shows its own result.
+    const onBlur = hideAll;
     onMount(() => window.addEventListener("blur", onBlur));
     onCleanup(() => {
         window.removeEventListener("blur", onBlur);

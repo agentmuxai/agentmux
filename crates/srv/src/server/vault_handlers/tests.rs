@@ -206,5 +206,12 @@ async fn only_the_host_can_fetch_a_value() {
     let (_, listed) = send(&app, get("/api/v1/vault")).await;
     assert!(!listed.to_string().contains("123-45"));
     let (_, act) = send(&app, post("/api/v1/host/vault", &[HOST], json!({ "op": "activity" }))).await;
+    assert!(!act.to_string().contains("copied"), "fetching for a copy isn't a copy: {act}");
+    let report = json!({ "op": "record_copy", "id": id, "part": "value", "done": true });
+    let (s, _) = send(&app, post("/api/v1/host/vault", &[], report.clone())).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "an agent can't write the audit trail");
+    let (s, _) = send(&app, post("/api/v1/host/vault", &[HOST], report)).await;
+    assert_eq!(s, StatusCode::OK);
+    let (_, act) = send(&app, post("/api/v1/host/vault", &[HOST], json!({ "op": "activity" }))).await;
     assert!(act.to_string().contains("copied") && !act.to_string().contains("123-45"), "{act}");
 }
