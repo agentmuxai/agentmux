@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# build-slot-version: 2
+# build-slot-version: 3
 # build-slot: run one heavy build or test command while holding the host-wide
 # build slot, so only one such command runs on this machine at a time.
-# Spec: docs/specs/SPEC_BUILD_SLOT_ENFORCEMENT_2026_10_20.md. AgentMux installs this file to
-# ~/.agentmux/shared/locks/build-slot.sh at startup when its version is newer than the installed one.
+# Written up in two places: the standard, docs/standards/DEV_HOST_BUILD_SLOT.md in
+# a5af/shared-infrastructure, and AgentMux's spec, docs/specs/SPEC_BUILD_SLOT_ENFORCEMENT_2026_10_20.md
+# in agentmuxai/agentmux. AgentMux installs this file to ~/.agentmux/shared/locks/build-slot.sh
+# at startup when its version is newer than the installed one.
 #
 #   build-slot [--reason "text"] -- <command> [args...]   run <command> when the slot is free
 #   build-slot status                                     show the holder and the queue
@@ -21,6 +23,7 @@ STALE_SECS="${BUILD_SLOT_STALE_SECS:-90}"
 MAX_WAIT="${BUILD_SLOT_MAX_WAIT:-3600}"
 POLL="${BUILD_SLOT_POLL:-3}"
 ME="${AGENTMUX_AGENT_ID:-${USER:-unknown}}"
+PARENT="$PPID"
 
 now() { date +%s; }
 # The "waiting" line goes to the terminal when there is one, even if stdout and stderr are
@@ -118,7 +121,15 @@ while :; do
   if [ "$said" -eq 0 ] || [ $((waited % 60)) -lt "$POLL" ]; then
     wait_note "build-slot: waiting ($ME) — $(status | head -2 | tr '\n' ' ')"; said=1
   fi
-  sleep "$POLL"; waited=$((waited + POLL))
+  # A wait whose parent is gone (the tool or shell that started it was stopped) must not
+  # keep a ticket in the queue: leave. BUILD_SLOT_DETACHED=1 turns this off for a wait
+  # started on purpose with nohup or setsid.
+  if [ -z "${BUILD_SLOT_DETACHED:-}" ] && ! kill -0 "$PARENT" 2>/dev/null; then
+    echo "build-slot: the process that started this wait ($PARENT) is gone; leaving the queue" >&2; exit 129
+  fi
+  # Sleep in the background and wait for it, so a signal is handled at once, not after the sleep.
+  sleep "$POLL" & wait $! 2>/dev/null
+  waited=$((waited + POLL))
 done
 
 { echo "agent=$ME"; echo "pid=$$"; echo "token=$TOKEN"; echo "start=$(now)"; echo "cwd=$PWD"; echo "cmd=$CMDLINE";
