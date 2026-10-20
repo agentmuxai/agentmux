@@ -44,8 +44,8 @@ pub enum CredentialState {
     /// only place that count lives, since transitioning through
     /// `Refreshing` would otherwise lose it before `RefreshFailed` can read
     /// it back out to increment. `prior_reauth` keeps the `NeedsReauth` an
-    /// on-demand check started from, so a refresh that can't reach the server
-    /// puts it back instead of forgetting a refusal while offline. `offline`
+    /// on-demand check started from, so a refusal is put back after any
+    /// refresh that doesn't succeed instead of being forgotten. `offline`
     /// carries `Failed { offline }` through the attempt: still offline until
     /// an answer says otherwise.
     Refreshing {
@@ -287,16 +287,24 @@ pub fn update(
                 }
                 _ => (0, None),
             };
-            if matches!(error, RefreshErrorKind::Unreachable(_)) {
-                let back = match prior_reauth {
-                    Some(prior) => *prior,
-                    None => CredentialState::Failed {
+            let unreachable = matches!(error, RefreshErrorKind::Unreachable(_));
+            // A refusal stands until a refresh succeeds: neither silence nor a
+            // transient answer says the refused credential works.
+            if !permanent {
+                if let Some(prior) = prior_reauth.filter(|p| matches!(**p, CredentialState::NeedsReauth { rejected: true, .. })) {
+                    states.insert(id.clone(), *prior);
+                    return if unreachable { vec![Event::BecameUnreachable { id, error: reason }] } else { Vec::new() };
+                }
+            }
+            if unreachable {
+                states.insert(
+                    id.clone(),
+                    CredentialState::Failed {
                         consecutive_failures: prior_failures,
                         last_error: reason.clone(),
                         offline: true,
                     },
-                };
-                states.insert(id.clone(), back);
+                );
                 return vec![Event::BecameUnreachable { id, error: reason }];
             }
             let consecutive_failures = prior_failures + 1;
@@ -650,6 +658,50 @@ mod tests {
         assert_eq!(events, vec![Event::BecameUnreachable { id: "cred".into(), error: "offline".into() }]);
         assert_eq!(m.get("cred").cloned(), refused);
         assert!(matches!(m.get("cred"), Some(CredentialState::NeedsReauth { rejected: true, .. })));
+    }
+
+    /// A transient answer doesn't say a refused credential works either.
+    #[test]
+    fn a_transient_answer_keeps_a_refusal() {
+        let mut m = registered();
+        let gen = m.generation_of("cred");
+        m.dispatch(Command::CheckRequested { id: "cred".into() });
+        m.dispatch(Command::RefreshFailed {
+            id: "cred".into(),
+            error: RefreshErrorKind::PermanentAuthFailure("invalid_grant".into()),
+            generation: gen,
+        });
+        m.dispatch(Command::CheckRequested { id: "cred".into() });
+        m.dispatch(Command::RefreshFailed {
+            id: "cred".into(),
+            error: RefreshErrorKind::Transient("503".into()),
+            generation: gen,
+        });
+        assert!(matches!(m.get("cred"), Some(CredentialState::NeedsReauth { rejected: true, .. })));
+    }
+
+    /// Answered failures that piled up are no refusal; going offline after
+    /// them is recorded as offline.
+    #[test]
+    fn an_unreachable_refresh_after_piled_up_failures_is_offline() {
+        let mut m = registered();
+        let gen = m.generation_of("cred");
+        for _ in 0..NEEDS_REAUTH_THRESHOLD {
+            m.dispatch(Command::CheckRequested { id: "cred".into() });
+            m.dispatch(Command::RefreshFailed {
+                id: "cred".into(),
+                error: RefreshErrorKind::Transient("503".into()),
+                generation: gen,
+            });
+        }
+        assert!(matches!(m.get("cred"), Some(CredentialState::NeedsReauth { rejected: false, .. })));
+        m.dispatch(Command::CheckRequested { id: "cred".into() });
+        m.dispatch(Command::RefreshFailed {
+            id: "cred".into(),
+            error: RefreshErrorKind::Unreachable("connect".into()),
+            generation: gen,
+        });
+        assert!(matches!(m.get("cred"), Some(CredentialState::Failed { offline: true, .. })));
     }
 
     #[test]
