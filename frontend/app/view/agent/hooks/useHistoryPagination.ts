@@ -323,7 +323,9 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
             // can race to trigger <Index> reconcileArrays from separate
             // frames → replaceChild NotFoundError.
             // (SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md §3.2)
-            batch(() => opts.model.dispatchDoc({ type: "HistoryLoaded", nodes: newNodes }));
+            // The fill's rows are above the screen and collapsed: their results
+            // would unload in the next pass, so they arrive unloaded.
+            batch(() => opts.model.dispatchDoc({ type: "HistoryLoaded", nodes: newNodes, unloadResults: extra?.alignFloor !== undefined }));
         }
         if (!contextSeeded && (parsed.lastContext || Object.keys(parsed.reportedContextWindows).length > 0)) {
             contextSeeded = true;

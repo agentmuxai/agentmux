@@ -1678,6 +1678,23 @@ describe("UnloadToolResults / ResultLoaded (SPEC_AGENT_PANE_TOOL_RESULT_UNLOADIN
         expect(r.events).toEqual([]);
     });
 
+    it("a page loaded with unloadResults arrives with its unloadable results already stubbed", () => {
+        const s = seed([user("u2"), finished("t3", { id: "t3" })]);
+        const page = [user("u0"), finished("t1"), finished("t0", { resultSource: undefined }), user("u1")];
+        const r = update(s, { type: "HistoryLoaded", nodes: page, unloadResults: true });
+        const [t1, t0] = [r.state.nodes[1] as ToolNode, r.state.nodes[2] as ToolNode];
+        expect(t1.result).toBeUndefined();
+        expect(t1.resultUnloaded?.bytes).toBeGreaterThan(20_000);
+        expect(t0.result).toBe(BIG); // no transcript line to read it back from
+        expect((r.state.nodes[5] as ToolNode).result).toBe(BIG); // the rows already there are not this command's
+        expect(r.state.nodeIndexById.get("t1")).toBe(1);
+    });
+
+    it("a page loaded without unloadResults keeps its results (a scroll-up)", () => {
+        const r = update(seed([user("u2")]), { type: "HistoryLoaded", nodes: [user("u0"), finished("t1"), user("u1")] });
+        expect((r.state.nodes[1] as ToolNode).result).toBe(BIG);
+    });
+
     it("ResultLoaded restores the result and clears the stub", () => {
         let s = seed([user("u0"), finished("t1"), user("u1")]);
         s = update(s, { type: "UnloadToolResults", keepIds: new Set() }).state;

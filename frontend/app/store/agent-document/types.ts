@@ -68,8 +68,13 @@ export type AgentDocumentCommand =
     | { type: "SessionStart"; at: number }
     /** Hook signal: subscription torn down (cleanup). */
     | { type: "SessionEnd"; at: number }
-    /** Persisted history (older messages from blockfile) — prepended. */
-    | { type: "HistoryLoaded"; nodes: DocumentNode[] }
+    /**
+     * Persisted history (older messages from blockfile) — prepended.
+     * `unloadResults`: the page's tool results that the next roll-off pass
+     * would unload anyway arrive as stubs, so a background fill doesn't hold
+     * them in memory just to drop them (`planUnload`, with nothing kept).
+     */
+    | { type: "HistoryLoaded"; nodes: DocumentNode[]; unloadResults?: boolean }
     /**
      * Restore from a snapshot file (`output.state.json`). Semantically
      * identical to `HistoryLoaded` (prepend with id-dedup), with one
