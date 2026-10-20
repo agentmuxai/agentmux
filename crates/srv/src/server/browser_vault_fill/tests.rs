@@ -345,7 +345,7 @@ async fn the_host_refusing_the_fill_is_reported_as_failed_and_leaks_nothing() {
 
 // A page's validation message can echo what it was just given; it is cleaned like an error.
 #[tokio::test]
-async fn a_validation_message_that_echoes_the_value_is_cleaned() {
+async fn a_validation_message_that_echoes_the_value_in_any_form_is_not_shown() {
     let s = setup(ssn_field("https://irs.gov")).await;
     let created = s.state.identity_store.vault_get(&s.entry).unwrap().unwrap().created_at;
     s.state.identity_store.vault_grant_add(&s.entry, "https://irs.gov", 1, created).unwrap();
@@ -355,7 +355,7 @@ async fn a_validation_message_that_echoes_the_value_is_cleaned() {
             if route == "field_info" {
                 Json(json!({ "ok": true, "data": ssn_field("https://irs.gov") }))
             } else {
-                Json(json!({ "ok": true, "data": { "filled": true, "validation": "123-45-6789 is not accepted", "changed_by_page": false } }))
+                Json(json!({ "ok": true, "data": { "filled": true, "validation": "123456789 is not accepted", "changed_by_page": false } }))
             }
         }),
     );
@@ -366,7 +366,7 @@ async fn a_validation_message_that_echoes_the_value_is_cleaned() {
     let (status, body) = fill(&s, &s.entry).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(!body.to_string().contains("123-45"), "{body}");
-    assert!(body.to_string().contains("[hidden] is not accepted"), "{body}");
+    assert!(!body.to_string().contains("123456789") && body.to_string().contains("flagged the value as invalid"), "{body}");
 }
 
 // An entry deleted and made again while the person decided has the same id: what they

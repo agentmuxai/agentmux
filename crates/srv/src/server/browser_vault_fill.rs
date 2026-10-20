@@ -211,8 +211,14 @@ pub(crate) async fn handle_vault_fill(
     let (entry, part, created) = (target.id.clone(), target.part, target.created_at);
     let value = match tokio::task::spawn_blocking(move || vault::value_for_fill(&store, &entry, created, part)).await {
         Ok(Ok(v)) => v,
-        Ok(Err(e)) => return err_response(StatusCode::BAD_REQUEST, e),
-        Err(e) => return err_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        Ok(Err(e)) => {
+            record(&state, &block_id, &target, &agent, &site, "failed");
+            return err_response(StatusCode::BAD_REQUEST, e);
+        }
+        Err(e) => {
+            record(&state, &block_id, &target, &agent, &site, "failed");
+            return err_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+        }
     };
     let body = json!({
         "block_id": block_id,
@@ -225,14 +231,10 @@ pub(crate) async fn handle_vault_fill(
     // Whatever the host says, the value isn't in it: an error that quotes it (a
     // parser's, a page's) is cleaned before the agent can see it.
     let filled = filled.map_err(|(code, e)| (code, if value.is_empty() { e } else { e.replace(value.as_str(), "[hidden]") }));
-    // The page's own validation message is page-controlled text too: it can echo
-    // the value it just received, so it is cleaned the same way.
-    let validation = filled
-        .as_ref()
-        .ok()
-        .and_then(|d| d.get("validation").and_then(Value::as_str))
-        .filter(|v| !v.is_empty())
-        .map(|v| if value.is_empty() { v.to_string() } else { v.replace(value.as_str(), "[hidden]") });
+    // The page's own validation message is page-controlled text: it can echo the
+    // value it was given, reformatted (dashes stripped, spaces added) so that no
+    // replacement of the original finds it. The agent is told only that there is one.
+    let invalid = filled.as_ref().ok().and_then(|d| d.get("validation").and_then(Value::as_str)).is_some_and(|v| !v.is_empty());
     drop(value);
     match filled {
         Ok(data) => {
@@ -248,8 +250,8 @@ pub(crate) async fn handle_vault_fill(
                 "field": field.label,
             });
             if let Some(o) = out.as_object_mut() {
-                if let Some(v) = &validation {
-                    o.insert("validation".into(), json!(v));
+                if invalid {
+                    o.insert("validation".into(), json!("the page flagged the value as invalid (its message isn't shown, since a page can put the value in it)"));
                 }
                 if data.get("changed_by_page").and_then(Value::as_bool) == Some(true) {
                     o.insert("note".into(), json!("the page shortened or reformatted the value"));

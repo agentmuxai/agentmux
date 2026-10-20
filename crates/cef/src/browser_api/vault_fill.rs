@@ -245,6 +245,9 @@ async fn fill(state: &Arc<AppState>, root: &mut super::cdp::CdpSession, req: &Fi
     if focused.as_bool() != Some(true) && date.is_none() {
         return Err("the field didn't take the focus (the page moved it), so nothing was typed".to_string());
     }
+    // What the field held before, to tell a widget that ignored the typing from one
+    // that took it (a field that already had text isn't empty after an ignored insert).
+    let before = call_on(cdp, &obj, READ_VALUE, vec![]).await.ok().and_then(|v| v.as_str().map(str::to_string));
     if date.is_some() {
         call_on(cdp, &obj, SET_DATE_VALUE, vec![json!(typed)]).await?;
     } else {
@@ -255,7 +258,9 @@ async fn fill(state: &Arc<AppState>, root: &mut super::cdp::CdpSession, req: &Fi
     // `fill` does for a field that ignores typing.
     if seen.get("same").and_then(Value::as_bool) != Some(true) && date.is_none() {
         let empty = call_on(cdp, &obj, IS_EMPTY, vec![]).await?.as_bool() == Some(true);
-        if empty {
+        let now = call_on(cdp, &obj, READ_VALUE, vec![]).await.ok().and_then(|v| v.as_str().map(str::to_string));
+        let unchanged = before.is_some() && before == now;
+        if empty || unchanged {
             call_on(cdp, &obj, SET_VALUE, vec![json!(typed)]).await?;
             seen = call_on(cdp, &obj, CHECK_RESULT, vec![json!(typed)]).await?;
         }
@@ -266,6 +271,9 @@ async fn fill(state: &Arc<AppState>, root: &mut super::cdp::CdpSession, req: &Fi
         changed_by_page: seen.get("same").and_then(Value::as_bool) != Some(true),
     })
 }
+
+/// The field's text, or null for a rich-text field (which is never set directly).
+const READ_VALUE: &str = r#"function () { return this.isContentEditable ? null : (this.value == null ? "" : String(this.value)); }"#;
 
 const IS_EMPTY: &str = r#"function () { return (this.isContentEditable ? this.textContent : this.value) === ""; }"#;
 
