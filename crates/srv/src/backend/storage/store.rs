@@ -175,7 +175,8 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         run_identity_store_schema(&conn)?;
         conn.execute_batch(super::work_claims::SCHEMA)?;
-        Ok(conn.execute_batch(super::coord_posts::SCHEMA)?)
+        conn.execute_batch(super::coord_posts::SCHEMA)?;
+        Ok(conn.execute_batch(super::work_board::SCHEMA)?)
     }
 
     /// Open the GLOBAL shared store at `path` (`~/.agentmux/shared/store.db`).
@@ -238,6 +239,7 @@ impl Store {
         run_identity_store_schema(&conn)?;
         conn.execute_batch(super::work_claims::SCHEMA)?;
         conn.execute_batch(super::coord_posts::SCHEMA)?;
+        conn.execute_batch(super::work_board::SCHEMA)?;
         stamp_version(&conn, IDENTITY_STORE_SCHEMA_VERSION)?;
         Ok(Self {
             conn: Mutex::new(conn),

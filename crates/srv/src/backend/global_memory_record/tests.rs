@@ -205,3 +205,16 @@ fn a_hashed_scope_is_shown_and_attributed_by_its_real_name() {
     import(&fs, &channel, &offer.list_id, 0).unwrap();
     assert_eq!(channel.bundle_version_list("g-x").unwrap()[0].source_detail, "from channel:my test/channel");
 }
+
+#[test]
+fn a_corrupt_error_of_the_live_store_is_not_damage_to_the_shared_record() {
+    use crate::backend::transcript::damage::{self, test_support};
+    // The same error type comes from the live store and from the record; only the record's marks the record.
+    let from_live = live::<()>(Err(test_support::corrupt_error())).unwrap_err();
+    assert!(!damage::is_corrupt(&from_live), "{from_live:?}");
+    assert!(from_live.to_string().contains("live store"), "{from_live}");
+    assert!(!damage::note_corrupt(damage::GLOBAL_MEMORY_ZONE, "global memory record", &from_live));
+    assert!(!damage::is_damaged(damage::GLOBAL_MEMORY_ZONE));
+    // A live-store call that works is passed through as it was.
+    assert_eq!(live(Ok::<_, StoreError>(5)).unwrap(), 5);
+}

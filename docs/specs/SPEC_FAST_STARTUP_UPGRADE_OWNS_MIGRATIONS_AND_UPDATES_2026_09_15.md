@@ -1,6 +1,6 @@
 # SPEC — Fast startup: the Upgrade button owns migrations and updates, the boot path owns nothing deferrable
 
-**Status:** proposed — not implemented
+**Status:** proposed — phase 1a implemented; revised 2026-10-20 in §10 (migrations run only in the upgrade step)
 **Date:** 2026-09-15
 **Tracking:** [#3258](https://github.com/agentmuxai/agentmux/issues/3258) —
 tracking: startup + splash — get migrations and updates off the boot path
@@ -382,3 +382,47 @@ against these:
   (simplest, matches "an app restart would happen then") or only respawns
   srv and reconnects the frontend (fewer moving parts for the user, more for
   the code).
+
+## 10. Revision 2026-10-20: the upgrade route exists; migrations run only in the upgrade step
+
+Requested by the operator on 2026-10-20: *"can we move migrations completely out of the the startup? leave it only for updates"*, then *"lets fix the bugs and architectural issues"*. The audit behind this revision is `docs/reports/REPORT_STARTUP_ARCHITECTURE_AND_MIGRATIONS_AUDIT_2026_10_20.md`.
+
+### 10.1 What changed since 09-15
+
+- **The in-app upgrade route exists** (`SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md`): update check with an upgrade floor (#5110), download and unpack, restart once agents are idle, and the launcher's confirm → quit host → `quiesce_srv` → relaunch. It runs **no migration step**: the new version still migrates at its own first start. Phase 1a (`upgrade::run_migration_upgrade`) still has no caller.
+- **Carry-forward** (#4996): a new version's first start copies the previous version's per-version databases, then migrates them. It runs inside srv's boot too.
+- **The pending check is fallible** (`try_count_pending_migrations`), half of S1b, but it still opens the stores read-write and runs schema setup.
+
+### 10.2 Design
+
+**One upgrade step.** `agentmux-srv migrate --prepare`, run from the *new* version's binary, does, in order:
+1. Carry-forward, when this version has no data yet.
+2. One backup, with `VACUUM INTO` (`storage::db_copy`): the shared `store.db` and `identity-store.db` always, and `objects.db` only when nothing was carried forward (after a carry-forward, the previous version's folder is the backup).
+3. The pending migrations.
+
+It reports progress on stderr in the `srv_stderr` protocol, so the launcher's native splash shows each step.
+
+**Two callers, the same step:**
+- **The in-app update route:** between `quiesce_srv` and relaunch, the launcher runs the staged version's `migrate --prepare` (phase 1b). A failure stops the relaunch and offers retry or to keep the current version, which is untouched.
+- **Any other way a new version arrives** (installer, manual unzip, channel switch, `task dev`, `task package`): srv's boot gate does a read-only, fail-closed pending check (S1b, S1c). If anything is pending, or the check can't tell, srv exits with a dedicated status **before writing anything**, carry-forward included. The launcher then asks "This version needs to update your data: Update now / Quit", runs the same step with splash progress, and starts srv again.
+
+**srv never migrates at boot.** The in-process run in `bootstrap/stores.rs` is removed. A boot with nothing pending is unchanged: no new spawn, file or network call (the 2026-06-27 rule).
+
+### 10.3 Decisions
+
+These were taken on 2026-10-20 with the defaults the audit recommended; the operator can override them.
+
+- **D1, the shared stores.** Every AgentMux on the computer opens `shared/store.db`, `identity-store.db` and the transcripts store at once. Schema changes and global migrations there must be **additive**, so older builds that share the files keep working: new tables and columns only, no renames or drops until a floor raise retires the old shape. Reviews check for it. With that rule, a `task dev` build prepares like any other version.
+- **D2, the progress screen.** The native splash. Option A (the full-window in-app screen chosen on 2026-09-16) needs srv running, and srv is stopped during the step. The splash already renders migration sub-rows.
+- **§9's relaunch question:** the whole app restarts, as the upgrade route already does.
+
+### 10.4 Phases (replacing §8 from here on)
+
+| Phase | Scope | State |
+|---|---|---|
+| S0 | One stderr protocol (`srv_stderr`), a splash row always running, restart splash fed, `VACUUM INTO` backups | In PRs (2026-10-20) |
+| S1a | `migrate --prepare`: carry-forward inside it, the backup rule, progress lines | Next. No change to boot behaviour |
+| S1b | The update route runs it (phase 1b) | |
+| S1c | srv's read-only, fail-closed boot gate and its exit status; the launcher's prompt, run and relaunch; in-process migrations removed from `stores.rs` | The behaviour change |
+| S2 | Lean boot: open each store once, version-gated schema setup, every-boot repairs to one-time or post-ESTART, the §6 budget test | |
+| S3 | Retire migrations below `UPGRADE_FLOOR` | |

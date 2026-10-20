@@ -69,6 +69,10 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 keyring = "2"
 # Zero plaintext secret buffers on drop.
 zeroize = { version = "1", features = ["zeroize_derive"] }
+# The Vault's `.vault` files are age files encrypted to a passphrase (SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §8.2).
+age = { version = "0.11", default-features = false }
+# The Vault's importers read the CSV files other password managers export (spec section 8.4).
+csv = "1"
 mdns-sd = "0.12"
 # Interface enumeration for LAN listener bind addresses (backend/lan_listeners.rs).
 # Already in the tree transitively via mdns-sd, so declaring it directly adds no

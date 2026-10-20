@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
-import { createMemo, type Accessor } from "solid-js";
+import { createMemo, createSignal, type Accessor } from "solid-js";
 import { readZoom } from "@/app/store/zoom-factor";
 
-export type WardenSection = "host" | "lan" | "internet" | "audit" | "history";
+export type WardenSection = "kanban" | "host" | "lan" | "internet" | "audit" | "history";
 
 // Label text only (not icon), hoisted here so viewName can read it without
 // importing from warden-view.tsx, which would reintroduce the circular
@@ -13,6 +13,7 @@ export type WardenSection = "host" | "lan" | "internet" | "audit" | "history";
 // too, so the two can never drift out of sync, like the section labels in
 // connectors.tsx and memory.tsx.
 export const WARDEN_SECTION_LABELS: Record<WardenSection, string> = {
+    kanban: "Kanban",
     host: "Host",
     lan: "LAN",
     internet: "Internet",
@@ -40,6 +41,10 @@ export class WardenViewModel {
     sectionAtom: Accessor<WardenSection>;
 
     viewName: Accessor<string>;
+    /** How many Kanban tasks need the operator: shown in the title on the Kanban section
+     *  (SPEC_WARDEN_KANBAN_2026_10_20.md §6.1). Set by the section while it is shown. */
+    kanbanNeeds: Accessor<number>;
+    setKanbanNeeds: (n: number) => void;
 
     // A native pane tab (Pane Tab contract Phase 2c): built by `create(ctx)`;
     // its memos live in the instance's own root (host rule 8), so they no
@@ -53,6 +58,13 @@ export class WardenViewModel {
             const s = meta()?.["warden:section"];
             return isWardenSection(s) ? s : "host";
         });
-        this.viewName = createMemo<string>(() => WARDEN_SECTION_LABELS[this.sectionAtom()]);
+        const [kanbanNeeds, setKanbanNeeds] = createSignal(0);
+        this.kanbanNeeds = kanbanNeeds;
+        this.setKanbanNeeds = setKanbanNeeds;
+        this.viewName = createMemo<string>(() => {
+            const section = this.sectionAtom();
+            const n = kanbanNeeds();
+            return section === "kanban" && n > 0 ? `Kanban · ${n} need${n === 1 ? "s" : ""} you` : WARDEN_SECTION_LABELS[section];
+        });
     }
 }

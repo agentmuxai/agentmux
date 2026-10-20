@@ -16,6 +16,10 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "complete", tool: "WorkComplete", rename: &[] },
     Act { action: "release", tool: "WorkRelease", rename: &[] },
     Act { action: "list", tool: "WorkList", rename: &[] },
+    // Kanban (SPEC_WARDEN_KANBAN_2026_10_20.md §6.11).
+    Act { action: "update", tool: "WorkUpdate", rename: &[] },
+    Act { action: "ask", tool: "WorkAsk", rename: &[] },
+    Act { action: "submit", tool: "WorkSubmit", rename: &[] },
 ];
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {

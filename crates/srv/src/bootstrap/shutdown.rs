@@ -12,8 +12,15 @@ use super::*;
 pub fn emit_estart(ws_port: u16, web_port: u16, version: &str, build_time: &str, instance_id: &str) {
     let pending_migrations = migrations::count_pending_migrations(&base::get_mux_data_dir());
     eprintln!(
-        "AGENTMUXSRV-ESTART ws:127.0.0.1:{} web:127.0.0.1:{} version:{} buildtime:{} instance:{} pending_migrations:{}",
-        ws_port, web_port, version, build_time, instance_id, pending_migrations
+        "{}",
+        agentmux_common::srv_stderr::estart_line(&agentmux_common::srv_stderr::Estart {
+            ws_endpoint: format!("127.0.0.1:{ws_port}"),
+            web_endpoint: format!("127.0.0.1:{web_port}"),
+            version: version.to_string(),
+            build_time: build_time.to_string(),
+            instance_id: instance_id.to_string(),
+            pending_migrations,
+        })
     );
 }
 

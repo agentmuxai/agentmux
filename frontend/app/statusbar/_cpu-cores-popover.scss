@@ -96,7 +96,7 @@
 
         .cpu-core-bar {
             @include popoverFrame.readout-bar;
-            background: rgba(127, 127, 127, 0.18);
+            background: var(--tint-4);
             border-radius: 2px;
         }
 

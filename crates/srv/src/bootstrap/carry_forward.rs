@@ -21,6 +21,8 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::backend::storage::db_copy::copy_database;
+
 /// The databases copied, `objects.db` last: its presence is what marks a
 /// version as started, so a copy cut short is tried again on the next start.
 const DATABASES: [&str; 3] = ["filestore.db", "sagas.db", "objects.db"];
@@ -48,29 +50,6 @@ fn previous_db_dir(versions_dir: &Path, current: (u64, u64, u64)) -> Option<Path
         .map(|(_, db)| db)
 }
 
-/// A consistent copy of the SQLite database `src` at `dst`.
-fn copy_database(src: &Path, dst: &Path) -> Result<(), String> {
-    let tmp = dst.with_extension("db.carrying");
-    let _ = std::fs::remove_file(&tmp);
-    let result = (|| {
-        let conn = rusqlite::Connection::open_with_flags(
-            src,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )
-        .map_err(|e| format!("open {}: {e}", src.display()))?;
-        conn.busy_timeout(std::time::Duration::from_secs(5)).map_err(|e| e.to_string())?;
-        let tmp_str = tmp.to_str().ok_or("the data path isn't UTF-8")?;
-        conn.execute("VACUUM INTO ?1", [tmp_str])
-            .map_err(|e| format!("copy {}: {e}", src.display()))?;
-        drop(conn);
-        std::fs::rename(&tmp, dst).map_err(|e| format!("rename into {}: {e}", dst.display()))
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    result
-}
-
 /// On the first start of `version` (no `objects.db` in `db_dir` yet), copy
 /// the databases of the newest older version in the same channel. Returns
 /// the version directory copied from, or `None` when there was nothing to do
@@ -95,8 +74,11 @@ pub(super) fn from_previous_version(db_dir: &Path, version: &str) -> Option<Path
     // A large filestore.db takes a while to copy: the same line migrations
     // print moves the launcher's ESTART deadline from 30 s to 30 minutes.
     eprintln!(
-        "AGENTMUXSRV-MIGRATING copying-previous-version:{}",
-        from.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()
+        "{}",
+        agentmux_common::srv_stderr::migrating_line(
+            "copying-previous-version",
+            from.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()
+        )
     );
     let mut copied = Vec::new();
     for name in DATABASES {
@@ -155,7 +137,7 @@ mod tests {
         let from = from_previous_version(&new, "0.59.27").unwrap();
         assert!(from.ends_with("versions/0.59.26"));
         assert_eq!(marker(&new), "previous");
-        assert!(!new.join("objects.db.carrying").exists());
+        assert!(!new.join("objects.db.copying").exists());
     }
 
     #[test]

@@ -13,6 +13,7 @@ pub mod agent_tokens;
 pub mod agent_lan_keys;
 pub mod agent_uid_keys;
 pub mod agent_wan_keys;
+pub mod db_copy;
 pub mod wan_identity;
 pub mod agent_native_memory;
 pub mod agent_native_memory_versions;
@@ -46,6 +47,7 @@ pub mod vault;
 pub mod viewer_devices;
 pub mod agent_input_history;
 pub mod widget_storage;
+pub mod work_board;
 pub mod work_claims;
 pub mod work_queue;
 

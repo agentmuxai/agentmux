@@ -12,6 +12,9 @@ import { createRoot, createSignal } from "solid-js";
 import { getApi } from "@/app/store/app-api";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
+import type { ImportPreview } from "@/types/rpc/ImportPreview";
+import type { ImportResult } from "@/types/rpc/ImportResult";
+import type { MappingNeeded } from "@/types/rpc/MappingNeeded";
 import type { VaultActivity } from "@/types/rpc/VaultActivity";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 import type { UseRequest } from "@/types/rpc/UseRequest";
@@ -147,6 +150,72 @@ export type UseDecision = "once" | "always" | "deny";
 export const answerUse = (id: string, decision: UseDecision) => call<unknown>("answer_use", { id, decision });
 /** Stops an agent filling an entry on a site without asking. */
 export const revokeGrant = (entryId: string, origin: string) => call<unknown>("revoke_grant", { entry_id: entryId, origin });
+
+/** What the host needs to export: which entries (all when left out) and the
+ *  passphrase; the host asks where to save. `null` if the person closed the dialog. */
+export async function exportVault(args: { ids?: string[]; passphrase: string; defaultName: string }): Promise<{ count: number; file_name: string } | null> {
+    const relay = getApi()?.approvals?.vaultExport;
+    if (!relay) throw new Error("Export needs the AgentMux desktop app.");
+    const res = (await relay({ ids: args.ids, passphrase: args.passphrase, default_name: args.defaultName })) as {
+        cancelled?: boolean;
+        count?: number;
+        file_name?: string;
+    };
+    if (res?.cancelled) return null;
+    return { count: res?.count ?? 0, file_name: res?.file_name ?? "" };
+}
+
+export type Duplicates = "skip" | "replace" | "keep_both";
+
+/** Where an import is: the file needs its passphrase, or is read and described. */
+export type ImportStep =
+    | { kind: "needs_passphrase"; pickId: string; fileName: string }
+    /** A CSV no reader knows: the person says which column is which. */
+    | { kind: "needs_mapping"; pickId: string; fileName: string; columns: string[]; rows: number }
+    | { kind: "preview"; pickId: string; preview: ImportPreview; syncedFolder: string | null };
+
+/** The person's column choices for a CSV no reader knows. */
+export interface CsvMapping {
+    kind: string;
+    label: number;
+    value: number;
+    site?: number;
+    username?: number;
+}
+
+/** Asks the host which file (no `pickId`) or reads the same one again with its
+ *  passphrase. `null` if the person closed the file dialog. */
+export async function pickImport(pickId?: string, passphrase?: string, mapping?: CsvMapping): Promise<ImportStep | null> {
+    const relay = getApi()?.approvals?.vaultImport;
+    if (!relay) throw new Error("Import needs the AgentMux desktop app.");
+    const res = (await relay({ pick_id: pickId, passphrase, mapping })) as {
+        cancelled?: boolean;
+        needs_passphrase?: boolean;
+        needs_mapping?: MappingNeeded;
+        preview?: ImportPreview;
+        synced_folder?: string | null;
+        pick_id: string;
+        file_name: string;
+    };
+    if (res?.cancelled) return null;
+    if (res.needs_passphrase) return { kind: "needs_passphrase", pickId: res.pick_id, fileName: res.file_name };
+    if (res.needs_mapping) return { kind: "needs_mapping", pickId: res.pick_id, fileName: res.file_name, columns: res.needs_mapping.columns, rows: res.needs_mapping.rows };
+    if (!res.preview) throw new Error("AgentMux sent no preview of the file.");
+    return { kind: "preview", pickId: res.pick_id, preview: res.preview, syncedFolder: res.synced_folder ?? null };
+}
+
+/** Deletes the file the person picked, by its id (the host holds the path). Not a
+ *  secure erase: on an SSD an overwrite doesn't reliably reach the old blocks. */
+export async function deleteImportFile(pickId: string): Promise<void> {
+    const relay = getApi()?.approvals?.vaultImportDelete;
+    if (!relay) throw new Error("Deleting needs the AgentMux desktop app.");
+    await relay({ pick_id: pickId });
+}
+
+export const commitImport = (token: string, duplicates: Duplicates) =>
+    call<{ result: ImportResult }>("import_commit", { token, duplicates }).then((r) => r.result);
+export const cancelImport = (token: string) => call<unknown>("import_cancel", { token }).catch(() => {});
+export const suggestPassphrase = () => call<{ passphrase: string }>("suggest_passphrase").then((r) => r.passphrase);
 
 export const createEntry = (entry: NewVaultEntry) => call<{ id: string }>("create", { ...entry });
 export const updateEntry = (change: VaultEntryChange) => call<unknown>("update", { ...change });

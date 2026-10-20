@@ -860,7 +860,7 @@ declare global {
         // block remount and names the pane (section-pane.tsx, warden-model.ts).
         "connectors:section"?: "accounts" | "mcp" | "remotes";
         "memory:section"?: "global" | "personal" | "skills" | "bundles";
-        "warden:section"?: "host" | "lan" | "internet" | "audit" | "history";
+        "warden:section"?: "kanban" | "host" | "lan" | "internet" | "audit" | "history";
         "vault:section"?: "personal" | "cards" | "api-keys" | "logins" | "notes" | "kept" | "activity";
         // An agent's Vault request to open the form for (vault-model.ts); cleared once shown.
         "vault:request"?: string | null;
@@ -997,6 +997,7 @@ declare global {
         "preview:showhiddenfiles"?: boolean;
         "tab:preset"?: string;
         "tab:confirmclose"?: boolean;
+        "mouse:sidebuttons"?: boolean;
         "splash:disabled"?: boolean;
         "app:runinbackground"?: boolean;
         "app:showtray"?: boolean;

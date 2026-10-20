@@ -249,6 +249,9 @@ export const cefApprovals: ApprovalHostApi = {
     vault: (op, args) => invokeCommand("vault_op", { ...args, op }),
     vaultReveal: (args) => invokeCommand("vault_reveal", args),
     vaultCopy: (args) => invokeCommand("vault_copy", args),
+    vaultExport: (args) => invokeCommand("vault_export", args),
+    vaultImport: (args) => invokeCommand("vault_import", args),
+    vaultImportDelete: (args) => invokeCommand("vault_import_delete", args),
     requestMemoryAdoption: async (args) => {
         await invokeCommand("memory_adoption_request", args);
     },

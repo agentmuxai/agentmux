@@ -60,6 +60,13 @@ export const TIPS: TipRow[] = [
         source: { file: "frontend/layout/lib/TileLayout.core.tsx", anchor: "Extra veto for canDrag" },
     },
     {
+        id: "pane:history:sidebutton",
+        area: "Panes",
+        gesture: "sidebutton",
+        label: "Mouse Back / Forward: select the pane you had selected before / after, in any tab, with the caret in it",
+        source: { file: "frontend/app/store/side-button-rules.ts", anchor: "SIDE_BUTTON_BACK" },
+    },
+    {
         id: "pane:numbers",
         area: "Panes",
         gesture: "hold:ctrl+shift",
@@ -432,6 +439,14 @@ export const TIPS: TipRow[] = [
         where: "in a browser pane",
         label: "Address bar / reload / back / forward",
         source: { file: "crates/cef/src/client/handlers.rs", anchor: "Alt+Left — back" },
+    },
+    {
+        id: "browser:sidebutton",
+        area: "Browser",
+        gesture: "ctrl+sidebutton",
+        where: "over a browser pane",
+        label: "Back / forward in that page (a plain side button re-selects panes)",
+        source: { file: "crates/cef/src/browser_pane/hwnd.rs", anchor: "WM_XBUTTONUP" },
     },
 ];
 

@@ -13,6 +13,8 @@ import type { VaultActivity } from "@/types/rpc/VaultActivity";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
 import type { VaultSection } from "@/types/rpc/VaultSection";
 import { VaultEntries } from "./vault-entries";
+import { VaultExportDialog } from "./vault-export";
+import { VaultImportDialog } from "./vault-import";
 import { VaultEntryForm, type VaultFormTarget } from "./vault-entry-form";
 import { formatWhen } from "./vault-format";
 import { SECTION_LABELS, vaultKind, type VaultPaneSection } from "./vault-kinds";
@@ -288,6 +290,12 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
                             </div>
                         </TabbedPane>
                         <Show when={form()}>{(target) => <VaultEntryForm target={target()} onClose={() => setForm(null)} />}</Show>
+                        <Show when={model.transfer() === "export"}>
+                            <VaultExportDialog onClose={() => model.openTransfer(null)} />
+                        </Show>
+                        <Show when={model.transfer() === "import"}>
+                            <VaultImportDialog onClose={() => model.openTransfer(null)} />
+                        </Show>
                     </Show>
                 </div>
             </div>

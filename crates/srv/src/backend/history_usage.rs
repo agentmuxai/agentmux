@@ -34,7 +34,7 @@ impl Roots {
     /// The roots on this machine, or `None` when they can't be resolved.
     pub fn on_this_machine() -> Option<Roots> {
         let shared = crate::registry::resolve_global_shared_root()?;
-        let root = agentmux_common::data_paths::agentmux_root().ok()?;
+        let root = crate::srv_info::agentmux_root()?;
         Some(Roots {
             identities: shared.join("identities"),
             transcripts_db: crate::registry::resolve_shared_transcripts_dir()?.join("filestore.db"),

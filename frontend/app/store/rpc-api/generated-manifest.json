@@ -260,6 +260,10 @@
             "dataType": "{ connname: string; blockid?: string }"
         },
         {
+            "command": "connectivity.status",
+            "method": "ConnectivityStatusCommand"
+        },
+        {
             "command": "containerimagecheck",
             "method": "ContainerImageCheckCommand"
         },
@@ -635,6 +639,24 @@
             "method": "InstallToolCommand"
         },
         {
+            "command": "kanban.act",
+            "method": "KanbanActCommand",
+            "dataType": "import(\"@/app/view/warden-kanban/kanban-types\").KanbanActRequest",
+            "returns": "import(\"@/app/view/warden-kanban/kanban-types\").KanbanActResult"
+        },
+        {
+            "command": "kanban.list",
+            "method": "KanbanListCommand",
+            "dataType": "Record<string, never>",
+            "returns": "import(\"@/app/view/warden-kanban/kanban-types\").KanbanBoard"
+        },
+        {
+            "command": "kanban.task",
+            "method": "KanbanTaskCommand",
+            "dataType": "{ id: string }",
+            "returns": "import(\"@/app/view/warden-kanban/kanban-types\").KanbanTaskDetail"
+        },
+        {
             "command": "linkagentidentity",
             "method": "LinkAgentIdentityCommand"
         },
@@ -921,6 +943,14 @@
         {
             "command": "layout.open",
             "method": "OpenLayoutCommand"
+        },
+        {
+            "command": "layout.otherBuilds",
+            "method": "OtherBuildLayoutsCommand"
+        },
+        {
+            "command": "layout.restoreOtherBuild",
+            "method": "RestoreOtherBuildLayoutCommand"
         },
         {
             "command": "layout.applyIntent",

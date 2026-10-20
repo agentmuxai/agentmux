@@ -645,7 +645,7 @@ fn match_delimiter(chars: &[char], i: usize, word: &str) -> Option<(usize, bool,
 /// has already been through [`sanitize_message`], which dropped invisible
 /// characters and carriage returns; this only replaces delimiters, so it
 /// can't create text a content check didn't see.
-fn neutralize_markers(msg: &str) -> String {
+pub(crate) fn neutralize_markers(msg: &str) -> String {
     let chars: Vec<char> = msg.chars().collect();
     let mut out = String::with_capacity(msg.len());
     let mut i = 0;

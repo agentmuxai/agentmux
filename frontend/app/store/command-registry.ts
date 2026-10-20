@@ -27,6 +27,7 @@ import { redockThisFloater } from "@/app/block/floating-redock";
 import { userInThisWindow } from "@/app/store/input-owner";
 import { openConnectors, openMemory } from "@/app/view/section-pane/panes";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
+import { paneHistoryBack, paneHistoryForward } from "@/app/store/pane-history";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -158,6 +159,16 @@ export function registerDefaultCommands(): void {
         category: "Open",
         icon: "tower-observation",
         execute: () => createBlock({ meta: { view: "tower" } }),
+    });
+    commandRegistry.register({
+        id: "open:kanban",
+        label: "Open Kanban",
+        category: "Open",
+        icon: "table-columns",
+        // Warden's Kanban section (SPEC_WARDEN_KANBAN_2026_10_20.md §6.1): the tab's Warden, or a new one
+        // (what open-warden.ts does; the store layer doesn't import views).
+        execute: () =>
+            openOrFocusPaneByView("warden", { meta: { view: "warden", "warden:section": "kanban" } }, { "warden:section": "kanban" }),
     });
     commandRegistry.register({
         id: "open:vault",
@@ -345,6 +356,20 @@ export function registerDefaultCommands(): void {
                 layoutModel.magnifyNodeToggle(focusedNode.id);
             }
         },
+    });
+    commandRegistry.register({
+        id: "pane:history:back",
+        label: "Back to Previous Pane",
+        category: "Pane",
+        icon: "arrow-left",
+        execute: () => paneHistoryBack(),
+    });
+    commandRegistry.register({
+        id: "pane:history:forward",
+        label: "Forward to Next Pane",
+        category: "Pane",
+        icon: "arrow-right",
+        execute: () => paneHistoryForward(),
     });
     commandRegistry.register({
         id: "pane:focus:right",

@@ -54,6 +54,30 @@ pub struct StageEntry {
     pub subs: Vec<SubEntry>,
 }
 
+/// The `stage` of a row the timeline opens itself when a stage ends and the
+/// next has not begun, so a row is always running between show and dismiss
+/// and the time between stages is measured instead of frozen
+/// (the startup audit in agentmux PR #5218, freeze points F1 and F2).
+pub const GAP_STAGE: &str = "gap";
+
+/// A gap shorter than this is dropped when the next stage begins: it would
+/// only add a row for time nobody waited on.
+pub const GAP_MIN_MS: u64 = 150;
+
+/// What runs after `stage` ends and before the next stage reports, as the
+/// gap row's label. `None` after the last stage: nothing follows it.
+pub fn gap_label_after(stage: &str) -> Option<&'static str> {
+    match stage {
+        "paint" => None,
+        "prep" | "migrations" => Some("Starting the backend"),
+        "backend" => Some("Starting the window"),
+        "host" => Some("Connecting the window"),
+        "dlopen" => Some("Starting the browser engine"),
+        "cef_init" => Some("Loading the interface"),
+        _ => Some("Waiting for the next step"),
+    }
+}
+
 /// Identifies which row a `Begin` event created, so the same-tick deferral
 /// in `apply_tick` can recognize an `End` for a row created in the very same
 /// batch.
@@ -79,6 +103,7 @@ impl StageTimeline {
     fn apply_one(&mut self, ev: StartupEvent) {
         match ev {
             StartupEvent::StageBegin { stage, label } => {
+                self.close_gap(Instant::now());
                 self.stages.push(StageEntry {
                     stage,
                     label,
@@ -88,8 +113,24 @@ impl StageTimeline {
                 });
             }
             StartupEvent::StageEnd { stage, duration_ms, status, detail } => {
-                if let Some(row) = self.stages.iter_mut().rev().find(|r| r.stage == stage) {
-                    row.done = Some((duration_ms, status, detail));
+                if let Some(i) = self.stages.iter().rposition(|r| r.stage == stage) {
+                    let observed = self.stages[i].started_at.elapsed().as_millis() as u64;
+                    self.stages[i].done = Some((duration_ms, status, detail));
+                    // A stage reported after the fact (macOS `dlopen`: begin and
+                    // end sent together once the work is done) ran during the gap
+                    // before it, so its time is taken back out of that gap.
+                    self.shrink_gap_before(i, duration_ms.saturating_sub(observed));
+                }
+                if self.stages.iter().all(|r| r.done.is_some()) {
+                    if let Some(label) = gap_label_after(stage) {
+                        self.stages.push(StageEntry {
+                            stage: GAP_STAGE,
+                            label,
+                            started_at: Instant::now(),
+                            done: None,
+                            subs: Vec::new(),
+                        });
+                    }
                 }
             }
             StartupEvent::SubBegin { stage, id, label } => {
@@ -104,6 +145,38 @@ impl StageTimeline {
                     }
                 }
             }
+        }
+    }
+
+    /// Take `ms` out of the closed gap row just before `self.stages[i]`,
+    /// dropping the gap if what remains is under [`GAP_MIN_MS`].
+    fn shrink_gap_before(&mut self, i: usize, ms: u64) {
+        if ms == 0 || i == 0 {
+            return;
+        }
+        let gap = &mut self.stages[i - 1];
+        let Some((gap_ms, _, _)) = gap.done.as_mut() else { return };
+        if gap.stage != GAP_STAGE {
+            return;
+        }
+        *gap_ms = gap_ms.saturating_sub(ms);
+        if *gap_ms < GAP_MIN_MS {
+            self.stages.remove(i - 1);
+        }
+    }
+
+    /// End an open gap row at `at`: keep it with its duration, or drop it if
+    /// it was shorter than [`GAP_MIN_MS`].
+    fn close_gap(&mut self, at: Instant) {
+        let Some(last) = self.stages.last_mut() else { return };
+        if last.stage != GAP_STAGE || last.done.is_some() {
+            return;
+        }
+        let ms = at.saturating_duration_since(last.started_at).as_millis() as u64;
+        if ms < GAP_MIN_MS {
+            self.stages.pop();
+        } else {
+            last.done = Some((ms, StartupStatus::Ok, None));
         }
     }
 
@@ -198,6 +271,9 @@ impl StageTimeline {
         for ev in deferred {
             self.apply_one(ev);
         }
+        // A gap open at readiness ran until now: it is real time, not an
+        // interrupted step.
+        self.close_gap(at);
         for stage in &mut self.stages {
             if stage.done.is_none() {
                 let ms = at.saturating_duration_since(stage.started_at).as_millis() as u64;
@@ -405,6 +481,94 @@ mod tests {
     }
     fn end(stage: &'static str, ms: u64) -> StartupEvent {
         StartupEvent::StageEnd { stage, duration_ms: ms, status: StartupStatus::Ok, detail: None }
+    }
+
+    /// Backdate the open gap row so the next begin sees it as `ms` long.
+    fn age_gap(tl: &mut StageTimeline, ms: u64) {
+        let gap = tl.stages.last_mut().unwrap();
+        assert_eq!(gap.stage, GAP_STAGE);
+        gap.started_at = gap.started_at.checked_sub(Duration::from_millis(ms)).unwrap();
+    }
+
+    #[test]
+    fn a_stage_ending_with_none_open_opens_a_gap_named_for_what_runs_next() {
+        let mut tl = StageTimeline::new();
+        tl.apply_tick(vec![begin("host")]);
+        tl.apply_tick(vec![end("host", 30)]);
+        let gap = tl.stages.last().unwrap();
+        assert_eq!((gap.stage, gap.label), (GAP_STAGE, "Connecting the window"));
+        assert!(gap.done.is_none(), "the gap row is the one running");
+    }
+
+    #[test]
+    fn the_next_stage_closes_a_long_gap_with_its_duration_and_drops_a_short_one() {
+        let mut tl = StageTimeline::new();
+        tl.apply_tick(vec![begin("host")]);
+        tl.apply_tick(vec![end("host", 30)]);
+        age_gap(&mut tl, 1200);
+        tl.apply_tick(vec![begin("cef_init")]);
+        let stages: Vec<&str> = tl.stages.iter().map(|r| r.stage).collect();
+        assert_eq!(stages, vec!["host", GAP_STAGE, "cef_init"]);
+        assert!(tl.stages[1].done.as_ref().unwrap().0 >= 1200);
+
+        tl.apply_tick(vec![end("cef_init", 80)]);
+        tl.apply_tick(vec![begin("paint")]);
+        let stages: Vec<&str> = tl.stages.iter().map(|r| r.stage).collect();
+        assert_eq!(stages, vec!["host", GAP_STAGE, "cef_init", "paint"], "a gap under GAP_MIN_MS leaves no row");
+    }
+
+    #[test]
+    fn no_gap_follows_the_last_stage_or_a_stage_with_another_still_open() {
+        let mut tl = StageTimeline::new();
+        tl.apply_tick(vec![begin("backend"), begin("host")]);
+        tl.apply_tick(vec![end("backend", 10)]);
+        assert_eq!(tl.stages.len(), 2, "host is still open: no gap");
+        tl.apply_tick(vec![end("host", 10)]);
+        age_gap(&mut tl, 500);
+        tl.apply_tick(vec![begin("paint")]);
+        tl.apply_tick(vec![end("paint", 5)]);
+        assert_eq!(tl.stages.last().unwrap().stage, "paint", "nothing follows paint");
+    }
+
+    #[test]
+    fn a_stage_reported_after_the_fact_is_taken_out_of_the_gap_before_it() {
+        let mut tl = StageTimeline::new();
+        tl.apply_tick(vec![begin("host")]);
+        tl.apply_tick(vec![end("host", 30)]);
+        age_gap(&mut tl, 1000);
+        // dlopen's begin and end arrive together, after 700 ms of loading.
+        tl.apply_tick(vec![begin("dlopen"), end("dlopen", 700)]);
+        tl.apply_tick(vec![]);
+        let gap = tl.stages.iter().find(|r| r.stage == GAP_STAGE).expect("300 ms of the gap remain");
+        let ms = gap.done.as_ref().unwrap().0;
+        assert!((300..400).contains(&ms), "gap keeps only the time dlopen didn't report, got {ms}");
+
+        // When the after-the-fact stage covers the whole gap, the gap goes.
+        let mut tl = StageTimeline::new();
+        tl.apply_tick(vec![begin("host")]);
+        tl.apply_tick(vec![end("host", 30)]);
+        age_gap(&mut tl, 500);
+        tl.apply_tick(vec![begin("dlopen"), end("dlopen", 500)]);
+        tl.apply_tick(vec![]);
+        let stages: Vec<&str> = tl.stages.iter().map(|r| r.stage).collect();
+        // No gap is left before dlopen; the one after it is the open wait for
+        // CEF initialize.
+        assert_eq!(stages, vec!["host", "dlopen", GAP_STAGE]);
+        assert!(tl.stages[2].done.is_none());
+    }
+
+    #[test]
+    fn finalize_keeps_an_open_gap_as_real_time_not_interrupted() {
+        let mut tl = StageTimeline::new();
+        tl.apply_tick(vec![begin("cef_init")]);
+        tl.apply_tick(vec![end("cef_init", 10)]);
+        age_gap(&mut tl, 400);
+        tl.finalize_running(Instant::now());
+        let gap = tl.stages.last().unwrap();
+        assert_eq!(gap.stage, GAP_STAGE);
+        let (ms, status, detail) = gap.done.as_ref().unwrap();
+        assert!(*ms >= 400);
+        assert_eq!((*status, detail.as_deref()), (StartupStatus::Ok, None));
     }
 
     #[test]

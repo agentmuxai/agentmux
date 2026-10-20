@@ -124,6 +124,8 @@ pub const COMMAND_AGENT_SHUTDOWN_KEEP: &str = "agentshutdownkeep";
 pub const COMMAND_AGENT_STOP: &str = "agentstop";
 /// The API retry a pane's CLI is waiting on, as of now (`backend::agent_api_retry`).
 pub const COMMAND_AGENT_API_RETRY: &str = "agentapiretry";
+/// Each service's reachability, as of now (`connectivity`).
+pub const COMMAND_CONNECTIVITY_STATUS: &str = "connectivity.status";
 /// Backend half of the `/btw` slash command — a fast, one-shot, tool-less
 /// side question answered against a fresh throwaway block, without
 /// touching the asking pane's own persisted transcript or blocking/queuing
@@ -417,6 +419,11 @@ pub const COMMAND_AGENT_TRACKED_BLOCKS: &str = "agent.tracked-blocks";
 /// sections below its own tree. Returns `backend::swarm_remote::SwarmOtherInstancesResult`.
 /// docs/specs/SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md
 pub const COMMAND_SWARM_OTHER_INSTANCES: &str = "swarm.other-instances";
+/// The Warden Kanban (docs/specs/SPEC_WARDEN_KANBAN_2026_10_20.md §7.2): the
+/// board, one task with its history, and the operator's moves.
+pub const COMMAND_KANBAN_LIST: &str = "kanban.list";
+pub const COMMAND_KANBAN_TASK: &str = "kanban.task";
+pub const COMMAND_KANBAN_ACT: &str = "kanban.act";
 // Connections (SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md). The
 // names are the ones the frontend's connection UI has always called
 // (rpc-api/workspace.ts); they had no handler until P0.
@@ -624,6 +631,9 @@ pub const COMMAND_BROWSER_PROFILES_DELETE: &str = "browser_profiles.delete";
 pub const COMMAND_LAYOUT_SAVE: &str = "layout.save";
 pub const COMMAND_LAYOUT_PREVIEW: &str = "layout.preview";
 pub const COMMAND_LAYOUT_OPEN: &str = "layout.open";
+/// Layouts other builds saved, and restoring one here (`session_other_builds`).
+pub const COMMAND_LAYOUT_OTHER_BUILDS: &str = "layout.otherBuilds";
+pub const COMMAND_LAYOUT_RESTORE_OTHER_BUILD: &str = "layout.restoreOtherBuild";
 /// Apply one layout edit (split, move, resize, close, ...) to a tab's tree in
 /// the reducer — `Command::LayoutApplyIntent`.
 /// SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md §4.

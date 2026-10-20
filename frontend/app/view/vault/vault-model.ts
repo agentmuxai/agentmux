@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
-import { createMemo, type Accessor } from "solid-js";
+import { createMemo, createSignal, type Accessor } from "solid-js";
 import { readZoom } from "@/app/store/zoom-factor";
 import { isVaultPaneSection, SECTION_LABELS, type VaultPaneSection } from "./vault-kinds";
 
@@ -21,6 +21,9 @@ export class VaultViewModel {
     shown: Accessor<boolean>;
     /** The note on what may ask the person: open until they dismiss it. */
     promptsOpen: Accessor<boolean>;
+    /** The export or import dialog, opened from the header. */
+    transfer: Accessor<"export" | "import" | null>;
+    openTransfer: (which: "export" | "import" | null) => void;
 
     constructor(ctx: PaneTabHostContext) {
         this.blockId = ctx.blockId;
@@ -38,5 +41,8 @@ export class VaultViewModel {
         });
         this.viewName = createMemo<string>(() => SECTION_LABELS[this.sectionAtom()]);
         this.promptsOpen = createMemo<boolean>(() => meta()?.["vault:prompts-read"] !== true);
+        const [transfer, setTransfer] = createSignal<"export" | "import" | null>(null);
+        this.transfer = transfer;
+        this.openTransfer = setTransfer;
     }
 }

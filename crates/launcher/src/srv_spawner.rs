@@ -580,8 +580,8 @@ pub async fn spawn_srv(
         let mut reader = BufReader::new(stderr).lines();
         let mut estart_sent = false;
         while let Ok(Some(line)) = reader.next_line().await {
-            if !estart_sent && line.starts_with("AGENTMUXSRV-ESTART") {
-                let parsed = parse_estart(&line);
+            let estart = if estart_sent { None } else { agentmux_common::srv_stderr::parse_estart_line(&line) };
+            if let Some(parsed) = estart {
                 let result = SrvSpawnResult {
                     pid: pid_for_log,
                     ws_endpoint: parsed.ws_endpoint,
@@ -604,7 +604,7 @@ pub async fn spawn_srv(
             {
                 crate::log(&format!("[srv {} MIGRATION FAILED] {}", pid_for_log, reason));
                 let _ = failure_tx.send(reason).await;
-            } else if line.starts_with("AGENTMUXSRV-MIGRATING") {
+            } else if agentmux_common::srv_stderr::is_migrating_line(&line) {
                 crate::log(&format!("[srv {} migrating] {}", pid_for_log, line));
                 let _ = migration_tx.send(()).await;
             } else if let Some(b) = agentmux_common::srv_stderr::parse_migration_begin_line(&line) {
@@ -625,7 +625,7 @@ pub async fn spawn_srv(
             } else if let Some(req) = agentmux_common::srv_stderr::parse_upgrade_line(&line) {
                 crate::log(&format!("[srv {} upgrade] {}", pid_for_log, line));
                 crate::upgrade_restart::forward(req);
-            } else if line.starts_with("AGENTMUXSRV-EVENT:") {
+            } else if agentmux_common::srv_stderr::parse_event_line(&line).is_some() {
                 crate::log(&format!("[srv {} event] {}", pid_for_log, line));
                 // Phase B.2 will forward these to subscribers.
             } else {
@@ -783,37 +783,6 @@ fn resolve_srv_binary(launcher_exe_dir: &Path) -> Result<PathBuf, SrvSpawnError>
             .collect::<Vec<_>>()
             .join("\n  ")
     )))
-}
-
-/// Parsed fields out of a `AGENTMUXSRV-ESTART` line. Same shape as the
-/// host's `parse_estart` in sidecar.rs, minus `version`.
-struct EstartFields {
-    ws_endpoint: String,
-    web_endpoint: String,
-    instance_id: String,
-    pending_migrations: usize,
-}
-
-fn parse_estart(line: &str) -> EstartFields {
-    let parts: Vec<&str> = line.split_whitespace().collect();
-    let get = |prefix: &str| -> String {
-        parts
-            .iter()
-            .find_map(|p| p.strip_prefix(prefix))
-            .unwrap_or_default()
-            .to_string()
-    };
-    let pending_migrations = parts
-        .iter()
-        .find_map(|p| p.strip_prefix("pending_migrations:"))
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(0);
-    EstartFields {
-        ws_endpoint: get("ws:"),
-        web_endpoint: get("web:"),
-        instance_id: get("instance:"),
-        pending_migrations,
-    }
 }
 
 /// Assign a process to the launcher's Job Object J0. Used by

@@ -1,0 +1,176 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! Readers for the files other password managers export
+//! (docs/specs/SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §8.4).
+//!
+//! Each reader turns a file's bytes into [`Incoming`] entries (the same shape a
+//! `.vault` file holds) and says what it couldn't bring in and why. They're
+//! attack surface (§8.7): they run on files a person was given, so each caps
+//! what it reads and takes no value as trusted. Nothing here touches the Vault:
+//! `transfer::inspect` stages what they return, and the person previews it.
+//!
+//! Everything here is a plaintext export (the encrypted sources, KeePass and
+//! password-protected exports, come with their own passwords); `Imported`
+//! says so, and the pane then offers to delete the file.
+
+mod bitwarden;
+mod env;
+mod logins;
+
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
+
+/// Where an import came from, for the preview.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub enum Source {
+    Vault,
+    LastPass,
+    OnePassword,
+    Bitwarden,
+    Chrome,
+    Firefox,
+    Safari,
+    Env,
+    Csv,
+}
+
+impl Source {
+    pub fn label(self) -> &'static str {
+        match self {
+            Source::Vault => "an AgentMux Vault file",
+            Source::LastPass => "LastPass",
+            Source::OnePassword => "1Password",
+            Source::Bitwarden => "Bitwarden",
+            Source::Chrome => "a browser's password export (Chrome, Edge, Brave)",
+            Source::Firefox => "Firefox",
+            Source::Safari => "Safari or Apple Passwords",
+            Source::Env => "a .env file",
+            Source::Csv => "a CSV file",
+        }
+    }
+}
+
+/// An entry as a file holds it, before it is checked against its kind.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct Incoming {
+    #[serde(default)]
+    pub id: String,
+    pub kind: String,
+    pub label: String,
+    #[serde(default)]
+    pub fields: BTreeMap<String, String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub parts: BTreeMap<String, String>,
+    #[serde(default)]
+    pub created_at: i64,
+    #[serde(default)]
+    pub updated_at: i64,
+}
+
+impl Incoming {
+    pub fn new(kind: &str, label: &str) -> Self {
+        Self { kind: kind.into(), label: label.trim().into(), ..Self::default() }
+    }
+
+    pub fn part(mut self, name: &str, value: &str) -> Self {
+        self.parts.insert(name.into(), value.to_string());
+        self
+    }
+
+    pub fn field(mut self, name: &str, value: &str) -> Self {
+        let v = value.trim();
+        if !v.is_empty() {
+            self.fields.insert(name.into(), v.to_string());
+        }
+        self
+    }
+
+    pub fn tag(mut self, tag: &str) -> Self {
+        let t = tag.trim();
+        if !t.is_empty() && !self.tags.iter().any(|x| x == t) {
+            self.tags.push(t.to_string());
+        }
+        self
+    }
+}
+
+/// What a reader found.
+pub struct Imported {
+    pub source: Source,
+    pub entries: Vec<Incoming>,
+    /// (label, why) for what couldn't come in.
+    pub skipped: Vec<(String, String)>,
+}
+
+/// Which column of a CSV is what, chosen by the person for a file no reader knows.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Mapping {
+    /// The kind of entry every row becomes: `login`, `api-key`, `note`, ….
+    pub kind: String,
+    pub label: usize,
+    /// The main value: a login's password, a key, a note's text.
+    pub value: usize,
+    #[serde(default)]
+    pub site: Option<usize>,
+    #[serde(default)]
+    pub username: Option<usize>,
+}
+
+/// A CSV no reader recognised: its columns, for the person to say which is which.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct MappingNeeded {
+    pub columns: Vec<String>,
+    pub rows: usize,
+}
+
+pub enum ReadError {
+    NeedsMapping(MappingNeeded),
+    Other(String),
+}
+
+impl From<String> for ReadError {
+    fn from(s: String) -> Self {
+        ReadError::Other(s)
+    }
+}
+
+impl From<&str> for ReadError {
+    fn from(s: &str) -> Self {
+        ReadError::Other(s.to_string())
+    }
+}
+
+/// The most rows or items one file may hold (§8.7).
+pub const MAX_ITEMS: usize = 100_000;
+
+const KDBX_MAGIC: [u8; 4] = [0x03, 0xD9, 0xA2, 0x9A];
+
+/// Reads a plaintext export, finding out what it is from its contents.
+pub fn read(bytes: &[u8], file_name: &str, mapping: Option<&Mapping>) -> Result<Imported, ReadError> {
+    if bytes.starts_with(&KDBX_MAGIC) {
+        return Err("this is a KeePass database, which AgentMux can't import yet".into());
+    }
+    if bytes.starts_with(b"PK\x03\x04") {
+        return Err("this is a zip file (a 1Password .1pux or Proton Pass export), which AgentMux can't import yet; export a CSV or JSON from that app instead".into());
+    }
+    let text = std::str::from_utf8(bytes).map_err(|_| "this isn't a text file AgentMux knows how to read: its export formats are CSV, JSON and .env".to_string())?;
+    let text = text.trim_start_matches('\u{feff}');
+    let trimmed = text.trim_start();
+    if trimmed.starts_with('{') {
+        return bitwarden::read(text);
+    }
+    if file_name.to_ascii_lowercase().ends_with(".env") || env::looks_like_env(text) {
+        return env::read(text);
+    }
+    logins::read(text, mapping)
+}
+
+#[cfg(test)]
+mod tests;

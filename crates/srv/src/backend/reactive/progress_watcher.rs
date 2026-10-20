@@ -798,6 +798,7 @@ pub async fn run_agent_progress_loop(filestore: Arc<FileStore>, mstore: Arc<Stor
         states = returned_states;
         // Hands off and returns at once: the check runs on its own task.
         crate::backend::work_facts::overlap_notes::on_new_edits(edits);
+        crate::backend::kanban::on_new_prs(&prs);
         crate::backend::work_facts::overlap_notes::on_new_prs(prs);
         *snapshot().write() = states
             .iter()

@@ -168,6 +168,7 @@ import type { CommandNativeMemoryReadFileData } from "@/types/rpc/CommandNativeM
 import type { CommandNativeMemoryRevertData } from "@/types/rpc/CommandNativeMemoryRevertData";
 import type { CommandNativeMemoryWriteFileData } from "@/types/rpc/CommandNativeMemoryWriteFileData";
 import type { CommandNextPromptSuggestionData } from "@/types/rpc/CommandNextPromptSuggestionData";
+import type { CommandOtherBuildLayoutsData } from "@/types/rpc/CommandOtherBuildLayoutsData";
 import type { CommandPaneMoveTabData } from "@/types/rpc/CommandPaneMoveTabData";
 import type { CommandPaneOpenData } from "@/types/rpc/CommandPaneOpenData";
 import type { CommandPaneTabData } from "@/types/rpc/CommandPaneTabData";
@@ -183,6 +184,7 @@ import type { CommandRemoteTestData } from "@/types/rpc/CommandRemoteTestData";
 import type { CommandRenameAgentDefinitionTitleData } from "@/types/rpc/CommandRenameAgentDefinitionTitleData";
 import type { CommandReorderGlobalBundlesData } from "@/types/rpc/CommandReorderGlobalBundlesData";
 import type { CommandResolveCliData } from "@/types/rpc/CommandResolveCliData";
+import type { CommandRestoreOtherBuildLayoutData } from "@/types/rpc/CommandRestoreOtherBuildLayoutData";
 import type { CommandRunCliLoginData } from "@/types/rpc/CommandRunCliLoginData";
 import type { CommandSearchAgentHistoryData } from "@/types/rpc/CommandSearchAgentHistoryData";
 import type { CommandSessionArchiveData } from "@/types/rpc/CommandSessionArchiveData";
@@ -212,6 +214,7 @@ import type { CommandVoiceCheckPathData } from "@/types/rpc/CommandVoiceCheckPat
 import type { CommandWriteAgentConfigData } from "@/types/rpc/CommandWriteAgentConfigData";
 import type { CommandWriteAgentConfigResult } from "@/types/rpc/CommandWriteAgentConfigResult";
 import type { CommandWriteEditorFileData } from "@/types/rpc/CommandWriteEditorFileData";
+import type { ConnectivityStatus } from "@/types/rpc/ConnectivityStatus";
 import type { ContainerImageCheckResult } from "@/types/rpc/ContainerImageCheckResult";
 import type { ContainerRuntimeAvailableResult } from "@/types/rpc/ContainerRuntimeAvailableResult";
 import type { CopyForkHistoryResult } from "@/types/rpc/CopyForkHistoryResult";
@@ -355,6 +358,7 @@ import type { NotifyTakeActivationParams } from "@/types/rpc/NotifyTakeActivatio
 import type { NotifyTakeActivationResult } from "@/types/rpc/NotifyTakeActivationResult";
 import type { OAuthSessionReq } from "@/types/rpc/OAuthSessionReq";
 import type { OpenInShellReq } from "@/types/rpc/OpenInShellReq";
+import type { OtherBuildLayoutsResult } from "@/types/rpc/OtherBuildLayoutsResult";
 import type { PaneOpenResult } from "@/types/rpc/PaneOpenResult";
 import type { PaneTabEditResult } from "@/types/rpc/PaneTabEditResult";
 import type { PollProviderAuthReq } from "@/types/rpc/PollProviderAuthReq";
@@ -377,6 +381,7 @@ import type { ResolveCliResult } from "@/types/rpc/ResolveCliResult";
 import type { ResolveInstallCommandResult } from "@/types/rpc/ResolveInstallCommandResult";
 import type { ResolvePrereqsReq } from "@/types/rpc/ResolvePrereqsReq";
 import type { ResolvePrereqsResult } from "@/types/rpc/ResolvePrereqsResult";
+import type { RestoreOtherBuildLayoutResult } from "@/types/rpc/RestoreOtherBuildLayoutResult";
 import type { RunCliLoginResult } from "@/types/rpc/RunCliLoginResult";
 import type { RunDroneReq } from "@/types/rpc/RunDroneReq";
 import type { RunDroneResp } from "@/types/rpc/RunDroneResp";
@@ -831,6 +836,10 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<Array<HostSession>> {
     return client.rpcCall("connsessions", data, opts);
+  },
+  // command "connectivity.status"
+  ConnectivityStatusCommand(client: RpcClient, opts?: RpcOpts): Promise<ConnectivityStatus> {
+    return client.rpcCall("connectivity.status", {}, opts);
   },
   // command "containerimagecheck"
   ContainerImageCheckCommand(
@@ -1352,6 +1361,30 @@ export const GeneratedApi = {
   InstallToolCommand(client: RpcClient, data: CommandInstallToolData, opts?: RpcOpts): Promise<InstallToolResult> {
     return client.rpcCall("installtool", data, opts);
   },
+  // command "kanban.act"
+  KanbanActCommand(
+    client: RpcClient,
+    data: import("@/app/view/warden-kanban/kanban-types").KanbanActRequest,
+    opts?: RpcOpts
+  ): Promise<import("@/app/view/warden-kanban/kanban-types").KanbanActResult> {
+    return client.rpcCall("kanban.act", data, opts);
+  },
+  // command "kanban.list"
+  KanbanListCommand(
+    client: RpcClient,
+    data: Record<string, never>,
+    opts?: RpcOpts
+  ): Promise<import("@/app/view/warden-kanban/kanban-types").KanbanBoard> {
+    return client.rpcCall("kanban.list", data, opts);
+  },
+  // command "kanban.task"
+  KanbanTaskCommand(
+    client: RpcClient,
+    data: { id: string },
+    opts?: RpcOpts
+  ): Promise<import("@/app/view/warden-kanban/kanban-types").KanbanTaskDetail> {
+    return client.rpcCall("kanban.task", data, opts);
+  },
   // command "linkagentidentity"
   LinkAgentIdentityCommand(client: RpcClient, data: CommandLinkAgentIdentityData, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("linkagentidentity", data, opts);
@@ -1717,6 +1750,22 @@ export const GeneratedApi = {
   // command "layout.open"
   OpenLayoutCommand(client: RpcClient, data: CommandLayoutOpenData, opts?: RpcOpts): Promise<LayoutOpenResult> {
     return client.rpcCall("layout.open", data, opts);
+  },
+  // command "layout.otherBuilds"
+  OtherBuildLayoutsCommand(
+    client: RpcClient,
+    data: CommandOtherBuildLayoutsData,
+    opts?: RpcOpts
+  ): Promise<OtherBuildLayoutsResult> {
+    return client.rpcCall("layout.otherBuilds", data, opts);
+  },
+  // command "layout.restoreOtherBuild"
+  RestoreOtherBuildLayoutCommand(
+    client: RpcClient,
+    data: CommandRestoreOtherBuildLayoutData,
+    opts?: RpcOpts
+  ): Promise<RestoreOtherBuildLayoutResult> {
+    return client.rpcCall("layout.restoreOtherBuild", data, opts);
   },
   // command "layout.applyIntent"
   LayoutApplyIntentCommand(

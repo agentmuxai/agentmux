@@ -9,11 +9,14 @@
 //! ones. Everything here is blocking (the store, the keychain): call it off
 //! the async runtime.
 
+pub mod import;
 pub mod kinds;
 pub mod requests;
 pub mod seal;
 pub mod slots;
+pub mod transfer;
 pub mod uses;
+mod wordlist;
 
 use std::collections::BTreeMap;
 
@@ -403,3 +406,5 @@ pub fn activity(store: &Store, limit: i64) -> Result<Vec<VaultActivity>, String>
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod transfer_tests;

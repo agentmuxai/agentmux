@@ -43,6 +43,7 @@ mod websocket;
 mod drone_handlers;
 mod cron;
 pub(crate) mod work_queue;
+mod work_tasks;
 mod messaging_handlers;
 mod muxbus_handlers;
 mod muxspect_handlers;

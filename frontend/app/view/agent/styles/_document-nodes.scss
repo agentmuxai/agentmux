@@ -504,7 +504,7 @@ $transcript-preview-max-height: calc(50vh / 3);
                 margin-left: 8px;
                 padding: 0 6px;
                 color: var(--accent-color);
-                background: rgba(43, 212, 168, 0.08);
+                background: var(--accent-bg-subtle);
                 border-radius: 0;
                 font-family: var(--font-mono);
                 font-size: var(--text-xs);
