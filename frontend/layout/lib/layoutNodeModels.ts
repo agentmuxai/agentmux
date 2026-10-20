@@ -166,7 +166,12 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
                 onClose: () => {
                     fireAndForget(() => model.closeNode(nodeid));
                 },
-                toggleMagnify: () => model.magnifyNodeToggle(nodeid),
+                // While maximized the header's button reads "Restore": back to the pane's tile, expanded,
+                // even for a chip that was maximized (its Minimize, below, keeps it a chip).
+                toggleMagnify: () =>
+                    model.localTreeStateAtom().magnifiedNodeId === nodeid
+                        ? model.restoreMaximizedNode(nodeid)
+                        : model.magnifyNodeToggle(nodeid),
                 // While maximized the header's button reads "Minimize" even for a chip that was
                 // maximized, so it must not restore it; every other caller toggles.
                 toggleMinimize: () =>
