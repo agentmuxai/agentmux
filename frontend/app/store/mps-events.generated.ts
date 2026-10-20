@@ -32,6 +32,7 @@ import type { DispatchUpdatedEvent } from "@/types/rpc/DispatchUpdatedEvent";
 import type { DockClearEvent } from "@/types/rpc/DockClearEvent";
 import type { FilesChangedEvent } from "@/types/rpc/FilesChangedEvent";
 import type { FsOpEvent } from "@/types/rpc/FsOpEvent";
+import type { IncidentEvent } from "@/types/rpc/IncidentEvent";
 import type { InputHistoryChangedEvent } from "@/types/rpc/InputHistoryChangedEvent";
 import type { InstallChunkEvent } from "@/types/rpc/InstallChunkEvent";
 import type { InstallProgressEvent } from "@/types/rpc/InstallProgressEvent";
@@ -133,6 +134,7 @@ export type MuxEventPayloads = {
   "files:op": FsOpEvent;
   "identity:no-direct-links": NoDirectLinksEvent;
   "identityaccounts:changed": null;
+  "incident:recorded": IncidentEvent;
   install_chunk: InstallChunkEvent;
   install_progress: InstallProgressEvent;
   laninstances: LanInstanceList;
@@ -236,6 +238,7 @@ export const TYPED_MUX_EVENTS = [
   "files:op",
   "identity:no-direct-links",
   "identityaccounts:changed",
+  "incident:recorded",
   "install_chunk",
   "install_progress",
   "laninstances",

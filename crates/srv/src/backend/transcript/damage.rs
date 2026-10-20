@@ -24,6 +24,17 @@ use std::sync::Mutex;
 
 use crate::backend::storage::error::StoreError;
 
+/// The broker event that shows a recorded incident in every open window now; the window shows
+/// what is in `incidents.jsonl` again when it starts.
+pub const EVENT_INCIDENT_RECORDED: &str = "incident:recorded";
+
+static BROKER: std::sync::OnceLock<std::sync::Arc<crate::backend::mps::Broker>> = std::sync::OnceLock::new();
+
+/// Attach the broker (bootstrap), so an incident reaches the open windows when it is recorded.
+pub fn install_broker(broker: std::sync::Arc<crate::backend::mps::Broker>) {
+    let _ = BROKER.set(broker);
+}
+
 /// The `kind` of the incident (`agentmux_common::incidents::Incident::kind`).
 pub const INCIDENT_KIND: &str = "transcript_damaged";
 
@@ -151,23 +162,41 @@ pub fn agent_note() -> String {
 
 /// Writes the incident to `incidents.jsonl` in `dir` unless an unacknowledged one
 /// for the same agent is already there (a restart finds the same damage again).
-pub fn write_incident(dir: &Path, zone: &str, op: &str) {
+pub fn write_incident(dir: &Path, zone: &str, op: &str) -> Option<agentmux_common::incidents::Incident> {
     let path = dir.join(agentmux_common::incidents::FILE_NAME);
     let incident = incident_for(zone, op);
     let seen = agentmux_common::incidents::read(&path, 200)
         .iter()
         .any(|i| i.kind == INCIDENT_KIND && i.acknowledged_at_ms.is_none() && i.evidence.as_deref().is_some_and(|e| e.ends_with(&zone_tag(zone))));
     if seen {
-        return;
+        return None;
     }
     if let Err(e) = agentmux_common::incidents::append(&path, &incident) {
         tracing::warn!(error = %e, zone = %zone, "shared transcript store: couldn't record the damage as an incident");
+        return None;
     }
+    Some(incident)
+}
+
+/// Shows `incident` in every open window now. One not published here (already open from an
+/// earlier start, or no window yet) is shown from the file when a window starts.
+fn publish(incident: &agentmux_common::incidents::Incident) {
+    if let Some(broker) = BROKER.get() {
+        publish_to(broker, incident);
+    }
+}
+
+fn publish_to(broker: &crate::backend::mps::Broker, incident: &agentmux_common::incidents::Incident) {
+    broker.publish_event::<crate::backend::mps_events::IncidentRecorded>(&incident.into(), vec![], 0);
 }
 
 fn announce(zone: &str, op: &str) {
     match std::env::var_os("AGENTMUX_DATA_DIR").filter(|d| !d.is_empty()) {
-        Some(dir) => write_incident(Path::new(&dir), zone, op),
+        Some(dir) => {
+            if let Some(incident) = write_incident(Path::new(&dir), zone, op) {
+                publish(&incident);
+            }
+        }
         None => tracing::warn!(zone = %zone, "shared transcript store: no data folder to record the damage in"),
     }
     let Some(id) = agent_of(zone).map(str::to_string) else { return };
@@ -378,5 +407,34 @@ mod tests {
         test_support::corrupt(&own);
         assert_eq!(crate::backend::blockcontroller::shell::extend_output_idx(&own, zone), None);
         assert!(!is_damaged(zone));
+    }
+
+    #[test]
+    fn a_recorded_incident_goes_to_the_open_windows_as_a_typed_event() {
+        use crate::backend::mps::{Broker, MuxEvent};
+        let broker = Broker::new();
+        let seen = std::sync::Arc::new(Mutex::new(Vec::<MuxEvent>::new()));
+        let s2 = seen.clone();
+        broker.add_observer(std::sync::Arc::new(move |e: &MuxEvent| s2.lock().unwrap().push(e.clone())));
+        let incident = incident_for("agent:live-toast-1:current", "append");
+        publish_to(&broker, &incident);
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].event, EVENT_INCIDENT_RECORDED);
+        assert!(seen[0].scopes.is_empty(), "to every window, not one pane's");
+        let data = seen[0].data.clone().unwrap();
+        assert_eq!(data["id"], incident.id);
+        assert_eq!(data["kind"], INCIDENT_KIND);
+        assert_eq!(data["what"], incident.what);
+        assert_eq!(data["did"].as_array().unwrap().len(), incident.did.len());
+        assert!(data.get("acknowledged_at_ms").is_none(), "{data}");
+    }
+
+    #[test]
+    fn only_an_incident_that_was_written_is_published() {
+        let dir = tempfile::tempdir().unwrap();
+        let zone = "agent:live-toast-2:current";
+        assert!(write_incident(dir.path(), zone, "append").is_some());
+        assert!(write_incident(dir.path(), zone, "tail read").is_none(), "already open: shown from the file, not again");
     }
 }
