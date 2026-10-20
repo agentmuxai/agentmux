@@ -202,10 +202,12 @@ export const MaintenanceSection = (): JSX.Element => {
         upgradeAndRestart(now).catch((e) => setStartError(String(e?.message ?? e)));
     };
 
-    // Older than the release upgrades from: its floor version first, from its page.
-    const installFirst = () => (release() ? appUpdate()?.install_first : undefined);
     // A Microsoft Store install is updated by the Store, not by AgentMux.
     const viaStore = () => appUpdate()?.install === "windows-store";
+    // Older than the release upgrades from: its floor version first, from its
+    // page. Not for a Store install: the Store installs the version it has, and
+    // a standalone build from the page would sit beside it.
+    const installFirst = () => (release() && !viaStore() ? appUpdate()?.install_first : undefined);
     const handleInstallUpdate = () => {
         const r = release();
         const first = installFirst();
@@ -393,7 +395,7 @@ export const MaintenanceSection = (): JSX.Element => {
             <Show when={download()?.state === "ready" && download()?.error}>
                 <div class="maintenance-row-text maintenance-row-text--error">{download()!.error}</div>
             </Show>
-            <Show when={updaterStatus() === "available" && viaStore() && !installFirst()}>
+            <Show when={updaterStatus() === "available" && viaStore()}>
                 <div class="maintenance-row-text maintenance-row-text--dim">
                     {`The Microsoft Store updates this install. It gets each release after GitHub does, so v${updaterVersion()} may not be there yet.`}
                 </div>
