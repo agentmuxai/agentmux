@@ -1,5 +1,6 @@
 # REPORT: the Toolchain pane and the app's look
 
+**Status:** active. Tier A (section 4) is in PR #5198; the shared `Pill`, the Card/StatusDot rebuild (Tier B) and the colour-literal check are not started.
 **Date:** 2026-10-19
 **Author:** Agent1@narko
 **Verified against:** `agentmuxai/agentmux` `main` @ `7269860e5` (v0.59.35), by reading code and git history. The findings were first made from the code alone. **Addendum 2026-10-20, with Tier A:** the pane's real stylesheet was then rendered statically (its markup, the real theme and kit stylesheets, headless Chrome) on `default`, `midnight`, `light` and `solarized-light`, before and after, which confirmed the surface mismatch (3.1) and the pill problems (3.2); the contrast risks in 3.3 were measured from the theme files (section 4, Tier A, item 2). The full app was not run.
