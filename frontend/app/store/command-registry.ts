@@ -26,7 +26,6 @@ import { openNewWindowFromHere } from "@/app/store/window-appearance";
 import { redockThisFloater } from "@/app/block/floating-redock";
 import { userInThisWindow } from "@/app/store/input-owner";
 import { openConnectors, openMemory } from "@/app/view/section-pane/panes";
-import { openWarden } from "@/app/view/warden/open-warden";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
 
 // ---------------------------------------------------------------------------
@@ -165,8 +164,10 @@ export function registerDefaultCommands(): void {
         label: "Open Kanban",
         category: "Open",
         icon: "table-columns",
-        // Warden's Kanban section (SPEC_WARDEN_KANBAN_2026_10_20.md §6.1): the tab's Warden, or a new one.
-        execute: () => openWarden("kanban"),
+        // Warden's Kanban section (SPEC_WARDEN_KANBAN_2026_10_20.md §6.1): the tab's Warden, or a new one
+        // (what open-warden.ts does; the store layer doesn't import views).
+        execute: () =>
+            openOrFocusPaneByView("warden", { meta: { view: "warden", "warden:section": "kanban" } }, { "warden:section": "kanban" }),
     });
     commandRegistry.register({
         id: "open:vault",
