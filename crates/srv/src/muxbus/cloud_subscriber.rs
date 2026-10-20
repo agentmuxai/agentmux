@@ -40,6 +40,7 @@ use crate::broker::RefreshErrorKind;
 use crate::muxbus::delivery_status;
 
 mod delivery;
+pub(crate) mod live_names;
 use delivery::{claim_and_deliver, PendingResp};
 
 // The relay's WebSocket endpoint has its own domain, and the handshake is at
@@ -660,7 +661,9 @@ async fn connect_and_run(
     delivery_status::set_link(delivery_status::Link::Connected);
     let (mut write, mut read) = ws_stream.split();
 
-    // Initial subscription for all currently-registered agents
+    // Initial subscription: every registered agent, under every name it answers to.
+    let handler = get_global_handler();
+    live_names::seed(&agents, &live_names::live_agents(handler), &*live_names::directory().await);
     let initial_agents: Vec<String> = agents.lock().unwrap().iter().cloned().collect();
     let sub_msg = serde_json::to_string(&ClientMsg::Subscribe { agents: initial_agents })
         .map_err(|e| format!("serialize subscribe: {e}"))?;
@@ -690,6 +693,10 @@ async fn connect_and_run(
 
     loop {
         tokio::select! {
+            _ = live_names::registrations_changed() => {
+                live_names::subscribe_live(handler).await;
+            }
+
             // Keepalive — see CLIENT_PING_INTERVAL_SECS. Proactive credential
             // freshness is no longer piggybacked on this tick: the broker's
             // own background sweep (registered once in `run_loop`, see
@@ -698,18 +705,18 @@ async fn connect_and_run(
             // open, so a long-lived session no longer needs to special-case
             // its own credential check here.
             _ = lease_interval.tick() => {
+                let (live, dir) = live_names::subscribe_live(handler).await;
                 let mut registered: Vec<String> = agents.lock().unwrap().iter().cloned().collect();
                 // Never renew a lease for an agent no live block holds: drop
                 // the leaked subscription instead. A drop goes through the
                 // RemoveAgent arm below, which unsubscribes and releases the
                 // lease; `drop_if_orphaned` re-checks liveness so a respawn
                 // registering meanwhile keeps its subscription.
-                let handler = get_global_handler();
-                let orphans = orphaned_subscriptions(&registered, |a| handler.has_live_name(a));
+                let orphans = live_names::orphaned_subscriptions(&registered, &live, &dir);
                 if !orphans.is_empty() {
                     if let Some(sub) = get_global_subscriber() {
                         for agent_id in &orphans {
-                            if sub.drop_if_orphaned(agent_id, |a| handler.has_live_name(a)) {
+                            if sub.drop_if_orphaned(agent_id, |a| handler.has_live_name(a) || live_names::is_held(a, &live, &dir)) {
                                 tracing::warn!(
                                     agent = %agent_id,
                                     "cloud_subscriber: subscribed agent has no live pane — dropped it and released its WAN lease"
@@ -1289,14 +1296,6 @@ pub(crate) fn drop_cloud_subscription_on_exit(registration_was_ours: bool, still
     registration_was_ours || !still_held
 }
 
-/// Subscribed agents no live block holds. Every way into the subscription
-/// (`add_agent`) runs with a live registration, so one without is a leak
-/// from a teardown that missed it; renewing its WAN lease would fence the
-/// agent everywhere else for as long as this srv runs.
-fn orphaned_subscriptions(registered: &[String], is_live: impl Fn(&str) -> bool) -> Vec<String> {
-    registered.iter().filter(|a| !is_live(a)).cloned().collect()
-}
-
 /// Drop `agent` from the relay subscription and release its WAN lease,
 /// awaiting the release (the `RemoveAgent` arm's is fire-and-forget) — for a
 /// Take over, whose requester claims the lease right after. `false` if it
@@ -1630,14 +1629,6 @@ mod tests {
         assert!(!sub.agents.lock().unwrap().contains("opaz"));
         assert!(matches!(rx.try_recv(), Ok(super::CtrlMsg::RemoveAgent(k)) if k == "opaz"));
         assert!(!sub.drop_if_orphaned("Opaz", |_| false), "already gone");
-    }
-
-    #[test]
-    fn the_lease_tick_finds_subscriptions_no_live_block_holds() {
-        let registered = vec!["opaz".to_string(), "maricon".to_string()];
-        let orphans = super::orphaned_subscriptions(&registered, |name| name == "maricon");
-        assert_eq!(orphans, vec!["opaz".to_string()]);
-        assert!(super::orphaned_subscriptions(&registered, |_| true).is_empty());
     }
 
     #[tokio::test]
