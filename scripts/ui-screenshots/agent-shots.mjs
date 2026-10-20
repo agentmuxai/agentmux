@@ -15,9 +15,9 @@
 // (dev@acme.example) with a placeholder credential, and agents for the
 // picker's My Agents.
 //
-// A conversation shot creates its agent through the picker's Create new agent
-// form in a window tab of its own, as a user would, so the agent starts with
-// no history. The form leaves the agent unbound, so the shot clicks the pane's
+// A conversation shot creates its agent through the new-agent panel under the
+// picker's Claude Code card, in a window tab of its own, as a user would, so
+// the agent starts with no history. The panel leaves the agent unbound, so the shot clicks the pane's
 // "Bind: dev@acme.example" for the demo account. Cleanup closes the tab, which
 // stops the agent, and deletes it.
 
@@ -149,12 +149,12 @@ async function pickerPane(session) {
     return pane;
 }
 
-/** Opens the picker's Create new agent form for Claude Code. */
+/** Opens the new-agent panel under the picker's Claude Code card. */
 async function openCreateForm(session) {
     const pane = await pickerPane(session);
     // The harness cards reorder as their install checks come back, so a click
     // can land on another card: wait for the grid to hold still, and check
-    // which form opened.
+    // which panel opened.
     const cardAt = `(() => {
         const el = [...document.querySelectorAll(${JSON.stringify(`${pane} ${PICKER} *`)})].find((e) => e.children.length === 0 && e.offsetParent && e.textContent.trim() === "Claude Code");
         if (!el) return null;
@@ -173,18 +173,19 @@ async function openCreateForm(session) {
         }
         if (!last) throw new Error("no Claude Code card in the picker");
         await session.clickAt(last);
+        const title = `document.querySelector(${JSON.stringify(`${pane} .agent-create-panel-title`)})?.textContent ?? ""`;
+        const form = `!!document.querySelector(${JSON.stringify(`${pane} [data-testid="agent-create-form"]`)})`;
         for (let i = 0; i < 12; i++) {
             await session.wait(250);
-            if (await session.evaluate(paneText(pane, "Create new agent from Claude"))) return pane;
-            if (await session.evaluate(paneText(pane, "Create new agent from"))) break;
+            const opened = await session.evaluate(title);
+            if (opened.startsWith("New Claude") && (await session.evaluate(form))) return pane;
+            if (opened) break;
         }
-        // Another harness's form, or none: back out and try again.
-        const cancel = await session.evaluate(visibleCenter(`${pane} [data-modal-dismiss]`));
-        if (cancel) await session.clickAt(cancel);
-        else await session.pressKey("Escape");
+        // Another harness's panel, or none: close it (Esc) and try again.
+        await session.pressKey("Escape");
         await session.wait(400);
     }
-    throw new Error("the Create new agent form for Claude Code didn't open");
+    throw new Error("the new-agent panel for Claude Code didn't open");
 }
 
 /** Creates agent `name` from the Claude Code template, on this computer, and
@@ -193,7 +194,7 @@ async function openCreateForm(session) {
  *  signed-in, idle agent (for an agent that can't start). */
 export async function createAgent(session, name, { settled = true, maximized = true } = {}) {
     const pane = await openCreateForm(session);
-    await session.clickSelector(`${pane} .agent-new-bundle-modal-input`);
+    await session.clickSelector(`${pane} [data-testid="create-from-template-name-input"]`);
     await session.typeText(name);
     // Docker on the capturing machine makes the form default to a container.
     await session.evaluate(`(() => {
@@ -206,12 +207,12 @@ export async function createAgent(session, name, { settled = true, maximized = t
     })()`);
     await session.wait(300);
     const create = await session.evaluate(`(() => {
-        const b = [...document.querySelectorAll(${JSON.stringify(`${pane} button`)})].find((e) => e.offsetParent && e.innerText.trim() === "Create" && !e.disabled);
+        const b = [...document.querySelectorAll(${JSON.stringify(`${pane} button`)})].find((e) => e.offsetParent && e.innerText.trim() === "Create and start" && !e.disabled);
         if (!b) return null;
         const r = b.getBoundingClientRect();
         return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
     })()`);
-    if (!create) throw new Error("the form's Create button isn't enabled");
+    if (!create) throw new Error("the panel's Create and start button isn't enabled");
     await session.clickAt(create);
     let agentPane = null;
     for (let i = 0; i < 60 && !agentPane; i++) {
@@ -394,10 +395,10 @@ export const shots = [
     }),
     agentShot({
         id: "agent-create",
-        title: "Create new agent",
-        description: "Creating an agent from the Claude Code harness: its name, runtime, model, endpoint and bundles.",
+        title: "New agent panel",
+        description: "Creating an agent from the Claude Code harness, in the panel under its card: its name, runtime, model, endpoint and bundles.",
         inTab: (session) => openCreateForm(session),
-        verify: async (session) => (await session.evaluate(visibleText("Create new agent"))) || "the form isn't open",
+        verify: async (session) => (await session.evaluate(visibleText("Create and start"))) || "the panel isn't open",
     }),
     conversationShot({
         id: "agent-sign-in",
