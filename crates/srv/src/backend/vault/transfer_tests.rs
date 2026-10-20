@@ -3,6 +3,7 @@
 
 //! The `.vault` file: export, inspect, commit.
 
+use super::import::{Mapping, Source};
 use super::transfer::*;
 use super::*;
 
@@ -136,8 +137,8 @@ fn a_wrong_passphrase_a_missing_one_and_a_tampered_file_write_nothing() {
     export(&s, None, PASS, &path).unwrap();
     wipe(&s);
 
-    assert_eq!(inspect(&s, &path, None).unwrap_err(), InspectError::NeedsPassphrase);
-    assert_eq!(inspect(&s, &path, Some("")).unwrap_err(), InspectError::NeedsPassphrase);
+    assert!(matches!(inspect(&s, &path, None).unwrap_err(), InspectError::NeedsPassphrase));
+    assert!(matches!(inspect(&s, &path, Some("")).unwrap_err(), InspectError::NeedsPassphrase));
     match inspect(&s, &path, Some("not the passphrase")).unwrap_err() {
         InspectError::Other(m) => assert!(m.contains("didn't open the file"), "{m}"),
         e => panic!("{e:?}"),
@@ -160,7 +161,7 @@ fn files_that_are_not_vault_files_are_refused_with_a_reason() {
     let dir = tempfile::tempdir().unwrap();
     let text = dir.path().join("notes.txt");
     std::fs::write(&text, "hello").unwrap();
-    assert!(matches!(inspect(&s, &text, Some(PASS)).unwrap_err(), InspectError::Other(m) if m.contains("age-encrypted")));
+    assert!(matches!(inspect(&s, &text, Some(PASS)).unwrap_err(), InspectError::Other(m) if m.contains("one column")));
     assert!(matches!(inspect(&s, &dir.path().join("missing.vault"), Some(PASS)).unwrap_err(), InspectError::Other(m) if m.contains("couldn't read")));
     assert!(matches!(inspect(&s, dir.path(), Some(PASS)).unwrap_err(), InspectError::Other(m) if m.contains("isn't a file")));
 
@@ -336,4 +337,135 @@ fn a_failed_file_write_leaves_no_temp_file() {
     assert!(export(&s, None, PASS, &taken).is_err());
     let leftovers: Vec<_> = std::fs::read_dir(dir.path()).unwrap().flatten().map(|e| e.file_name()).collect();
     assert_eq!(leftovers.len(), 1, "only the folder: {leftovers:?}");
+}
+
+// ── Other services' exports, through the same preview and commit ────────────
+
+fn write(dir: &tempfile::TempDir, name: &str, text: &str) -> std::path::PathBuf {
+    let p = dir.path().join(name);
+    std::fs::write(&p, text).unwrap();
+    p
+}
+
+#[test]
+fn a_lastpass_export_is_previewed_by_kind_then_imported_as_those_kinds() {
+    let s = store();
+    let dir = tempfile::tempdir().unwrap();
+    let csv = "url,username,password,totp,extra,name,grouping,fav\n\
+https://example.com,alex,hunter2,JBSWY3DPEHPK3PXP,,Example,Shopping,0\n\
+http://sn,,,,\"NoteType:Social Security\nName:Alex Doe\nNumber:123-45-6789\",My SSN,,0\n\
+http://sn,,,,\"NoteType:Credit Card\nNumber:4111111111111111\nSecurity Code:123\",Visa,,0\n";
+    let path = write(&dir, "lastpass_vault_export.csv", csv);
+    let preview = inspect(&s, &path, None).unwrap();
+    assert_eq!((preview.source, preview.total, preview.skipped.len()), (Source::LastPass, 3, 0));
+    assert!(preview.plaintext_file, "the person is offered to delete it");
+    assert!(preview.source_label.contains("LastPass"));
+    assert_eq!(preview.sections.len(), 3, "a login, a card and an SSN");
+    let shown = serde_json::to_string(&preview).unwrap();
+    for secret in ["hunter2", "123-45", "4111", "JBSWY3"] {
+        assert!(!shown.contains(secret), "the preview shows {secret}");
+    }
+    let done = commit(&s, &preview.token, Duplicates::Skip).unwrap();
+    assert_eq!(done.added, 3);
+    assert_eq!(all_parts(&s, "login-example")["totp"], "JBSWY3DPEHPK3PXP");
+    assert_eq!(all_parts(&s, "ssn-my-ssn")["value"], "123-45-6789");
+    assert_eq!(all_parts(&s, "card-visa")["cvc"], "123");
+    assert!(s.vault_get("login-example").unwrap().unwrap().tags.contains("Shopping"));
+    let log = activity(&s, 3).unwrap();
+    assert_eq!(log[0].action, "imported");
+    assert!(!serde_json::to_string(&log).unwrap().contains("hunter2"));
+}
+
+#[test]
+fn a_second_import_of_the_same_export_marks_every_entry_a_duplicate() {
+    let s = store();
+    let dir = tempfile::tempdir().unwrap();
+    let path = write(&dir, "chrome.csv", "name,url,username,password\nGitHub,https://github.com,alex,pw1\nExample,https://example.com,bob,pw2\n");
+    let first = inspect(&s, &path, None).unwrap();
+    commit(&s, &first.token, Duplicates::Skip).unwrap();
+    let again = inspect(&s, &path, None).unwrap();
+    assert_eq!((again.total, again.duplicates), (2, 2));
+    let done = commit(&s, &again.token, Duplicates::Skip).unwrap();
+    assert_eq!((done.added, done.skipped), (0, 2));
+    assert_eq!(s.vault_count().unwrap(), 2);
+}
+
+#[test]
+fn a_csv_no_reader_knows_is_imported_with_the_persons_column_choices() {
+    let s = store();
+    let dir = tempfile::tempdir().unwrap();
+    let path = write(&dir, "keys.csv", "Service,Secret,Owner\nStripe,sk_test_1,alex\nTwilio,tw_2,bob\n");
+    match inspect(&s, &path, None) {
+        Err(InspectError::NeedsMapping(m)) => assert_eq!((m.columns.len(), m.rows), (3, 2)),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(s.vault_count().unwrap(), 0, "nothing is read in until the columns are chosen");
+    let mapping = Mapping { kind: "api-key".into(), label: 0, value: 1, site: None, username: None };
+    let preview = inspect_with(&s, &path, None, Some(&mapping)).unwrap();
+    assert_eq!((preview.source, preview.total), (Source::Csv, 2));
+    commit(&s, &preview.token, Duplicates::Skip).unwrap();
+    assert_eq!(all_parts(&s, "api-key-stripe")["value"], "sk_test_1");
+}
+
+#[test]
+fn an_env_file_and_a_bitwarden_export_are_found_by_their_contents_not_their_names() {
+    let s = store();
+    let dir = tempfile::tempdir().unwrap();
+    let env = write(&dir, "secrets.txt", "STRIPE_API_KEY=sk_test_123\nGITHUB_TOKEN=ghp_abc\n");
+    let preview = inspect(&s, &env, None).unwrap();
+    assert_eq!((preview.source, preview.total), (Source::Env, 2));
+    let bw = write(&dir, "backup", r#"{"encrypted":false,"folders":[],"items":[{"type":1,"name":"A","login":{"username":"u","password":"p","uris":[{"uri":"https://a.example"}]}}]}"#);
+    let preview = inspect(&s, &bw, None).unwrap();
+    assert_eq!((preview.source, preview.total), (Source::Bitwarden, 1));
+}
+
+#[test]
+fn rows_that_break_the_vaults_limits_are_listed_not_imported_and_the_rest_still_come_in() {
+    let s = store();
+    let dir = tempfile::tempdir().unwrap();
+    let huge = "x".repeat(1024 * 1024 + 1);
+    let path = write(&dir, "chrome.csv", &format!("name,url,username,password\nGood,https://g.example,u,p\nHuge,https://h.example,u,{huge}\n"));
+    let preview = inspect(&s, &path, None).unwrap();
+    assert_eq!(preview.total, 1);
+    assert_eq!(preview.skipped.len(), 1);
+    assert!(preview.skipped[0].reason.contains("1 MiB"), "{}", preview.skipped[0].reason);
+}
+
+#[test]
+fn a_vault_file_is_not_called_plaintext() {
+    let s = store();
+    seed(&s);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("b.vault");
+    export(&s, None, PASS, &path).unwrap();
+    let preview = inspect(&s, &path, Some(PASS)).unwrap();
+    assert_eq!((preview.source, preview.plaintext_file), (Source::Vault, false));
+}
+
+// A parser must never panic on a file made to break it (spec §8.7).
+#[test]
+fn hostile_files_are_refused_and_never_panic() {
+    let s = store();
+    let dir = tempfile::tempdir().unwrap();
+    let samples: &[&[u8]] = &[
+        b"",
+        b"\0\0\0\0",
+        b"{",
+        b"{\"items\": 5}",
+        b"{\"items\": [null, 1, \"x\", {\"type\": 99}]}",
+        b"a,b\n\"unterminated",
+        b"a,b,c\n1,2\n1,2,3,4,5\n",
+        b"=\n=\n=",
+        b"NAME=\"unterminated",
+        b"\xEF\xBB\xBF",
+        b"url,username,password\n\x00,\x00,\x00\n",
+        &[0xff; 4096],
+        b"age-encryption.org/v1\n-> scrypt \n",
+    ];
+    for (i, bytes) in samples.iter().enumerate() {
+        let path = dir.path().join(format!("hostile{i}"));
+        std::fs::write(&path, bytes).unwrap();
+        let _ = inspect(&s, &path, Some(PASS));
+    }
+    assert_eq!(s.vault_count().unwrap(), 0);
 }

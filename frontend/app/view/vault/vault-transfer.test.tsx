@@ -36,7 +36,8 @@ const vault = vi.fn(async (op: string, _args?: Record<string, unknown>): Promise
 });
 const vaultExport = vi.fn();
 const vaultImport = vi.fn();
-vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ approvals: { vault, vaultExport, vaultImport } }) }));
+const vaultImportDelete = vi.fn();
+vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ approvals: { vault, vaultExport, vaultImport, vaultImportDelete } }) }));
 
 import { MIN_PASSPHRASE, passphraseStrength, VaultExportDialog } from "./vault-export";
 import { VaultImportDialog } from "./vault-import";
@@ -160,7 +161,11 @@ describe("Import", () => {
             { section: "api-keys", count: 2, first: [{ label: "Stripe", kind: "api-key", duplicate: false }, { label: "GitHub", kind: "api-key", duplicate: false }] },
         ],
         skipped: [{ label: "Odd one", reason: "unknown kind \"rocket\"" }],
+        source: "vault",
+        source_label: "an AgentMux Vault file",
+        plaintext_file: false,
     };
+    const PLAIN = { ...PREVIEW, file_name: "lastpass_export.csv", source: "last-pass", source_label: "LastPass", plaintext_file: true };
 
     it("asks the host for a file when it opens, and closes if the person closes that dialog", async () => {
         vaultImport.mockResolvedValue({ cancelled: true });
@@ -215,6 +220,49 @@ describe("Import", () => {
         await screen.findByRole("status");
         again.unmount();
         expect(calls("import_cancel")).toHaveLength(0);
+    });
+
+    it("says which service a file came from, and what the person should do with a plaintext one", async () => {
+        vaultImport.mockResolvedValueOnce({ preview: PLAIN, pick_id: "pick-2", file_name: "lastpass_export.csv", synced_folder: "OneDrive" });
+        render(() => <VaultImportDialog onClose={vi.fn()} />);
+        await screen.findByText(/to import, from LastPass/);
+        const dialog = screen.getByRole("dialog");
+        fireEvent.click(within(dialog).getByRole("button", { name: "Import" }));
+        const done = await screen.findByRole("status");
+        expect(done.textContent).toContain("2 added");
+        expect(dialog.textContent).toContain("holds every secret in it unencrypted");
+        expect(dialog.textContent).toContain("It is in your OneDrive folder");
+        expect(dialog.textContent).toContain("a copy may already be in the cloud");
+        vaultImportDelete.mockResolvedValueOnce({ deleted: true });
+        fireEvent.click(within(dialog).getByRole("button", { name: "Delete the file" }));
+        await waitFor(() => expect(vaultImportDelete).toHaveBeenCalledWith({ pick_id: "pick-2" }));
+        expect((await screen.findAllByRole("status")).map((s) => s.textContent).join(" ")).toContain("isn't securely erased");
+    });
+
+    it("offers no deletion for an encrypted Vault file", async () => {
+        vaultImport.mockResolvedValueOnce({ preview: PREVIEW, pick_id: "pick-1", file_name: "backup.vault" });
+        render(() => <VaultImportDialog onClose={vi.fn()} />);
+        await screen.findByText(/to import, from an AgentMux Vault file/);
+        fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Import" }));
+        await screen.findByRole("status");
+        expect(screen.queryByRole("button", { name: "Delete the file" })).toBeNull();
+        expect(screen.getByRole("dialog").textContent).toContain("The file stays where it is");
+    });
+
+    it("asks which column is which for a CSV nothing knows, and reads it again with the choice", async () => {
+        vaultImport.mockResolvedValueOnce({ needs_mapping: { columns: ["Service", "Secret", "Owner"], rows: 2 }, pick_id: "pick-3", file_name: "keys.csv" });
+        render(() => <VaultImportDialog onClose={vi.fn()} />);
+        await screen.findByText(/doesn't know this file's format/);
+        const dialog = screen.getByRole("dialog");
+        expect(dialog.textContent).toContain("it has 2 rows");
+        const selects = Array.from(dialog.querySelectorAll("select")) as HTMLSelectElement[];
+        // Each row becomes / Label / Key.
+        fireEvent.change(selects[1], { target: { value: "0" } });
+        fireEvent.change(selects[2], { target: { value: "1" } });
+        vaultImport.mockResolvedValueOnce({ preview: { ...PLAIN, source: "csv", source_label: "a CSV file" }, pick_id: "pick-3", file_name: "keys.csv" });
+        fireEvent.click(within(dialog).getByRole("button", { name: "Continue" }));
+        await waitFor(() => expect(vaultImport).toHaveBeenLastCalledWith({ pick_id: "pick-3", passphrase: undefined, mapping: { kind: "api-key", label: 0, value: 1 } }));
+        await screen.findByText(/to import, from a CSV file/);
     });
 
     it("shows why a file can't be read", async () => {
