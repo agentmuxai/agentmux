@@ -12,6 +12,8 @@
  * coming back on the next start.
  */
 
+import { onMuxEvent } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
 import { getApi, pushNotification, removeNotificationById } from "@/store/global";
 import { createSignal } from "solid-js";
 
@@ -103,6 +105,12 @@ export async function surfaceIncidents(): Promise<void> {
     const api = getApi();
     try {
         void api.listen<Incident>("incident-recorded", (i) => {
+            if (!i?.id) return;
+            remember(i);
+            show(i);
+        });
+        // One srv recorded (a corrupt transcript zone): the host doesn't know of it, so srv says so itself.
+        onMuxEvent(WpsEvent.IncidentRecorded, (i) => {
             if (!i?.id) return;
             remember(i);
             show(i);

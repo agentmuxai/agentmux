@@ -17,6 +17,14 @@ const api = {
     }),
 };
 
+const muxHandlers = new Map<string, (p: unknown) => void>();
+vi.mock("@/app/store/mps", () => ({
+    onMuxEvent: (event: string, fn: (p: unknown) => void) => {
+        muxHandlers.set(event, fn);
+        return () => {};
+    },
+}));
+
 vi.mock("@/store/global", () => ({
     getApi: () => api,
     pushNotification: (n: NotificationType) => pushed.push(n),
@@ -68,8 +76,14 @@ describe("recovery notices", () => {
         handlers.get("incident-recorded")?.({ ...crash, id: "3-c", at_ms: 9_000 });
         expect(pushed.at(-1)?.id).toBe("incident-3-c");
 
+        // Recorded by srv (a corrupt transcript zone): shown now too, and the same window's history has it.
+        muxHandlers.get("incident:recorded")?.({ id: "4-d", at_ms: 9_500, kind: "transcript_damaged", what: "Saved history for agent 4775c42b is damaged", did: ["x"], lost: [] });
+        expect(pushed.at(-1)?.id).toBe("incident-4-d");
+        expect(pushed.at(-1)?.title).toBe("Saved history for agent 4775c42b is damaged");
+        handlers.get("incident-acknowledged")?.({ id: "4-d" });
+
         // The status bar's history (§4.3): every one, closed or not, newest first.
-        expect(recentIncidents().map((i) => i.id)).toEqual(["3-c", "2-b", "1-a", "0-z"]);
+        expect(recentIncidents().map((i) => i.id)).toEqual(["4-d", "3-c", "2-b", "1-a", "0-z"]);
         expect(recentIncidents().find((i) => i.id === "1-a")?.acknowledged_at_ms).toBeGreaterThan(0);
         expect(hasOpenIncident()).toBe(true);
         for (const id of ["0-z", "3-c"]) handlers.get("incident-acknowledged")?.({ id });
