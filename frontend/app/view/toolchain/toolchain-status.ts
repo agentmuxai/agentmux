@@ -103,3 +103,10 @@ export function widgetStatus(w: WidgetFacts, port: number): { tone: StatusTone; 
     const text = w.installKind === "manual" ? "Not detected" : "Not installed";
     return { tone: "idle", label: text, subtitle: text };
 }
+
+/** A port as typed; null when it is not a whole number from 1 to 65535. */
+export function parsePort(raw: string): number | null {
+    if (!/^\d{1,5}$/.test(raw.trim())) return null;
+    const n = parseInt(raw, 10);
+    return n >= 1 && n <= 65535 ? n : null;
+}

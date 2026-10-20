@@ -130,10 +130,10 @@ describe("ToolchainView", () => {
         const widgets = await screen.findByRole("group", { name: "External widgets" });
         const first = within(widgets).getAllByRole("button")[0];
         fireEvent.click(first);
-        const port = await screen.findByRole("spinbutton");
+        const port = await screen.findByLabelText("Port");
         rpc.WidgetHealthCommand.mockClear();
         fireEvent.input(port, { target: { value: "9123" } });
-        fireEvent.blur(port); // a pending change is applied at once on blur
+        fireEvent.keyDown(port, { key: "Enter" });
         await waitFor(() =>
             expect(rpc.WidgetHealthCommand).toHaveBeenCalledWith(
                 {},
@@ -142,6 +142,10 @@ describe("ToolchainView", () => {
             )
         );
         expect(Object.values(JSON.parse(localStorage.getItem("agentmux:widget-ports") ?? "{}"))).toEqual([9123]);
+        // A value that isn't a port is refused, with the port in use named.
+        fireEvent.input(port, { target: { value: "70000" } });
+        fireEvent.blur(port);
+        expect(await screen.findByText(/Still using 9123/)).toBeInTheDocument();
         // The reset button puts the default back.
         fireEvent.click(await screen.findByRole("button", { name: "Reset to the default port" }));
         await waitFor(() => expect(localStorage.getItem("agentmux:widget-ports")).toBe("{}"));

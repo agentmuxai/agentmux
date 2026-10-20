@@ -17,8 +17,9 @@ import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { SystemToolInstallInline } from "./SystemToolInstallInline";
 import { CliDiskSpace } from "./CliDiskSpace";
 import { toolNotes, toolStatus, widgetStatus } from "./toolchain-status";
+import { WidgetPortField } from "./WidgetPortField";
 import "./toolchain-view.scss";
-import { Button, Card, CardGrid, Field, FilterInput, IconButton, NumberInput, Pill } from "@/app/element/ui";
+import { Button, Card, CardGrid, FilterInput, IconButton, Pill } from "@/app/element/ui";
 import { matchesEveryWord } from "@/app/util/fuzzysearch";
 
 // ── Port/localStorage helpers (unchanged from modal) ─────────────────────────
@@ -581,29 +582,12 @@ export function ToolchainView(): JSX.Element {
                             Requires: {row().requires.filter((id) => !isAvailable(id)).join(", ")}
                         </p>
                     </Show>
-                    <Field label="Port" hint={`1 to 65535. ${row().defaultPort} unless you change it.`}>
-                        <div class="toolchain-detail-row">
-                            <NumberInput
-                                class="toolchain-port-input"
-                                density="compact"
-                                value={effectivePort(row())}
-                                min={1}
-                                max={65535}
-                                step={1}
-                                parse="int"
-                                debounceMs={800}
-                                onChange={(port) => applyPort(key, port)}
-                            />
-                            <Show when={row().customPort !== undefined}>
-                                <IconButton
-                                    density="compact"
-                                    icon="rotate-left"
-                                    label="Reset to the default port"
-                                    onClick={() => applyPort(key, undefined)}
-                                />
-                            </Show>
-                        </div>
-                    </Field>
+                    <WidgetPortField
+                        port={effectivePort(row())}
+                        defaultPort={row().defaultPort}
+                        custom={row().customPort !== undefined}
+                        onApply={(port) => applyPort(key, port)}
+                    />
                 </div>
             )}
         </Show>

@@ -3,7 +3,7 @@
 
 import { resolveDrift } from "@/app/view/agent/providers/version-drift";
 import { describe, expect, it } from "vitest";
-import { toolNotes, toolStatus, widgetStatus, type ToolFacts } from "./toolchain-status";
+import { parsePort, toolNotes, toolStatus, widgetStatus, type ToolFacts } from "./toolchain-status";
 
 const facts = (over: Partial<ToolFacts> = {}): ToolFacts => ({ loading: false, found: true, kind: "core", ...over });
 const drift = (installed?: string, pinned?: string, latest?: string, found = true) =>
@@ -94,5 +94,18 @@ describe("widgetStatus", () => {
         });
         expect(widgetStatus(w, 1).subtitle).toBe("Not installed");
         expect(widgetStatus({ ...w, installKind: "manual" }, 1).subtitle).toBe("Not detected");
+    });
+});
+
+describe("parsePort", () => {
+    it("takes whole numbers from 1 to 65535", () => {
+        expect(parsePort("1")).toBe(1);
+        expect(parsePort(" 8188 ")).toBe(8188);
+        expect(parsePort("65535")).toBe(65535);
+    });
+
+    it("refuses anything else", () => {
+        for (const raw of ["", "0", "65536", "70000", "-1", "80.5", "8e3", "abc", "123456"])
+            expect(parsePort(raw), raw).toBeNull();
     });
 });
