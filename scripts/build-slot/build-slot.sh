@@ -2,10 +2,8 @@
 # build-slot-version: 3
 # build-slot: run one heavy build or test command while holding the host-wide
 # build slot, so only one such command runs on this machine at a time.
-# Written up in two places: the standard, docs/standards/DEV_HOST_BUILD_SLOT.md in
-# a5af/shared-infrastructure, and AgentMux's spec, docs/specs/SPEC_BUILD_SLOT_ENFORCEMENT_2026_10_20.md
-# in agentmuxai/agentmux. AgentMux installs this file to ~/.agentmux/shared/locks/build-slot.sh
-# at startup when its version is newer than the installed one.
+# Spec: docs/specs/SPEC_BUILD_SLOT_ENFORCEMENT_2026_10_20.md. AgentMux installs this file to
+# ~/.agentmux/shared/locks/build-slot.sh at startup when its version is newer than the installed one.
 #
 #   build-slot [--reason "text"] -- <command> [args...]   run <command> when the slot is free
 #   build-slot status                                     show the holder and the queue
