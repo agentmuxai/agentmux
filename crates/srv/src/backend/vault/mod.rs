@@ -251,6 +251,27 @@ pub fn update(store: &Store, mut change: EntryChange) -> Result<(), String> {
     Ok(())
 }
 
+/// One part's value, for the person: shown in the pane (`revealed`) or put on
+/// the clipboard by the host (`copied`). Only the host reaches this, after the
+/// OS has confirmed the person; the use is logged and the value never is.
+pub fn reveal(store: &Store, id: &str, part: &str, action: &str) -> Result<zeroize::Zeroizing<String>, String> {
+    if action != "revealed" && action != "copied" {
+        return Err(format!("unknown use {action:?}"));
+    }
+    let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {id}"))?;
+    let kind = kinds::kind(&row.kind).ok_or_else(|| format!("entry {id} has an unknown kind"))?;
+    if !kind.parts.contains(&part) {
+        return Err(format!("a {} entry has no part {part:?}", kind.name));
+    }
+    let key = seal::key(false)?;
+    let parts = seal::open(&key, &row.id, &row.sealed)?;
+    let value = parts.get(part).ok_or_else(|| format!("{} has no {part} saved", row.label))?;
+    let value = zeroize::Zeroizing::new(value.to_string());
+    store.vault_touch(&row.id, now_ms()).map_err(|e| e.to_string())?;
+    record(store, &row.id, &row.label, PERSON, action, part, "done");
+    Ok(value)
+}
+
 pub fn delete(store: &Store, id: &str) -> Result<(), String> {
     let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {id}"))?;
     store.vault_delete(id).map_err(|e| e.to_string())?;

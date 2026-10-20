@@ -112,6 +112,13 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                 vault::update(&store, change)?;
                 Ok((json!({}), true))
             }
+            // One part's value, for Reveal and Copy. The host asks only after
+            // the OS has confirmed the person.
+            "reveal" => {
+                let s = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+                let value = vault::reveal(&store, &s("id"), &s("part"), &s("action"))?;
+                Ok((json!({ "value": value.as_str() }), true))
+            }
             "delete" => {
                 let id = body.get("id").and_then(Value::as_str).unwrap_or("");
                 vault::delete(&store, id)?;

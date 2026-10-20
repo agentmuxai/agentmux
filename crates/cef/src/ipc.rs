@@ -476,6 +476,8 @@ async fn route_command(
         "close_window_by_label" => commands::window::close_window_by_label(state, args),
 
         // ---- Clipboard (CEF can't use navigator.clipboard without permission policy) ----
+        "vault_reveal" => commands::vault::reveal(state, args).await,
+        "vault_copy" => commands::vault::copy(state, args).await,
         "read_clipboard" => commands::clipboard::read_clipboard(),
         "write_clipboard" => commands::clipboard::write_clipboard(args),
         "read_clipboard_attachments" => commands::clipboard::read_clipboard_attachments(),
@@ -781,6 +783,11 @@ async fn route_command(
             // The log names the operation, never what it carries.
             let body = args.clone();
             let op = body.get("op").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            // A value is only ever fetched by vault_reveal / vault_copy, after
+            // the OS has confirmed the person.
+            if op == "reveal" {
+                return Err("a Vault value is only shown through Reveal or Copy".to_string());
+            }
             let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
             let auth_key = state.auth_key.lock().clone();
             let ipc_token = state.ipc_token.clone();

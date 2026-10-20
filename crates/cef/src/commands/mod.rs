@@ -20,6 +20,7 @@ pub mod replace_page;
 pub mod pane_pool;
 pub mod startup_pools;
 pub mod clipboard;
+pub mod vault;
 pub mod stubs;
 pub mod palette;
 pub mod recycle;

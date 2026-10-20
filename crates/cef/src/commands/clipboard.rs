@@ -96,6 +96,76 @@ fn write_clipboard_text(text: &str) -> Result<(), String> {
     }
 }
 
+/// Writes a secret to the clipboard: on Windows kept out of the clipboard
+/// history and cloud clipboard (`CanIncludeInClipboardHistory`,
+/// `CanUploadToCloudClipboard`) and from clipboard monitors
+/// (`ExcludeClipboardContentFromMonitorProcessing`).
+#[cfg(target_os = "windows")]
+pub fn write_secret_text(text: &str) -> Result<(), String> {
+    use windows_sys::Win32::System::DataExchange::*;
+    use windows_sys::Win32::System::Memory::*;
+    use windows_sys::Win32::System::Ole::CF_UNICODETEXT;
+
+    unsafe fn dword(value: u32) -> *mut std::ffi::c_void {
+        let h = GlobalAlloc(GMEM_MOVEABLE, 4);
+        if !h.is_null() {
+            let p = GlobalLock(h) as *mut u32;
+            if !p.is_null() {
+                *p = value;
+                GlobalUnlock(h);
+            }
+        }
+        h
+    }
+    fn format(name: &str) -> u32 {
+        let wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+        unsafe { RegisterClipboardFormatW(wide.as_ptr()) }
+    }
+
+    write_clipboard_text(text)?;
+    // Mark what was just written. The flags are set on the same clipboard
+    // ownership, right after the text; if marking fails the text is cleared
+    // rather than left where history could take it.
+    unsafe {
+        if OpenClipboard(std::ptr::null_mut()) == 0 {
+            let _ = write_clipboard_text("");
+            return Err("couldn't mark the copied secret as private".into());
+        }
+        let mut ok = true;
+        for (name, value) in [
+            ("ExcludeClipboardContentFromMonitorProcessing", 1u32),
+            ("CanIncludeInClipboardHistory", 0),
+            ("CanUploadToCloudClipboard", 0),
+        ] {
+            let h = dword(value);
+            if h.is_null() || SetClipboardData(format(name), h).is_null() {
+                ok = false;
+            }
+        }
+        // A format needs the text to be on the clipboard still.
+        let _ = CF_UNICODETEXT;
+        CloseClipboard();
+        if !ok {
+            let _ = write_clipboard_text("");
+            return Err("couldn't mark the copied secret as private".into());
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn write_secret_text(text: &str) -> Result<(), String> {
+    write_clipboard_text(text)
+}
+
+/// Empties the clipboard if it still holds exactly `text`.
+pub fn clear_if_holds(text: &str) -> Result<(), String> {
+    if read_clipboard_text()? == text {
+        write_clipboard_text("")?;
+    }
+    Ok(())
+}
+
 #[cfg(target_os = "macos")]
 fn read_clipboard_text() -> Result<String, String> {
     use std::process::Command;

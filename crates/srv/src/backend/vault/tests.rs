@@ -122,3 +122,32 @@ fn every_change_is_in_the_activity_log_without_values() {
     assert!(!text.contains("6789") && !text.contains("4321"));
     assert!(delete(&s, &id).is_err());
 }
+
+#[test]
+fn a_reveal_returns_the_part_and_logs_the_use_without_the_value() {
+    let s = store();
+    let id = create(&s, ssn("Alex", "123-45-6789")).unwrap();
+    assert_eq!(&*reveal(&s, &id, "value", "revealed").unwrap(), "123-45-6789");
+    assert_eq!(&*reveal(&s, &id, "value", "copied").unwrap(), "123-45-6789");
+    let log = activity(&s, 10).unwrap();
+    assert_eq!(log.iter().map(|a| a.action.as_str()).take(2).collect::<Vec<_>>(), ["copied", "revealed"]);
+    assert_eq!(log[0].target, "value");
+    assert!(!serde_json::to_string(&log).unwrap().contains("6789"));
+    assert!(s.vault_get(&id).unwrap().unwrap().last_used_at > 0, "the use is noted on the entry");
+}
+
+#[test]
+fn a_reveal_of_a_missing_part_or_an_unknown_use_is_refused() {
+    let s = store();
+    let id = create(&s, ssn("Alex", "123-45-6789")).unwrap();
+    assert!(reveal(&s, &id, "cvc", "revealed").unwrap_err().contains("no part"));
+    assert!(reveal(&s, &id, "value", "emailed").unwrap_err().contains("unknown use"));
+    assert!(reveal(&s, "nope", "value", "revealed").unwrap_err().contains("no entry"));
+    let card = create(
+        &s,
+        NewEntry { kind: "card".into(), label: "C".into(), fields: Default::default(), tags: vec![], parts: parts(&[("number", "4111111111111111")]) },
+    )
+    .unwrap();
+    assert!(reveal(&s, &card, "cvc", "revealed").unwrap_err().contains("no cvc saved"));
+    assert_eq!(activity(&s, 10).unwrap().iter().filter(|a| a.action == "revealed").count(), 0, "a refusal isn't a use");
+}

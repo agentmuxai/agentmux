@@ -188,3 +188,23 @@ async fn a_malformed_entry_is_refused_without_quoting_its_value() {
     assert_eq!(s, StatusCode::BAD_REQUEST);
     assert!(!body.to_string().contains("123456789"), "{body}");
 }
+
+// Only the host can fetch a value (after the OS confirmed the person); an agent holding the instance key can't.
+#[tokio::test]
+async fn only_the_host_can_fetch_a_value() {
+    let app = app().await;
+    let (_, body) = send(&app, post("/api/v1/host/vault", &[HOST], new_ssn())).await;
+    let id = body["data"]["id"].as_str().unwrap().to_string();
+    let ask = json!({ "op": "reveal", "id": id, "part": "value", "action": "copied" });
+    let (s, body) = send(&app, post("/api/v1/host/vault", &[], ask.clone())).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    assert!(!body.to_string().contains("123-45"), "{body}");
+    let (s, body) = send(&app, post("/api/v1/host/vault", &[HOST], ask)).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(body["data"]["value"], "123-45-6789");
+    // Nothing an agent can read carries it.
+    let (_, listed) = send(&app, get("/api/v1/vault")).await;
+    assert!(!listed.to_string().contains("123-45"));
+    let (_, act) = send(&app, post("/api/v1/host/vault", &[HOST], json!({ "op": "activity" }))).await;
+    assert!(act.to_string().contains("copied") && !act.to_string().contains("123-45"), "{act}");
+}
