@@ -128,14 +128,15 @@ impl Store {
         Ok(n > 0)
     }
 
-    pub fn vault_grant_add(&self, entry_id: &str, origin: &str, at_ms: i64) -> Result<(), StoreError> {
+    pub fn vault_grant_add(&self, entry_id: &str, origin: &str, at_ms: i64, entry_created_at: i64) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
-        // Only for an entry that exists: the person has minutes to answer, in which
-        // time the entry can be deleted, and a re-created one of the same name (its
-        // id comes from its kind and label) must not inherit the site.
+        // Only for the entry the person was asked about: they have minutes to answer,
+        // in which time it can be deleted, and a re-created one of the same name (its
+        // id comes from its kind and label, its `created_at` is new) must not inherit
+        // the site.
         conn.execute(
-            "INSERT OR REPLACE INTO db_vault_grants (entry_id, origin, granted_at) SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM db_vault_entries WHERE id = ?1)",
-            params![entry_id, origin, at_ms],
+            "INSERT OR REPLACE INTO db_vault_grants (entry_id, origin, granted_at) SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM db_vault_entries WHERE id = ?1 AND created_at = ?4)",
+            params![entry_id, origin, at_ms, entry_created_at],
         )?;
         Ok(())
     }
@@ -328,11 +329,14 @@ mod tests {
         s.vault_insert(&row("a", "A")).unwrap();
         s.vault_insert(&row("b", "B")).unwrap();
         // An entry deleted while its prompt was open: the late "Always" writes nothing.
-        s.vault_grant_add("gone", "https://irs.gov", 1).unwrap();
+        s.vault_grant_add("gone", "https://irs.gov", 1, 1).unwrap();
         assert!(s.vault_grants().unwrap().is_empty());
-        s.vault_grant_add("a", "https://irs.gov", 1).unwrap();
-        s.vault_grant_add("a", "https://irs.gov", 2).unwrap();
-        s.vault_grant_add("a", "https://ssa.gov", 3).unwrap();
+        s.vault_grant_add("a", "https://irs.gov", 1, 1).unwrap();
+        s.vault_grant_add("a", "https://irs.gov", 2, 1).unwrap();
+        s.vault_grant_add("a", "https://ssa.gov", 3, 1).unwrap();
+        // The same id with another `created_at` is a different entry.
+        s.vault_grant_add("b", "https://irs.gov", 4, 99).unwrap();
+        assert!(!s.vault_grant_check("b", "https://irs.gov").unwrap());
         assert!(s.vault_grant_check("a", "https://irs.gov").unwrap());
         assert!(!s.vault_grant_check("a", "https://evil.example").unwrap(), "another site");
         assert!(!s.vault_grant_check("b", "https://irs.gov").unwrap(), "another entry");

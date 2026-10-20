@@ -202,14 +202,14 @@ pub(crate) async fn handle_vault_fill(
         }
     }
     if always {
-        let (store, entry, origin) = (state.identity_store.clone(), target.id.clone(), field.origin.clone());
-        let _ = tokio::task::spawn_blocking(move || store.vault_grant_add(&entry, &origin, agentmux_common::time::now_ms())).await;
+        let (store, entry, origin, created) = (state.identity_store.clone(), target.id.clone(), field.origin.clone(), target.created_at);
+        let _ = tokio::task::spawn_blocking(move || store.vault_grant_add(&entry, &origin, agentmux_common::time::now_ms(), created)).await;
     }
 
     // The value leaves the sealed row only now, for the host's request.
     let store = state.identity_store.clone();
-    let (entry, part) = (target.id.clone(), target.part);
-    let value = match tokio::task::spawn_blocking(move || vault::value_for_fill(&store, &entry, part)).await {
+    let (entry, part, created) = (target.id.clone(), target.part, target.created_at);
+    let value = match tokio::task::spawn_blocking(move || vault::value_for_fill(&store, &entry, created, part)).await {
         Ok(Ok(v)) => v,
         Ok(Err(e)) => return err_response(StatusCode::BAD_REQUEST, e),
         Err(e) => return err_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
@@ -225,6 +225,14 @@ pub(crate) async fn handle_vault_fill(
     // Whatever the host says, the value isn't in it: an error that quotes it (a
     // parser's, a page's) is cleaned before the agent can see it.
     let filled = filled.map_err(|(code, e)| (code, if value.is_empty() { e } else { e.replace(value.as_str(), "[hidden]") }));
+    // The page's own validation message is page-controlled text too: it can echo
+    // the value it just received, so it is cleaned the same way.
+    let validation = filled
+        .as_ref()
+        .ok()
+        .and_then(|d| d.get("validation").and_then(Value::as_str))
+        .filter(|v| !v.is_empty())
+        .map(|v| if value.is_empty() { v.to_string() } else { v.replace(value.as_str(), "[hidden]") });
     drop(value);
     match filled {
         Ok(data) => {
@@ -240,7 +248,7 @@ pub(crate) async fn handle_vault_fill(
                 "field": field.label,
             });
             if let Some(o) = out.as_object_mut() {
-                if let Some(v) = data.get("validation").and_then(Value::as_str).filter(|v| !v.is_empty()) {
+                if let Some(v) = &validation {
                     o.insert("validation".into(), json!(v));
                 }
                 if data.get("changed_by_page").and_then(Value::as_bool) == Some(true) {

@@ -222,7 +222,10 @@ async fn a_field_that_doesnt_look_like_an_ssn_asks_and_offers_no_always() {
     comment["slots"] = json!([]);
     comment["label"] = json!("Leave a comment");
     let s = setup(comment).await;
-    s.state.identity_store.vault_grant_add(&s.entry, "https://irs.gov", 1).unwrap();
+    {
+        let created = s.state.identity_store.vault_get(&s.entry).unwrap().unwrap().created_at;
+        s.state.identity_store.vault_grant_add(&s.entry, "https://irs.gov", 1, created).unwrap();
+    }
     let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Deny));
     let (status, _) = fill(&s, &s.entry).await;
     let asked = ask.await.unwrap();
@@ -287,7 +290,10 @@ async fn an_unverified_caller_is_refused_before_anything_is_read() {
 #[tokio::test]
 async fn a_host_error_that_quotes_the_value_is_cleaned_before_the_agent_sees_it() {
     let s = setup(ssn_field("https://irs.gov")).await;
-    s.state.identity_store.vault_grant_add(&s.entry, "https://irs.gov", 1).unwrap();
+    {
+        let created = s.state.identity_store.vault_get(&s.entry).unwrap().unwrap().created_at;
+        s.state.identity_store.vault_grant_add(&s.entry, "https://irs.gov", 1, created).unwrap();
+    }
     let app = Router::new().route(
         "/agentmux/browser/:route",
         post(|Path(route): Path<String>| async move {
@@ -312,7 +318,10 @@ async fn a_host_error_that_quotes_the_value_is_cleaned_before_the_agent_sees_it(
 #[tokio::test]
 async fn the_host_refusing_the_fill_is_reported_as_failed_and_leaks_nothing() {
     let s = setup(ssn_field("https://irs.gov")).await;
-    s.state.identity_store.vault_grant_add(&s.entry, "https://irs.gov", 1).unwrap();
+    {
+        let created = s.state.identity_store.vault_get(&s.entry).unwrap().unwrap().created_at;
+        s.state.identity_store.vault_grant_add(&s.entry, "https://irs.gov", 1, created).unwrap();
+    }
     // A host that answers the fill with an error.
     let app = Router::new().route(
         "/agentmux/browser/:route",
@@ -332,4 +341,57 @@ async fn the_host_refusing_the_fill_is_reported_as_failed_and_leaks_nothing() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(body.to_string().contains("nothing was typed") && !body.to_string().contains("123-45"), "{body}");
     assert!(activity_text(&s).contains("failed"));
+}
+
+// A page's validation message can echo what it was just given; it is cleaned like an error.
+#[tokio::test]
+async fn a_validation_message_that_echoes_the_value_is_cleaned() {
+    let s = setup(ssn_field("https://irs.gov")).await;
+    let created = s.state.identity_store.vault_get(&s.entry).unwrap().unwrap().created_at;
+    s.state.identity_store.vault_grant_add(&s.entry, "https://irs.gov", 1, created).unwrap();
+    let app = Router::new().route(
+        "/agentmux/browser/:route",
+        post(|Path(route): Path<String>| async move {
+            if route == "field_info" {
+                Json(json!({ "ok": true, "data": ssn_field("https://irs.gov") }))
+            } else {
+                Json(json!({ "ok": true, "data": { "filled": true, "validation": "123-45-6789 is not accepted", "changed_by_page": false } }))
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    *s.state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port, token: "host-token".into() });
+    let (status, body) = fill(&s, &s.entry).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(!body.to_string().contains("123-45"), "{body}");
+    assert!(body.to_string().contains("[hidden] is not accepted"), "{body}");
+}
+
+// An entry deleted and made again while the person decided has the same id: what they
+// approved was the old one, so nothing is typed from the new one.
+#[tokio::test]
+async fn an_entry_made_again_while_the_person_decided_is_not_typed() {
+    let s = setup(ssn_field("https://irs.gov")).await;
+    let old = vault_get_created(&s);
+    let again = NewEntry {
+        kind: "ssn".into(),
+        label: "Alex".into(),
+        fields: Default::default(),
+        tags: vec![],
+        parts: crate::backend::vault::seal::Parts([("value".to_string(), "999-99-9999".to_string())].into()),
+    };
+    crate::backend::vault::delete(&s.state.identity_store, &s.entry).unwrap();
+    // `created_at` has a one-millisecond clock.
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    let id = create(&s.state.identity_store, again).unwrap();
+    assert_eq!(id, s.entry, "the same kind and label get the same id");
+    let err = crate::backend::vault::value_for_fill(&s.state.identity_store, &id, old, "value").err().unwrap();
+    assert!(err.contains("replaced"), "{err}");
+    assert!(!err.contains("999"));
+}
+
+fn vault_get_created(s: &Setup) -> i64 {
+    s.state.identity_store.vault_get(&s.entry).unwrap().unwrap().created_at
 }

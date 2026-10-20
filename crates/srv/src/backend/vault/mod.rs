@@ -305,6 +305,10 @@ pub struct FillTarget {
     pub part: &'static str,
     pub slot: Option<&'static str>,
     pub what: String,
+    /// Which incarnation of the id this is: a deleted entry's id is reused by a
+    /// new one of the same kind and label, and neither a grant nor a value may
+    /// cross from one to the other while the person decides.
+    pub created_at: i64,
 }
 
 /// Resolves `"id"` or `"id.part"` for a fill, or says why it can't be filled.
@@ -315,13 +319,16 @@ pub fn fill_target(store: &Store, vault: &str) -> Result<FillTarget, String> {
     let part = slots::fillable_part(kind, part)?;
     let slot = slots::slot(kind, part);
     let what = slots::what(kind, part);
-    Ok(FillTarget { id: row.id, label: row.label, part, slot, what })
+    Ok(FillTarget { id: row.id, label: row.label, part, slot, what, created_at: row.created_at })
 }
 
 /// A part's value for the host to type; never returned to an agent. The use is
 /// logged by the caller, with the site and the outcome.
-pub fn value_for_fill(store: &Store, id: &str, part: &str) -> Result<zeroize::Zeroizing<String>, String> {
+pub fn value_for_fill(store: &Store, id: &str, created_at: i64, part: &str) -> Result<zeroize::Zeroizing<String>, String> {
     let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {id}"))?;
+    if row.created_at != created_at {
+        return Err(format!("{} was replaced while the person was deciding: nothing was typed", row.label));
+    }
     let key = seal::key(false)?;
     let parts = seal::open(&key, &row.id, &row.sealed)?;
     let value = parts.get(part).ok_or_else(|| format!("{} has no {part} saved", row.label))?;
