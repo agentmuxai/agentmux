@@ -25,8 +25,8 @@ import { contextReadingFromMeta } from "@/app/store/agent-pane-state/context-rea
 import { resolveSwarmLine, type SwarmLine } from "@/app/store/swarm-line";
 import type { SupervisorMode } from "@/types/rpc/SupervisorMode";
 import { remoteSections, type SwarmOtherInstances } from "./swarm-remote";
-import { createSignal, type Accessor, type Setter } from "solid-js";
-import { traced, tracedList } from "@/app/util/select-trace";
+import { createSignal, untrack, type Accessor, type Setter } from "solid-js";
+import { sameList, traced } from "@/app/util/select-trace";
 import { groupBackgroundTasks, type AgentBackgroundTasks } from "./swarm-background";
 import { toolDetail } from "@/app/view/agent/tool-meta/tool-descriptors";
 import { onSubagentNamed, withSubagentName } from "./subagent-naming";
@@ -970,7 +970,7 @@ export class SwarmViewModel {
     // Ordered list of tracked block IDs (preserves server-side ordering)
     private _trackedBlockIds = createSignal<string[]>([]);
     trackedBlockIdsAtom: Accessor<string[]> = this._trackedBlockIds[0];
-    private setTrackedBlockIds: Setter<string[]> = tracedList("tracked-ids", this._trackedBlockIds);
+    private setTrackedBlockIds: Setter<string[]> = traced("tracked-ids", this._trackedBlockIds);
 
     // Fleet control (SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md) — which
     // top-level agent blockIds are currently checked for a bulk action.
@@ -1344,7 +1344,7 @@ export class SwarmViewModel {
         try {
             const { block_ids } = await RpcApi.AgentTrackedBlocksCommand(TabRpcClient, {});
             const ids: string[] = block_ids ?? [];
-            this.setTrackedBlockIds(ids);
+            if (!sameList(untrack(this.trackedBlockIdsAtom), ids)) this.setTrackedBlockIds(ids);
             // Codex P2 on PR #3219: subscribeToBlockStatuses tears down and
             // rebuilds every per-block status subscription (each unsub/sub
             // flushes its own MPS eventsub command) plus issues a fresh

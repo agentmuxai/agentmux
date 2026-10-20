@@ -4,7 +4,7 @@
 import { UnseenTurnsDot } from "@/app/block/UnseenTurnsDot";
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-holds";
-import { createMemo, createSignal, createEffect, onCleanup, onMount, For, Show, type Accessor, type JSX } from "solid-js";
+import { createMemo, createSignal, createEffect, onCleanup, onMount, untrack, For, Show, type Accessor, type JSX } from "solid-js";
 import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, ActiveShell, ActiveCron, WorkflowDispatch, SubagentEvent, DispatchActivityEntry, TodoItem } from "./swarm-model";
 import { collectClearableRows, subagentDisplayLabel, subagentRowKey, subagentToolDetail, workflowRetireSignal, AUTO_RETIRE_DELAY_MS } from "./swarm-model";
 import { LOCAL_PROVIDER_UNKNOWN, REMOTE_PROVIDER_UNKNOWN, SwarmProviderIcon } from "./swarm-provider-icon";
@@ -24,7 +24,7 @@ import { longRunningToolRows, type LongRunningToolRow } from "./swarm-longrunnin
 import { formatCompactNumber } from "@/util/format-count";
 import { formatElapsedClock, formatTimeLeft } from "@/util/format-time";
 import { revealBlock } from "@/app/util/reveal-block";
-import { selectTrace } from "@/app/util/select-trace";
+import { sameList, selectTrace } from "@/app/util/select-trace";
 import { BackgroundTaskBucket, SubagentBackgroundTasks, visibleBackgroundTasks } from "./swarm-background-tasks";
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 import { swarmRowColors } from "./swarm-row-colors";
@@ -99,6 +99,19 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
         selectTrace.rebuilt();
         return rows;
     });
+    // The list is keyed by block id, so a rebuild with the same agents updates the
+    // rows in place; only an agent joining or leaving adds or removes a row.
+    const keyedRows = createMemo(() => {
+        const seen = new Map<string, number>();
+        return tree().map((n) => {
+            const base = agentRowKey(n);
+            const count = (seen.get(base) ?? 0) + 1;
+            seen.set(base, count);
+            return [count === 1 ? base : `${base}#${count}`, n] as const;
+        });
+    });
+    const rowKeys = createMemo<string[]>(() => keyedRows().map(([key]) => key), [], { equals: sameList });
+    const rowsByKey = createMemo(() => new Map(keyedRows()));
     const clearableCount = createMemo(() => collectClearableRows(tree()).length);
     const remote = createMemo(() => remoteRows(remoteSections(model.otherInstancesAtom())));
     const localKeys = createMemo(() => tree().flatMap((n) => (n.blockId ? [n.blockId] : [])));
@@ -171,8 +184,8 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
                     (docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §5). */}
                 <Show when={tree().length > 0 || remote().length > 0}>
                     <div class="swarm-tree">
-                        <For each={tree()}>
-                            {(node) => <AgentRow node={node} focusedBlockId={focusedBlockId} model={model} />}
+                        <For each={rowKeys()}>
+                            {(key) => <AgentRowHost rowKey={key} rows={rowsByKey} focusedBlockId={focusedBlockId} model={model} />}
                         </For>
                         <RemoteAgentRows model={model} rows={remote()} />
                     </div>
@@ -317,6 +330,24 @@ export function countdownSecondsRemaining(model: SwarmViewModel, rowKey: string,
 
 const fmtCtx = formatCompactNumber;
 
+/** What identifies an agent's row across rebuilds of the tree. */
+function agentRowKey(node: AgentTreeNode): string {
+    return node.blockId ?? `name:${node.agentName}`;
+}
+
+/** One agent's row, following its node as the tree is rebuilt. The last node it saw
+ *  stands in while the row is on its way out. */
+export function AgentRowHost(props: {
+    rowKey: string;
+    rows: Accessor<Map<string, AgentTreeNode>>;
+    focusedBlockId: () => string | null;
+    model: SwarmViewModel;
+}): JSX.Element {
+    let last = untrack(() => props.rows().get(props.rowKey))!;
+    const node = createMemo(() => (last = props.rows().get(props.rowKey) ?? last));
+    return <AgentRow node={node} focusedBlockId={props.focusedBlockId} model={props.model} />;
+}
+
 // Exported for `swarm-agent-row.render.test.tsx`, which pins the PR #2862
 // regression both reviewers caught: an agent whose only activity is a
 // long-running tool call must still show the expand affordance and render the
@@ -326,14 +357,14 @@ export function AgentRow({
     focusedBlockId,
     model,
 }: {
-    node: AgentTreeNode;
+    node: Accessor<AgentTreeNode>;
     focusedBlockId: () => string | null;
     model: SwarmViewModel;
 }): JSX.Element {
     const displayStatus = createMemo<AgentDisplayStatus>(() =>
-        phaseToDisplayStatus(node.blockId, node.agentStatus)
+        phaseToDisplayStatus(node().blockId, node().agentStatus)
     );
-    const collapsed = createMemo(() => model.isAgentCollapsed(node.blockId));
+    const collapsed = createMemo(() => model.isAgentCollapsed(node().blockId));
     // The agent's own pane-tab color — same source PaneChrome's `tabColors`
     // memo reads for the tab underline (pane-identity.ts: the pane's pick,
     // else its agent color, else its widget color), so the Swarm row's
@@ -341,7 +372,7 @@ export function AgentRow({
     // tab (the unselected pane border, for hover) instead of a fixed theme accent
     // (SPEC_SWARM_ROW_AGENT_COLOR_AND_SELECT_TO_FOCUS_2026_09_25.md §2.1-2.2).
     const blockMeta = createMemo(() =>
-        node.blockId ? MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", node.blockId))()?.meta : undefined
+        node().blockId ? MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", node().blockId))()?.meta : undefined
     );
     const rowColors = createMemo(() => swarmRowColors(blockMeta(), isLightThemeActive()));
     // Computed HERE, not inside LongRunningBucket, so it can feed `totalRows`
@@ -360,23 +391,23 @@ export function AgentRow({
     // from the registry, with their real status.
     const longRunningRows = createMemo(() => {
         tick();
-        return longRunningToolRows(node.blockId, Date.now());
+        return longRunningToolRows(node().blockId, Date.now());
     });
     const ownBackgroundRows = createMemo(() => {
         tick();
-        return visibleBackgroundTasks(node.backgroundTasks.own, Date.now());
+        return visibleBackgroundTasks(node().backgroundTasks.own, Date.now());
     });
     const supervisorDecisions = createMemo(() => supervisorRows(blockMeta()));
     const totalRows = createMemo(() =>
-        agentChildRowCount(node, longRunningRows().length, ownBackgroundRows().length, supervisorDecisions().length)
+        agentChildRowCount(node(), longRunningRows().length, ownBackgroundRows().length, supervisorDecisions().length)
     );
     const hasChildren = createMemo(() => totalRows() > 0);
 
     const [summaryFlash, setSummaryFlash] = createSignal(false);
     let flashTimer: ReturnType<typeof setTimeout> | undefined;
-    let prevSummary: string | null = node.activitySummary; // don't flash existing summary on mount
+    let prevSummary: string | null = untrack(() => node().activitySummary); // don't flash existing summary on mount
     createEffect(() => {
-        const summary = node.activitySummary;
+        const summary = node().activitySummary;
         if (summary && summary !== prevSummary) {
             clearTimeout(flashTimer);
             setSummaryFlash(true);
@@ -392,11 +423,27 @@ export function AgentRow({
     // actions.ts) can never fire anything here. This is the only way to
     // copy an agent's name or block id out of Swarm. The sub-rows below use the
     // same helper. See docs/specs/REPORT_CONTEXT_MENU_GAP_AUDIT_2026_08_07.md.
+    // A click is lost when the pressed element is replaced before the button comes
+    // up, so a mouse press selects the agent at once and the click that follows
+    // does nothing more. Touch and pen keep to click: a touch can turn into a scroll.
+    // Keyboard: Enter or Space on the focused card.
+    let pressSelected = false;
+    const selectAgent = () => {
+        const blockId = untrack(() => node().blockId);
+        if (blockId) void revealBlock(blockId, { source: "swarm" });
+    };
+    // Only controls INSIDE this card count: closest() also walks ancestors, and
+    // the Swarm root above every card has a tabindex, so an unbounded match would
+    // always hit it and skip the guard entirely.
+    const pressedOnControl = (e: { target: EventTarget | null; currentTarget: Element }) => {
+        const control = (e.target as Element | null)?.closest("input, button, select, textarea, a[href], [tabindex]");
+        return !!control && control !== e.currentTarget && e.currentTarget.contains(control);
+    };
     const handleAgentRowContextMenu = (e: MouseEvent) => {
         showCopyContextMenu(
             [
-                { label: "Copy agent name", value: node.agentName },
-                { label: "Copy block ID", value: node.blockId },
+                { label: "Copy agent name", value: node().agentName },
+                { label: "Copy block ID", value: node().blockId },
             ],
             e
         );
@@ -407,10 +454,10 @@ export function AgentRow({
             <div
                 classList={{
                     "swarm-agent-card": true,
-                    [`swarm-agent-card--${node.agentStatus}`]: true,
-                    "swarm-agent-card--active": focusedBlockId() === node.blockId,
+                    [`swarm-agent-card--${node().agentStatus}`]: true,
+                    "swarm-agent-card--active": focusedBlockId() === node().blockId,
                 }}
-                data-block-id={node.blockId ?? undefined}
+                data-block-id={node().blockId ?? undefined}
                 style={{
                     "--swarm-agent-active-border": rowColors().active,
                     "--swarm-agent-hover-border": rowColors().hover,
@@ -427,7 +474,12 @@ export function AgentRow({
                 // "selects the pane" behavior for non-agent-entry clicks.
                 onClick={(e) => {
                     e.stopPropagation();
-                    if (node.blockId) void revealBlock(node.blockId, { source: "swarm" });
+                    // A mouse press already selected the agent (onPointerDown below).
+                    if (pressSelected) {
+                        pressSelected = false;
+                        return;
+                    }
+                    selectAgent();
                 }}
                 // ...and the Swarm pane must not flash selected first. The
                 // Swarm root is focusable (tabIndex={-1}), so a press anywhere
@@ -443,32 +495,39 @@ export function AgentRow({
                 // checkbox), and pressing one is a Swarm action, not "select
                 // this agent" (Codex P2 on #3955).
                 // SPEC_SWARM_ROW_AGENT_COLOR_AND_SELECT_TO_FOCUS_2026_09_25.md §2.3.
+                onPointerDown={(e) => {
+                    pressSelected = false;
+                    if (e.pointerType !== "mouse" || e.button !== 0 || pressedOnControl(e)) return;
+                    pressSelected = true;
+                    selectAgent();
+                }}
+                onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    selectAgent();
+                }}
+                role="button"
+                tabIndex={0}
                 onMouseDown={(e) => {
-                    // Only controls INSIDE this card count: closest() also walks
-                    // ancestors, and the Swarm root above every card has a
-                    // tabindex, so an unbounded match would always hit it and
-                    // skip the guard entirely (reagentx P0 on #3955).
-                    const control = (e.target as Element | null)?.closest(
-                        "input, button, select, textarea, a[href], [tabindex]"
-                    );
-                    if (control && control !== e.currentTarget && e.currentTarget.contains(control)) return;
+                    if (pressedOnControl(e)) return;
                     e.preventDefault();
                 }}
                 onContextMenu={handleAgentRowContextMenu}
-                title={node.agentName}
+                title={node().agentName}
             >
                 <div class="swarm-agent-row">
                     {/* Fleet control selection (SPEC_MULTI_AGENT_FLEET_CONTROL_
                         2026_08_20.md) — only a block with a real blockId can be
                         a bulk-action target. stopPropagation so checking it
                         doesn't also focus the card's own agent pane. */}
-                    <Show when={node.blockId} fallback={<span class="swarm-agent-select-spacer" />}>
+                    <Show when={node().blockId} fallback={<span class="swarm-agent-select-spacer" />}>
                         <input
                             type="checkbox"
                             class="swarm-agent-select-checkbox"
-                            checked={model.isSelected(node.blockId!)}
+                            checked={model.isSelected(node().blockId!)}
                             onClick={(e) => e.stopPropagation()}
-                            onChange={() => model.toggleSelected(node.blockId!)}
+                            onChange={() => model.toggleSelected(node().blockId!)}
                             title="Select for a fleet action (broadcast/stop)"
                         />
                     </Show>
@@ -488,33 +547,33 @@ export function AgentRow({
                             class={`fa-solid fa-${collapsed() ? "chevron-right" : "chevron-down"} swarm-agent-expand-icon`}
                             onClick={(e) => {
                                 e.stopPropagation();
-                                if (node.blockId) model.toggleAgentCollapsed(node.blockId);
+                                if (node().blockId) model.toggleAgentCollapsed(node().blockId);
                             }}
                         />
                     </Show>
                     <span class="swarm-agent-icon">
-                        <SwarmProviderIcon provider={node.agentProvider} unknownTitle={LOCAL_PROVIDER_UNKNOWN} />
+                        <SwarmProviderIcon provider={node().agentProvider} unknownTitle={LOCAL_PROVIDER_UNKNOWN} />
                     </span>
-                    <span class="swarm-agent-label">{node.agentName}</span>
+                    <span class="swarm-agent-label">{node().agentName}</span>
                     {/* Turns this agent didn't get from you that finished
                         unseen: the same mark as its pane header (UnseenTurnsDot). */}
-                    <Show when={node.blockId}>{(blockId) => <UnseenTurnsDot blockId={blockId()} />}</Show>
+                    <Show when={node().blockId}>{(blockId) => <UnseenTurnsDot blockId={blockId()} />}</Show>
                     <Show when={collapsed() && hasChildren()}>
                         <span class="swarm-agent-collapsed-count">{totalRows()}</span>
                     </Show>
-                    <Show when={node.contextTokens != null}>
-                        <span class="swarm-ctx-size">{fmtCtx(node.contextTokens!)}</span>
+                    <Show when={node().contextTokens != null}>
+                        <span class="swarm-ctx-size">{fmtCtx(node().contextTokens!)}</span>
                     </Show>
                     <AgentStatusChip
                         status={displayStatus()}
-                        awaitingUser={isAwaitingUser(blockMeta(), node.agentStatus)}
-                        blockId={node.blockId}
+                        awaitingUser={isAwaitingUser(blockMeta(), node().agentStatus)}
+                        blockId={node().blockId}
                     />
-                    <Show when={node.blockId}>
+                    <Show when={node().blockId}>
                         {(blockId) => (
                             <SupervisorChip
                                 meta={blockMeta()}
-                                live={node.agentStatus === "running"}
+                                live={node().agentStatus === "running"}
                                 onSet={(mode) => setSupervisorMode(blockId(), mode)}
                             />
                         )}
@@ -526,44 +585,46 @@ export function AgentRow({
                     classList={{
                         "swarm-activity-summary": true,
                         "swarm-activity-summary--flash": summaryFlash(),
-                        "swarm-activity-summary--fallback": node.line.source !== "generated",
+                        "swarm-activity-summary--fallback": node().line.source !== "generated",
                     }}
-                    title={swarmLineTooltip(node.line)}
+                    title={swarmLineTooltip(node().line)}
                 >
-                    {node.line.text}
+                    {node().line.text}
                 </div>
                 {/* The literal call in flight, next to the Haiku paraphrase
                     above it. Deliberately OUTSIDE the collapsed() guard: it is
                     one line, it is the most perishable thing on the card, and
                     a collapsed agent is exactly when you want to know what it
                     is doing without expanding it. */}
-                <Show when={node.currentTool}>
+                <Show when={node().currentTool}>
                     <div class="swarm-current-tool">
                         <i class="fa-solid fa-bolt swarm-current-tool-icon" />
-                        <span class="swarm-current-tool-name">{node.currentTool}</span>
+                        <span class="swarm-current-tool-name">{node().currentTool}</span>
                     </div>
                 </Show>
             </div>
-            <Show when={!collapsed()}>
-                <div class="swarm-children">
-                    <SupervisorBucket rows={supervisorDecisions()} />
-                    <TodoBucket
-                        rows={node.todoRows}
-                        truncated={node.todosTruncated}
-                        partial={node.todosPartial}
-                    />
-                    <AgentToolBucket
-                        rows={node.agentToolRows}
-                        model={model}
-                        parentAgentStatus={node.agentStatus}
-                        backgroundBySubagent={node.backgroundTasks.bySubagent}
-                    />
-                    <WorkflowBucket rows={node.workflowRows} model={model} />
-                    <ShellBucket rows={node.shellRows} />
-                    <CronBucket rows={node.cronRows} />
-                    <LongRunningBucket rows={longRunningRows()} />
-                    <BackgroundTaskBucket tasks={ownBackgroundRows()} />
-                </div>
+            <Show when={collapsed() ? undefined : node()} keyed>
+                {(current) => (
+                    <div class="swarm-children">
+                        <SupervisorBucket rows={supervisorDecisions()} />
+                        <TodoBucket
+                            rows={current.todoRows}
+                            truncated={current.todosTruncated}
+                            partial={current.todosPartial}
+                        />
+                        <AgentToolBucket
+                            rows={current.agentToolRows}
+                            model={model}
+                            parentAgentStatus={current.agentStatus}
+                            backgroundBySubagent={current.backgroundTasks.bySubagent}
+                        />
+                        <WorkflowBucket rows={current.workflowRows} model={model} />
+                        <ShellBucket rows={current.shellRows} />
+                        <CronBucket rows={current.cronRows} />
+                        <LongRunningBucket rows={longRunningRows()} />
+                        <BackgroundTaskBucket tasks={ownBackgroundRows()} />
+                    </div>
+                )}
             </Show>
         </div>
     );

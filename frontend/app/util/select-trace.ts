@@ -214,14 +214,7 @@ export function traced<T>(cause: string, signal: [Accessor<T>, Setter<T>]): Sett
     }) as Setter<T>;
 }
 
-/** `traced` for a list that is re-fetched on a timer: a new array with the same items
- *  notifies readers all the same, and is blamed on "poll-same" rather than on `cause`. */
-export function tracedList<T>(cause: string, signal: [Accessor<T[]>, Setter<T[]>]): Setter<T[]> {
-    const [get, set] = signal;
-    return ((value: T[]) => {
-        const before = untrack(get);
-        const same = before.length === value.length && before.every((x, i) => x === value[i]);
-        selectTrace.cause(same ? "poll-same" : cause);
-        return set(value);
-    }) as Setter<T[]>;
+/** Whether two lists hold the same items in the same order. */
+export function sameList<T>(a: readonly T[], b: readonly T[]): boolean {
+    return a.length === b.length && a.every((x, i) => x === b[i]);
 }

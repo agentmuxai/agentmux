@@ -1,6 +1,6 @@
 # Spec: Selecting a pane from Swarm — the lost click, and one state machine for "show this pane"
 
-**Status:** active — decisions taken 2026-10-20 (section 9); P0 (the trace) is in #5193; P1 to P4 not started. Verified 2026-10-20.
+**Status:** active — decisions taken 2026-10-20 (section 9); P0 (the trace) is in #5193; P1 (stable rows, press to select, keyboard, quiet poll) is in the next PR; P2 to P4 not started. Verified 2026-10-20.
 **Date:** 2026-10-18
 **Author:** AgentY
 **Requested by:** the owner, 2026-10-18: "sometimes, but not all the time, if I click on an agent in swarm, nothing happens, I need to click a 2nd time. it is not always reproducible, likely has to do with some order of selection which makes me think perhaps we need a proper architecture like state machine. take a closer look, write spec to file."

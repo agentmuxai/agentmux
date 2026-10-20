@@ -104,7 +104,7 @@ function modelStub(): SwarmViewModel {
 
 function renderRow(node: AgentTreeNode) {
     registerPane(BLOCK);
-    return render(() => <AgentRow node={node} focusedBlockId={() => null} model={modelStub()} />);
+    return render(() => <AgentRow node={() => node} focusedBlockId={() => null} model={modelStub()} />);
 }
 
 describe("Swarm background tasks", () => {

@@ -127,6 +127,11 @@
         border-radius: 0;
     }
 
+    &:focus-visible {
+        outline: 1px solid var(--swarm-agent-active-border, var(--accent-color));
+        outline-offset: -1px;
+    }
+
     &--active {
         background: var(--highlight-bg-color);
         // inset box-shadow draws on all four sides inside the element and is

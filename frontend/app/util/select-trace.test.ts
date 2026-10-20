@@ -3,7 +3,7 @@
 
 import { createMemo, createRoot, createSignal } from "solid-js";
 import { describe, expect, it } from "vitest";
-import { CLICK_GRACE_MS, createSelectTrace, selectTrace, traced } from "./select-trace";
+import { CLICK_GRACE_MS, createSelectTrace, sameList, selectTrace, traced } from "./select-trace";
 
 function harness() {
     let t = 1_000_000;
@@ -192,5 +192,14 @@ describe("reveals", () => {
         const { trace } = harness();
         for (let i = 0; i < 130; i++) trace.revealStarted("swarm", `b${i}`)(true);
         expect(trace.entries()).toHaveLength(100);
+    });
+});
+
+describe("sameList", () => {
+    it("is true only for the same items in the same order", () => {
+        expect(sameList(["a", "b"], ["a", "b"])).toBe(true);
+        expect(sameList(["a", "b"], ["b", "a"])).toBe(false);
+        expect(sameList(["a"], ["a", "b"])).toBe(false);
+        expect(sameList([], [])).toBe(true);
     });
 });

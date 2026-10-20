@@ -101,7 +101,7 @@ function renderRow(node: AgentTreeNode, opts: { seedPane?: boolean } = {}) {
     const escaped = { count: 0 };
     const result = render(() => (
         <div onContextMenu={() => escaped.count++}>
-            <AgentRow node={node} focusedBlockId={() => null} model={modelStub()} />
+            <AgentRow node={() => node} focusedBlockId={() => null} model={modelStub()} />
         </div>
     ));
     return { ...result, escaped };
