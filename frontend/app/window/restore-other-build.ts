@@ -1,12 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Restoring a layout another build of AgentMux saved (srv
-// `session_other_builds.rs`): every build keeps its own data, so a different
-// or newer build starts with the default layout while the previous build's
-// layout waits in that build's data. A window that came up with the default
-// because nothing was restored offers the newest one in a notice; ☰ → Layouts
-// → "Restore layout from another build…" lists them any time.
+// Restoring the layout another build saved (srv `session_other_builds.rs`).
+// A window that came up with the default because nothing was restored offers
+// the newest; ☰ → Layouts → "Restore layout from another build…" lists them.
 
 import { reopenRestoredWindows } from "@/app/init/restored-windows";
 import { setNotificationAction } from "@/app/notification/usenotification";
