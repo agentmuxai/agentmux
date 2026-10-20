@@ -80,7 +80,7 @@ fn the_operators_order_in_the_backlog_decides_between_an_agents_own_tasks() {
     }
     // Dragged above "first".
     s.work_card_edit("second", Some(500.0), None, None, 3000).unwrap();
-    let waiting = s.work_board_waiting_for("Loap-3", "uid-l", 10).unwrap();
+    let waiting = s.work_board_waiting_for("Loap-3", "uid-l", 10, 5000).unwrap();
     assert_eq!(waiting.iter().map(|t| t.item.id.as_str()).collect::<Vec<_>>(), ["second", "first"]);
     assert_eq!(claim(&s, "Loap-3", "uid-l").unwrap().id, "second");
 }
@@ -241,4 +241,47 @@ fn history_of_long_finished_tasks_is_pruned() {
     s.work_event_add(&WorkEvent { work_id: "t".into(), at: 1000, kind: "cancelled".into(), ..Default::default() }).unwrap();
     assert_eq!(s.work_events_prune(1000 + EVENTS_RETENTION_MS - 1).unwrap(), 0);
     assert_eq!(s.work_events_prune(1000 + EVENTS_RETENTION_MS + 1).unwrap(), 1);
+}
+
+#[test]
+fn an_empty_card_made_first_is_filled_when_the_card_is_created() {
+    let (s, _d) = store();
+    s.work_queue_enqueue(&item("t", 1000)).unwrap();
+    // A claim or a list got there first.
+    let n = s.work_card_ensure("t", 1000).unwrap();
+    let card = NewCard { review_required: true, requested_by_kind: requested::OPERATOR.into(), filed_by: "Loap-3".into(), ..Default::default() };
+    assert_eq!(s.work_card_create("t", &card, 1100).unwrap(), n, "same number");
+    let c = s.work_board_get("t").unwrap().unwrap().card;
+    assert!(c.review_required);
+    assert_eq!((c.requested_by_kind.as_str(), c.filed_by.as_str()), (requested::OPERATOR, "Loap-3"));
+}
+
+#[test]
+fn a_task_filed_on_hold_is_never_claimable() {
+    let (s, _d) = store();
+    s.work_queue_enqueue(&WorkItem { state: work_state::HELD.into(), ..item("h", 1000) }).unwrap();
+    assert_eq!(s.work_queue_get("h").unwrap().unwrap().state, work_state::HELD);
+    assert!(claim(&s, "Loap-3", "").is_none());
+}
+
+#[test]
+fn a_task_not_yet_due_is_not_offered_as_next() {
+    let (s, _d) = store();
+    s.work_queue_enqueue(&WorkItem { not_before: Some(9000), ..for_agent("later", 1000, "Loap-3", "uid-l") }).unwrap();
+    s.work_card_ensure("later", 1000).unwrap();
+    assert!(s.work_board_waiting_for("Loap-3", "uid-l", 10, 5000).unwrap().is_empty());
+    assert_eq!(s.work_board_waiting_for("Loap-3", "uid-l", 10, 9000).unwrap().len(), 1);
+}
+
+#[test]
+fn an_undelivered_start_is_undone_without_using_an_attempt() {
+    let (s, _d) = store();
+    s.work_queue_enqueue(&WorkItem { max_attempts: 1, ..for_agent("t", 1000, "Loap-3", "uid-l") }).unwrap();
+    s.work_hold("t", 1100).unwrap().unwrap();
+    let started = s.work_start_for("t", "Naki", "uid-n", 2000, 60_000).unwrap().unwrap();
+    assert!(s.work_unstart("t", "Naki", started.attempts, work_state::HELD, "Loap-3", "uid-l", 2100).unwrap());
+    let t = s.work_queue_get("t").unwrap().unwrap();
+    assert_eq!((t.state.as_str(), t.attempts, t.target_agent.as_str()), (work_state::HELD, 0, "Loap-3"));
+    s.work_unhold("t", 2200).unwrap().unwrap();
+    assert_eq!(claim(&s, "Loap-3", "uid-l").unwrap().id, "t", "still claimable: no attempt was burnt");
 }

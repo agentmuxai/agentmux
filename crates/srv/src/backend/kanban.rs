@@ -128,7 +128,7 @@ pub fn reminder_text(waiting: &[BoardTask], now_ms: i64) -> String {
 /// named since it went idle, and not handed back by it in the last hour.
 fn due(identity: &Store, agent: &str, uid: &str, idle_since: i64, now_ms: i64) -> Vec<BoardTask> {
     identity
-        .work_board_waiting_for(agent, uid, 20)
+        .work_board_waiting_for(agent, uid, 20, now_ms)
         .unwrap_or_default()
         .into_iter()
         .filter(|t| t.card.last_reminded_at.is_none_or(|at| at < idle_since))

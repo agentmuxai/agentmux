@@ -137,7 +137,9 @@ pub(super) async fn handle_work_enqueue(
         target_agent: req.target_agent,
         target_group: req.target_group,
         priority: req.priority,
-        state: String::new(), // set by the store
+        // Set by the store: `open`, or `held` when filed on hold (never
+        // claimable, not even between the enqueue and a later hold).
+        state: if req.hold { crate::backend::storage::work_queue::work_state::HELD.into() } else { String::new() },
         claimed_by: String::new(),
         target_agent_uid,
         claimed_by_uid: String::new(),
@@ -154,10 +156,11 @@ pub(super) async fn handle_work_enqueue(
         result: String::new(),
     };
 
-    let filing = super::work_tasks::Filing { repo: req.repo, review: req.review, hold: req.hold };
+    let filing = super::work_tasks::Filing { repo: req.repo, review: req.review };
+    let card = super::work_tasks::prepare_card(&state, caller.as_deref(), &item.created_by, filing).await;
     match state.identity_store.work_queue_enqueue(&item) {
         Ok(()) => {
-            let num = super::work_tasks::file_card(&state, caller.as_deref(), &item, filing).await;
+            let num = super::work_tasks::file_card(&state, &item, &card);
             publish_changed(&state);
             (StatusCode::OK, Json(json!({ "id": item.id, "num": num })))
         }

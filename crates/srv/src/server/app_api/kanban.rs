@@ -253,7 +253,7 @@ async fn act(state: &AppState, data: Value) -> Result<Value, String> {
                 target_agent: target,
                 target_group: String::new(),
                 priority: req.priority.unwrap_or(0),
-                state: String::new(),
+                state: if req.hold == Some(true) { work_state::HELD.into() } else { String::new() },
                 claimed_by: String::new(),
                 target_agent_uid: target_uid,
                 claimed_by_uid: String::new(),
@@ -278,12 +278,8 @@ async fn act(state: &AppState, data: Value) -> Result<Value, String> {
                 filed_by: String::new(),
             };
             let num = store.work_card_create(&item.id, &card, now).map_err(|e| e.to_string())?;
-            record(state, &item.id, OPERATOR, OPERATOR, "created", "", work_state::OPEN, "");
-            if req.hold == Some(true) {
-                if let Ok(Some(m)) = store.work_hold(&item.id, now) {
-                    record(state, &item.id, OPERATOR, OPERATOR, "held", &m.from, &m.to, "");
-                }
-            }
+            let first = if req.hold == Some(true) { work_state::HELD } else { work_state::OPEN };
+            record(state, &item.id, OPERATOR, OPERATOR, "created", "", first, "");
             json!({ "ok": true, "id": item.id, "num": num })
         }
         "edit" => {
@@ -349,9 +345,18 @@ async fn act(state: &AppState, data: Value) -> Result<Value, String> {
                 .ok_or("only a waiting task can be started")?;
             let fresh = store.work_board_get(&t.item.id).map_err(|e| e.to_string())?.ok_or("no such task")?;
             if let Err(e) = tell(state, &reg, start_text(&fresh, started.attempts)).await {
-                // Not delivered: give it back rather than leave it held by an
-                // agent that never heard of it.
-                let _ = store.work_queue_release(&t.item.id, &reg.agent_id, &uid, started.attempts, "not delivered", now);
+                // Not delivered: put it back as it was, its attempt not used,
+                // rather than leave it held by an agent that never heard of it.
+                let _ = store.work_unstart(
+                    &t.item.id,
+                    &reg.agent_id,
+                    started.attempts,
+                    &t.item.state,
+                    &t.item.target_agent,
+                    &t.item.target_agent_uid,
+                    now,
+                );
+                record(state, &t.item.id, OPERATOR, OPERATOR, "start_failed", work_state::CLAIMED, &t.item.state, &format!("couldn't reach {}", reg.agent_id));
                 changed(state);
                 return Err(format!("couldn't reach {}: {e}", reg.agent_id));
             }

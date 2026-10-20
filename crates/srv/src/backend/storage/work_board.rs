@@ -227,7 +227,8 @@ impl Store {
         Ok(conn.query_row("SELECT num FROM db_work_cards WHERE work_id = ?1", params![work_id], |r| r.get(0))?)
     }
 
-    /// Create the card of a task just enqueued. Returns its number.
+    /// Create the card of a task just enqueued, or fill the empty one a claim
+    /// or a list made for it meanwhile (`work_card_ensure`). Returns its number.
     pub fn work_card_create(&self, work_id: &str, card: &NewCard, now_ms: i64) -> Result<i64, StoreError> {
         let conn = self.conn().lock().unwrap();
         conn.execute(
@@ -235,7 +236,10 @@ impl Store {
                 (work_id, repo, branch, review_required, requested_by, requested_by_kind,
                  request_text, filed_by, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-             ON CONFLICT(work_id) DO NOTHING",
+             ON CONFLICT(work_id) DO UPDATE SET
+                repo = excluded.repo, branch = excluded.branch, review_required = excluded.review_required,
+                requested_by = excluded.requested_by, requested_by_kind = excluded.requested_by_kind,
+                request_text = excluded.request_text, filed_by = excluded.filed_by, updated_at = excluded.updated_at",
             params![
                 work_id,
                 card.repo,
@@ -308,12 +312,14 @@ impl Store {
     }
 
     /// The tasks waiting for this agent (open, targeted at it by UID or by
-    /// name), in the order it will take them: the claim's order (§6.5).
-    pub fn work_board_waiting_for(&self, agent_id: &str, uid: &str, limit: usize) -> Result<Vec<BoardTask>, StoreError> {
+    /// name, claimable now), in the order it will take them: the claim's
+    /// order (§6.5).
+    pub fn work_board_waiting_for(&self, agent_id: &str, uid: &str, limit: usize, now_ms: i64) -> Result<Vec<BoardTask>, StoreError> {
         let conn = self.conn().lock().unwrap();
         let sql = format!(
             "SELECT {q}, {CARD_COLS} FROM db_work_queue q JOIN db_work_cards c ON c.work_id = q.id
               WHERE q.state = '{open}' AND q.attempts < q.max_attempts
+                AND (q.not_before IS NULL OR q.not_before <= ?4)
                 AND ((q.target_agent_uid <> '' AND q.target_agent_uid = ?2)
                      OR (q.target_agent_uid = '' AND q.target_agent <> '' AND q.target_agent = ?1))
               ORDER BY q.priority DESC, COALESCE(c.rank, q.created_at) ASC
@@ -322,7 +328,7 @@ impl Store {
             open = work_state::OPEN,
         );
         let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(params![agent_id, uid, limit as i64], |r| {
+        let rows = stmt.query_map(params![agent_id, uid, limit as i64, now_ms], |r| {
             Ok(BoardTask { item: row_to_item(r)?, card: row_to_card(r)? })
         })?;
         let mut out = Vec::new();
@@ -539,6 +545,32 @@ impl Store {
         Ok(conn
             .query_row(&sql, params![work_id, agent, uid, now_ms + lease_ms, now_ms], row_to_item)
             .optional()?)
+    }
+
+    /// Undo [`Store::work_start_for`] when the task couldn't be delivered: it
+    /// waits again as it did before (`state`, `target_agent`, its UID), and
+    /// the attempt it was given is taken back. Only while that claim stands.
+    pub fn work_unstart(
+        &self,
+        work_id: &str,
+        agent: &str,
+        attempt: i64,
+        state: &str,
+        target_agent: &str,
+        target_uid: &str,
+        now_ms: i64,
+    ) -> Result<bool, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        Ok(conn.execute(
+            &format!(
+                "UPDATE db_work_queue
+                    SET state = ?4, attempts = attempts - 1, claimed_by = '', claimed_by_uid = '',
+                        claim_expires = NULL, target_agent = ?5, target_agent_uid = ?6, updated_at = ?7
+                  WHERE id = ?1 AND claimed_by = ?2 AND attempts = ?3 AND state = '{c}'",
+                c = work_state::CLAIMED
+            ),
+            params![work_id, agent, attempt, state, target_agent, target_uid, now_ms],
+        )? > 0)
     }
 
     /// The holder asks the operator something: `claimed` to `blocked`, lease

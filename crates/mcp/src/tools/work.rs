@@ -148,8 +148,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             require_agent_env(local_url, auth_key, block_id)?;
             let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow::anyhow!("AGENTMUX_AGENT_ID is not set"))?;
-            let id = arguments.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
+            let id = task_id(arguments)?;
             let attempt = arguments.get("attempt").and_then(|v| v.as_i64())
                 .ok_or_else(|| anyhow::anyhow!("missing required parameter: attempt (from the Tasks claim answer)"))?;
             let str_arg = |k: &str| arguments.get(k).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty());
@@ -199,8 +198,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             require_agent_env(local_url, auth_key, block_id)?;
             let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow::anyhow!("AGENTMUX_AGENT_ID is not set"))?;
-            let id = arguments.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
+            let id = task_id(arguments)?;
             let attempt = arguments.get("attempt").and_then(|v| v.as_i64())
                 .ok_or_else(|| anyhow::anyhow!("missing required parameter: attempt (from the Tasks claim answer)"))?;
 
@@ -335,6 +333,22 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     }
 }
 
+/// The task an action names, as it goes in a URL path: its id, or its number
+/// with or without the `#` the answers print (a raw `#` would start the URL's
+/// fragment). Anything else that isn't an id character is refused.
+fn task_id(arguments: &Value) -> Result<&str> {
+    let id = arguments
+        .get("id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().trim_start_matches('#'))
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
+    if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        anyhow::bail!("id {id:?} is neither a task number (12) nor a task id");
+    }
+    Ok(id)
+}
+
 /// A task as an answer names it: `#12` when srv gave it a number, else its id.
 fn task_name(v: &Value, id: &str) -> String {
     match v.get("num").and_then(|n| n.as_i64()) {
@@ -376,4 +390,18 @@ fn finished_text(id: &str, v: &Value) -> String {
         None => out.push_str(" Your backlog is empty."),
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_task_number_works_with_or_without_its_hash() {
+        assert_eq!(task_id(&serde_json::json!({"id": "#12"})).unwrap(), "12");
+        assert_eq!(task_id(&serde_json::json!({"id": " 12 "})).unwrap(), "12");
+        assert_eq!(task_id(&serde_json::json!({"id": "7f3a-b2"})).unwrap(), "7f3a-b2");
+        assert!(task_id(&serde_json::json!({"id": "12/../x"})).is_err());
+        assert!(task_id(&serde_json::json!({"id": "#"})).is_err());
+    }
 }

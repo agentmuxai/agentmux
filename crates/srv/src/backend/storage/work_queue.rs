@@ -214,9 +214,10 @@ pub(super) const COLS: &str = "id, title, payload, kind, target_agent, target_gr
                     target_agent_uid, claimed_by_uid, created_by_uid";
 
 impl Store {
-    /// Insert a new `open` item. `id` is caller-supplied so an enqueue can be
-    /// made idempotent by the caller (re-enqueueing the same id is a conflict,
-    /// not a duplicate).
+    /// Insert a new `open` item, or `held` when `item.state` says so (Kanban:
+    /// a task filed on hold is never claimable, not even for a moment). `id`
+    /// is caller-supplied so an enqueue can be made idempotent by the caller
+    /// (re-enqueueing the same id is a conflict, not a duplicate).
     pub fn work_queue_enqueue(&self, item: &WorkItem) -> Result<(), StoreError> {
         let conn = self.conn().lock().unwrap();
         conn.execute(
@@ -228,7 +229,8 @@ impl Store {
              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,'',?19)",
             params![
                 item.id, item.title, item.payload, item.kind, item.target_agent,
-                item.target_group, item.priority, work_state::OPEN, "",
+                item.target_group, item.priority,
+                if item.state == work_state::HELD { work_state::HELD } else { work_state::OPEN }, "",
                 None::<i64>, 0i64, if item.max_attempts > 0 { item.max_attempts } else { 3 },
                 item.created_by, item.created_at, item.updated_at, item.not_before, "",
                 item.target_agent_uid, item.created_by_uid,

@@ -142,20 +142,20 @@ async fn repo_of(state: &AppState, reg: Option<&AgentRegistration>) -> (String, 
 pub(super) struct Filing {
     pub repo: Option<String>,
     pub review: Option<bool>,
-    pub hold: bool,
 }
 
-/// Give a just-enqueued task its card and first history line, and hold it
-/// when asked to. Returns its number.
-pub(super) async fn file_card(state: &AppState, caller: Option<&Caller>, item: &WorkItem, f: Filing) -> Option<i64> {
+/// The card of a task about to be enqueued: who asked, the repository, the
+/// filer. Worked out before the row exists, so nothing awaits between the
+/// row and its card (`file_card`).
+pub(super) async fn prepare_card(state: &AppState, caller: Option<&Caller>, created_by: &str, f: Filing) -> NewCard {
     let reg = caller_reg(state, caller);
     let (requested_by, kind, request_text) = provenance(state, reg.as_ref());
     let (repo, branch) = match f.repo.filter(|r| !r.trim().is_empty()) {
         Some(r) => (r.trim().to_string(), String::new()),
         None => repo_of(state, reg.as_ref()).await,
     };
-    let filer = reg.as_ref().map(|r| r.agent_id.clone()).unwrap_or_else(|| item.created_by.clone());
-    let card = NewCard {
+    let filer = reg.as_ref().map(|r| r.agent_id.clone()).unwrap_or_else(|| created_by.to_string());
+    NewCard {
         repo,
         branch,
         // What the operator asked for needs the operator's eyes; a handoff
@@ -164,10 +164,18 @@ pub(super) async fn file_card(state: &AppState, caller: Option<&Caller>, item: &
         requested_by,
         requested_by_kind: kind,
         request_text,
-        filed_by: filer.clone(),
-    };
+        filed_by: filer,
+    }
+}
+
+/// Give a just-enqueued task its card and first history line. Returns its
+/// number. Synchronous: called right after the enqueue, with nothing awaited
+/// between them; a claim or list that got in first made an empty card, which
+/// this fills.
+pub(super) fn file_card(state: &AppState, item: &WorkItem, card: &NewCard) -> Option<i64> {
     let now = now_ms();
-    let num = match state.identity_store.work_card_create(&item.id, &card, now) {
+    let filer = card.filed_by.clone();
+    let num = match state.identity_store.work_card_create(&item.id, card, now) {
         Ok(n) => Some(n),
         Err(e) => {
             tracing::warn!(target: "workqueue", error = %e, "card not created");
@@ -175,19 +183,15 @@ pub(super) async fn file_card(state: &AppState, caller: Option<&Caller>, item: &
         }
     };
     let for_itself = !item.target_agent.is_empty() && item.target_agent == filer;
-    record(state, &item.id, &filer, "agent", if for_itself { "filed_for_later" } else { "created" }, "", work_state::OPEN, "");
-    if f.hold {
-        if let Ok(Some(m)) = state.identity_store.work_hold(&item.id, now) {
-            record(state, &item.id, &filer, "agent", "held", &m.from, &m.to, "");
-        }
-    }
+    let state_now = if item.state == work_state::HELD { work_state::HELD } else { work_state::OPEN };
+    record(state, &item.id, &filer, "agent", if for_itself { "filed_for_later" } else { "created" }, "", state_now, "");
     num
 }
 
 /// The next task waiting for this agent, as the answer to finishing one
 /// carries it (§6.5: it proceeds through its backlog).
 pub(super) fn next_for(state: &AppState, agent_id: &str, uid: &str) -> Value {
-    let waiting = state.identity_store.work_board_waiting_for(agent_id, uid, 50).unwrap_or_default();
+    let waiting = state.identity_store.work_board_waiting_for(agent_id, uid, 50, now_ms()).unwrap_or_default();
     match waiting.first() {
         Some(t) => json!({
             "next": task_brief(t),
