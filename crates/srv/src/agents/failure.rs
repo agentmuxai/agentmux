@@ -380,8 +380,10 @@ pub fn classify(
         );
     }
     // Claude Code ends a turn whose retries ran out with "API Error:
-    // Connection refused — … (ECONNREFUSED)" when the network is down.
+    // Connection refused — … (ECONNREFUSED)" when the network is down,
+    // or "Unable to connect to API (ConnectionRefused)" when nothing listens.
     if hay.contains("apiconnectionerror")
+        || hay.contains("unable to connect to api")
         || hay.contains("connection error")
         || hay.contains("connection refused")
         || hay.contains("could not resolve")
@@ -754,6 +756,24 @@ mod tests {
         let f = classify(None, None, "", Some(&frame));
         assert_eq!(f.code, FailureClass::Network);
         assert!(f.retryable);
+    }
+
+    #[test]
+    fn unable_to_connect_is_network() {
+        for text in [
+            "Unable to connect to API (ConnectionRefused)",
+            "Unable to connect to API (ECONNRESET)",
+        ] {
+            let f = classify(Some(1), None, text, None);
+            assert_eq!(f.code, FailureClass::Network, "{text}");
+            assert!(f.retryable, "{text}");
+        }
+    }
+
+    #[test]
+    fn unable_to_connect_elsewhere_is_not_network() {
+        let f = classify(Some(1), None, "Unable to connect to MCP server", None);
+        assert_ne!(f.code, FailureClass::Network);
     }
 
     #[test]
