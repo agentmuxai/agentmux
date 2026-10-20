@@ -47,6 +47,7 @@ pub mod layout;
 pub mod project_instructions;
 pub mod agent_runtime;
 pub mod agent_context_usage;
+pub mod agent_api_retry;
 pub mod providers;
 pub mod cli_install;
 pub mod cli_prune;
@@ -167,6 +168,8 @@ pub mod cron;
 pub mod dev_proxy;
 pub mod shell_node;
 pub mod work_facts;
+/// The Kanban's reminders and PR links (SPEC_WARDEN_KANBAN_2026_10_20.md).
+pub mod kanban;
 /// A leader hears when its workers end a turn without reporting, fail or stop.
 pub mod worker_notes;
 

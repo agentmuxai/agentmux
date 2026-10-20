@@ -57,13 +57,13 @@ async fn handle_adopt(state: &AppState, call: &WebCallType) -> WebReturnType {
         Ok(a) => a,
         Err(e) => return WebReturnType::error(format!("memoryadopt.Adopt: {e}")),
     };
-    let Some(fs) = crate::backend::agent_session::global_transcript_store() else {
-        return WebReturnType::error("memoryadopt.Adopt: memory record store unavailable");
+    let Some(fs) = crate::backend::transcript::damage::global_for(&crate::backend::transcript::damage::memory_zone(&args.agent_id)) else {
+        return WebReturnType::error("memoryadopt.Adopt: memory record store unavailable, or its record is damaged");
     };
     let mstore = state.mstore.clone();
     let choices: Vec<(usize, String)> = args.choices.into_iter().map(|c| (c.index, c.dir_hash)).collect();
     let result = tokio::task::spawn_blocking(move || {
-        memory_adopt::adopt(fs, &mstore, &args.agent_id, &args.list_id, &choices)
+        memory_adopt::adopt(&fs, &mstore, &args.agent_id, &args.list_id, &choices)
     })
     .await;
     match result {
@@ -101,11 +101,11 @@ async fn handle_release(call: &WebCallType) -> WebReturnType {
         Ok(a) => a,
         Err(e) => return WebReturnType::error(format!("memoryadopt.Release: {e}")),
     };
-    let Some(fs) = crate::backend::agent_session::global_transcript_store() else {
-        return WebReturnType::error("memoryadopt.Release: memory record store unavailable");
+    let Some(fs) = crate::backend::transcript::damage::global_for(&crate::backend::transcript::damage::memory_zone(&args.agent_id)) else {
+        return WebReturnType::error("memoryadopt.Release: memory record store unavailable, or its record is damaged");
     };
     let result =
-        tokio::task::spawn_blocking(move || memory_release::release(fs, &args.agent_id, &args.list_id, args.index)).await;
+        tokio::task::spawn_blocking(move || memory_release::release(&fs, &args.agent_id, &args.list_id, args.index)).await;
     match result {
         Ok(Ok(released)) => WebReturnType::success(serde_json::json!({ "released": released })),
         Ok(Err(ReleaseError::UnknownList)) => WebReturnType::error("unknown-list: the list expired or is not this agent's; list again"),

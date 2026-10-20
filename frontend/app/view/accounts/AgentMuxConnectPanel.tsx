@@ -28,9 +28,10 @@ import { ProviderLogo } from "@/element/ProviderLogo";
 import { CopyableErrorMessage } from "@/app/errors/CopyableErrorMessage";
 import { createMuxBusCloudConfig } from "./muxbus-cloud-config";
 import { muxbusNeedsSignInAgain } from "./muxbus-session";
-import { Button, IconButton } from "@/app/element/ui";
+import { IconButton } from "@/app/element/ui";
 import { acceptMuxbusDelivery, type MuxBusDeliveryStatus } from "@/store/muxbus-delivery";
 import { MuxBusSignInChoices, type MuxBusIdentityProvider } from "./muxbus-sign-in-choices";
+import { MuxBusSignOutButton } from "./muxbus-sign-out";
 
 // Production Cognito config — set after deployment.
 // Override with VITE_MUXBUS_COGNITO_DOMAIN / VITE_MUXBUS_CLIENT_ID at build time.
@@ -276,14 +277,12 @@ export const MuxBusConnectSection = (): JSX.Element => {
                             {loading() ? "Connecting… (Cancel)" : "Sign in again"}
                         </button>
                     </Show>
-                    <button
+                    <MuxBusSignOutButton
+                        muxbus={muxbus}
                         class="agent-identity-unassign-btn"
-                        disabled={loading()}
                         title="Disconnect from AgentMux Cloud"
-                        onClick={() => void muxbus.disconnect()}
-                    >
-                        Disconnect
-                    </button>
+                        label="Disconnect"
+                    />
                 </div>
             </Show>
             <Show when={error()}>
@@ -378,13 +377,11 @@ export function AgentMuxConnectPanel(props: {
                                 />
                             </Show>
                             <div class="identity-key-actions">
-                                <Button
+                                <MuxBusSignOutButton
+                                    muxbus={muxbus}
                                     class="identity-btn identity-btn-secondary"
-                                    disabled={muxbus.loading()}
-                                    onClick={() => void muxbus.disconnect()}
-                                >
-                                    Disconnect
-                                </Button>
+                                    label="Disconnect"
+                                />
                             </div>
                         </Show>
                     </Show>

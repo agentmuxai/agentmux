@@ -387,7 +387,7 @@ pub(crate) fn register_global_memory_import(engine: &WshRpcEngine, state: &AppSt
             async move {
                 let fs = crate::backend::agent_session::global_transcript_store()
                     .ok_or_else(|| "globalmemory:import_sources: record store unavailable".to_string())?;
-                tokio::task::spawn_blocking(move || crate::backend::global_memory_record::import_sources(fs, &store))
+                tokio::task::spawn_blocking(move || crate::backend::global_memory_record::import_sources_checked(fs, &store))
                     .await
                     .map_err(|e| format!("globalmemory:import_sources: {e}"))?
                     .map_err(|e| format!("globalmemory:import_sources: {e}"))
@@ -405,7 +405,7 @@ pub(crate) fn register_global_memory_import(engine: &WshRpcEngine, state: &AppSt
                 let fs = crate::backend::agent_session::global_transcript_store()
                     .ok_or_else(|| "globalmemory:import: record store unavailable".to_string())?;
                 let report = tokio::task::spawn_blocking(move || {
-                    crate::backend::global_memory_record::import(fs, &store, &cmd.list_id, cmd.index)
+                    crate::backend::global_memory_record::import_checked(fs, &store, &cmd.list_id, cmd.index)
                 })
                 .await
                 .map_err(|e| format!("globalmemory:import: {e}"))?

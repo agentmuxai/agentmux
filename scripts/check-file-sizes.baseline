@@ -6,7 +6,7 @@
 1974 crates/cef/src/client/lifecycle.rs
 1524 crates/cef/src/commands/cli_login.rs
 2217 crates/cef/src/commands/window_pool.rs
-1516 crates/cef/src/lib.rs
+1517 crates/cef/src/lib.rs
 1632 crates/cef/src/state/mod.rs
 2183 crates/cef/src/ui_tasks/window.rs
 2493 crates/common/src/data_paths.rs
@@ -24,15 +24,15 @@
 2217 crates/srv/src/backend/history/index.rs
 1900 crates/srv/src/backend/history/mod.rs
 3280 crates/srv/src/backend/lan_discovery.rs
-2130 crates/srv/src/backend/reactive/handler.rs
+2126 crates/srv/src/backend/reactive/handler.rs
 2494 crates/srv/src/backend/storage/migrations.rs
 1799 crates/srv/src/backend/storage/muxbus.rs
 3354 crates/srv/src/identity/resolver/inject.rs
 1538 crates/srv/src/migrations/runner.rs
-2193 crates/srv/src/muxbus/cloud_subscriber.rs
+2194 crates/srv/src/muxbus/cloud_subscriber.rs
 2161 crates/srv/src/persist_subscriber.rs
 1509 crates/srv/src/registry/migrate.rs
-2241 crates/srv/src/server/agent_handlers/input.rs
+2243 crates/srv/src/server/agent_handlers/input.rs
 1768 crates/srv/src/server/app_api/agent_open.rs
 1562 crates/srv/src/server/editor_handlers.rs
 2108 crates/srv/src/server/muxspect_handlers.rs

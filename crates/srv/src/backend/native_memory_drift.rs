@@ -250,11 +250,18 @@ pub(crate) fn reconciliation_sweep_once(
 /// (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.3). Capture only;
 /// the folder isn't touched.
 fn capture_into_record(agent_id: &str, memory_dir: &Path) {
-    let Some(fs) = crate::backend::agent_session::global_transcript_store() else { return };
-    match crate::backend::memory_reconcile::capture_while_running(fs, agent_id, memory_dir, crate::backend::memory_reconcile::CAPTURE_SETTLE) {
+    use crate::backend::transcript::damage;
+    // A memory record found corrupt is not written to again in this process.
+    let zone = damage::memory_zone(agent_id);
+    let Some(fs) = damage::global_for(&zone) else { return };
+    match crate::backend::memory_reconcile::capture_while_running(&fs, agent_id, memory_dir, crate::backend::memory_reconcile::CAPTURE_SETTLE) {
         Ok(0) => {}
         Ok(n) => tracing::info!(agent_id, recorded = n, "native_memory_drift: recorded provider writes into the memory record"),
-        Err(e) => tracing::warn!(agent_id, error = %e, "native_memory_drift: memory record capture failed; retried next sweep"),
+        Err(e) => {
+            if !damage::note_corrupt(&zone, "memory capture", &e) {
+                tracing::warn!(agent_id, error = %e, "native_memory_drift: memory record capture failed; retried next sweep");
+            }
+        }
     }
 }
 
@@ -891,5 +898,29 @@ mod tests {
             Some(v) => std::env::set_var("AGENTMUX_SHARED_DIR", v),
             None => std::env::remove_var("AGENTMUX_SHARED_DIR"),
         }
+    }
+}
+
+#[cfg(test)]
+mod damage_tests {
+    use super::*;
+    use crate::backend::storage::filestore::FileStore;
+    use crate::backend::transcript::damage::{self, test_support};
+    use std::sync::Arc;
+
+    #[test]
+    fn a_capture_that_finds_the_shared_store_corrupt_marks_the_memory_record_and_stops() {
+        let agent = "uid-drift-damage-1";
+        let dir = tempfile::tempdir().unwrap();
+        let fs = Arc::new(FileStore::open_in_memory().unwrap());
+        let _g = test_support::use_global(&fs);
+        test_support::corrupt(&fs);
+        capture_into_record(agent, dir.path());
+        assert!(damage::is_damaged(&damage::memory_zone(agent)));
+        // The next sweep does not go near the store: a healthy one swapped in sees no read from it.
+        let fixed = Arc::new(FileStore::open_in_memory().unwrap());
+        let _g2 = test_support::use_global(&fixed);
+        capture_into_record(agent, dir.path());
+        assert!(fixed.conn().lock().unwrap().query_row("SELECT count(*) FROM db_wave_file", [], |r| r.get::<_, i64>(0)).unwrap() == 0);
     }
 }

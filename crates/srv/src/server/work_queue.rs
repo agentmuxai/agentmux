@@ -10,7 +10,12 @@
 //!   POST   /agentmux/work/:id/complete    — finish
 //!   POST   /agentmux/work/:id/release     — give back
 //!   GET    /agentmux/work                 — list
-//!   DELETE /agentmux/work/:id             — cancel
+//!   DELETE /agentmux/work/:id             — cancel (the operator's; refused
+//!                                            to an agent's token)
+//!
+//! The Kanban's additions (cards, history, update/ask/submit, the next task)
+//! are in `work_tasks.rs` (SPEC_WARDEN_KANBAN_2026_10_20.md). An `:id` may be
+//! a task's number (`12`) as well as its id.
 //!
 //! Auth-gated by the same middleware as the cron and reactive routes.
 //!
@@ -72,6 +77,15 @@ pub(super) struct EnqueueRequest {
     /// ms epoch. Not claimable before this.
     #[serde(default)]
     pub not_before: Option<i64>,
+    /// Kanban: the repository it belongs to; default the enqueuer's own.
+    #[serde(default)]
+    pub repo: Option<String>,
+    /// Kanban: on hold until the operator releases it.
+    #[serde(default)]
+    pub hold: bool,
+    /// Kanban: whether a person must accept it; default from who asked.
+    #[serde(default)]
+    pub review: Option<bool>,
 }
 
 pub(super) async fn handle_work_enqueue(
@@ -123,7 +137,9 @@ pub(super) async fn handle_work_enqueue(
         target_agent: req.target_agent,
         target_group: req.target_group,
         priority: req.priority,
-        state: String::new(), // set by the store
+        // Set by the store: `open`, or `held` when filed on hold (never
+        // claimable, not even between the enqueue and a later hold).
+        state: if req.hold { crate::backend::storage::work_queue::work_state::HELD.into() } else { String::new() },
         claimed_by: String::new(),
         target_agent_uid,
         claimed_by_uid: String::new(),
@@ -140,10 +156,13 @@ pub(super) async fn handle_work_enqueue(
         result: String::new(),
     };
 
+    let filing = super::work_tasks::Filing { repo: req.repo, review: req.review };
+    let card = super::work_tasks::prepare_card(&state, caller.as_deref(), &item.created_by, filing).await;
     match state.identity_store.work_queue_enqueue(&item) {
         Ok(()) => {
+            let num = super::work_tasks::file_card(&state, &item, &card);
             publish_changed(&state);
-            (StatusCode::OK, Json(json!({ "id": item.id })))
+            (StatusCode::OK, Json(json!({ "id": item.id, "num": num })))
         }
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("enqueue failed: {e}")),
     }
@@ -225,11 +244,21 @@ pub(super) async fn handle_work_claim(
     // wants the item, and reaping here makes that self-healing. The predicate
     // is indexed (idx_ids_work_queue_claim_expires) and no-ops when nothing
     // has expired.
+    // A holder srv knows is alive keeps its lease whether or not it calls
+    // heartbeat (Kanban §6.8); what still expires is recorded as such.
+    super::work_tasks::extend_live_leases(&state, now);
+    let expiring = super::work_tasks::expiring(&state, now);
     if let Err(e) = state.identity_store.work_queue_reap(now) {
         // Not fatal — a claim against a not-yet-reaped queue is still correct,
         // just possibly emptier than it could be. Log and continue rather than
         // failing the caller's request.
         tracing::warn!(target: "workqueue", error = %e, "reap before claim failed");
+    }
+    for gone in expiring {
+        let to = state.identity_store.work_queue_get(&gone.id).ok().flatten().map(|i| i.state).unwrap_or_default();
+        if to != crate::backend::storage::work_queue::work_state::CLAIMED {
+            super::work_tasks::record(&state, &gone.id, &gone.claimed_by, "system", "expired", "claimed", &to, "lease expired");
+        }
     }
 
     // Identity M4c-1 (§6.5.9): an attributed claim's UID is the request's
@@ -260,6 +289,8 @@ pub(super) async fn handle_work_claim(
 
     match state.identity_store.work_queue_claim(&filter, now, lease) {
         Ok(Some(item)) => {
+            let num = state.identity_store.work_card_ensure(&item.id, now).ok();
+            super::work_tasks::record(&state, &item.id, &item.claimed_by, "agent", "claimed", "open", "claimed", "");
             publish_changed(&state);
             // `attempt` is echoed at the top level as well as inside `item`
             // because every subsequent call (heartbeat/complete/release) MUST
@@ -269,7 +300,7 @@ pub(super) async fn handle_work_claim(
             // 404-shaped "not the holder" response.
             (
                 StatusCode::OK,
-                Json(json!({ "claimed": true, "attempt": item.attempts, "item": item })),
+                Json(json!({ "claimed": true, "attempt": item.attempts, "num": num, "item": item })),
             )
         }
         Ok(None) => (StatusCode::OK, Json(json!({ "claimed": false }))),
@@ -334,6 +365,7 @@ pub(super) async fn handle_work_heartbeat(
         super::actor::ActorSite::WorkHeartbeat,
         Some(&req.agent_id),
     );
+    let id = super::work_tasks::resolve_id(&state, &id);
     let lease = req.lease_ms.filter(|&n| n > 0).unwrap_or(DEFAULT_LEASE_MS);
     match state
         .identity_store
@@ -359,16 +391,11 @@ pub(super) async fn handle_work_complete(
         super::actor::ActorSite::WorkComplete,
         Some(&req.agent_id),
     );
-    match state
-        .identity_store
-        .work_queue_complete(&id, &req.agent_id, holder_uid(caller.as_deref()), req.attempt, &req.result, now_ms())
-    {
-        Ok(matched) => {
-            count_holder_match(matched);
-            holder_result(matched.is_some(), &state)
-        }
-        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("complete failed: {e}")),
-    }
+    let id = super::work_tasks::resolve_id(&state, &id);
+    // A task that needs review goes to Review instead of done (the agent
+    // can't accept its own work); either way the answer names the agent's
+    // next waiting task (Kanban §6.5).
+    super::work_tasks::finish(&state, caller.as_deref(), &id, &req.agent_id, req.attempt, &req.result, None).await
 }
 
 /// Returns the item's RESULTING state alongside `ok` (Codex P2 on PR #2902).
@@ -387,6 +414,7 @@ pub(super) async fn handle_work_release(
         super::actor::ActorSite::WorkRelease,
         Some(&req.agent_id),
     );
+    let id = super::work_tasks::resolve_id(&state, &id);
     match state
         .identity_store
         .work_queue_release(&id, &req.agent_id, holder_uid(caller.as_deref()), req.attempt, &req.result, now_ms())
@@ -404,6 +432,7 @@ pub(super) async fn handle_work_release(
                 .flatten()
                 .map(|i| i.state)
                 .unwrap_or_default();
+            super::work_tasks::record(&state, &id, &req.agent_id, "agent", "released", "claimed", &resulting, &req.result);
             (StatusCode::OK, Json(json!({ "ok": true, "state": resulting })))
         }
         Ok(None) => holder_result(false, &state),
@@ -425,7 +454,22 @@ pub(super) async fn handle_work_list(
 ) -> (StatusCode, Json<Value>) {
     let limit = q.limit.unwrap_or(50).clamp(1, 500);
     match state.identity_store.work_queue_list(&q.state, limit) {
-        Ok(items) => (StatusCode::OK, Json(json!({ "items": items }))),
+        Ok(items) => {
+            // Each with its number, which agents and the operator use.
+            let now = now_ms();
+            let items: Vec<Value> = items
+                .into_iter()
+                .map(|i| {
+                    let num = state.identity_store.work_card_ensure(&i.id, now).ok();
+                    let mut v = serde_json::to_value(&i).unwrap_or_default();
+                    if let Some(o) = v.as_object_mut() {
+                        o.insert("num".into(), json!(num));
+                    }
+                    v
+                })
+                .collect();
+            (StatusCode::OK, Json(json!({ "items": items })))
+        }
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("list failed: {e}")),
     }
 }
@@ -446,11 +490,20 @@ pub(super) struct CancelRequest {
 pub(super) async fn handle_work_cancel(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     body: Option<Json<CancelRequest>>,
 ) -> (StatusCode, Json<Value>) {
+    // Cancelling is the operator's (Kanban §6.12): an agent hands a task back
+    // with release, it doesn't withdraw it.
+    if caller.as_deref().and_then(super::caller::Caller::uid).is_some() {
+        return err(StatusCode::FORBIDDEN, "cancelling a task is the operator's; hand it back with release");
+    }
     let req = body.map(|Json(r)| r).unwrap_or_default();
+    let id = super::work_tasks::resolve_id(&state, &id);
+    let before = state.identity_store.work_queue_get(&id).ok().flatten().map(|i| i.state).unwrap_or_default();
     match state.identity_store.work_queue_cancel(&id, &req.reason, now_ms()) {
         Ok(true) => {
+            super::work_tasks::record(&state, &id, "operator", "operator", "cancelled", &before, "cancelled", &req.reason);
             publish_changed(&state);
             (StatusCode::OK, Json(json!({ "ok": true })))
         }

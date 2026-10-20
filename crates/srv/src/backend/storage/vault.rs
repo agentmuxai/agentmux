@@ -135,6 +135,37 @@ impl Store {
         Ok(conn.query_row("SELECT COUNT(*) FROM db_vault_entries", [], |r| r.get(0))?)
     }
 
+    /// Notes that an entry was used at `at_ms`.
+    pub fn vault_touch(&self, id: &str, at_ms: i64) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("UPDATE db_vault_entries SET last_used_at = ?2 WHERE id = ?1", params![id, at_ms])?;
+        Ok(())
+    }
+
+    /// Inserts and updates many entries in one transaction: all of them or none.
+    /// An update replaces the row's kind, label, fields, tags and sealed parts.
+    pub fn vault_write_many(&self, inserts: &[VaultRow], updates: &[VaultRow]) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let tx = conn.unchecked_transaction()?;
+        for row in inserts {
+            tx.execute(
+                &format!("INSERT INTO db_vault_entries ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"),
+                params![row.id, row.kind, row.label, row.fields, row.tags, row.sealed, row.created_at, row.updated_at, row.last_used_at],
+            )?;
+        }
+        for row in updates {
+            let n = tx.execute(
+                "UPDATE db_vault_entries SET kind = ?2, label = ?3, fields = ?4, tags = ?5, sealed = ?6, updated_at = ?7 WHERE id = ?1",
+                params![row.id, row.kind, row.label, row.fields, row.tags, row.sealed, row.updated_at],
+            )?;
+            if n == 0 {
+                return Err(StoreError::NotFound);
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Whether a MuxBus sign-in is kept, and whose, read from its row alone:
     /// its tokens are in the keychain, and reading them could ask the person.
     pub fn vault_kept_muxbus_user(&self) -> Result<Option<String>, StoreError> {

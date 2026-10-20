@@ -24,6 +24,18 @@ export const vaultPaneTab: PaneTabManifest = {
             headerActions: () => [
                 {
                     elemtype: "iconbutton",
+                    icon: "file-import",
+                    title: "Import into the Vault",
+                    click: () => model.openTransfer("import"),
+                },
+                {
+                    elemtype: "iconbutton",
+                    icon: "file-export",
+                    title: "Export the Vault",
+                    click: () => model.openTransfer("export"),
+                },
+                {
+                    elemtype: "iconbutton",
                     icon: "circle-info",
                     title: "What the Vault may ask you",
                     click: () => model.setMeta({ "vault:prompts-read": null }),

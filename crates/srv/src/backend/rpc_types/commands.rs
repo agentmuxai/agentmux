@@ -122,6 +122,8 @@ pub const COMMAND_AGENT_CANCEL: &str = "agentcancel";
 /// (docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5, §12.3).
 pub const COMMAND_AGENT_SHUTDOWN_KEEP: &str = "agentshutdownkeep";
 pub const COMMAND_AGENT_STOP: &str = "agentstop";
+/// The API retry a pane's CLI is waiting on, as of now (`backend::agent_api_retry`).
+pub const COMMAND_AGENT_API_RETRY: &str = "agentapiretry";
 /// Backend half of the `/btw` slash command — a fast, one-shot, tool-less
 /// side question answered against a fresh throwaway block, without
 /// touching the asking pane's own persisted transcript or blocking/queuing
@@ -415,6 +417,11 @@ pub const COMMAND_AGENT_TRACKED_BLOCKS: &str = "agent.tracked-blocks";
 /// sections below its own tree. Returns `backend::swarm_remote::SwarmOtherInstancesResult`.
 /// docs/specs/SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md
 pub const COMMAND_SWARM_OTHER_INSTANCES: &str = "swarm.other-instances";
+/// The Warden Kanban (docs/specs/SPEC_WARDEN_KANBAN_2026_10_20.md §7.2): the
+/// board, one task with its history, and the operator's moves.
+pub const COMMAND_KANBAN_LIST: &str = "kanban.list";
+pub const COMMAND_KANBAN_TASK: &str = "kanban.task";
+pub const COMMAND_KANBAN_ACT: &str = "kanban.act";
 // Connections (SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md). The
 // names are the ones the frontend's connection UI has always called
 // (rpc-api/workspace.ts); they had no handler until P0.

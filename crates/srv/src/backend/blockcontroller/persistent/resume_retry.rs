@@ -102,7 +102,7 @@ impl PersistentSubprocessController {
         let Some(gfs) = crate::backend::transcript::damage::global_for(&zone) else {
             return false;
         };
-        global_zone_has_output(gfs, &zone)
+        global_zone_has_output(&gfs, &zone)
     }
 
     /// The session to continue on a first spawn that holds no id of its own
@@ -134,7 +134,7 @@ impl PersistentSubprocessController {
     pub(super) fn inherited_fork_session(&self) -> Option<String> {
         let zone = global_prior_zone(self.mstore.as_deref(), &self.block_id)?;
         let gfs = crate::backend::transcript::damage::global_for(&zone)?;
-        crate::backend::agent_session::fork_history::inherited_session(gfs, &zone)
+        crate::backend::agent_session::fork_history::inherited_session(&gfs, &zone)
     }
 
     /// AgentMux's record of the conversation this pane renders, as a
@@ -144,7 +144,7 @@ impl PersistentSubprocessController {
         let zone = global_prior_zone(self.mstore.as_deref(), &self.block_id);
         // A zone found corrupt is left out: the packet is built from the pane's own transcript.
         let gfs = zone.as_deref().and_then(crate::backend::transcript::damage::global_for);
-        let global = zone.as_deref().zip(gfs.map(|g| &**g)).map(|(z, g)| (g, z));
+        let global = zone.as_deref().zip(gfs.as_deref()).map(|(z, g)| (g, z));
         let (tail, starts_mid_line) = packet_history_tail(
             self.filestore.as_deref(),
             &self.block_id,
@@ -778,7 +778,7 @@ pub(crate) fn pane_history_tail(
     }
     let zone = global_prior_zone(mstore, block_id)?;
     let gfs = crate::backend::transcript::damage::global_for(&zone)?;
-    read_transcript_tail(gfs, &zone, crate::backend::agent_session::OUTPUT_FILE, max_bytes)
+    read_transcript_tail(&gfs, &zone, crate::backend::agent_session::OUTPUT_FILE, max_bytes)
 }
 
 /// The transcript a continuation packet is built from: the agent's global

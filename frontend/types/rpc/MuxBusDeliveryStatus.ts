@@ -21,4 +21,9 @@ last_error?: string,
 /**
  * The account this channel is (or was last) signed in as.
  */
-account_email?: string, };
+account_email?: string, 
+/**
+ * The last sign-in refresh couldn't reach the sign-in server, though the
+ * relay may still be connected: a sign-out now couldn't be undone.
+ */
+sign_in_unreachable: boolean, };

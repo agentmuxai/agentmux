@@ -50,6 +50,10 @@ pub struct MuxBusDeliveryStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub account_email: Option<String>,
+    /// The last sign-in refresh couldn't reach the sign-in server, though the
+    /// relay may still be connected: a sign-out now couldn't be undone.
+    #[serde(default)]
+    pub sign_in_unreachable: bool,
 }
 
 impl Default for MuxBusDeliveryStatus {
@@ -60,6 +64,7 @@ impl Default for MuxBusDeliveryStatus {
             last_ok_ms: None,
             last_error: None,
             account_email: None,
+            sign_in_unreachable: false,
         }
     }
 }

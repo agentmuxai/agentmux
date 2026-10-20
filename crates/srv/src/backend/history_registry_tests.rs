@@ -54,3 +54,20 @@ fn agent_zone_takes_only_current_and_archive_zones() {
     assert_eq!(agent_zone("agent::current"), None);
     assert_eq!(agent_zone("block-1"), None);
 }
+
+/// A zone found corrupt is left out of the list instead of failing it for every agent.
+#[test]
+fn a_zone_found_corrupt_is_left_out_and_the_rest_of_the_list_stays() {
+    use crate::backend::transcript::damage::{self, test_support};
+    let fs = FileStore::open_in_memory().unwrap();
+    put(&fs, "agent:list-damage-a:current", b"aaaa\n");
+    put(&fs, "agent:list-damage-a:archive:7", b"old\n");
+    put(&fs, "agent:list-damage-b:current", b"bbbbbb\n");
+    assert_eq!(agents(&fs, |_| None).unwrap().len(), 2);
+    damage::note_corrupt("agent:list-damage-a:current", "append", &test_support::corrupt_error());
+    let rows = agents(&fs, |_| None).unwrap();
+    assert_eq!(rows.len(), 2, "its archive is another zone and stays: {rows:?}");
+    let a = rows.iter().find(|r| r.definition_id == "list-damage-a").unwrap();
+    assert_eq!((a.current_bytes, a.archives), (0, 1), "only the damaged zone is left out");
+    assert_eq!(rows.iter().find(|r| r.definition_id == "list-damage-b").unwrap().current_bytes, 7);
+}

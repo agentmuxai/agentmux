@@ -97,6 +97,20 @@
     --file-icon-steel: #7494a3;
     --file-icon-grey: #6d8086;
 
+    // The editor's syntax colours (view/editor/editor-theme.ts): One Dark's
+    // palette, which reads on every dark theme. The light themes swap it in
+    // the polarity block below, so code is as legible there as on dark.
+    --syntax-keyword: #c678dd;
+    --syntax-name: #e06c75;
+    --syntax-function: #61afef;
+    --syntax-constant: #d19a66;
+    --syntax-plain: #abb2bf;
+    --syntax-type: #e5c07b;
+    --syntax-operator: #56b6c2;
+    --syntax-comment: #7d8799;
+    --syntax-string: #98c379;
+    --syntax-invalid: #ff7b72;
+
     // User-input highlight — complementary to --accent-color (blue hue ~210°).
     // Hue ~28° (warm amber) is the colour-wheel complement of the accent.
     // Used as the solid border and as the INPUT to color-mix() in
@@ -678,4 +692,16 @@
     // yellow: its usual one is unreadable on white.
     --file-tree-text-color: #3b3b3b;
     --file-icon-yellow: #a2852f;
+    // Syntax colours for a light page, each 4.5:1 or better on all four light
+    // themes' surfaces (editor-syntax-colors.test.ts).
+    --syntax-keyword: #9a2bb0;
+    --syntax-name: #c0392b;
+    --syntax-function: #2159b8;
+    --syntax-constant: #8f4f00;
+    --syntax-plain: #383a42;
+    --syntax-type: #7a5800;
+    --syntax-operator: #00697f;
+    --syntax-comment: #596273;
+    --syntax-string: #2f7432;
+    --syntax-invalid: #c0001a;
 }

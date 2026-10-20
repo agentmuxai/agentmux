@@ -21,6 +21,8 @@ describe("what the Vault may ask the person", () => {
 
     it("says what each platform asks, and when", () => {
         expect(vaultPromptNotes("win32").join(" ")).toContain("doesn't ask you anything");
+        expect(vaultPromptNotes("win32").join(" ")).toContain("Windows Hello");
+        expect(vaultPromptNotes("darwin").join(" ")).toContain("need Windows Hello for now");
         expect(vaultPromptNotes("darwin").join(" ")).toMatch(/first time.*Always Allow/);
         expect(vaultPromptNotes("linux").join(" ")).toContain("keyring is locked");
     });
