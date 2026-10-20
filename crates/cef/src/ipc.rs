@@ -783,10 +783,12 @@ async fn route_command(
             // The log names the operation, never what it carries.
             let body = args.clone();
             let op = body.get("op").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            // A value is only ever fetched by vault_reveal / vault_copy, after
-            // the OS has confirmed the person.
-            if op == "reveal" {
-                return Err("a Vault value is only shown through Reveal or Copy".to_string());
+            // These are only ever sent by the host's own commands (vault_reveal and
+            // vault_copy), after the OS has confirmed the person: a value is only
+            // fetched then, and only then is a copy reported. The page can't send
+            // them through here.
+            if matches!(op.as_str(), "reveal" | "record_copy") {
+                return Err("that is only done by Reveal and Copy, after Windows Hello confirms it's you".to_string());
             }
             let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
             let auth_key = state.auth_key.lock().clone();

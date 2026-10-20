@@ -280,6 +280,9 @@ pub fn reveal(store: &Store, id: &str, part: &str, action: &str) -> Result<zeroi
 /// only says it didn't happen.
 pub fn record_copy(store: &Store, id: &str, part: &str, done: bool) -> Result<(), String> {
     let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {id}"))?;
+    if !kinds::kind(&row.kind).is_some_and(|k| k.parts.contains(&part)) {
+        return Err(format!("{} has no part {part:?}", row.label));
+    }
     if done {
         store.vault_touch(&row.id, now_ms()).map_err(|e| e.to_string())?;
     }

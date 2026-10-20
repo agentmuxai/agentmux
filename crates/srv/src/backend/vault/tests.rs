@@ -155,6 +155,7 @@ fn a_copy_is_logged_only_once_the_host_says_the_clipboard_has_it() {
     assert!(s.vault_get(&id).unwrap().unwrap().last_used_at > 0);
     assert!(!serde_json::to_string(&log).unwrap().contains("6789"));
     assert!(record_copy(&s, "nope", "value", true).is_err());
+    assert!(record_copy(&s, &id, "free text <script>", true).unwrap_err().contains("has no part"), "the part is checked against the kind");
 }
 
 #[test]
