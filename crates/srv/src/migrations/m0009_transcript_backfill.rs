@@ -17,7 +17,7 @@ impl Migration for M0009TranscriptBackfill {
         std::fs::create_dir_all(&transcripts_dir)
             .map_err(|e| MigrationError(format!("transcript_backfill: create transcripts dir: {}", e)))?;
 
-        let global = FileStore::open(&transcripts_dir.join("filestore.db"))
+        let global = FileStore::open_global_transcripts(&transcripts_dir.join("filestore.db"))
             .map_err(|e| MigrationError(format!("transcript_backfill: open global filestore: {}", e)))?;
 
         // Collect definition IDs to seed transcripts for.

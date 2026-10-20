@@ -44,6 +44,8 @@ mod tests_stamp_throttle;
 mod tests_readers;
 #[cfg(test)]
 mod tests_checkpoint;
+#[cfg(test)]
+mod tests_global_version;
 
 #[allow(unused_imports)]
 pub use core::{FileStore, DEFAULT_FLUSH_SECS, MAX_CACHE_BYTES};

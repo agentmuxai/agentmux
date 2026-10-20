@@ -76,6 +76,17 @@ impl Drop for TimedConn<'_> {
     }
 }
 
+/// `user_version` value stamped into the GLOBAL transcript store
+/// (`shared/agents/transcripts/filestore.db`) by builds that bundle SQLite 3.51.3
+/// or later. The schema is the same as [`FILESTORE_SCHEMA_VERSION`]'s; the number
+/// is a lock: a build older than this one refuses a `user_version` above its own
+/// (`check_schema_compat`), so it cannot open the shared store with its old
+/// SQLite (3.45.0), whose WAL-reset bug can corrupt a database several processes
+/// write. Such a build runs on without the global store, as it does when that
+/// store can't be opened (`bootstrap/stores.rs`).
+/// RCA_UPGRADE_0_59_30_TO_0_59_34_ISSUES_2026_10_19.md section 6.
+pub const GLOBAL_TRANSCRIPT_STORE_VERSION: i64 = 2;
+
 /// Connections that only read, for a file-backed store. In WAL mode a reader
 /// sees every committed write and never waits for a writer, so reads taken
 /// through these don't queue behind the writer's mutex — which, on the global
@@ -140,8 +151,19 @@ pub struct FileStore {
 impl FileStore {
     /// Open a FileStore backed by a file on disk.
     pub fn open(path: &Path) -> Result<Self, StoreError> {
+        Self::open_at(path, FILESTORE_SCHEMA_VERSION)
+    }
+
+    /// Open the machine-wide transcript store (`shared/agents/transcripts/filestore.db`),
+    /// which every srv shares. It is stamped [`GLOBAL_TRANSCRIPT_STORE_VERSION`], so
+    /// builds that predate it (and bundle the SQLite with the WAL-reset bug) refuse it.
+    pub fn open_global_transcripts(path: &Path) -> Result<Self, StoreError> {
+        Self::open_at(path, GLOBAL_TRANSCRIPT_STORE_VERSION)
+    }
+
+    fn open_at(path: &Path, schema_version: i64) -> Result<Self, StoreError> {
         let conn = Connection::open(path)?;
-        let mut store = Self::configure_and_migrate(conn)?;
+        let mut store = Self::configure_and_migrate(conn, schema_version)?;
         // Checkpoints off the write path: a thread with its own connection
         // runs them, and this connection stops running them inside whichever
         // write crosses the threshold (checkpointer.rs). Only if the thread
@@ -177,14 +199,14 @@ impl FileStore {
     #[allow(dead_code)]
     pub fn open_in_memory() -> Result<Self, StoreError> {
         let conn = Connection::open_in_memory()?;
-        Self::configure_and_migrate(conn)
+        Self::configure_and_migrate(conn, FILESTORE_SCHEMA_VERSION)
     }
 
     /// Open an in-memory FileStore with a custom LRU byte cap.  Used in tests.
     #[allow(dead_code)]
     pub fn open_in_memory_with_cap(max_bytes: usize) -> Result<Self, StoreError> {
         let conn = Connection::open_in_memory()?;
-        let mut store = Self::configure_and_migrate(conn)?;
+        let mut store = Self::configure_and_migrate(conn, FILESTORE_SCHEMA_VERSION)?;
         store.cache_max_bytes = max_bytes;
         Ok(store)
     }
@@ -253,7 +275,7 @@ impl FileStore {
         Ok(busy == 0)
     }
 
-    fn configure_and_migrate(mut conn: Connection) -> Result<Self, StoreError> {
+    fn configure_and_migrate(mut conn: Connection, schema_version: i64) -> Result<Self, StoreError> {
         // The global transcript store is opened by every srv instance on the
         // machine, possibly at the same moment. busy_timeout comes first so
         // every lock below waits instead of failing.
@@ -291,9 +313,9 @@ impl FileStore {
         // deadlock with this one on a lock upgrade.
         {
             let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            check_schema_compat(&tx, FILESTORE_SCHEMA_VERSION, "filestore.db")?;
+            check_schema_compat(&tx, schema_version, "filestore.db")?;
             run_filestore_migrations(&tx)?;
-            stamp_version(&tx, FILESTORE_SCHEMA_VERSION)?;
+            stamp_version(&tx, schema_version)?;
             tx.commit()?;
         }
         Ok(Self {

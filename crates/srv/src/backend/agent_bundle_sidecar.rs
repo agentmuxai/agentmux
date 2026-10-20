@@ -89,7 +89,7 @@ pub(crate) fn record(uid: &str, memory_id: &str) {
 pub(crate) fn open_global() -> Option<FileStore> {
     let dir = crate::registry::resolve_shared_transcripts_dir()?;
     std::fs::create_dir_all(&dir).ok()?;
-    FileStore::open(&dir.join("filestore.db")).ok()
+    FileStore::open_global_transcripts(&dir.join("filestore.db")).ok()
 }
 
 #[cfg(test)]
