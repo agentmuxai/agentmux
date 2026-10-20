@@ -12,7 +12,7 @@ import { getApi } from "@/app/store/app-api";
 import { settingsAtom } from "@/app/store/global";
 import { modalsModel } from "@/app/store/modalmodel";
 import { paneHistoryBack, paneHistoryForward } from "./pane-history";
-import { decideSideButton, isRepeat } from "./side-button-rules";
+import { decideSideButton, hostPressActs, isRepeat } from "./side-button-rules";
 
 const SETTING = "mouse:sidebuttons";
 
@@ -34,6 +34,8 @@ function perform(dir: -1 | 1, via: string): void {
 interface HostSideButton {
     button: "back" | "forward";
     ctrl: boolean;
+    /** Shift, Alt, a Windows key or the left button was down. */
+    blocked?: boolean;
     source: string;
     block_id?: string | null;
 }
@@ -51,7 +53,7 @@ function onHostSideButton(p: HostSideButton): void {
         }
         return;
     }
-    if (modalsModel.hasOpenModals()) return;
+    if (!hostPressActs(p, { enabled: true, modalOpen: modalsModel.hasOpenModals() })) return;
     perform(dir, `host:${p.source}`);
 }
 

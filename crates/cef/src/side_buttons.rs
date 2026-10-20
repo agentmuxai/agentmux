@@ -65,6 +65,20 @@ pub(crate) fn ctrl_down() -> bool {
     unsafe { GetKeyState(VK_CONTROL as i32) < 0 }
 }
 
+/// Whether Shift, Alt, a Windows key or the left mouse button is down right
+/// now: the presses the page listener leaves alone (a modified click, or a press
+/// during a drag), which the host path must leave alone too. A `WM_APPCOMMAND`
+/// carries no key or button state, and Chromium makes one from a side-button
+/// release the page already declined (`decideSideButton`, side-button-rules.ts).
+pub(crate) fn others_down() -> bool {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        GetKeyState, VK_LBUTTON, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
+    };
+    [VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN, VK_LBUTTON]
+        .into_iter()
+        .any(|vk| unsafe { GetKeyState(vk as i32) < 0 })
+}
+
 pub(crate) fn emit(
     state: &Arc<AppState>,
     window: &str,
@@ -73,10 +87,12 @@ pub(crate) fn emit(
     source: &str,
     block_id: Option<&str>,
 ) {
+    let blocked = others_down();
     tracing::info!(
-        "[side-button] {} ctrl={} source={} window={} block={:?}",
+        "[side-button] {} ctrl={} blocked={} source={} window={} block={:?}",
         button.as_str(),
         ctrl,
+        blocked,
         source,
         window,
         block_id,
@@ -88,6 +104,7 @@ pub(crate) fn emit(
         &serde_json::json!({
             "button": button.as_str(),
             "ctrl": ctrl,
+            "blocked": blocked,
             "source": source,
             "block_id": block_id,
         }),

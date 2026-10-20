@@ -41,6 +41,19 @@ export function decideSideButton(e: SideButtonInput, ctx: SideButtonContext): Si
     return { consume: true, act: plain && idle && !ctx.modalOpen ? dir : null };
 }
 
+/** What the host reports of a press the page never saw as its own. */
+export interface HostSideButtonPress {
+    /** Ctrl was down: over a browser pane that is the page's own history, done in the host. */
+    ctrl: boolean;
+    /** Shift, Alt, a Windows key or the left button was down: the page listener declines these. */
+    blocked?: boolean;
+}
+
+/** Whether a host-reported press moves the selection history: the same rules as the page listener's. */
+export function hostPressActs(p: HostSideButtonPress, ctx: SideButtonContext): boolean {
+    return ctx.enabled && !ctx.modalOpen && !p.ctrl && !p.blocked;
+}
+
 /** True when this press repeats `last` closely enough to be the same press. */
 export function isRepeat(dir: -1 | 1, now: number, last: { dir: -1 | 1; at: number } | null): boolean {
     return last != null && last.dir === dir && now - last.at < DEBOUNCE_MS;

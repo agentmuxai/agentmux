@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
     DEBOUNCE_MS,
     decideSideButton,
+    hostPressActs,
     isRepeat,
     SIDE_BUTTON_BACK,
     SIDE_BUTTON_FORWARD,
@@ -63,5 +64,24 @@ describe("isRepeat", () => {
     it("lets the other direction through at once, and a first press", () => {
         expect(isRepeat(1, 1010, { dir: -1, at: 1000 })).toBe(false);
         expect(isRepeat(-1, 1000, null)).toBe(false);
+    });
+});
+
+describe("hostPressActs", () => {
+    const on = { enabled: true, modalOpen: false };
+
+    it("acts on a plain press the host reports", () => {
+        expect(hostPressActs({ ctrl: false }, on)).toBe(true);
+        expect(hostPressActs({ ctrl: false, blocked: false }, on)).toBe(true);
+    });
+
+    it("declines what the page listener declines: a modified press or one during a drag", () => {
+        expect(hostPressActs({ ctrl: false, blocked: true }, on)).toBe(false);
+    });
+
+    it("leaves Ctrl presses to the host and respects the setting and open modals", () => {
+        expect(hostPressActs({ ctrl: true }, on)).toBe(false);
+        expect(hostPressActs({ ctrl: false }, { enabled: false, modalOpen: false })).toBe(false);
+        expect(hostPressActs({ ctrl: false }, { enabled: true, modalOpen: true })).toBe(false);
     });
 });
