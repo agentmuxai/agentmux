@@ -206,15 +206,14 @@ fn backup_stores(home: &Path, shared_store_path: &Path, data_dir: &Path) -> std:
         .join(format!("pre-migration-{}-{}", version, ts));
     std::fs::create_dir_all(&backup_dir)?;
 
-    // shared store.db
-    if shared_store_path.exists() {
-        std::fs::copy(shared_store_path, backup_dir.join("store.db"))?;
-    }
-
-    // channel objects.db
+    // VACUUM INTO, not a file copy: other processes hold the shared stores open
+    // and a file copy misses their -wal. Global migrations write identity-store.db.
     let objects_db = data_dir.join("db").join("objects.db");
-    if objects_db.exists() {
-        std::fs::copy(&objects_db, backup_dir.join("objects.db"))?;
+    let identity_store = home.join("shared").join("identity-store.db");
+    for (src, name) in [(shared_store_path, "store.db"), (objects_db.as_path(), "objects.db"), (identity_store.as_path(), "identity-store.db")] {
+        if src.exists() {
+            crate::backend::storage::db_copy::copy_database(src, &backup_dir.join(name)).map_err(std::io::Error::other)?;
+        }
     }
 
     prune_old_backups(home);

@@ -121,15 +121,10 @@ pub fn create_snapshot(
             continue;
         }
         let dst = snap_dir.join(db_name);
-        let conn = Connection::open(&src)?;
-        // VACUUM INTO writes a consistent single-file snapshot of the
-        // current DB state including any committed WAL frames. The dst
-        // path must not exist. Cannot use parameter binding for the
-        // path — SQLite parses VACUUM INTO at planning time before
-        // bindings are applied. Path safety is ensured by the snap_dir
-        // construction (validate_channel + ISO timestamp).
-        let quoted = quote_sql_literal(&dst.to_string_lossy());
-        conn.execute_batch(&format!("VACUUM INTO {quoted};"))?;
+        // A consistent copy including committed WAL frames, read-only on the
+        // source (`db_copy`).
+        crate::backend::storage::db_copy::copy_database(&src, &dst)
+            .map_err(|e| SnapshotError::io(&dst, std::io::Error::other(e)))?;
     }
     info!(
         snapshot = %snap_dir.display(),
@@ -266,13 +261,6 @@ fn snapshot_dir_name(channel: &str, code_version: &str, t: SystemTime) -> String
     // Spec §3.4 example uses this same form.
     let ts = dt.format("%Y-%m-%dT%H-%M-%SZ").to_string();
     format!("{channel}-pre-v{code_version}-{ts}.bak")
-}
-
-fn quote_sql_literal(s: &str) -> String {
-    // Double up any single quotes; wrap in single quotes. VACUUM INTO
-    // accepts a string-literal path; binding params is not supported.
-    let escaped = s.replace('\'', "''");
-    format!("'{escaped}'")
 }
 
 // ── tests ──────────────────────────────────────────────────────────────
