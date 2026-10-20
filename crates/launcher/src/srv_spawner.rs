@@ -242,7 +242,7 @@ fn forward_progress_line(line: &str, stage: &'static str, sink: &crate::startup_
 }
 
 /// Run `agentmux-srv migrate --prepare` while srv is stopped, as the splash's
-/// "Updating your data" stage: copy the previous version's data forward,
+/// "Updating data" stage: copy the previous version's data forward,
 /// back up, run the pending migrations, each a sub-row. The upgrade step of
 /// `docs/specs/SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md`
 /// §10, run by [`spawn_srv`] when srv reports `AGENTMUXSRV-NEEDS-PREPARE`.
@@ -251,7 +251,7 @@ async fn run_prepare(
     paths: &DataPaths,
     sink: &crate::startup_events::StartupEventSink,
 ) -> Result<(), SrvSpawnError> {
-    sink.stage_begin("prepare", "Updating your data");
+    sink.stage_begin("prepare", "Updating data");
     let t = std::time::Instant::now();
     let backend_path = resolve_srv_binary(launcher_exe_dir)?;
     let mut cmd = Command::new(&backend_path);

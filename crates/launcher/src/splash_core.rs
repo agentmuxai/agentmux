@@ -64,17 +64,24 @@ pub const GAP_STAGE: &str = "gap";
 /// only add a row for time nobody waited on.
 pub const GAP_MIN_MS: u64 = 150;
 
+/// The widest stage label the Windows and macOS splashes show whole; longer
+/// ones are cut with "..". Every stage and gap label must fit
+/// (`every_stage_label_fits_the_splash`).
+// Linux's text splash has its own wider column (`splash_linux`).
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+pub const STAGE_LABEL_MAX_CHARS: usize = 16;
+
 /// What runs after `stage` ends and before the next stage reports, as the
 /// gap row's label. `None` after the last stage: nothing follows it.
 pub fn gap_label_after(stage: &str) -> Option<&'static str> {
     match stage {
         "paint" => None,
-        "prep" | "migrations" | "prepare" => Some("Starting the backend"),
-        "backend" => Some("Starting the window"),
-        "host" => Some("Connecting the window"),
-        "dlopen" => Some("Starting the browser engine"),
-        "cef_init" => Some("Loading the interface"),
-        _ => Some("Waiting for the next step"),
+        "prep" | "migrations" | "prepare" => Some("Starting backend"),
+        "backend" => Some("Starting window"),
+        "host" => Some("Connecting"),
+        "dlopen" => Some("Starting engine"),
+        "cef_init" => Some("Loading the UI"),
+        _ => Some("Waiting"),
     }
 }
 
@@ -491,12 +498,25 @@ mod tests {
     }
 
     #[test]
+    fn every_stage_label_fits_the_splash() {
+        let stages = ["prep", "migrations", "prepare", "backend", "host", "dlopen", "cef_init", "paint", "other"];
+        // The labels the launcher and the host report (`stage_begin` calls).
+        let reported = [
+            "Launcher setup", "Updating data", "Backend startup", "Host startup",
+            "Load CEF library", "CEF initialize", "Window paint", "Migrations",
+        ];
+        for label in stages.iter().filter_map(|s| gap_label_after(s)).chain(reported) {
+            assert!(label.chars().count() <= STAGE_LABEL_MAX_CHARS, "{label:?} is cut on the splash");
+        }
+    }
+
+    #[test]
     fn a_stage_ending_with_none_open_opens_a_gap_named_for_what_runs_next() {
         let mut tl = StageTimeline::new();
         tl.apply_tick(vec![begin("host")]);
         tl.apply_tick(vec![end("host", 30)]);
         let gap = tl.stages.last().unwrap();
-        assert_eq!((gap.stage, gap.label), (GAP_STAGE, "Connecting the window"));
+        assert_eq!((gap.stage, gap.label), (GAP_STAGE, "Connecting"));
         assert!(gap.done.is_none(), "the gap row is the one running");
     }
 
