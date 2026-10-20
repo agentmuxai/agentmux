@@ -3,7 +3,8 @@
 
 //! The persistent CLI's stdout reader task, started by `spawn_process`
 //! (`spawn.rs`): control frames, session-id capture, resume-state events,
-//! failure classification, the task feed and the output append.
+//! API retry state, failure classification, the task feed and the output
+//! append.
 
 use super::*;
 
@@ -62,6 +63,9 @@ impl PersistentSubprocessController {
         // lines drive the background-task registry, including tasks a
         // subagent owns (see `background_task_feed.rs`).
         let mut task_feed = crate::backend::background_task_feed::TaskFeed::default();
+        // Clears its retry when dropped, so also when this task is aborted.
+        let mut api_retry =
+            crate::backend::agent_api_retry::ApiRetryReader::new(&block_id_read, my_generation_read, broker_read.clone());
         // Set by a compaction boundary: the memory card the hook finished
         // before the boundary was written waits for the first line after the
         // boundary that isn't the CLI's own user-turn text (its summary, a
@@ -169,6 +173,7 @@ impl PersistentSubprocessController {
                         continue;
                     }
                 }
+                api_retry.observe(&parsed, || inner_read.lock().unwrap().spawn_generation);
                 if let Some(store) = mstore_read.as_deref() {
                     let now_ms = agentmux_common::time::now_ms();
                     task_feed.apply(

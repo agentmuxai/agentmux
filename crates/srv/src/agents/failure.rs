@@ -379,10 +379,18 @@ pub fn classify(
             &tail,
         );
     }
+    // Claude Code ends a turn whose retries ran out with "API Error:
+    // Connection refused — … (ECONNREFUSED)" when the network is down.
     if hay.contains("apiconnectionerror")
         || hay.contains("connection error")
+        || hay.contains("connection refused")
         || hay.contains("could not resolve")
         || hay.contains("econnreset")
+        || hay.contains("econnrefused")
+        || hay.contains("enotfound")
+        || hay.contains("enetunreach")
+        || hay.contains("ehostunreach")
+        || hay.contains("etimedout")
         || hay.contains("network")
         || hay.contains("timed out")
         || hay.contains("timeout")
@@ -726,6 +734,35 @@ mod tests {
         let f = classify(Some(1), None, "APIConnectionError: Connection error.", None);
         assert_eq!(f.code, FailureClass::Network);
         assert!(f.retryable);
+    }
+
+    const CONNECTION_REFUSED: &str =
+        "API Error: Connection refused — a firewall or proxy may be blocking it (ECONNREFUSED)";
+
+    #[test]
+    fn connection_refused_after_the_cli_gave_up_is_network() {
+        let f = classify(Some(1), None, CONNECTION_REFUSED, None);
+        assert_eq!(f.code, FailureClass::Network);
+        assert!(f.retryable);
+        // The same text in the result frame the persistent controller classifies.
+        let frame = json!({
+            "type": "result",
+            "subtype": "success",
+            "is_error": true,
+            "result": CONNECTION_REFUSED,
+        });
+        let f = classify(None, None, "", Some(&frame));
+        assert_eq!(f.code, FailureClass::Network);
+        assert!(f.retryable);
+    }
+
+    #[test]
+    fn socket_error_codes_are_network() {
+        for code in ["ECONNREFUSED", "ENOTFOUND", "ENETUNREACH", "EHOSTUNREACH", "ETIMEDOUT"] {
+            let f = classify(Some(1), None, &format!("Error: connect {code} api.anthropic.com"), None);
+            assert_eq!(f.code, FailureClass::Network, "{code}");
+            assert!(f.retryable, "{code}");
+        }
     }
 
     #[test]

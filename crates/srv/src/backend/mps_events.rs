@@ -94,6 +94,8 @@ events! {
     AgentMessageAccepted: super::mps::EVENT_AGENT_MESSAGE_ACCEPTED => crate::backend::blockcontroller::MessageAcceptedEvent,
     /// A stale `--resume` is being retried, or the retry resolved.
     AgentResumeRetry: super::mps::EVENT_AGENT_RESUME_RETRY => ResumeRetryEvent,
+    /// A Claude CLI request is being retried, or no longer is.
+    AgentApiRetry: super::mps::EVENT_AGENT_API_RETRY => crate::backend::agent_api_retry::ApiRetryEvent,
     /// One line of a closing agent pane's shutdown log (`sagas::close_pane::publish_shutdown`).
     AgentShutdown: crate::sagas::close_pane::EVENT_AGENT_SHUTDOWN => crate::sagas::close_pane::ShutdownLineEvent,
     /// A call to action srv holds open started, or ended (`backend::user_attention`).

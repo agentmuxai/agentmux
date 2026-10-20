@@ -34,6 +34,7 @@ import type { AgentSessionWriteStateResult } from "@/types/rpc/AgentSessionWrite
 import type { AgentShutdownKeepResult } from "@/types/rpc/AgentShutdownKeepResult";
 import type { AgentSkill } from "@/types/rpc/AgentSkill";
 import type { AgentTrackedBlocksResult } from "@/types/rpc/AgentTrackedBlocksResult";
+import type { ApiRetryEvent } from "@/types/rpc/ApiRetryEvent";
 import type { AppInfoResult } from "@/types/rpc/AppInfoResult";
 import type { AppUpdateStatus } from "@/types/rpc/AppUpdateStatus";
 import type { AskSideQuestionResult } from "@/types/rpc/AskSideQuestionResult";
@@ -59,6 +60,7 @@ import type { CheckCliAuthResult } from "@/types/rpc/CheckCliAuthResult";
 import type { ClaudeGlobalConfig } from "@/types/rpc/ClaudeGlobalConfig";
 import type { CommandActivitySummaryData } from "@/types/rpc/CommandActivitySummaryData";
 import type { CommandAgentAnswerData } from "@/types/rpc/CommandAgentAnswerData";
+import type { CommandAgentApiRetryData } from "@/types/rpc/CommandAgentApiRetryData";
 import type { CommandAgentCancelData } from "@/types/rpc/CommandAgentCancelData";
 import type { CommandAgentDefCreateFromTemplateData } from "@/types/rpc/CommandAgentDefCreateFromTemplateData";
 import type { CommandAgentDefHideData } from "@/types/rpc/CommandAgentDefHideData";
@@ -500,6 +502,10 @@ export const GeneratedApi = {
   // command "agentanswer"
   AgentAnswerCommand(client: RpcClient, data: CommandAgentAnswerData, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("agentanswer", data, opts);
+  },
+  // command "agentapiretry"
+  AgentApiRetryCommand(client: RpcClient, data: CommandAgentApiRetryData, opts?: RpcOpts): Promise<ApiRetryEvent> {
+    return client.rpcCall("agentapiretry", data, opts);
   },
   // command "agentcancel"
   AgentCancelCommand(client: RpcClient, data: CommandAgentCancelData, opts?: RpcOpts): Promise<void> {

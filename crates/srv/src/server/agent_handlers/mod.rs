@@ -8,6 +8,7 @@
 // conversation history. A process spawn starts any agent's CLI. Definitions:
 // docs/architecture/ARCHITECTURE_FORK_SPAWN_AND_WORKER_2026_10_17.md.
 mod account_label;
+mod api_retry;
 mod core;
 mod skills;
 mod history;
@@ -49,6 +50,7 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     history::register(engine, state);
     template::register(engine, state);
     fork_history::register(engine, state);
+    api_retry::register(engine);
     identity::register(engine, state);
     instance::register(engine, state);
     session::register(engine, state);
