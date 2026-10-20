@@ -39,7 +39,7 @@ use crate::server::AppState;
 
 use super::reducer_helpers::{dispatch_to_reducer, seed_layout_via_reducer};
 
-const SNAPSHOT_META_KEY: &str = "session:last_topology";
+pub(crate) const SNAPSHOT_META_KEY: &str = "session:last_topology";
 
 pub(crate) fn placeholder(idx: usize) -> String {
     format!("__snap_block_{idx}__")
@@ -599,28 +599,7 @@ pub(crate) async fn restore_workspace(
         return Err("restore_last_session: CreateWorkspace produced no WorkspaceCreated event".into());
     };
 
-    let replay: Vec<ReplayTab> = tabs_json
-        .iter()
-        .map(|tab_json| ReplayTab {
-            name: tab_json.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
-            blocks: tab_json
-                .get("blocks")
-                .and_then(|v| v.as_array())
-                .map(|blocks| blocks.iter().map(|b| b.get("meta").cloned().unwrap_or(Value::Null)).collect())
-                .unwrap_or_default(),
-            rootnode: tab_json
-                .get("rootnode")
-                .filter(|v| !v.is_null())
-                .and_then(|v| serde_json::from_value::<LayoutNode>(v.clone()).ok()),
-            focused: tab_json.get("focusednodeid").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
-            // `magnifiednodeid` refers to a LayoutNode.id, not a block id —
-            // like `focusednodeid`, it survives the snapshot round-trip
-            // verbatim (only block ids are placeholder-remapped). Previously
-            // never captured/passed at all (reagentx P2 on PR #2560), so a tab
-            // closed with a pane magnified relaunched showing the full tree.
-            magnified: tab_json.get("magnifiednodeid").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
-        })
-        .collect();
+    let replay = replay_tabs_of(snapshot);
     let (tab_events, replayed) = replay_tabs(state, &ws_id, &replay, "restore_last_session").await;
     let mut all_events = ws_events;
     all_events.extend(tab_events);
@@ -650,34 +629,75 @@ pub(crate) async fn restore_workspace(
         return Ok(None);
     }
 
-    // Restore which tab was active (reagentx P2 on PR #2560: previously
-    // never captured/restored at all — every relaunch focused whichever tab
-    // `CreateTab`'s own first-tab-wins default (`wcore/tab.rs`) happened to
-    // leave active, i.e. always the first). `None` (no index in the
-    // snapshot, or that index's tab didn't survive restore) leaves that
-    // default in place rather than erroring — an unset/stale active tab is
-    // a cosmetic miss, not a reason to fail the whole restore.
-    if let Some(active_snapshot_idx) = snapshot.get("active_tab_index").and_then(|v| v.as_u64()) {
-        if let Some(new_active_tab_id) = new_tab_ids_by_snapshot_index.get(&(active_snapshot_idx as usize)) {
-            let active_events = dispatch_to_reducer(
-                state,
-                Command::SetActiveTab {
-                    workspace_id: ws_id.clone(),
-                    tab_id: new_active_tab_id.clone(),
-                },
-            )
-            .await;
-            if let Some(err) = find_error(&active_events) {
-                tracing::warn!(error = %err, "restore_last_session: SetActiveTab failed — leaving default active tab");
-            } else if apply_and_publish(state, &active_events).await.is_err() {
-                tracing::warn!("restore_last_session: SetActiveTab SQLite write failed — leaving default active tab");
-            } else {
-                all_events.extend(active_events);
-            }
-        }
-    }
-
+    all_events.extend(restore_active_tab(state, &ws_id, snapshot, &new_tab_ids_by_snapshot_index).await);
     Ok(Some((ws_id, all_events)))
+}
+
+/// The tabs of one saved window (`snapshot_workspace`'s shape), ready for
+/// [`replay_tabs`].
+pub(crate) fn replay_tabs_of(snapshot: &Value) -> Vec<ReplayTab> {
+    let tabs_json = snapshot.get("tabs").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    tabs_json
+        .iter()
+        .map(|tab_json| ReplayTab {
+            name: tab_json.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+            blocks: tab_json
+                .get("blocks")
+                .and_then(|v| v.as_array())
+                .map(|blocks| blocks.iter().map(|b| b.get("meta").cloned().unwrap_or(Value::Null)).collect())
+                .unwrap_or_default(),
+            rootnode: tab_json
+                .get("rootnode")
+                .filter(|v| !v.is_null())
+                .and_then(|v| serde_json::from_value::<LayoutNode>(v.clone()).ok()),
+            focused: tab_json.get("focusednodeid").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+            // `magnifiednodeid` refers to a LayoutNode.id, not a block id —
+            // like `focusednodeid`, it survives the snapshot round-trip
+            // verbatim (only block ids are placeholder-remapped). Previously
+            // never captured/passed at all (reagentx P2 on PR #2560), so a tab
+            // closed with a pane magnified relaunched showing the full tree.
+            magnified: tab_json.get("magnifiednodeid").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+        })
+        .collect()
+}
+
+/// Make the snapshot's active tab (`active_tab_index`, a position in its
+/// `tabs`) the workspace's active tab, given the new ids of the tabs that came
+/// back by that position. Returns the applied events, unpublished.
+///
+/// Restore which tab was active (reagentx P2 on PR #2560: previously
+/// never captured/restored at all — every relaunch focused whichever tab
+/// `CreateTab`'s own first-tab-wins default (`wcore/tab.rs`) happened to
+/// leave active, i.e. always the first). `None` (no index in the
+/// snapshot, or that index's tab didn't survive restore) leaves that
+/// default in place rather than erroring — an unset/stale active tab is
+/// a cosmetic miss, not a reason to fail the whole restore.
+pub(crate) async fn restore_active_tab(
+    state: &AppState,
+    ws_id: &str,
+    snapshot: &Value,
+    new_tab_ids_by_snapshot_index: &HashMap<usize, String>,
+) -> Vec<Event> {
+    let Some(active_snapshot_idx) = snapshot.get("active_tab_index").and_then(|v| v.as_u64()) else {
+        return Vec::new();
+    };
+    let Some(new_active_tab_id) = new_tab_ids_by_snapshot_index.get(&(active_snapshot_idx as usize)) else {
+        return Vec::new();
+    };
+    let active_events = dispatch_to_reducer(
+        state,
+        Command::SetActiveTab { workspace_id: ws_id.to_string(), tab_id: new_active_tab_id.clone() },
+    )
+    .await;
+    if let Some(err) = find_error(&active_events) {
+        tracing::warn!(error = %err, "restore_last_session: SetActiveTab failed — leaving default active tab");
+        return Vec::new();
+    }
+    if apply_and_publish(state, &active_events).await.is_err() {
+        tracing::warn!("restore_last_session: SetActiveTab SQLite write failed — leaving default active tab");
+        return Vec::new();
+    }
+    active_events
 }
 
 #[cfg(test)]

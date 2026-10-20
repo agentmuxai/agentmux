@@ -252,6 +252,11 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
                     // no split. See single_leaf_tree's doc comment.
                     Some(crate::backend::wcore::single_leaf_tree(&seeded_ids[0]))
                 } else if seed_view.is_none() && seeded_ids.len() == 3 {
+                    // A cold start with nothing of its own to restore: the
+                    // window may offer a layout another build saved.
+                    if restore_if_available {
+                        super::session_other_builds::remember_seeded_default(store, &new_ws_id, &new_tab_id, &seeded_ids);
+                    }
                     // SPEC_864 Phase 3 — post-bootstrap seed routes
                     // through the reducer (single writer of
                     // db_layout); the tree shape is shared with the

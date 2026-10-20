@@ -127,3 +127,67 @@ pub struct LayoutIntentResult {
     #[ts(type = "number")]
     pub version: u64,
 }
+
+/// Request for `layout.otherBuilds`: the layouts other builds of AgentMux
+/// saved when their last window closed (`session_other_builds`).
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandOtherBuildLayoutsData {
+    /// The window asking; decides `OtherBuildLayoutsResult::offer`.
+    pub window_id: String,
+}
+
+/// One build's saved layout, described without opening it.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS, PartialEq)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct OtherBuildLayout {
+    /// The build's data channel, e.g. `stable` or a local build's own.
+    pub channel: String,
+    pub version: String,
+    /// When it was saved, in ms since the epoch.
+    #[ts(type = "number")]
+    pub saved_at_ms: i64,
+    /// False when the record has no time of its own and `saved_at_ms` is
+    /// when that build last wrote its database.
+    pub saved_at_exact: bool,
+    pub windows: u32,
+    pub tabs: u32,
+    pub panes: u32,
+    /// The agents in its panes, by name, each once.
+    pub agents: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct OtherBuildLayoutsResult {
+    /// The window still shows the default layout a cold start seeded because
+    /// this build had nothing to restore, so offering one is welcome.
+    pub offer: bool,
+    /// Newest first.
+    pub layouts: Vec<OtherBuildLayout>,
+}
+
+/// Request for `layout.restoreOtherBuild`: rebuild another build's saved
+/// layout in this window. Its database is only read.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandRestoreOtherBuildLayoutData {
+    pub window_id: String,
+    pub channel: String,
+    pub version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct RestoreOtherBuildLayoutResult {
+    /// The window's workspace, which the tabs were added to.
+    pub workspace_id: String,
+    /// The tabs created in this window, in order.
+    pub tab_ids: Vec<String>,
+    /// The untouched default tab was removed, so the window shows only the
+    /// restored layout.
+    pub replaced_default: bool,
+    /// The layout's other windows, rebuilt and waiting for this window to
+    /// open them (`window.TakeRestoredWindows`).
+    pub other_windows: u32,
+}

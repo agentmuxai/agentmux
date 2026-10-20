@@ -919,6 +919,14 @@
             "method": "OpenLayoutCommand"
         },
         {
+            "command": "layout.otherBuilds",
+            "method": "OtherBuildLayoutsCommand"
+        },
+        {
+            "command": "layout.restoreOtherBuild",
+            "method": "RestoreOtherBuildLayoutCommand"
+        },
+        {
             "command": "layout.applyIntent",
             "method": "LayoutApplyIntentCommand"
         },

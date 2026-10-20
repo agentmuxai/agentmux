@@ -622,6 +622,9 @@ pub const COMMAND_BROWSER_PROFILES_DELETE: &str = "browser_profiles.delete";
 pub const COMMAND_LAYOUT_SAVE: &str = "layout.save";
 pub const COMMAND_LAYOUT_PREVIEW: &str = "layout.preview";
 pub const COMMAND_LAYOUT_OPEN: &str = "layout.open";
+/// Layouts other builds saved, and restoring one here (`session_other_builds`).
+pub const COMMAND_LAYOUT_OTHER_BUILDS: &str = "layout.otherBuilds";
+pub const COMMAND_LAYOUT_RESTORE_OTHER_BUILD: &str = "layout.restoreOtherBuild";
 /// Apply one layout edit (split, move, resize, close, ...) to a tab's tree in
 /// the reducer — `Command::LayoutApplyIntent`.
 /// SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md §4.

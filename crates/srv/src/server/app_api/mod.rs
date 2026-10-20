@@ -83,6 +83,7 @@ mod bookmarks;
 mod browser_profiles;
 pub(crate) use browser_profiles::list as browser_profiles_list;
 mod layout;
+mod other_build_layouts;
 mod browser_start_page;
 mod voice;
 pub(crate) mod fleet;
@@ -117,6 +118,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     bookmarks::register(engine, state);
     browser_profiles::register(engine, state);
     layout::register(engine, state);
+    other_build_layouts::register(engine, state);
     layout_intent::register(engine, state);
     browser_start_page::register(engine, state);
     voice::register(engine, state);
