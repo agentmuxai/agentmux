@@ -19,7 +19,7 @@ import { getTabGrabOffset } from "@/app/tab/tab-grab-offset";
 import { onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import { getLayoutModelForStaticTab } from "@/layout/index";
-import { removeMovedBlock } from "@/layout/lib/layoutMagnify";
+import { paneTearOffOf, removeTornOffPane } from "./pane-tearoff";
 import { handlePaneTabDragEnd, type PaneTabDragPayload } from "./pane-tab-tearoff";
 import type { LayoutNode } from "@/layout/lib/types";
 import { endReleasedSession } from "./drag-session";
@@ -146,6 +146,7 @@ async function handleCrossWindowDragEnd(
 
     let dragPayloadForApi: { blockId?: string; tabId?: string };
     let dragType: "pane" | "tab";
+    let tearOffMembers: string[] = [];
 
     // A single Pane Tab: its own rules (in-window guard, stack-safe source
     // removal, rollback). SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.5.
@@ -155,9 +156,12 @@ async function handleCrossWindowDragEnd(
     }
 
     if (payload.kind === "tile") {
-        const blockId = payload.node?.data?.blockId;
-        if (!blockId) return;
-        dragPayloadForApi = { blockId };
+        // The whole pane goes: every tab of its stack, not only the visible
+        // one (the host's drag session still only needs the visible block).
+        const tearOff = paneTearOffOf(payload.node);
+        if (!tearOff) return;
+        dragPayloadForApi = { blockId: tearOff.blockId };
+        tearOffMembers = tearOff.members;
         dragType = "pane";
     } else {
         dragPayloadForApi = { tabId: payload.tabId };
@@ -181,7 +185,7 @@ async function handleCrossWindowDragEnd(
             await performCrossWindowDrop(dragType, dragPayloadForApi, workspace.oid, activeTabId);
             await api.completeCrossDrag(dragId, targetWindow, cursorPoint.x, cursorPoint.y);
         } else if (!targetWindow) {
-            await performTearOff(dragType, dragPayloadForApi, workspace.oid, activeTabId, cursorPoint.x, cursorPoint.y, sourceWindow);
+            await performTearOff(dragType, dragPayloadForApi, tearOffMembers, workspace.oid, activeTabId, cursorPoint.x, cursorPoint.y, sourceWindow);
             await api.completeCrossDrag(dragId, null, cursorPoint.x, cursorPoint.y);
         } else {
             await api.cancelCrossDrag(dragId);
@@ -204,6 +208,7 @@ async function performCrossWindowDrop(
 async function performTearOff(
     dragType: "pane" | "tab",
     payload: { blockId?: string; tabId?: string },
+    members: string[],
     sourceWsId: string,
     sourceTabId: string,
     screenX: number,
@@ -253,6 +258,7 @@ async function performTearOff(
             sourceTabId,
             sourceWsId,
             true,
+            members,
         );
         if (!newWsId) {
             Logger.error("dnd:cross", "TearOffBlock returned no workspace id", {
@@ -326,12 +332,11 @@ async function performTearOff(
         // floater). Mirrors the .win32 and .darwin siblings.
         const layoutModel = getLayoutModelForStaticTab();
         if (layoutModel) {
-            // Stack-safe: when the pane had other tabs, only this block leaves
-            // and the pane stays. The old DeleteNode(getNodeByBlockId(...))
-            // removed the WHOLE leaf, sibling tabs included, and raced the
-            // backend's own stack-safe queued delete.
+            // Every tab of the pane left with it, so each goes (stack-safe, the
+            // pane with the last). The old DeleteNode(getNodeByBlockId(...))
+            // removed the whole leaf and raced the backend's own queued delete.
             // SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.5 (design 3).
-            removeMovedBlock(layoutModel, payload.blockId);
+            removeTornOffPane(layoutModel, members);
         }
     } else if (dragType === "tab" && payload.tabId) {
         const newWsId = await WorkspaceService.TearOffTab(payload.tabId, sourceWsId);

@@ -45,10 +45,10 @@ import { ErrorBoundary } from "@/app/element/errorboundary";
 import { CenteredDiv } from "@/app/element/quickelems";
 import { ModalsRenderer } from "@/app/modals/modalsrenderer";
 import { TabContent } from "@/app/tab/tabcontent";
-import { WorkspaceService } from "@/store/services";
 import { atoms, getApi } from "@/store/global";
 import * as MOS from "@/store/mos";
 import { holdRedock, redockInProgress } from "./floating-redock-guard";
+import { floaterPanes, redockFloaterPane } from "./floater-panes";
 import { Show, createEffect, createMemo, onCleanup, onMount, type JSX } from "solid-js";
 
 import { createRedockArming } from "./redock-arming";
@@ -994,11 +994,10 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             // `onCleanup` against the current reactive owner, but we're inside
             // an async mouseup callback with no owner — the refCount would
             // never get decremented and we'd leak a Tab subscription per drop.
-            const sourceTabObj = MOS.getObjectValue<Tab>(
-                MOS.makeORef("tab", sourceTabId),
-            );
-            const sourceBlockId = sourceTabObj?.blockids?.[0];
-            if (!sourceBlockId) {
+            // The pane the floater holds, with all of its tabs when it was torn off
+            // as a stack (floater-panes.ts).
+            const pane = floaterPanes(sourceTabId)[0];
+            if (!pane) {
                 console.warn(
                     "[floating-pane] floater has no block to redock — skipping",
                 );
@@ -1018,14 +1017,11 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             capturedGhostForWindow = null;
 
             try {
-                await WorkspaceService.RedockFloatingPane(
-                    sourceBlockId,
-                    sourceTabId,
-                    sourceWsId,
-                    targetTabId,
-                    targetWsId,
-                    ghost.block_id ?? null,
-                    ghost.dir ?? null,
+                await redockFloaterPane(
+                    pane,
+                    { tabId: sourceTabId, workspaceId: sourceWsId },
+                    { tabId: targetTabId, workspaceId: targetWsId },
+                    { blockId: ghost.block_id, dir: ghost.dir },
                 );
                 // After successful redock, source tab.blockids empties
                 // → the auto-close watcher dismisses the floater.
