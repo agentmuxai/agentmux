@@ -65,6 +65,7 @@ import { installFileDropController } from "@/app/drag/file-drop";
 import { installWindowDragEvents } from "@/app/drag/window-drag-events";
 import { MuxInitFatalError, requireLoaded } from "@/app/init/require-loaded";
 import { installFocusFollowsSelection } from "@/app/store/focusManager";
+import { reopenRestoredWindows } from "@/app/init/restored-windows";
 
 // Deferred — assigned inside initApp() after window.api is ready.
 // Do NOT call getApi() at module level: this file is statically imported by
@@ -146,22 +147,6 @@ function currentWindowLabel(): string {
     return new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
 }
 
-/**
- * Open the windows a restore rebuilt beside this one: the rest of the last
- * session's windows, each in a window of its own where it was. Best-effort:
- * one that fails to open leaves the others, and this window, as they are.
- */
-async function reopenRestoredWindows(): Promise<void> {
-    try {
-        const restored = await WindowService.TakeRestoredWindows();
-        for (const w of restored ?? []) {
-            await getApi().openRestoredWindow(w);
-        }
-    } catch (e) {
-        console.warn("[session-restore] couldn't reopen the last session's other windows", e);
-    }
-}
-
 async function initHostMux(): Promise<void> {
     const t0 = performance.now();
     const tlog = (label: string, since: number) => {
@@ -184,6 +169,7 @@ async function initHostMux(): Promise<void> {
         tlog("GetClientData", t);
 
         let windowId = clientData.windowids?.[0];
+        const coldStart = !windowId;
 
         // If no windows exist, create one. This is the genuine cold-start
         // case (SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13 Feature 1)
@@ -284,6 +270,11 @@ async function initHostMux(): Promise<void> {
         })();
         // What AgentMux recovered from, until the user closes it (SPEC_RECOVERY_NOTICES_AND_TOASTS §4.2).
         void import("@/app/init/incidents").then(({ surfaceIncidents }) => surfaceIncidents());
+        // A cold start with nothing of its own to restore offers the layout
+        // another build saved. Fire-and-forget: it reads other builds' data.
+        if (coldStart) {
+            void import("@/app/window/restore-other-build").then((m) => m.offerLayoutFromOtherBuild());
+        }
 
         benchDump(); // emit full startup timeline to log
 
