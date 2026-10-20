@@ -32,8 +32,8 @@ export function perfState({ hasA, initial, final }) {
     return flaggedMeasures(final).length ? "red" : "green";
 }
 
-/** Whether a confirmation pair finished: the comparison over every run has more runs than the first matrix's. */
-const confirmationRan = (initial, final) => (final?.head?.length ?? 0) > (initial?.head?.length ?? 0);
+/** Whether a confirmation pair finished: the comparison over every run has more runs than the first matrix's on both sides (a lone extra B run is not a pair). */
+const confirmationRan = (initial, final) => (final?.head?.length ?? 0) > (initial?.head?.length ?? 0) && (final?.base?.length ?? 0) > (initial?.base?.length ?? 0);
 
 const fmt = (x) => (x == null ? "n/a" : String(Math.round(x * 10) / 10));
 const sign = (n) => (n == null ? "n/a" : n > 0 ? `+${n}%` : `${n}%`);

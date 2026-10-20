@@ -7,11 +7,11 @@ import { describe, expect, it } from "vitest";
 import { closeNote, failedSteps, flaggedMeasures, issueBody, perfState, reportIssue, reportRunFailure, runState, timedOutResult } from "./lib/perfissue.mjs";
 
 const cell = (a, b, changePct, flag) => ({ a, b, change_pct: changePct, flag });
-const compare = (measures, head = ["b1", "b2", "b3", "b4"]) => ({ head, measures, flags: Object.entries(measures).filter(([, m]) => m?.flag).map(([k]) => k) });
+const compare = (measures, head = ["b1", "b2", "b3", "b4"], base = ["a1", "a2", "a3", "a4"]) => ({ base, head, measures, flags: Object.entries(measures).filter(([, m]) => m?.flag).map(([k]) => k) });
 const clean = compare({ app_mb: cell(640, 652, 1.9, false), srv_cpu_s: cell(38, 39, 2.6, false), open_first_screen_ms: null });
 const worse = compare({ app_mb: cell(640, 652, 1.9, false), srv_cpu_s: cell(38, 44.1, 16.1, true) });
 // the same night's comparison over the first matrix and the confirmation pair together: one more run a side
-const withPair = (c) => ({ ...c, head: [...c.head, "b1"] });
+const withPair = (c) => ({ ...c, base: [...c.base, "a1"], head: [...c.head, "b1"] });
 const plan = {
     a: { id: 111, sha: "71a3e2300aaaa", createdAt: "2026-10-18T11:00:00Z" },
     b: { id: 112, sha: "5ba04f91fbbbb", createdAt: "2026-10-19T11:00:00Z" },
@@ -34,8 +34,9 @@ describe("what the night says", () => {
         expect(perfState({ hasA: true, initial: clean, final: clean })).toBe("green");
     });
 
-    it("does not call a flag red when the confirmation pair added no runs", () => {
+    it("does not call a flag red when the confirmation pair added no runs, or only one side's", () => {
         expect(perfState({ hasA: true, initial: worse, final: worse })).toBe("unknown");
+        expect(perfState({ hasA: true, initial: worse, final: { ...worse, head: [...worse.head, "b1"] } })).toBe("unknown"); // B1 finished, A1 did not
     });
 
     it("is unknown with nothing to compare or when the lab did not write its comparison", () => {
