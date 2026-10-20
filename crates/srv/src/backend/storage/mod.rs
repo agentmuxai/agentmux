@@ -42,6 +42,7 @@ pub mod registry_mirror;
 pub mod skills;
 pub mod snapshot;
 pub mod store;
+pub mod vault;
 pub mod viewer_devices;
 pub mod agent_input_history;
 pub mod widget_storage;

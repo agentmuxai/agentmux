@@ -26,6 +26,7 @@ import { openNewWindowFromHere } from "@/app/store/window-appearance";
 import { redockThisFloater } from "@/app/block/floating-redock";
 import { userInThisWindow } from "@/app/store/input-owner";
 import { openConnectors, openMemory } from "@/app/view/section-pane/panes";
+import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -157,6 +158,14 @@ export function registerDefaultCommands(): void {
         category: "Open",
         icon: "tower-observation",
         execute: () => createBlock({ meta: { view: "tower" } }),
+    });
+    commandRegistry.register({
+        id: "open:vault",
+        label: "Open Vault",
+        category: "Open",
+        icon: "lock",
+        // One Vault per tab: focus the one already open.
+        execute: () => openOrFocusPaneByView("vault", { meta: { view: "vault" } }),
     });
     commandRegistry.register({
         id: "open:help",

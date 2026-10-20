@@ -556,6 +556,7 @@ fn a_title_miss_never_reveals_a_withheld_match() {
         None,
         None,
         &mut resolved,
+        false,
     )
     .expect_err("a nonsense title cannot match");
     let msg = err.to_string();

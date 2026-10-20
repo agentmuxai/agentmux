@@ -73,6 +73,7 @@ pub(crate) mod ui_handlers;
 pub(crate) mod ui_shortcuts;
 pub(crate) mod widget_access_handlers;
 pub(crate) mod widget_agent_handlers;
+pub(crate) mod vault_handlers;
 pub(crate) mod widget_handlers;
 
 #[cfg(test)]

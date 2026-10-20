@@ -1,0 +1,101 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// The Vault pane. Its sections reuse section-pane.scss's
+// `.bundle-manager-section` / `-pane` rules, as Warden does, and Warden's
+// shared manager chrome for bodies and tables.
+
+.vault-container {
+    width: 100%;
+    height: 100%;
+    container-type: inline-size;
+    container-name: vault;
+}
+
+.vault-view {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+
+    > .bundle-manager-section,
+    > :last-child {
+        flex: 1 1 auto;
+        min-height: 0;
+    }
+}
+
+.vault-unavailable,
+.vault-problem {
+    padding: var(--space-3);
+}
+
+.vault-requests {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.vault-request {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.vault-request-text {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.vault-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+
+    > :first-child:not(:last-child) {
+        flex: 1 1 auto;
+    }
+
+    > :last-child {
+        margin-left: auto;
+    }
+}
+
+.vault-id {
+    margin-left: var(--space-2);
+}
+
+.vault-actions {
+    white-space: nowrap;
+    text-align: right;
+}
+
+.vault-form-fields {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.vault-part {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+
+    > :first-child {
+        flex: 1 1 auto;
+    }
+}
+
+.vault-textarea {
+    width: 100%;
+    resize: vertical;
+    font-family: inherit;
+}
+
+// A secret note's text is masked while typed, like a password field.
+.vault-secret-text {
+    -webkit-text-security: disc;
+}

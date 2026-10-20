@@ -2221,7 +2221,7 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
             updated_at    INTEGER NOT NULL DEFAULT 0
         );",
     )?;
-
+    conn.execute_batch(super::vault::VAULT_SCHEMA)?; // The Vault's tables, no version bump: storage/vault.rs.
     // Seed the blank Bundle singleton — same fixed id as objects.db/store.db
     // so cross-version reads never see a missing blank row.
     conn.execute_batch(

@@ -155,6 +155,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         swarm: "Swarm",
         help: "Help",
         warden: "Warden",
+        vault: "Vault",
     };
 
     const resolveFloatingName = (entry: FloatingPaneEntry, idx: number): string => {

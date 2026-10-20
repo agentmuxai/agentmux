@@ -1,6 +1,6 @@
 # SPEC: the Vault: one pane for the person's secrets, which agents use without seeing them
 
-**Status:** active — P1 (§4, §11) shipped in #5180; P2 to P8 remain, waiting on the operator's decisions in §13
+**Status:** active — P1 (§4, §11) shipped in #5180; P2a (§5: the pane, the store, the `Vault` tool, agents kept out) is built; P2b to P8 remain. The operator took the recommended answers to §13 on 2026-10-19.
 **Date:** 2026-10-19
 **Author:** Agent2 #6 (agent2-6@narko), at the operator's request
 **Trigger (operator, 2026-10-19):** an agent filling a US state's corporate-registry certificate request form was refused on the address, city, ZIP and email fields, then could not tick a checkbox, so the person had to finish the form by hand. "Agentmux needs to be able to fill in personal information including ssn." … "we'll need to pivot into that work now, write a spec to file." On a first draft that put saved values in Settings: "sounds like we may need a new pane type, a vault, or settings wouldn't really make sense" … "api keys and anything secret can be kept there." … "we want rich features, like support for pw protected encrypted export file (.vault file), and imports from kdbx files and last pass, and any other popular services should be supported."
@@ -12,7 +12,7 @@
 ## 1. Summary
 
 1. **Fix the false positives first (P1, §4).** Any field whose `autocomplete` contains `new-password` is secret today. Sites put that on ordinary fields to stop the browser's autofill: on the triggering form, the address, city, ZIP and email fields. After P1 it counts only on a real password field. A styled checkbox whose input is hidden gets a reference through its label (§11).
-2. **A new pane type, the Vault (`view: "vault"`, §5).** One place for everything secret the person owns: personal data (SSN, date of birth, passport and licence numbers), bank accounts and payment cards, API keys and tokens, site logins, and free-form secret notes. Values live in the OS keychain through the existing `secret_store`. Only the person adds, edits, reveals or deletes, in the pane.
+2. **A new pane type, the Vault (`view: "vault"`, §5).** One place for everything secret the person owns: personal data (SSN, date of birth, passport and licence numbers), bank accounts and payment cards, API keys and tokens, site logins, and free-form secret notes. Values are encrypted with a Vault key that lives in the OS keychain through the existing `secret_store` (§5.5). Only the person adds, edits, reveals or deletes, in the pane.
 3. **Agents use an entry by name and never see its value (§6, §7).**
    - In a browser pane: `Browser` `fill` with `vault: "<entry>"`. The host types the value; the result, snapshots, screenshots, logs and transcripts show only that the entry was filled.
    - In a command: `Terminal` `run` with `secrets: {"STRIPE_API_KEY": "<entry>"}`. srv puts the value in that one process's environment and scrubs it from the output.
@@ -99,21 +99,35 @@ Each entry also shows its **grants** (§6.4, §7.3) with a revoke button, and it
 
 ### 5.3 Locked, revealed, captured
 
-- Values are hidden in the pane. **Reveal** and **Copy** ask the OS to confirm the person (Windows Hello, Touch ID, the desktop's polkit prompt) where available, otherwise the person's AgentMux unlock (§13 question 4). Copied values are cleared from the clipboard after 30 seconds.
-- **Agents can't capture it.** `UI` `screenshot` and `query` of a Vault pane, and `UI` `window` captures of a window holding one, black out the pane (as #5089 does for secret fields). No MuxAPI route returns a Vault value.
-- The pane relocks after a few minutes idle or when the window loses focus for long, and on sleep.
+- Values are hidden in the pane: it shows each entry's label, plain fields and the main value's last characters (§5.5), never a value. Secret parts are typed into hidden inputs and never sent back to the pane; changing an entry replaces only the parts the person types.
+- **Reveal** and **Copy** (P2b) ask the OS to confirm the person (Windows Hello, Touch ID, the desktop's polkit prompt). Copied values are cleared from the clipboard after 30 seconds and kept out of the clipboard history. The pane relocks after a few minutes idle or when the window loses focus for long, and on sleep.
+- **Agents can't capture it** (built in P2a):
+  - `UI` `query` and `click` already reach only the caller's own pane, and the Vault's forms and confirmations are drawn inside the Vault pane, so neither reaches it. `UI` `keys` sends only keys from the shortcut table, as key events that type no text.
+  - `UI` `screenshot` is clipped to the caller's own pane. A Vault pane magnified or floating over it would be inside the clip, so the host finds every element marked `data-agent-hidden` (the Vault's root) inside the clip just before and just after the capture, and srv blacks those boxes out as it does secret fields (#5089). If the page can't be asked, the screenshot is refused.
+  - `UI` `window` grabs the OS window itself, outside srv and the host, so it can't black out one pane. Instead, while a Vault pane is on screen in any AgentMux on the computer, it refuses to capture any AgentMux window. Each Vault pane notes that it's showing every 10 seconds through the host, one note at a time so they arrive in order; a note lasts 30 seconds and is cleared when that pane is hidden or closed. Each pane has its own note, so one pane hiding doesn't clear another's. The notes are kept in the identity store every instance shares, and only the host can write one, so an agent can't clear it. If srv can't be asked, the capture is refused.
+- No MuxAPI route returns a Vault value.
 
 ### 5.4 Who writes it
 
 Only the person, in the pane or in a banner (§6.5). Writes go through the host, as approval answers do (base spec §5.6); srv refuses Vault writes on every agent route, so a tricked agent can't plant or replace a value.
 
 Agents get a `Vault` MuxAPI tool:
-- `list`: `[{id, label, kind, section}]`. No values, tails or grants.
-- `request {kind, label, why}`: opens the Vault on a new empty entry of that kind with the agent's reason ("Agent2 #6 asks for: Stripe test key, to run the payment tests"). The person fills it in, or dismisses it. The agent gets back the new entry's id, or "declined".
+- `list`: `[{id, label, kind, section}]`. No values, tails, fields or grants. It reads no value, so it never touches the keychain.
+- `request {kind, label, why}`: every AgentMux window shows a prompt naming the agent (by its signed identity; an unsigned request says "not a verified agent"), the kind, the label and the reason, and the Vault lists the request at its top. **Fill it in** opens the Vault on a new entry of that kind; **Dismiss** declines it. The agent gets back the new entry's id, `declined`, or `pending` when its wait (default 5 minutes, at most 10) ends first. A request stays open for an hour, so the person can still answer, and the agent then finds the entry with `list`.
+
+An entry's id is made once from its kind and label (`ssn-alex`, then `ssn-alex-2`) and never changes, so an agent's reference survives a rename. It has no `.`, which names a part (`card-company.number`, §6.1).
 
 ### 5.5 Storage
 
-Each value in `secret_store` (keychain or headless file store), under the service `agentmux-vault`, keyed by entry id. The database keeps id, label, kind, section, owner, tail (last 2 to 4 characters, shown only in the pane), grants and use history; never a value. Deleting an entry deletes its keychain item and its grants.
+- **One Vault key in `secret_store`** (the keychain, or the headless file store), not one item per value: Windows' Credential Manager caps an item at 1280 characters, which a note or a long key passes, and macOS asks the person about each item separately. The key is 256 random bits, made with the first entry. If it goes missing while entries exist, srv says so and makes no new key, which couldn't open them.
+- **Each entry is one row** in the identity store (`db_vault_entries`), shared by every AgentMux on the computer like the keychain. The row holds the id, kind, label, plain fields and tags, and the secret parts, sealed together: ChaCha20-Poly1305 (`ring`), a random nonce each time, and the entry id as associated data, so sealed parts moved to another row don't open. No column holds a value. One row per entry also lets an import land in one transaction (§8.5).
+- The main value's last characters (4 of a long value, 2 of a short one; none of a value of 4 characters or fewer, a password, a date of birth or a note) are worked out for the pane when it lists entries; they aren't stored.
+- **Activity** (`db_vault_activity`) records what was done, by whom, to which entry and where; never a value.
+- Deleting an entry deletes its row, and its sealed parts with it.
+
+### 5.6 Activity and grants in Warden too
+
+The operator decided on 2026-10-19 that the Vault stays its own pane, and that Warden also shows its oversight half: the record of agents' uses of entries and the standing "Always" grants, as a section or as Audit events, linked both ways with the Vault. Built with the grants, in P3.
 
 ## 6. Agents fill browser fields from the Vault
 
@@ -277,8 +291,10 @@ Fix (built in P1):
 | Phase | What | Done when |
 |---|---|---|
 | **P1** | §4 (autocomplete rule, reasons) and §11 (hidden checkboxes). Small, independent, ships first | The triggering form's submitter block and checkbox are filled by the agent with no hand-off |
-| **P2** | The Vault pane and store (§5): sections, add/edit/delete, reveal with OS confirmation, capture blackout, Activity, "Kept by AgentMux" list; the `Vault` tool's `list` and `request`; `.vault` export and import (§8.1, §8.2, §8.5), so there is a backup from the first day | The person keeps an SSN, a card and an API key in the Vault, exports them, deletes them and imports them back; no agent route returns a value |
-| **P3** | Browser fill from the Vault (§6.1 to §6.4, §6.6), taint, grants | An agent fills an SSN fixture field; its result, snapshot, screenshot and transcript have no trace of the value; another origin is asked |
+| **P2a** | The Vault pane and store (§5): sections, add, change and delete, Activity, "Kept by AgentMux"; agents kept out of it (§5.3); the `Vault` tool's `list` and `request` | The person keeps an SSN, a card and an API key in the Vault; an agent asks for one and gets its id; no agent route returns a value, a tail or a field |
+| **P2b** | Reveal and Copy with OS confirmation, the clipboard clear, relocking (§5.3) | Reveal asks Windows Hello; a copied value is gone from the clipboard 30 s later |
+| **P2c** | `.vault` export and import (§8.1, §8.2, §8.5), so there is a backup early | The person exports the Vault, deletes the entries and imports them back |
+| **P3** | Browser fill from the Vault (§6.1 to §6.4, §6.6), taint, grants; Activity and grants in Warden (§5.6) | An agent fills an SSN fixture field; its result, snapshot, screenshot and transcript have no trace of the value; another origin is asked |
 | **P4** | §6.5: the banner's value field and **Save to Vault**; `request_value` | A form with an SSN field is done by the agent plus one value typed in the banner |
 | **P5** | Importers, first wave (§8.4): KeePass `.kdbx`, LastPass, 1Password, Bitwarden, the browsers' CSVs, `.env`, any CSV; plaintext-file handling (§8.6); fuzzing (§8.7); KeePass export (§8.3) | Each imports its real-export fixture with the right kinds and no loss the preview didn't list |
 | **P6** | Importers, second wave: Proton Pass, Dashlane, Keeper, NordPass, RoboForm, Enpass, Zoho Vault, Sticky Password | The same, per source |
@@ -286,6 +302,8 @@ Fix (built in P1):
 | **P8** | Only on a yes to §13 question 1 or 2 | — |
 
 ## 13. Decisions for the operator
+
+**Answered 2026-10-19:** the operator went with the recommended answers: 1 no; 2 store passwords, don't fill them yet; 3 the first use per site (forms) and per agent (commands) asks, with "Always" for that site or agent; 4 OS confirmation (Windows Hello, Touch ID) for Reveal and Copy; 5 list AgentMux's own secrets read-only; 6 age; 7 offer plaintext export behind a warning; 8 yes.
 
 1. **Agent-typed secrets.** Should an agent also be able to type an SSN, card number or key it holds itself, after the person turns it on? *Recommended: no;* the Vault covers the same work, and an agent-held value leaks into transcripts and other agents' reach (§9.2).
 2. **Passwords and one-time codes.** The Vault stores logins (§5.2). Should agents fill them, with the same per-site approval? *Recommended: not yet;* sign-in is where phishing pages aim, and the person signing in is the proof they are there. A later spec can add it.

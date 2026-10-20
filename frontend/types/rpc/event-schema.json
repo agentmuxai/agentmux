@@ -793,6 +793,15 @@
     }
   },
   {
+    "event": "vault",
+    "payloadTs": {
+      "imports": [
+        "VaultEvent"
+      ],
+      "name": "VaultEvent"
+    }
+  },
+  {
     "event": "viewer:paired",
     "payloadTs": {
       "imports": [

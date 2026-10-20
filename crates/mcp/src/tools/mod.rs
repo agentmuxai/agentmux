@@ -38,6 +38,7 @@ mod tasks_tool;
 mod terminal;
 mod ui;
 mod ui_tool;
+mod vault_tool;
 mod widget_tool;
 mod widgets;
 mod work;
@@ -226,6 +227,7 @@ pub(crate) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         memory_tool,
         identity_tool,
         widget_tool,
+        vault_tool,
         app_tool
     );
     if let Some((_, instead)) = REPLACED.iter().find(|(old, _)| *old == name) {
@@ -253,6 +255,7 @@ mod tests {
         ("tasks_tool", include_str!("tasks_tool.rs")),
         ("terminal", include_str!("terminal.rs")),
         ("ui_tool", include_str!("ui_tool.rs")),
+        ("vault_tool", include_str!("vault_tool.rs")),
         ("widget_tool", include_str!("widget_tool.rs")),
     ];
 

@@ -119,6 +119,23 @@
     return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
   };
 
+  // Boxes of what an agent may never capture ([data-agent-hidden]: the
+  // Vault pane) that overlap `clip`, as [x, y, width, height] from the
+  // clip's origin. A pane screenshot is clipped to the caller's own pane,
+  // but a pane magnified or floating over it is drawn inside that clip.
+  window.__amq_hidden_boxes = (clip) => {
+    const out = [];
+    for (const el of document.querySelectorAll('[data-agent-hidden]')) {
+      const r = el.getBoundingClientRect();
+      const x1 = Math.max(r.x, clip.x);
+      const y1 = Math.max(r.y, clip.y);
+      const x2 = Math.min(r.x + r.width, clip.x + clip.width);
+      const y2 = Math.min(r.y + r.height, clip.y + clip.height);
+      if (x2 > x1 && y2 > y1) out.push([x1 - clip.x, y1 - clip.y, x2 - x1, y2 - y1]);
+    }
+    return out;
+  };
+
   // getBoundingClientRect() of blockId's own pane wrapper — used to build
   // a CDP Page.captureScreenshot `clip` so a screenshot only covers one
   // pane's subtree, not the whole shared window. Deliberately does NOT

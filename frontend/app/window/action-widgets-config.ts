@@ -324,8 +324,8 @@ export function buildPaneWidgetMenuItems(
 // ── Widget actions ────────────────────────────────────────────────────────────
 
 /** Views whose widget focuses the pane already open in this tab instead of
- *  opening another: there's one Connectors and one Memory to manage. */
-const FOCUS_EXISTING_VIEWS = new Set(["connectors", "memory"]);
+ *  opening another: there's one Connectors, one Memory and one Vault to manage. */
+const FOCUS_EXISTING_VIEWS = new Set(["connectors", "memory", "vault"]);
 
 export async function handleWidgetSelect(widget: WidgetConfigType) {
     const view = widget.blockdef?.meta?.["view"] as string | undefined;
