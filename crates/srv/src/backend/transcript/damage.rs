@@ -128,8 +128,46 @@ pub fn note_corrupt_text(zone: &str, op: &str, text: &str) -> bool {
 /// The shared transcript store, unless `zone` of it was found corrupt in this process: a
 /// reader with a copy of its own to fall back to asks this instead of
 /// `agent_session::global_transcript_store()`.
-pub fn global_for(zone: &str) -> Option<&'static std::sync::Arc<crate::backend::storage::filestore::FileStore>> {
-    crate::backend::agent_session::global_transcript_store().filter(|_| !is_damaged(zone))
+pub fn global_for(zone: &str) -> Option<std::sync::Arc<crate::backend::storage::filestore::FileStore>> {
+    if is_damaged(zone) {
+        return None;
+    }
+    #[cfg(test)]
+    {
+        if let Some(fs) = test_support::global_override() {
+            return Some(fs);
+        }
+    }
+    crate::backend::agent_session::global_transcript_store().cloned()
+}
+
+/// The key under which an agent's memory record in the shared store is marked. The record spans several
+/// zones (its files, its bundle, its claims), none with a copy of its own to fall back to, so it is marked as a whole.
+pub fn memory_zone(uid: &str) -> String {
+    format!("agent-uid:{uid}:memory")
+}
+
+/// The key under which Global Memory's record in the shared store is marked.
+pub const GLOBAL_MEMORY_ZONE: &str = "global-memory";
+
+/// What a marked zone is, which decides what the user and the agent are told.
+enum Kind<'a> {
+    /// A transcript, its summary, archive or segment log: the agent's saved history.
+    History(&'a str),
+    /// An agent's memory record.
+    Memory(&'a str),
+    GlobalMemory,
+    Other,
+}
+
+fn kind_of(zone: &str) -> Kind<'_> {
+    if zone == GLOBAL_MEMORY_ZONE {
+        return Kind::GlobalMemory;
+    }
+    if let Some(id) = zone.strip_prefix("agent-uid:").and_then(|z| z.strip_suffix(":memory")) {
+        return Kind::Memory(id);
+    }
+    agent_of(zone).map_or(Kind::Other, Kind::History)
 }
 
 /// [`note_corrupt`] when `fs` is the shared store itself, which a reader of
@@ -169,15 +207,43 @@ fn short(id: &str) -> &str {
 
 /// The incident for a damaged zone, as the user is told about it.
 pub fn incident_for(zone: &str, op: &str) -> agentmux_common::incidents::Incident {
-    let label = agent_of(zone).map_or_else(|| format!("zone {zone}"), |id| format!("agent {}", short(id)));
-    let mut i = agentmux_common::incidents::Incident::new(INCIDENT_KIND, format!("Saved history for {label} is damaged"), "srv");
+    const REPAIR: &str = "Before you repair the shared database, quit every AgentMux window and keep the shared/agents/transcripts folder as it is: repairing it needs the files in it.";
+    let (what, did, lost): (String, Vec<String>, Vec<String>) = match kind_of(zone) {
+        Kind::History(id) => (
+            format!("Saved history for agent {} is damaged", short(id)),
+            vec![
+                "AgentMux stopped writing this history to the shared database and keeps saving it in this version's own copy, so nothing new is lost.".to_string(),
+                "Its history views read that copy instead.".to_string(),
+                REPAIR.to_string(),
+            ],
+            vec!["Lines the shared database failed to take, and what was on its damaged pages.".to_string()],
+        ),
+        Kind::Memory(id) => (
+            format!("The saved memory record for agent {} is damaged", short(id)),
+            vec![
+                "AgentMux stopped using the shared memory record for this agent for now. Its memory files in its own folder are not changed and are used as they are.".to_string(),
+                REPAIR.to_string(),
+            ],
+            vec!["Changes to its memory files since the damage began are not in the shared record, and what was on its damaged pages.".to_string()],
+        ),
+        Kind::GlobalMemory => (
+            "The saved history of Global Memory is damaged".to_string(),
+            vec![
+                "AgentMux stopped using the shared Global Memory record for now. Global Memory itself, in this version's own store, is not changed.".to_string(),
+                REPAIR.to_string(),
+            ],
+            vec!["Changes to Global Memory since the damage began are not in the shared record, and what was on its damaged pages.".to_string()],
+        ),
+        Kind::Other => (
+            format!("Saved data in the shared database ({zone}) is damaged"),
+            vec!["AgentMux stopped using that part of the shared database for now.".to_string(), REPAIR.to_string()],
+            vec!["What was on its damaged pages.".to_string()],
+        ),
+    };
+    let mut i = agentmux_common::incidents::Incident::new(INCIDENT_KIND, what, "srv");
     i.cause = Some(format!("The shared transcript database reported corruption ({op})."));
-    i.did = vec![
-        "AgentMux stopped writing this history to the shared database and keeps saving it in this version's own copy, so nothing new is lost.".to_string(),
-        "Its history views read that copy instead.".to_string(),
-        "Before you repair the shared database, quit every AgentMux window and keep the shared/agents/transcripts folder as it is: repairing it needs the files in it.".to_string(),
-    ];
-    i.lost = vec!["Lines the shared database failed to take, and what was on its damaged pages.".to_string()];
+    i.did = did;
+    i.lost = lost;
     // The full agent id, which `what` shortens: a restart finds the same damage by it.
     i.evidence = i.evidence.map(|e| format!("{e}, {}", zone_tag(zone)));
     i
@@ -186,7 +252,12 @@ pub fn incident_for(zone: &str, op: &str) -> agentmux_common::incidents::Inciden
 /// What a restart finds the same damage by: the agent, as one notice covers all of its zones
 /// (its transcript, segment log and archives), else the zone.
 fn zone_tag(zone: &str) -> String {
-    agent_of(zone).map_or_else(|| format!("zone {zone}"), |id| format!("agent {id}"))
+    match kind_of(zone) {
+        Kind::History(id) => format!("agent {id}"),
+        Kind::Memory(id) => format!("memory {id}"),
+        Kind::GlobalMemory => "global memory".to_string(),
+        Kind::Other => format!("zone {zone}"),
+    }
 }
 
 static TOLD: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -248,7 +319,9 @@ fn announce(zone: &str, op: &str) {
         }
         None => tracing::warn!(zone = %zone, "shared transcript store: no data folder to record the damage in"),
     }
-    let Some(id) = agent_of(zone).map(str::to_string) else { return };
+    // Only the agent's saved history is news to the agent; a memory record is not.
+    let Kind::History(id) = kind_of(zone) else { return };
+    let id = id.to_string();
     if !first_to_tell(&zone_tag(zone)) {
         return;
     }
@@ -299,6 +372,29 @@ pub(crate) mod test_support {
             version + 1
         ))
         .unwrap();
+    }
+
+    thread_local! {
+        static GLOBAL: std::cell::RefCell<Option<std::sync::Arc<FileStore>>> = const { std::cell::RefCell::new(None) };
+    }
+
+    pub(crate) fn global_override() -> Option<std::sync::Arc<FileStore>> {
+        GLOBAL.with(|g| g.borrow().clone())
+    }
+
+    /// Makes `fs` the shared store for [`super::global_for`] on this thread while the guard lives,
+    /// and recognised as the shared one by [`super::note_if_shared`].
+    pub(crate) struct UseGlobal(Shared);
+
+    pub(crate) fn use_global(fs: &std::sync::Arc<FileStore>) -> UseGlobal {
+        GLOBAL.with(|g| *g.borrow_mut() = Some(fs.clone()));
+        UseGlobal(register(fs))
+    }
+
+    impl Drop for UseGlobal {
+        fn drop(&mut self) {
+            GLOBAL.with(|g| *g.borrow_mut() = None);
+        }
     }
 
     static SHARED: Mutex<Vec<usize>> = Mutex::new(Vec::new());
@@ -480,6 +576,24 @@ mod tests {
         assert_eq!(data["what"], incident.what);
         assert_eq!(data["did"].as_array().unwrap().len(), incident.did.len());
         assert!(data.get("acknowledged_at_ms").is_none(), "{data}");
+    }
+
+    #[test]
+    fn a_memory_record_and_global_memory_are_told_in_their_own_words() {
+        let h = incident_for("agent:kinds-1:current", "append");
+        let m = incident_for(&memory_zone("kinds-1"), "bundle record");
+        let g = incident_for(GLOBAL_MEMORY_ZONE, "global memory import");
+        assert_eq!(h.what, "Saved history for agent kinds-1 is damaged");
+        assert_eq!(m.what, "The saved memory record for agent kinds-1 is damaged");
+        assert_eq!(g.what, "The saved history of Global Memory is damaged");
+        for i in [&m, &g] {
+            let did = i.did.join(" ");
+            assert!(did.contains("stopped using") && did.contains("quit every AgentMux window"), "{did}");
+            assert!(!did.contains("own copy"), "a memory record has no copy of its own to read: {did}");
+        }
+        // Three notices for one agent that is hurt three ways: none hides another.
+        let tags = [zone_tag("agent:kinds-1:current"), zone_tag(&memory_zone("kinds-1")), zone_tag(GLOBAL_MEMORY_ZONE)];
+        assert_eq!(tags.iter().collect::<std::collections::HashSet<_>>().len(), 3, "{tags:?}");
     }
 
     #[test]

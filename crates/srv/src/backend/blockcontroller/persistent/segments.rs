@@ -34,7 +34,7 @@ fn zone_size(zone: &str) -> Option<i64> {
     match gfs.line_state(zone, crate::backend::agent_session::OUTPUT_FILE) {
         Ok(state) => state.map(|s| s.size),
         Err(e) => {
-            crate::backend::transcript::damage::note_if_shared(gfs, zone, "tail read", &e);
+            crate::backend::transcript::damage::note_if_shared(&gfs, zone, "tail read", &e);
             None
         }
     }
@@ -275,6 +275,11 @@ impl PersistentSubprocessController {
         let Some(uid) = config.env_vars.get("AGENTMUX_AGENT_UID").filter(|u| !u.is_empty()) else {
             return;
         };
+        // A memory record found corrupt is not reconciled with: the agent's folder is used as it is.
+        if crate::backend::transcript::damage::is_damaged(&crate::backend::transcript::damage::memory_zone(uid)) {
+            tracing::info!(block_id = %self.block_id, uid, "memory reconcile skipped: the agent's shared memory record is damaged");
+            return;
+        }
         let meta = mstore
             .get::<crate::backend::obj::Block>(&self.block_id)
             .ok()

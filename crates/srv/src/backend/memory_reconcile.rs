@@ -876,9 +876,14 @@ pub(crate) fn capture_while_running(fs: &FileStore, uid: &str, dir: &Path, settl
 /// is recorded and the next spawn's reconcile keeps both. Never fails the
 /// write: an error is logged, and a later capture records the file.
 pub(crate) fn record_agentmux_write(uid: &str, dir: &Path, file: &str, body: &[u8], source: &str, source_detail: &str) {
-    let Some(fs) = crate::backend::agent_session::global_transcript_store() else { return };
-    if let Err(e) = record_agentmux_write_in(fs, uid, dir, file, body, source, source_detail) {
-        tracing::warn!(uid, file, error = %e, "memory record: AgentMux write not recorded; a later capture records it");
+    use crate::backend::transcript::damage;
+    // A memory record found corrupt is not written to again in this process.
+    let zone = damage::memory_zone(uid);
+    let Some(fs) = damage::global_for(&zone) else { return };
+    if let Err(e) = record_agentmux_write_in(&fs, uid, dir, file, body, source, source_detail) {
+        if !damage::note_corrupt(&zone, "memory record", &e) {
+            tracing::warn!(uid, file, error = %e, "memory record: AgentMux write not recorded; a later capture records it");
+        }
     }
 }
 

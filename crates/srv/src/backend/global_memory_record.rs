@@ -419,6 +419,11 @@ enum Job {
 }
 
 fn process(fs: &FileStore, store: &Store, scope: &str, job: Job) {
+    use crate::backend::transcript::damage;
+    // A record found corrupt is not written to again in this process.
+    if damage::is_damaged(damage::GLOBAL_MEMORY_ZONE) {
+        return;
+    }
     let r = match job {
         Job::Change(GlobalMemoryChange::Entry(id)) => sync_entry(fs, store, scope, &id, None).map(|_| ()),
         Job::Change(GlobalMemoryChange::Order) => sync_order(fs, store, scope).map(|_| ()),
@@ -429,8 +434,36 @@ fn process(fs: &FileStore, store: &Store, scope: &str, job: Job) {
         }),
     };
     if let Err(e) = r {
-        tracing::warn!(scope, error = %e, "global memory record: not recorded; the next start compares again");
+        if !damage::note_corrupt(damage::GLOBAL_MEMORY_ZONE, "global memory record", &e) {
+            tracing::warn!(scope, error = %e, "global memory record: not recorded; the next start compares again");
+        }
     }
+}
+
+const DAMAGED: &str = "Global Memory's shared record is damaged (see the notice); it is not read or written for now";
+
+/// [`import_sources`] for the RPC: a record found corrupt is refused in plain words, and a corrupt answer marks it.
+pub(crate) fn import_sources_checked(fs: &FileStore, store: &Store) -> Result<ImportSources, String> {
+    use crate::backend::transcript::damage;
+    if damage::is_damaged(damage::GLOBAL_MEMORY_ZONE) {
+        return Err(DAMAGED.to_string());
+    }
+    import_sources(fs, store).map_err(|e| {
+        damage::note_corrupt(damage::GLOBAL_MEMORY_ZONE, "global memory import", &e);
+        e.to_string()
+    })
+}
+
+/// [`import`] for the RPC; see [`import_sources_checked`].
+pub(crate) fn import_checked(fs: &FileStore, store: &Store, list_id: &str, index: usize) -> Result<ImportReport, String> {
+    use crate::backend::transcript::damage;
+    if damage::is_damaged(damage::GLOBAL_MEMORY_ZONE) {
+        return Err(DAMAGED.to_string());
+    }
+    import(fs, store, list_id, index).map_err(|e| {
+        damage::note_corrupt(damage::GLOBAL_MEMORY_ZONE, "global memory import", &e);
+        e.to_string()
+    })
 }
 
 /// Handle for queueing the start-up comparison once seeding is done.

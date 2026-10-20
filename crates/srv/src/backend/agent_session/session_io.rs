@@ -55,7 +55,7 @@ pub fn write_session_state(
         // above keeps the real id for same-channel restore. See
         // docs/retro/retro-legacy-agent-history-cross-channel-2026-06-16.md.
         let global_content = normalize_snapshot_for_global(content);
-        if let Err(e) = write_zone_file(gfs, &zone, SNAPSHOT_FILE, &global_content) {
+        if let Err(e) = write_zone_file(&gfs, &zone, SNAPSHOT_FILE, &global_content) {
             if !crate::backend::transcript::damage::note_corrupt_text(&zone, "snapshot mirror", &e) {
                 tracing::warn!(zone = %zone, error = %e, "global transcripts: snapshot mirror failed");
             }
@@ -169,7 +169,8 @@ pub fn read_session_state(
     definition_id: &str,
 ) -> Result<(Option<String>, Option<i64>), String> {
     let zone = validate_and_current(definition_id)?;
-    read_session_state_in(filestore, crate::backend::transcript::damage::global_for(&zone).map(|g| g.as_ref()), &zone)
+    let global = crate::backend::transcript::damage::global_for(&zone);
+    read_session_state_in(filestore, global.as_deref(), &zone)
 }
 
 /// [`read_session_state`] with the global store given (`None`: none, or the agent's zone in it found corrupt).
