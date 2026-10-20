@@ -140,7 +140,7 @@ async fn the_last_close_of_a_quit_keeps_the_quits_record() {
     let (_, last_ws) = window(&state, "window-2", "sysinfo", 10, 20).await;
     save_last_session_snapshot(&state.mstore, snapshot_session(&state.mstore, true).unwrap());
 
-    save_on_last_close(&state.mstore, &last_ws, None);
+    save_on_last_close(&state.mstore, &last_ws, None, &Default::default());
     let kept = load_last_session_snapshot(&state.mstore).unwrap();
     assert_eq!(windows_of(&kept).len(), 2, "the quit's record, not the last window alone");
 
@@ -148,14 +148,14 @@ async fn the_last_close_of_a_quit_keeps_the_quits_record() {
     let mut stale = kept;
     stale["saved_at_ms"] = json!(agentmux_common::time::now_ms() - QUIT_RECORD_KEPT_FOR_MS - 1);
     save_last_session_snapshot(&state.mstore, stale);
-    save_on_last_close(&state.mstore, &last_ws, None);
+    save_on_last_close(&state.mstore, &last_ws, None, &Default::default());
     let replaced = load_last_session_snapshot(&state.mstore).unwrap();
     assert_eq!(entry_views(&replaced), ["sysinfo"]);
     assert!(replaced.get("windows").is_none());
 
     // Nor does a record that wasn't a quit's hold the close back.
     save_last_session_snapshot(&state.mstore, snapshot_session(&state.mstore, false).unwrap());
-    save_on_last_close(&state.mstore, &last_ws, None);
+    save_on_last_close(&state.mstore, &last_ws, None, &Default::default());
     assert!(load_last_session_snapshot(&state.mstore).unwrap().get("windows").is_none());
 }
 
@@ -344,7 +344,7 @@ async fn closing_the_last_window_keeps_its_name_for_the_next_start() {
     // CloseWindow reads the name before it prunes the row.
     let closing = window_name(&state.mstore.get::<Window>(&win_id).unwrap().unwrap());
     no_windows(&state);
-    save_on_last_close(&state.mstore, &ws, closing.as_deref());
+    save_on_last_close(&state.mstore, &ws, closing.as_deref(), &Default::default());
     let record = load_last_session_snapshot(&state.mstore).unwrap();
     assert_eq!((record["window"]["name"].as_str(), record["name"].as_str()), (Some("Release work"), Some("Upgrades")));
 
@@ -353,9 +353,10 @@ async fn closing_the_last_window_keeps_its_name_for_the_next_start() {
     assert_eq!(restored_window_name(&state.mstore, &restored).as_deref(), Some("Release work"));
     // Kept until the window has it: reading it again finds it again.
     assert_eq!(restored_window_name(&state.mstore, &restored).as_deref(), Some("Release work"));
-    assert_eq!(forget_restored_window_name(&state.mstore, &restored).as_deref(), Some("Release work"));
+    let taken = forget_restored_window_meta(&state.mstore, &restored).unwrap();
+    assert_eq!(taken.get("window:displayname"), Some(&json!("Release work")));
     assert_eq!(restored_window_name(&state.mstore, &restored), None);
-    assert_eq!(forget_restored_window_name(&state.mstore, &restored), None);
+    assert_eq!(forget_restored_window_meta(&state.mstore, &restored), None);
 }
 
 #[tokio::test]
@@ -372,4 +373,128 @@ async fn a_name_whose_write_failed_is_kept_by_the_next_save() {
     assert_eq!(saved_name(&state.mstore, &win).as_deref(), Some("Release work"));
     let record = snapshot_session(&state.mstore, true).unwrap();
     assert_eq!(record["windows"][0]["window"]["name"], "Release work");
+}
+
+
+/// Give window `win_id` the appearance the user chose.
+fn style(state: &AppState, win_id: &str, meta: Value) {
+    let mut w = state.mstore.get::<Window>(win_id).unwrap().unwrap();
+    for (k, v) in meta.as_object().unwrap() {
+        w.meta.insert(k.clone(), v.clone());
+    }
+    state.mstore.update(&mut w).unwrap();
+}
+
+fn create_window_call(ws: &str) -> WebCallType {
+    WebCallType {
+        service: "window".into(),
+        method: "CreateWindow".into(),
+        args: vec![Value::Null, json!(ws), json!("window-x")],
+        uicontext: None,
+    }
+}
+
+/// The window `CreateWindow` makes onto `ws`.
+async fn open_onto(state: &AppState, ws: &str) -> Window {
+    let ret = crate::server::service::window::handle_window_service(state, &create_window_call(ws)).await;
+    assert!(ret.error.is_none(), "{:?}", ret.error);
+    let id = ret.data.unwrap()["oid"].as_str().unwrap().to_string();
+    state.mstore.get::<Window>(&id).unwrap().unwrap()
+}
+
+#[tokio::test]
+async fn a_quit_and_a_restore_keep_each_windows_name_theme_and_opacity() {
+    let state = test_state();
+    no_windows(&state);
+    let (main_id, main_ws) = window(&state, "main", "agent", 0, 0).await;
+    let (other_id, other_ws) = window(&state, "window-2", "sysinfo", 10, 20).await;
+    let (plain_id, plain_ws) = window(&state, "window-3", "term", 30, 40).await;
+    name(&state, &main_id, &main_ws, "59.30", "Upgrades").await;
+    style(&state, &main_id, json!({ "window:theme": "midnight", "window:opacity": 0.95 }));
+    style(&state, &other_id, json!({ "window:theme": "nord" }));
+    let _ = (&plain_id, &plain_ws);
+
+    // The quit saves it.
+    let record = snapshot_session(&state.mstore, true).unwrap();
+    assert_eq!(record["windows"][0]["window"]["meta"], json!({ "window:theme": "midnight", "window:opacity": 0.95 }));
+    assert_eq!(record["windows"][1]["window"]["meta"], json!({ "window:theme": "nord" }));
+    assert!(record["windows"][2]["window"].get("meta").is_none(), "a window with no appearance saves none");
+    save_last_session_snapshot(&state.mstore, record);
+
+    // The rows are gone, as after a quit; the next start restores them.
+    no_windows(&state);
+    let (restored_main, _) = restore_last_session(&state).await.unwrap().unwrap();
+    let take = WebCallType { service: "window".into(), method: "TakeRestoredWindows".into(), args: vec![], uicontext: None };
+    let others = handle_take_restored_windows(&state, &take).data.unwrap();
+    let ws_of = |i: usize| others[i]["workspaceid"].as_str().unwrap().to_string();
+
+    let main = open_onto(&state, &restored_main).await;
+    assert_eq!(main.meta.get("window:displayname"), Some(&json!("59.30")));
+    assert_eq!(main.meta.get("window:theme"), Some(&json!("midnight")));
+    assert_eq!(main.meta.get("window:opacity"), Some(&json!(0.95)));
+    let other = open_onto(&state, &ws_of(0)).await;
+    assert_eq!(other.meta.get("window:theme"), Some(&json!("nord")));
+    assert_eq!(other.meta.get("window:opacity"), None);
+    let plain = open_onto(&state, &ws_of(1)).await;
+    assert_eq!((plain.meta.get("window:theme"), plain.meta.get("window:opacity")), (None, None));
+
+    let client = state.mstore.get_all::<Client>().unwrap().into_iter().next().unwrap();
+    assert!(!client.meta.contains_key(NAMES_META_KEY), "nothing left waiting");
+}
+
+#[tokio::test]
+async fn closing_the_last_window_keeps_its_theme_and_opacity_for_the_next_start() {
+    let state = test_state();
+    no_windows(&state);
+    let (win_id, ws) = window(&state, "main", "agent", 0, 0).await;
+    style(&state, &win_id, json!({ "window:theme": "dracula", "window:opacity": 0.7 }));
+    // CloseWindow reads them before it prunes the row.
+    let closing = saved_appearance(&state.mstore, &state.mstore.get::<Window>(&win_id).unwrap().unwrap());
+    no_windows(&state);
+    save_on_last_close(&state.mstore, &ws, None, &closing);
+    let record = load_last_session_snapshot(&state.mstore).unwrap();
+    assert_eq!(record["window"]["meta"], json!({ "window:theme": "dracula", "window:opacity": 0.7 }));
+
+    let (restored, _) = restore_last_session(&state).await.unwrap().unwrap();
+    let win = open_onto(&state, &restored).await;
+    assert_eq!(win.meta.get("window:theme"), Some(&json!("dracula")));
+    assert_eq!(win.meta.get("window:opacity"), Some(&json!(0.7)));
+}
+
+#[tokio::test]
+async fn an_appearance_whose_write_failed_is_kept_by_the_next_save() {
+    let state = test_state();
+    no_windows(&state);
+    let (win_id, ws) = window(&state, "main", "agent", 0, 0).await;
+    // A restore left this window's theme waiting; writing it to the window failed.
+    let mut client = state.mstore.get_all::<Client>().unwrap().into_iter().next().unwrap();
+    client.meta.insert(NAMES_META_KEY.into(), json!({ ws.clone(): { "window:displayname": "59.30", "window:theme": "midnight" } }));
+    state.mstore.update(&mut client).unwrap();
+    // The user already picked an opacity on the row; the waiting theme fills in what it lacks.
+    style(&state, &win_id, json!({ "window:opacity": 0.9 }));
+    let record = snapshot_session(&state.mstore, true).unwrap();
+    assert_eq!(record["windows"][0]["window"]["name"], "59.30");
+    assert_eq!(record["windows"][0]["window"]["meta"], json!({ "window:theme": "midnight", "window:opacity": 0.9 }));
+}
+
+#[tokio::test]
+async fn a_record_can_only_set_a_theme_and_an_opacity_on_a_restored_window() {
+    let state = test_state();
+    no_windows(&state);
+    let (_, ws) = window(&state, "main", "agent", 0, 0).await;
+    let mut record = snapshot_session(&state.mstore, true).unwrap();
+    record["windows"][0]["window"] = json!({
+        "meta": { "window:theme": 7, "window:opacity": "see-through", "host:label": "evil", "window:displayname": "x" }
+    });
+    save_last_session_snapshot(&state.mstore, record);
+    no_windows(&state);
+    let (restored, _) = restore_last_session(&state).await.unwrap().unwrap();
+    assert!(restored_window_meta(&state.mstore, &restored).is_empty(), "wrong types and other keys are dropped");
+    let _ = ws;
+
+    // And an older version's bare name still reads.
+    let mut client = state.mstore.get_all::<Client>().unwrap().into_iter().next().unwrap();
+    client.meta.insert(NAMES_META_KEY.into(), json!({ restored.clone(): "Release work" }));
+    state.mstore.update(&mut client).unwrap();
+    assert_eq!(restored_window_name(&state.mstore, &restored).as_deref(), Some("Release work"));
 }
