@@ -744,7 +744,7 @@ mod hidden_reinjection_registry_tests {
         })
         .to_string();
         global.append_lines(zone, "output", format!("{line}\n").as_bytes()).unwrap();
-        let source = TranscriptSource { fs: &global, zone: zone.to_string(), global: true };
+        let source = TranscriptSource { fs: &global, zone: zone.to_string(), global: true, own: None };
         let activity = read_recent_activity_from(&source, "block-digest-global-only").expect("a digest from the agent zone");
         assert!(activity.text.contains("reply from the agent zone"), "{}", activity.text);
         // And the block's own store, which holds nothing, gives nothing.

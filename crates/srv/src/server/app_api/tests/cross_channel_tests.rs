@@ -321,3 +321,41 @@ fn global_zone_line_count_still_builds_when_no_index_exists() {
     let idx = global.stat(zone, "output.idx").expect("stat ok");
     assert!(idx.is_some(), "the build should leave an index behind");
 }
+
+#[test]
+fn global_output_source_does_not_choose_a_zone_found_corrupt() {
+    use crate::backend::transcript::damage::{self, test_support};
+    let per_channel = mem_store();
+    let global = mem_store();
+    let mstore = Arc::new(Store::open_in_memory().unwrap());
+    let block_id = insert_agent_block(&mstore, "def-cc-corrupt-1");
+    let zone = "agent:def-cc-corrupt-1:current";
+    seed_output(&per_channel, &block_id, b"{\"type\":\"local\"}
+");
+    seed_output(&global, zone, b"{\"type\":\"global\"}
+");
+    test_support::corrupt(&global);
+
+    // The size read that picks the source fails: the per-channel copy answers, and the zone is damaged.
+    let resolved = global_output_source(&per_channel, &Some(global.clone()), &mstore, &block_id, "output");
+    assert!(resolved.is_none());
+    assert!(damage::is_damaged(zone));
+}
+
+#[test]
+fn global_output_source_skips_a_zone_already_marked_damaged() {
+    use crate::backend::transcript::damage;
+    let per_channel = mem_store();
+    let global = mem_store();
+    let mstore = Arc::new(Store::open_in_memory().unwrap());
+    let block_id = insert_agent_block(&mstore, "def-cc-corrupt-2");
+    let zone = "agent:def-cc-corrupt-2:current";
+    seed_output(&global, zone, b"{\"type\":\"global\"}
+");
+    assert!(global_output_source(&per_channel, &Some(global.clone()), &mstore, &block_id, "output").is_some());
+    damage::note_corrupt(zone, "append", &crate::backend::storage::error::StoreError::Sqlite(rusqlite::Error::SqliteFailure(
+        rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CORRUPT),
+        None,
+    )));
+    assert!(global_output_source(&per_channel, &Some(global), &mstore, &block_id, "output").is_none());
+}
