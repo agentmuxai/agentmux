@@ -29,7 +29,6 @@ vi.mock("@/app/store/app-api", () => ({
 }));
 const openLink = vi.fn();
 const installAppUpdate = vi.fn();
-const openNativePath = vi.fn();
 const revealInFileExplorer = vi.fn();
 vi.mock("@/store/global", async (importOriginal) => {
     const { createSignal } = await import("solid-js");
@@ -37,7 +36,7 @@ vi.mock("@/store/global", async (importOriginal) => {
     const [version] = createSignal<string | null>(null);
     return {
         atoms: { updaterStatusAtom: status, updaterVersionAtom: version },
-        getApi: () => ({ installAppUpdate, openNativePath, revealInFileExplorer, getBackendInfo: () => Promise.resolve({ pending_migrations: 0 }), listen: () => Promise.resolve(() => {}) }),
+        getApi: () => ({ installAppUpdate, revealInFileExplorer, getBackendInfo: () => Promise.resolve({ pending_migrations: 0 }), listen: () => Promise.resolve(() => {}) }),
         openLink: (u: string) => openLink(u),
     };
 });
@@ -71,7 +70,7 @@ beforeEach(() => {
     upgradeCancel.mockReset();
     openLink.mockReset();
     installAppUpdate.mockReset();
-    openNativePath.mockReset();
+    revealInFileExplorer.mockReset().mockResolvedValue(undefined);
     acceptAppUpdate({ state: "unknown", current: "0.59.26", checked_ms: 0, install: "unknown", can_download: false });
 });
 afterEach(() => cleanup());
@@ -145,11 +144,19 @@ describe("Maintenance download, for an install AgentMux can upgrade itself", () 
         expect(await screen.findByText("Unpacking v0.59.27…")).toBeTruthy();
     });
 
+    it("says why when the folder can't be shown", async () => {
+        updateStatus.mockResolvedValue(download("ready", { folder: "C:/apps/agentmux-0.59.27-x64-portable" }));
+        revealInFileExplorer.mockRejectedValue(new Error("Failed to open in Explorer: not found"));
+        render(() => <MaintenanceSection />);
+        fireEvent.click(await screen.findByRole("button", { name: "Show folder" }));
+        expect(await screen.findByText(/Couldn't open C:\/apps\/agentmux-0.59.27-x64-portable: Failed to open in Explorer: not found/)).toBeTruthy();
+    });
+
     it("a staged release shows its folder; a failed one says why and can be retried", async () => {
         updateStatus.mockResolvedValue(download("ready", { folder: "C:/apps/agentmux-0.59.27-x64-portable" }));
         render(() => <MaintenanceSection />);
         fireEvent.click(await screen.findByRole("button", { name: "Show folder" }));
-        expect(openNativePath).toHaveBeenCalledWith("C:/apps/agentmux-0.59.27-x64-portable");
+        expect(revealInFileExplorer).toHaveBeenCalledWith("C:/apps/agentmux-0.59.27-x64-portable");
         expect(installAppUpdate).not.toHaveBeenCalled();
 
         acceptAppUpdate(download("failed", { error: "the download doesn't match the checksum GitHub lists for it" }));
@@ -247,7 +254,6 @@ describe("Maintenance on a setup.exe install", () => {
         expect(screen.queryByRole("button", { name: "Show folder" })).toBeNull();
         fireEvent.click(screen.getByRole("button", { name: "Show installer" }));
         expect(revealInFileExplorer).toHaveBeenCalledWith(installer);
-        expect(openNativePath).not.toHaveBeenCalled();
         fireEvent.click(screen.getByRole("button", { name: "Upgrade & restart" }));
         expect(upgradeRestart).toHaveBeenCalledWith(false);
     });

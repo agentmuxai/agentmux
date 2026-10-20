@@ -471,8 +471,8 @@ declare global {
         sendLog: (log: string) => void;
         sendLogStructured: (level: string, module: string, message: string, data: Record<string, any> | null) => void;
         onQuicklook: (filePath: string) => void;
-        openNativePath(filePath: string): void;
-        revealInFileExplorer(filePath: string): void;
+        /** Opens a folder in the file manager, or shows a file in its folder. Rejects with the host's reason. */
+        revealInFileExplorer(filePath: string): Promise<void>;
         /** Native "open file" dialog. Resolves to the chosen absolute path,
          *  or null if the user cancelled. See
          *  docs/specs/SPEC_MEDIA_PANE_2026_07_26.md. */

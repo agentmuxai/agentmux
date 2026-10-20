@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("@/app/platform/ipc", () => ({ invokeCommand: vi.fn() }));
 
 import { invokeCommand } from "@/app/platform/ipc";
-import { createLogBatcher, hostSendLogBatch, LOG_BUFFER_MAX, LOG_FLUSH_MS, type LogEntry } from "./log-pipe";
+import { createLogBatcher, hostSendLogBatch, initLogPipe, LOG_BUFFER_MAX, LOG_FLUSH_MS, type LogEntry } from "./log-pipe";
 
 const line = (message: string): LogEntry => ({ level: "info", module: "console", message, data: null });
 
@@ -87,5 +87,21 @@ describe("hostSendLogBatch", () => {
             "fe_log_structured",
             "fe_log_structured",
         ]);
+    });
+});
+
+describe("initLogPipe", () => {
+    it("forwards an Error's message, not the {} it serialises to", async () => {
+        vi.useFakeTimers();
+        try {
+            vi.mocked(invokeCommand).mockReset().mockResolvedValue(null);
+            initLogPipe();
+            console.error(new Error("Unknown command: open_native_path"));
+            await vi.advanceTimersByTimeAsync(LOG_FLUSH_MS);
+            const entries = vi.mocked(invokeCommand).mock.calls.flatMap((c) => (c[1] as { entries: LogEntry[] }).entries);
+            expect(entries.map((e) => e.message)).toContain("Error: Unknown command: open_native_path");
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });

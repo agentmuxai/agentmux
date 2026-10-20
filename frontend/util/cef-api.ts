@@ -191,11 +191,10 @@ export function buildCefApi(): AppApi {
         openAgent: (agentId: string) => {
             return invokeCommand("open_agent", { agent_id: agentId });
         },
-        openNativePath: (filePath: string) => {
-            invokeCommand("open_native_path", { filePath }).catch(console.error);
-        },
+        // Opens a folder, or shows a file in its folder; never opens the path itself, which
+        // would run an executable. Rejects when the host can't (callers show why).
         revealInFileExplorer: (filePath: string) => {
-            invokeCommand("reveal_in_file_explorer", { filePath }).catch(console.error);
+            return invokeCommand<void>("reveal_in_file_explorer", { filePath });
         },
         showOpenFileDialog: () => {
             return invokeCommand<string | null>("show_open_file_dialog");

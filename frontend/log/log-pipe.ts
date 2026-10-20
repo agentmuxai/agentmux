@@ -121,6 +121,8 @@ export function initLogPipe() {
                 const msg = args
                     .map((a) => {
                         if (typeof a === "string") return a;
+                        // JSON.stringify(new Error("x")) is "{}": the message is what the log needs.
+                        if (a instanceof Error) return String(a);
                         try {
                             return JSON.stringify(a);
                         } catch {

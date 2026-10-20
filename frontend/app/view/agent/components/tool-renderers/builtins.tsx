@@ -194,7 +194,7 @@ function renderRead(node: ToolNode): JSX.Element {
                             type="button"
                             class="agent-tool-read-open"
                             title="Show the file in the OS file manager"
-                            onClick={() => window.api?.revealInFileExplorer(filePath)}
+                            onClick={() => void Promise.resolve(window.api?.revealInFileExplorer(filePath)).catch(console.error)}
                         >
                             Show in folder
                         </button>

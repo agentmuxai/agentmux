@@ -36,8 +36,9 @@ vi.mock("@/app/view/agent/agent-launch-env", () => ({ agentmuxHome: () => "C:/Us
 const decideWidget = vi.fn(async () => {});
 const forgetWidgetKey = vi.fn(async () => {});
 const showOpenFileDialog = vi.fn(async () => "C:/src/acme.notes/widget.json");
+const revealInFileExplorer = vi.fn(async (_path: string) => {});
 vi.mock("@/app/store/app-api", () => ({
-    getApi: () => ({ approvals: { decideWidget, forgetWidgetKey }, showOpenFileDialog, openNativePath: vi.fn() }),
+    getApi: () => ({ approvals: { decideWidget, forgetWidgetKey }, showOpenFileDialog, revealInFileExplorer }),
 }));
 
 import { setWidgetPackages } from "@/app/store/widget-packages-store";
@@ -78,7 +79,7 @@ function given(packages: WidgetPackageInfo[]): void {
 
 describe("WidgetsSection", () => {
     beforeEach(() => {
-        for (const f of [list, install, uninstall, setEnabled, decideWidget, forgetWidgetKey, showOpenFileDialog]) f.mockClear();
+        for (const f of [list, install, uninstall, setEnabled, decideWidget, forgetWidgetKey, showOpenFileDialog, revealInFileExplorer]) f.mockClear();
         list.mockResolvedValue({ packages: [] });
     });
     afterEach(() => cleanup());
@@ -139,6 +140,17 @@ describe("WidgetsSection", () => {
         render(() => <WidgetsSection />);
         await screen.findByText("Notes");
         expect(screen.queryByText("Uninstall")).not.toBeInTheDocument();
+    });
+
+    it("shows a widget's folder through the host, and says why when it can't", async () => {
+        given([pkg({ folder: "C:/Users/me/.agentmux/widgets/acme.notes" })]);
+        render(() => <WidgetsSection />);
+        await screen.findByText("Notes");
+        fireEvent.click(screen.getByText("Show folder"));
+        expect(revealInFileExplorer).toHaveBeenCalledWith("C:/Users/me/.agentmux/widgets/acme.notes");
+        revealInFileExplorer.mockRejectedValueOnce(new Error("Failed to open in Explorer: not found"));
+        fireEvent.click(screen.getByText("Show folder"));
+        expect(await screen.findByText(/Couldn't open C:\/Users\/me\/.agentmux\/widgets\/acme.notes: Failed to open in Explorer: not found/)).toBeInTheDocument();
     });
 
     it("says who signed a widget, and warns when it isn't the publisher's usual key", async () => {
