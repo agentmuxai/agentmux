@@ -156,6 +156,35 @@ async fn a_first_use_asks_the_person_and_the_value_never_reaches_the_agent() {
     assert!(!s.state.identity_store.vault_grant_check(&s.entry, "https://irs.gov").unwrap());
 }
 
+// The agent's call can be dropped while the person still has the prompt open: the request goes
+// and every window is told, so the prompt doesn't stay.
+#[tokio::test]
+async fn a_dropped_call_takes_its_prompt_down() {
+    let s = setup(ssn_field("https://irs.gov")).await;
+    let agent = s.auth.agent_id.clone();
+    let asking = {
+        let (state, auth, entry) = (s.state.clone(), s.auth.clone(), s.entry.clone());
+        tokio::spawn(async move {
+            let req = VaultFillRequest { auth, pane: None, ref_: "e7".into(), vault: entry };
+            handle_vault_fill(State(state), None, Json(req)).await
+        })
+    };
+    let mut asked = None;
+    for _ in 0..200 {
+        asked = uses::uses().list().into_iter().find(|u| u.agent == agent);
+        if asked.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    let asked = asked.expect("the use was asked about");
+    asking.abort();
+    let _ = asking.await;
+    assert!(uses::uses().get(&asked.id).is_none(), "the dropped call's request is gone");
+    assert!(!uses::uses().answer(&asked.id, Decision::Once), "and it can't be answered");
+    assert!(typed(&s).is_none());
+}
+
 #[tokio::test]
 async fn always_grants_the_site_and_the_next_fill_doesnt_ask() {
     let s = setup(ssn_field("https://irs.gov")).await;

@@ -38,7 +38,13 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
             await answerUse(u.id, decision);
             props.close();
         } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
+            const message = e instanceof Error ? e.message : String(e);
+            // The agent gave up, or another window answered: nothing is waiting any more.
+            if (/no longer waiting/i.test(message)) {
+                props.close();
+                return;
+            }
+            setError(message);
             setBusy(false);
         }
     };

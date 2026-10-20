@@ -96,6 +96,21 @@ fn record(state: &AppState, target: &FillTarget, agent: &str, where_: &str, outc
     crate::backend::vault::record(&state.identity_store, &target.id, &target.label, agent, "filled a web form", where_, outcome);
 }
 
+/// Takes a use request down, and tells every window, however the wait ends: the
+/// agent's call can be dropped (it disconnected, or was stopped) while the person
+/// still has the prompt open, and the prompt must go then too.
+struct Waiting {
+    id: String,
+    state: AppState,
+}
+
+impl Drop for Waiting {
+    fn drop(&mut self) {
+        uses::uses().forget(&self.id);
+        super::vault_handlers::publish(&self.state);
+    }
+}
+
 /// `POST /api/v1/ui/browser/vault_fill`.
 pub(crate) async fn handle_vault_fill(
     State(state): State<AppState>,
@@ -153,6 +168,7 @@ pub(crate) async fn handle_vault_fill(
                 requested_ms: agentmux_common::time::now_ms_u64(),
             };
             let answer = uses::uses().ask(request);
+            let _waiting = Waiting { id: use_id.clone(), state: state.clone() };
             super::vault_handlers::publish(&state);
             let _asking = crate::backend::user_attention::Asking::start(
                 &state.broker,
@@ -162,8 +178,6 @@ pub(crate) async fn handle_vault_fill(
                 &format!("{agent} wants to fill your {} on {}", target.what, field.origin),
             );
             let decision = tokio::time::timeout(ANSWER_WAIT, answer).await;
-            uses::uses().forget(&use_id);
-            super::vault_handlers::publish(&state);
             match decision {
                 Ok(Ok(Decision::Once)) => {}
                 Ok(Ok(Decision::Always)) => always = true,

@@ -93,13 +93,24 @@ describe("the prompt for an agent's use of an entry", () => {
         const close = vi.fn();
         render(() => <UsePrompt use={uses[0]} close={close} />);
         const dialog = await screen.findByRole("dialog");
-        vault.mockRejectedValueOnce(new Error("that request is no longer waiting"));
+        vault.mockRejectedValueOnce(new Error("couldn't reach AgentMux's host"));
         fireEvent.click(within(dialog).getByRole("button", { name: "Allow once" }));
-        expect((await screen.findByRole("alert")).textContent).toContain("no longer waiting");
+        expect((await screen.findByRole("alert")).textContent).toContain("couldn't reach");
         expect(close).not.toHaveBeenCalled();
         uses = [];
         await refreshVault();
         await waitFor(() => expect(close).toHaveBeenCalled());
+    });
+
+    it("closes when the answer says nothing is waiting any more, instead of staying stuck", async () => {
+        const close = vi.fn();
+        render(() => <UsePrompt use={uses[0]} close={close} />);
+        const dialog = await screen.findByRole("dialog");
+        // The agent gave up and its prompt wasn't taken down: the answer is refused.
+        vault.mockRejectedValueOnce(new Error("that request is no longer waiting"));
+        fireEvent.click(within(dialog).getByRole("button", { name: "Deny" }));
+        await waitFor(() => expect(close).toHaveBeenCalled());
+        expect(screen.queryByRole("alert")).toBeNull();
     });
 
     it("shows a site by its host", () => {
