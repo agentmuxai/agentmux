@@ -103,7 +103,7 @@ Every measure appears in the summary whether or not it flags. Margins live in `b
   - It compares only nights on the newest night's workload version, 12 agents and 10 rounds, one night per date, and needs at least 5 recent and 10 earlier nights, so nothing is said in the first weeks.
   - It is said once, on the night the drift starts, not on every night it lasts (a night where the median is already over the line the night before adds nothing). A new issue is titled "nightly performance drift"; both kinds carry the `perf-regression` label.
   - A drifting night is not a clean one: it does not close the open issue, even when nothing flags.
-- **Only the standard workload is recorded.** A manual run with other panes or rounds prints the trend but writes no line, so a test dispatch cannot skew the history.
+- **Only the standard workload is recorded.** A manual run with other panes or rounds, a named B, or fewer than 4 runs a side prints the trend but writes no line, so a test or bisect dispatch cannot stand in for the night's figures.
 - **A rerun of the same workflow run** replaces its own line (the run id is the key), it doesn't add a second.
 
 ### 4.7 The nightly GitHub email
