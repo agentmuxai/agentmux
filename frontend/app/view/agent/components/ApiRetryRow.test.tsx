@@ -4,7 +4,7 @@
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { toApiRetryView, type ApiRetryView } from "../hooks/useApiRetryState";
+import { applyApiRetryEvent, toApiRetryView, type ApiRetryView } from "../hooks/useApiRetryState";
 import { ApiRetryRow, apiRetryText } from "./ApiRetryRow";
 
 const NOW = 1_800_000_000_000;
@@ -29,6 +29,24 @@ describe("toApiRetryView", () => {
             error: "unknown",
         });
         expect(toApiRetryView(null, NOW)).toBeNull();
+    });
+});
+
+describe("applyApiRetryEvent", () => {
+    const sent = { attempt: 3, maxRetries: 10, retryInMs: 18_000, errorStatus: null, error: "unknown" };
+
+    it("applies a newer revision", () => {
+        const set = applyApiRetryEvent(null, { revision: 5, retry: sent }, NOW);
+        expect(set?.view?.attempt).toBe(3);
+        expect(applyApiRetryEvent(set, { revision: 6, retry: null }, NOW)).toEqual({ revision: 6, view: null });
+    });
+
+    it("ignores an event older than the one it shows", () => {
+        // A replacement's retry (7) arrived before an older clear (6).
+        const shown = applyApiRetryEvent(null, { revision: 7, retry: sent }, NOW);
+        expect(applyApiRetryEvent(shown, { revision: 6, retry: null }, NOW)).toBeNull();
+        // The mount-time answer at the same revision changes nothing either.
+        expect(applyApiRetryEvent(shown, { revision: 7, retry: null }, NOW)).toBeNull();
     });
 });
 

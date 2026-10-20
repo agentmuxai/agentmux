@@ -5,4 +5,8 @@ import type { ApiRetryState } from "./ApiRetryState";
  * The `agent-api-retry` event's payload (`mps_events::AgentApiRetry`), and
  * `agentapiretry`'s answer: the retry in progress, or `null` when none is.
  */
-export type ApiRetryEvent = { retry: ApiRetryState | null, };
+export type ApiRetryEvent = { 
+/**
+ * Rises with every change, for every pane; only an order, not a time.
+ */
+revision: number, retry: ApiRetryState | null, };
