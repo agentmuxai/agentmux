@@ -301,6 +301,14 @@ pub(crate) mod test_support {
         .unwrap();
     }
 
+    /// SQLite's `SQLITE_CORRUPT`, as a store error.
+    pub(crate) fn corrupt_error() -> crate::backend::storage::error::StoreError {
+        crate::backend::storage::error::StoreError::Sqlite(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CORRUPT),
+            Some("database disk image is malformed".into()),
+        ))
+    }
+
     static SHARED: Mutex<Vec<usize>> = Mutex::new(Vec::new());
 
     /// Stands in for the process-global shared store while it lives: stores the
