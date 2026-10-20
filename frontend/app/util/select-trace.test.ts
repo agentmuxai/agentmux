@@ -128,6 +128,16 @@ describe("pressed rows whose click never arrives", () => {
         expect(trace.counters().lostClicks).toBe(1);
     });
 
+    it("a lost click found after its window was written still reaches a summary", () => {
+        const { trace, logs, advance } = harness();
+        trace.pressed("block-aaaaaaaa", { isConnected: false });
+        advance(59_900);
+        trace.released();
+        advance(CLICK_GRACE_MS);
+        advance(60_000);
+        expect(logs.some((l) => l.includes("[swarm] last 60s") && l.includes("lost=1"))).toBe(true);
+    });
+
     it("a cancelled pointer sequence is not a lost click", () => {
         const { trace, advance } = harness();
         trace.pressed("block-aaaaaaaa", { isConnected: true });

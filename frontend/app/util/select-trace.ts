@@ -163,6 +163,7 @@ export function createSelectTrace(opts: SelectTraceOptions = {}) {
                 press = null;
                 const rowGone = !p.el.isConnected;
                 counters.lostClicks++;
+                armSummary();
                 if (rowGone) counters.lostClicksRowGone++;
                 record(
                     `[swarm] press on blk=${short(p.blockId)} held ${now() - p.downAt - CLICK_GRACE_MS}ms got no click; ` +
