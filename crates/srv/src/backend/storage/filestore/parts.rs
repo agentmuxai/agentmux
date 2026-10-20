@@ -41,18 +41,18 @@ pub(super) fn load_parts(
     }
 }
 
-/// `[offset, offset + len)` of a file, or `None` if a part inside it has no
-/// row (a writer mid-append): `counter::read_bytes_exact`, for when its range
-/// query hit a damaged part. The damaged part counts as stored, as spaces.
-pub(super) fn read_exact_past_damage(
+/// `[offset, offset + len)` of a file and how many of its bytes are stored,
+/// as `counter::read_bytes_covered` reads them, for when its range query hit
+/// a damaged part: that part counts as stored, as spaces.
+pub(super) fn read_covered_past_damage(
     conn: &Connection,
     zone_id: &str,
     name: &str,
     offset: i64,
     len: i64,
-) -> Result<Option<Vec<u8>>, StoreError> {
+) -> Result<(Vec<u8>, usize), StoreError> {
     if len <= 0 {
-        return Ok(Some(Vec::new()));
+        return Ok((Vec::new(), 0));
     }
     let size: i64 = conn.query_row(
         "SELECT size FROM db_wave_file WHERE zoneid = ?1 AND name = ?2",
@@ -74,7 +74,7 @@ pub(super) fn read_exact_past_damage(
             covered += (to - from) as usize;
         }
     }
-    Ok((covered == len as usize).then_some(out))
+    Ok((out, covered))
 }
 
 fn load_range(conn: &Connection, zone_id: &str, name: &str, start: i32, end: i32) -> Result<HashMap<i32, Vec<u8>>, StoreError> {
@@ -205,10 +205,10 @@ mod tests {
         }
         assert_eq!(parts[&3], vec![b' '; pds]);
 
-        // The snapshot reader's exact read, across the damaged part's start.
+        // The exact read the snapshot reader and the counter's catch-up both
+        // use, across the damaged part's start.
         let at = 3 * pds as i64 - 10;
-        assert!(super::super::counter::read_bytes_exact(&conn, "z", "output", at, 20).is_err());
-        let bytes = read_exact_past_damage(&conn, "z", "output", at, 20).unwrap().unwrap();
+        let bytes = super::super::counter::read_bytes_exact(&conn, "z", "output", at, 20).unwrap().unwrap();
         assert_eq!(bytes, [vec![b'2'; 10], vec![b' '; 10]].concat());
     }
 

@@ -56,15 +56,9 @@ impl SnapshotReader<'_> {
         super::counter::tail_state_in(self.tx, zone_id, name, max_catch_up)
     }
 
-    /// `[offset, offset + len)`, or `None` if any of it isn't stored. A
-    /// damaged part reads as blank (parts.rs).
+    /// `[offset, offset + len)`, or `None` if any of it isn't stored.
     pub fn bytes(&self, zone_id: &str, name: &str, offset: i64, len: i64) -> Result<Option<Vec<u8>>, StoreError> {
-        match super::counter::read_bytes_exact(self.tx, zone_id, name, offset, len) {
-            Err(StoreError::Sqlite(e)) if super::parts::is_corrupt(&e) => {
-                super::parts::read_exact_past_damage(self.tx, zone_id, name, offset, len)
-            }
-            other => other,
-        }
+        super::counter::read_bytes_exact(self.tx, zone_id, name, offset, len)
     }
 }
 
