@@ -1,6 +1,6 @@
 # Spec: The build slot — one heavy build or test at a time on a machine, enforced for agents' cargo
 
-**Status:** active. Shipped: §3 (the lock script) and §4 (the `cargo` shim, installed at startup) in this PR. Left: the same for the other heavy commands (§6), the holder on the Swarm and Presence views (§6), and wait/hold reporting (§6).
+**Status:** active. Shipped: §3 (the lock script) and §4 (the `cargo` shim, installed at startup), both in #5207. Left: the same for the other heavy commands (§6), the holder on the Swarm and Presence views (§6), and wait/hold reporting (§6).
 **Date:** 2026-10-20
 **Author:** Lazo
 **Verified against:** `agentmux` `main` @ `2a864efd4` (2026-10-20), by reading code.
