@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
     badRadii,
     collect,
+    colourLiterals,
     compare,
     countButtons,
     deadFallbacks,
@@ -109,9 +110,9 @@ describe("rules 5-9: the shared scales", () => {
         expect(rawDurations(scss)).toBe(3);
     });
 
-    it("counts font sizes given as raw px only", () => {
-        const scss = `.a { font-size: 12px; } .b { font-size: var(--text-sm); } .c { font-size: 0.9em; } .d { font-size: 9px !important; }`;
-        expect(rawFontSizes(scss).map((d) => d.selector)).toEqual([".a", ".d"]);
+    it("counts font sizes given as raw px or rem only", () => {
+        const scss = `.a { font-size: 12px; } .b { font-size: var(--text-sm); } .c { font-size: 0.9em; } .d { font-size: 9px !important; } .e { font-size: 0.75rem; }`;
+        expect(rawFontSizes(scss).map((d) => d.selector)).toEqual([".a", ".d", ".e"]);
     });
 
     it("counts z-indexes given as raw numbers only", () => {
@@ -129,6 +130,25 @@ describe("rules 5-9: the shared scales", () => {
             .f:has(.g:focus-visible) { outline-color: red; }
         `;
         expect(handFocusRings(scss)).toEqual([".a:focus-visible", ".c:hover, .c:focus-visible", ".f:has(.g:focus-visible)"]);
+    });
+
+    it("counts colour literals, not black or white, tokens or colours built from a token", () => {
+        const scss = `
+            .a { color: #ef4444; background: rgba(245, 158, 11, 0.1); border-color: hsl(10 50% 50%); }
+            .b { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 1px rgb(255 255 255 / 0.2); color: #fff; background: #000000; }
+            .c { color: var(--error-color); background: rgba(var(--accent-color-rgb), 0.2); border-color: rgb(from var(--x) r g b); }
+            .d { color: var(--color-error, #e5484d); background: color-mix(in srgb, #ef4444 12%, transparent); }
+            .e { color: #fffa00; background: #00000040; --local: #123456; }
+        `;
+        expect(colourLiterals(scss).map((c) => c.literal)).toEqual([
+            "#ef4444",
+            "rgba(245, 158, 11, 0.1)",
+            "hsl(10 50% 50%)",
+            "#e5484d",
+            "#ef4444",
+            "#fffa00",
+            "#123456",
+        ]);
     });
 
     it("takes tokens set on :root, alone or in a list, and not inside an at-rule", () => {
@@ -207,6 +227,15 @@ describe("collect", () => {
         expect(out.durations).toEqual({ "frontend/app/view/x/s.scss": 1 });
         expect(out.fallbacks).toEqual({ "frontend/app/view/x/s.scss": 1 });
         expect(out.focusRings).toEqual({ "frontend/app/view/x/s.scss": 1 });
+    });
+
+    it("counts colour literals outside the theme files only", () => {
+        const coloured = [
+            { path: "frontend/app/view/x/c.scss", source: ".c { color: #ef4444; }" },
+            { path: "frontend/app/theme.scss", source: ":root { --error-color: #ef4444; }" },
+            { path: "frontend/app/themes/nord.scss", source: "[data-theme=nord] { --accent-color: #88c0d0; }" },
+        ];
+        expect(collect(coloured).colours).toEqual({ "frontend/app/view/x/c.scss": 1 });
     });
 
     it("doesn't count a variable set only by a test as defined", () => {

@@ -16,7 +16,7 @@ import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
 import { search, openSearchPanel } from "@codemirror/search";
 import { lintGutter } from "@codemirror/lint";
-import { editorTheme } from "./editor-theme";
+import { editorTheme, isLightPolarity } from "./editor-theme";
 import { Markdown } from "@/app/element/markdown";
 import { EmptyPaneLogo } from "@/app/element/EmptyPaneLogo";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -254,6 +254,16 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
     // The Save keys come from the shortcut table and follow live changes to
     // the user's keybindings (createEffect below), like word wrap does.
     const saveKeysCompartment = new Compartment();
+    // CodeMirror's light/dark base styles follow the app theme's polarity,
+    // which can change while tabs are open (and their saved states hold the
+    // old one), so it is resynced like the two above.
+    const themeCompartment = new Compartment();
+    const themeExtension = (): Extension => editorTheme(isLightPolarity());
+    const polarityObserver = new MutationObserver(() => {
+        cmView?.dispatch({ effects: themeCompartment.reconfigure(themeExtension()) });
+    });
+    polarityObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme-polarity"] });
+    onCleanup(() => polarityObserver.disconnect());
 
     // Keys from the shortcut table (`editor:save`, `editor:saveAs`).
     const saveKeymap = (): Extension =>
@@ -446,7 +456,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
 
         const extensions: Extension[] = [
             basicSetup,
-            editorTheme,
+            themeCompartment.of(themeExtension()),
             search(),
             // lintGutter installs the lint state field that backs the inline
             // diagnostic underlines (LSP pushes via setDiagnostics). We keep
@@ -698,6 +708,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                     effects: [
                         wordWrapCompartment.reconfigure(model.wordWrapAtom() ? [EditorView.lineWrapping] : []),
                         saveKeysCompartment.reconfigure(saveKeymap()),
+                        themeCompartment.reconfigure(themeExtension()),
                     ],
                 });
                 setLiveDoc(saved.doc.toString()); // seed preview from restored doc

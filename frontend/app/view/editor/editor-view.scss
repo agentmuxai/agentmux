@@ -14,7 +14,7 @@
     height: 100%;
     width: 100%;
     overflow: hidden;
-    background: var(--block-bg-color);
+    background: var(--main-bg-color);
 
     &.editor-view--tree-collapsed {
         // Only main column visible; tree column not rendered
@@ -28,7 +28,7 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    background: var(--block-bg-color);
+    background: var(--main-bg-color);
 }
 
 // Vertical resize strip between the tree column and the main editor column.
@@ -274,7 +274,7 @@
     outline: none;
 
     &:focus {
-        box-shadow: 0 0 0 2px rgba(137, 180, 250, 0.25);
+        box-shadow: 0 0 0 2px var(--accent-line);
     }
 }
 
@@ -317,7 +317,7 @@
     outline: none;
 
     &:focus {
-        box-shadow: 0 0 0 2px rgba(137, 180, 250, 0.25);
+        box-shadow: 0 0 0 2px var(--accent-line);
     }
 }
 
@@ -405,10 +405,10 @@
 
 .editor-error {
     padding: var(--space-2) var(--space-3);
-    background: rgba(255, 80, 80, 0.15);
+    background: var(--error-bg);
     color: var(--error-color);
     font-size: var(--text-sm);
-    border-bottom: 1px solid rgba(255, 80, 80, 0.3);
+    border-bottom: 1px solid var(--error-line);
 }
 
 // Full-pane error panel — shown when the active tab failed to load (the
@@ -447,8 +447,8 @@
     font-size: var(--text-sm);
     color: var(--secondary-text-color);
     max-width: 500px;
-    background: rgba(255, 80, 80, 0.08);
-    border: 1px solid rgba(255, 80, 80, 0.25);
+    background: var(--error-bg);
+    border: 1px solid var(--error-line);
     border-radius: 3px;
     padding: var(--space-2) var(--space-3);
 }
@@ -597,8 +597,8 @@
 .editor-lsp-banner {
     flex: 0 0 auto;
     padding: var(--space-2) var(--space-3);
-    background: rgba(245, 158, 11, 0.08);
-    border-bottom: 1px solid rgba(245, 158, 11, 0.25);
+    background: var(--warning-bg);
+    border-bottom: 1px solid var(--warning-line);
     color: var(--main-text-color);
     font-size: var(--text-sm);
     display: flex;
@@ -613,7 +613,7 @@
 }
 
 .editor-lsp-banner-icon {
-    color: rgba(245, 158, 11, 0.9);
+    color: var(--warning-color);
     font-size: var(--text-md);
 }
 
@@ -630,7 +630,7 @@
 .editor-lsp-banner-cmd {
     flex: 1;
     padding: 2px var(--space-1);
-    background: rgba(0, 0, 0, 0.2);
+    background: var(--tint-2);
     border-radius: 3px;
     @include mixins.truncate;
 }
@@ -678,12 +678,12 @@
 .editor-lsp-status[data-kind="starting"],
 .editor-lsp-status[data-kind="initializing"] {
     .editor-lsp-status-dot {
-        background: #f59e0b; // yellow
+        background: var(--warning-color);
     }
 }
 .editor-lsp-status[data-kind="ready"] {
     .editor-lsp-status-dot {
-        background: #22c55e; // green
+        background: var(--success-color);
     }
 }
 .editor-lsp-status[data-kind="missing"] {

@@ -5,17 +5,21 @@
 // (frontend/app/theme.scss + frontend/app/themes/*.scss). The editor follows
 // whatever theme the user has active instead of a fixed dark palette.
 //
-// Syntax-token colors come from oneDark's highlight style: the app theme
-// system has no per-token color tokens, and oneDark's palette reads well on
-// every (dark) app theme. Only the chrome — background, text, gutters,
-// cursor, selection — is rebound to CSS variables here.
+// Syntax-token colours are the `--syntax-*` tokens (theme.scss): One Dark's
+// palette on the dark themes and a palette checked for contrast on the light
+// ones, switched by the `data-theme-polarity` marker, so a theme change
+// recolours the code with no reconfiguring. The chrome — background, text,
+// gutters, cursor, selection — is rebound to CSS variables here. Only
+// CodeMirror's own light/dark base styles need the polarity told to them:
+// `editorTheme(light)` sets that, and the editor swaps it in a Compartment.
 
 import { EditorView } from "@codemirror/view";
-import { syntaxHighlighting } from "@codemirror/language";
-import { oneDarkHighlightStyle } from "@codemirror/theme-one-dark";
+import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { tags } from "@lezer/highlight";
 import type { Extension } from "@codemirror/state";
 
-const editorChromeTheme = EditorView.theme(
+const editorChromeTheme = (dark: boolean) =>
+    EditorView.theme(
     {
         "&": {
             color: "var(--main-text-color)",
@@ -157,7 +161,37 @@ const editorChromeTheme = EditorView.theme(
             backgroundColor: "transparent",
         },
     },
-    { dark: true },
+    { dark },
 );
 
-export const editorTheme: Extension = [editorChromeTheme, syntaxHighlighting(oneDarkHighlightStyle)];
+const v = (name: string) => `var(--syntax-${name})`;
+
+// One Dark's tag-to-colour mapping (@codemirror/theme-one-dark), with the
+// colours as tokens.
+const syntaxStyle = HighlightStyle.define([
+    { tag: tags.keyword, color: v("keyword") },
+    { tag: [tags.name, tags.deleted, tags.character, tags.propertyName, tags.macroName], color: v("name") },
+    { tag: [tags.function(tags.variableName), tags.labelName], color: v("function") },
+    { tag: [tags.color, tags.constant(tags.name), tags.standard(tags.name)], color: v("constant") },
+    { tag: [tags.definition(tags.name), tags.separator], color: v("plain") },
+    {
+        tag: [tags.typeName, tags.className, tags.number, tags.changed, tags.annotation, tags.modifier, tags.self, tags.namespace],
+        color: v("type"),
+    },
+    { tag: [tags.operator, tags.operatorKeyword, tags.url, tags.escape, tags.regexp, tags.link, tags.special(tags.string)], color: v("operator") },
+    { tag: [tags.meta, tags.comment], color: v("comment") },
+    { tag: tags.strong, fontWeight: "bold" },
+    { tag: tags.emphasis, fontStyle: "italic" },
+    { tag: tags.strikethrough, textDecoration: "line-through" },
+    { tag: tags.link, color: v("comment"), textDecoration: "underline" },
+    { tag: tags.heading, fontWeight: "bold", color: v("name") },
+    { tag: [tags.atom, tags.bool, tags.special(tags.variableName)], color: v("constant") },
+    { tag: [tags.processingInstruction, tags.string, tags.inserted], color: v("string") },
+    { tag: tags.invalid, color: v("invalid") },
+]);
+
+/** The editor's theme for a light or a dark app theme. */
+export const editorTheme = (light: boolean): Extension => [editorChromeTheme(!light), syntaxHighlighting(syntaxStyle)];
+
+/** Whether the app's theme is a light one (the marker app.tsx keeps on <html>). */
+export const isLightPolarity = (): boolean => document.documentElement.getAttribute("data-theme-polarity") === "light";
