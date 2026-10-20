@@ -14,6 +14,7 @@ import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import type { VaultActivity } from "@/types/rpc/VaultActivity";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
+import type { UseRequest } from "@/types/rpc/UseRequest";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
 
 export interface KeptSecret {
@@ -56,15 +57,18 @@ async function call<T>(op: string, args: Record<string, unknown> = {}): Promise<
 const store = createRoot(() => {
     const [entries, setEntries] = createSignal<VaultEntryInfo[] | null>(null);
     const [requests, setRequests] = createSignal<VaultRequest[]>([]);
+    const [uses, setUses] = createSignal<UseRequest[]>([]);
     const [problem, setProblem] = createSignal<string | null>(null);
     const [error, setError] = createSignal<string | null>(null);
     const [loading, setLoading] = createSignal(false);
     const [changedMs, setChangedMs] = createSignal(0);
-    return { entries, setEntries, requests, setRequests, problem, setProblem, error, setError, loading, setLoading, changedMs, setChangedMs };
+    return { entries, setEntries, requests, setRequests, uses, setUses, problem, setProblem, error, setError, loading, setLoading, changedMs, setChangedMs };
 });
 
 export const vaultEntries = store.entries;
 export const vaultRequests = store.requests;
+/** Agents' uses of an entry (filling a web form) waiting for the person to allow them. */
+export const vaultUses = store.uses;
 /** Why the values couldn't be opened, when they couldn't. */
 export const vaultProblem = store.problem;
 export const vaultError = store.error;
@@ -75,10 +79,11 @@ export const vaultChangedMs = store.changedMs;
 export async function refreshVault(): Promise<void> {
     store.setLoading(true);
     try {
-        const data = await call<{ entries: VaultEntryInfo[]; problem: string | null; requests: VaultRequest[] }>("list");
+        const data = await call<{ entries: VaultEntryInfo[]; problem: string | null; requests: VaultRequest[]; uses: UseRequest[] }>("list");
         store.setEntries(data.entries);
         store.setProblem(data.problem);
         store.setRequests(data.requests);
+        store.setUses(data.uses ?? []);
         store.setError(null);
     } catch (e) {
         store.setError(e instanceof Error ? e.message : String(e));
@@ -90,8 +95,9 @@ export async function refreshVault(): Promise<void> {
 /** Only the agents' requests: needs no keychain read. */
 export async function refreshVaultRequests(): Promise<void> {
     try {
-        const data = await call<{ requests: VaultRequest[] }>("requests");
+        const data = await call<{ requests: VaultRequest[]; uses: UseRequest[] }>("requests");
         store.setRequests(data.requests);
+        store.setUses(data.uses ?? []);
     } catch (e) {
         console.log("vault: could not load agents' requests", e);
     }
@@ -105,6 +111,7 @@ export function followVault(): void {
     following = true;
     onMuxEvent(WpsEvent.Vault, (data) => {
         store.setRequests(data.requests);
+        store.setUses(data.uses);
         store.setChangedMs(data.changed_ms);
         if (store.entries() !== null) void refreshVault();
     });
@@ -133,6 +140,13 @@ export async function copyVaultPart(id: string, part: string, label: string): Pr
     const res = (await relay({ id, part, label })) as { clears_in_secs?: number };
     return res?.clears_in_secs ?? 30;
 }
+
+export type UseDecision = "once" | "always" | "deny";
+
+/** The person's answer to an agent's use of an entry; srv takes it only from the host. */
+export const answerUse = (id: string, decision: UseDecision) => call<unknown>("answer_use", { id, decision });
+/** Stops an agent filling an entry on a site without asking. */
+export const revokeGrant = (entryId: string, origin: string) => call<unknown>("revoke_grant", { entry_id: entryId, origin });
 
 export const createEntry = (entry: NewVaultEntry) => call<{ id: string }>("create", { ...entry });
 export const updateEntry = (change: VaultEntryChange) => call<unknown>("update", { ...change });

@@ -149,3 +149,20 @@
     overflow-wrap: anywhere;
     user-select: text;
 }
+
+// Where agents may fill an entry without asking.
+.vault-grants {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+    margin-top: var(--space-1);
+}
+
+.vault-grant {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: 0 var(--space-1);
+    border: 1px solid var(--border-color);
+}

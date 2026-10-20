@@ -12,6 +12,8 @@
 pub mod kinds;
 pub mod requests;
 pub mod seal;
+pub mod slots;
+pub mod uses;
 
 use std::collections::BTreeMap;
 
@@ -46,6 +48,8 @@ pub struct VaultEntryInfo {
     pub tags: Vec<String>,
     /// The parts that hold a value.
     pub parts_set: Vec<String>,
+    /// The sites an agent may fill this entry into without asking again.
+    pub grants: Vec<String>,
     pub tail: String,
     #[ts(type = "number")]
     pub created_at: i64,
@@ -290,6 +294,37 @@ pub fn record_copy(store: &Store, id: &str, part: &str, done: bool) -> Result<()
     Ok(())
 }
 
+/// What a web form fill needs to know about an entry, before anything is asked:
+/// the entry, the part, and the kind of field that part belongs in.
+pub struct FillTarget {
+    pub id: String,
+    pub label: String,
+    pub part: &'static str,
+    pub slot: Option<&'static str>,
+    pub what: String,
+}
+
+/// Resolves `"id"` or `"id.part"` for a fill, or says why it can't be filled.
+pub fn fill_target(store: &Store, vault: &str) -> Result<FillTarget, String> {
+    let (id, part) = slots::split(vault);
+    let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no Vault entry {id:?}: Vault's list action shows the entries"))?;
+    let kind = kinds::kind(&row.kind).ok_or_else(|| format!("entry {id} has an unknown kind"))?;
+    let part = slots::fillable_part(kind, part)?;
+    let slot = slots::slot(kind, part);
+    let what = slots::what(kind, part);
+    Ok(FillTarget { id: row.id, label: row.label, part, slot, what })
+}
+
+/// A part's value for the host to type; never returned to an agent. The use is
+/// logged by the caller, with the site and the outcome.
+pub fn value_for_fill(store: &Store, id: &str, part: &str) -> Result<zeroize::Zeroizing<String>, String> {
+    let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {id}"))?;
+    let key = seal::key(false)?;
+    let parts = seal::open(&key, &row.id, &row.sealed)?;
+    let value = parts.get(part).ok_or_else(|| format!("{} has no {part} saved", row.label))?;
+    Ok(zeroize::Zeroizing::new(value.to_string()))
+}
+
 pub fn delete(store: &Store, id: &str) -> Result<(), String> {
     let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no entry {id}"))?;
     store.vault_delete(id).map_err(|e| e.to_string())?;
@@ -301,6 +336,7 @@ pub fn delete(store: &Store, id: &str) -> Result<(), String> {
 /// couldn't (the tails are then empty).
 pub fn list_for_pane(store: &Store) -> Result<(Vec<VaultEntryInfo>, Option<String>), String> {
     let rows = store.vault_list().map_err(|e| e.to_string())?;
+    let mut grants = store.vault_grants().map_err(|e| e.to_string())?;
     let key = if rows.is_empty() { Ok(None) } else { seal::key(false).map(Some) };
     let mut problem = key.as_ref().err().cloned();
     let mut out = Vec::with_capacity(rows.len());
@@ -320,6 +356,7 @@ pub fn list_for_pane(store: &Store) -> Result<(Vec<VaultEntryInfo>, Option<Strin
             fields: serde_json::from_str(&row.fields).unwrap_or_default(),
             tags: serde_json::from_str(&row.tags).unwrap_or_default(),
             section: kind.section,
+            grants: grants.remove(&row.id).unwrap_or_default(),
             id: row.id,
             kind: row.kind,
             label: row.label,

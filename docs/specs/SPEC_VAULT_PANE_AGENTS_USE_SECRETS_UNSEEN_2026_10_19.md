@@ -1,6 +1,6 @@
 # SPEC: the Vault: one pane for the person's secrets, which agents use without seeing them
 
-**Status:** active — P1 (§4, §11) shipped in #5180; P2a (§5: the pane, the store, the `Vault` tool, agents kept out) and P2b (Reveal and Copy, Windows) are built; P2c to P8 remain. The operator took the recommended answers to §13 on 2026-10-19.
+**Status:** active — P1 (§4, §11) shipped in #5180; P2a (§5: the pane, the store, the `Vault` tool, agents kept out) P2b (Reveal and Copy, Windows) and P3 (§6.1 to §6.4, §6.6, as §6.7 says) are built; P2c, P4 to P8 remain. The operator took the recommended answers to §13 on 2026-10-19.
 **Date:** 2026-10-19
 **Author:** Agent2 #6 (agent2-6@narko), at the operator's request
 **Trigger (operator, 2026-10-19):** an agent filling a US state's corporate-registry certificate request form was refused on the address, city, ZIP and email fields, then could not tick a checkbox, so the person had to finish the form by hand. "Agentmux needs to be able to fill in personal information including ssn." … "we'll need to pivot into that work now, write a spec to file." On a first draft that put saved values in Settings: "sounds like we may need a new pane type, a vault, or settings wouldn't really make sense" … "api keys and anything secret can be kept there." … "we want rich features, like support for pw protected encrypted export file (.vault file), and imports from kdbx files and last pass, and any other popular services should be supported."
@@ -186,6 +186,19 @@ The host types it into the page. With the box ticked, it is also saved, with a g
 
 Keychain → srv (`Zeroizing`) → host over host IPC → `Input.insertText` in the page. Never MCP, a tool result or srv's ordinary API responses. The host log records entry id, field and origin, never the value.
 
+### 6.7 Built in P3
+
+What shipped, and where it differs from §6.1 to §6.6:
+
+- **The action.** `Browser` `fill` takes `vault` (an id, or `id.part`) instead of `text`; both is an error. It is its own srv route (`/api/v1/ui/browser/vault_fill`, `server/browser_vault_fill.rs`) and its own pair of host routes (`field_info`, `vault_fill`; `browser_api/vault_fill.rs`), not a branch of `act`.
+- **Which parts.** Every part except a login's: `login` is refused whole (its password and one-time-code seed are never filled, §13 question 2), and the host refuses any field that is a password or one-time-code field, whatever the entry.
+- **The decision** is srv's (`plan` in `browser_vault_fill.rs`): the host reports the field's frame origin and which kinds of value it looks like (`browser_api/vault_slots.rs`, whose slot names srv's `vault/slots.rs` maps each part to; a test keeps the two lists equal). A granted site and a field that fits fill without asking; a granted site and a field that doesn't fit asks; an ungranted site asks, offering "Always on this site" only when the field fits. Entries of a kind no field can be known to fit (another ID, a note) always ask. An unknown origin, a password-like field or one that takes no text is refused.
+- **The prompt is a window prompt, not a banner in the browser pane,** and shows no screenshot. Every AgentMux window shows it (the same way as an agent's request for an entry, §5.4): the agent, the entry, the site, the field and why it is asked, with **Deny**, **Allow once** and **Always on <site>**. Closing it denies. The answer reaches srv only through the host's Vault route, and srv refuses "always" when it wasn't offered. A grant is one entry on one origin; the pane lists each entry's sites with a revoke button, and deleting an entry deletes its grants. Auto-approve doesn't answer these. A pane screenshot is left out because the prompt shows the person the exact field label and origin, and srv has the host re-check both when it types (below).
+- **Typing.** srv sends the value to the host only after the person has answered, in the request that types it (a local HTTP call to the host, not the page, MCP or a log; srv holds it in a `Zeroizing` buffer). The host re-reads the field and refuses unless it is still in the origin and has the markup the person approved, then focuses it, requires that it holds the focus, marks it, and types it as trusted input; a date field is set whole. A page that ignored the typed text gets it set directly, as `fill` does.
+- **What comes back** is `{filled_from_vault, part, value: "[secret: hidden]", site, field}` plus the page's own validation message and a note when the page shortened or reformatted the value; never a length, a tail or a read-back.
+- **Taint** is a marker attribute on the field (`data-agentmux-vault`), set before anything is typed. `secret_reason` reports it, so every snapshot, `find`, read-back, banner field list and screenshot blackout treats the field as secret from then on, whatever its name. It is an attribute rather than a host-side set because every reader already works from the element's attributes. A page can remove it, but the page already holds the value; the marker is against an agent reading it back, not against the page.
+- **Activity** records each use as `filled a web form`: the agent, the entry, the site and field, and `done`, `denied`, `refused`, `failed` or `timed out`. The pane's Warden view of these is still §5.6.
+
 ## 7. Agents run commands with a Vault entry
 
 ### 7.1 The action
@@ -309,7 +322,7 @@ Fix (built in P1):
 | **P2a** | The Vault pane and store (§5): sections, add, change and delete, Activity, "Kept by AgentMux"; agents kept out of it (§5.3); the `Vault` tool's `list` and `request` | The person keeps an SSN, a card and an API key in the Vault; an agent asks for one and gets its id; no agent route returns a value, a tail or a field |
 | **P2b** | Reveal and Copy with OS confirmation and the clipboard clear (§5.3), built for Windows Hello; the macOS and Linux confirmations follow | Reveal asks Windows Hello; a copied value is gone from the clipboard 30 s later |
 | **P2c** | `.vault` export and import (§8.1, §8.2, §8.5), so there is a backup early | The person exports the Vault, deletes the entries and imports them back |
-| **P3** | Browser fill from the Vault (§6.1 to §6.4, §6.6), taint, grants; Activity and grants in Warden (§5.6) | An agent fills an SSN fixture field; its result, snapshot, screenshot and transcript have no trace of the value; another origin is asked |
+| **P3** | Browser fill from the Vault (§6.1 to §6.4, §6.6), taint, grants. Built (§6.7); Activity and grants in Warden (§5.6) follow | An agent fills an SSN fixture field; its result, snapshot, screenshot and transcript have no trace of the value; another origin is asked |
 | **P4** | §6.5: the banner's value field and **Save to Vault**; `request_value` | A form with an SSN field is done by the agent plus one value typed in the banner |
 | **P5** | Importers, first wave (§8.4): KeePass `.kdbx`, LastPass, 1Password, Bitwarden, the browsers' CSVs, `.env`, any CSV; plaintext-file handling (§8.6); fuzzing (§8.7); KeePass export (§8.3) | Each imports its real-export fixture with the right kinds and no loss the preview didn't list |
 | **P6** | Importers, second wave: Proton Pass, Dashlane, Keeper, NordPass, RoboForm, Enpass, Zoho Vault, Sticky Password | The same, per source |

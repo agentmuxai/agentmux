@@ -14,7 +14,8 @@ import { VaultEntryForm, type VaultFormTarget } from "./vault-entry-form";
 import { VaultRevealDialog } from "./vault-reveal";
 import { formatWhen } from "./vault-format";
 import { SECTION_LABELS, vaultKind } from "./vault-kinds";
-import { deleteEntry, vaultEntries, vaultLoading } from "./vault-store";
+import { siteOf } from "./vault-use-prompts";
+import { deleteEntry, revokeGrant, vaultEntries, vaultLoading } from "./vault-store";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 
@@ -41,6 +42,15 @@ export function VaultEntries(props: { section: VaultSection }): JSX.Element {
     const [error, setError] = createSignal<string | null>(null);
     const rows = createMemo(() => (vaultEntries() ?? []).filter((e) => e.section === props.section && entryMatches(e, filter())));
     const total = createMemo(() => (vaultEntries() ?? []).filter((e) => e.section === props.section).length);
+
+    const revoke = async (id: string, origin: string) => {
+        try {
+            await revokeGrant(id, origin);
+            setError(null);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : String(err));
+        }
+    };
 
     const confirmDelete = async () => {
         const e = deleting();
@@ -99,6 +109,19 @@ export function VaultEntries(props: { section: VaultSection }): JSX.Element {
                                     <td>
                                         <span>{e.label}</span>
                                         <span class="warden-manager-mono warden-manager-dim vault-id">{e.id}</span>
+                                        <Show when={e.grants.length > 0}>
+                                            <div class="vault-grants" aria-label={`Sites ${e.label} may be filled into without asking`}>
+                                                <span class="warden-manager-dim">Agents may fill it on </span>
+                                                <For each={e.grants}>
+                                                    {(origin) => (
+                                                        <span class="vault-grant" data-origin={origin}>
+                                                            {siteOf(origin)}
+                                                            <IconButton icon="xmark" label={`Stop filling ${e.label} on ${siteOf(origin)} without asking`} density="compact" onClick={() => void revoke(e.id, origin)} />
+                                                        </span>
+                                                    )}
+                                                </For>
+                                            </div>
+                                        </Show>
                                     </td>
                                     <td>{vaultKind(e.kind)?.label ?? e.kind}</td>
                                     <td class="warden-manager-dim">{entryDetails(e)}</td>

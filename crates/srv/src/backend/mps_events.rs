@@ -407,6 +407,8 @@ pub struct WidgetRequestsEvent {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct VaultEvent {
     pub requests: Vec<crate::backend::vault::requests::VaultRequest>,
+    /// Agents' uses of an entry waiting for the person to allow them.
+    pub uses: Vec<crate::backend::vault::uses::UseRequest>,
     #[ts(type = "number")]
     pub changed_ms: u64,
 }

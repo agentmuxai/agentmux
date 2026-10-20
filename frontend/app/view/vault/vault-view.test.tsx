@@ -45,6 +45,7 @@ function ssn(over: Partial<VaultEntryInfo> = {}): VaultEntryInfo {
         fields: { owner: "Alex Doe" },
         tags: [],
         parts_set: ["value"],
+        grants: [],
         tail: "6789",
         created_at: Date.now(),
         updated_at: Date.now(),

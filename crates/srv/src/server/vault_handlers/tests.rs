@@ -215,3 +215,53 @@ async fn only_the_host_can_fetch_a_value() {
     let (_, act) = send(&app, post("/api/v1/host/vault", &[HOST], json!({ "op": "activity" }))).await;
     assert!(act.to_string().contains("copied") && !act.to_string().contains("123-45"), "{act}");
 }
+
+// The person's answer to an agent's use of an entry comes only from the host, "always" only
+// when it was offered, and a grant can be revoked.
+#[tokio::test]
+async fn answering_a_use_and_revoking_a_grant_go_through_the_host_only() {
+    use crate::backend::vault::uses::{self, Decision, UseRequest};
+    let app = app().await;
+    let host = |body: Value| post("/api/v1/host/vault", &[HOST], body);
+    let use_req = |id: &str, offer_always: bool| UseRequest {
+        id: id.into(),
+        agent: "Agent1".into(),
+        entry_id: "ssn-alex".into(),
+        entry_label: "Alex".into(),
+        what: "Social Security number".into(),
+        origin: "https://irs.gov".into(),
+        field: "SSN".into(),
+        offer_always,
+        reason: "a new site".into(),
+        requested_ms: agentmux_common::time::now_ms_u64(),
+    };
+
+    let rx = uses::uses().ask(use_req("answer-1", true));
+    let answer = json!({ "op": "answer_use", "id": "answer-1", "decision": "always" });
+    let (s, _) = send(&app, post("/api/v1/host/vault", &[], answer.clone())).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "an agent can't answer for the person");
+    let (s, body) = send(&app, host(answer.clone())).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(rx.await.unwrap(), Decision::Always);
+    let (s, body) = send(&app, host(answer)).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "answered already: {body}");
+
+    let rx = uses::uses().ask(use_req("answer-2", false));
+    let (s, body) = send(&app, host(json!({ "op": "answer_use", "id": "answer-2", "decision": "always" }))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert!(body.to_string().contains("isn't offered"), "{body}");
+    let (s, _) = send(&app, host(json!({ "op": "answer_use", "id": "answer-2", "decision": "sometimes" }))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, _) = send(&app, host(json!({ "op": "answer_use", "id": "answer-2", "decision": "deny" }))).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(rx.await.unwrap(), Decision::Deny);
+
+    // Revoking a grant that isn't there is refused, and an agent can't revoke at all.
+    let (_, made) = send(&app, host(new_ssn())).await;
+    let id = made["data"]["id"].as_str().unwrap().to_string();
+    let revoke = json!({ "op": "revoke_grant", "entry_id": id, "origin": "https://irs.gov" });
+    let (s, body) = send(&app, host(revoke.clone())).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "no such grant yet: {body}");
+    let (s, _) = send(&app, post("/api/v1/host/vault", &[], revoke)).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+}
