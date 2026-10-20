@@ -1303,10 +1303,10 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     .agent_def_get(&cmd.agent_id)
                     .map_err(|e| format!("agent:memory:adoption_list: store: {e}"))?
                     .ok_or_else(|| format!("agent:memory:adoption_list: agent {} not found", cmd.agent_id))?;
-                let Some(fs) = crate::backend::agent_session::global_transcript_store() else {
+                let Some(fs) = crate::backend::transcript::damage::global_for(&crate::backend::transcript::damage::memory_zone(&agent.id)) else {
                     return Ok(NativeMemoryAdoptionListResult { list: None });
                 };
-                let list = tokio::task::spawn_blocking(move || crate::backend::memory_adopt::list(fs, &mstore, &agent))
+                let list = tokio::task::spawn_blocking(move || crate::backend::memory_adopt::list(&fs, &mstore, &agent))
                     .await
                     .map_err(|e| format!("agent:memory:adoption_list: {e}"))?
                     .map_err(|e| format!("agent:memory:adoption_list: {e}"))?;
@@ -1326,9 +1326,9 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     .agent_def_get(&cmd.agent_id)
                     .map_err(|e| format!("agent:memory:claims: store: {e}"))?
                     .ok_or_else(|| format!("agent:memory:claims: agent {} not found", cmd.agent_id))?;
-                let fs = crate::backend::agent_session::global_transcript_store()
-                    .ok_or_else(|| "agent:memory:claims: memory record store unavailable".to_string())?;
-                tokio::task::spawn_blocking(move || crate::backend::memory_release::list(fs, &agent.id))
+                let fs = crate::backend::transcript::damage::global_for(&crate::backend::transcript::damage::memory_zone(&agent.id))
+                    .ok_or_else(|| "agent:memory:claims: memory record store unavailable, or its record is damaged".to_string())?;
+                tokio::task::spawn_blocking(move || crate::backend::memory_release::list(&fs, &agent.id))
                     .await
                     .map_err(|e| format!("agent:memory:claims: {e}"))?
                     .map_err(|e| format!("agent:memory:claims: {e}"))
