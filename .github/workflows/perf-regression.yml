@@ -253,9 +253,11 @@ jobs:
             --history perf-data/perf/history.jsonl ${results[0]:+--result "${results[0]}"} | tee -a "$GITHUB_STEP_SUMMARY"
 
       # A failure here is loud on purpose: the job turns red and the `failed` job opens its issue, instead of the history
-      # quietly ceasing to grow.
+      # quietly ceasing to grow. Only the scheduled night, or a dispatch with the nightly's own choices (latest B, 4 runs a
+      # side), is recorded: a dispatch naming another B, or fewer runs, would stand in the charts and the drift check for
+      # the night's figures (the last line of a date wins there).
       - name: Publish the history (perf-data)
-        if: ${{ always() && github.ref == 'refs/heads/main' && !inputs.dry-run-issue && steps.record.outputs.publish == 'true' }}
+        if: ${{ always() && github.ref == 'refs/heads/main' && !inputs.dry-run-issue && steps.record.outputs.publish == 'true' && (github.event_name == 'schedule' || (inputs.b-run == '' && (inputs.runs == '' || inputs.runs == '4'))) }}
         shell: bash
         working-directory: perf-data
         run: |

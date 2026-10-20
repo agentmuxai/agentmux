@@ -1,6 +1,6 @@
 # Spec: a nightly performance regression check
 
-**Status:** active. Phase 1 (the workflow) shipped in #5168, Phase 2 (the issue, `perf-run-failed`) in #5187, Phase 3 (history, charts, drift) in #5192. Remaining: the email section (§4.7, Camper, in `a5af/shared-infrastructure`) and the later decisions in §5.5.
+**Status:** active. Phase 1 (the workflow) shipped in #5168, Phase 2 (the issue, `perf-run-failed`) in #5187, Phase 3 (history, charts, drift) in #5192. Remaining: the email section (§4.7, Camper, built outside this repository) and the later decisions in §5.5.
 **Date:** 2026-10-19
 **Author:** Camper (coordinator); owner of the work: Loap-3
 **Builds on:**
@@ -9,7 +9,7 @@
 
 ## 1. Ask
 
-The owner, 2026-10-19: "can we leverage our nightly CI on github to run performance regression testing? do we need a UI for it?", then "ok, lets get this into a formal spec. it would run alongside and seperate from the nightly builds?", then "we'd also like to add the results to the nightly github email, see a5af/shared-infrastructure"
+The owner, 2026-10-19: "can we leverage our nightly CI on github to run performance regression testing? do we need a UI for it?", then "ok, lets get this into a formal spec. it would run alongside and seperate from the nightly builds?", then "we'd also like to add the results to the nightly github email"
 
 ## 2. What exists
 
@@ -108,9 +108,9 @@ Every measure appears in the summary whether or not it flags. Margins live in `b
 
 ### 4.7 The nightly GitHub email
 
-The daily GitHub email (`gh-reporter` in `a5af/shared-infrastructure`, a private repository) already has sections for the nightly build, the nightly artifacts and the nightly release. It gains a **Nightly performance** section:
+The daily GitHub email already has sections for the nightly build, the nightly artifacts and the nightly release. It is built outside this repository; here only what it reads is fixed. It gains a **Nightly performance** section:
 
-- **The run's status:** the latest `perf-regression.yml` runs, with the same rows and helper (`get_nightly_build_status`) the other nightly sections use.
+- **The run's status:** the latest `perf-regression.yml` runs, in the same rows the other nightly sections use.
 - **The numbers:** the last line of `perf/history.jsonl` on `perf-data`, read through the contents API. It shows the two builds compared, then a row per main measure: A, B, the change, and a flag mark.
 - **The open `perf-regression` issue,** if there is one, linked.
 - **Missing data:** an error stub, as the other sections show, if the data can't be read. A note if the newest entry is more than 36 hours old.
@@ -159,7 +159,7 @@ One JSON object per line in `perf/history.jsonl`. The perf job writes it; the em
 1. **The workflow:** A/B download, interleaved runs, `compare.mjs`, summary table, merges between builds. Report only: no issue yet. Shipped in #5168.
 2. **The `perf-regression` issue,** with the confirmation pair, reusing `decide()` from `ci-nightly-status.mjs`, plus the `perf-run-failed` issue. Shipped in #5187.
 3. **History:** `perf-data`, the Mermaid charts, and the drift check. Shipped in #5192.
-4. **The email section** (`gh-reporter`, a PR in `a5af/shared-infrastructure`), once Phase 3 writes the history line. Owner: Camper.
+4. **The email section** (outside this repository), once Phase 3 writes the history line. Owner: Camper.
 5. **Later, each a separate decision:**
    - a Linux leg (`ubuntu-latest`);
    - macOS, once runners are reliable enough;

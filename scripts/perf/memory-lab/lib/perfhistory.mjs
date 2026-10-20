@@ -4,7 +4,7 @@
 // The nightly performance check's history (SPEC_NIGHTLY_PERF_REGRESSION §4.6, §4.9): one JSON line a night in
 // `perf/history.jsonl` on the `perf-data` branch, the Mermaid charts of the last 30 nights for the job summary, and the
 // drift check. Pure functions; `nightly.mjs history` reads and writes the file. The line's field names are never
-// renamed, only added: the nightly email (gh-reporter) reads the last line.
+// renamed, only added: the nightly email reads the last line.
 
 /** The measures the charts draw and the drift check watches, with the unit shown on the axis. */
 export const MAIN_MEASURES = {
