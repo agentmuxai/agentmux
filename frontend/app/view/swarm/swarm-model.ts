@@ -25,25 +25,12 @@ import { contextReadingFromMeta } from "@/app/store/agent-pane-state/context-rea
 import { resolveSwarmLine, type SwarmLine } from "@/app/store/swarm-line";
 import type { SupervisorMode } from "@/types/rpc/SupervisorMode";
 import { remoteSections, type SwarmOtherInstances } from "./swarm-remote";
-import { createSignal, untrack, type Accessor, type Setter } from "solid-js";
-import { selectTrace } from "@/app/util/select-trace";
-
+import { createSignal, type Accessor, type Setter } from "solid-js";
+import { traced, tracedList } from "@/app/util/select-trace";
 import { groupBackgroundTasks, type AgentBackgroundTasks } from "./swarm-background";
 import { toolDetail } from "@/app/view/agent/tool-meta/tool-descriptors";
 import { onSubagentNamed, withSubagentName } from "./subagent-naming";
 import { withAgentProgress, withAgentStatus } from "./swarm-updates";
-
-/** A setter that tells the selection trace which signal moved, for blaming a Swarm
- *  rebuild. A write that leaves the value as it was notifies nobody, so it is not blamed. */
-function traced<T>(cause: string, signal: [Accessor<T>, Setter<T>]): Setter<T> {
-    const [get, set] = signal;
-    return ((value: unknown) => {
-        const before = untrack(get);
-        const result = (set as (v: unknown) => unknown)(value);
-        if (!Object.is(before, untrack(get))) selectTrace.cause(cause);
-        return result;
-    }) as Setter<T>;
-}
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -983,7 +970,7 @@ export class SwarmViewModel {
     // Ordered list of tracked block IDs (preserves server-side ordering)
     private _trackedBlockIds = createSignal<string[]>([]);
     trackedBlockIdsAtom: Accessor<string[]> = this._trackedBlockIds[0];
-    private setTrackedBlockIds: Setter<string[]> = this._trackedBlockIds[1];
+    private setTrackedBlockIds: Setter<string[]> = tracedList("tracked-ids", this._trackedBlockIds);
 
     // Fleet control (SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md) — which
     // top-level agent blockIds are currently checked for a bulk action.
@@ -1357,10 +1344,6 @@ export class SwarmViewModel {
         try {
             const { block_ids } = await RpcApi.AgentTrackedBlocksCommand(TabRpcClient, {});
             const ids: string[] = block_ids ?? [];
-            const prevIds = this._trackedBlockIds[0]();
-            selectTrace.cause(
-                ids.length === prevIds.length && ids.every((id, i) => id === prevIds[i]) ? "poll-same" : "tracked-ids"
-            );
             this.setTrackedBlockIds(ids);
             // Codex P2 on PR #3219: subscribeToBlockStatuses tears down and
             // rebuilds every per-block status subscription (each unsub/sub

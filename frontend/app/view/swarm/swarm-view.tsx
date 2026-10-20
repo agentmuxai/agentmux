@@ -73,18 +73,19 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
             if (card && blockId) selectTrace.pressed(blockId, card);
         };
         const onUp = () => selectTrace.released();
+        const onCancel = () => selectTrace.cancelled();
         const onClick = (e: MouseEvent) => {
             const card = (e.target as Element | null)?.closest<HTMLElement>(".swarm-agent-card") ?? null;
             selectTrace.clicked(card?.dataset.blockId ?? null, card);
         };
         root.addEventListener("pointerdown", onDown, true);
         root.addEventListener("pointerup", onUp, true);
-        root.addEventListener("pointercancel", onUp, true);
+        root.addEventListener("pointercancel", onCancel, true);
         root.addEventListener("click", onClick, true);
         onCleanup(() => {
             root.removeEventListener("pointerdown", onDown, true);
             root.removeEventListener("pointerup", onUp, true);
-            root.removeEventListener("pointercancel", onUp, true);
+            root.removeEventListener("pointercancel", onCancel, true);
             root.removeEventListener("click", onClick, true);
         });
     });

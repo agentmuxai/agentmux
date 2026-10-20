@@ -18,6 +18,8 @@
  * `__selectTrace()`.
  */
 
+import { untrack, type Accessor, type Setter } from "solid-js";
+
 const MAX_ENTRIES = 100;
 const SUMMARY_MS = 60_000;
 /** A click follows its release at once; this long after, it is not coming. */
@@ -165,6 +167,13 @@ export function createSelectTrace(opts: SelectTraceOptions = {}) {
             }, CLICK_GRACE_MS);
         },
 
+        /** The pointer sequence was cancelled (a scroll, an OS gesture): no click is expected. */
+        cancelled() {
+            if (graceTimer != null) clearTimer(graceTimer);
+            graceTimer = null;
+            press = null;
+        },
+
         /** A click arrived on the row with this block id and it is still in the document:
          *  the press was not lost. A click that landed on the list instead (the pressed
          *  row was replaced) does not count. */
@@ -185,3 +194,28 @@ export const selectTrace = createSelectTrace();
 
 (globalThis as { __selectTrace?: () => string[] }).__selectTrace = () =>
     selectTrace.entries().map((e) => `${new Date(e.at).toISOString()} ${e.line}`);
+
+/** A setter that tells the selection trace which signal moved, for blaming a Swarm
+ *  rebuild. A write that leaves the value as it was notifies nobody, so it is not
+ *  blamed. The cause is recorded before the write: readers recompute inside it. */
+export function traced<T>(cause: string, signal: [Accessor<T>, Setter<T>]): Setter<T> {
+    const [get, set] = signal;
+    return ((value: T | ((prev: T) => T)) => {
+        const before = untrack(get);
+        const next = typeof value === "function" ? (value as (prev: T) => T)(before) : value;
+        if (!Object.is(before, next)) selectTrace.cause(cause);
+        return set(() => next);
+    }) as Setter<T>;
+}
+
+/** `traced` for a list that is re-fetched on a timer: a new array with the same items
+ *  notifies readers all the same, and is blamed on "poll-same" rather than on `cause`. */
+export function tracedList<T>(cause: string, signal: [Accessor<T[]>, Setter<T[]>]): Setter<T[]> {
+    const [get, set] = signal;
+    return ((value: T[]) => {
+        const before = untrack(get);
+        const same = before.length === value.length && before.every((x, i) => x === value[i]);
+        selectTrace.cause(same ? "poll-same" : cause);
+        return set(value);
+    }) as Setter<T[]>;
+}

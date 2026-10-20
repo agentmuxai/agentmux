@@ -1,8 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { createMemo, createRoot, createSignal } from "solid-js";
 import { describe, expect, it } from "vitest";
-import { CLICK_GRACE_MS, createSelectTrace } from "./select-trace";
+import { CLICK_GRACE_MS, createSelectTrace, selectTrace, traced } from "./select-trace";
 
 function harness() {
     let t = 1_000_000;
@@ -59,6 +60,29 @@ describe("rebuild causes", () => {
     });
 });
 
+describe("traced setters", () => {
+    it("record the cause before readers recompute, and skip a write that changes nothing", () => {
+        const [get, set] = createSignal<number[]>([1]);
+        const write = traced("status", [get, set]);
+        createRoot((dispose) => {
+            createMemo(() => {
+                get();
+                selectTrace.rebuilt();
+            });
+            const initial = selectTrace.counters().rebuildsByCause;
+            expect(initial).toEqual({ other: 1 });
+
+            write(get());
+            write((prev) => prev);
+            expect(selectTrace.counters().rebuildsByCause).toEqual({ other: 1 });
+
+            write([2]);
+            expect(selectTrace.counters().rebuildsByCause).toEqual({ other: 1, status: 1 });
+            dispose();
+        });
+    });
+});
+
 describe("pressed rows whose click never arrives", () => {
     it("is not lost when the click follows the release", () => {
         const { trace, logs, advance } = harness();
@@ -95,6 +119,14 @@ describe("pressed rows whose click never arrives", () => {
         trace.clicked("block-aaaaaaaa", { isConnected: false });
         advance(CLICK_GRACE_MS);
         expect(trace.counters().lostClicks).toBe(1);
+    });
+
+    it("a cancelled pointer sequence is not a lost click", () => {
+        const { trace, advance } = harness();
+        trace.pressed("block-aaaaaaaa", { isConnected: true });
+        trace.cancelled();
+        advance(CLICK_GRACE_MS * 2);
+        expect(trace.counters().lostClicks).toBe(0);
     });
 
     it("a release with no press on a row is ignored", () => {
