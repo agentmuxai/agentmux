@@ -1,0 +1,15 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// The task chip under an agent in the Swarm (kanban-held.tsx).
+
+.kanban-held-chip {
+    max-width: 100%;
+    align-self: flex-start;
+}
+
+.kanban-held-chip__text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

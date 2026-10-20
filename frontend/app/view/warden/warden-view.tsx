@@ -51,7 +51,12 @@ export function WardenView(props: { model: WardenViewModel }): JSX.Element {
                      * first shown and on Refresh.
                      */}
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "kanban" }}>
-                        <WardenKanbanManager visible={section() === "kanban"} onNeedsCount={model.setKanbanNeeds} />
+                        <WardenKanbanManager
+                            visible={section() === "kanban"}
+                            onNeedsCount={model.setKanbanNeeds}
+                            openRequest={model.kanbanOpenAtom()}
+                            onOpenHandled={() => model.setMeta({ "kanban:open": null })}
+                        />
                     </div>
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "host" }}>
                         <WardenHostManager />

@@ -114,7 +114,13 @@ function AgentStripChip(props: { agent: KanbanAgent; model: KanbanModel }): JSX.
     );
 }
 
-export const WardenKanbanManager = (props: { visible: boolean; onNeedsCount?: (n: number) => void }): JSX.Element => {
+export const WardenKanbanManager = (props: {
+    visible: boolean;
+    onNeedsCount?: (n: number) => void;
+    /** A task to open, asked for from elsewhere (the Swarm's task chip); cleared with onOpenHandled. */
+    openRequest?: string | null;
+    onOpenHandled?: () => void;
+}): JSX.Element => {
     const model = new KanbanModel();
     onCleanup(() => model.dispose());
     createEffect(() => model.setVisible(props.visible));
@@ -127,6 +133,14 @@ export const WardenKanbanManager = (props: { visible: boolean; onNeedsCount?: (n
     const [showUntracked, setShowUntracked] = createSignal(true);
     const [adding, setAdding] = createSignal(false);
     const [openId, setOpenId] = createSignal<string | null>(null);
+
+    // Opened from elsewhere: show the task once the board has it, then clear the request.
+    createEffect(() => {
+        const id = props.openRequest;
+        if (!id || !model.board()?.tasks.some((t) => t.id === id)) return;
+        setOpenId(id);
+        props.onOpenHandled?.();
+    });
 
     const board = () => model.board();
     const agents = () => board()?.agents ?? [];

@@ -1,6 +1,6 @@
 # Spec: a Kanban section in Warden, where agents keep their work current and the operator follows it
 
-**Status:** active. srv and MCP (the task model, the agents' `Tasks` actions, the reminder, the operator's RPCs) in #5231; the Warden Kanban section, its palette command and widget-bar button in #5235. Remaining: Phase 4 (§9), the Swarm-to-card link (§6.14) and Codex plans (§6.12).
+**Status:** active. srv and MCP (the task model, the agents' `Tasks` actions, the reminder, the operator's RPCs) in #5231; the Warden Kanban section, its palette command and widget-bar button in #5235. The Swarm's task chip (§6.14) and Codex plans as checklists (§6.12) in #PR_C. Remaining: Phase 4 (§9).
 **Date:** 2026-10-20
 **Author:** Loap-3@narko, at the operator's request
 **Verified against:** `agentmux` `main` @ `30daa7c28` (2026-10-20), by reading code. The survey of other products in §3 is from public sources read the same day (§12).
@@ -291,7 +291,7 @@ The operator-config guidance (`crates/srv/operator-config-seed.json`) gets a sho
 ### 6.14 Kanban and Swarm
 
 Swarm answers "what is each agent doing right now" (agents, subagents, shells, crons, background tasks). Kanban answers "what work is there and where does it stand". They link, they don't merge:
-- A Swarm row shows its agent's task ("on #12 …"), which opens Kanban on that card.
+- A Swarm row shows its agent's task ("#12 …", marked when it waits on the operator's answer), which opens the Kanban with that task's drawer open (block meta `kanban:open` on the Warden pane, cleared once shown).
 - A card's agent chip opens the agent's pane; its drawer has "Show in Swarm".
 - Swarm's subagents, shells and crons stay out of Kanban.
 
