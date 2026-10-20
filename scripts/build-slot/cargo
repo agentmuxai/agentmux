@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# agentmux-build-slot-shim v1: written by AgentMux; edits here are overwritten.
+#
+# `cargo build|check|test|...` in an agent's shell waits for the host-wide build
+# slot first, so only one heavy build runs at a time (build-slot.sh, spec
+# docs/specs/SPEC_BUILD_SLOT_ENFORCEMENT_2026_10_20.md). Everything else runs
+# cargo directly. It fails open: if the slot script or the real cargo is not
+# where it should be, cargo still runs. Opt out for one command with
+# AGENTMUX_BUILD_SLOT_OFF=1.
+
+self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+
+# The real cargo: the first one on PATH that is not this directory's.
+real=""
+IFS=:
+for dir in $PATH; do
+  [ -n "$dir" ] && [ "$dir" != "$self_dir" ] || continue
+  for cand in "$dir/cargo" "$dir/cargo.exe"; do
+    if [ -f "$cand" ] && [ -x "$cand" ]; then real="$cand"; break 2; fi
+  done
+done
+unset IFS
+if [ -z "$real" ]; then
+  echo "cargo: not found on PATH (the AgentMux build-slot shim looked past $self_dir)" >&2
+  exit 127
+fi
+
+# The subcommand: the first word that is neither +toolchain nor an option.
+sub=""
+for arg in "$@"; do
+  case "$arg" in +*|-*) ;; *) sub="$arg"; break ;; esac
+done
+
+# `run` is left out on purpose: it builds, but then keeps running (a server, the app), and the
+# slot must not be held for as long as that runs.
+heavy=0
+case "$sub" in
+  build|b|check|c|test|t|clippy|doc|d|bench|rustc|rustdoc|fix|install|package|nextest|llvm-cov|tarpaulin|udeps|miri)
+    heavy=1 ;;
+esac
+
+slot="${AGENTMUX_BUILD_SLOT_SCRIPT:-$HOME/.agentmux/shared/locks/build-slot.sh}"
+if [ "$heavy" = 1 ] && [ -z "${AGENTMUX_BUILD_SLOT_OFF:-}" ] && [ -f "$slot" ]; then
+  exec bash "$slot" --reason "cargo $sub" -- "$real" "$@"
+fi
+exec "$real" "$@"
