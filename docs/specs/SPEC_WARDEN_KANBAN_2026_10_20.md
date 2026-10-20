@@ -1,6 +1,6 @@
 # Spec: a Kanban section in Warden, where agents keep their work current and the operator follows it
 
-**Status:** active. srv and MCP (the task model, the agents' `Tasks` actions, the reminder, the operator's RPCs) in #PR_SRV. Remaining: the Warden Kanban section itself (§6.1, §6.3, §6.6–§6.10, the frontend), and Phase 4 (§9).
+**Status:** active. srv and MCP (the task model, the agents' `Tasks` actions, the reminder, the operator's RPCs) in #5231. Remaining: the Warden Kanban section itself (§6.1, §6.3, §6.6–§6.10, the frontend), and Phase 4 (§9).
 **Date:** 2026-10-20
 **Author:** Loap-3@narko, at the operator's request
 **Verified against:** `agentmux` `main` @ `30daa7c28` (2026-10-20), by reading code. The survey of other products in §3 is from public sources read the same day (§12).
