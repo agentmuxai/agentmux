@@ -17,6 +17,9 @@
 // 1. `CreateWorkspace { name: "" }`
 // 2. `CreateTab { workspace_id: new_ws_id, name: "" }`
 // 3. `MoveBlock { block_id, src=source_tab, dst=new_tab, dst_index: 0 }`
+//    — then one more `MoveBlock` per other member when a whole pane (its
+//    full tab stack) is torn off, in stack order, after the visible one so
+//    that the new tab's `blockids[0]` is the visible block.
 //
 // Auto-close-source-tab and layout setup are NOT here — see the
 // RPC handler in `service.rs` for those steps.
@@ -24,7 +27,9 @@
 // **Compensation:**
 // * Step 3 fails after step 1+2 → `DeleteWorkspace { new_ws_id }`
 //   (cascades through tabs to blocks; no blocks landed in the new
-//   tab at this point).
+//   tab at this point). When the failing move is not the first, the
+//   members already moved go back to the source tab first, or the
+//   cascade would delete them.
 // * Step 2 fails after step 1 → `DeleteWorkspace { new_ws_id }`.
 // * Step 1 fails → nothing to compensate.
 
@@ -36,7 +41,7 @@ use super::{
 };
 use crate::server::AppState;
 
-/// Run the TearOffBlock saga. On success, returns
+/// Run the TearOffBlock saga for ONE block. On success, returns
 /// `{"new_workspace_id": "...", "new_tab_id": "..."}`.
 pub async fn run(
     state: &AppState,
@@ -44,6 +49,36 @@ pub async fn run(
     source_tab_id: String,
     source_workspace_id: String,
 ) -> Result<Value, String> {
+    run_stack(state, block_id, Vec::new(), source_tab_id, source_workspace_id).await
+}
+
+/// The blocks a tear-off moves, in the order they move: `block_id` (the
+/// visible tab) first, then the other `members` in their given order. Empty
+/// or without `block_id` in it, `members` means just `block_id`; repeats are
+/// dropped.
+pub(crate) fn tear_off_order(block_id: &str, members: &[String]) -> Vec<String> {
+    let mut order = vec![block_id.to_string()];
+    if members.iter().any(|m| m == block_id) {
+        for m in members {
+            if !order.contains(m) {
+                order.push(m.clone());
+            }
+        }
+    }
+    order
+}
+
+/// Run the TearOffBlock saga for a whole pane: `members` is its tab stack in
+/// order, `block_id` the visible one (see [`tear_off_order`]). Same return
+/// value as [`run`].
+pub async fn run_stack(
+    state: &AppState,
+    block_id: String,
+    members: Vec<String>,
+    source_tab_id: String,
+    source_workspace_id: String,
+) -> Result<Value, String> {
+    let order = tear_off_order(&block_id, &members);
     // Pre-condition: block exists and belongs to source_tab; source
     // tab is in source_workspace. Reducer would catch the structural
     // mismatch via MoveBlock validation, but check up-front so we
@@ -74,19 +109,21 @@ pub async fn run(
                 "[dnd:svc] TearOffBlock REJECTED — possible frontend/backend workspace desync"
             );
         };
-        match s.blocks.get(&block_id) {
-            None => {
-                reject("block_not_found", &s);
-                return Err(format!("TearOffBlock: block not found: {}", block_id));
+        for member in &order {
+            match s.blocks.get(member) {
+                None => {
+                    reject("block_not_found", &s);
+                    return Err(format!("TearOffBlock: block not found: {}", member));
+                }
+                Some(block) if block.tab_id != source_tab_id => {
+                    reject("block_in_other_tab", &s);
+                    return Err(format!(
+                        "TearOffBlock: block {} is in tab {}, not {}",
+                        member, block.tab_id, source_tab_id
+                    ));
+                }
+                _ => {}
             }
-            Some(block) if block.tab_id != source_tab_id => {
-                reject("block_in_other_tab", &s);
-                return Err(format!(
-                    "TearOffBlock: block {} is in tab {}, not {}",
-                    block_id, block.tab_id, source_tab_id
-                ));
-            }
-            _ => {}
         }
         match s.tabs.get(&source_tab_id) {
             None => {
@@ -114,6 +151,7 @@ pub async fn run(
         "tear_off_block",
         serde_json::json!({
             "block_id": &block_id,
+            "members": &order,
             "source_tab_id": &source_tab_id,
         }),
     )
@@ -122,14 +160,14 @@ pub async fn run(
         return Err(e);
     }
     let ctx = SagaCtx::new(state, saga_id);
-    let result = run_saga("tear_off_block", run_inner(ctx, block_id, source_tab_id)).await;
+    let result = run_saga("tear_off_block", run_inner(ctx, order, source_tab_id)).await;
     emit_terminal(state, saga_id, classify_run_saga_result(&result)).await;
     result
 }
 
 async fn run_inner(
     ctx: SagaCtx<'_>,
-    block_id: String,
+    order: Vec<String>,
     source_tab_id: String,
 ) -> Result<Value, String> {
     // Step 1: new workspace.
@@ -178,24 +216,38 @@ async fn run_inner(
             "TearOffBlock: CreateTab did not emit TabCreated".to_string()
         })?;
 
-    // Step 3: move the block.
-    if let Err(reason) = ctx
-        .dispatch(Command::MoveBlock {
-            block_id: block_id.clone(),
-            src_tab_id: source_tab_id.clone(),
-            dst_tab_id: new_tab_id.clone(),
-            dst_index: 0,
-        })
-        .await
-    {
-        // Compensate: delete the workspace (cascades the empty tab).
-        // `force: false` — internal compensation (Step 5 PR 2).
-        ctx.compensate(Command::DeleteWorkspace {
-            workspace_id: new_workspace_id.clone(),
-            force: false,
-        })
-        .await;
-        return Err(format!("TearOffBlock step 3 (MoveBlock): {}", reason));
+    // Step 3: move the blocks, the visible one first (so it is the new tab's
+    // `blockids[0]`), the rest after it in stack order.
+    for (i, member) in order.iter().enumerate() {
+        if let Err(reason) = ctx
+            .dispatch(Command::MoveBlock {
+                block_id: member.clone(),
+                src_tab_id: source_tab_id.clone(),
+                dst_tab_id: new_tab_id.clone(),
+                dst_index: i as u32,
+            })
+            .await
+        {
+            // Put the members that already moved back where they were, or
+            // deleting the workspace would delete them with it.
+            for moved in order[..i].iter().rev() {
+                ctx.compensate(Command::MoveBlock {
+                    block_id: moved.clone(),
+                    src_tab_id: new_tab_id.clone(),
+                    dst_tab_id: source_tab_id.clone(),
+                    dst_index: u32::MAX,
+                })
+                .await;
+            }
+            // Compensate: delete the workspace (cascades the empty tab).
+            // `force: false` — internal compensation (Step 5 PR 2).
+            ctx.compensate(Command::DeleteWorkspace {
+                workspace_id: new_workspace_id.clone(),
+                force: false,
+            })
+            .await;
+            return Err(format!("TearOffBlock step 3 (MoveBlock {}): {}", member, reason));
+        }
     }
 
     Ok(json!({

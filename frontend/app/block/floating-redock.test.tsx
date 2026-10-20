@@ -42,6 +42,8 @@ vi.mock("@/app/store/mos", () => ({
     },
     getObjectValue: (oref: string) => hub.objects.get(oref),
 }));
+// No layout for the floater's tab: every block is a one-tab pane (floater-panes.ts).
+vi.mock("@/layout/lib/layoutModelHooks", () => ({ getLayoutModelForTabById: () => undefined }));
 vi.mock("@/app/store/services", () => ({
     WorkspaceService: {
         RedockFloatingPane: async (...args: unknown[]) => {

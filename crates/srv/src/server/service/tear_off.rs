@@ -11,7 +11,7 @@ use crate::backend::service::{self, WebCallType, WebReturnType};
 use super::super::AppState;
 use super::layout_helpers::{
     queue_source_layout_delete, queue_target_layout_insert, queue_target_layout_split,
-    queue_target_stack_push, setup_torn_off_block_layout,
+    queue_target_stack_push, setup_torn_off_stack_layout,
 };
 use super::reducer_helpers::{dispatch_to_reducer, publish_events};
 
@@ -42,10 +42,17 @@ pub(crate) async fn handle_tear_off_block(state: &AppState, call: &WebCallType) 
         Err(e) => return WebReturnType::error(e),
     };
     let auto_close: bool = service::get_arg(args, 3).unwrap_or(true);
-    tracing::info!(block_id = %block_id, source_tab = %source_tab_id, source_ws = %source_ws_id, "[dnd:svc] TearOffBlock via saga");
-    let saga_result = crate::sagas::tear_off_block::run(
+    // Optional: the pane's whole tab stack, in order, `block_id` being its
+    // visible tab. Absent (a single block, or one pane tab's pill) → just
+    // `block_id`. Dragging a pane by its header sends it, so no tab is left
+    // behind (RCA_WHOLE_PANE_TEAROFF_MOVES_ONLY_THE_VISIBLE_TAB_2026_10_19.md).
+    let members: Vec<String> = service::get_optional_arg(args, 4).unwrap_or(None).unwrap_or_default();
+    let order = crate::sagas::tear_off_block::tear_off_order(&block_id, &members);
+    tracing::info!(block_id = %block_id, members = order.len(), source_tab = %source_tab_id, source_ws = %source_ws_id, "[dnd:svc] TearOffBlock via saga");
+    let saga_result = crate::sagas::tear_off_block::run_stack(
         state,
         block_id.clone(),
+        members.clone(),
         source_tab_id.clone(),
         source_ws_id.clone(),
     )
@@ -70,15 +77,19 @@ pub(crate) async fn handle_tear_off_block(state: &AppState, call: &WebCallType) 
     // Layout setup for the new tab — make the moved block its
     // single root node so the frontend renders it. Best-effort;
     // reducer-routed (SPEC_864 Phase 3 seed / Phase 4 queue).
-    if let Err(e) = setup_torn_off_block_layout(state, &new_tab_oid, &block_id).await {
+    if let Err(e) = setup_torn_off_stack_layout(state, &new_tab_oid, &block_id, &members).await {
         tracing::warn!(new_tab = %new_tab_oid, "TearOffBlock: layout setup failed: {} (block in tab but layout malformed)", e);
     }
     // Source tab: out of srv's tree, then the queued `delete` for the source
     // window (`queue_source_layout_delete`). Stack-safe: one tab of a
-    // multi-tab pane leaves only that member (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md
-    // §3.5, design 4). Best-effort: the block has already moved.
-    if let Err(e) = queue_source_layout_delete(state, &source_tab_id, &block_id).await {
-        tracing::warn!(source_tab = %source_tab_id, "TearOffBlock: source layout delete-action enqueue failed: {}", e);
+    // multi-tab pane leaves only that member, and the pane goes with its last
+    // one, so a whole-pane tear-off removes each member in turn
+    // (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.5, design 4). Best-effort:
+    // the blocks have already moved.
+    for member in &order {
+        if let Err(e) = queue_source_layout_delete(state, &source_tab_id, member).await {
+            tracing::warn!(source_tab = %source_tab_id, block = %member, "TearOffBlock: source layout delete-action enqueue failed: {}", e);
+        }
     }
 
     // Auto-close empty source tab. Route through the reducer
@@ -189,6 +200,12 @@ pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCall
     // pane-tab tear-off back into the pane it came from
     // (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.5, design 6).
     let as_tab: bool = service::get_optional_arg(args, 7).unwrap_or(None).unwrap_or(false);
+    // Optional: the floater's whole tab stack, in order (`block_id` is its
+    // first member, the one that lands as the pane), and which of them is
+    // visible. The rest land as tabs of that pane, so a torn-off pane goes
+    // back as it left. Absent → just `block_id`.
+    let members: Vec<String> = service::get_optional_arg(args, 8).unwrap_or(None).unwrap_or_default();
+    let active_block_id: String = service::get_optional_arg(args, 9).unwrap_or(None).unwrap_or_else(|| block_id.clone());
     tracing::info!(
         block_id = %block_id,
         source_tab = %source_tab_id,
@@ -231,7 +248,7 @@ pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCall
     // in the exact slot the ghost previewed. Otherwise fall back to
     // the generic InsertNode (Phase 4a behavior).
     let target_layout_result = match (target_block_id.as_deref(), direction) {
-        (Some(tbid), _) if as_tab => redock_as_tab(state, &target_tab_id, &block_id, tbid).await,
+        (Some(tbid), _) if as_tab => redock_as_tab(state, &target_tab_id, &block_id, tbid, true).await,
         (Some(tbid), Some(dir)) => {
             queue_target_layout_split(state, &target_tab_id, &block_id, tbid, dir).await
         }
@@ -249,6 +266,30 @@ pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCall
         return WebReturnType::error(format!(
             "redock layout action failed: {e}"
         ));
+    }
+
+    // The rest of the stack, in order, as tabs of the pane that just landed.
+    // A failure part-way leaves the members already docked docked, and this one
+    // and any after it in the floater (which stays open while it holds them);
+    // the layout updates for the docked ones are still published below, then
+    // the failure is reported.
+    let mut stack_failure: Option<String> = None;
+    for member in members.iter().filter(|m| **m != block_id) {
+        if let Err(reason) = redock_stack_member(
+            state,
+            member,
+            &block_id,
+            &source_tab_id,
+            &source_ws_id,
+            &target_tab_id,
+            &target_ws_id,
+            *member == active_block_id,
+        )
+        .await
+        {
+            stack_failure = Some(reason);
+            break;
+        }
     }
 
     let mut updates = Vec::new();
@@ -304,6 +345,9 @@ pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCall
     // reactive flush — see EventBus::broadcast_mux_obj_updates.
     state.event_bus.broadcast_mux_obj_updates(&updates);
 
+    if let Some(reason) = stack_failure {
+        return WebReturnType::error(reason);
+    }
     WebReturnType::success_data_updates(
         serde_json::json!({
             "redocked": true,
@@ -345,8 +389,44 @@ async fn put_redocked_block_back(state: &AppState, block_id: &str, target_tab_id
     }
 }
 
+/// Move one more member of a floater's stack into the target tab and place it
+/// as a tab of the pane `pane_block_id` (already docked there). Visible there
+/// only when `activate`. On a failed layout step the block goes back to the
+/// floater, as for the first member.
+#[allow(clippy::too_many_arguments)]
+async fn redock_stack_member(
+    state: &AppState,
+    block_id: &str,
+    pane_block_id: &str,
+    source_tab_id: &str,
+    source_ws_id: &str,
+    target_tab_id: &str,
+    target_ws_id: &str,
+    activate: bool,
+) -> Result<(), String> {
+    crate::sagas::redock_floating_pane::run(
+        state,
+        block_id.to_string(),
+        source_tab_id.to_string(),
+        source_ws_id.to_string(),
+        target_tab_id.to_string(),
+        target_ws_id.to_string(),
+        None,
+    )
+    .await?;
+    if let Err(e) = queue_source_layout_delete(state, source_tab_id, block_id).await {
+        put_redocked_block_back(state, block_id, target_tab_id, source_tab_id).await;
+        return Err(format!("redock layout delete failed: {e}"));
+    }
+    if let Err(e) = redock_as_tab(state, target_tab_id, block_id, pane_block_id, activate).await {
+        put_redocked_block_back(state, block_id, target_tab_id, source_tab_id).await;
+        return Err(format!("redock layout action failed: {e}"));
+    }
+    Ok(())
+}
+
 /// Place a just-redocked block as a TAB of the pane holding
-/// `target_block_id`, active: the reducer's own tree first
+/// `target_block_id`, active when `activate`: the reducer's own tree first
 /// (`LayoutStackPush`, which also checks the block now lives in this tab),
 /// then a queued `stackpush` so the window showing that tab adds the pill.
 /// Same backend-then-frontend shape as `pane.moveTab`.
@@ -355,6 +435,7 @@ async fn redock_as_tab(
     target_tab_id: &str,
     block_id: &str,
     target_block_id: &str,
+    activate: bool,
 ) -> Result<(), String> {
     let events = dispatch_to_reducer(
         state,
@@ -362,7 +443,7 @@ async fn redock_as_tab(
             tab_id: target_tab_id.to_string(),
             target_block_id: target_block_id.to_string(),
             block_id: block_id.to_string(),
-            activate: true,
+            activate,
             correlation_id: String::new(),
         },
     )
@@ -377,7 +458,7 @@ async fn redock_as_tab(
         let _ = crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore);
     }
     publish_events(state, &events);
-    queue_target_stack_push(state, target_tab_id, block_id, target_block_id).await
+    queue_target_stack_push(state, target_tab_id, block_id, target_block_id, activate).await
 }
 
 // Phase E.5.5 — TearOffTab migrated to saga. Closes the
@@ -642,5 +723,125 @@ mod tests {
             layout.pendingbackendactions.unwrap_or_default().iter().any(|x| x.actiontype == "stackpush" && x.blockid == b),
             "the window showing the pane is told to add the pill"
         );
+    }
+
+    /// `TearOffBlock` for a whole pane: `block` visible, `members` its stack.
+    async fn tear_off_pane(state: &AppState, block: &str, members: &[String], tab_id: &str, ws_id: &str) -> String {
+        let ret = handle_tear_off_block(
+            state,
+            &call(
+                "TearOffBlock",
+                vec![block.into(), tab_id.into(), ws_id.into(), true.into(), serde_json::json!(members)],
+            ),
+        )
+        .await;
+        assert!(ret.error.is_none(), "TearOffBlock failed: {:?}", ret.error);
+        ret.data.as_ref().and_then(|v| v.as_str()).expect("new workspace id").to_string()
+    }
+
+    async fn floater_pane(state: &AppState, new_ws: &str) -> (String, Vec<String>, String, Vec<String>) {
+        let srv = state.srv_state.lock().await;
+        let tab_id = srv.workspaces[new_ws].tab_ids[0].clone();
+        let tab = &srv.tabs[&tab_id];
+        let root = tab.rootnode.as_ref().expect("floater tree");
+        let data = root.data.as_ref().expect("one leaf");
+        (tab_id, crate::backend::layout::leaf_members(data), data.active_block_id.clone(), tab.block_ids.clone())
+    }
+
+    #[tokio::test]
+    async fn tearing_off_a_whole_pane_moves_every_tab_and_the_pane_with_them() {
+        let state = test_state();
+        let (ws_id, tab_id, a, b, c) = two_tab_pane_and_a_neighbour(&state).await;
+
+        // b is the visible tab when the pane is dragged out by its header.
+        let new_ws = tear_off_pane(&state, &b, &[a.clone(), b.clone()], &tab_id, &ws_id).await;
+
+        let (_, members, active, floater_blocks) = floater_pane(&state, &new_ws).await;
+        assert_eq!(members, vec![a.clone(), b.clone()], "the pane keeps its tab order");
+        assert_eq!(active, b, "and its visible tab");
+        assert_eq!(floater_blocks.first(), Some(&b), "the visible block is the floater tab's first");
+        assert_eq!(floater_blocks.len(), 2);
+
+        // The source lost the whole pane and kept its neighbour.
+        let srv = state.srv_state.lock().await;
+        let src = &srv.tabs[&tab_id];
+        assert_eq!(src.block_ids, vec![c.clone()]);
+        let root = src.rootnode.as_ref().unwrap();
+        assert!(crate::backend::layout::find_node_by_id(root, "pane-src").is_none(), "the pane left");
+        assert!(crate::backend::layout::find_leaf_containing_block(root, &c).is_some());
+        drop(srv);
+        let tab = state.mstore.must_get::<Tab>(&tab_id).unwrap();
+        let layout = state.mstore.must_get::<LayoutState>(&tab.layoutstate).unwrap();
+        let deletes: Vec<_> = layout
+            .pendingbackendactions
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|x| x.actiontype == "delete")
+            .map(|x| x.blockid)
+            .collect();
+        assert!(deletes.contains(&a) && deletes.contains(&b), "the source window is told to drop both: {deletes:?}");
+    }
+
+    #[tokio::test]
+    async fn a_whole_pane_tear_off_with_a_member_from_another_tab_moves_nothing() {
+        let state = test_state();
+        let (ws_id, tab_id, a, b, _c) = two_tab_pane_and_a_neighbour(&state).await;
+        let ret = handle_tear_off_block(
+            &state,
+            &call(
+                "TearOffBlock",
+                vec![
+                    b.clone().into(),
+                    tab_id.clone().into(),
+                    ws_id.into(),
+                    true.into(),
+                    serde_json::json!([a.clone(), b.clone(), "ghost-block"]),
+                ],
+            ),
+        )
+        .await;
+        assert!(ret.error.is_some(), "an unknown member is rejected up front");
+        let srv = state.srv_state.lock().await;
+        assert!(srv.tabs[&tab_id].block_ids.contains(&a) && srv.tabs[&tab_id].block_ids.contains(&b));
+        assert_eq!(srv.workspaces.len(), 1, "no workspace was left behind");
+    }
+
+    #[tokio::test]
+    async fn redocking_a_torn_off_pane_puts_every_tab_back_in_order_with_the_same_visible_one() {
+        let state = test_state();
+        let (ws_id, tab_id, a, b, c) = two_tab_pane_and_a_neighbour(&state).await;
+        let new_ws = tear_off_pane(&state, &b, &[a.clone(), b.clone()], &tab_id, &ws_id).await;
+        let (floater_tab, ..) = floater_pane(&state, &new_ws).await;
+
+        // Dock it back beside the neighbour, as the ghost overlay would.
+        let ret = handle_redock_floating_pane(
+            &state,
+            &call(
+                "RedockFloatingPane",
+                vec![
+                    a.clone().into(),
+                    floater_tab.clone().into(),
+                    new_ws.clone().into(),
+                    tab_id.clone().into(),
+                    ws_id.into(),
+                    c.clone().into(),
+                    1.into(),
+                    serde_json::Value::Null,
+                    serde_json::json!([a.clone(), b.clone()]),
+                    b.clone().into(),
+                ],
+            ),
+        )
+        .await;
+        assert!(ret.error.is_none(), "redock failed: {:?}", ret.error);
+
+        let srv = state.srv_state.lock().await;
+        let root = srv.tabs[&tab_id].rootnode.as_ref().unwrap();
+        let pane = crate::backend::layout::find_leaf_containing_block(root, &a).expect("the pane is back");
+        let data = pane.data.as_ref().unwrap();
+        assert_eq!(crate::backend::layout::leaf_members(data), vec![a.clone(), b.clone()], "same tab order");
+        assert_eq!(data.block_id, b, "same visible tab");
+        assert!(srv.tabs[&floater_tab].block_ids.is_empty(), "nothing is left in the floater");
+        assert!(srv.tabs[&tab_id].block_ids.contains(&a) && srv.tabs[&tab_id].block_ids.contains(&b));
     }
 }

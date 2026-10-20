@@ -276,7 +276,16 @@ class WorkspaceServiceType {
 
     // Tear off a block into a new workspace
     // @returns new workspace id (and object updates)
-    TearOffBlock(blockId: string, sourceTabId: string, sourceWsId: string, autoClose?: boolean): Promise<string> {
+    // `members`: the pane's whole tab stack in order, `blockId` being its visible
+    // tab — a header drag tears the pane off with all of its tabs. Omit it for
+    // one block (a pane tab's pill).
+    TearOffBlock(
+        blockId: string,
+        sourceTabId: string,
+        sourceWsId: string,
+        autoClose?: boolean,
+        members?: string[],
+    ): Promise<string> {
         return MOS.callBackendService("workspace", "TearOffBlock", Array.from(arguments))
     }
 
@@ -299,6 +308,10 @@ class WorkspaceServiceType {
     // pane, active, instead of a split/insert — the rollback of a failed
     // pane-tab tear-off (SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md §3.5).
     //
+    // `members` + `activeBlockId`: a floater holding a whole pane (several tabs)
+    // redocks all of them. `blockId` is the first member, which lands as the
+    // pane; the rest land as its tabs in order; `activeBlockId` ends visible.
+    //
     // @returns { redocked: true, block_id, target_tab_id } (and object updates)
     RedockFloatingPane(
         blockId: string,
@@ -309,6 +322,8 @@ class WorkspaceServiceType {
         targetBlockId?: string | null,
         direction?: number | null,
         asTab?: boolean,
+        members?: string[],
+        activeBlockId?: string,
     ): Promise<{ redocked: boolean; block_id?: string; target_tab_id?: string }> {
         return MOS.callBackendService("workspace", "RedockFloatingPane", Array.from(arguments))
     }

@@ -193,13 +193,14 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
         }
         case LayoutTreeActionType.StackPush: {
             // The backend already placed the block (`CreateBlockInStack`);
-            // mirror it so the tab appears. SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3.
+            // mirror it so the tab appears; `activate` rides on `action.focused`,
+            // as for StackMove below. SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3.
             let leaf = model?.getNodeByBlockId(action.targetblockid);
             if (!leaf && model.treeState.rootNode) {
                 leaf = findNodeByBlockId(model.treeState.rootNode, action.targetblockid);
             }
             if (leaf?.data) {
-                addMemberToStack(leaf.data, action.blockid, true);
+                addMemberToStack(leaf.data, action.blockid, action.focused);
             } else {
                 console.error(
                     "Cannot apply layout action StackPush, no pane holds blockId",
