@@ -54,7 +54,7 @@ fn previous_db_dir(versions_dir: &Path, current: (u64, u64, u64)) -> Option<Path
 /// the databases of the newest older version in the same channel. Returns
 /// the version directory copied from, or `None` when there was nothing to do
 /// or the copy failed (logged; the version then starts fresh).
-pub(super) fn from_previous_version(db_dir: &Path, version: &str) -> Option<PathBuf> {
+pub(crate) fn from_previous_version(db_dir: &Path, version: &str) -> Option<PathBuf> {
     if db_dir.join("objects.db").exists() {
         return None;
     }
@@ -80,25 +80,43 @@ pub(super) fn from_previous_version(db_dir: &Path, version: &str) -> Option<Path
             from.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()
         )
     );
-    let mut copied = Vec::new();
-    for name in DATABASES {
-        let src = source.join(name);
-        let dst = db_dir.join(name);
-        // Already here: copied by a start that was cut short before objects.db.
-        if !src.is_file() || dst.exists() {
-            continue;
-        }
-        if let Err(e) = copy_database(&src, &dst) {
-            tracing::warn!(error = %e, from = %from.display(), "carry-forward: copy failed; starting fresh");
-            for dst in copied {
-                let _ = std::fs::remove_file(dst);
+    let label = format!("Copying your data from {}", from.file_name().map(|n| n.to_string_lossy()).unwrap_or_default());
+    let copied_all = crate::boot_timing::step("copy_previous_version", &label, || {
+        let mut copied = Vec::new();
+        for name in DATABASES {
+            let src = source.join(name);
+            let dst = db_dir.join(name);
+            // Already here: copied by a start that was cut short before objects.db.
+            if !src.is_file() || dst.exists() {
+                continue;
             }
-            return None;
+            if let Err(e) = copy_database(&src, &dst) {
+                tracing::warn!(error = %e, from = %from.display(), "carry-forward: copy failed; starting fresh");
+                for dst in copied {
+                    let _ = std::fs::remove_file(dst);
+                }
+                return false;
+            }
+            copied.push(dst);
         }
-        copied.push(dst);
+        true
+    });
+    if !copied_all {
+        return None;
     }
+    CARRIED_FORWARD.store(true, std::sync::atomic::Ordering::Relaxed);
     tracing::info!(from = %from.display(), "carry-forward: started from the previous version's data");
     Some(from)
+}
+
+static CARRIED_FORWARD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether this process copied a previous version's data forward. The
+/// previous version's folder then still holds that data untouched, so the
+/// pre-migration snapshot and the backup of `objects.db` would only copy the
+/// same data again (`bootstrap/stores.rs`, `migrations/backup.rs`).
+pub(crate) fn carried_forward_this_run() -> bool {
+    CARRIED_FORWARD.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 #[cfg(test)]

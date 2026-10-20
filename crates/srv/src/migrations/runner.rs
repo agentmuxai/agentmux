@@ -36,7 +36,7 @@ fn emit(event: &str, id: &str, extra: &str) {
     }
 }
 
-fn emit_summary(applied: usize, skipped: usize) {
+pub(super) fn emit_summary(applied: usize, skipped: usize) {
     println!(
         "{{\"event\":\"complete\",\"applied\":{},\"skipped\":{}}}",
         applied, skipped
@@ -49,7 +49,7 @@ fn emit_summary(applied: usize, skipped: usize) {
 /// varies under isolated-auth mode, resolving to a channel-scoped path
 /// instead of the global one) — nearly every registered migration builds
 /// paths directly off `ctx.home` (registry/definitions/transcripts dirs),
-/// and `backup_stores`/`write_error_log` below use it too. All of those
+/// and `backup::backup_stores`/`write_error_log` use it too. All of those
 /// must stay anchored to the real global root regardless of isolation;
 /// only `ctx.shared_store_path` itself is meant to vary. A single shared
 /// helper (not one inline derivation per call site) so the two can't
@@ -72,7 +72,7 @@ pub const VERIFY_FAILED_EXIT_CODE: i32 = 3;
 /// Called from `main.rs` when the `migrate` subcommand is active.
 /// Returns the exit code (0 = success, 1 = failure, 3 = `--verify` found a
 /// mismatch — see `VERIFY_FAILED_EXIT_CODE`).
-pub fn run_migrate_command(data_dir: &Path, dry_run: bool, list: bool, verify: bool) -> i32 {
+pub fn run_migrate_command(data_dir: &Path, dry_run: bool, list: bool, verify: bool, prepare: bool) -> i32 {
     // Unresolvable shared store path means we're in CI or an unusual env that
     // has no AGENTMUX_SHARED_DIR. Mirror the daemon's behaviour: treat as a
     // no-op and exit 0 so the launcher proceeds normally.
@@ -109,6 +109,10 @@ pub fn run_migrate_command(data_dir: &Path, dry_run: bool, list: bool, verify: b
             eprintln!("migration: failed to create shared dir {}: {}", parent.display(), e);
             return 1;
         }
+    }
+
+    if prepare {
+        return super::prepare::run(data_dir, &home, &shared_store_path);
     }
 
     // `--list` and `--dry-run` are read-only previews and deliberately do NOT
@@ -192,58 +196,6 @@ fn cmd_list(shared_store: &Store, channel_store: Option<&Store>) -> i32 {
     0
 }
 
-// ── Backup ────────────────────────────────────────────────────────────────────
-
-fn backup_stores(home: &Path, shared_store_path: &Path, data_dir: &Path) -> std::io::Result<()> {
-    let version = env!("CARGO_PKG_VERSION");
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let backup_dir = home
-        .join("shared")
-        .join("backups")
-        .join(format!("pre-migration-{}-{}", version, ts));
-    std::fs::create_dir_all(&backup_dir)?;
-
-    // VACUUM INTO, not a file copy: other processes hold the shared stores open
-    // and a file copy misses their -wal. Global migrations write identity-store.db.
-    let objects_db = data_dir.join("db").join("objects.db");
-    let identity_store = home.join("shared").join("identity-store.db");
-    for (src, name) in [(shared_store_path, "store.db"), (objects_db.as_path(), "objects.db"), (identity_store.as_path(), "identity-store.db")] {
-        if src.exists() {
-            crate::backend::storage::db_copy::copy_database(src, &backup_dir.join(name)).map_err(std::io::Error::other)?;
-        }
-    }
-
-    prune_old_backups(home);
-    Ok(())
-}
-
-fn prune_old_backups(home: &Path) {
-    let backups_dir = home.join("shared").join("backups");
-    let cutoff = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-        .saturating_sub(30 * 24 * 60 * 60); // 30 days
-
-    let Ok(entries) = std::fs::read_dir(&backups_dir) else { return };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() { continue; }
-        let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-        // parse timestamp from "pre-migration-<version>-<ts>"
-        if let Some(ts_str) = name.rsplit('-').next() {
-            if let Ok(ts) = ts_str.parse::<u64>() {
-                if ts < cutoff {
-                    let _ = std::fs::remove_dir_all(&path);
-                }
-            }
-        }
-    }
-}
-
 // ── In-process migration runner (used by srv startup) ────────────────────────
 
 /// Apply all pending migrations in-process before srv opens its stores.
@@ -289,16 +241,7 @@ pub fn run_pending_migrations(data_dir: &Path) -> Result<usize, String> {
     // already parse the rest of this protocol from. The launcher parses
     // these two lines (`srv_spawner.rs`); a supervisor that doesn't (the
     // CEF host sidecar today) just logs them like any other stderr line.
-    let progress = ApplyProgress {
-        on_start: &|id, description| {
-            eprintln!("{}", agentmux_common::srv_stderr::migration_begin_line(id, description));
-        },
-        on_done: &|id, ms| {
-            eprintln!("{}", agentmux_common::srv_stderr::migration_end_line(id, ms));
-        },
-    };
-
-    apply_pending(REGISTRY, &home, &shared_store_path, data_dir, Some(&progress)).map(|o| o.applied)
+    apply_pending(REGISTRY, &home, &shared_store_path, data_dir, Some(&STDERR_PROGRESS)).map(|o| o.applied)
 }
 
 // ── Cross-process migration lock (Phase 3, F6) ────────────────────────────────
@@ -399,6 +342,14 @@ pub(super) struct ApplyProgress<'a> {
     pub on_done: &'a dyn Fn(&str, u64),
 }
 
+/// Per-migration BEGIN/END lines on stderr (`agentmux_common::srv_stderr`),
+/// which the launcher shows as splash sub-rows: the daemon's batch and
+/// `migrate --prepare` report the same way.
+pub(super) const STDERR_PROGRESS: ApplyProgress<'static> = ApplyProgress {
+    on_start: &|id, description| eprintln!("{}", agentmux_common::srv_stderr::migration_begin_line(id, description)),
+    on_done: &|id, ms| eprintln!("{}", agentmux_common::srv_stderr::migration_end_line(id, ms)),
+};
+
 /// What a batch did. `skipped` = already applied at the time of the run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct ApplyOutcome {
@@ -440,6 +391,7 @@ pub(super) fn apply_pending(
         .parent()
         .map(|p| p.join(MIGRATION_LOCK_FILE))
         .unwrap_or_else(|| PathBuf::from(MIGRATION_LOCK_FILE));
+    let lock_wait = Instant::now();
     let _shared_lock = MigrationLock::acquire(&shared_lock_path, MIGRATION_LOCK_WAIT)
         .map_err(|e| format!("run_pending_migrations: {}", e))?;
     let channel_db_dir = data_dir.join("db");
@@ -448,6 +400,10 @@ pub(super) fn apply_pending(
     }
     let _channel_lock = MigrationLock::acquire(&channel_db_dir.join(MIGRATION_LOCK_FILE), MIGRATION_LOCK_WAIT)
         .map_err(|e| format!("run_pending_migrations: {}", e))?;
+    let waited = lock_wait.elapsed().as_millis() as u64;
+    if waited >= 250 {
+        crate::boot_timing::step_done("migration_lock", "Waiting for another AgentMux to finish migrating", waited);
+    }
 
     let (shared_store, channel_store) = open_stores_for_preview(shared_store_path, data_dir)
         .map_err(|e| format!("run_pending_migrations: {}", e))?;
@@ -466,7 +422,7 @@ pub(super) fn apply_pending(
         channel_store_path: channel_store_path.clone(),
     };
 
-    if let Err(e) = backup_stores(home, shared_store_path, data_dir) {
+    if let Err(e) = super::backup::backup_stores(home, shared_store_path, data_dir) {
         return Err(format!("run_pending_migrations: backup failed: {}", e));
     }
 
@@ -626,7 +582,7 @@ pub fn count_pending_migrations(data_dir: &Path) -> usize {
 
 // ── Error log ─────────────────────────────────────────────────────────────────
 
-fn write_error_log(home: &Path, msg: &str) {
+pub(super) fn write_error_log(home: &Path, msg: &str) {
     let log_dir = home.join("logs");
     let _ = std::fs::create_dir_all(&log_dir);
     let path = log_dir.join("migration-error.log");

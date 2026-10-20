@@ -11,7 +11,7 @@ pub fn load_config() -> config::Config {
     let args = CliArgs::parse();
 
     // Dispatch migrate subcommand before loading config (no AUTH_KEY needed).
-    if let Some(config::SrvCommand::Migrate { dry_run, list, verify }) = &args.command {
+    if let Some(config::SrvCommand::Migrate { dry_run, list, verify, prepare }) = &args.command {
         // Same precedence as `Config::from_env_and_args`: the CLI flag, then
         // the canonical `AGENTMUX_DATA_DIR` the launcher exports. Without
         // that fallback a launcher-spawned `migrate --verify` opened a
@@ -24,7 +24,7 @@ pub fn load_config() -> config::Config {
             .or_else(|| std::env::var_os("AGENTMUX_DATA_DIR").filter(|s| !s.is_empty()).map(std::path::PathBuf::from))
             .or_else(|| std::env::var_os("AGENTMUX_DATA_HOME").map(std::path::PathBuf::from))
             .unwrap_or_else(|| std::path::PathBuf::from(base::get_mux_data_dir()));
-        let code = migrations::run_migrate_command(&data_dir, *dry_run, *list, *verify);
+        let code = migrations::run_migrate_command(&data_dir, *dry_run, *list, *verify, *prepare);
         std::process::exit(code);
     }
 
@@ -150,15 +150,15 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         .unwrap_or_else(base::get_mux_data_dir)
         .join("snapshots");
     // A new version's first start begins from the previous version's data,
-    // then snapshots and migrates it like any upgrade (carry_forward.rs).
-    super::carry_forward::from_previous_version(&db_dir, &code_version);
-    match maybe_snapshot_pre_migration(
-        &db_dir,
-        &snapshots_dir,
-        &channel,
-        &code_version,
-        OBJECT_SCHEMA_VERSION,
-    ) {
+    // then migrates it like any upgrade (carry_forward.rs). No snapshot after
+    // a copy-forward: the previous version's folder is that data, untouched.
+    let carried = super::carry_forward::from_previous_version(&db_dir, &code_version).is_some();
+    let snapshot = if carried {
+        Ok(None)
+    } else {
+        maybe_snapshot_pre_migration(&db_dir, &snapshots_dir, &channel, &code_version, OBJECT_SCHEMA_VERSION)
+    };
+    match snapshot {
         Ok(Some(path)) => tracing::info!(snapshot = %path.display(), "pre-migration snapshot written"),
         Ok(None) => {}
         Err(e) => tracing::warn!("pre-migration snapshot failed (continuing without backup): {}", e),

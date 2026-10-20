@@ -31,6 +31,12 @@
 //!   CEF-host sidecar has no splash to report to and simply logs them like
 //!   any other stderr line, same as it already did for the unparsed line
 //!   before this existed.
+//! - `AGENTMUXSRV-STEP-BEGIN id:<id> label:<text>` /
+//!   `AGENTMUXSRV-STEP-END id:<id> duration_ms:<n>` — one data-preparation
+//!   step besides a migration: copying the previous version's data, a
+//!   snapshot, waiting for another AgentMux's migrations, the backup. Written
+//!   by srv's startup and by `agentmux-srv migrate --prepare`; the launcher
+//!   shows each as a sub-row of `backend`, like a migration.
 //! - `AGENTMUXSRV-MIGRATION-FAILED error:<text>` — a migration failed and srv
 //!   is about to exit 1 **without** emitting ESTART. Added by Phase 1 of
 //!   `docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md`; before it,
@@ -136,6 +142,47 @@ fn one_line(s: &str) -> String {
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()
         .join(" | ")
+}
+
+/// Prefix of the line srv writes when a data-preparation step starts.
+pub const STEP_BEGIN_PREFIX: &str = "AGENTMUXSRV-STEP-BEGIN";
+/// Prefix of the line srv writes when that step ends.
+pub const STEP_END_PREFIX: &str = "AGENTMUXSRV-STEP-END";
+
+/// A parsed `STEP_BEGIN_PREFIX` line. Ids are code-chosen, without spaces.
+#[derive(Debug, PartialEq, Eq)]
+pub struct StepBegin {
+    pub id: String,
+    pub label: String,
+}
+
+/// A parsed `STEP_END_PREFIX` line.
+#[derive(Debug, PartialEq, Eq)]
+pub struct StepEnd {
+    pub id: String,
+    pub duration_ms: u64,
+}
+
+pub fn step_begin_line(id: &str, label: &str) -> String {
+    format!("{STEP_BEGIN_PREFIX} id:{id} label:{}", one_line(label))
+}
+
+pub fn step_end_line(id: &str, duration_ms: u64) -> String {
+    format!("{STEP_END_PREFIX} id:{id} duration_ms:{duration_ms}")
+}
+
+pub fn parse_step_begin_line(line: &str) -> Option<StepBegin> {
+    let rest = line.strip_prefix(STEP_BEGIN_PREFIX)?.trim_start().strip_prefix("id:")?;
+    let (id, rest) = rest.split_once(' ')?;
+    let label = rest.strip_prefix("label:").unwrap_or(rest).trim();
+    Some(StepBegin { id: id.to_string(), label: label.to_string() })
+}
+
+pub fn parse_step_end_line(line: &str) -> Option<StepEnd> {
+    let rest = line.strip_prefix(STEP_END_PREFIX)?.trim_start().strip_prefix("id:")?;
+    let (id, rest) = rest.split_once(' ')?;
+    let duration_ms = rest.trim().strip_prefix("duration_ms:")?.trim().parse().ok()?;
+    Some(StepEnd { id: id.to_string(), duration_ms })
 }
 
 /// Prefix of the line srv writes to stderr just before applying one pending
@@ -271,6 +318,21 @@ mod tests {
         assert_eq!(parse_estart_line("AGENTMUXSRV-MIGRATING migrations:1"), None);
         let bare = parse_estart_line("AGENTMUXSRV-ESTART ws:127.0.0.1:1").unwrap();
         assert_eq!((bare.ws_endpoint.as_str(), bare.pending_migrations), ("127.0.0.1:1", 0));
+    }
+
+    #[test]
+    fn step_lines_round_trip_and_stay_apart_from_migration_lines() {
+        let begin = step_begin_line("copy_previous_version", "Copying your data\nfrom 0.59.33");
+        assert_eq!(
+            parse_step_begin_line(&begin),
+            Some(StepBegin { id: "copy_previous_version".into(), label: "Copying your data | from 0.59.33".into() })
+        );
+        let end = step_end_line("backup", 812);
+        assert_eq!(parse_step_end_line(&end), Some(StepEnd { id: "backup".into(), duration_ms: 812 }));
+        assert_eq!(parse_step_begin_line(&migration_begin_line("0001_x", "y")), None);
+        assert!(parse_migration_begin_line(&begin).is_none());
+        assert!(!is_migrating_line(&begin));
+        assert_eq!(parse_step_end_line("AGENTMUXSRV-STEP-END id:backup duration_ms:x"), None);
     }
 
     #[test]

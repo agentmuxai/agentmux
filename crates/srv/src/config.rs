@@ -83,6 +83,13 @@ pub enum SrvCommand {
         /// wrote what it was meant to.
         #[arg(long)]
         verify: bool,
+        /// Prepare this version's data for its first start, with srv stopped:
+        /// copy the previous version's data forward when this version has
+        /// none, back up, and run the pending migrations, each reported on
+        /// stderr for the splash. The upgrade step of
+        /// SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15 §10.
+        #[arg(long)]
+        prepare: bool,
     },
 }
 

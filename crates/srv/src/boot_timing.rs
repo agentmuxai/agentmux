@@ -127,6 +127,33 @@ pub fn time<T>(step: &'static str, f: impl FnOnce() -> T) -> T {
     out
 }
 
+/// A data-preparation step the splash shows: copying the previous version's
+/// data, a snapshot, the backup. Writes `AGENTMUXSRV-STEP-BEGIN`/`-END` on
+/// stderr around `f` (the launcher shows a sub-row of "Backend startup"; the
+/// same lines report `agentmux-srv migrate --prepare`'s steps) and records
+/// the time like [`time`], so the splash and the boot summary come from one
+/// call.
+pub fn step<T>(id: &'static str, label: &str, f: impl FnOnce() -> T) -> T {
+    eprintln!("{}", agentmux_common::srv_stderr::step_begin_line(id, label));
+    let t = Instant::now();
+    let out = time(id, f);
+    eprintln!("{}", agentmux_common::srv_stderr::step_end_line(id, t.elapsed().as_millis() as u64));
+    out
+}
+
+/// Report a step that is only worth showing once it is known to have taken
+/// long (waiting for another process's lock): begin and end at once, with
+/// the time it took.
+pub fn step_done(id: &'static str, label: &str, ms: u64) {
+    eprintln!("{}", agentmux_common::srv_stderr::step_begin_line(id, label));
+    eprintln!("{}", agentmux_common::srv_stderr::step_end_line(id, ms));
+    if let Ok(mut guard) = recorder().lock() {
+        if let Some(timings) = guard.as_mut() {
+            timings.steps.push((id, ms));
+        }
+    }
+}
+
 /// `time`, for an async step. Same no-lock-across-the-work property.
 pub async fn time_async<T>(step: &'static str, fut: impl std::future::Future<Output = T>) -> T {
     let t = Instant::now();
