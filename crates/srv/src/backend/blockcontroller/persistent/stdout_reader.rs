@@ -172,9 +172,14 @@ impl PersistentSubprocessController {
                     }
                 }
                 if let Some(update) = api_retry.observe(&parsed, agentmux_common::time::now_ms()) {
-                    if let Some(broker) = broker_read.as_deref() {
-                        crate::backend::agent_api_retry::publish_api_retry(broker, &block_id_read, update);
-                    }
+                    let current = inner_read.lock().unwrap().spawn_generation;
+                    crate::backend::agent_api_retry::publish_api_retry(
+                        broker_read.as_deref(),
+                        &block_id_read,
+                        my_generation_read,
+                        current,
+                        update,
+                    );
                 }
                 if let Some(store) = mstore_read.as_deref() {
                     let now_ms = agentmux_common::time::now_ms();
@@ -754,8 +759,15 @@ impl PersistentSubprocessController {
             }
         }
 
-        if let (Some(update), Some(broker)) = (api_retry.finish(), broker_read.as_deref()) {
-            crate::backend::agent_api_retry::publish_api_retry(broker, &block_id_read, update);
+        if let Some(update) = api_retry.finish() {
+            let current = inner_read.lock().unwrap().spawn_generation;
+            crate::backend::agent_api_retry::publish_api_retry(
+                broker_read.as_deref(),
+                &block_id_read,
+                my_generation_read,
+                current,
+                update,
+            );
         }
         tracing::info!(block_id = %block_id_read, "persistent stdout reader finished");
     }

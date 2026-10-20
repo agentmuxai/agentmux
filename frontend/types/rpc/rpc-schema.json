@@ -718,6 +718,25 @@
     }
   },
   {
+    "command": "agentapiretry",
+    "request": "agentmux_srv::backend::agent_api_retry::CommandAgentApiRetryData",
+    "requestName": "CommandAgentApiRetryData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentApiRetryData"
+      ],
+      "name": "CommandAgentApiRetryData"
+    },
+    "response": "agentmux_srv::backend::agent_api_retry::ApiRetryEvent",
+    "responseName": "ApiRetryEvent",
+    "responseTs": {
+      "imports": [
+        "ApiRetryEvent"
+      ],
+      "name": "ApiRetryEvent"
+    }
+  },
+  {
     "command": "agentcancel",
     "request": "agentmux_srv::backend::rpc_types::block::CommandAgentCancelData",
     "requestName": "CommandAgentCancelData",

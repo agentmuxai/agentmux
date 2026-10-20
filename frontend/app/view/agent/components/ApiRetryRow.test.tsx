@@ -1,21 +1,35 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ApiRetryState } from "@/types/rpc/ApiRetryState";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { toApiRetryView, type ApiRetryView } from "../hooks/useApiRetryState";
 import { ApiRetryRow, apiRetryText } from "./ApiRetryRow";
 
 const NOW = 1_800_000_000_000;
 
-const retry = (over: Partial<ApiRetryState> = {}): ApiRetryState => ({
+const retry = (over: Partial<ApiRetryView> = {}): ApiRetryView => ({
     attempt: 3,
     maxRetries: 10,
-    nextRetryAtMs: NOW + 18_000,
+    nextRetryAt: NOW + 18_000,
     errorStatus: null,
     error: "unknown",
     ...over,
+});
+
+describe("toApiRetryView", () => {
+    it("puts the next attempt on this clock, from the time remaining srv sent", () => {
+        const sent = { attempt: 3, maxRetries: 10, retryInMs: 18_000, errorStatus: null, error: "unknown" };
+        expect(toApiRetryView(sent, NOW)).toEqual({
+            attempt: 3,
+            maxRetries: 10,
+            nextRetryAt: NOW + 18_000,
+            errorStatus: null,
+            error: "unknown",
+        });
+        expect(toApiRetryView(null, NOW)).toBeNull();
+    });
 });
 
 describe("apiRetryText", () => {
@@ -60,9 +74,9 @@ describe("ApiRetryRow", () => {
     });
 
     it("follows a new attempt and disappears when cleared", () => {
-        const [state, setState] = createSignal<ApiRetryState | null>(retry());
+        const [state, setState] = createSignal<ApiRetryView | null>(retry());
         render(() => <ApiRetryRow retry={state()} onStop={() => {}} />);
-        setState(retry({ attempt: 4, nextRetryAtMs: NOW + 30_000 }));
+        setState(retry({ attempt: 4, nextRetryAt: NOW + 30_000 }));
         expect(screen.getByRole("status").textContent).toContain("attempt 4 of 10, next in 30 s.");
         setState(null);
         expect(screen.queryByRole("status")).toBeNull();

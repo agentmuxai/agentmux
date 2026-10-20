@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button } from "@/app/element/ui";
-import type { ApiRetryState } from "@/types/rpc/ApiRetryState";
 import { Show, createSignal, onCleanup, type JSX } from "solid-js";
-import { useApiRetryState } from "../hooks/useApiRetryState";
+import { useApiRetryState, type ApiRetryView } from "../hooks/useApiRetryState";
 
 function retryReason(status: number | null): string {
     if (status == null) return "Can't reach the API";
@@ -14,10 +13,10 @@ function retryReason(status: number | null): string {
 }
 
 /** "Can't reach the API. Retrying: attempt 3 of 10, next in 18 s." */
-export function apiRetryText(retry: ApiRetryState, nowMs: number): string {
+export function apiRetryText(retry: ApiRetryView, nowMs: number): string {
     const attempt =
         retry.maxRetries > 0 ? `attempt ${retry.attempt} of ${retry.maxRetries}` : `attempt ${retry.attempt}`;
-    const seconds = Math.ceil((retry.nextRetryAtMs - nowMs) / 1000);
+    const seconds = Math.ceil((retry.nextRetryAt - nowMs) / 1000);
     const reason = retryReason(retry.errorStatus);
     return seconds > 0
         ? `${reason}. Retrying: ${attempt}, next in ${seconds} s.`
@@ -29,7 +28,7 @@ export function apiRetryText(retry: ApiRetryState, nowMs: number): string {
  * says so, counts down to the next attempt, and offers Stop: otherwise the
  * pane just looks busy for the minutes the CLI's retries can take.
  */
-export function ApiRetryRow(props: { retry: ApiRetryState | null; onStop: () => void }): JSX.Element {
+export function ApiRetryRow(props: { retry: ApiRetryView | null; onStop: () => void }): JSX.Element {
     return (
         <Show when={props.retry}>
             {(retry) => {

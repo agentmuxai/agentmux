@@ -10,13 +10,46 @@
 //! network down that is minutes of a busy-looking pane with nothing else on
 //! stdout, so the pane shows the retry, with Stop.
 //!
-//! Published as the persisted per-pane `agent-api-retry` event. Cleared by
-//! the next frame that is neither `system` nor `user` (a reply arrived, or
-//! the turn's `result`), and when the process's stdout closes.
+//! Published as the per-pane `agent-api-retry` event, and answered for a pane
+//! that opens mid-retry by `agentapiretry`. Cleared by the next frame that is
+//! neither `system` nor `user` (a reply arrived, or the turn's `result`), and
+//! when the process's stdout closes.
+//!
+//! The wait goes out as time remaining, computed when srv sends it, never as
+//! a deadline: srv's clock and the renderer's need not agree. So the event is
+//! not persisted (a replay would carry a stale remainder); srv keeps the
+//! current retry here instead.
+
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
 
 use serde_json::Value;
 
-/// One retry the CLI is waiting on.
+/// One retry the CLI is waiting on, on srv's clock.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingRetry {
+    pub attempt: u32,
+    pub max_retries: u32,
+    /// When the CLI makes the next attempt (srv's epoch ms).
+    pub next_retry_at_ms: i64,
+    pub error_status: Option<u16>,
+    pub error: Option<String>,
+}
+
+impl PendingRetry {
+    /// The retry as sent at `now_ms`.
+    pub fn at(&self, now_ms: i64) -> ApiRetryState {
+        ApiRetryState {
+            attempt: self.attempt,
+            max_retries: self.max_retries,
+            retry_in_ms: u64::try_from(self.next_retry_at_ms.saturating_sub(now_ms)).unwrap_or(0),
+            error_status: self.error_status,
+            error: self.error.clone(),
+        }
+    }
+}
+
+/// One retry the CLI is waiting on, as the pane gets it.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
@@ -24,9 +57,10 @@ pub struct ApiRetryState {
     /// The CLI's retry count, from 1, out of `max_retries`.
     pub attempt: u32,
     pub max_retries: u32,
-    /// When the CLI makes that attempt (epoch ms).
+    /// How long until the next attempt, as of sending; the receiver adds
+    /// its own clock.
     #[ts(type = "number")]
-    pub next_retry_at_ms: i64,
+    pub retry_in_ms: u64,
     /// The HTTP status of the failed request; `null` when none came back
     /// (the connection itself failed).
     pub error_status: Option<u16>,
@@ -34,23 +68,30 @@ pub struct ApiRetryState {
     pub error: Option<String>,
 }
 
-/// The `agent-api-retry` event's payload (`mps_events::AgentApiRetry`):
-/// the retry in progress, or `null` once there is none.
+/// The `agent-api-retry` event's payload (`mps_events::AgentApiRetry`), and
+/// `agentapiretry`'s answer: the retry in progress, or `null` when none is.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ApiRetryEvent {
     pub retry: Option<ApiRetryState>,
 }
 
+/// `agentapiretry`'s request: the pane asking.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandAgentApiRetryData {
+    pub blockid: String,
+}
+
 /// What a frame changes about the pane's retry state.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ApiRetryUpdate {
-    Set(ApiRetryState),
+    Set(PendingRetry),
     Clear,
 }
 
 /// The retry an `api_retry` frame announces, or `None` for any other frame.
-pub fn retry_from_frame(frame: &Value, now_ms: i64) -> Option<ApiRetryState> {
+pub fn retry_from_frame(frame: &Value, now_ms: i64) -> Option<PendingRetry> {
     if frame.get("type").and_then(Value::as_str) != Some("system")
         || frame.get("subtype").and_then(Value::as_str) != Some("api_retry")
     {
@@ -58,7 +99,7 @@ pub fn retry_from_frame(frame: &Value, now_ms: i64) -> Option<ApiRetryState> {
     }
     let num = |key: &str| frame.get(key).and_then(Value::as_u64);
     let delay_ms = i64::try_from(num("retry_delay_ms").unwrap_or(0)).unwrap_or(i64::MAX);
-    Some(ApiRetryState {
+    Some(PendingRetry {
         attempt: u32::try_from(num("attempt")?).ok()?,
         max_retries: u32::try_from(num("max_retries").unwrap_or(0)).unwrap_or(u32::MAX),
         next_retry_at_ms: now_ms.saturating_add(delay_ms),
@@ -72,7 +113,7 @@ pub fn retry_from_frame(frame: &Value, now_ms: i64) -> Option<ApiRetryState> {
 }
 
 /// One stdout reader's view of whether its CLI is retrying, so a clear is
-/// published once, not for every frame.
+/// sent once, not for every frame.
 #[derive(Debug, Default)]
 pub struct ApiRetryTracker {
     active: bool,
@@ -100,17 +141,76 @@ impl ApiRetryTracker {
     }
 }
 
-/// Publish an update, persisted, so a pane that mounts mid-retry sees it.
-pub fn publish_api_retry(broker: &crate::backend::mps::Broker, block_id: &str, update: ApiRetryUpdate) {
-    let retry = match update {
-        ApiRetryUpdate::Set(retry) => Some(retry),
-        ApiRetryUpdate::Clear => None,
-    };
-    broker.publish_event::<crate::backend::mps_events::AgentApiRetry>(
-        &ApiRetryEvent { retry },
-        vec![format!("block:{block_id}")],
-        1,
-    );
+/// The retry each pane shows, and which process generation it came from.
+#[derive(Debug, Default)]
+pub struct ApiRetryRegistry {
+    by_block: HashMap<String, (u64, PendingRetry)>,
+}
+
+impl ApiRetryRegistry {
+    /// Applies an update from the stdout reader of process `generation`,
+    /// `current` being the controller's generation now; returns the event to
+    /// publish, if the pane's state changed. A replaced process's reader can
+    /// still be draining its pipe: it may clear only a retry it set itself,
+    /// and may not set one, or a stale row would offer to stop the new process.
+    pub fn apply(
+        &mut self,
+        block_id: &str,
+        generation: u64,
+        current: u64,
+        update: ApiRetryUpdate,
+        now_ms: i64,
+    ) -> Option<ApiRetryEvent> {
+        match update {
+            ApiRetryUpdate::Set(retry) if generation == current => {
+                let event = ApiRetryEvent { retry: Some(retry.at(now_ms)) };
+                self.by_block.insert(block_id.to_string(), (generation, retry));
+                Some(event)
+            }
+            ApiRetryUpdate::Set(_) => None,
+            ApiRetryUpdate::Clear => {
+                let owned = self.by_block.get(block_id).is_some_and(|(g, _)| *g == generation);
+                owned.then(|| {
+                    self.by_block.remove(block_id);
+                    ApiRetryEvent { retry: None }
+                })
+            }
+        }
+    }
+
+    /// The pane's retry as of `now_ms`.
+    pub fn current(&self, block_id: &str, now_ms: i64) -> ApiRetryEvent {
+        ApiRetryEvent { retry: self.by_block.get(block_id).map(|(_, retry)| retry.at(now_ms)) }
+    }
+}
+
+static REGISTRY: LazyLock<Mutex<ApiRetryRegistry>> = LazyLock::new(Mutex::default);
+
+/// Records an update from the reader of process `generation` and publishes
+/// the change, if any (see [`ApiRetryRegistry::apply`]).
+pub fn publish_api_retry(
+    broker: Option<&crate::backend::mps::Broker>,
+    block_id: &str,
+    generation: u64,
+    current: u64,
+    update: ApiRetryUpdate,
+) {
+    let now_ms = agentmux_common::time::now_ms();
+    let event = REGISTRY
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .apply(block_id, generation, current, update, now_ms);
+    if let (Some(event), Some(broker)) = (event, broker) {
+        broker.publish_event::<crate::backend::mps_events::AgentApiRetry>(&event, vec![format!("block:{block_id}")], 0);
+    }
+}
+
+/// `agentapiretry`: the pane's retry as of now.
+pub fn current_api_retry(block_id: &str) -> ApiRetryEvent {
+    REGISTRY
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .current(block_id, agentmux_common::time::now_ms())
 }
 
 #[cfg(test)]
@@ -128,11 +228,15 @@ mod tests {
         })
     }
 
+    fn pending(attempt: u32) -> PendingRetry {
+        PendingRetry { attempt, max_retries: 10, next_retry_at_ms: NOW + 10_000, error_status: None, error: None }
+    }
+
     #[test]
     fn reads_the_clis_retry_frame() {
         assert_eq!(
             retry_from_frame(&retry_frame(), NOW),
-            Some(ApiRetryState {
+            Some(PendingRetry {
                 attempt: 3,
                 max_retries: 10,
                 next_retry_at_ms: NOW + 2238,
@@ -195,12 +299,53 @@ mod tests {
     }
 
     #[test]
+    fn the_wait_is_sent_as_time_remaining_when_sent() {
+        let mut r = ApiRetryRegistry::default();
+        let sent = r.apply("b", 1, 1, ApiRetryUpdate::Set(pending(3)), NOW).unwrap();
+        assert_eq!(sent.retry.unwrap().retry_in_ms, 10_000);
+        // A pane opening 4 s later is told 6 s, and nothing once it is due.
+        assert_eq!(r.current("b", NOW + 4_000).retry.unwrap().retry_in_ms, 6_000);
+        assert_eq!(r.current("b", NOW + 60_000).retry.unwrap().retry_in_ms, 0);
+        assert_eq!(r.current("other", NOW).retry, None);
+    }
+
+    #[test]
+    fn the_owning_generation_clears() {
+        let mut r = ApiRetryRegistry::default();
+        r.apply("b", 1, 1, ApiRetryUpdate::Set(pending(3)), NOW);
+        assert_eq!(r.apply("b", 1, 1, ApiRetryUpdate::Clear, NOW), Some(ApiRetryEvent { retry: None }));
+        assert_eq!(r.current("b", NOW).retry, None);
+        // Nothing left to clear: nothing to publish.
+        assert_eq!(r.apply("b", 1, 1, ApiRetryUpdate::Clear, NOW), None);
+    }
+
+    #[test]
+    fn a_replaced_process_changes_nothing_of_its_replacements() {
+        let mut r = ApiRetryRegistry::default();
+        r.apply("b", 2, 2, ApiRetryUpdate::Set(pending(5)), NOW);
+        // Generation 1's reader, still draining after generation 2 started.
+        assert_eq!(r.apply("b", 1, 2, ApiRetryUpdate::Set(pending(9)), NOW), None);
+        assert_eq!(r.apply("b", 1, 2, ApiRetryUpdate::Clear, NOW), None);
+        assert_eq!(r.current("b", NOW).retry.unwrap().attempt, 5);
+    }
+
+    #[test]
+    fn a_replaced_process_still_clears_a_retry_it_set() {
+        // Otherwise a row from the old process would stay until the new one retried.
+        let mut r = ApiRetryRegistry::default();
+        r.apply("b", 1, 1, ApiRetryUpdate::Set(pending(3)), NOW);
+        assert_eq!(r.apply("b", 1, 2, ApiRetryUpdate::Clear, NOW), Some(ApiRetryEvent { retry: None }));
+        assert_eq!(r.current("b", NOW).retry, None);
+    }
+
+    #[test]
     fn the_event_serializes_camel_case_and_null_when_cleared() {
-        let set = ApiRetryEvent { retry: retry_from_frame(&retry_frame(), NOW) };
+        let set = ApiRetryEvent { retry: Some(pending(3).at(NOW)) };
         let v = serde_json::to_value(&set).unwrap();
         assert_eq!(v["retry"]["maxRetries"], json!(10));
-        assert_eq!(v["retry"]["nextRetryAtMs"], json!(NOW + 2238));
+        assert_eq!(v["retry"]["retryInMs"], json!(10_000));
         assert_eq!(v["retry"]["errorStatus"], Value::Null);
+        assert!(v["retry"].get("nextRetryAtMs").is_none(), "no server-clock deadline on the wire: {v}");
         assert_eq!(serde_json::to_value(ApiRetryEvent { retry: None }).unwrap(), json!({ "retry": null }));
     }
 }

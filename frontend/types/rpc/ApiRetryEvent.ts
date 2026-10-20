@@ -2,7 +2,7 @@
 import type { ApiRetryState } from "./ApiRetryState";
 
 /**
- * The `agent-api-retry` event's payload (`mps_events::AgentApiRetry`):
- * the retry in progress, or `null` once there is none.
+ * The `agent-api-retry` event's payload (`mps_events::AgentApiRetry`), and
+ * `agentapiretry`'s answer: the retry in progress, or `null` when none is.
  */
 export type ApiRetryEvent = { retry: ApiRetryState | null, };

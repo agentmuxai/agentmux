@@ -92,7 +92,8 @@ pub const EVENT_AGENT_FAILURE: &str = "agentfailure";
 /// `publish_resume_retry_status`'s own doc comment for why 2, not 1.
 pub const EVENT_AGENT_RESUME_RETRY: &str = "agent-resume-retry";
 /// A Claude CLI request is being retried, or no longer is
-/// (`backend::agent_api_retry`). Payload: `{ "retry": {…} | null }`.
+/// (`backend::agent_api_retry`). Payload: `{ "retry": {…} | null }`. Not
+/// persisted: it carries time remaining as of sending.
 pub const EVENT_AGENT_API_RETRY: &str = "agent-api-retry";
 /// Fired by `SubagentWatcher::scan_session_subagents` (the pane-reopen
 /// cold-backfill entry point, `subagent_watcher/scan.rs`) so a pane can
