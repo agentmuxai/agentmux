@@ -219,36 +219,45 @@ export async function startProxy({
 
     async function reevaluate() {
         const now = Date.now();
-        const summary = JSON.stringify(describe(state, now));
-        if (summary !== lastSummary) {
-            const d = describe(state, now);
-            const rules = d.rules.map((r) => ` ${r.host}=${r.now}${r.mode === r.now ? "" : ` (${r.mode})`}`).join("");
-            log(
-                `${stamp()} now: default=${d.default.now}${d.default.mode === d.default.now ? "" : ` (${d.default.mode})`}${rules}`
-            );
-            lastSummary = summary;
+        try {
+            const summary = JSON.stringify(describe(state, now));
+            if (summary !== lastSummary) {
+                const d = describe(state, now);
+                const rules = d.rules.map((r) => ` ${r.host}=${r.now}${r.mode === r.now ? "" : ` (${r.mode})`}`).join("");
+                log(
+                    `${stamp()} now: default=${d.default.now}${d.default.mode === d.default.now ? "" : ` (${d.default.mode})`}${rules}`
+                );
+                lastSummary = summary;
+            }
+            for (const conn of [...conns]) {
+                const mode = decide(state, conn.host, now);
+                if (mode !== conn.applied) act(conn, mode);
+            }
+            const wantListen = !refusesEverything(state, now);
+            if (wantListen && !listening) {
+                await listen();
+                log(`${stamp()} listening again on ${bind}:${actualPort}`);
+            } else if (!wantListen && listening) {
+                unlisten();
+                log(`${stamp()} every host refused: stopped listening, so new connects get ECONNREFUSED`);
+            }
+        } finally {
+            // Re-arm even when listen() failed, so flapping carries on.
+            clearTimeout(timer);
+            const next = nextChangeIn(state, now);
+            // A few ms past the boundary, so the phase has actually flipped when this runs.
+            if (next !== null) timer = setTimeout(scheduleFromTimer, next + 5);
         }
-        for (const conn of [...conns]) {
-            const mode = decide(state, conn.host, now);
-            if (mode !== conn.applied) act(conn, mode);
-        }
-        const wantListen = !refusesEverything(state, now);
-        if (wantListen && !listening) {
-            await listen();
-            log(`${stamp()} listening again on ${bind}:${actualPort}`);
-        } else if (!wantListen && listening) {
-            unlisten();
-            log(`${stamp()} every host refused: stopped listening, so new connects get ECONNREFUSED`);
-        }
-        clearTimeout(timer);
-        const next = nextChangeIn(state, now);
-        // A few ms past the boundary, so the phase has actually flipped when this runs.
-        if (next !== null) timer = setTimeout(schedule, next + 5);
     }
 
     function schedule() {
         queue = queue.then(reevaluate, reevaluate);
         return queue;
+    }
+
+    // Nothing awaits a timer's run, so log its failure instead of letting it end the proxy.
+    function scheduleFromTimer() {
+        schedule().catch((err) => log(`${stamp()} re-evaluating failed: ${err.message}`));
     }
 
     const status = () => ({

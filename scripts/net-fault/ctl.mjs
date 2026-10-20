@@ -36,12 +36,20 @@ if (!command) {
     process.exit(2);
 }
 
+// A bad mode is a usage error, not a sign the proxy is down.
+if (!["status", "clear"].includes(command)) {
+    try {
+        parseMode(command);
+    } catch (err) {
+        console.error(`ctl: ${err.message}`);
+        process.exit(2);
+    }
+}
 let res;
 try {
     if (command === "status") res = await fetch(`${values.control}/status`);
     else if (command === "clear") res = await fetch(`${values.control}/clear`, { method: "POST" });
     else {
-        parseMode(command);
         res = await fetch(`${values.control}/mode`, {
             method: "POST",
             headers: { "content-type": "application/json" },
