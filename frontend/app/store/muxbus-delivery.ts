@@ -105,6 +105,28 @@ export function muxbusDeliveryLine(s: MuxBusDeliveryStatus | null | undefined): 
     }
 }
 
+/**
+ * What Sign out should say before it deletes the sign-in, or null to go
+ * ahead. While MuxBus, or only its sign-in server, can't be reached the
+ * stored sign-in is fine and recovers by itself; signing out deletes it, and
+ * signing in again needs both to be reachable.
+ */
+export function muxbusSignOutWarning(s: MuxBusDeliveryStatus | null | undefined): string | null {
+    if (s?.state === "reconnecting") {
+        return (
+            `MuxBus can't be reached since ${clockTime(s.since_ms)}. Your sign-in is kept and reconnects by itself. ` +
+            "Signing out deletes it, and you can't sign in again until MuxBus is reachable."
+        );
+    }
+    if (s?.state === "connected" && s.sign_in_unreachable) {
+        return (
+            "AgentMux can't reach the MuxBus sign-in server right now. Your sign-in is kept and refreshes by itself. " +
+            "Signing out deletes it, and you can't sign in again until the server is reachable."
+        );
+    }
+    return null;
+}
+
 /** Settings offers "Sign in" in these states, "Sign out" in the others. */
 export function muxbusOffersSignIn(s: MuxBusDeliveryStatus | null | undefined): boolean {
     return !s || s.state === "signed_out" || s.state === "needs_sign_in";

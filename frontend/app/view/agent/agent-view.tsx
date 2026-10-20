@@ -1374,9 +1374,8 @@ export const AgentPresentationView = ({
                 />
             </div>
 
-            {/* Login, decisions, questions, queue, recovery banners, activity
-                dock, working row and session notices
-                (components/AgentBottomPanels.tsx). */}
+            {/* Login, decisions, questions, queue, recovery banners, activity dock,
+                working row and session notices (components/AgentBottomPanels.tsx). */}
             <AgentBottomPanels
                 blockId={model.blockId}
                 agentId={agentId}
@@ -1397,6 +1396,7 @@ export const AgentPresentationView = ({
                 backgroundTasksAtom={backgroundTasksAtom}
                 workingRowVisible={workingRowVisible}
                 workingRowLoading={workingRowLoading}
+                onStop={commands.stopAgent}
             />
 
             {/* Composer status strip — single 28-32px row with live

@@ -142,7 +142,7 @@ pub enum LookupOutcome {
 }
 
 /// How `inject_message_inner` resolved its target (spec §4.4.3).
-enum TargetResolution {
+pub(super) enum TargetResolution {
     Uid(String),
     Name(String),
     Ambiguous(Vec<AgentRegistration>),
@@ -570,7 +570,7 @@ impl Handler {
     /// by exactly one live block — sweeping dead candidates only when the
     /// name is contested (§4.4.4 Q9) — refusing an ambiguous name with its
     /// candidates rather than guessing. Counts what it did (§9.2).
-    fn resolve_target(&mut self, target: &str) -> TargetResolution {
+    pub(super) fn resolve_target(&mut self, target: &str) -> TargetResolution {
         if let Some(block) = self
             .uid_to_block
             .get(target)
@@ -1481,19 +1481,15 @@ impl Handler {
     }
 
     /// Deliver one of srv's own `[AgentMux]` system notes to `target_agent`
-    /// (`muxbus::delivery_status`). Not a jekt: no marker block, tier or
-    /// trust label, because nothing but srv wrote the text, and no jekt or
-    /// forwarded text can carry the marker (`sanitize::neutralize_markers`).
+    /// now, which starts a turn if none is running; an informational note
+    /// waits for the next one instead (`held_notes`). Not a jekt: no marker
+    /// block, tier or trust label, because nothing but srv wrote the text,
+    /// and no jekt or forwarded text can carry the marker
+    /// (`sanitize::neutralize_markers`).
     /// Routed like a jekt: the controller's structured channel, else
     /// keystrokes. Audited as `system_note` from `agentmux`.
     pub fn deliver_system_note(&mut self, target_agent: &str, text: &str) -> Result<(), String> {
-        let block_id = match self.resolve_target(target_agent) {
-            TargetResolution::Uid(b) | TargetResolution::Name(b) => b,
-            TargetResolution::Ambiguous(candidates) => {
-                return Err(format!("ambiguous agent name: '{target_agent}' is held by {} live agents", candidates.len()));
-            }
-            TargetResolution::NotFound => return Err(format!("agent not found: {target_agent}")),
-        };
+        let block_id = self.note_target(target_agent)?;
         let result = self.send_to_block(&block_id, text);
         let request_id = uuid::Uuid::new_v4().to_string();
         self.log_audit(
@@ -1634,7 +1630,7 @@ impl Default for Handler {
 
 /// Thread-safe wrapper around Handler.
 pub struct ReactiveHandler {
-    inner: Mutex<Handler>,
+    pub(super) inner: Mutex<Handler>,
     /// Called with the target block_id after a successful delivery whose
     /// marker says `ESCALATE=required` — the notification Router turns it
     /// into a "needs your review" OS notification (fixed text, no content).

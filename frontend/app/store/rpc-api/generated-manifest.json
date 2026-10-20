@@ -30,6 +30,10 @@
             "dataType": "CommandAgentAnswerData"
         },
         {
+            "command": "agentapiretry",
+            "method": "AgentApiRetryCommand"
+        },
+        {
             "command": "agentcancel",
             "method": "AgentCancelCommand"
         },

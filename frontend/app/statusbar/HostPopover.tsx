@@ -20,6 +20,7 @@ import { firewallMessage, resolveLanIndicator } from "./lan-indicator";
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
 import { useMuxBusStatus, type MuxBusController } from "@/app/view/accounts/AgentMuxConnectPanel";
 import { isMuxBusSessionOk, muxbusNeedsSignInAgain } from "@/app/view/accounts/muxbus-session";
+import { MuxBusSignOutButton } from "@/app/view/accounts/muxbus-sign-out";
 import { isLinux, isMacOS } from "@/util/platformutil";
 import { PairDevicePanel } from "./PairDevicePanel";
 
@@ -322,14 +323,11 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                     </Show>
                     <Show when={muxbusOk()}>
                         <div class="status-bar-popover-row" style={{ "justify-content": "flex-end" }}>
-                            <button
-                                type="button"
+                            <MuxBusSignOutButton
+                                muxbus={muxbus}
                                 class="muxbus-popover-disconnect-btn"
-                                disabled={muxbus.loading()}
-                                onClick={() => void muxbus.disconnect()}
-                            >
-                                {muxbus.loading() ? "Disconnecting…" : "Disconnect"}
-                            </button>
+                                label="Disconnect"
+                            />
                         </div>
                     </Show>
                     <Show when={muxbus.error()}>

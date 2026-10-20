@@ -79,3 +79,18 @@ fn the_largest_agents_are_named_and_sorted() {
     let got: Vec<(&str, u64)> = u.agents.iter().map(|a| (a.name.as_str(), a.bytes)).collect();
     assert_eq!(got, vec![("Lark", 5000), ("def-mid", 300), ("def-small", 10)], "no empty zone, no archive zone");
 }
+
+#[test]
+fn the_largest_agents_leave_out_a_zone_found_corrupt() {
+    use crate::backend::transcript::damage::{self, test_support};
+    let fs = FileStore::open_in_memory().unwrap();
+    for (id, bytes) in [("usage-damage-a", 900usize), ("usage-damage-b", 100)] {
+        let zone = agent_current_zone(id);
+        fs.make_file(&zone, crate::backend::agent_session::OUTPUT_FILE, FileMeta::default(), FileOpts::default()).unwrap();
+        fs.append_data(&zone, crate::backend::agent_session::OUTPUT_FILE, &vec![b'x'; bytes]).unwrap();
+    }
+    assert_eq!(largest_agents(Some(&fs), |_| None).len(), 2);
+    damage::note_corrupt(&agent_current_zone("usage-damage-a"), "append", &test_support::corrupt_error());
+    let rows = largest_agents(Some(&fs), |_| None);
+    assert_eq!(rows.iter().map(|r| r.definition_id.as_str()).collect::<Vec<_>>(), ["usage-damage-b"]);
+}

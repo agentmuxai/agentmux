@@ -307,6 +307,7 @@ partial list.
 | [`SPEC_CEF_RS_BINDING_FORK_UNDER_ORG_2026_09_22`](SPEC_CEF_RS_BINDING_FORK_UNDER_ORG_2026_09_22.md) | SPEC — Own the `cef-dll-sys` binding fork: `agentmuxai/cef-rs` |
 | [`SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21`](SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21.md) | SPEC: CI check placement protocol — what runs on a PR, what runs nightly |
 | [`SPEC_CI_COMPLETION_NOTIFICATIONS_2026_08_16`](SPEC_CI_COMPLETION_NOTIFICATIONS_2026_08_16.md) | SPEC: jekt notification when a PR's CI run completes (pass or fail) |
+| [`SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19`](SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19.md) | Spec: CI that keeps main green: a merge queue with fast gates, quicker PR builds, and a red-main alert |
 | [`SPEC_CI_PATH_CONDITIONAL_CHECKS_2026_09_21`](SPEC_CI_PATH_CONDITIONAL_CHECKS_2026_09_21.md) | SPEC: skip the build on documentation-only PRs, safely |
 | [`SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22`](SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md) | Spec: protect a pre-existing project `CLAUDE.md` from AgentMux's overwrite |
 | [`SPEC_CODEGEN_REMAINING_GAPS_2026_10_13`](SPEC_CODEGEN_REMAINING_GAPS_2026_10_13.md) | What codegen still doesn't cover |
@@ -634,7 +635,6 @@ partial list.
 | [`SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07`](SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md) | SPEC: A bundle holds instructions, context, skills, Global Memory and Personal Memory — not MCP servers |
 | [`SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21`](SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md) | SPEC: retire the agent slug as a lookup key — `db_agents.id` becomes canonical |
 | [`SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07`](SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md) | CEF milestone upgrade: 148 (7778) → 152 (7977), all three platforms |
-| [`SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19`](SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19.md) | Spec: CI that keeps main green: a merge queue with fast gates, quicker PR builds, and a red-main alert |
 | [`SPEC_CLAUDE_CLI_PIN_CONTRACT_TESTS_2026_07_14`](SPEC_CLAUDE_CLI_PIN_CONTRACT_TESTS_2026_07_14.md) | SPEC — CLI pin consolidation + contract tests against the pinned Claude CLI |
 | [`SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27`](SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27.md) | SPEC: AgentMux Cloud settings discovery, and recovering from a dead cloud sign-in |
 | [`SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08`](SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08.md) | Codex Provider Integration: Claude-Parity Lifecycle |
@@ -695,6 +695,7 @@ partial list.
 | [`SPEC_NINE_NEW_HARNESSES_2026_10_14`](SPEC_NINE_NEW_HARNESSES_2026_10_14.md) | Spec: Nine new harnesses — OpenCode, Kilo Code, Cline, goose, Grok Build, DeepSeek Harness, Muse Code, Crush, Aider |
 | [`SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15`](SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15.md) | Node.js 24 LTS standardization across agentmuxai repos |
 | [`SPEC_NO_WINDOW_SPAWN_AND_META_ROW_TYPE_SCALE_DRY_2026_10_01`](SPEC_NO_WINDOW_SPAWN_AND_META_ROW_TYPE_SCALE_DRY_2026_10_01.md) | Spec: DRY the no-window spawn flag, and the meta-row type scale |
+| [`SPEC_OFFLINE_RESILIENCE_2026_10_20`](SPEC_OFFLINE_RESILIENCE_2026_10_20.md) | SPEC: Stay in control of every agent when the internet drops, and recover by itself |
 | [`SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24`](SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md) | SPEC: OS notification system (native toasts) + tray re-enablement |
 | [`SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20`](SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md) | SPEC — Consolidate pane loading into one readiness system |
 | [`SPEC_PANE_SELECTION_STATE_MACHINE_AND_SWARM_CLICK_2026_10_18`](SPEC_PANE_SELECTION_STATE_MACHINE_AND_SWARM_CLICK_2026_10_18.md) | Spec: Selecting a pane from Swarm — the lost click, and one state machine for "show this pane" |

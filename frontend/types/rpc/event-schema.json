@@ -1,5 +1,14 @@
 [
   {
+    "event": "agent-api-retry",
+    "payloadTs": {
+      "imports": [
+        "ApiRetryEvent"
+      ],
+      "name": "ApiRetryEvent"
+    }
+  },
+  {
     "event": "agent-message-accepted",
     "payloadTs": {
       "imports": [

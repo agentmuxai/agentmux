@@ -124,3 +124,28 @@
     margin: var(--space-2) 0 0;
     opacity: 0.8;
 }
+
+// Reveal and Copy.
+.vault-reveal-parts {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.vault-reveal-part {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.vault-reveal-label {
+    flex: 0 0 8em;
+    opacity: 0.7;
+}
+
+.vault-reveal-value {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    user-select: text;
+}

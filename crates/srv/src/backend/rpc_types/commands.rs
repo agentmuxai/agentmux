@@ -122,6 +122,8 @@ pub const COMMAND_AGENT_CANCEL: &str = "agentcancel";
 /// (docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5, §12.3).
 pub const COMMAND_AGENT_SHUTDOWN_KEEP: &str = "agentshutdownkeep";
 pub const COMMAND_AGENT_STOP: &str = "agentstop";
+/// The API retry a pane's CLI is waiting on, as of now (`backend::agent_api_retry`).
+pub const COMMAND_AGENT_API_RETRY: &str = "agentapiretry";
 /// Backend half of the `/btw` slash command — a fast, one-shot, tool-less
 /// side question answered against a fresh throwaway block, without
 /// touching the asking pane's own persisted transcript or blocking/queuing

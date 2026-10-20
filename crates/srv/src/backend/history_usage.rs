@@ -134,7 +134,17 @@ fn largest_agents(transcripts: Option<&FileStore>, name_of: impl Fn(&str) -> Opt
         .iter()
         .filter_map(|zone| {
             let id = zone.strip_prefix("agent:")?.strip_suffix(":current")?;
-            let bytes = fs.stat(zone, crate::backend::agent_session::OUTPUT_FILE).ok()??.size.max(0) as u64;
+            if crate::backend::transcript::damage::is_damaged(zone) {
+                return None;
+            }
+            let file = match fs.stat(zone, crate::backend::agent_session::OUTPUT_FILE) {
+                Ok(file) => file?,
+                Err(e) => {
+                    crate::backend::transcript::damage::note_if_shared(fs, zone, "history size", &e);
+                    return None;
+                }
+            };
+            let bytes = file.size.max(0) as u64;
             (bytes > 0).then(|| HistoryUsageAgent {
                 definition_id: id.to_string(),
                 name: name_of(id).unwrap_or_else(|| id.to_string()),

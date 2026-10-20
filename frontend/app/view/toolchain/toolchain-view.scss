@@ -1,9 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// The Toolchain pane. Colours come from the theme (tints and the semantic
-// washes in theme.scss), sizes from the shared scales, and controls from
-// element/ui; see docs/reports/REPORT_TOOLCHAIN_PANE_THEME_INTEGRATION_2026_10_19.md.
+// The Toolchain pane. Its tools are element/ui cards in groups, like the MCP
+// and Remotes panes; colours come from the theme and sizes from the shared
+// scales. What is here is the pane's layout and the inside of a card's
+// details. See docs/reports/REPORT_TOOLCHAIN_PANE_THEME_INTEGRATION_2026_10_19.md.
 
 @use "../../mixins.scss";
 
@@ -19,23 +20,21 @@
     background: var(--main-bg-color);
 }
 
+// The shared section header, as the bar over the scrolling list.
 .toolchain-view-header {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: var(--space-1);
-    padding: var(--space-2) var(--space-3);
-    border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
+    flex-wrap: wrap;
+    padding: var(--space-1-5) var(--space-2);
+    border-bottom: 1px solid var(--border-color);
 }
 
 .toolchain-body {
     display: flex;
     flex-direction: column;
-    gap: var(--space-4);
+    gap: var(--space-2);
     flex: 1 1 auto;
     overflow-y: auto;
-    padding: var(--space-3);
+    padding: var(--space-2);
 }
 
 .toolchain-section {
@@ -44,15 +43,7 @@
     gap: var(--space-1);
 }
 
-.toolchain-section-title {
-    margin: 0 0 var(--space-1);
-    font-size: var(--text-2xs);
-    font-weight: 600;
-    @include mixins.label-caps;
-    color: var(--secondary-text-color);
-}
-
-// ── Environment ───────────────────────────────────────────────────────
+// ── Environment and old CLI versions ──────────────────────────────────
 
 .toolchain-env-line {
     display: flex;
@@ -85,8 +76,6 @@
     white-space: pre;
 }
 
-// ── Old CLI versions ──────────────────────────────────────────────────
-
 .toolchain-prune-list {
     margin: var(--space-1) 0 var(--space-1-5);
     padding-left: var(--space-5);
@@ -94,113 +83,58 @@
     color: var(--secondary-text-color);
 }
 
-.toolchain-error {
-    color: var(--error-color);
+// A failure the user should see: the error wash and line, as the other panes'
+// notices.
+.toolchain-notice {
+    padding: var(--space-1-5) var(--space-2);
+    border: 1px solid var(--error-line);
+    background: var(--error-bg);
+    color: var(--main-text-color);
+    font-size: var(--text-xs);
 }
 
-// ── Tool rows ─────────────────────────────────────────────────────────
+// ── A card's details ──────────────────────────────────────────────────
 
-.toolchain-row {
+.toolchain-detail {
     display: flex;
-    align-items: flex-start;
-    gap: var(--space-3);
+    flex-direction: column;
+    gap: var(--space-1-5);
     padding: var(--space-2);
-    border-radius: var(--radius-md);
+    min-width: 0;
+    font-size: var(--text-xs);
 }
 
-.toolchain-row-icon {
-    width: var(--space-5);
-    text-align: center;
-    margin-top: var(--space-0-5);
+.toolchain-detail-note {
+    margin: 0;
     color: var(--secondary-text-color);
 }
 
-.toolchain-row-main {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-0-5);
+.toolchain-detail-label {
+    margin-top: var(--space-1);
+    font-size: var(--text-2xs);
+    font-weight: 600;
+    @include mixins.label-caps;
+    color: var(--secondary-text-color);
 }
 
-.toolchain-row-title {
+.toolchain-detail-value {
+    min-width: 0;
+    padding: var(--space-1) var(--space-1-5);
+    border: 1px solid var(--border-color);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--main-text-color);
+    overflow-wrap: anywhere;
+}
+
+.toolchain-detail-row {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: var(--space-2);
-}
-
-.toolchain-row-name {
-    font-weight: 600;
-    font-size: var(--text-base);
-}
-
-.toolchain-row-path {
-    font-size: var(--text-xs);
-    color: var(--tertiary-text-color);
-    @include mixins.truncate;
-}
-
-.toolchain-widget-desc {
-    white-space: normal;
-    overflow: visible;
-    text-overflow: unset;
-}
-
-.toolchain-widget-port {
-    display: flex;
-    align-items: center;
-    gap: var(--space-1-5);
-    margin-top: var(--space-1);
-}
-
-.toolchain-widget-port-label {
-    font-size: var(--text-xs);
-    color: var(--tertiary-text-color);
-    min-width: 3em;
-}
-
-// The kit's line input (class `ui-input`); only its width is the pane's.
-.toolchain-widget-port-input {
-    width: 5.5em;
-    text-align: right;
-}
-
-.toolchain-row-cmd {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-
-    code {
-        font-family: var(--font-mono);
-        font-size: var(--text-xs);
-        padding: var(--space-0-5) var(--space-1-5);
-        border-radius: var(--radius-sm);
-        background: var(--tint-2);
-    }
-}
-
-.toolchain-row-actions {
-    display: flex;
-    align-items: center;
     gap: var(--space-1);
-    margin-top: var(--space-0-5);
 }
 
-// ── Running dot ───────────────────────────────────────────────────────
-
-// The "Running" pill's dot is smaller than a pill icon (the pills are the
-// shared Pill, element/ui).
-.toolchain-running i {
-    font-size: 0.5em;
-}
-
-// ── Buttons ───────────────────────────────────────────────────────────
-
-// Toolchain actions are element/ui Buttons; the one rule below is layout.
-// "or install it now" is an accent Button on its own line. The doubled class
-// outranks .ui-button whatever order the stylesheets load in.
-.ui-button.toolchain-link-btn--install-now {
-    display: flex;
-    width: fit-content;
+.toolchain-port-input {
+    width: 6em;
+    text-align: right;
 }

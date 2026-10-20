@@ -161,6 +161,50 @@ pub(crate) fn byte_after_time(
     Ok(Some(parse(&carry).filter(|&(_, ms)| ms > at_ms).map(|(off, _)| off)))
 }
 
+/// The byte length of the sidecar's part that stamps `output` bytes before
+/// `end`: the start of the first record at or past `end`, or `size` when every
+/// record is before it. Read through `read` like [`stamps_for`]; `Ok(None)` when
+/// bytes it needs aren't stored. A copy of a transcript's first `end` bytes
+/// takes this much of its sidecar. Records out of order across the cut land on
+/// whichever side the scan finds them.
+pub(crate) fn cut_before(
+    read: &dyn Fn(i64, i64) -> Result<Option<Vec<u8>>, StoreError>,
+    size: i64,
+    end: u64,
+) -> Result<Option<i64>, StoreError> {
+    // The latest record boundary whose record is before `end`.
+    let (mut lo, mut hi) = (0i64, size);
+    while hi - lo > SEARCH_STOP {
+        let mid = lo + (hi - lo) / 2;
+        match first_record_after(read, mid, hi)? {
+            Probe::Found { start, off, .. } if off < end => lo = start,
+            Probe::Found { .. } | Probe::NoneBefore => hi = mid,
+            Probe::Unreadable => return Ok(None),
+        }
+    }
+    // From there, the first record at or past `end`.
+    let mut pos = lo;
+    let mut carry: Vec<u8> = Vec::new();
+    let mut carry_start = lo;
+    while pos < size {
+        let len = CHUNK.min(size - pos);
+        let Some(chunk) = read(pos, len)? else { return Ok(None) };
+        carry.extend_from_slice(&chunk);
+        pos += len;
+        while let Some(nl) = carry.iter().position(|&b| b == b'\n') {
+            if parse(&carry[..nl]).is_some_and(|(off, _)| off >= end) {
+                return Ok(Some(carry_start));
+            }
+            carry.drain(..=nl);
+            carry_start += nl as i64 + 1;
+        }
+    }
+    if parse(&carry).is_some_and(|(off, _)| off >= end) {
+        return Ok(Some(carry_start));
+    }
+    Ok(Some(size))
+}
+
 enum Probe {
     /// The first parsable record starting after `pos`.
     Found { start: i64, off: u64, ms: i64 },
@@ -257,6 +301,31 @@ mod tests {
         let got = stamps_for(&read, bytes.len() as i64, &lines).unwrap();
         assert_eq!(got, reference(&bytes, &lines));
         assert!(read_bytes.get() < 400 * 1024, "read {} of {} bytes", read_bytes.get(), bytes.len());
+    }
+
+    #[test]
+    fn a_cut_is_where_the_first_record_at_or_past_the_end_starts() {
+        let records: Vec<(u64, i64)> = (0..200_000u64).map(|i| (i * 300, 1_700_000_000_000 + i as i64)).collect();
+        let bytes = sidecar(&records);
+        let read = |off: i64, len: i64| -> Result<Option<Vec<u8>>, StoreError> {
+            let (a, b) = (off as usize, ((off + len) as usize).min(bytes.len()));
+            Ok(Some(bytes[a..b].to_vec()))
+        };
+        let size = bytes.len() as i64;
+        // The expected cut: the bytes of every record before `end`.
+        let expect = |end: u64| -> i64 {
+            let keep = records.partition_point(|&(off, _)| off < end);
+            records[..keep].iter().map(|(o, m)| format!("{{\"off\":{o},\"ms\":{m}}}
+").len() as i64).sum()
+        };
+        for end in [0u64, 1, 299, 300, 301, 45_000_000, 45_000_001, 59_999_700, 60_000_000] {
+            assert_eq!(cut_before(&read, size, end).unwrap(), Some(expect(end)), "end {end}");
+        }
+        assert_eq!(cut_before(&read, size, 0).unwrap(), Some(0));
+        assert_eq!(cut_before(&read, size, u64::MAX).unwrap(), Some(size));
+        assert_eq!(cut_before(&read, 0, 10).unwrap(), Some(0));
+        let unreadable = |_: i64, _: i64| -> Result<Option<Vec<u8>>, StoreError> { Ok(None) };
+        assert_eq!(cut_before(&unreadable, size, 45_000_000).unwrap(), None);
     }
 
     #[test]

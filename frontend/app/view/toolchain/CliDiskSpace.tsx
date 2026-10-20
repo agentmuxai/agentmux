@@ -71,7 +71,7 @@ export const CliDiskSpace = (): JSX.Element => {
 
     return (
         <section class="toolchain-section" data-testid="cli-disk-space">
-            <h3 class="toolchain-section-title">Old CLI versions</h3>
+            <h4 class="ui-card-group-heading">Old CLI versions</h4>
             <Show when={state().kind === "idle" || state().kind === "error"}>
                 <div class="toolchain-env-line">
                     Agent CLIs are kept after an upgrade. This lists the ones nothing has used for 30 days and nothing is
@@ -82,7 +82,7 @@ export const CliDiskSpace = (): JSX.Element => {
                 </Button>
             </Show>
             <Show when={state().kind === "error"}>
-                <div class="toolchain-env-line toolchain-error" role="alert">
+                <div class="toolchain-notice" role="alert">
                     Couldn't check: {(state() as { message: string }).message}
                 </div>
             </Show>
@@ -110,7 +110,7 @@ export const CliDiskSpace = (): JSX.Element => {
                                     {formatBytes(r().reclaimable_bytes)} can be freed
                                 </div>
                                 {list(r().candidates)}
-                                <Button tone="quiet" onClick={() => remove(r().candidates.map((c) => c.dir))}>
+                                <Button tone="danger" icon="trash" onClick={() => remove(r().candidates.map((c) => c.dir))}>
                                     Remove {r().candidates.length} · free {formatBytes(r().reclaimable_bytes)}
                                 </Button>
                             </Show>

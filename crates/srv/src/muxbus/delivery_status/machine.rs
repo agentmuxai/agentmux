@@ -206,9 +206,16 @@ impl Machine {
             (link, _) => link.clone(),
         };
         let (state, error) = derive(self.session_known, &link, broker);
+        let sign_in_unreachable = matches!(
+            broker,
+            Some(CredentialState::Failed { offline: true, .. } | CredentialState::Refreshing { offline: true, .. })
+        );
         let mut out = Vec::new();
         let prev = self.status.state;
-        let changed = state != prev || error != self.status.last_error || self.email != self.status.account_email;
+        let changed = state != prev
+            || error != self.status.last_error
+            || self.email != self.status.account_email
+            || sign_in_unreachable != self.status.sign_in_unreachable;
         if state == MuxBusDeliveryState::Connected || prev == MuxBusDeliveryState::Connected {
             self.status.last_ok_ms = Some(now_ms);
         }
@@ -242,6 +249,7 @@ impl Machine {
         self.status.state = state;
         self.status.last_error = error;
         self.status.account_email = self.email.clone();
+        self.status.sign_in_unreachable = sign_in_unreachable;
         if changed {
             out.insert(0, Effect::Changed(self.status.clone()));
         }
@@ -332,6 +340,24 @@ mod tests {
         let fx = m.tick(Some(&refused()), T0 + 2);
         assert_eq!(m.status().state, NeedsSignIn);
         assert_eq!(kinds(&fx), ["changed", "notify"]);
+    }
+
+    /// The relay can stay connected while the sign-in server can't be
+    /// reached; the status says so (Sign out asks first then).
+    #[test]
+    fn a_connected_relay_still_reports_an_unreachable_sign_in_server() {
+        let mut m = connected_machine();
+        let offline = CredentialState::Failed { consecutive_failures: 0, last_error: "connect".into(), offline: true };
+        let fx = m.tick(Some(&offline), T0 + 1);
+        assert_eq!(m.status().state, Connected);
+        assert!(m.status().sign_in_unreachable);
+        assert_eq!(kinds(&fx), ["changed"]);
+        // A retry in flight is still offline until something answers.
+        let retrying = CredentialState::Refreshing { prior_failures: 0, prior_reauth: None, offline: true };
+        m.tick(Some(&retrying), T0 + 2);
+        assert!(m.status().sign_in_unreachable);
+        m.tick(Some(&CredentialState::Fresh), T0 + 3);
+        assert!(!m.status().sign_in_unreachable);
     }
 
     #[test]

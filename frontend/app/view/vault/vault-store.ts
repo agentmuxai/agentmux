@@ -115,6 +115,25 @@ export function followVault(): void {
  *  Each pane has its own note, so one pane hiding can't clear another's. */
 export const setVaultOnScreen = (pane: string, on: boolean) => call<unknown>("on_screen", { pane, on });
 
+/** One part's value, after the OS (Windows Hello) confirms the person: the host
+ *  asks, then fetches it from srv. Rejects with "cancelled" if they dismiss it. */
+export async function revealVaultPart(id: string, part: string, label: string): Promise<string> {
+    const relay = getApi()?.approvals?.vaultReveal;
+    if (!relay) throw new Error("Reveal needs the AgentMux desktop app.");
+    const res = (await relay({ id, part, label })) as { value?: string };
+    if (typeof res?.value !== "string") throw new Error("AgentMux sent no value.");
+    return res.value;
+}
+
+/** Copies one part's value on the host, which clears it later; the value never
+ *  reaches this page. Answers how many seconds until it clears. */
+export async function copyVaultPart(id: string, part: string, label: string): Promise<number> {
+    const relay = getApi()?.approvals?.vaultCopy;
+    if (!relay) throw new Error("Copy needs the AgentMux desktop app.");
+    const res = (await relay({ id, part, label })) as { clears_in_secs?: number };
+    return res?.clears_in_secs ?? 30;
+}
+
 export const createEntry = (entry: NewVaultEntry) => call<{ id: string }>("create", { ...entry });
 export const updateEntry = (change: VaultEntryChange) => call<unknown>("update", { ...change });
 export const deleteEntry = (id: string) => call<unknown>("delete", { id });

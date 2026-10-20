@@ -11,6 +11,7 @@ import { Button, FilterInput, IconButton } from "@/app/element/ui";
 import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 import type { VaultSection } from "@/types/rpc/VaultSection";
 import { VaultEntryForm, type VaultFormTarget } from "./vault-entry-form";
+import { VaultRevealDialog } from "./vault-reveal";
 import { formatWhen } from "./vault-format";
 import { SECTION_LABELS, vaultKind } from "./vault-kinds";
 import { deleteEntry, vaultEntries, vaultLoading } from "./vault-store";
@@ -36,6 +37,7 @@ export function VaultEntries(props: { section: VaultSection }): JSX.Element {
     const [filter, setFilter] = createSignal("");
     const [form, setForm] = createSignal<VaultFormTarget | null>(null);
     const [deleting, setDeleting] = createSignal<VaultEntryInfo | null>(null);
+    const [revealing, setRevealing] = createSignal<VaultEntryInfo | null>(null);
     const [error, setError] = createSignal<string | null>(null);
     const rows = createMemo(() => (vaultEntries() ?? []).filter((e) => e.section === props.section && entryMatches(e, filter())));
     const total = createMemo(() => (vaultEntries() ?? []).filter((e) => e.section === props.section).length);
@@ -103,6 +105,7 @@ export function VaultEntries(props: { section: VaultSection }): JSX.Element {
                                     <td class="warden-manager-mono">{e.tail ? `•••• ${e.tail}` : "••••"}</td>
                                     <td class="warden-manager-dim">{formatWhen(e.updated_at)}</td>
                                     <td class="vault-actions">
+                                        <IconButton icon="eye" label="Show or copy" density="compact" onClick={() => setRevealing(e)} />
                                         <IconButton icon="pen" label="Change" density="compact" onClick={() => setForm({ mode: "edit", entry: e })} />
                                         <IconButton icon="trash" label="Delete" density="compact" onClick={() => setDeleting(e)} />
                                     </td>
@@ -113,6 +116,7 @@ export function VaultEntries(props: { section: VaultSection }): JSX.Element {
                 </table>
             </Show>
             <Show when={form()}>{(target) => <VaultEntryForm target={target()} onClose={() => setForm(null)} />}</Show>
+            <Show when={revealing()}>{(entry) => <VaultRevealDialog entry={entry()} onClose={() => setRevealing(null)} />}</Show>
             <Show when={deleting()}>
                 {(e) => (
                     <ConfirmModal

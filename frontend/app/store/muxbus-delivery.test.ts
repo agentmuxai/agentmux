@@ -12,6 +12,7 @@ import {
     muxbusDeliveryLine,
     muxbusIndicator,
     muxbusOffersSignIn,
+    muxbusSignOutWarning,
     RECONNECTING_QUIET_MS,
     type MuxBusDeliveryStatus,
 } from "./muxbus-delivery";
@@ -19,7 +20,7 @@ import {
 const NOW = 1_791_000_000_000;
 
 function at(state: MuxBusDeliveryStatus["state"], extra: Partial<MuxBusDeliveryStatus> = {}): MuxBusDeliveryStatus {
-    return { state, since_ms: NOW - 60_000, ...extra };
+    return { state, since_ms: NOW - 60_000, sign_in_unreachable: false, ...extra };
 }
 
 describe("muxbusIndicator", () => {
@@ -70,6 +71,24 @@ describe("muxbusDeliveryLine", () => {
         expect(muxbusOffersSignIn(at("needs_sign_in"))).toBe(true);
         expect(muxbusOffersSignIn(at("connected"))).toBe(false);
         expect(muxbusOffersSignIn(at("reconnecting"))).toBe(false);
+    });
+});
+
+describe("muxbusSignOutWarning", () => {
+    it("warns only while MuxBus can't be reached", () => {
+        const text = muxbusSignOutWarning(at("reconnecting", { since_ms: NOW }));
+        expect(text).toContain(clockTime(NOW));
+        expect(text).toContain("can't sign in again until MuxBus is reachable");
+        for (const state of ["connected", "needs_sign_in", "signed_out"] as const) {
+            expect(muxbusSignOutWarning(at(state))).toBeNull();
+        }
+        expect(muxbusSignOutWarning(null)).toBeNull();
+    });
+
+    it("warns while connected if the sign-in server can't be reached", () => {
+        const text = muxbusSignOutWarning(at("connected", { sign_in_unreachable: true }));
+        expect(text).toContain("sign-in server");
+        expect(muxbusSignOutWarning(at("connected", { sign_in_unreachable: false }))).toBeNull();
     });
 });
 

@@ -100,7 +100,8 @@ impl RefreshScheduler {
     /// (reagent P1 on #2260). `refresh` performs the actual refresh and is
     /// responsible for persisting the result itself (and for NOT persisting
     /// anything on failure) — and for classifying a failure as
-    /// `RefreshErrorKind::Transient` (worth retrying) vs
+    /// `RefreshErrorKind::Transient` (worth retrying), `::Unreachable` (no
+    /// answer at all; never counts toward needs-reauth) or
     /// `::PermanentAuthFailure` (the credential itself is rejected; only a
     /// fresh login can fix it — see that type's own doc comment).
     pub async fn register(
@@ -236,9 +237,9 @@ impl RefreshScheduler {
                         Ok(()) => (None, Command::RefreshSucceeded { id: id.clone(), generation }),
                         Err(error) => {
                             let msg = match &error {
-                                RefreshErrorKind::Transient(m) | RefreshErrorKind::PermanentAuthFailure(m) => {
-                                    m.clone()
-                                }
+                                RefreshErrorKind::Transient(m)
+                                | RefreshErrorKind::Unreachable(m)
+                                | RefreshErrorKind::PermanentAuthFailure(m) => m.clone(),
                             };
                             (Some(msg), Command::RefreshFailed { id: id.clone(), error, generation })
                         }
@@ -262,11 +263,13 @@ impl RefreshScheduler {
 
     /// Background sweep — checks every registered credential every
     /// `interval` and proactively refreshes anything stale. Skips entries
-    /// currently `NeedsReauth`: retrying a credential already known to
-    /// require a fresh human login is pointless and just hammers the
-    /// backing server; `ensure_fresh` called on-demand still re-checks
-    /// those (see `state`'s own doc comment). Spawn once via `tokio::spawn`;
-    /// runs until the process exits.
+    /// the server refused (`NeedsReauth { rejected: true }`): retrying a
+    /// credential known to need a fresh human login just hammers the backing
+    /// server; `ensure_fresh` called on-demand still re-checks those (see
+    /// `state`'s own doc comment). A credential that reached `NeedsReauth`
+    /// only through failures the server answered (5xx, rate limits) is still
+    /// retried each tick: nothing said it is dead. Spawn once via
+    /// `tokio::spawn`; runs until the process exits.
     pub async fn run_sweep_loop(self: Arc<Self>, interval: Duration) {
         let mut tick = tokio::time::interval(interval);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -277,11 +280,11 @@ impl RefreshScheduler {
                 closures.keys().cloned().collect()
             };
             for id in ids {
-                let needs_reauth = matches!(
+                let refused = matches!(
                     self.tables.lock().unwrap().states.get(&id),
-                    Some(CredentialState::NeedsReauth { .. })
+                    Some(CredentialState::NeedsReauth { rejected: true, .. })
                 );
-                if needs_reauth {
+                if refused {
                     continue;
                 }
                 if let Err(e) = self.ensure_fresh(&id).await {
@@ -332,12 +335,28 @@ impl RefreshScheduler {
                         "auth.broker.failed: refresh attempt failed, will retry"
                     );
                 }
-                Event::BecameNeedsReauth { id, reason } => {
+                Event::BecameUnreachable { id, error } => {
+                    tracing::warn!(
+                        target: "identity",
+                        credential_id = %id,
+                        error = %error,
+                        "auth.broker.unreachable: couldn't reach the server to refresh; offline, will keep retrying"
+                    );
+                }
+                Event::BecameNeedsReauth { id, reason, rejected: true } => {
                     tracing::warn!(
                         target: "identity",
                         credential_id = %id,
                         reason = %reason,
-                        "auth.broker.needs_reauth: credential needs a fresh login, no longer auto-retrying"
+                        "auth.broker.needs_reauth: the server refused the credential; it needs a fresh login"
+                    );
+                }
+                Event::BecameNeedsReauth { id, reason, rejected: false } => {
+                    tracing::warn!(
+                        target: "identity",
+                        credential_id = %id,
+                        reason = %reason,
+                        "auth.broker.stalled: refreshes keep failing; retrying on each sweep"
                     );
                 }
                 Event::RunFreshnessCheck { .. }
@@ -530,7 +549,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(20)).await;
         assert_eq!(
             scheduler.state("test:cred"),
-            Some(CredentialState::Refreshing { prior_failures: 0 })
+            Some(CredentialState::Refreshing { prior_failures: 0, prior_reauth: None, offline: false })
         );
 
         // A second caller now dispatches while still Refreshing — gets
@@ -588,7 +607,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(20)).await;
         assert_eq!(
             scheduler.state("test:cred"),
-            Some(CredentialState::Refreshing { prior_failures: 0 })
+            Some(CredentialState::Refreshing { prior_failures: 0, prior_reauth: None, offline: false })
         );
 
         let s2 = scheduler.clone();

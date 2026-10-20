@@ -24,7 +24,7 @@
 //!   all come back on its next start. Elsewhere it is stopped with its pane
 //!   as before, which keeps its windows the same way.
 //! - **After:** each agent that resumes is told what of its own was stopped
-//!   ([`on_registered`]), once, so it can start it again.
+//!   ([`on_registered`]), once, with its next turn, so it can start it again.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -398,7 +398,7 @@ pub fn on_registered(block_id: &str) {
                     .find(|r| r.block_id == block_id)
                     .map(|r| r.uid.unwrap_or(r.agent_id))
                     .ok_or_else(|| Undelivered::Gone("not registered any more".into()))?;
-                handler.deliver_system_note(&target, &text).map_err(Undelivered::Retry)
+                handler.hold_system_note(&target, "background-work", &text).map_err(Undelivered::Retry)
             },
             RETRIES,
             RETRY_GAP,

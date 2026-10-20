@@ -135,6 +135,13 @@ impl Store {
         Ok(conn.query_row("SELECT COUNT(*) FROM db_vault_entries", [], |r| r.get(0))?)
     }
 
+    /// Notes that an entry was used at `at_ms`.
+    pub fn vault_touch(&self, id: &str, at_ms: i64) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("UPDATE db_vault_entries SET last_used_at = ?2 WHERE id = ?1", params![id, at_ms])?;
+        Ok(())
+    }
+
     /// Whether a MuxBus sign-in is kept, and whose, read from its row alone:
     /// its tokens are in the keychain, and reading them could ask the person.
     pub fn vault_kept_muxbus_user(&self) -> Result<Option<String>, StoreError> {

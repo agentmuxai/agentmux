@@ -255,6 +255,31 @@ impl PersistentSubprocessController {
         Ok(SendOutcome::Sent)
     }
 
+    /// srv's own note `text` into the running turn; with no turn running, or
+    /// a process that can't take a write now, held under `key` for the next
+    /// turn (`reactive::held_notes`) instead. The check and the write share
+    /// one acquisition of `inner`, which the turn-end handler takes too
+    /// ([`Self::turn_boundary_locked`]), so the turn can't end between them
+    /// and the note never starts one. Returns whether it joined the turn.
+    pub fn note_into_turn_or_hold(&self, key: &str, text: &str) -> bool {
+        let line = Self::encode_user_message(text);
+        let joined = {
+            let mut inner = self.inner.lock().unwrap();
+            let can_join = self.health_monitor.is_active_turn()
+                && inner.deferred_deliveries.is_empty()
+                && !self.deferred_must_wait_locked(&inner);
+            let joined = can_join && Self::try_write_stdin_locked(&mut inner, &line).is_ok();
+            if !joined {
+                crate::backend::reactive::held_notes::hold(&self.block_id, key, text);
+            }
+            joined
+        };
+        if joined {
+            self.append_delivered_message(&line);
+        }
+        joined
+    }
+
     /// Mark the turn active while the caller already holds `inner`, so the
     /// flip is never behind the write that caused it. Lock order is `inner` →
     /// `health_monitor`, matching the turn-end handler in `stdout_reader.rs`;
