@@ -174,7 +174,8 @@ fn try_clear(only: Option<u64>) -> Result<(), String> {
     Ok(())
 }
 
-/// Called as the host quits: a copied secret doesn't outlive AgentMux on the clipboard.
+/// Called as the host's message loop ends: a secret the Vault copied doesn't
+/// stay on the clipboard once AgentMux is gone.
 pub fn clear_clipboard_on_shutdown() {
     if let Err(e) = try_clear(None) {
         tracing::warn!("[vault] couldn't clear the clipboard at shutdown: {e}");

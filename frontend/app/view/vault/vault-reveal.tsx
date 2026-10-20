@@ -44,17 +44,19 @@ export function VaultRevealDialog(props: { entry: VaultEntryInfo; onClose: () =>
         timers.delete(part);
         setShown(part, "");
     };
-    // Bumped whenever everything is hidden (focus lost, dialog closed): a
-    // Reveal that was still waiting for Windows Hello when that happened
-    // finds it changed and shows nothing.
-    let concealed = 0;
-    const hideAll = () => {
-        concealed++;
-        parts.forEach((p) => hide(p.name));
+    // Bumped when the dialog closes: a Reveal still waiting for Windows Hello
+    // then finds it changed and shows nothing.
+    let closed = 0;
+    const hideAll = () => parts.forEach((p) => hide(p.name));
+    // Losing focus hides what is shown. Not while a Reveal or Copy is waiting:
+    // the Windows Hello prompt takes focus from this window, and that is expected.
+    const onBlur = () => {
+        if (busy() === null) hideAll();
     };
-    onMount(() => window.addEventListener("blur", hideAll));
+    onMount(() => window.addEventListener("blur", onBlur));
     onCleanup(() => {
-        window.removeEventListener("blur", hideAll);
+        window.removeEventListener("blur", onBlur);
+        closed++;
         hideAll();
     });
 
@@ -75,9 +77,9 @@ export function VaultRevealDialog(props: { entry: VaultEntryInfo; onClose: () =>
 
     const reveal = (part: string) =>
         run(part, async () => {
-            const before = concealed;
+            const before = closed;
             const value = await revealVaultPart(entry.id, part, entry.label);
-            if (concealed !== before) return;
+            if (closed !== before) return;
             setShown(part, value);
             timers.set(part, setTimeout(() => hide(part), REVEAL_SHOWN_MS));
         });

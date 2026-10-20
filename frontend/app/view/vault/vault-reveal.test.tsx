@@ -88,21 +88,33 @@ describe("Reveal and Copy", () => {
         await waitFor(() => expect(part("cvc").textContent).not.toContain("123"));
     });
 
-    it("shows nothing when the window lost focus while Windows Hello was still open", async () => {
+    it("still shows the value when Windows Hello took focus from the window while it was open", async () => {
         let answer: (v: unknown) => void = () => {};
         vaultReveal.mockReturnValue(new Promise((r) => (answer = r)));
         open();
         await screen.findByRole("dialog");
         fireEvent.click(within(part("number")).getByRole("button", { name: /Reveal/ }));
         await waitFor(() => expect(vaultReveal).toHaveBeenCalledTimes(1));
+        // The Hello prompt opens over the window: the window loses focus.
         window.dispatchEvent(new Event("blur"));
         answer({ value: "4111111111111111" });
-        await waitFor(() => expect(within(part("number")).getByRole("button", { name: /Reveal/ })).not.toBeDisabled());
-        expect(part("number").textContent).not.toContain("4111");
-        // A fresh Reveal after that works.
-        vaultReveal.mockResolvedValue({ value: "4111111111111111" });
-        fireEvent.click(within(part("number")).getByRole("button", { name: /Reveal/ }));
         await waitFor(() => expect(part("number").textContent).toContain("4111111111111111"));
+        // Once it's shown, losing focus hides it.
+        window.dispatchEvent(new Event("blur"));
+        await waitFor(() => expect(part("number").textContent).not.toContain("4111"));
+    });
+
+    it("shows nothing when the dialog was closed while Windows Hello was still open", async () => {
+        let answer: (v: unknown) => void = () => {};
+        vaultReveal.mockReturnValue(new Promise((r) => (answer = r)));
+        const { unmount } = open();
+        await screen.findByRole("dialog");
+        fireEvent.click(within(part("number")).getByRole("button", { name: /Reveal/ }));
+        await waitFor(() => expect(vaultReveal).toHaveBeenCalledTimes(1));
+        unmount();
+        answer({ value: "4111111111111111" });
+        await new Promise((r) => setTimeout(r, 20));
+        expect(document.body.innerHTML).not.toContain("4111111111111111");
     });
 
     it("copies on the host and says when it clears, without the value reaching the page", async () => {
