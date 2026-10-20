@@ -91,9 +91,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
     // SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27 §6.2.
     useReapplyFloatingOnTop(windowLabel, () => {
         const id = tabId();
-        if (!id) return undefined;
-        MOS.getMuxObjectAtom<Tab>(MOS.makeORef("tab", id))(); // re-run when the tab loads or changes
-        return floaterPaneBlockId(id);
+        return id ? floaterPaneBlockId(id) : undefined;
     });
 
     // Auto-close the floating window when its only pane is closed.

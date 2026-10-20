@@ -52,13 +52,13 @@ export function floaterPanes(tabId: string): FloaterPane[] {
     return panes;
 }
 
-/** The block the floater's window state belongs to (maximize, "always on top"):
- *  its pane's VISIBLE tab, because the header controls store that state on the
- *  block they are shown for. Falls back to the tab's first block until the
- *  layout is there. Non-reactive. */
+/** The block a floater's window state (maximize, "always on top") is keyed
+ *  on: the first block of its tab. Stable whichever tab of the pane is
+ *  visible, so the state does not seem to change when the user switches tabs.
+ *  The header controls use it too (`blockframe.tsx`). Reactive: reads the tab
+ *  object's atom. */
 export function floaterPaneBlockId(tabId: string): string | undefined {
-    const first = MOS.getObjectValue<Tab>(MOS.makeORef("tab", tabId))?.blockids?.[0];
-    return floaterPanes(tabId)[0]?.activeBlockId ?? first;
+    return MOS.getMuxObjectAtom<Tab>(MOS.makeORef("tab", tabId))()?.blockids?.[0];
 }
 
 /** `RedockFloatingPane` for one floater pane: all of its tabs go, in order. A

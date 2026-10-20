@@ -15,6 +15,7 @@ vi.mock("@/app/store/services", () => ({ WorkspaceService: svc }));
 vi.mock("@/app/store/mos", () => ({
     makeORef: (t: string, id: string) => `${t}:${id}`,
     getObjectValue: () => ({ blockids: state.blockids }),
+    getMuxObjectAtom: () => () => ({ blockids: state.blockids }),
 }));
 vi.mock("@/layout/lib/layoutModelHooks", () => ({
     getLayoutModelForTabById: () => ({ treeState: { rootNode: state.root } }),
@@ -59,15 +60,15 @@ describe("floaterPanes", () => {
 });
 
 describe("floaterPaneBlockId", () => {
-    it("is the visible tab of the pane, not the tab's first block", () => {
+    it("is the tab's first block, whichever tab of the pane is visible", () => {
         state.blockids = ["a", "b", "c"];
         state.root = pane({ blockId: "c", blockStack: ["a", "b", "c"], activeBlockId: "c" });
-        expect(floaterPaneBlockId("t")).toBe("c");
+        expect(floaterPaneBlockId("t")).toBe("a");
     });
 
-    it("falls back to the tab's first block until the layout is there", () => {
-        state.blockids = ["a", "b"];
-        expect(floaterPaneBlockId("t")).toBe("a");
+    it("is undefined until the tab has blocks", () => {
+        state.blockids = [];
+        expect(floaterPaneBlockId("t")).toBeUndefined();
     });
 });
 
