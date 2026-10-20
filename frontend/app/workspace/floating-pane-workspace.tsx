@@ -48,7 +48,7 @@ import { TabContent } from "@/app/tab/tabcontent";
 import { atoms, getApi } from "@/store/global";
 import * as MOS from "@/store/mos";
 import { holdRedock, redockInProgress } from "./floating-redock-guard";
-import { floaterPanes, redockFloaterPane } from "./floater-panes";
+import { floaterPaneBlockId, floaterPanes, redockFloaterPane } from "./floater-panes";
 import { Show, createEffect, createMemo, onCleanup, onMount, type JSX } from "solid-js";
 
 import { createRedockArming } from "./redock-arming";
@@ -91,7 +91,9 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
     // SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27 §6.2.
     useReapplyFloatingOnTop(windowLabel, () => {
         const id = tabId();
-        return id ? MOS.getMuxObjectAtom<Tab>(MOS.makeORef("tab", id))()?.blockids?.[0] : undefined;
+        if (!id) return undefined;
+        MOS.getMuxObjectAtom<Tab>(MOS.makeORef("tab", id))(); // re-run when the tab loads or changes
+        return floaterPaneBlockId(id);
     });
 
     // Auto-close the floating window when its only pane is closed.
@@ -222,7 +224,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         let win32MaximizedPress: { x: number; y: number } | null = null;
         const floaterMaximized = (): boolean => {
             const tid = tabId();
-            const blockId = tid ? MOS.getObjectValue<Tab>(MOS.makeORef("tab", tid))?.blockids?.[0] : undefined;
+            const blockId = tid ? floaterPaneBlockId(tid) : undefined;
             return !!blockId && isFloatingMaximized(MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta);
         };
         const COMPOSITOR_MOVE_THRESHOLD_PX = 4;
@@ -438,7 +440,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             if (!grab) return;
             unmaximizeOnMove = null;
             const tid = tabId();
-            const blockId = tid ? MOS.getObjectValue<Tab>(MOS.makeORef("tab", tid))?.blockids?.[0] : undefined;
+            const blockId = tid ? floaterPaneBlockId(tid) : undefined;
             if (!blockId) return; // no block yet: the drag moves it at its current size
             restoringForDrag = true;
             const settled = new Promise<void>((resolve) => {
@@ -1050,7 +1052,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             if (!target?.closest(HEADER_SELECTOR)) return;
             if (target.closest(INTERACTIVE_SELECTOR) && !target.closest(".pane-grip")) return;
             const tid = tabId();
-            const blockId = tid ? MOS.getObjectValue<Tab>(MOS.makeORef("tab", tid))?.blockids?.[0] : undefined;
+            const blockId = tid ? floaterPaneBlockId(tid) : undefined;
             if (!blockId) return;
             e.stopPropagation();
             getApi().windows.toggleFloatingMaximize(label, blockId).catch(console.error);

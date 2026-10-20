@@ -20,7 +20,7 @@ vi.mock("@/layout/lib/layoutModelHooks", () => ({
     getLayoutModelForTabById: () => ({ treeState: { rootNode: state.root } }),
 }));
 
-import { floaterPanes, redockFloaterPane } from "./floater-panes";
+import { floaterPaneBlockId, floaterPanes, redockFloaterPane } from "./floater-panes";
 
 const pane = (data: Record<string, unknown>) => ({ id: "p", data });
 
@@ -55,6 +55,19 @@ describe("floaterPanes", () => {
         state.blockids = ["a", "b"];
         state.root = pane({ blockId: "a", blockStack: ["a", "b", "gone"], activeBlockId: "a" });
         expect(floaterPanes("t")).toEqual([{ blockId: "a", members: ["a", "b"], activeBlockId: "a" }]);
+    });
+});
+
+describe("floaterPaneBlockId", () => {
+    it("is the visible tab of the pane, not the tab's first block", () => {
+        state.blockids = ["a", "b", "c"];
+        state.root = pane({ blockId: "c", blockStack: ["a", "b", "c"], activeBlockId: "c" });
+        expect(floaterPaneBlockId("t")).toBe("c");
+    });
+
+    it("falls back to the tab's first block until the layout is there", () => {
+        state.blockids = ["a", "b"];
+        expect(floaterPaneBlockId("t")).toBe("a");
     });
 });
 
