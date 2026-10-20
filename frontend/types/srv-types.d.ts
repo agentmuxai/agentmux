@@ -861,6 +861,9 @@ declare global {
         "connectors:section"?: "accounts" | "mcp" | "remotes";
         "memory:section"?: "global" | "personal" | "skills" | "bundles";
         "warden:section"?: "host" | "lan" | "internet" | "audit" | "history";
+        "vault:section"?: "personal" | "cards" | "api-keys" | "logins" | "notes" | "kept" | "activity";
+        // An agent's Vault request to open the form for (vault-model.ts); cleared once shown.
+        "vault:request"?: string | null;
         // Set once by quick-fork.ts right after a fork lands on a provider
         // with no --fork-session equivalent and a parent session existed to
         // lose; ForkProviderFallbackBanner (agent-view.tsx) reads it.

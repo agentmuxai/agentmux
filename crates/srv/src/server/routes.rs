@@ -244,6 +244,11 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // for the user's answer, which only the host can carry.
         .route("/api/v1/widgets", get(super::widget_agent_handlers::handle_widgets_list))
         .route("/api/v1/widgets/install", post(super::widget_agent_handlers::handle_widgets_install))
+        // The Vault for agents: entries' names, and asking the person for a
+        // new one. Never a value; writes come only from the host, below.
+        .route("/api/v1/vault", get(super::vault_handlers::handle_vault_list))
+        .route("/api/v1/vault/request", post(super::vault_handlers::handle_vault_request))
+        .route("/api/v1/vault/on_screen", get(super::vault_handlers::handle_vault_on_screen))
         // Open (launch) an agent into a pane from an agent tool call —
         // agentmux-mcp's OpenAgent tool POSTs `{agent_id, tab_id?, …}` here.
         // Shares the exact agent.open logic (incl. its AGENT_OPEN_LOCKS
@@ -447,6 +452,8 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/ui/browser/actions", post(crate::server::browser_actions::handle_ui_browser_actions))
         .route("/api/v1/host/browser_pause", post(crate::server::browser_actions::handle_host_browser_pause))
         .route("/api/v1/host/widget_approval", post(super::widget_handlers::handle_host_widget_approval))
+        // Everything the Vault pane does, relayed by the host.
+        .route("/api/v1/host/vault", post(super::vault_handlers::handle_host_vault))
         // The user's clicks in the version panel (Download, Upgrade & restart,
         // Cancel), and their answer to an agent's upgrade request, relayed by the host.
         .route("/api/v1/host/app_update", post(app_api::app_update::handle_host_app_update))

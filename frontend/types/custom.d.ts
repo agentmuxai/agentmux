@@ -162,6 +162,11 @@ declare global {
          *  relayed by the host like an approval: forgetting lets another key pin
          *  that publisher. SPEC_WIDGET_SHARING_2026_10_10.md §2.3. */
         forgetWidgetKey?(publisher: string): Promise<void>;
+        /** One of the Vault pane's operations (`list`, `create`, `update`,
+         *  `delete`, `decline_request`, `activity`, `kept`), relayed by the
+         *  host, which srv trusts and agents can't impersonate. Answers srv's
+         *  `data`. SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §5.4. */
+        vault?(op: string, args?: Record<string, unknown>): Promise<unknown>;
         /** Ask to adopt memory folders (payload: window_label, agent_id, list_id, choices, summary). */
         requestMemoryAdoption(args: Record<string, unknown>): Promise<void>;
         /** Ask to release a memory folder (payload: window_label, agent_id, list_id, index, summary). */

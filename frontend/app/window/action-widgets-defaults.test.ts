@@ -49,6 +49,7 @@ describe("the default widget bar", () => {
         expect(getMoreWidgets({}, wmap).map((w) => w.key.replace("defwidget@", ""))).toEqual([
             "drone",
             "warden",
+            "vault",
             "toolchain",
             "tower",
             "settings",

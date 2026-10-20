@@ -306,6 +306,24 @@ pub(crate) const WIDGET_TOOL: &str = r#"{
   }
 }"#;
 
+/// Vault: the person's secrets, which an agent names but never reads
+/// (docs/specs/SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §5.4).
+pub(crate) const VAULT_TOOL: &str = r#"{
+  "name": "Vault",
+  "description": "The Vault: the person's secrets (SSN and other ID numbers, cards and bank accounts, API keys and tokens, logins, secret notes), kept in AgentMux's Vault pane. You never see a value, and nothing you can call returns one. Every call takes an action. list: each entry's id, label, kind and section; no values. request: ask the person to add an entry you need (kind, a label saying what it is, and why you need it); the Vault opens it for them to fill in, and you get back the new entry's id, declined, or pending if they haven't answered within wait_secs (the request stays open for an hour; check list later). Never ask the person to paste a secret into the chat: ask for a Vault entry instead.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "action":    { "type": "string", "enum": ["list", "request"], "description": "What to do" },
+      "kind":      { "type": "string", "enum": ["ssn", "itin", "tin", "ein", "date-of-birth", "passport", "drivers-licence", "other-id", "card", "bank-account", "api-key", "login", "note"], "description": "request: the kind of entry" },
+      "label":     { "type": "string", "description": "request: what the entry is, e.g. Stripe test key" },
+      "why":       { "type": "string", "description": "request: one line on what you need it for; the person sees it" },
+      "wait_secs": { "type": "integer", "description": "request: how long to wait for the person, in seconds (default 300, at most 600)" }
+    },
+    "required": ["action"]
+  }
+}"#;
+
 /// App: this AgentMux itself; `upgrade` restarts every agent, so it is a
 /// tool of its own a harness can gate (like Stop).
 pub(crate) const APP_TOOL: &str = r#"{
@@ -428,6 +446,7 @@ pub(crate) const ADVERTISED: &[&str] = &[
     PANE_TOOL,
     STOP_TOOL,
     WIDGET_TOOL,
+    VAULT_TOOL,
     IDENTITY_TOOL,
     AGENTS_TOOL,
     MESSAGE_TOOL,

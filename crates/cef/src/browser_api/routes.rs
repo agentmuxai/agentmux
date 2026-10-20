@@ -346,6 +346,7 @@ pub async fn screenshot(
     // dedicated browser-pane target already IS this block's own page, so
     // no clip is needed (and __amq_rect_of would find nothing to clip to —
     // there's no [data-blockid] concept inside third-party page content).
+    let mut clip_width = None;
     if scope_to_block {
         let helper = include_str!("scripts/query.js");
         if let Err(e) = cdp
@@ -377,6 +378,7 @@ pub async fn screenshot(
                 let width = r.get("width").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let height = r.get("height").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 params["clip"] = json!({ "x": x, "y": y, "width": width, "height": height, "scale": 1.0 });
+                clip_width = Some(width);
             }
             None => {
                 let _ = cdp.close().await;
@@ -392,9 +394,32 @@ pub async fn screenshot(
     // capture, and blacked out by srv before the image reaches an agent (plan
     // §4.1). If the two scans disagree the page changed meanwhile: one more
     // try, then the screenshot is marked unchecked and srv refuses it.
+    //
+    // A pane screenshot is clipped to the caller's pane, but anything drawn
+    // over it is in the clip: the Vault pane, magnified or floating there,
+    // is blacked out the same way, found just before and just after.
     let mut secrets = None;
     let mut cap = serde_json::Value::Null;
     for _attempt in 0..2 {
+        if let Some(width) = clip_width {
+            let before = hidden_boxes(&mut cdp, &params["clip"]).await;
+            cap = match cdp.call("Page.captureScreenshot", params.clone()).await {
+                Ok(v) => v,
+                Err(e) => {
+                    let _ = cdp.close().await;
+                    return ok_body(ApiResponse::err(format!("CDP Page.captureScreenshot: {e}")));
+                }
+            };
+            let after = hidden_boxes(&mut cdp, &params["clip"]).await;
+            secrets = Some(match (before, after) {
+                (Some(mut b), Some(a)) => {
+                    b.extend(a);
+                    super::page_state::SecretBoxes { boxes: b, css_width: Some(width), complete: true }
+                }
+                _ => super::page_state::SecretBoxes { boxes: Vec::new(), css_width: Some(width), complete: false },
+            });
+            break;
+        }
         let before = if scope_to_block { None } else { Some(super::page_state::secret_boxes(&mut cdp).await) };
         cap = match cdp.call("Page.captureScreenshot", params.clone()).await {
             Ok(v) => v,
@@ -429,6 +454,15 @@ pub async fn screenshot(
         None => (Vec::new(), None, false),
     };
     ok_body(ApiResponse::ok(ScreenshotData { png_base64: data, secret_boxes, css_width, secrets_unchecked }))
+}
+
+/// The boxes of what agents may never capture (`[data-agent-hidden]`, the
+/// Vault pane) inside `clip`, from the clip's origin; `None` if the page
+/// couldn't be asked, and the screenshot is then refused.
+async fn hidden_boxes(cdp: &mut CdpSession, clip: &serde_json::Value) -> Option<Vec<[f64; 4]>> {
+    let expr = format!("__amq_hidden_boxes({clip})");
+    let reply = cdp.call("Runtime.evaluate", json!({ "expression": expr, "returnByValue": true })).await.ok()?;
+    serde_json::from_value(reply.get("result")?.get("value")?.clone()).ok()
 }
 
 /// `POST /agentmux/browser/click_element` — synthesize a real mouse

@@ -771,6 +771,23 @@ async fn route_command(
             relayed?;
             Ok(serde_json::json!(true))
         }
+        "vault_op" => {
+            // Everything the Vault pane does (list, save, change, delete,
+            // answer an agent's request), relayed to srv as the host: srv
+            // refuses Vault operations without this host's IPC token, so an
+            // agent holding the instance key can't reach them
+            // (SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §5.4).
+            // The log names the operation, never what it carries.
+            let body = args.clone();
+            let op = body.get("op").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
+            let auth_key = state.auth_key.lock().clone();
+            let ipc_token = state.ipc_token.clone();
+            tracing::info!("[ipc] vault_op op={op}");
+            tokio::task::spawn_blocking(move || crate::client::backend_vault(&web_endpoint, &auth_key, &ipc_token, &body))
+                .await
+                .map_err(|e| format!("vault_op: {e}"))?
+        }
         "app_update_action" => {
             // Download, Upgrade & restart (or Restart now) and Cancel in the
             // version panel, relayed to srv as the host: an agent holding the

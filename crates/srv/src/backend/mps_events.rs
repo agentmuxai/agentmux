@@ -154,6 +154,8 @@ events! {
     WidgetStorage: super::mps::EVENT_WIDGET_STORAGE => WidgetStorageEvent,
     /// The agents' widget install requests waiting for the user.
     WidgetRequests: super::mps::EVENT_WIDGET_REQUESTS => WidgetRequestsEvent,
+    /// The Vault changed, or its agents' requests did; never an entry or a value.
+    Vault: super::mps::EVENT_VAULT => VaultEvent,
     /// A pane's process status changed (`broker::process`).
     ProcessStatusChanged: crate::broker::process::EVENT_STATUS_CHANGED => crate::broker::process::ProcessStatus,
     /// An agent instance's identity has no direct links (`identity::resolver::inject`); a diagnostic.
@@ -392,6 +394,17 @@ pub struct WidgetStorageEvent {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct WidgetRequestsEvent {
     pub requests: Vec<crate::backend::widget_requests::WidgetInstallRequest>,
+}
+
+/// `vault`: the Vault changed (`changed_ms`), or its requests did. Any
+/// subscriber may read it, agents included, so it carries no entry: the pane
+/// asks the host for the list.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct VaultEvent {
+    pub requests: Vec<crate::backend::vault::requests::VaultRequest>,
+    #[ts(type = "number")]
+    pub changed_ms: u64,
 }
 
 /// `identity:no-direct-links`: the instance and the identity that has no direct links.

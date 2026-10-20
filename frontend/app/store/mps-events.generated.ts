@@ -76,6 +76,7 @@ import type { TimeSeriesData } from "@/types/rpc/TimeSeriesData";
 import type { ToolChunk } from "@/types/rpc/ToolChunk";
 import type { UpgradeRequestsEvent } from "@/types/rpc/UpgradeRequestsEvent";
 import type { UserAttentionEvent } from "@/types/rpc/UserAttentionEvent";
+import type { VaultEvent } from "@/types/rpc/VaultEvent";
 import type { ViewerPairedEvent } from "@/types/rpc/ViewerPairedEvent";
 import type { WSFileEventData } from "@/types/rpc/WSFileEventData";
 import type { WidgetPackagesEvent } from "@/types/rpc/WidgetPackagesEvent";
@@ -170,6 +171,7 @@ export type MuxEventPayloads = {
   sysinfo: TimeSeriesData;
   tool_chunk: ToolChunk;
   userattention: UserAttentionEvent;
+  vault: VaultEvent;
   "viewer:paired": ViewerPairedEvent;
   "waveobj:batchedupdates": MuxObjBatch;
   "waveobj:update": MuxObjUpdate;
@@ -272,6 +274,7 @@ export const TYPED_MUX_EVENTS = [
   "sysinfo",
   "tool_chunk",
   "userattention",
+  "vault",
   "viewer:paired",
   "waveobj:batchedupdates",
   "waveobj:update",

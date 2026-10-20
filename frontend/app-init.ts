@@ -1067,6 +1067,8 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     void import("@/app/block/widget-install-requests").then((m) => m.startWidgetInstallRequests());
     // An agent's request to upgrade AgentMux opens a prompt here.
     void import("@/app/block/upgrade-requests").then((m) => m.startUpgradeRequests());
+    // An agent's request for a Vault entry opens a prompt here.
+    void import("@/app/view/vault/vault-request-prompts").then((m) => m.startVaultRequestPrompts());
     // srv's calls to action (browser, SSH consent, widget installs) join the
     // waiting tone and notification.
     void import("@/app/notification/waiting-for-you").then((m) => m.installWaitingForYou());

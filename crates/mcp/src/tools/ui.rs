@@ -73,7 +73,16 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             // happened) is the honest, shippable Phase-1 answer while the
             // real gate is tracked separately (operator-confirmed).
             let mut resolved: Option<(CaptureTier, String)> = None;
-            let outcome = capture_window_impl(title_contains.as_deref(), index, pid, &mut resolved);
+            // Fail closed: if srv can't say, treat the Vault as showing.
+            let vault_on_screen = if local_url.is_empty() || auth_key.is_empty() {
+                false
+            } else {
+                crate::srv_http::srv_get_json(client, &format!("{}/api/v1/vault/on_screen", local_url.trim_end_matches('/')), auth_key, &[], "Vault on screen")
+                    .await
+                    .map(|v| v.get("on_screen").and_then(Value::as_bool).unwrap_or(true))
+                    .unwrap_or(true)
+            };
+            let outcome = capture_window_impl(title_contains.as_deref(), index, pid, &mut resolved, vault_on_screen);
             audit_log_capture_window(&query_desc, &outcome, &resolved);
             return outcome.map(|c| c.message);
         }

@@ -33,6 +33,9 @@ pub const EVENT_WIDGET_PACKAGES: &str = "widgetpackages";
 pub const EVENT_WIDGET_STORAGE: &str = "widgetstorage";
 /// Agents' widget install requests waiting for the user: `{ requests }`.
 pub const EVENT_WIDGET_REQUESTS: &str = "widgetrequests";
+/// The Vault changed, or its agents' requests did: `{ requests, changed_ms }`,
+/// never an entry or a value.
+pub const EVENT_VAULT: &str = "vault";
 /// A call to action srv holds open started or ended:
 /// `{ key, block_id, kind, text, window_ids, active }` (`backend/user_attention.rs`).
 pub const EVENT_USER_ATTENTION: &str = "userattention";

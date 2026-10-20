@@ -410,6 +410,10 @@ pub(crate) fn capture_window_impl(
     // Without it the log cannot tell "no such window" apart from "blocked
     // cross-user attempt", which is the entry a reviewer most wants to find.
     resolved: &mut Option<(CaptureTier, String)>,
+    // An AgentMux on this computer shows a Vault pane (srv's
+    // `/api/v1/vault/on_screen`): no AgentMux window is captured meanwhile
+    // (docs/specs/SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §5.3).
+    vault_on_screen: bool,
 ) -> Result<CaptureOutcome> {
     let all = enumerate_agentmux_windows()?;
     // Tier gate replaces the old `!w.is_self` exclusion — see `CaptureTier`.
@@ -575,6 +579,12 @@ pub(crate) fn capture_window_impl(
     };
 
     *resolved = Some((target.tier, audit_target_label(target)));
+
+    if vault_on_screen && target.is_agentmux {
+        anyhow::bail!(
+            "a Vault pane is open in AgentMux, so AgentMux windows can't be captured until the person closes or hides it;              UI screenshot of your own pane still works"
+        );
+    }
 
     let title = target.title.clone();
 

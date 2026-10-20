@@ -137,6 +137,18 @@
             }
         }
     },
+    "defwidget@vault": {
+        "display:order": 14,
+        "display:pinned": false,
+        "icon": "lock",
+        "label": "Vault",
+        "description": "Your secrets: ID numbers, cards and bank accounts, API keys, logins and notes. Agents use them by name without seeing them",
+        "blockdef": {
+            "meta": {
+                "view": "vault"
+            }
+        }
+    },
     "defwidget@messengers": {
         "display:order": 9,
         "display:pinned": true,

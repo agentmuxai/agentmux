@@ -240,6 +240,30 @@ pub(crate) fn backend_widget_approval(
         .map_err(|e| format!("srv refused the approval: {e}"))
 }
 
+/// Relay one of the Vault pane's operations to srv, as the host: srv takes
+/// Vault operations only with this host's IPC token, which agents never see
+/// (SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §5.4). Returns
+/// srv's `data`, or its error message. Up to a minute: the first operation
+/// may wait on the keychain asking the person. Blocking: run it off the UI
+/// thread.
+pub(crate) fn backend_vault(
+    web_endpoint: &str,
+    auth_key: &str,
+    ipc_token: &str,
+    body: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let raw = post_as_host_within(web_endpoint, auth_key, ipc_token, "/api/v1/host/vault", body, std::time::Duration::from_secs(60))
+        .map_err(|e| {
+            e.find('{')
+                .and_then(|i| serde_json::from_str::<serde_json::Value>(&e[i..]).ok())
+                .and_then(|v| v.get("error").and_then(|m| m.as_str()).map(str::to_string))
+                .unwrap_or(e)
+        })?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("srv answered something that isn't JSON: {e}"))?;
+    Ok(parsed.get("data").cloned().unwrap_or(serde_json::Value::Null))
+}
+
 /// Relay the user's answer to an agent's upgrade request, as the host.
 /// Blocking: run it off the UI thread.
 pub(crate) fn backend_upgrade_request(
@@ -355,6 +379,18 @@ fn post_as_host(
     path: &str,
     body: &serde_json::Value,
 ) -> Result<String, String> {
+    post_as_host_within(web_endpoint, auth_key, ipc_token, path, body, std::time::Duration::from_secs(10))
+}
+
+/// [`post_as_host`], waiting up to `timeout` for srv's answer.
+fn post_as_host_within(
+    web_endpoint: &str,
+    auth_key: &str,
+    ipc_token: &str,
+    path: &str,
+    body: &serde_json::Value,
+    timeout: std::time::Duration,
+) -> Result<String, String> {
     use std::io::{Read, Write};
     let addr = parse_web_endpoint(web_endpoint, path).ok_or("no srv endpoint")?;
     let body = body.to_string();
@@ -370,7 +406,6 @@ fn post_as_host(
          {body}",
         body.len()
     );
-    let timeout = std::time::Duration::from_secs(10);
     let mut stream = std::net::TcpStream::connect_timeout(&addr, timeout).map_err(|e| format!("connect to srv: {e}"))?;
     stream.set_read_timeout(Some(timeout)).ok();
     stream.set_write_timeout(Some(timeout)).ok();
