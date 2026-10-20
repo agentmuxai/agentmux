@@ -7,8 +7,7 @@
  * Pins the fix: the shell drawer's terminal must be constructed with the
  * FINAL (persisted) font size, not a default followed by a corrective jerk —
  * without triggering a second, redundant MOS fetch to get there (reagentx P1
- * on #2522). Mocks RPC/store/TermWrap at the module boundary (same approach
- * as AgentLaunchModal.integration.test.tsx); SUT is the real
+ * on #2522). Mocks RPC/store/TermWrap at the module boundary; SUT is the real
  * AgentShellSubblock.
  *
  * Mock design note: mirrors the REAL mos.ts shape — one signal per oref

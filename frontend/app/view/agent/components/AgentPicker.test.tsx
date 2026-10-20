@@ -9,10 +9,9 @@
  *  - the card grid (the "New Agent" tier) only renders
  *    definitions with `is_seeded === 1` — user-owned agents go to the
  *    `MyAgentsList` sibling above the grid (mocked in this file).
- *  - clicking a template card opens the `create-from-template` modal
- *    request via the modal-layer API, not the `launch-agent` request.
- *  - the modal's `onCreatedAndLaunch` hook eventually fires
- *    `launchAgentDefinition` with the picked bindings.
+ *  - clicking a template card opens its new-agent panel under the row.
+ *  - creating the agent there fires `launchAgentDefinition` with the
+ *    picked bindings.
  */
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
@@ -629,7 +628,8 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
     // sites used to read `agent.provider` directly instead of resolving
     // through the agent's bound bundle, the same "gate vs. actual launch
     // can disagree" risk class #2592/#2596 fixed for the credential gate
-    // and AgentLaunchModal. These pin the fix at each remaining live site.
+    // and the since-removed launch modal. These pin the fix at each
+    // remaining live site.
     // An agent with no provider of its own takes its bundle's
     // (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1); these pin that the
     // picker resolves through that path (#2594).

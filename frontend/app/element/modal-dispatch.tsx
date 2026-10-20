@@ -7,18 +7,12 @@
 // to change.
 
 import type { JSX } from "solid-js";
-import { RpcApi } from "@/app/store/rpc-api";
-import { TabRpcClient } from "@/app/store/rpc-util";
-import { AgentLaunchModalPanel } from "@/app/view/agent/components/AgentLaunchModal";
-import { AgentAddAccountModalPanel } from "@/app/view/agent/components/AgentNewIdentityModal";
-import { AgentNewBundleModalPanel } from "@/app/view/agent/components/AgentNewBundleModal";
 import { BrowserAuthModalPanel } from "@/app/view/browser/components/BrowserAuthModal";
 import { AgentIdentityModalPanel } from "@/app/view/agent/components/AgentIdentityModal";
 import { AgentNativeMemoryModal } from "@/app/view/agent/components/AgentNativeMemoryModal";
 import { BundleImportSelectModalPanel } from "@/app/view/bundle/components/BundleImportSelectModal";
 import { BundleImportPreviewModalPanel } from "@/app/view/bundle/components/BundleImportPreviewModal";
 import { BundleImportConfirmModalPanel } from "@/app/view/bundle/components/BundleImportConfirmModal";
-import "@/app/view/agent/components/AgentNewBundleModal.scss";
 import "@/app/view/agent/components/AgentIdentityModal.scss";
 import "@/app/view/agent/components/AgentStashModal.scss";
 import "@/app/view/browser/components/BrowserAuthModal.scss";
@@ -28,12 +22,6 @@ import type { ModalLayerApi, ModalLayerRequest } from "./modal-layer";
 
 export function requestLabel(req: ModalLayerRequest): string {
     switch (req.kind) {
-        case "launch-agent":
-            return `Launch ${req.agent.name}`;
-        case "add-account":
-            return "Add Account";
-        case "new-memory":
-            return "New Bundle";
         case "browser-auth":
             return req.isProxy ? "Proxy authentication required" : "Authentication required";
         case "agent-identity":
@@ -55,105 +43,6 @@ export function renderRequest(
     setSubmitting: (v: boolean) => void,
 ): { label: string; panel: JSX.Element } {
     switch (req.kind) {
-        case "launch-agent":
-            return {
-                label: requestLabel(req),
-                panel: (
-                    <AgentLaunchModalPanel
-                        agent={req.agent}
-                        onCancel={api.close}
-                        onSubmit={async (overrides) => {
-                            setSubmitting(true);
-                            try {
-                                await req.onSubmit(overrides);
-                                setSubmitting(false);
-                                api.close();
-                            } catch (e) {
-                                setSubmitting(false);
-                                throw e;
-                            }
-                        }}
-                        initialFormState={req.initialFormState}
-                        onRequestAddAccount={req.onRequestAddAccount}
-                        onRequestNewBundle={req.onRequestNewBundle}
-                    />
-                ),
-            };
-        case "add-account":
-            return {
-                label: requestLabel(req),
-                panel: (
-                    <AgentAddAccountModalPanel
-                        provider={req.provider}
-                        initialName={req.initialName}
-                        // Unlike the old bundle flow, the RPC
-                        // (`account.key.verify`) lives inside the panel
-                        // itself — it needs to run the live-probe
-                        // before knowing the resulting account id, and
-                        // the panel already tracks its own submitting
-                        // state for that. This callback just forwards
-                        // the result to the caller's chain.
-                        onSubmit={async ({ accountId }) => {
-                            // Caller's onCreated does modalLayer.replace
-                            // back to Launch with the new id
-                            // preselected — that's what unmounts this
-                            // panel. We don't `api.close()` here.
-                            req.onCreated(accountId);
-                        }}
-                        // Caller's onCancel does modalLayer.replace back to
-                        // Launch with the prior selection intact. Running
-                        // api.close() afterward would nullify that replace
-                        // (both run synchronously, last write wins) and
-                        // exit the launch flow — reagent P1 on PR #910.
-                        onCancel={req.onCancel}
-                    />
-                ),
-            };
-        case "new-memory":
-            return {
-                label: requestLabel(req),
-                panel: (
-                    <AgentNewBundleModalPanel
-                        initialName={req.initialName}
-                        // Same lift-up pattern as new-identity above —
-                        // layer owns the UpsertMemory RPC so its
-                        // submitting() flag (gates safeClose) tracks
-                        // the in-flight call.
-                        onSubmit={async ({ name, description, contextFiles }) => {
-                            setSubmitting(true);
-                            try {
-                                const memory = await RpcApi.UpsertBundleCommand(
-                                    TabRpcClient,
-                                    {
-                                        // Wire convention from
-                                        // bundle-model.ts:draftToWire —
-                                        // empty id triggers server-side
-                                        // uuid; 0 timestamps trigger
-                                        // server-side now-stamping.
-                                        id: "",
-                                        name,
-                                        description,
-                                        provider: "",
-                                        model: "",
-                                        instructions: "",
-                                        context_files: contextFiles,
-                                        mcp_servers: "[]",
-                                        skills: "[]",
-                                        created_at: 0,
-                                        updated_at: 0,
-                                    },
-                                );
-                                setSubmitting(false);
-                                req.onCreated(memory.id, memory.name);
-                            } catch (e) {
-                                setSubmitting(false);
-                                throw e;
-                            }
-                        }}
-                        onCancel={req.onCancel}
-                    />
-                ),
-            };
         case "browser-auth":
             return {
                 label: requestLabel(req),

@@ -46,8 +46,8 @@
  *          in-app login session (spec §3.1) — it polls for the child
  *          exiting AND credential material landing in the isolated dir,
  *          persists+links on success, and returns "inapp-success" /
- *          "inapp-timeout". For callers (PreLaunchAuthPanel) that want the
- *          whole session managed here instead of hand-rolling the poll.
+ *          "inapp-timeout". For callers that want the whole session
+ *          managed here instead of hand-rolling the poll.
  *   2. **(removed 2026-08-31)** — was `seedGlobalLogin` + `persistSeededAccount`,
  *      Claude only: if the user already had a valid login in their personal
  *      `~/.claude`, copy it into the isolated dir and register an account from

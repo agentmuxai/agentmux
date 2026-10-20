@@ -14,9 +14,8 @@
  *
  * Drives:
  * - `AgentCard` display (title = displayName, caption = blurb)
- * - `AgentLaunchModal` description text
- * - `AgentLaunchModal` default container image when "Container" is
- *   picked
+ * - the new-agent panel's title, and whether it offers the container
+ *   runtime
  *
  * When discussion #493 is updated with new CLIs or new facts, this
  * file must be updated in lockstep; the two are versioned together.

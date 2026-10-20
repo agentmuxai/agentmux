@@ -93,7 +93,7 @@ export const ERROR_CATALOG: Record<string, ErrorEntry> = {
     "AMX-AUTH-001": {
         title: "Interactive login required",
         message: (d) => `${str(d.provider, "This provider")} needs a real terminal for its OAuth login.`,
-        retry: "Use the Connect button in the launch modal — that wires up a PTY.",
+        retry: "Click Log in to try again. If it keeps failing, run the provider's login command in a terminal.",
     },
     "AMX-AUTH-002": {
         title: "Login timed out",

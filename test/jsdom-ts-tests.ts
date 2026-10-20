@@ -68,7 +68,6 @@ export const JSDOM_TS_TESTS = [
     "frontend/app/view/agent/activity/subagent-source.test.ts",
     "frontend/app/view/agent/activity/task-outcomes.test.ts",
     "frontend/app/view/agent/agent-pane-tab.test.ts",
-    "frontend/app/view/agent/auth/auth-flow-controller.test.ts",
     "frontend/app/view/agent/commands/providers/btw.test.ts",
     "frontend/app/view/agent/components/hover-anchor.test.ts",
     "frontend/app/view/agent/components/scroll-handoff.test.ts",

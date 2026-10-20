@@ -4,7 +4,7 @@
 // Generates agent-seed.json — one seeded definition per CLI in the
 // catalog (frontend/app/view/agent/defaults/cli-catalog.ts). Each row
 // is a template; a running instance is created when the user picks a
-// card + supplies a name via AgentLaunchModal.
+// card and names a new agent in the panel under it.
 //
 // See docs/specs/SPEC_AGENT_DEFINITIONS_MODAL_2026_04_23.md §5.
 //
@@ -34,9 +34,7 @@ const SKILL = {
 // Catalog-aligned seed. Keep in lockstep with
 // `frontend/app/view/agent/defaults/cli-catalog.ts`.
 // `working_directory` intentionally empty: `agent-model.ts` resolves
-// it at launch-time (portable vs installed build) and when a user
-// launches via AgentLaunchModal it's overridden with a fresh
-// `<slug>-<YYYYMMDD-HHMMSS>` path.
+// it at launch-time (portable vs installed build).
 const CLI_DEFS = [
     {
         id: "claude",

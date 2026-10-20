@@ -481,14 +481,12 @@ impl Store {
         Ok(rows > 0 || registry_renamed > 0)
     }
 
-    /// Named agents for the launch modal's "Continue agent" dropdown and the
-    /// picker's "My Agents" surface: non-hidden rows with an `instance_name`,
+    /// Named agents for the picker's "My Agents" surface: non-hidden rows with an `instance_name`,
     /// newest launch first, capped by `limit`.
     ///
     /// `definition_id` restricts the result to that agent itself OR every
-    /// agent derived from it (`parent_template_id`) — the launch modal opens
-    /// per template, and what a user wants to continue there is any agent
-    /// they launched from it. `identity_id` filters on the row's identity
+    /// agent derived from it (`parent_template_id`), so a per-template list
+    /// includes any agent launched from it. `identity_id` filters on the row's identity
     /// binding.
     ///
     /// `include_continuations` is accepted for API compatibility but no

@@ -65,15 +65,16 @@ pub struct StartProviderAuthReq {
     /// Vestigial — bundle mode (a successful auth adding the account to
     /// a named group of accounts) was retired in Phase 4c of
     /// SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md. Kept on the wire
-    /// shape only; `direct_account` is always true in practice.
+    /// shape only; no frontend caller sends it.
     #[serde(default)]
     #[ts(optional)]
     pub into_bundle_id: Option<String>,
-    /// Always `true` in practice — `AuthFlowController` (the sole
-    /// frontend caller) hardcodes `directAccount: true`. A successful
-    /// auth persists a standalone `IdentityAccount`; the actual
-    /// agent<->account link is written later, once the agent exists, by
-    /// the launch-flow reconcile.
+    /// When `true`, srv mints or reuses the account and a successful auth
+    /// persists a standalone `IdentityAccount`; the agent<->account link is
+    /// written later, once the agent exists. No frontend caller sets it
+    /// since the launch modal (whose `AuthFlowController` sent `true`) was
+    /// removed: the agent pane's login (`flows/login-backend.ts`) leaves it
+    /// `false` and persists the account itself.
     #[serde(default)]
     pub direct_account: bool,
     /// Direct-account reconnect: non-empty to refresh an already-
@@ -187,19 +188,19 @@ pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
                     direct_account = req.direct_account,
                     "auth.start"
                 );
-                // `direct_account` is the only path actually exercised
-                // (`AuthFlowController` hardcodes `directAccount: true`) —
-                // mints/reuses an account id and resolves its own
-                // isolation dir, mirroring the dir into `auth_env` under
-                // the provider's `auth_config_dir_env_var` (e.g.
+                // `direct_account` mints/reuses an account id and resolves
+                // its own isolation dir, mirroring the dir into `auth_env`
+                // under the provider's `auth_config_dir_env_var` (e.g.
                 // `CLAUDE_CONFIG_DIR`), overriding whatever the frontend
-                // computed via the legacy ambient `ensureAuthDir` path.
+                // computed. No frontend caller sets it since the launch
+                // modal's `AuthFlowController` was removed; the agent pane's
+                // login takes the other branch and persists the account
+                // itself, with its own dir in `auth_env`.
                 //
-                // The `into_bundle_id`/`compute_and_ensure_bundle_dir`
-                // branch below is vestigial — bundle mode was retired in
-                // Phase 4c of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md
-                // — kept only so this wire shape and its call sites don't
-                // need touching.
+                // `into_bundle_id` in that branch is vestigial — bundle mode
+                // was retired in Phase 4c of
+                // SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md — kept only
+                // so this wire shape and its call sites don't need touching.
                 //
                 // Errors (path resolve, mkdir) log + fall back to the
                 // legacy env — never abort `auth.start` over a dir issue.

@@ -6,12 +6,10 @@
  * URL + Open/Copy, a paste-code box wired to `setProviderAuth`, a live phase
  * line, and Cancel / "Use terminal instead" actions.
  *
- * Extracted from `PreLaunchAuthPanel.tsx` (its original and still-primary
- * caller — the launch surface, spec §3.3 surface 1) so the Connectors/Stash
- * surface (§3.3 surface 3) can reuse the identical UI instead of a second
- * hand-rolled copy. Decoupled from `PreLaunchAuthPanel`'s own
- * `AuthFlowController`/`AuthState` reducer — callers pass `authUrl` directly
- * (the only field of that reducer's state this component ever read).
+ * Extracted from the launch modal's sign-in panel (spec §3.3 surface 1;
+ * both since removed) so the agent pane (§3.3 surface 2) and the
+ * Connectors/Stash surface (§3.3 surface 3) share one UI instead of
+ * hand-rolled copies. Callers pass `authUrl` directly.
  *
  * See docs/specs/SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md.
  */

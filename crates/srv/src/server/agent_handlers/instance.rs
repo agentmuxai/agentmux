@@ -82,14 +82,14 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     started_at: now,
                     ended_at: 0,
                     created_at: now,
-                    // PR-F.3: launch modal passes through Identity +
-                    // Bundle picks. Empty string = blank
+                    // PR-F.3: the launch passes through its account +
+                    // bundle picks. Empty string = blank
                     // singleton (no override; the resolver returns
                     // immediately on either "" or "blank").
                     identity_id: cmd.identity_id,
                     memory_id: cmd.memory_id,
                     // v8: named-agent continuation. instance_name +
-                    // working_directory come from the launch-modal
+                    // working_directory come from the launch
                     // overrides via CommandCreateAgentInstanceData
                     // (added in the same spec). Empty string for
                     // legacy/ambient launches.
@@ -104,7 +104,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // so the response must carry the canonical row. The session
                 // zone stamp and the change event below deliberately keep
                 // using the REQUESTED definition id: Option E anchors the
-                // zone on the definition the launch modal opened
+                // zone on the definition the launch started from
                 // (`agent:<defId>:current`), and the frontend subscribes to
                 // `agentinstances:changed:<defId>` by that same id.
                 let created = mstore

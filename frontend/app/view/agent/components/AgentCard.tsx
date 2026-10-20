@@ -11,8 +11,9 @@
  * without a catalog entry fall back to the AgentDefinition row's own
  * description/name fields.
  *
- * Clicking the body opens the Launch modal (or Install modal if
- * the CLI isn't installed yet). When `installed === false`, a
+ * Clicking the body opens the template's new-agent panel under its
+ * row (starting with the install if the CLI isn't installed yet).
+ * When `installed === false`, a
  * bottom-right "Click to install" ribbon is overlaid on the card —
  * like a "For Sale" sign. The ribbon disappears once installation
  * succeeds (the picker re-runs install.check when the panel's install
@@ -51,21 +52,18 @@ interface AgentCardProps {
     /**
      * Opens or closes this template's new-agent panel.
      * The synthetic `MouseEvent` is forwarded so the parent can read
-     * modifier keys (Shift/Ctrl/Alt) — used by Option E to force the
-     * launch modal even when the agent has an in-progress session
-     * (default click would auto-continue otherwise).
+     * modifier keys (Shift/Ctrl/Alt).
      */
     onLaunch: (agent: AgentDefinition, evt?: MouseEvent | KeyboardEvent) => void;
     /**
      * Option E (PR 2 of 2): when true, this card's agent has a
-     * non-empty session zone (`agent:<defId>:current`) — i.e. the
-     * default click will auto-continue rather than open the launch
-     * modal. Renders a small "+ New" secondary button that archives
-     * the current zone and opens the launch modal for a fresh start.
+     * non-empty session zone (`agent:<defId>:current`). Renders a small
+     * "+ New" secondary button for a fresh start. The picker passes
+     * `false` for every template today.
      */
     hasCurrentSession?: boolean;
     /** Option E: invoked when the user clicks the "+ New" affordance.
-     *  Parent archives the current zone then opens the launch modal. */
+     *  Parent archives the current zone and starts a fresh session. */
     onNewSession?: (agent: AgentDefinition) => void;
     /**
      * Phase 2 (Q2 Decision Y — hide templates): right-click handler.
@@ -215,10 +213,9 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
                 </span>
             </Show>
             {/* Option E (PR #1008): "+ New" affordance — visible only
-                when the agent has an in-progress session. Outer card
-                click auto-continues by default; this button archives
-                the current zone and opens the launch modal so the
-                user can start fresh. Hidden during install ribbon
+                when the agent has an in-progress session. This
+                button asks the parent to archive the current zone
+                and start fresh. Hidden during install ribbon
                 state to avoid double-CTA overlap. */}
             <Show when={props.hasCurrentSession && props.installed !== false && !props.launching}>
                 <button
