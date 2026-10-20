@@ -57,8 +57,7 @@ pub struct StageEntry {
 /// The `stage` of a row the timeline opens itself when a stage ends and the
 /// next has not begun, so a row is always running between show and dismiss
 /// and the time between stages is measured instead of frozen
-/// (`docs/reports/REPORT_STARTUP_ARCHITECTURE_AND_MIGRATIONS_AUDIT_2026_10_20.md`
-/// §4, F1/F2).
+/// (the startup audit in agentmux PR #5218, freeze points F1 and F2).
 pub const GAP_STAGE: &str = "gap";
 
 /// A gap shorter than this is dropped when the next stage begins: it would
