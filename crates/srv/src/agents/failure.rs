@@ -383,8 +383,7 @@ pub fn classify(
     // Connection refused — … (ECONNREFUSED)" when the network is down,
     // or "Unable to connect to API (ConnectionRefused)" when nothing listens.
     if hay.contains("apiconnectionerror")
-        || hay.contains("unable to connect")
-        || hay.contains("connectionrefused")
+        || hay.contains("unable to connect to api")
         || hay.contains("connection error")
         || hay.contains("connection refused")
         || hay.contains("could not resolve")
@@ -769,6 +768,12 @@ mod tests {
             assert_eq!(f.code, FailureClass::Network, "{text}");
             assert!(f.retryable, "{text}");
         }
+    }
+
+    #[test]
+    fn unable_to_connect_elsewhere_is_not_network() {
+        let f = classify(Some(1), None, "Unable to connect to MCP server", None);
+        assert_ne!(f.code, FailureClass::Network);
     }
 
     #[test]
