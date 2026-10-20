@@ -494,6 +494,21 @@ pub fn open_external(args: &serde_json::Value) -> Result<serde_json::Value, Stri
     Ok(serde_json::Value::Null)
 }
 
+/// AgentMux's page in the Microsoft Store app. The version panel opens it
+/// for a Store install, which only the Store can update.
+const MS_STORE_PAGE_URL: &str = "ms-windows-store://pdp/?productid=9P9QCXNNCRK3";
+
+/// Whether `open_url_in_default_browser` may open `url`. The Store link is
+/// matched whole, on Windows only, rather than opening the `ms-windows-store`
+/// scheme to any link.
+fn external_url_allowed(url: &str) -> bool {
+    url.starts_with("http://")
+        || url.starts_with("https://")
+        || url.starts_with("devtools://")
+        || url.starts_with("vscode://")
+        || (cfg!(target_os = "windows") && url == MS_STORE_PAGE_URL)
+}
+
 /// Open a URL in the system's default browser.
 ///
 /// Shared by the `open_external` IPC command and by `on_before_popup`'s
@@ -503,11 +518,7 @@ pub fn open_external(args: &serde_json::Value) -> Result<serde_json::Value, Stri
 pub fn open_url_in_default_browser(url: &str) -> Result<(), String> {
     // Allow safe URL schemes. vscode:// is included so that file-path links
     // with a :line suffix can open the file at the correct line in VS Code.
-    let allowed = url.starts_with("http://")
-        || url.starts_with("https://")
-        || url.starts_with("devtools://")
-        || url.starts_with("vscode://");
-    if !allowed {
+    if !external_url_allowed(url) {
         return Err(format!("Refusing to open URL with unsupported scheme: {}", url));
     }
 
@@ -854,6 +865,19 @@ mod external_url_tests {
         assert!(!is_external_http_url("http://127.0.0.1:54469/"));
         assert!(!is_external_http_url("http://localhost:5173/?windowLabel=window-x"));
         assert!(!is_external_http_url("http://127.0.0.1:1/agentmux/browser/foo"));
+    }
+
+    #[test]
+    fn external_open_allows_the_store_page_only_whole_and_only_on_windows() {
+        use super::external_url_allowed;
+        let store = "ms-windows-store://pdp/?productid=9P9QCXNNCRK3";
+        assert_eq!(external_url_allowed(store), cfg!(target_os = "windows"));
+        // Any other Store link, or a look-alike, stays refused.
+        assert!(!external_url_allowed("ms-windows-store://pdp/?productid=9P9QCXNNCRK4"));
+        assert!(!external_url_allowed("ms-windows-store://pdp/?productid=9P9QCXNNCRK3&x=1"));
+        assert!(!external_url_allowed("ms-windows-store://downloadsandupdates"));
+        assert!(!external_url_allowed("file:///C:/Windows/System32/calc.exe"));
+        assert!(external_url_allowed("https://apps.microsoft.com/detail/9P9QCXNNCRK3"));
     }
 
     #[test]

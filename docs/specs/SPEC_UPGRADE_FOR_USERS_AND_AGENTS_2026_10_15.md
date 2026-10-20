@@ -485,8 +485,12 @@ Each phase is small and useful on its own.
      version's installer in its own version's `updates/<v>/` on a
      `setup.exe` install. The panel's **Show installer** reveals it in
      Explorer; it never opens it.
-   - **3c** macOS, **3e** AppImage and Linux portable, **3f** the Store,
-     **3g** `.deb`/`.rpm`.
+   - **3f**: the Store (§4.2): a Store install's panel says **Update in the
+     Store** and opens the Store page (`ms-windows-store://pdp/?productid=9P9QCXNNCRK3`;
+     the host opens exactly that link, on Windows only), with a note that
+     the Store gets each release after GitHub does (the `.msix` is uploaded
+     by hand). Installing through the Store API is not built.
+   - **3c** macOS, **3e** AppImage and Linux portable, **3g** `.deb`/`.rpm`.
 4. **Agents.**
    - **4a**: the `App` tool's `version` and `upgrade`, with the gate, the
      prompt in every window and the answer to the asker (§5.1).

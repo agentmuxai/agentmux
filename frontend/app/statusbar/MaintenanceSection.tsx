@@ -19,6 +19,9 @@ import { createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } f
 import "./_maintenance-section.scss";
 import { Button } from "@/app/element/ui";
 
+// The host opens exactly this link (`external_url_allowed` in the CEF host).
+const MS_STORE_PAGE_URL = "ms-windows-store://pdp/?productid=9P9QCXNNCRK3";
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 type MigStep = {
@@ -201,6 +204,8 @@ export const MaintenanceSection = (): JSX.Element => {
 
     // Older than the release upgrades from: its floor version first, from its page.
     const installFirst = () => (release() ? appUpdate()?.install_first : undefined);
+    // A Microsoft Store install is updated by the Store, not by AgentMux.
+    const viaStore = () => appUpdate()?.install === "windows-store";
     const handleInstallUpdate = () => {
         const r = release();
         const first = installFirst();
@@ -209,6 +214,10 @@ export const MaintenanceSection = (): JSX.Element => {
             return;
         }
         if (r) {
+            if (viaStore()) {
+                void openLink(MS_STORE_PAGE_URL);
+                return;
+            }
             // srv downloads, verifies and unpacks what it can (a Windows
             // portable); for any other install the release page is the way.
             if (!appUpdate()?.can_download) {
@@ -274,7 +283,7 @@ export const MaintenanceSection = (): JSX.Element => {
                             class="maintenance-btn maintenance-btn--primary"
                             onClick={handleInstallUpdate}
                         >
-                            {installFirst() ? `Get v${installFirst()}` : "Download"}
+                            {installFirst() ? `Get v${installFirst()}` : viaStore() ? "Update in the Store" : "Download"}
                         </Button>
                     </Show>
                     <Show when={updaterStatus() === "downloading"}>
@@ -383,6 +392,11 @@ export const MaintenanceSection = (): JSX.Element => {
             </Show>
             <Show when={download()?.state === "ready" && download()?.error}>
                 <div class="maintenance-row-text maintenance-row-text--error">{download()!.error}</div>
+            </Show>
+            <Show when={updaterStatus() === "available" && viaStore() && !installFirst()}>
+                <div class="maintenance-row-text maintenance-row-text--dim">
+                    {`The Microsoft Store updates this install. It gets each release after GitHub does, so v${updaterVersion()} may not be there yet.`}
+                </div>
             </Show>
             <Show when={installFirst()}>
                 <div class="maintenance-row-text maintenance-row-text--warn">
