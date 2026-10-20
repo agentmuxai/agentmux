@@ -206,8 +206,14 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
     });
 
     // While shown, renew srv's note that a Vault pane is on screen every 10 s
-    // (it lasts 30 s); clear it when hidden or closed.
-    const note = (on: boolean) => void setVaultOnScreen(on).catch((e) => console.log("vault: on-screen note failed", e));
+    // (it lasts 30 s); clear it when hidden or closed. Notes go one at a time,
+    // so a quick hide and show can't land as show-then-clear.
+    let sending: Promise<unknown> = Promise.resolve();
+    const note = (on: boolean) => {
+        sending = sending
+            .then(() => setVaultOnScreen(model.blockId, on))
+            .catch((e) => console.log("vault: on-screen note failed", e));
+    };
     createEffect(() => {
         if (!vaultAvailable() || !model.shown()) return;
         note(true);

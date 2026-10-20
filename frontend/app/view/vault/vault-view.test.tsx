@@ -29,6 +29,7 @@ import { VaultViewModel } from "./vault-model";
 import { VaultView } from "./vault-view";
 
 const [blockMeta, setBlockMeta] = createSignal<Record<string, unknown>>({});
+const [visibility, setVisibility] = createSignal<"active" | "dormant">("active");
 const setMeta = vi.fn((patch: Record<string, unknown>) => {
     setBlockMeta((prev) => ({ ...prev, ...patch }));
     return Promise.resolve();
@@ -53,7 +54,7 @@ function ssn(over: Partial<VaultEntryInfo> = {}): VaultEntryInfo {
 
 function renderVault() {
     return render(() => {
-        const model = new VaultViewModel({ blockId: "vault-block", meta: blockMeta as any, setMeta, isFocused: () => false, visibility: () => "active" } as any);
+        const model = new VaultViewModel({ blockId: "vault-block", meta: blockMeta as any, setMeta, isFocused: () => false, visibility } as any);
         return <VaultView model={model} />;
     });
 }
@@ -69,6 +70,7 @@ describe("the Vault pane", () => {
     afterEach(() => {
         cleanup();
         setBlockMeta({});
+        setVisibility("active");
     });
 
     it("lists an entry by label and last characters, and marks itself hidden from agents", async () => {
@@ -78,7 +80,7 @@ describe("the Vault pane", () => {
         expect(screen.getByText("Alex Doe")).toBeInTheDocument();
         expect(container.querySelector('[data-agent-hidden="vault"]')).not.toBeNull();
         // Shown: srv is told, so agents' whole-window captures of AgentMux are refused.
-        await waitFor(() => expect(calls("on_screen")[0]).toEqual({ on: true }));
+        await waitFor(() => expect(calls("on_screen")[0]).toEqual({ pane: "vault-block", on: true }));
         const rail = screen.getByRole("tablist", { name: "Vault section" });
         expect(Array.from(rail.querySelectorAll('[role="tab"]')).map((t) => t.textContent)).toEqual([
             "Personal data",
@@ -148,9 +150,35 @@ describe("the Vault pane", () => {
 
     it("tells srv when it is no longer shown", async () => {
         const { unmount } = renderVault();
-        await waitFor(() => expect(calls("on_screen")).toEqual([{ on: true }]));
+        const on = { pane: "vault-block", on: true };
+        const off = { pane: "vault-block", on: false };
+        await waitFor(() => expect(calls("on_screen")).toEqual([on]));
         unmount();
-        expect(calls("on_screen")).toEqual([{ on: true }, { on: false }]);
+        await waitFor(() => expect(calls("on_screen")).toEqual([on, off]));
+    });
+
+    it("sends a quick hide and show in order, one at a time", async () => {
+        let release: () => void = () => {};
+        const held = new Promise<void>((r) => (release = r));
+        // The first note is slow to answer: the next ones wait for it.
+        vault.mockImplementationOnce(async (op: string) => {
+            if (op === "list") return { entries, problem: null, requests, backend: "keychain" };
+            return {};
+        });
+        renderVault();
+        await waitFor(() => expect(calls("on_screen")).toHaveLength(1));
+        vault.mockImplementationOnce(async () => {
+            await held;
+            return {};
+        });
+        setVisibility("dormant");
+        setVisibility("active");
+        await waitFor(() => expect(calls("on_screen").map((c) => c.on)).toEqual([true, false]));
+        // The show waits until the hide has answered.
+        await new Promise((r) => setTimeout(r, 20));
+        expect(calls("on_screen").map((c) => c.on)).toEqual([true, false]);
+        release();
+        await waitFor(() => expect(calls("on_screen").map((c) => c.on)).toEqual([true, false, true]));
     });
 
     it("dismisses an agent's request through the host", async () => {

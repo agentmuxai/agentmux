@@ -582,7 +582,7 @@ pub(crate) fn capture_window_impl(
 
     if vault_on_screen && target.is_agentmux {
         anyhow::bail!(
-            "a Vault pane is open in AgentMux, so AgentMux windows can't be captured until the person closes or hides it;              UI screenshot of your own pane still works"
+            "a Vault pane is open in AgentMux, so AgentMux windows can't be captured until the person closes or hides it; UI screenshot of your own pane still works"
         );
     }
 

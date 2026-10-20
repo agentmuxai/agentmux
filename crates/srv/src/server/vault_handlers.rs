@@ -120,12 +120,17 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                 Ok((json!({}), true))
             }
             "requests" => Ok((json!({ "requests": requests::requests().list() }), false)),
-            // The pane says it is showing (or no longer is). Only the host can
-            // say so: an agent clearing it could then capture the window.
+            // A pane says it is showing (or no longer is). Only the host can
+            // say so: an agent clearing it could then capture the window. Each
+            // pane has its own note, so one pane hiding can't clear another's.
             "on_screen" => {
+                let pane = body.get("pane").and_then(Value::as_str).unwrap_or("").trim();
+                if pane.is_empty() || pane.len() > 128 {
+                    return Err("on_screen needs the pane's id".into());
+                }
                 let on = body.get("on").and_then(Value::as_bool).unwrap_or(false);
                 let until = if on { agentmux_common::time::now_ms() + ON_SCREEN_MS } else { 0 };
-                store.vault_on_screen_set(&on_screen_instance(), until).map_err(|e| e.to_string())?;
+                store.vault_on_screen_set(&on_screen_key(pane), until).map_err(|e| e.to_string())?;
                 Ok((json!({}), false))
             }
             "activity" => {
@@ -149,9 +154,10 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
     }
 }
 
-/// This srv's key among the AgentMux instances that share the identity store.
-fn on_screen_instance() -> String {
-    format!("srv-{}", std::process::id())
+/// A pane's key among the AgentMux instances that share the identity store:
+/// this srv and the pane.
+fn on_screen_key(pane: &str) -> String {
+    format!("srv-{}:{pane}", std::process::id())
 }
 
 /// `GET /api/v1/vault/on_screen`: whether any AgentMux on this computer shows

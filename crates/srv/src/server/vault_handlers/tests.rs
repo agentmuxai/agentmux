@@ -139,17 +139,34 @@ async fn a_declined_request_says_so() {
 async fn only_the_host_says_a_vault_pane_is_showing() {
     let app = app().await;
     let on_screen = |app: axum::Router| async move { send(&app, get("/api/v1/vault/on_screen")).await.1["on_screen"].clone() };
+    let note = |pane: &str, on: bool| json!({ "op": "on_screen", "pane": pane, "on": on });
     assert_eq!(on_screen(app.clone()).await, json!(false));
-    let (s, _) = send(&app, post("/api/v1/host/vault", &[], json!({ "op": "on_screen", "on": true }))).await;
+    let (s, _) = send(&app, post("/api/v1/host/vault", &[], note("p1", true))).await;
     assert_eq!(s, StatusCode::FORBIDDEN);
-    let (s, _) = send(&app, post("/api/v1/host/vault", &[HOST], json!({ "op": "on_screen", "on": true }))).await;
+    let (s, _) = send(&app, post("/api/v1/host/vault", &[HOST], note("p1", true))).await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(on_screen(app.clone()).await, json!(true));
-    let (s, _) = send(&app, post("/api/v1/host/vault", &[], json!({ "op": "on_screen", "on": false }))).await;
+    let (s, _) = send(&app, post("/api/v1/host/vault", &[], note("p1", false))).await;
     assert_eq!(s, StatusCode::FORBIDDEN, "an agent can't clear it");
     assert_eq!(on_screen(app.clone()).await, json!(true));
-    send(&app, post("/api/v1/host/vault", &[HOST], json!({ "op": "on_screen", "on": false }))).await;
+    send(&app, post("/api/v1/host/vault", &[HOST], note("p1", false))).await;
     assert_eq!(on_screen(app).await, json!(false));
+}
+
+// Two Vault panes: one hiding leaves the other's note in place.
+#[tokio::test]
+async fn one_pane_hiding_doesnt_clear_anothers_note() {
+    let app = app().await;
+    let on_screen = |app: axum::Router| async move { send(&app, get("/api/v1/vault/on_screen")).await.1["on_screen"].clone() };
+    let note = |pane: &str, on: bool| json!({ "op": "on_screen", "pane": pane, "on": on });
+    send(&app, post("/api/v1/host/vault", &[HOST], note("p1", true))).await;
+    send(&app, post("/api/v1/host/vault", &[HOST], note("p2", true))).await;
+    send(&app, post("/api/v1/host/vault", &[HOST], note("p1", false))).await;
+    assert_eq!(on_screen(app.clone()).await, json!(true), "p2 still shows");
+    send(&app, post("/api/v1/host/vault", &[HOST], note("p2", false))).await;
+    assert_eq!(on_screen(app.clone()).await, json!(false));
+    let (s, _) = send(&app, post("/api/v1/host/vault", &[HOST], json!({ "op": "on_screen", "on": true }))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "a note names its pane");
 }
 
 #[tokio::test]

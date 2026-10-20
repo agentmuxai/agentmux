@@ -110,9 +110,10 @@ export function followVault(): void {
     });
 }
 
-/** Tells srv a Vault pane is showing, or no longer is: agents' whole-window
- *  captures of AgentMux are refused while one does (spec §5.3). */
-export const setVaultOnScreen = (on: boolean) => call<unknown>("on_screen", { on });
+/** Tells srv the Vault pane `pane` is showing, or no longer is: agents'
+ *  whole-window captures of AgentMux are refused while one does (spec §5.3).
+ *  Each pane has its own note, so one pane hiding can't clear another's. */
+export const setVaultOnScreen = (pane: string, on: boolean) => call<unknown>("on_screen", { pane, on });
 
 export const createEntry = (entry: NewVaultEntry) => call<{ id: string }>("create", { ...entry });
 export const updateEntry = (change: VaultEntryChange) => call<unknown>("update", { ...change });
