@@ -36,12 +36,21 @@ fn agent_zone(zone: &str) -> Option<(&str, bool)> {
 /// Every agent with history in `store`, most recently active first. `info`
 /// looks a definition id up in the agent registry; `None` is a deleted agent.
 pub fn agents(store: &FileStore, info: impl Fn(&str) -> Option<AgentInfo>) -> Result<Vec<HistoryAgent>, String> {
+    use crate::backend::transcript::damage;
     let zones = store.zone_ids_with_prefix("agent:").map_err(|e| format!("listing the transcript store: {e}"))?;
     let mut by_id: BTreeMap<String, HistoryAgent> = BTreeMap::new();
     for zone in &zones {
         let Some((id, archived)) = agent_zone(zone) else { continue };
-        let Some(file) = store.stat(zone, OUTPUT_FILE).map_err(|e| format!("reading {zone}: {e}"))? else {
+        // A zone found corrupt is left out of the list, not the whole list failed for it
+        // (`transcript::damage`): the rest of the agents are still there.
+        if damage::is_damaged(zone) {
             continue;
+        }
+        let file = match store.stat(zone, OUTPUT_FILE) {
+            Ok(Some(file)) => file,
+            Ok(None) => continue,
+            Err(e) if damage::note_corrupt(zone, "history list", &e) => continue,
+            Err(e) => return Err(format!("reading {zone}: {e}")),
         };
         let row = by_id.entry(id.to_string()).or_insert_with(|| HistoryAgent { definition_id: id.to_string(), ..Default::default() });
         let bytes = file.size.max(0) as u64;

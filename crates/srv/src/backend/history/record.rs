@@ -120,10 +120,17 @@ impl AgentRecords {
         let mut by_id: HashMap<String, RecordSession> = HashMap::new();
         let mut order: Vec<String> = Vec::new();
         for zone in &zones {
+            // A zone found corrupt is left out, and said so: the rest of the record is still read.
+            if crate::backend::transcript::damage::is_damaged(zone) {
+                problems.push(format!("agent record {zone}: left out, the shared zone is damaged"));
+                continue;
+            }
             let scan = {
                 let mut scans = self.scans.lock().unwrap_or_else(|p| p.into_inner());
                 let scan = scans.entry(zone.clone()).or_default();
                 if let Err(e) = scan_zone(store, zone, scan) {
+                    // The record's store is the shared one, so its corruption is the shared zone's.
+                    crate::backend::transcript::damage::note_corrupt_text(zone, "agent record", &e);
                     problems.push(format!("agent record {zone}: {e}"));
                 }
                 scan.clone()
@@ -562,5 +569,34 @@ mod tests {
     fn no_store_reads_nothing() {
         let records = AgentRecords::new(None);
         assert_eq!(records.sessions_of(UID).0, Vec::new());
+    }
+}
+
+#[cfg(test)]
+mod damage_tests {
+    use super::*;
+    use crate::backend::transcript::damage::{self, test_support};
+
+    #[test]
+    fn a_zone_found_corrupt_is_left_out_of_the_record_and_said_so() {
+        let uid = "record-damage-1";
+        let fs = Arc::new(FileStore::open_in_memory().unwrap());
+        let current = format!("agent:{uid}:current");
+        let archive = format!("agent:{uid}:archive:1790000000000");
+        for (zone, text) in [(&current, "now"), (&archive, "before")] {
+            fs.make_file(zone, OUTPUT_FILE, Default::default(), Default::default()).unwrap();
+            let line = format!("{}\n", serde_json::json!({"type": "system", "subtype": "init", "session_id": text, "cwd": "/w"}));
+            fs.append_lines(zone, OUTPUT_FILE, line.as_bytes()).unwrap();
+        }
+        let records = AgentRecords::new(Some(fs));
+        let (healthy, problems) = records.sessions_of(uid);
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(healthy.len(), 2);
+
+        damage::note_corrupt(&current, "append", &test_support::corrupt_error());
+        let (left, problems) = records.sessions_of(uid);
+        assert_eq!(left.len(), 1, "only the archive is still read: {left:?}");
+        assert_eq!(left[0].session_id, "before");
+        assert!(problems.iter().any(|p| p.contains(&current) && p.contains("damaged")), "the record says what it left out: {problems:?}");
     }
 }
