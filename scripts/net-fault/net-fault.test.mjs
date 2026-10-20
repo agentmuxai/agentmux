@@ -284,6 +284,28 @@ describe("fault proxy", () => {
         }
     });
 
+    it("a taken control port fails startup and frees the proxy port", async () => {
+        const blocker = net.createServer();
+        await new Promise((r) => blocker.listen(0, "127.0.0.1", r));
+        const free = net.createServer();
+        await new Promise((r) => free.listen(0, "127.0.0.1", r));
+        const proxyPort = free.address().port;
+        await new Promise((r) => free.close(r));
+        try {
+            await expect(
+                startProxy({ port: proxyPort, controlPort: blocker.address().port, log: () => {} })
+            ).rejects.toMatchObject({ code: "EADDRINUSE" });
+            const again = net.createServer();
+            await new Promise((resolve, reject) => {
+                again.once("error", reject);
+                again.listen(proxyPort, "127.0.0.1", resolve);
+            });
+            await new Promise((r) => again.close(r));
+        } finally {
+            await new Promise((r) => blocker.close(r));
+        }
+    });
+
     it("switching to refuse cuts tunnels that are already open", async () => {
         await start();
         const r = track(await connectVia(proxy.port, echoTarget));

@@ -321,10 +321,16 @@ export async function startProxy({
     });
 
     await listen();
-    await new Promise((resolve, reject) => {
-        control.once("error", reject);
-        control.listen(controlPort, bind, resolve);
-    });
+    try {
+        await new Promise((resolve, reject) => {
+            control.once("error", reject);
+            control.listen(controlPort, bind, resolve);
+        });
+    } catch (err) {
+        // Don't leave the proxy port held when the control port is taken.
+        unlisten();
+        throw err;
+    }
     await schedule();
 
     const api = {
