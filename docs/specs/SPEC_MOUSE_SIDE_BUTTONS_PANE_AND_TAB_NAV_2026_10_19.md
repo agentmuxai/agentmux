@@ -1,6 +1,6 @@
 # Mouse side buttons walk back and forward through the panes you selected, and the caret follows
 
-**Status:** built on the Windows host and in the frontend (branch `qtimer/mouse-side-button-history`), awaiting a live test with a real mouse. macOS/Linux browser panes (P3) are not built. §10 records what was built and where it differs from this draft.
+**Status:** built on Windows host and frontend (all platforms handle the host events; mouse behavior awaits browser interaction). macOS/Linux browser panes (P3) are not built. §10 records what was built and where it differs from this draft.
 **Date:** 2026-10-19.
 **Requested by:** repo owner (asafebgi): use the mouse's side Forward/Back buttons to move through the selected pane,
 across tabs, selecting the input if there is one. Clarified: Back/Forward in browser panes move to Ctrl + side button;
