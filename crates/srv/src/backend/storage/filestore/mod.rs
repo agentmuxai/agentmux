@@ -21,6 +21,7 @@ mod off_worker;
 mod offset_ops;
 mod parts;
 mod replace;
+mod truncate_owner;
 mod types;
 mod zone_txn;
 #[cfg(test)]
@@ -41,9 +42,12 @@ mod tests_replace;
 mod tests_stamp_throttle;
 #[cfg(test)]
 mod tests_readers;
+#[cfg(test)]
+mod tests_checkpoint;
 
 #[allow(unused_imports)]
 pub use core::{FileStore, DEFAULT_FLUSH_SECS, MAX_CACHE_BYTES};
+pub use truncate_owner::TruncateOwner;
 pub use types::{FileMeta, FileOpts, MuxFile};
 #[allow(unused_imports)] // the memory record (SPEC_MEMORY_FOLLOWS_THE_AGENT M3)
 pub use zone_txn::ZoneTxn;

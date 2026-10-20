@@ -106,7 +106,7 @@ impl ReaderPool {
             &self.path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
-        conn.execute_batch("PRAGMA busy_timeout=5000; PRAGMA query_only=1;")?;
+        conn.execute_batch(&format!("PRAGMA busy_timeout=5000; PRAGMA query_only=1; {}", super::checkpointer::JOURNAL_SIZE_LIMIT))?;
         Ok(conn)
     }
 
@@ -161,7 +161,7 @@ impl FileStore {
     /// does not exist.
     pub fn open_read_only(path: &Path) -> Result<Self, StoreError> {
         let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-        conn.execute_batch("PRAGMA busy_timeout=5000;")?;
+        conn.execute_batch(&format!("PRAGMA busy_timeout=5000; {}", super::checkpointer::JOURNAL_SIZE_LIMIT))?;
         Ok(Self {
             conn: Mutex::new(conn),
             last_stamp: Mutex::new(HashMap::new()),
@@ -231,11 +231,33 @@ impl FileStore {
         Ok(())
     }
 
+    /// The database file, for a file-backed store.
+    pub fn path(&self) -> Option<&Path> {
+        self.readers.as_ref().map(|r| r.path.as_path())
+    }
+
+    /// `PRAGMA wal_checkpoint(TRUNCATE)` on a connection of its own, so this
+    /// store's writer mutex is not held while the checkpoint waits for other
+    /// connections' readers and writers (up to `busy_timeout`). Cuts the WAL
+    /// file back to nothing when it can; returns whether it ran to the end (a
+    /// busy store lets it stop early, and the next call finishes). An in-memory
+    /// store has no file: it uses its own connection.
+    pub fn checkpoint_truncate_apart(&self) -> Result<bool, StoreError> {
+        let Some(readers) = self.readers.as_ref() else {
+            self.checkpoint()?;
+            return Ok(true);
+        };
+        let conn = Connection::open(&readers.path)?;
+        conn.execute_batch(&format!("PRAGMA busy_timeout=5000; {}", super::checkpointer::JOURNAL_SIZE_LIMIT))?;
+        let busy: i64 = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE);", [], |r| r.get(0))?;
+        Ok(busy == 0)
+    }
+
     fn configure_and_migrate(mut conn: Connection) -> Result<Self, StoreError> {
         // The global transcript store is opened by every srv instance on the
         // machine, possibly at the same moment. busy_timeout comes first so
         // every lock below waits instead of failing.
-        conn.execute_batch("PRAGMA busy_timeout=5000;")?;
+        conn.execute_batch(&format!("PRAGMA busy_timeout=5000; {}", super::checkpointer::JOURNAL_SIZE_LIMIT))?;
         // Switching a rollback-journal database (new, or created by an old
         // build) to WAL upgrades a read lock to an exclusive one. Two
         // connections doing that at once deadlock, and SQLite fails one at
