@@ -549,7 +549,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(20)).await;
         assert_eq!(
             scheduler.state("test:cred"),
-            Some(CredentialState::Refreshing { prior_failures: 0, prior_reauth: None })
+            Some(CredentialState::Refreshing { prior_failures: 0, prior_reauth: None, offline: false })
         );
 
         // A second caller now dispatches while still Refreshing — gets
@@ -607,7 +607,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(20)).await;
         assert_eq!(
             scheduler.state("test:cred"),
-            Some(CredentialState::Refreshing { prior_failures: 0, prior_reauth: None })
+            Some(CredentialState::Refreshing { prior_failures: 0, prior_reauth: None, offline: false })
         );
 
         let s2 = scheduler.clone();

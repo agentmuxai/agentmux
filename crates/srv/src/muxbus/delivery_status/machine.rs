@@ -206,7 +206,10 @@ impl Machine {
             (link, _) => link.clone(),
         };
         let (state, error) = derive(self.session_known, &link, broker);
-        let sign_in_unreachable = matches!(broker, Some(CredentialState::Failed { offline: true, .. }));
+        let sign_in_unreachable = matches!(
+            broker,
+            Some(CredentialState::Failed { offline: true, .. } | CredentialState::Refreshing { offline: true, .. })
+        );
         let mut out = Vec::new();
         let prev = self.status.state;
         let changed = state != prev
@@ -349,7 +352,11 @@ mod tests {
         assert_eq!(m.status().state, Connected);
         assert!(m.status().sign_in_unreachable);
         assert_eq!(kinds(&fx), ["changed"]);
-        m.tick(Some(&CredentialState::Fresh), T0 + 2);
+        // A retry in flight is still offline until something answers.
+        let retrying = CredentialState::Refreshing { prior_failures: 0, prior_reauth: None, offline: true };
+        m.tick(Some(&retrying), T0 + 2);
+        assert!(m.status().sign_in_unreachable);
+        m.tick(Some(&CredentialState::Fresh), T0 + 3);
         assert!(!m.status().sign_in_unreachable);
     }
 
