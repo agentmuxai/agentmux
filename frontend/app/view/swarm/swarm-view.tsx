@@ -4,7 +4,7 @@
 import { UnseenTurnsDot } from "@/app/block/UnseenTurnsDot";
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-holds";
-import { createMemo, createSignal, createEffect, onCleanup, For, Show, type Accessor, type JSX } from "solid-js";
+import { createMemo, createSignal, createEffect, onCleanup, onMount, For, Show, type Accessor, type JSX } from "solid-js";
 import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, ActiveShell, ActiveCron, WorkflowDispatch, SubagentEvent, DispatchActivityEntry, TodoItem } from "./swarm-model";
 import { collectClearableRows, subagentDisplayLabel, subagentRowKey, subagentToolDetail, workflowRetireSignal, AUTO_RETIRE_DELAY_MS } from "./swarm-model";
 import { LOCAL_PROVIDER_UNKNOWN, REMOTE_PROVIDER_UNKNOWN, SwarmProviderIcon } from "./swarm-provider-icon";
@@ -24,6 +24,7 @@ import { longRunningToolRows, type LongRunningToolRow } from "./swarm-longrunnin
 import { formatCompactNumber } from "@/util/format-count";
 import { formatElapsedClock, formatTimeLeft } from "@/util/format-time";
 import { revealBlock } from "@/app/util/reveal-block";
+import { selectTrace } from "@/app/util/select-trace";
 import { BackgroundTaskBucket, SubagentBackgroundTasks, visibleBackgroundTasks } from "./swarm-background-tasks";
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 import { swarmRowColors } from "./swarm-row-colors";
@@ -60,12 +61,44 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
     });
 
     const zoomFactor = createMemo(() => readZoom(ctx.meta()));
+    // Trace presses on agent rows whose click never arrives (select-trace.ts).
+    // Capture listeners on the root, which a rebuild of the rows never replaces.
+    onMount(() => {
+        const root = rootRef;
+        if (!root) return;
+        const onDown = (e: PointerEvent) => {
+            if (e.button !== 0) return;
+            const card = (e.target as Element | null)?.closest<HTMLElement>(".swarm-agent-card");
+            const blockId = card?.dataset.blockId;
+            if (card && blockId) selectTrace.pressed(blockId, card);
+        };
+        const onUp = () => selectTrace.released();
+        const onCancel = () => selectTrace.cancelled();
+        const onClick = (e: MouseEvent) => {
+            const card = (e.target as Element | null)?.closest<HTMLElement>(".swarm-agent-card") ?? null;
+            selectTrace.clicked(card?.dataset.blockId ?? null, card);
+        };
+        root.addEventListener("pointerdown", onDown, true);
+        root.addEventListener("pointerup", onUp, true);
+        root.addEventListener("pointercancel", onCancel, true);
+        root.addEventListener("click", onClick, true);
+        onCleanup(() => {
+            root.removeEventListener("pointerdown", onDown, true);
+            root.removeEventListener("pointerup", onUp, true);
+            root.removeEventListener("pointercancel", onCancel, true);
+            root.removeEventListener("click", onClick, true);
+        });
+    });
     // Ctrl+scroll and Ctrl/Cmd +/-/0 zoom this pane through the shared handlers
     // (app.tsx, keymodel.ts): the `paneZoom` capability is all it needs.
 
     let rootRef: HTMLDivElement | undefined;
 
-    const tree = createMemo(() => model.buildTree());
+    const tree = createMemo(() => {
+        const rows = model.buildTree();
+        selectTrace.rebuilt();
+        return rows;
+    });
     const clearableCount = createMemo(() => collectClearableRows(tree()).length);
     const remote = createMemo(() => remoteRows(remoteSections(model.otherInstancesAtom())));
     const localKeys = createMemo(() => tree().flatMap((n) => (n.blockId ? [n.blockId] : [])));
@@ -377,6 +410,7 @@ export function AgentRow({
                     [`swarm-agent-card--${node.agentStatus}`]: true,
                     "swarm-agent-card--active": focusedBlockId() === node.blockId,
                 }}
+                data-block-id={node.blockId ?? undefined}
                 style={{
                     "--swarm-agent-active-border": rowColors().active,
                     "--swarm-agent-hover-border": rowColors().hover,
@@ -393,7 +427,7 @@ export function AgentRow({
                 // "selects the pane" behavior for non-agent-entry clicks.
                 onClick={(e) => {
                     e.stopPropagation();
-                    if (node.blockId) void revealBlock(node.blockId);
+                    if (node.blockId) void revealBlock(node.blockId, { source: "swarm" });
                 }}
                 // ...and the Swarm pane must not flash selected first. The
                 // Swarm root is focusable (tabIndex={-1}), so a press anywhere
