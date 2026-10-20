@@ -19,6 +19,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 .flatten()
                 .and_then(|w| other_builds::untouched_default_tab(&state.mstore, &w.workspaceid))
                 .is_some();
+            if !offer && req.offer_only.unwrap_or(false) {
+                return Ok(OtherBuildLayoutsResult { offer, layouts: Vec::new() });
+            }
             let Some(roots) = ScanRoots::live() else {
                 return Ok(OtherBuildLayoutsResult { offer, layouts: Vec::new() });
             };

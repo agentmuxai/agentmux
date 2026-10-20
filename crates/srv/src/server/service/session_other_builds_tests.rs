@@ -194,6 +194,16 @@ async fn a_cold_start_with_nothing_to_restore_offers_until_the_default_is_used()
     assert!(untouched_default_tab(&state.mstore, &win.workspaceid).is_none());
 }
 
+#[test]
+fn a_first_launch_offers_over_the_layout_it_seeded() {
+    let store = Store::open_in_memory().unwrap();
+    assert!(crate::backend::wcore::ensure_initial_data(&store).unwrap(), "a first launch");
+    remember_first_launch_default(&store);
+    let client = store.get_all::<Client>().unwrap().into_iter().next().unwrap();
+    let ws = store.get::<Window>(&client.windowids[0]).unwrap().unwrap().workspaceid;
+    assert!(untouched_default_tab(&store, &ws).is_some());
+}
+
 #[tokio::test]
 async fn a_cold_start_that_restored_its_own_layout_offers_nothing() {
     let state = test_state();

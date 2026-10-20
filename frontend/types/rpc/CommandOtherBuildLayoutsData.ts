@@ -8,4 +8,9 @@ export type CommandOtherBuildLayoutsData = {
 /**
  * The window asking; decides `OtherBuildLayoutsResult::offer`.
  */
-window_id: string, };
+window_id: string, 
+/**
+ * Look only when the window has a layout to offer over: nothing is
+ * read otherwise.
+ */
+offer_only?: boolean, };

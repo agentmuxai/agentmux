@@ -550,6 +550,8 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     });
     if first_launch {
         tracing::info!("First launch: created initial data");
+        // Its window may offer a layout another build saved.
+        crate::server::service::session_other_builds::remember_first_launch_default(&mstore);
     }
     // A window whose close a quit outran: the session record restores it.
     crate::server::service::forget_windows_left_by_quit(&mstore);

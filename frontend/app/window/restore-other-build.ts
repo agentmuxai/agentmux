@@ -96,16 +96,16 @@ export async function restoreLayoutFromOtherBuild(l: OtherBuildLayout): Promise<
     notify("info", `Restored the layout from ${l.version}`, `${count(result.tab_ids.length, "tab")}${added}.`);
 }
 
-async function listLayouts(): Promise<{ offer: boolean; layouts: OtherBuildLayout[] }> {
-    return RpcApi.OtherBuildLayoutsCommand(TabRpcClient, { window_id: windowId() });
+async function listLayouts(offerOnly: boolean): Promise<{ offer: boolean; layouts: OtherBuildLayout[] }> {
+    return RpcApi.OtherBuildLayoutsCommand(TabRpcClient, { window_id: windowId(), offer_only: offerOnly });
 }
 
-/** At a cold start: offer the newest recent layout another build saved, when
- *  this window shows the default layout because nothing was restored. */
+/** At startup: offer the newest recent layout another build saved, when this
+ *  window shows the default layout because there was nothing to restore. */
 export async function offerLayoutFromOtherBuild(now: number = Date.now()): Promise<void> {
     let found;
     try {
-        found = await listLayouts();
+        found = await listLayouts(true);
     } catch (err) {
         console.warn("[restore-other-build] couldn't look for other builds' layouts", err);
         return;
@@ -133,7 +133,7 @@ export async function offerLayoutFromOtherBuild(now: number = Date.now()): Promi
 export async function chooseLayoutFromOtherBuild(): Promise<void> {
     let found;
     try {
-        found = await listLayouts();
+        found = await listLayouts(false);
     } catch (err) {
         notify("error", "Couldn't look for other builds' layouts", errorText(err));
         return;

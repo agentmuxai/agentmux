@@ -73,7 +73,7 @@ describe("the offer at a cold start", () => {
     it("asks to restore the newest layout when this window shows the seeded default", async () => {
         h.OtherBuildLayoutsCommand.mockResolvedValue({ offer: true, layouts: [layout(), layout({ version: "0.59.31" })] });
         await offerLayoutFromOtherBuild(NOW);
-        expect(h.OtherBuildLayoutsCommand).toHaveBeenCalledWith({ tag: "tab-client" }, { window_id: "win-7" });
+        expect(h.OtherBuildLayoutsCommand).toHaveBeenCalledWith({ tag: "tab-client" }, { window_id: "win-7", offer_only: true });
         const n = notice();
         expect(n.id).toBe(NOTICE_ID);
         expect(n.persistent).toBe(true);

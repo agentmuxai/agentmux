@@ -13,9 +13,10 @@
 //! restore uses (`session_restore::replay_tabs`). The other database is never
 //! written.
 //!
-//! A cold start that seeds the default layout because nothing was restored
-//! remembers it ([`remember_seeded_default`]); while that layout is untouched
-//! the window offers the newest record, and restoring replaces it.
+//! A first launch, or a cold start that seeds the default layout because
+//! nothing was restored, remembers it ([`remember_seeded_default`]); while
+//! that layout is untouched the window offers the newest record, and
+//! restoring replaces it.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -222,6 +223,22 @@ pub(crate) fn remember_seeded_default(store: &Store, ws_id: &str, tab_id: &str, 
         SEEDED_META_KEY,
         Some(json!({ "workspace_id": ws_id, "tab_id": tab_id, "block_ids": block_ids })),
     );
+}
+
+/// A first launch: the store was empty and `wcore::ensure_initial_data` seeded
+/// the default layout, which a new build or a new local build starts with.
+pub(crate) fn remember_first_launch_default(store: &Store) {
+    let seeded = (|| {
+        let client = store.get_all::<Client>().ok()?.into_iter().next()?;
+        let window = store.get::<Window>(client.windowids.first()?).ok()??;
+        let workspace = store.get::<Workspace>(&window.workspaceid).ok()??;
+        let tab_id = workspace.pinnedtabids.iter().chain(workspace.tabids.iter()).next()?.clone();
+        let tab = store.get::<Tab>(&tab_id).ok()??;
+        Some((workspace.oid, tab_id, tab.blockids))
+    })();
+    if let Some((ws_id, tab_id, block_ids)) = seeded {
+        remember_seeded_default(store, &ws_id, &tab_id, &block_ids);
+    }
 }
 
 /// The seeded default tab of workspace `ws_id`, if the workspace still holds

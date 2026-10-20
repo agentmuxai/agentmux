@@ -169,7 +169,6 @@ async function initHostMux(): Promise<void> {
         tlog("GetClientData", t);
 
         let windowId = clientData.windowids?.[0];
-        const coldStart = !windowId;
 
         // If no windows exist, create one. This is the genuine cold-start
         // case (SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13 Feature 1)
@@ -270,11 +269,9 @@ async function initHostMux(): Promise<void> {
         })();
         // What AgentMux recovered from, until the user closes it (SPEC_RECOVERY_NOTICES_AND_TOASTS §4.2).
         void import("@/app/init/incidents").then(({ surfaceIncidents }) => surfaceIncidents());
-        // A cold start with nothing of its own to restore offers the layout
-        // another build saved. Fire-and-forget: it reads other builds' data.
-        if (coldStart) {
-            void import("@/app/window/restore-other-build").then((m) => m.offerLayoutFromOtherBuild());
-        }
+        // A window that came up with the default layout because there was
+        // nothing to restore offers the layout another build saved (srv decides).
+        void import("@/app/window/restore-other-build").then((m) => m.offerLayoutFromOtherBuild());
 
         benchDump(); // emit full startup timeline to log
 

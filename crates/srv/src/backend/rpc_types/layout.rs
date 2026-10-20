@@ -135,6 +135,11 @@ pub struct LayoutIntentResult {
 pub struct CommandOtherBuildLayoutsData {
     /// The window asking; decides `OtherBuildLayoutsResult::offer`.
     pub window_id: String,
+    /// Look only when the window has a layout to offer over: nothing is
+    /// read otherwise.
+    #[serde(default)]
+    #[ts(optional)]
+    pub offer_only: Option<bool>,
 }
 
 /// One build's saved layout, described without opening it.
