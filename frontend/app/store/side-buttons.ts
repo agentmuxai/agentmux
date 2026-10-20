@@ -11,7 +11,6 @@
 import { getApi } from "@/app/store/app-api";
 import { settingsAtom } from "@/app/store/global";
 import { modalsModel } from "@/app/store/modalmodel";
-import { invokeCommand } from "@/app/platform/ipc";
 import { paneHistoryBack, paneHistoryForward } from "./pane-history";
 import { decideSideButton, isRepeat } from "./side-button-rules";
 
@@ -47,7 +46,8 @@ function onHostSideButton(p: HostSideButton): void {
     if (!enabled()) {
         // Off means the page keeps its own history on these buttons.
         if (p.source === "pane" && p.block_id) {
-            void invokeCommand(dir < 0 ? "browser_pane_go_back" : "browser_pane_go_forward", { block_id: p.block_id });
+            const panes = getApi().browserPanes;
+            void (dir < 0 ? panes?.goBack(p.block_id) : panes?.goForward(p.block_id));
         }
         return;
     }
