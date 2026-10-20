@@ -14,10 +14,13 @@
  * RCA_WHOLE_PANE_TEAROFF_MOVES_ONLY_THE_VISIBLE_TAB_2026_10_19.md
  */
 
+import { WorkspaceService } from "@/app/store/services";
+import { redockFloaterPane } from "@/app/workspace/floater-panes";
 import { removeMovedBlock } from "@/layout/lib/layoutMagnify";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { effectiveStack } from "@/layout/lib/stackMembers";
 import type { LayoutNode } from "@/layout/lib/types";
+import { Logger } from "@/util/logger";
 
 /** What a header drag of a pane tears off: its visible tab and its whole tab
  *  stack in order (`[blockId]` for a pane with one tab). */
@@ -43,5 +46,45 @@ export function paneTearOffOf(node: LayoutNode | undefined): PaneTearOff | null 
 export function removeTornOffPane(model: LayoutModel, members: string[]): void {
     for (const blockId of members) {
         removeMovedBlock(model, blockId);
+    }
+}
+
+/**
+ * Undo a tear-off whose floating window never opened: the backend already
+ * moved every tab into a new workspace, so put them back as the pane they
+ * were (one redock with the whole stack) and delete the now-empty workspace.
+ * The pane's old position isn't recoverable (it is re-inserted), but no tab
+ * is lost. If the source window tab was auto-closed (the pane was its only
+ * one) there is nowhere to put them back: they stay in the new workspace,
+ * reachable from the workspace switcher, and this is logged. Never throws.
+ */
+export async function rollBackPaneTearOff(
+    pane: PaneTearOff,
+    newWsId: string,
+    sourceTabId: string,
+    sourceWsId: string
+): Promise<boolean> {
+    try {
+        const newWs = await WorkspaceService.GetWorkspace(newWsId);
+        const floaterTabId = newWs?.tabids?.[0];
+        if (!floaterTabId) throw new Error("the new workspace has no tab");
+        await redockFloaterPane(
+            { blockId: pane.members[0], members: pane.members, activeBlockId: pane.blockId },
+            { tabId: floaterTabId, workspaceId: newWsId },
+            { tabId: sourceTabId, workspaceId: sourceWsId }
+        );
+        await WorkspaceService.DeleteWorkspace(newWsId);
+        Logger.warn("dnd:cross", "pane tear-off rolled back: the floating window didn't open", {
+            blockId: pane.blockId,
+            tabs: pane.members.length,
+        });
+        return true;
+    } catch (e) {
+        Logger.error("dnd:cross", "pane tear-off rollback failed — the pane is in its own workspace", {
+            error: String(e),
+            blockId: pane.blockId,
+            newWsId,
+        });
+        return false;
     }
 }

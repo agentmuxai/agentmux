@@ -269,6 +269,11 @@ pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCall
     }
 
     // The rest of the stack, in order, as tabs of the pane that just landed.
+    // A failure part-way leaves the members already docked docked, and this one
+    // and any after it in the floater (which stays open while it holds them);
+    // the layout updates for the docked ones are still published below, then
+    // the failure is reported.
+    let mut stack_failure: Option<String> = None;
     for member in members.iter().filter(|m| **m != block_id) {
         if let Err(reason) = redock_stack_member(
             state,
@@ -282,11 +287,11 @@ pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCall
         )
         .await
         {
-            // The members already docked stay docked; this one and any after
-            // it stay in the floater, which stays open while it holds them.
-            return WebReturnType::error(reason);
+            stack_failure = Some(reason);
+            break;
         }
     }
+
     let mut updates = Vec::new();
     // Layout updates MUST come first — the queue helpers persist
     // via the reducer route (SPEC_864 Phase 4), whose SQLite write
@@ -340,6 +345,9 @@ pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCall
     // reactive flush — see EventBus::broadcast_mux_obj_updates.
     state.event_bus.broadcast_mux_obj_updates(&updates);
 
+    if let Some(reason) = stack_failure {
+        return WebReturnType::error(reason);
+    }
     WebReturnType::success_data_updates(
         serde_json::json!({
             "redocked": true,

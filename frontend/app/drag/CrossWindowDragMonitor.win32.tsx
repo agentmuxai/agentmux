@@ -24,7 +24,7 @@ import { atoms, getApi } from "@/store/global";
 import { sleep } from "@/util/util";
 import { WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForStaticTab } from "@/layout/index";
-import { paneTearOffOf, removeTornOffPane } from "./pane-tearoff";
+import { paneTearOffOf, removeTornOffPane, rollBackPaneTearOff } from "./pane-tearoff";
 import { handlePaneTabDragEnd, type PaneTabDragPayload } from "./pane-tab-tearoff";
 import { Logger } from "@/util/logger";
 import { openTearOffWindow, measureSourcePaneSize, measureMotherResize } from "./tear-off-pool-helper";
@@ -435,6 +435,7 @@ async function performTearOff(
                         error: String(e2),
                         blockId: payload.blockId,
                     });
+                    await rollBackPaneTearOff({ blockId: payload.blockId, members }, newWsId, sourceTabId, sourceWsId);
                     return;
                 }
             } else if (snapshot) {
@@ -455,21 +456,20 @@ async function performTearOff(
                         mother_resize_to_width: motherResizeToWidth,
                     });
                 } catch (e2) {
-                    Logger.error("dnd:cross", "open_floating_pane_window failed — leaving pane docked", {
+                    Logger.error("dnd:cross", "open_floating_pane_window failed — rolling the pane back", {
                         error: String(e2),
                         blockId: payload.blockId,
                     });
+                    await rollBackPaneTearOff({ blockId: payload.blockId, members }, newWsId, sourceTabId, sourceWsId);
                     return;
                 }
             } else {
-                Logger.error("dnd:cross", "open_floating_pane_window failed — leaving pane docked", {
+                Logger.error("dnd:cross", "open_floating_pane_window failed — rolling the pane back", {
                     error: msg,
                     blockId: payload.blockId,
                 });
-                // TODO(phase-5): undo TearOffBlock here to avoid an orphaned
-                // workspace if the host couldn't create the floating window.
-                // For now we leave the new workspace in place; it's reachable
                 // via the workspace switcher and the user can close it.
+                await rollBackPaneTearOff({ blockId: payload.blockId, members }, newWsId, sourceTabId, sourceWsId);
                 return;
             }
         }

@@ -19,7 +19,7 @@ import { getTabGrabOffset } from "@/app/tab/tab-grab-offset";
 import { onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import { getLayoutModelForStaticTab } from "@/layout/index";
-import { paneTearOffOf, removeTornOffPane } from "./pane-tearoff";
+import { paneTearOffOf, removeTornOffPane, rollBackPaneTearOff } from "./pane-tearoff";
 import { handlePaneTabDragEnd, type PaneTabDragPayload } from "./pane-tab-tearoff";
 import type { LayoutNode } from "@/layout/lib/types";
 import { endReleasedSession } from "./drag-session";
@@ -315,14 +315,16 @@ async function performTearOff(
                         blockId: payload.blockId,
                         newWsId,
                     });
+                    await rollBackPaneTearOff({ blockId: payload.blockId, members }, newWsId, sourceTabId, sourceWsId);
                     return;
                 }
             } else {
-                Logger.error("dnd:cross", "open_floating_pane_window failed — leaving pane docked", {
+                Logger.error("dnd:cross", "open_floating_pane_window failed — rolling the pane back", {
                     error: msg,
                     blockId: payload.blockId,
                     newWsId,
                 });
+                await rollBackPaneTearOff({ blockId: payload.blockId, members }, newWsId, sourceTabId, sourceWsId);
                 return;
             }
         }

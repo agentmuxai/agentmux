@@ -12,7 +12,7 @@ import { atoms, getApi } from "@/store/global";
 import { sleep } from "@/util/util";
 import { WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForStaticTab } from "@/layout/index";
-import { paneTearOffOf, removeTornOffPane } from "./pane-tearoff";
+import { paneTearOffOf, removeTornOffPane, rollBackPaneTearOff } from "./pane-tearoff";
 import { handlePaneTabDragEnd, type PaneTabDragPayload } from "./pane-tab-tearoff";
 import { Logger } from "@/util/logger";
 import { endedByEscape } from "./native-cancel";
@@ -287,13 +287,15 @@ async function performTearOff(
                         error: String(e2),
                         blockId: payload.blockId,
                     });
+                    await rollBackPaneTearOff({ blockId: payload.blockId, members }, newWsId, sourceTabId, sourceWsId);
                     return;
                 }
             } else {
-                Logger.error("dnd:cross", "open_floating_pane_window failed — leaving pane docked", {
+                Logger.error("dnd:cross", "open_floating_pane_window failed — rolling the pane back", {
                     error: msg,
                     blockId: payload.blockId,
                 });
+                await rollBackPaneTearOff({ blockId: payload.blockId, members }, newWsId, sourceTabId, sourceWsId);
                 return;
             }
         }

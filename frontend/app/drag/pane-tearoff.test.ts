@@ -6,10 +6,16 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { removeMovedBlock } = vi.hoisted(() => ({ removeMovedBlock: vi.fn() }));
+const { removeMovedBlock, svc, redockFloaterPane } = vi.hoisted(() => ({
+    removeMovedBlock: vi.fn(),
+    svc: { GetWorkspace: vi.fn(), DeleteWorkspace: vi.fn() },
+    redockFloaterPane: vi.fn(),
+}));
 vi.mock("@/layout/lib/layoutMagnify", () => ({ removeMovedBlock: (...a: unknown[]) => removeMovedBlock(...a) }));
+vi.mock("@/app/store/services", () => ({ WorkspaceService: svc }));
+vi.mock("@/app/workspace/floater-panes", () => ({ redockFloaterPane: (...a: unknown[]) => redockFloaterPane(...a) }));
 
-import { paneTearOffOf, removeTornOffPane } from "./pane-tearoff";
+import { paneTearOffOf, removeTornOffPane, rollBackPaneTearOff } from "./pane-tearoff";
 
 const leaf = (data: Record<string, unknown>) => ({ id: "n1", data }) as never;
 
@@ -55,5 +61,31 @@ describe("removeTornOffPane", () => {
             [model, "b"],
             [model, "c"],
         ]);
+    });
+});
+
+describe("rollBackPaneTearOff", () => {
+    beforeEach(() => {
+        svc.GetWorkspace.mockReset().mockResolvedValue({ tabids: ["ft"] });
+        svc.DeleteWorkspace.mockReset().mockResolvedValue(undefined);
+        redockFloaterPane.mockReset().mockResolvedValue({ redocked: true });
+    });
+
+    it("redocks the whole stack into the source tab, with the visible tab, then deletes the new workspace", async () => {
+        const ok = await rollBackPaneTearOff({ blockId: "b", members: ["a", "b", "c"] }, "nw", "st", "sw");
+        expect(ok).toBe(true);
+        expect(redockFloaterPane).toHaveBeenCalledWith(
+            { blockId: "a", members: ["a", "b", "c"], activeBlockId: "b" },
+            { tabId: "ft", workspaceId: "nw" },
+            { tabId: "st", workspaceId: "sw" }
+        );
+        expect(svc.DeleteWorkspace).toHaveBeenCalledWith("nw");
+    });
+
+    it("keeps the new workspace and reports false when the tabs cannot go back", async () => {
+        redockFloaterPane.mockRejectedValue(new Error("source tab gone"));
+        const ok = await rollBackPaneTearOff({ blockId: "a", members: ["a"] }, "nw", "st", "sw");
+        expect(ok).toBe(false);
+        expect(svc.DeleteWorkspace).not.toHaveBeenCalled();
     });
 });
