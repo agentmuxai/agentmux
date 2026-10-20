@@ -144,7 +144,9 @@ fn deleting_a_drones_runs_leaves_other_drones_runs() {
     store.drone_run_insert(&run("a-1", "drone-a")).unwrap();
     store.drone_run_insert(&run("a-2", "drone-a")).unwrap();
     store.drone_run_insert(&run("b-1", "drone-b")).unwrap();
-    assert_eq!(store.drone_runs_delete_for("drone-a").unwrap(), 2);
+    assert_eq!(store.drone_run_delete("a-1").unwrap(), 1, "one run by id");
+    assert_eq!(store.drone_runs_for("drone-a", 10).unwrap().len(), 1);
+    assert_eq!(store.drone_runs_delete_for("drone-a").unwrap(), 1);
     assert!(store.drone_runs_for("drone-a", 10).unwrap().is_empty());
     assert_eq!(store.drone_runs_for("drone-b", 10).unwrap().len(), 1);
 }

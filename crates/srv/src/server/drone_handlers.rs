@@ -240,9 +240,17 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // No FK ties the run to its definition (m0038): if the drone
                 // was deleted while this run started, take the row back out
                 // rather than leave history for a drone that no longer exists.
-                if id_store.drone_get(&drone_id).ok().flatten().is_none() {
-                    let _ = mstore.drone_runs_delete_for(&drone_id);
-                    return Err(format!("rundrone: drone {drone_id} was deleted while the run started"));
+                match id_store.drone_get(&drone_id) {
+                    Ok(Some(_)) => {}
+                    // Only this run's own row: the drone's other runs belong
+                    // to the delete handler, which removes them itself.
+                    Ok(None) => {
+                        let _ = mstore.drone_run_delete(&run_id);
+                        return Err(format!("rundrone: drone {drone_id} was deleted while the run started"));
+                    }
+                    // Can't tell (a lock or I/O error): keep the run and its
+                    // history rather than delete anything on a guess.
+                    Err(e) => tracing::warn!(drone_id = %drone_id, "rundrone: re-checking the drone failed: {e}"),
                 }
 
                 // Drain on a background task; on completion, UPDATE
