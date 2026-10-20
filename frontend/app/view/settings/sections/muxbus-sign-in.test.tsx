@@ -43,7 +43,7 @@ describe("MuxBusSignIn", () => {
     });
 
     it("shows a lost sign-in with Sign in", () => {
-        const status = { state: "needs_sign_in" as const, since_ms: Date.now(), account_email: "a@b.c" };
+        const status = { state: "needs_sign_in" as const, since_ms: Date.now(), account_email: "a@b.c", sign_in_unreachable: false };
         acceptMuxbusDelivery(status);
         render(() => <MuxBusSignIn />);
         expect(screen.getByRole("status").textContent).toBe(muxbusDeliveryLine(status));
