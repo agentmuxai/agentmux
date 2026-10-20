@@ -23,6 +23,7 @@ use crate::backend::vault::uses::{self, Decision, UseRequest};
 use crate::backend::vault::{self, FillTarget};
 use agentmux_common::api_types::UiAutomationAuth;
 
+use super::browser_actions::{note, How, Kind};
 use super::ui_handlers::{err_response, proxy_value, target_block_id};
 use super::AppState;
 
@@ -92,8 +93,16 @@ pub(crate) fn plan(origin_known: bool, password_like: bool, fillable: bool, gran
     }
 }
 
-fn record(state: &AppState, target: &FillTarget, agent: &str, where_: &str, outcome: &str) {
+fn record(state: &AppState, block_id: &str, target: &FillTarget, agent: &str, where_: &str, outcome: &str) {
     crate::backend::vault::record(&state.identity_store, &target.id, &target.label, agent, "filled a web form", where_, outcome);
+    // The pane's own Log shows it too, with what was filled and never its value.
+    let how = match outcome {
+        "done" => How::Allowed,
+        "denied" => How::Declined,
+        "timed out" => How::TimedOut,
+        other => How::Refused(other.to_string()),
+    };
+    note(block_id, agent, Kind::Fill).detail(&format!("{} from the Vault", target.what)).how(how).record(state);
 }
 
 /// Takes a use request down, and tells every window, however the wait ends: the
@@ -149,7 +158,7 @@ pub(crate) async fn handle_vault_fill(
     let mut always = false;
     match plan(!field.origin.is_empty(), field.password_like, field.fillable, granted, fits) {
         Plan::Refuse(why) => {
-            record(&state, &target, &agent, &site, "refused");
+            record(&state, &block_id, &target, &agent, &site, "refused");
             return err_response(StatusCode::BAD_REQUEST, why.to_string());
         }
         Plan::Go => {}
@@ -182,11 +191,11 @@ pub(crate) async fn handle_vault_fill(
                 Ok(Ok(Decision::Once)) => {}
                 Ok(Ok(Decision::Always)) => always = true,
                 Ok(Ok(Decision::Deny)) | Ok(Err(_)) => {
-                    record(&state, &target, &agent, &site, "denied");
+                    record(&state, &block_id, &target, &agent, &site, "denied");
                     return err_response(StatusCode::FORBIDDEN, "the person said no: nothing was typed".to_string());
                 }
                 Err(_) => {
-                    record(&state, &target, &agent, &site, "timed out");
+                    record(&state, &block_id, &target, &agent, &site, "timed out");
                     return err_response(StatusCode::REQUEST_TIMEOUT, "the person didn't answer in time: nothing was typed; ask again when they are there".to_string());
                 }
             }
@@ -219,7 +228,7 @@ pub(crate) async fn handle_vault_fill(
     drop(value);
     match filled {
         Ok(data) => {
-            record(&state, &target, &agent, &site, "done");
+            record(&state, &block_id, &target, &agent, &site, "done");
             let store = state.identity_store.clone();
             let entry = target.id.clone();
             let _ = tokio::task::spawn_blocking(move || store.vault_touch(&entry, agentmux_common::time::now_ms())).await;
@@ -241,7 +250,7 @@ pub(crate) async fn handle_vault_fill(
             (StatusCode::OK, Json(json!({ "ok": true, "data": out }))).into_response()
         }
         Err((code, e)) => {
-            record(&state, &target, &agent, &site, "failed");
+            record(&state, &block_id, &target, &agent, &site, "failed");
             err_response(code, e)
         }
     }

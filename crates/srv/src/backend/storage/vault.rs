@@ -134,7 +134,7 @@ impl Store {
         // time the entry can be deleted, and a re-created one of the same name (its
         // id comes from its kind and label) must not inherit the site.
         conn.execute(
-            "INSERT OR REPLACE INTO db_vault_grants (entry_id, origin, granted_at)              SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM db_vault_entries WHERE id = ?1)",
+            "INSERT OR REPLACE INTO db_vault_grants (entry_id, origin, granted_at) SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM db_vault_entries WHERE id = ?1)",
             params![entry_id, origin, at_ms],
         )?;
         Ok(())
