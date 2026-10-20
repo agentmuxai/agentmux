@@ -27,6 +27,11 @@ export function vaultPromptNotes(platform: VaultPlatform): string[] {
     } else {
         notes.push("If your keyring is locked, your desktop asks for its password the first time AgentMux uses the Vault key.");
     }
+    if (platform === "win32") {
+        notes.push("Reveal and Copy ask Windows Hello (your PIN, fingerprint or face) each time, to confirm it's you. A copied value clears from the clipboard after 30 seconds.");
+    } else {
+        notes.push("Reveal and Copy need Windows Hello for now; Touch ID and the desktop's prompt aren't built yet.");
+    }
     notes.push("The Vault never asks for administrator rights. Agents never see these prompts, and can't answer them.");
     return notes;
 }

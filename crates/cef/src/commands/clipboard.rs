@@ -96,6 +96,147 @@ fn write_clipboard_text(text: &str) -> Result<(), String> {
     }
 }
 
+/// Writes a secret to the clipboard: on Windows kept out of the clipboard
+/// history and cloud clipboard (`CanIncludeInClipboardHistory`,
+/// `CanUploadToCloudClipboard`) and from clipboard monitors
+/// (`ExcludeClipboardContentFromMonitorProcessing`).
+///
+/// The text and the three markers are set in ONE open/close of the clipboard:
+/// the change notification fires on close, and history and monitors read the
+/// text then, so a marker set afterwards would come too late.
+#[cfg(target_os = "windows")]
+pub fn write_secret_text(text: &str) -> Result<(), String> {
+    use windows_sys::Win32::Foundation::GlobalFree;
+    use windows_sys::Win32::System::DataExchange::*;
+    use windows_sys::Win32::System::Memory::*;
+    use windows_sys::Win32::System::Ole::CF_UNICODETEXT;
+
+    /// A movable global block holding `bytes`, or null.
+    unsafe fn block(bytes: &[u8]) -> *mut std::ffi::c_void {
+        let h = GlobalAlloc(GMEM_MOVEABLE, bytes.len());
+        if h.is_null() {
+            return h;
+        }
+        let p = GlobalLock(h) as *mut u8;
+        if p.is_null() {
+            GlobalFree(h);
+            return std::ptr::null_mut();
+        }
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), p, bytes.len());
+        GlobalUnlock(h);
+        h
+    }
+    fn format(name: &str) -> u32 {
+        let wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+        unsafe { RegisterClipboardFormatW(wide.as_ptr()) }
+    }
+
+    let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+    let text_bytes: Vec<u8> = wide.iter().flat_map(|u| u.to_le_bytes()).collect();
+    let markers = [
+        (format("ExcludeClipboardContentFromMonitorProcessing"), 1u32),
+        (format("CanIncludeInClipboardHistory"), 0),
+        (format("CanUploadToCloudClipboard"), 0),
+    ];
+    unsafe {
+        // Another program (a clipboard manager) may hold the clipboard for a
+        // moment: try a few times before giving up.
+        let mut opened = false;
+        for _ in 0..10 {
+            if OpenClipboard(std::ptr::null_mut()) != 0 {
+                opened = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        if !opened {
+            return Err("the clipboard is in use by another program; try again".into());
+        }
+        EmptyClipboard();
+        // Markers first, then the text. The system owns a block once
+        // SetClipboardData succeeds; if it fails the block is still ours to free.
+        let mut ok = true;
+        for (fmt, value) in markers {
+            let h = block(&value.to_le_bytes());
+            if h.is_null() {
+                ok = false;
+            } else if SetClipboardData(fmt, h).is_null() {
+                GlobalFree(h);
+                ok = false;
+            }
+        }
+        let h = block(&text_bytes);
+        if h.is_null() {
+            ok = false;
+        } else if SetClipboardData(CF_UNICODETEXT as u32, h).is_null() {
+            GlobalFree(h);
+            ok = false;
+        }
+        if !ok {
+            // Never leave the secret where history could take it.
+            EmptyClipboard();
+            CloseClipboard();
+            return Err("couldn't put the secret on the clipboard privately".into());
+        }
+        CloseClipboard();
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn write_secret_text(text: &str) -> Result<(), String> {
+    write_clipboard_text(text)
+}
+
+/// Empties the clipboard if it still holds exactly `text`. On Windows the
+/// comparison and the clear happen in one open of the clipboard, so something
+/// copied in between can't be erased.
+#[cfg(target_os = "windows")]
+pub fn clear_if_holds(text: &str) -> Result<(), String> {
+    use windows_sys::Win32::System::DataExchange::*;
+    use windows_sys::Win32::System::Memory::*;
+    use windows_sys::Win32::System::Ole::CF_UNICODETEXT;
+    unsafe {
+        let mut opened = false;
+        for _ in 0..10 {
+            if OpenClipboard(std::ptr::null_mut()) != 0 {
+                opened = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        if !opened {
+            return Err("the clipboard is in use by another program".into());
+        }
+        let mut holds = false;
+        let handle = GetClipboardData(CF_UNICODETEXT as u32);
+        if !handle.is_null() {
+            let ptr = GlobalLock(handle) as *const u16;
+            if !ptr.is_null() {
+                let mut len = 0;
+                while *ptr.add(len) != 0 {
+                    len += 1;
+                }
+                holds = String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len)) == text;
+                GlobalUnlock(handle);
+            }
+        }
+        if holds {
+            EmptyClipboard();
+        }
+        CloseClipboard();
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn clear_if_holds(text: &str) -> Result<(), String> {
+    if read_clipboard_text()? == text {
+        write_clipboard_text("")?;
+    }
+    Ok(())
+}
+
 #[cfg(target_os = "macos")]
 fn read_clipboard_text() -> Result<String, String> {
     use std::process::Command;
@@ -485,5 +626,35 @@ mod attachment_tests {
     fn garbage_is_refused() {
         assert!(dib_to_bmp(&[1, 2, 3]).is_none());
         assert!(dib_to_bmp(&dib(40, 24, 0, 0, 0)[..20]).is_none());
+    }
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod secret_tests {
+    use super::*;
+
+    fn available(name: &str) -> bool {
+        use windows_sys::Win32::System::DataExchange::*;
+        let wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+        unsafe { IsClipboardFormatAvailable(RegisterClipboardFormatW(wide.as_ptr())) != 0 }
+    }
+
+    /// Writes the real clipboard (and puts its text back), so it's run by hand:
+    /// `cargo test -p agentmux-cef secret_tests -- --ignored`.
+    #[test]
+    #[ignore = "writes the real clipboard"]
+    fn a_secret_is_marked_private_in_the_same_write_and_clears() {
+        let before = read_clipboard_text().unwrap_or_default();
+        write_secret_text("vault-secret-for-test").unwrap();
+        assert_eq!(read_clipboard_text().unwrap(), "vault-secret-for-test");
+        for marker in ["ExcludeClipboardContentFromMonitorProcessing", "CanIncludeInClipboardHistory", "CanUploadToCloudClipboard"] {
+            assert!(available(marker), "{marker} is set with the text");
+        }
+        // Something else on the clipboard isn't cleared.
+        clear_if_holds("another value").unwrap();
+        assert_eq!(read_clipboard_text().unwrap(), "vault-secret-for-test");
+        clear_if_holds("vault-secret-for-test").unwrap();
+        assert_eq!(read_clipboard_text().unwrap(), "");
+        write_clipboard_text(&before).unwrap();
     }
 }
