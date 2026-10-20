@@ -59,20 +59,26 @@ function agentBlocks(objectsDb, want) {
     }
 }
 
-/** The recorded size of a zone's `output` and whether its parts are whole; null if there is none. */
-function outputState(db, zone) {
+/**
+ * The recorded size of a zone's `output` and whether its parts are whole: no gap, adding up to
+ * the size and, with `contentScan`, no NUL bytes (a lost page read back as zeros). Null if none.
+ */
+function outputState(db, zone, contentScan) {
     const f = db.prepare("SELECT size FROM db_wave_file WHERE zoneid = ? AND name = 'output'").get(zone);
     if (!f || Number(f.size) <= 0) return null;
     const p = db.prepare("SELECT COUNT(*) AS n, MIN(partidx) AS lo, MAX(partidx) AS hi, SUM(LENGTH(data)) AS bytes FROM db_file_data WHERE zoneid = ? AND name = 'output'").get(zone);
-    const whole = p.n > 0 && p.lo === 0 && p.hi + 1 === p.n && Number(p.bytes) === Number(f.size);
+    let whole = p.n > 0 && p.lo === 0 && p.hi + 1 === p.n && Number(p.bytes) === Number(f.size);
+    if (whole && contentScan) {
+        whole = db.prepare("SELECT COUNT(*) AS n FROM db_file_data WHERE zoneid = ? AND name = 'output' AND instr(data, x'00') > 0").get(zone).n === 0;
+    }
     return { size: Number(f.size), whole };
 }
 
 /**
  * For each definition id in `want`, every candidate copy found and the one to use:
- * the largest whole copy. -> Map(defId -> { best: {dataDir, blockOid, size} | null, candidates: [...] })
+ * the largest whole copy (no gap, the right size, no NUL bytes). -> Map(defId -> { best: {dataDir, blockOid, size} | null, candidates: [...] })
  */
-export function findSources(home, want) {
+export function findSources(home, want, { contentScan = true } = {}) {
     const found = new Map([...want].map((id) => [id, { best: null, candidates: [] }]));
     const dataDirs = collectDataDirs(home);
     for (const data of dataDirs) {
@@ -93,7 +99,7 @@ export function findSources(home, want) {
             for (const { defId, blockOid } of blocks) {
                 let state = null;
                 try {
-                    state = outputState(fdb, blockOid);
+                    state = outputState(fdb, blockOid, contentScan);
                 } catch {
                     continue;
                 }

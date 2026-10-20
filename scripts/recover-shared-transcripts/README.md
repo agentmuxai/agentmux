@@ -13,7 +13,7 @@ result in place is a manual step (see "Putting the result in place").
 
 ## What it does
 
-1. Refuses to start if AgentMux processes are running (`--allow-running` overrides),
+1. Refuses to start if AgentMux processes are running or the process list can't be read (`--allow-running` overrides),
    if `--work` is inside the store's folder, if there is not about twice the
    store's size free under `--work`, or if the `sqlite3` shell is older than 3.51.3.
 2. Copies the database, `-wal` and `-shm` into `--work`.
@@ -28,7 +28,7 @@ result in place is a manual step (see "Putting the result in place").
    - `agent:<id>:current` / `output`: **rebuild** from the richest whole per-channel
      copy, the same source `crates/srv/src/backend/transcript_backfill.rs` uses (every
      `channels/*/versions/*/data` and `dev/**/data` store; the blocks whose meta
-     `agentId` or legacy `agent:id` is the agent). A copy with its own gap is not used.
+     `agentId` or legacy `agent:id` is the agent). A copy with its own gap, the wrong size or NUL bytes is not used.
      No copy: **no-source**, left alone. A copy shorter than the zone: **source-shorter**,
      left alone unless `--allow-shorter` (the shared zone also holds conversation from
      other channels and builds, so a short copy can lose lines).

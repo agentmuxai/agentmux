@@ -96,3 +96,26 @@ export function agentOfZone(zone) {
 
 /** Files the app derives from `output` and rebuilds on demand. */
 export const DERIVED = new Set(["output.tsidx", "output.idx", "output.state.json"]);
+
+/**
+ * Everything wrong with a database: the structural damage of [`findDamage`] and, unless
+ * `contentScan` is false, the NUL holes of [`findNulHoles`] (added to the file's entry when
+ * it already has one).
+ */
+export function allDamage(db, { contentScan = true } = {}) {
+    const found = findDamage(db);
+    if (contentScan) {
+        for (const hole of findNulHoles(db)) {
+            const detail = `${hole.parts} part(s) hold NUL bytes, from part ${hole.first}`;
+            const known = found.damage.find((d) => d.zone === hole.zone && d.name === hole.name);
+            if (known) {
+                known.detail += `; ${detail}`;
+                continue;
+            }
+            const f = db.prepare("SELECT size FROM db_wave_file WHERE zoneid = ? AND name = ?").get(hole.zone, hole.name);
+            const bytes = Number(db.prepare("SELECT COALESCE(SUM(LENGTH(data)), 0) AS n FROM db_file_data WHERE zoneid = ? AND name = ?").get(hole.zone, hole.name).n);
+            found.damage.push({ zone: hole.zone, name: hole.name, kind: "nul-bytes", detail, size: f ? Number(f.size) : null, partsBytes: bytes, prefixBytes: 0 });
+        }
+    }
+    return found;
+}

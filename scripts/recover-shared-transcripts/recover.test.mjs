@@ -73,6 +73,8 @@ beforeAll(() => {
         { oid: "blk-aaa", meta: { agentId: "aaa" }, output: text.aaa },
         { oid: "blk-fff", meta: { "agent:id": "fff" }, output: text.fff },
         { oid: "blk-ggg", meta: { agentId: "ggg" }, output: text.ggg },
+        // Larger, and the sizes add up, but a lost page reads back as zeros: not a usable source.
+        { oid: "blk-ggg-holey", meta: { agentId: "ggg" }, output: Buffer.concat([holey, transcript("tail", PART)]) },
     ]);
 
     // Corrupt fff on disk: a whole page from the middle of its part 3 is lost (read back as zeros).
@@ -114,6 +116,7 @@ suite("the offline recovery tool", () => {
         expect(Object.keys(byZone).sort()).toEqual(["agent:aaa:current", "agent:ccc:current", "agent:ddd:current", "agent:fff:current", "agent:ggg:current"]);
         expect(r.damage.find((d) => d.zone === "agent:ggg:current").kind, "sizes add up, only the zeros give it away").toBe("nul-bytes");
         expect(byZone["agent:ggg:current"].action).toBe("rebuild");
+        expect(byZone["agent:ggg:current"].source.blockOid, "the larger copy with a zero-filled hole is passed over").toBe("blk-ggg");
         expect(byZone["agent:aaa:current"].action).toBe("rebuild");
         expect(byZone["agent:aaa:current"].source.blockOid, "the largest whole copy, not the larger one with a gap").toBe("blk-aaa");
         expect(byZone["agent:ccc:current"].action).toBe("no-source");
@@ -153,6 +156,7 @@ suite("the offline recovery tool", () => {
         } finally {
             db.close();
         }
+        expect(r.remainingDamage.map((d) => `${d.zone}/${d.name}`).sort(), "the rescan after the rebuild includes the NUL scan").toEqual(["agent:ccc:current/output", "agent:ddd:current/output"]);
         const actions = Object.fromEntries(r.plan.filter((p) => p.name === "output").map((p) => [p.zone, [p.action, p.applied]]));
         expect(actions["agent:aaa:current"]).toEqual(["rebuild", true]);
         expect(actions["agent:ccc:current"][1]).toBeUndefined();
@@ -174,6 +178,13 @@ suite("the offline recovery tool", () => {
         const r = JSON.parse(readFileSync(join(work, "report.json"), "utf8"));
         expect(r.damage.map((d) => d.zone)).not.toContain("agent:ggg:current");
     }, 120_000);
+
+    it("refuses to go on when it cannot tell whether AgentMux is running", async () => {
+        const args = ["--work", join(dir, "work3"), "--source", store, "--sqlite3", cli.path];
+        expect(await main(args, { runningInstances: () => ({ checked: false, lines: [] }) })).toBe(2);
+        expect(await main(args, { runningInstances: () => ({ checked: true, lines: ["123 agentmux-srv"] }) })).toBe(2);
+        expect(existsSync(join(dir, "work3"))).toBe(false);
+    });
 
     it("refuses a work folder inside the store's folder", async () => {
         await expect(main(["--work", join(home, "shared", "agents", "transcripts", "w"), "--source", store, "--sqlite3", cli.path, "--allow-running"])).rejects.toThrow(/overlaps/);

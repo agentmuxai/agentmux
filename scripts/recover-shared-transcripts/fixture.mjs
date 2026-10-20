@@ -40,6 +40,33 @@ ALTER TABLE db_wave_file ADD COLUMN lines_rev INTEGER;
 ALTER TABLE db_wave_file ADD COLUMN incarnation BLOB;`;
 
 export const TRIGGERS = [
+    `CREATE TRIGGER IF NOT EXISTS db_file_data_rev_insert_v2
+         BEFORE INSERT ON db_file_data
+         WHEN EXISTS (
+             SELECT 1 FROM db_file_data d
+             WHERE d.zoneid = NEW.zoneid AND d.name = NEW.name AND d.partidx = NEW.partidx
+               AND substr(NEW.data, 1, length(d.data)) IS NOT d.data
+         )
+         -- A NEW part inside the range the file already claims: bytes the
+         -- file declared (and a reader may have read as missing) are being
+         -- filled in, not appended. Every writer inserts appended parts
+         -- before raising \`size\`, so an append's new parts always start at
+         -- or past it. Older builds' write_file raises \`size\` first and
+         -- inserts after (Codex on #3631). 65536 is PART_DATA_SIZE.
+         OR (
+             NOT EXISTS (
+                 SELECT 1 FROM db_file_data d
+                 WHERE d.zoneid = NEW.zoneid AND d.name = NEW.name AND d.partidx = NEW.partidx
+             )
+             AND NEW.partidx * 65536 < (
+                 SELECT COALESCE(MAX(w.size), 0) FROM db_wave_file w
+                 WHERE w.zoneid = NEW.zoneid AND w.name = NEW.name
+             )
+         )
+         BEGIN
+             UPDATE db_wave_file SET rev = COALESCE(rev, 0) + 1
+             WHERE zoneid = NEW.zoneid AND name = NEW.name;
+         END;`,
     `CREATE TRIGGER IF NOT EXISTS db_file_data_rev_delete
          AFTER DELETE ON db_file_data
          BEGIN

@@ -10,8 +10,8 @@
 import { copyFileSync, existsSync, mkdirSync, openSync, readSync, closeSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { agentOfZone, DERIVED, findDamage, findNulHoles, lostAndFound } from "./lib/analyze.mjs";
-import { checkWorkDir, copyNames, freeBytes, homeOf, locateStore, requiredBytes, runningInstances, workPath } from "./lib/preflight.mjs";
+import { agentOfZone, allDamage, DERIVED, lostAndFound } from "./lib/analyze.mjs";
+import { checkWorkDir, copyNames, freeBytes, homeOf, locateStore, requiredBytes, runningInstances as listRunning, workPath } from "./lib/preflight.mjs";
 import { dropFile, outputTemplate, rebuildZone } from "./lib/rebuild.mjs";
 import { writeReport } from "./lib/report.mjs";
 import { atLeast, findSqlite3, integrityCheck, MIN_SQLITE, open, recover, sqliteVersionOfNode } from "./lib/sqlite.mjs";
@@ -61,7 +61,7 @@ function headerUserVersion(file) {
 
 const fingerprint = (store) => store.files.map((f) => (existsSync(f.path) ? `${statSync(f.path).size}:${statSync(f.path).mtimeMs}` : "absent"));
 
-export async function main(argv) {
+export async function main(argv, { runningInstances = listRunning } = {}) {
     const args = parseArgs(argv);
     const source = args.source ?? join(homedir(), ".agentmux", "shared", "agents", "transcripts", "filestore.db");
     const store = locateStore(source);
@@ -70,9 +70,15 @@ export async function main(argv) {
     checkWorkDir(work, store);
 
     const running = runningInstances();
-    if (running.lines.length && !args.allowRunning) {
-        console.error(`AgentMux is running; a copy taken now can be inconsistent. Quit every instance first (or pass --allow-running):\n${running.lines.slice(0, 5).join("\n")}`);
-        return 2;
+    if (!args.allowRunning) {
+        if (!running.checked) {
+            console.error("could not list the running processes, so it can't be shown that AgentMux is stopped. Quit every instance and pass --allow-running to go on.");
+            return 2;
+        }
+        if (running.lines.length) {
+            console.error(`AgentMux is running; a copy taken now can be inconsistent. Quit every instance first (or pass --allow-running):\n${running.lines.slice(0, 5).join("\n")}`);
+            return 2;
+        }
     }
     const cli = findSqlite3(args.sqlite3);
     if (!cli.version || !atLeast(cli.version, MIN_SQLITE)) {
@@ -160,27 +166,14 @@ export async function main(argv) {
     const db = open(working, { write: args.apply });
     try {
         report.lostAndFound = lostAndFound(db);
-        const found = findDamage(db);
+        const found = allDamage(db, { contentScan: !args.skipContentScan });
         report.damage = found.damage;
-        if (!args.skipContentScan) {
-            log("looking for zero-filled holes in the transcripts");
-            for (const hole of findNulHoles(db)) {
-                const known = found.damage.find((d) => d.zone === hole.zone && d.name === hole.name);
-                const detail = `${hole.parts} part(s) hold NUL bytes, from part ${hole.first}`;
-                if (known) known.detail += `; ${detail}`;
-                else {
-                    const f = db.prepare("SELECT size FROM db_wave_file WHERE zoneid = ? AND name = ?").get(hole.zone, hole.name);
-                    const bytes = Number(db.prepare("SELECT COALESCE(SUM(LENGTH(data)), 0) AS n FROM db_file_data WHERE zoneid = ? AND name = ?").get(hole.zone, hole.name).n);
-                    found.damage.push({ zone: hole.zone, name: hole.name, kind: "nul-bytes", detail, size: f ? Number(f.size) : null, partsBytes: bytes, prefixBytes: 0 });
-                }
-            }
-        }
         report.inventory = { files: found.files, zones: found.zones };
         log(`${found.files} file(s) in ${found.zones} zone(s); ${found.damage.length} damaged`);
 
         // 5. Plan: which damaged files can be rebuilt from which per-channel copy.
         const wanted = new Set(found.damage.map((d) => (d.name === "output" ? agentOfZone(d.zone) : null)).filter(Boolean));
-        const sources = wanted.size ? findSources(home, wanted) : { dataDirsScanned: 0, byAgent: new Map() };
+        const sources = wanted.size ? findSources(home, wanted, { contentScan: !args.skipContentScan }) : { dataDirsScanned: 0, byAgent: new Map() };
         if (wanted.size) log(`looked for ${wanted.size} agent(s)' transcripts in ${sources.dataDirsScanned} channel store(s)`);
         const rebuilt = new Set();
         for (const d of found.damage) {
@@ -225,7 +218,7 @@ export async function main(argv) {
                     p.error = String(e.message ?? e);
                 }
             }
-            report.remainingDamage = findDamage(db).damage;
+            report.remainingDamage = allDamage(db, { contentScan: !args.skipContentScan }).damage;
         }
     } finally {
         db.close();
