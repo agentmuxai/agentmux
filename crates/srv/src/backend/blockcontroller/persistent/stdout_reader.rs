@@ -3,7 +3,8 @@
 
 //! The persistent CLI's stdout reader task, started by `spawn_process`
 //! (`spawn.rs`): control frames, session-id capture, resume-state events,
-//! failure classification, the task feed and the output append.
+//! API retry state, failure classification, the task feed and the output
+//! append.
 
 use super::*;
 
@@ -62,6 +63,7 @@ impl PersistentSubprocessController {
         // lines drive the background-task registry, including tasks a
         // subagent owns (see `background_task_feed.rs`).
         let mut task_feed = crate::backend::background_task_feed::TaskFeed::default();
+        let mut api_retry = crate::backend::agent_api_retry::ApiRetryTracker::default();
         // Set by a compaction boundary: the memory card the hook finished
         // before the boundary was written waits for the first line after the
         // boundary that isn't the CLI's own user-turn text (its summary, a
@@ -167,6 +169,11 @@ impl PersistentSubprocessController {
                             }
                         }
                         continue;
+                    }
+                }
+                if let Some(update) = api_retry.observe(&parsed, agentmux_common::time::now_ms()) {
+                    if let Some(broker) = broker_read.as_deref() {
+                        crate::backend::agent_api_retry::publish_api_retry(broker, &block_id_read, update);
                     }
                 }
                 if let Some(store) = mstore_read.as_deref() {
@@ -747,6 +754,9 @@ impl PersistentSubprocessController {
             }
         }
 
+        if let (Some(update), Some(broker)) = (api_retry.finish(), broker_read.as_deref()) {
+            crate::backend::agent_api_retry::publish_api_retry(broker, &block_id_read, update);
+        }
         tracing::info!(block_id = %block_id_read, "persistent stdout reader finished");
     }
 }

@@ -13,6 +13,7 @@ import type { AgentRuntimeEvent } from "@/types/rpc/AgentRuntimeEvent";
 import type { AgentTurnEvent } from "@/types/rpc/AgentTurnEvent";
 import type { AmbientNarrationEvent } from "@/types/rpc/AmbientNarrationEvent";
 import type { AmbientSpentEvent } from "@/types/rpc/AmbientSpentEvent";
+import type { ApiRetryEvent } from "@/types/rpc/ApiRetryEvent";
 import type { AppUpdateStatus } from "@/types/rpc/AppUpdateStatus";
 import type { AttachmentBatchDoneEvent } from "@/types/rpc/AttachmentBatchDoneEvent";
 import type { AttachmentFailedEvent } from "@/types/rpc/AttachmentFailedEvent";
@@ -87,6 +88,7 @@ import type { WidgetStorageEvent } from "@/types/rpc/WidgetStorageEvent";
 /** Each typed broker event's payload, by its wire name. An event sent under a name per id
  *  (`agent:memory:changed:<agent id>`) is keyed by its prefix and any id. Subscribe with `onMuxEvent`. */
 export type MuxEventPayloads = {
+  "agent-api-retry": ApiRetryEvent;
   "agent-message-accepted": MessageAcceptedEvent;
   "agent-resume-retry": ResumeRetryEvent;
   "agent:inputhistory": InputHistoryChangedEvent;
@@ -191,6 +193,7 @@ export type MuxEventPayloads = {
 
 /** The typed events' wire names, apart from the per-id ones. */
 export const TYPED_MUX_EVENTS = [
+  "agent-api-retry",
   "agent-message-accepted",
   "agent-resume-retry",
   "agent:inputhistory",
