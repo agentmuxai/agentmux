@@ -397,24 +397,24 @@ export function ToolchainView(): JSX.Element {
     };
 
     const renderRow = (row: ToolRow): JSX.Element => (
-        <div class="toolchain-row" classList={{ "toolchain-row--missing": !row.loading && !row.found }}>
+        <div class="toolchain-row">
             <i class={`toolchain-row-icon ${rowIconClass(row.icon, row.brandIcon)}`} aria-hidden="true" />
             <div class="toolchain-row-main">
                 <div class="toolchain-row-title">
                     <span class="toolchain-row-name">{row.label}</span>
                     <Show when={row.loading}>
-                        <span class="toolchain-pill toolchain-pill--muted">Checking…</span>
+                        <span class="toolchain-pill">Checking…</span>
                     </Show>
                     <Show when={!row.loading && row.found}>
                         <span class="toolchain-pill toolchain-pill--ok">
                             <i class="fa-solid fa-check" /> {row.version ?? "installed"}
                         </span>
                         <Show when={row.source === "local_install"}>
-                            <span class="toolchain-pill toolchain-pill--muted">managed</span>
+                            <span class="toolchain-pill">managed</span>
                         </Show>
                         <Show when={row.kind === "provider" && row.source === "system_path"}>
                             <span
-                                class="toolchain-pill toolchain-pill--muted"
+                                class="toolchain-pill"
                                 title="AgentMux doesn't install this CLI: it runs the copy you installed"
                             >
                                 your install
@@ -435,7 +435,7 @@ export function ToolchainView(): JSX.Element {
                                 <>
                                     <Show when={d.drift === "behind-pin"}>
                                         <span
-                                            class="toolchain-pill toolchain-pill--update"
+                                            class="toolchain-pill toolchain-pill--warn"
                                             title={`AgentMux is validated against ${d.pinned}; you have ${d.installed}`}
                                         >
                                             <i class="fa-solid fa-circle-up" />{" "}
@@ -443,13 +443,13 @@ export function ToolchainView(): JSX.Element {
                                         </span>
                                     </Show>
                                     <Show when={d.drift === "current"}>
-                                        <span class="toolchain-pill toolchain-pill--muted">
+                                        <span class="toolchain-pill">
                                             <i class="fa-solid fa-circle-check" /> up to date
                                         </span>
                                     </Show>
                                     <Show when={d.drift === "ahead-of-pin"}>
                                         <span
-                                            class="toolchain-pill toolchain-pill--muted"
+                                            class="toolchain-pill"
                                             title={`Newer than the ${d.pinned} AgentMux validates against — not a problem, just untested here`}
                                         >
                                             ahead of pin
@@ -457,7 +457,7 @@ export function ToolchainView(): JSX.Element {
                                     </Show>
                                     <Show when={d.currency === "pin-behind-upstream"}>
                                         <span
-                                            class="toolchain-pill toolchain-pill--muted"
+                                            class="toolchain-pill"
                                             title={`AgentMux pins ${d.pinned}; upstream has ${d.latest}. Nothing for you to do — this is ours to bump.`}
                                         >
                                             pin {d.pinned} · upstream {d.latest}
@@ -468,7 +468,7 @@ export function ToolchainView(): JSX.Element {
                         })()}
                     </Show>
                     <Show when={!row.loading && !row.found}>
-                        <span class="toolchain-pill" classList={{ "toolchain-pill--warn": !row.optional, "toolchain-pill--muted": row.optional }}>
+                        <span class="toolchain-pill" classList={{ "toolchain-pill--warn": !row.optional }}>
                             {row.optional ? "Not installed (optional)" : "Not found"}
                         </span>
                     </Show>
@@ -479,7 +479,7 @@ export function ToolchainView(): JSX.Element {
                 <Show when={!row.loading && !row.found && row.installCommand}>
                     <div class="toolchain-row-cmd">
                         <code>{row.installCommand}</code>
-                        <Button tone="quiet" class="toolchain-link-btn" onClick={() => copy(row.installCommand)} title="Copy">
+                        <Button tone="quiet" onClick={() => copy(row.installCommand)} title="Copy">
                             <i class="fa-solid fa-copy" />
                         </Button>
                     </div>
@@ -492,7 +492,7 @@ export function ToolchainView(): JSX.Element {
                 >
                     <Button
                         tone="accent"
-                        class="toolchain-link-btn toolchain-link-btn--install-now"
+                        class="toolchain-link-btn--install-now"
                         onClick={() => toggleInstallPanel(row.id)}
                     >
                         or install it now
@@ -512,12 +512,12 @@ export function ToolchainView(): JSX.Element {
             </div>
             <div class="toolchain-row-actions">
                 <Show when={!row.loading && !row.found && row.installUrl}>
-                    <Button class="toolchain-btn" onClick={() => open(row.installUrl)}>
+                    <Button onClick={() => open(row.installUrl)}>
                         Install <i class="fa-solid fa-arrow-up-right-from-square" />
                     </Button>
                 </Show>
                 <Show when={row.docsUrl}>
-                    <Button tone="quiet" class="toolchain-link-btn" onClick={() => open(row.docsUrl)} title="Docs">
+                    <Button tone="quiet" onClick={() => open(row.docsUrl)} title="Docs">
                         <i class="fa-solid fa-book" />
                     </Button>
                 </Show>
@@ -528,12 +528,11 @@ export function ToolchainView(): JSX.Element {
     return (
         <div class="toolchain-view">
             <div class="toolchain-view-header">
-                <Button tone="quiet" class="toolchain-btn toolchain-btn--ghost" onClick={refresh}>
+                <Button tone="quiet" onClick={refresh}>
                     <i class="fa-solid fa-rotate" /> Refresh
                 </Button>
                 <Button
                     tone="quiet"
-                    class="toolchain-btn toolchain-btn--ghost"
                     onClick={() => void checkLatestVersions()}
                     disabled={latestLoading()}
                     title="Fetch latest published versions from npm registry"
@@ -546,7 +545,7 @@ export function ToolchainView(): JSX.Element {
                     deliberately excluded, so this never nags about something
                     they cannot fix. */}
                 <Show when={behindCount() > 0}>
-                    <span class="toolchain-pill toolchain-pill--update" title="Reinstall from each row to move to the version AgentMux validates against">
+                    <span class="toolchain-pill toolchain-pill--warn" title="Reinstall from each row to move to the version AgentMux validates against">
                         <i class="fa-solid fa-circle-up" />{" "}
                         {behindCount()} {behindCount() === 1 ? "tool is" : "tools are"} behind
                     </span>
@@ -567,12 +566,11 @@ export function ToolchainView(): JSX.Element {
                                     <span class="toolchain-pill" classList={{
                                         "toolchain-pill--ok": e().pathSource === "login-shell",
                                         "toolchain-pill--warn": e().pathSource === "inherited" && plat !== "windows",
-                                        "toolchain-pill--muted": e().pathSource === "fallback-dirs" || plat === "windows",
                                     }}>
                                         {pathSourceLabel(e().pathSource)}
                                     </span>
                                 </div>
-                                <Button tone="quiet" class="toolchain-link-btn toolchain-path-toggle" onClick={() => setShowPath((v) => !v)}>
+                                <Button tone="quiet" class="toolchain-path-toggle" onClick={() => setShowPath((v) => !v)}>
                                     {showPath() ? "Hide" : "Show"} effective PATH
                                 </Button>
                                 <Show when={showPath()}>
@@ -606,24 +604,24 @@ export function ToolchainView(): JSX.Element {
                     <h3 class="toolchain-section-title">External Widgets</h3>
                     <For each={wrows}>
                         {(row, i) => (
-                            <div class="toolchain-row" classList={{ "toolchain-row--missing": !row.cliLoading && !row.cliFound && !row.running }}>
+                            <div class="toolchain-row">
                                 <i class={`toolchain-row-icon ${rowIconClass(row.icon)}`} aria-hidden="true" />
                                 <div class="toolchain-row-main">
                                     <div class="toolchain-row-title">
                                         <span class="toolchain-row-name">{row.label}</span>
                                         <Show when={row.running}>
                                             <span class="toolchain-pill toolchain-pill--ok">
-                                                <i class="fa-solid fa-circle" style="font-size:0.5em;vertical-align:middle" /> Running
+                                                <i class="fa-solid fa-circle fa-2xs" aria-hidden="true" /> Running
                                             </span>
                                         </Show>
                                         <Show when={!row.cliLoading && row.cliFound && !row.running}>
-                                            <span class="toolchain-pill toolchain-pill--muted">Installed</span>
+                                            <span class="toolchain-pill">Installed</span>
                                         </Show>
                                         <Show when={row.cliLoading || row.healthLoading}>
-                                            <span class="toolchain-pill toolchain-pill--muted">Checking…</span>
+                                            <span class="toolchain-pill">Checking…</span>
                                         </Show>
                                         <Show when={!row.cliLoading && !row.healthLoading && !row.cliFound && !row.running}>
-                                            <span class="toolchain-pill toolchain-pill--muted">
+                                            <span class="toolchain-pill">
                                                 {row.installKind === "manual" ? "Not detected" : "Not installed"}
                                             </span>
                                         </Show>
@@ -637,7 +635,7 @@ export function ToolchainView(): JSX.Element {
                                     <div class="toolchain-widget-port">
                                         <span class="toolchain-widget-port-label">Port</span>
                                         <input
-                                            class="toolchain-widget-port-input"
+                                            class="ui-input ui-density-compact toolchain-widget-port-input"
                                             type="number" min="1" max="65535"
                                             value={row.customPort ?? row.defaultPort}
                                             onBlur={(e) => {
@@ -650,7 +648,7 @@ export function ToolchainView(): JSX.Element {
                                             }}
                                         />
                                         <Show when={row.customPort !== undefined}>
-                                            <Button tone="quiet" class="toolchain-link-btn" title="Reset to default port"
+                                            <Button tone="quiet" title="Reset to default port"
                                                 onClick={() => { setWrows(i(), { customPort: undefined, cliLoading: true, cliFound: false, healthLoading: false, running: false }); saveWidgetPort(row.id, undefined); void probeWidget(i()); }}>
                                                 <i class="fa-solid fa-rotate-left" />
                                             </Button>
@@ -659,13 +657,13 @@ export function ToolchainView(): JSX.Element {
                                 </div>
                                 <div class="toolchain-row-actions">
                                     <Show when={row.running}>
-                                        <Button class="toolchain-btn"
+                                        <Button
                                             onClick={() => void createBlock({ meta: { view: "browser", url: `http://127.0.0.1:${row.customPort ?? row.defaultPort}${row.embedPath}`, "frame:title": row.label } })}>
                                             Open Pane <i class="fa-solid fa-arrow-up-right-from-square" />
                                         </Button>
                                     </Show>
                                     <Show when={row.docsUrl}>
-                                        <Button tone="quiet" class="toolchain-link-btn" onClick={() => open(row.docsUrl)} title="Docs">
+                                        <Button tone="quiet" onClick={() => open(row.docsUrl)} title="Docs">
                                             <i class="fa-solid fa-book" />
                                         </Button>
                                     </Show>
