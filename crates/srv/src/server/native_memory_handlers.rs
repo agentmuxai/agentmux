@@ -1303,7 +1303,6 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     .agent_def_get(&cmd.agent_id)
                     .map_err(|e| format!("agent:memory:adoption_list: store: {e}"))?
                     .ok_or_else(|| format!("agent:memory:adoption_list: agent {} not found", cmd.agent_id))?;
-                // A memory record found corrupt (`transcript::damage`) offers nothing to adopt.
                 let Some(fs) = crate::backend::transcript::damage::global_for(&crate::backend::transcript::damage::memory_zone(&agent.id)) else {
                     return Ok(NativeMemoryAdoptionListResult { list: None });
                 };
