@@ -5,11 +5,11 @@
 // reach this channel's agents, in one line, with Sign in or Sign out. The
 // same state the status bar indicator shows (`@/store/muxbus-delivery`).
 
-import { Button } from "@/app/element/ui";
 import { onMount, Show, type JSX } from "solid-js";
 
 import { useMuxBusStatus } from "@/app/view/accounts/AgentMuxConnectPanel";
 import { MuxBusSignInChoices } from "@/app/view/accounts/muxbus-sign-in-choices";
+import { MuxBusSignOutButton } from "@/app/view/accounts/muxbus-sign-out";
 import { muxbusDelivery, muxbusDeliveryLine, muxbusOffersSignIn } from "@/store/muxbus-delivery";
 import type { SettingsIndexEntry } from "../settings-model";
 
@@ -35,9 +35,7 @@ export function MuxBusSignIn(): JSX.Element {
                     {muxbusDeliveryLine(muxbusDelivery())}
                 </span>
                 <Show when={!offersSignIn()}>
-                    <Button busy={muxbus.loading()} onClick={() => void muxbus.disconnect()}>
-                        Sign out
-                    </Button>
+                    <MuxBusSignOutButton muxbus={muxbus} />
                 </Show>
             </div>
             <Show when={offersSignIn()}>

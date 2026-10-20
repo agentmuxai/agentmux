@@ -1,0 +1,24 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// MuxBus Sign out's in-place confirmation while MuxBus can't be reached
+// (muxbus-sign-out.tsx).
+
+.muxbus-signout-confirm {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    max-width: 360px;
+}
+
+.muxbus-signout-warning {
+    font-size: var(--text-sm);
+    color: var(--secondary-text-color);
+    line-height: 1.4;
+}
+
+.muxbus-signout-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+}

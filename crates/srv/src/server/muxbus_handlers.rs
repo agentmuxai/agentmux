@@ -418,6 +418,12 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         move |_req: MuxBusDisconnectReq, _ctx| {
             let mstore = mstore_disconnect.clone();
             async move {
+                // The only path that deletes the stored sign-in: say so, and in
+                // what state delivery was when it happened.
+                tracing::info!(
+                    delivery = ?crate::muxbus::delivery_status::status().state,
+                    "muxbus.disconnect: signing out, clearing the stored sign-in"
+                );
                 // The presence goodbye goes first: it needs the sign-in
                 // being cleared. At most 2 s; nothing is published after it
                 // until `signed_out`, which runs whether or not the clear
