@@ -988,6 +988,17 @@ describe("a pane that is both minimized and maximized", () => {
         expect(model.calls).toEqual(["updateTree"]);
     });
 
+    it("the header's Restore on a maximized pane that is not in the tree (an ephemeral pane) still ends the maximize", () => {
+        const { root } = buildTwoColumnLayout();
+        const model = makeMagnifyMock(root, "ephemeral-node");
+
+        restoreMaximizedNode(model, "ephemeral-node");
+
+        expect(model.treeState.magnifiedNodeId).toBeUndefined();
+        expect(model.calls).toEqual(["updateTree"]);
+        expect(model.magnifyCalls.map((c: { nodeId: string }) => c.nodeId)).toEqual(["ephemeral-node"]);
+    });
+
     it("the header's Restore does nothing for a pane that is not maximized", () => {
         const { root, paneA1 } = buildTwoColumnLayout();
         paneA1.minimized = true;

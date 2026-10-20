@@ -144,10 +144,11 @@ export function collapseMaximizedNode(model: LayoutModel, nodeId: string) {
  * pane, which the layout allows.
  */
 export function restoreMaximizedNode(model: LayoutModel, nodeId: string) {
-    const node = findNode(model.treeState.rootNode, nodeId);
-    if (!node || node.children?.length) return;
     if (model.treeState.magnifiedNodeId !== nodeId) return;
-    if (node.minimized) commitToggle(model, LayoutTreeActionType.Restore, nodeId);
+    // Only a chip in the tree has a flag to clear; anything else maximized (an ephemeral pane,
+    // which is not in the tree) just ends its maximize.
+    const node = findNode(model.treeState.rootNode, nodeId);
+    if (node && !node.children?.length && node.minimized) commitToggle(model, LayoutTreeActionType.Restore, nodeId);
     model.magnifyNodeToggle(nodeId);
 }
 
