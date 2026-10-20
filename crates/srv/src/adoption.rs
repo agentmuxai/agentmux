@@ -26,7 +26,7 @@
 //! pointing at the source channel's folder: the spawn path uses the stored dir,
 //! so the login works at once, with no copy of the credentials.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -116,10 +116,15 @@ fn modified(p: &Path) -> Option<SystemTime> {
 }
 
 fn same_file(a: &Path, b: &Path) -> bool {
-    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
-        (Ok(x), Ok(y)) => x == y,
-        _ => a == b,
-    }
+    canonical(a) == canonical(b)
+}
+
+/// `p` resolved to its canonical form, or `p` itself when that fails. Each
+/// candidate is resolved once: `canonicalize` opens the file on Windows, and
+/// comparing every pair of channel stores with it cost about 130 ms per boot
+/// on a host with ~50 channels.
+fn canonical(p: &Path) -> PathBuf {
+    std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
 }
 
 /// `local-<branch>-<hash6>-<8 hex>` → its prefix up to and including the last `-`.
@@ -133,8 +138,14 @@ fn build_prefix(channel: &str) -> Option<&str> {
 
 pub(crate) fn discover_sources(inp: &Inputs) -> Sources {
     let mut found: Vec<(SystemTime, PathBuf)> = Vec::new();
+    let target = canonical(inp.target_path);
+    let mut seen: HashSet<PathBuf> = HashSet::new();
     let mut push = |p: PathBuf| {
-        if p.is_file() && !same_file(&p, inp.target_path) && !found.iter().any(|(_, q)| same_file(q, &p)) {
+        if !p.is_file() {
+            return;
+        }
+        let c = canonical(&p);
+        if c != target && seen.insert(c) {
             if let Some(t) = modified(&p) {
                 found.push((t, p));
             }
@@ -175,8 +186,9 @@ pub(crate) fn discover_sources(inp: &Inputs) -> Sources {
             })
             // The build you upgraded from is the newest one that holds a login:
             // a build that was only opened and closed has nothing to carry.
-            .filter(|(_, p)| has_accounts(p))
-            .max_by_key(|(t, _)| *t)
+            // `found` is newest first, so this opens stores only until the
+            // first one with a login, not every older build of the branch.
+            .find(|(_, p)| has_accounts(p))
             .map(|(_, p)| p.clone());
         if let Some(p) = predecessor {
             if !accounts.iter().any(|q| same_file(q, &p)) {
@@ -429,6 +441,7 @@ pub(crate) fn adopt(target: &Store, inp: &Inputs) -> Report {
         Ok(c) => c,
         Err(e) => e.into_inner(),
     };
+    let accounts: HashSet<PathBuf> = sources.accounts.iter().map(|a| canonical(a)).collect();
     for path in &sources.all {
         if started.elapsed() > inp.budget {
             report.budget_exhausted = true;
@@ -436,7 +449,7 @@ pub(crate) fn adopt(target: &Store, inp: &Inputs) -> Report {
         }
         let key = path.display().to_string();
         let stamp = stamp_of(path);
-        let for_accounts = sources.accounts.iter().any(|a| same_file(a, path));
+        let for_accounts = accounts.contains(&canonical(path));
         // A source already processed in this role, unchanged since, is skipped.
         // The role is part of the key so a source that later becomes a
         // predecessor is still read for accounts.
