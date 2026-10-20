@@ -15,7 +15,7 @@ import { checkWorkDir, copyNames, freeBytes, homeOf, locateStore, requiredBytes,
 import { dropFile, outputTemplate, rebuildZone } from "./lib/rebuild.mjs";
 import { writeReport } from "./lib/report.mjs";
 import { atLeast, findSqlite3, integrityCheck, MIN_SQLITE, open, recover, sqliteVersionOfNode } from "./lib/sqlite.mjs";
-import { findSources, readSource } from "./lib/sources.mjs";
+import { findSources, readSource as readSourceBytes } from "./lib/sources.mjs";
 
 const USAGE = `Usage: node scripts/recover-shared-transcripts/recover.mjs --work <folder> [options]
 
@@ -61,7 +61,8 @@ function headerUserVersion(file) {
 
 const fingerprint = (store) => store.files.map((f) => (existsSync(f.path) ? `${statSync(f.path).size}:${statSync(f.path).mtimeMs}` : "absent"));
 
-export async function main(argv, { runningInstances = listRunning } = {}) {
+// The two options are for tests: how running processes are listed and how a source copy is read.
+export async function main(argv, { runningInstances = listRunning, readSource = readSourceBytes } = {}) {
     const args = parseArgs(argv);
     const source = args.source ?? join(homedir(), ".agentmux", "shared", "agents", "transcripts", "filestore.db");
     const store = locateStore(source);
@@ -203,16 +204,24 @@ export async function main(argv, { runningInstances = listRunning } = {}) {
         if (args.apply) {
             const template = outputTemplate(db);
             const now = Date.now();
-            for (const p of report.plan) {
+            // Rebuilds first; a derived file of a zone whose rebuild went through left with it,
+            // and one whose rebuild failed is dropped here (nothing is derived from a damaged output).
+            const outcome = new Map();
+            for (const p of report.plan.filter((q) => q.action === "rebuild")) {
                 try {
-                    if (p.action === "rebuild") {
-                        log(`rebuilding ${p.zone}`);
-                        rebuildZone(db, p.zone, readSource(p.source), now, template);
-                        p.applied = true;
-                    } else if (p.action === "drop-derived") {
-                        if (!rebuilt.has(p.zone)) dropFile(db, p.zone, p.name);
-                        p.applied = true;
-                    }
+                    log(`rebuilding ${p.zone}`);
+                    rebuildZone(db, p.zone, readSource(p.source), now, template);
+                    p.applied = true;
+                } catch (e) {
+                    p.applied = false;
+                    p.error = String(e.message ?? e);
+                }
+                outcome.set(p.zone, p.applied);
+            }
+            for (const p of report.plan.filter((q) => q.action === "drop-derived")) {
+                try {
+                    if (outcome.get(p.zone) !== true) dropFile(db, p.zone, p.name);
+                    p.applied = true;
                 } catch (e) {
                     p.applied = false;
                     p.error = String(e.message ?? e);

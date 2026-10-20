@@ -34,7 +34,7 @@ export function markdown(r) {
         if (r.integrity.lines.length > 15) line(`  - ... ${r.integrity.lines.length - 15} more line(s) in report.json`);
     }
     if (r.recover) {
-        line(`- \`.recover\`: ${r.recover.reused ? "reused " + r.recover.file : `${(r.recover.ms / 1000).toFixed(1)} s`}; integrity of the result: **${r.recoveredIntegrity?.ok ? "ok" : "NOT OK"}**; \`lost_and_found\`: ${r.lostAndFound?.table ? `${r.lostAndFound.rows} row(s) it could not place` : "none"}.`);
+        line(`- \`.recover\`: ${r.recover.reused ? "reused " + r.recover.file : `${(r.recover.ms / 1000).toFixed(1)} s`}; integrity of the result: **${r.recoveredIntegrity ? (r.recoveredIntegrity.ok ? "ok" : "NOT OK") : "not checked"}**; \`lost_and_found\`: ${r.lostAndFound?.table ? `${r.lostAndFound.rows} row(s) it could not place` : "none"}.`);
     }
     if (r.userVersion) line(`- \`user_version\`: original ${r.userVersion.original}, recovered ${r.userVersion.recovered}${r.userVersion.fixed ? " (set back)" : ""}.`);
     line();

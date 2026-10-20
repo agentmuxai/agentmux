@@ -13,6 +13,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createChannel, createFilestore, putFile, PART, TRIGGERS, TABLES, transcript } from "./fixture.mjs";
 import { findDamage } from "./lib/analyze.mjs";
+import { markdown } from "./lib/report.mjs";
 import { atLeast, findSqlite3, MIN_SQLITE } from "./lib/sqlite.mjs";
 import { main } from "./recover.mjs";
 
@@ -50,7 +51,7 @@ beforeAll(() => {
     const db = createFilestore(store);
     putFile(db, "agent:aaa:current", "output", text.aaa, { dropParts: [2] });
     putFile(db, "agent:aaa:current", "output.tsidx", Buffer.from("tsidx"));
-    putFile(db, "agent:aaa:current", "output.idx", Buffer.from("idx"));
+    putFile(db, "agent:aaa:current", "output.idx", Buffer.alloc(3 * PART, 9), { dropParts: [1] });
     putFile(db, "agent:aaa:current", "output.state.json", Buffer.from('{"old":true}'));
     putFile(db, "agent:bbb:current", "output", text.bbb);
     putFile(db, "agent:ccc:current", "output", text.ccc, { dropParts: [1] });
@@ -77,14 +78,25 @@ beforeAll(() => {
         { oid: "blk-ggg-holey", meta: { agentId: "ggg" }, output: Buffer.concat([holey, transcript("tail", PART)]) },
     ]);
 
-    // Corrupt fff on disk: a whole page from the middle of its part 3 is lost (read back as zeros).
+    // Corrupt fff on disk: an overflow page from the middle of its part 3 is lost (read back as zeros).
+    // dbstat names a cell's overflow pages "<leaf path><cell, 3 digits>+<overflow index, 6 digits>".
+    const q = (sql) => spawnSync(cli.path, ["-readonly", "-separator", "|", store, sql], { encoding: "utf8" }).stdout.trim().split("\n").filter(Boolean);
+    const rowid = Number(q("SELECT rowid FROM db_file_data WHERE zoneid = 'agent:fff:current' AND name = 'output' AND partidx = 3;")[0]);
+    let before = Number(q(`SELECT COUNT(*) FROM db_file_data WHERE rowid < ${rowid};`)[0]);
+    let leaf = null;
+    for (const row of q("SELECT path, ncell FROM dbstat WHERE name = 'db_file_data' AND pagetype = 'leaf' ORDER BY path;")) {
+        const [path, ncell] = row.split("|");
+        if (before < Number(ncell)) {
+            leaf = path;
+            break;
+        }
+        before -= Number(ncell);
+    }
+    expect(leaf, "the leaf page that holds fff's part 3").not.toBeNull();
+    const pageno = Number(q(`SELECT pageno FROM dbstat WHERE name = 'db_file_data' AND pagetype = 'overflow' AND path = '${leaf}${String(before).padStart(3, "0")}+000004';`)[0]);
+    expect(pageno, "an overflow page of that cell").toBeGreaterThan(1);
     const file = readFileSync(store);
-    // A stretch that includes the zone's tag, so it can only be found in fff's own pages.
-    const mark = text.fff.indexOf('"tag":"fff"', 3 * PART + 30000);
-    const at = file.indexOf(text.fff.subarray(mark, mark + 64));
-    expect(at).toBeGreaterThan(0);
-    const page = Math.floor(at / 4096);
-    file.fill(0, page * 4096, page * 4096 + 4096);
+    file.fill(0, (pageno - 1) * 4096, pageno * 4096);
     writeFileSync(store, file);
 });
 
@@ -178,6 +190,37 @@ suite("the offline recovery tool", () => {
         const r = JSON.parse(readFileSync(join(work, "report.json"), "utf8"));
         expect(r.damage.map((d) => d.zone)).not.toContain("agent:ggg:current");
     }, 120_000);
+
+    it("a rebuild that fails is reported as failed and its damaged index is still dropped", async () => {
+        const work = join(dir, "work4");
+        const args = ["--work", work, "--source", store, "--sqlite3", cli.path, "--allow-running"];
+        expect(await main(args)).toBe(0);
+        const unreadable = () => {
+            throw new Error("source unreadable");
+        };
+        expect(await main([...args, "--recovered", join(work, "recovered.db"), "--apply"], { readSource: unreadable })).toBe(0);
+        const r = JSON.parse(readFileSync(join(work, "report.json"), "utf8"));
+        const aaa = r.plan.find((p) => p.zone === "agent:aaa:current" && p.name === "output");
+        expect(aaa.applied).toBe(false);
+        expect(aaa.error).toContain("source unreadable");
+        const idx = r.plan.find((p) => p.zone === "agent:aaa:current" && p.name === "output.idx");
+        expect(idx.action).toBe("drop-derived");
+        expect(idx.applied, "dropped on its own: its zone's rebuild did not happen").toBe(true);
+        const db = new DatabaseSync(join(work, "recovered.db"), { readOnly: true });
+        try {
+            expect(db.prepare("SELECT COUNT(*) n FROM db_wave_file WHERE zoneid = 'agent:aaa:current' AND name = 'output.idx'").get().n).toBe(0);
+        } finally {
+            db.close();
+        }
+    }, 120_000);
+
+    it("the report says 'not checked' for a recovered file it did not make itself", () => {
+        const base = { mode: "dry run", startedAt: "t", source: { db: "d", files: [] }, work: "w", tools: {}, inventory: { files: 0, zones: 0 }, damage: [], plan: [], copy: null, integrity: null, userVersion: null };
+        const text = markdown({ ...base, recover: { reused: true, file: "r.db", ms: 0 }, recoveredIntegrity: null, lostAndFound: null });
+        expect(text).toContain("integrity of the result: **not checked**");
+        expect(markdown({ ...base, recover: { ms: 1 }, recoveredIntegrity: { ok: true, lines: ["ok"] } })).toContain("integrity of the result: **ok**");
+        expect(markdown({ ...base, recover: { ms: 1 }, recoveredIntegrity: { ok: false, lines: ["bad"] } })).toContain("integrity of the result: **NOT OK**");
+    });
 
     it("refuses to go on when it cannot tell whether AgentMux is running", async () => {
         const args = ["--work", join(dir, "work3"), "--source", store, "--sqlite3", cli.path];
