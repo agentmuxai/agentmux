@@ -1324,6 +1324,9 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
 
     tracing::info!("CEF message loop exited, shutting down");
 
+    // A secret the Vault copied doesn't stay on the clipboard once AgentMux is gone.
+    commands::vault::clear_clipboard_on_shutdown();
+
     // Kill the backend sidecar. (The launcher's Job Object also reaps it once
     // we exit; kill explicitly for promptness.)
     {

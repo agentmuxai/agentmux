@@ -116,6 +116,33 @@ pub async fn reveal(state: &Arc<AppState>, args: &Value) -> Result<Value, String
     Ok(json!({ "value": value.as_str() }))
 }
 
+/// The value a copy put on the clipboard, until it is cleared. One at a time: a
+/// newer copy replaces it, so an older copy's timer can't clear the newer one.
+static PENDING_CLEAR: std::sync::Mutex<Option<(u64, zeroize::Zeroizing<String>)>> = std::sync::Mutex::new(None);
+static COPY_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Clears the clipboard if it still holds the pending copy. The timer passes
+/// its own copy's number; shutdown passes `None` and clears whatever is pending.
+fn clear_pending(only: Option<u64>) {
+    let taken = {
+        let mut p = PENDING_CLEAR.lock().unwrap_or_else(|e| e.into_inner());
+        match (&*p, only) {
+            (Some((n, _)), Some(want)) if *n != want => return,
+            _ => p.take(),
+        }
+    };
+    if let Some((_, value)) = taken {
+        if let Err(e) = super::clipboard::clear_if_holds(&value) {
+            tracing::warn!("[vault] couldn't clear the clipboard: {e}");
+        }
+    }
+}
+
+/// Called as the host quits: a copied secret doesn't outlive AgentMux on the clipboard.
+pub fn clear_clipboard_on_shutdown() {
+    clear_pending(None);
+}
+
 /// `vault_copy`: confirm the person, then copy one part's value to the
 /// clipboard without it passing through the page, and clear it later.
 pub async fn copy(state: &Arc<AppState>, args: &Value) -> Result<Value, String> {
@@ -125,15 +152,13 @@ pub async fn copy(state: &Arc<AppState>, args: &Value) -> Result<Value, String> 
     let value = fetch_value(state, &id, &part, "copied").await?;
     super::clipboard::write_secret_text(&value)?;
     tracing::info!("[vault] copy confirmed for an entry (value not logged)");
-    let copied = value.clone();
+    let n = COPY_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    *PENDING_CLEAR.lock().unwrap_or_else(|e| e.into_inner()) = Some((n, value));
     tokio::spawn(async move {
         tokio::time::sleep(CLIPBOARD_CLEAR_AFTER).await;
-        // Only if the clipboard still holds what we put there: the person may
-        // have copied something else since.
-        let cleared = tokio::task::spawn_blocking(move || super::clipboard::clear_if_holds(&copied)).await;
-        if let Ok(Err(e)) = cleared {
-            tracing::warn!("[vault] couldn't clear the clipboard: {e}");
-        }
+        // Only if no newer copy replaced this one, and the clipboard still holds
+        // what we put there: the person may have copied something else since.
+        let _ = tokio::task::spawn_blocking(move || clear_pending(Some(n))).await;
     });
     Ok(json!({ "clears_in_secs": CLIPBOARD_CLEAR_AFTER.as_secs() }))
 }
