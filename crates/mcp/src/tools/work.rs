@@ -18,11 +18,24 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let payload = arguments.get("payload").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow::anyhow!("missing required parameter: payload"))?;
             let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty()).unwrap_or_default();
-            let target_agent = arguments.get("target_agent").and_then(|v| v.as_str()).unwrap_or("");
+            // Kanban §6.5: `for: "me"` files it in the caller's own backlog,
+            // to take after its current work.
+            let for_me = arguments.get("for").and_then(|v| v.as_str()).map(str::trim) == Some("me");
+            if for_me && self_id.is_empty() {
+                anyhow::bail!("for \"me\" needs AGENTMUX_AGENT_ID, which is not set");
+            }
+            let target_agent = if for_me {
+                self_id.as_str()
+            } else {
+                arguments.get("target_agent").and_then(|v| v.as_str()).unwrap_or("")
+            };
             // Identity M3: resolve the typed target NOW, at the boundary, and
             // carry its uid; an ambiguous name is handed back with candidates.
+            // The caller itself is its own UID.
             let target_agent_uid = if target_agent.is_empty() {
                 None
+            } else if for_me {
+                std::env::var("AGENTMUX_AGENT_UID").ok().filter(|s| !s.is_empty())
             } else {
                 resolve_agent_name_at_boundary(&client, local_url, auth_key, target_agent).await?
             };
@@ -39,6 +52,9 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "not_before": arguments.get("not_before").and_then(|v| v.as_i64()),
                 "max_attempts": arguments.get("max_attempts").and_then(|v| v.as_i64()).filter(|&n| n > 0),
                 "created_by": self_id,
+                "repo": arguments.get("repo").and_then(|v| v.as_str()),
+                "hold": arguments.get("hold").and_then(|v| v.as_bool()).unwrap_or(false),
+                "review": arguments.get("review").and_then(|v| v.as_bool()),
             });
             let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
                 .map_err(|e| anyhow::anyhow!("work enqueue request failed: {e}"))?;
@@ -47,10 +63,17 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             if !status.is_success() {
                 anyhow::bail!("Tasks enqueue failed: HTTP {status} — {text}");
             }
-            let id = serde_json::from_str::<Value>(&text).ok()
-                .and_then(|v| v.get("id").and_then(|x| x.as_str()).map(|s| s.to_string()))
-                .unwrap_or_default();
-            Ok(format!("Enqueued work item {id}: {title}"))
+            let v = serde_json::from_str::<Value>(&text).unwrap_or(serde_json::json!({}));
+            let id = v.get("id").and_then(|x| x.as_str()).unwrap_or_default().to_string();
+            let name = task_name(&v, &id);
+            Ok(if for_me {
+                format!(
+                    "Filed {name} in your backlog: {title}. Tell the operator its number. It waits for you: \
+                     finish what you are doing, then take it with Tasks claim."
+                )
+            } else {
+                format!("Enqueued {name}: {title}")
+            })
         }
         "WorkClaim" => {
             require_agent_env(local_url, auth_key, block_id)?;
@@ -95,6 +118,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let attempt = v.get("attempt").and_then(|x| x.as_i64()).unwrap_or(0);
             let item = v.get("item").cloned().unwrap_or(serde_json::json!({}));
             let id = item.get("id").and_then(|x| x.as_str()).unwrap_or("");
+            let name = task_name(&v, id);
             let title = item.get("title").and_then(|x| x.as_str()).unwrap_or("");
             let payload = item.get("payload").and_then(|x| x.as_str()).unwrap_or("");
             // Carry forward why a PREVIOUS holder handed this back (Codex P2 on
@@ -113,11 +137,63 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             } else {
                 String::new()
             };
+            let short = v.get("num").and_then(|n| n.as_i64()).map(|n| n.to_string()).unwrap_or_else(|| id.to_string());
             Ok(format!(
-                "Claimed work item {id} (attempt {attempt}) — pass attempt={attempt} to \
-                 Tasks heartbeat, complete and release for this item.\n\n\
+                "Claimed {name} (attempt {attempt}): pass id={short} and attempt={attempt} to \
+                 Tasks update, ask, submit, complete and release for this task.\n\n\
                  Title: {title}\n\n{payload}{handback}"
             ))
+        }
+        "WorkUpdate" | "WorkAsk" | "WorkSubmit" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("AGENTMUX_AGENT_ID is not set"))?;
+            let id = arguments.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
+            let attempt = arguments.get("attempt").and_then(|v| v.as_i64())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: attempt (from the Tasks claim answer)"))?;
+            let str_arg = |k: &str| arguments.get(k).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty());
+            let (segment, text) = match name {
+                "WorkAsk" => ("ask", str_arg("question").ok_or_else(|| anyhow::anyhow!("Tasks ask needs a question"))?),
+                "WorkSubmit" => (
+                    "submit",
+                    str_arg("result").ok_or_else(|| anyhow::anyhow!("Tasks submit needs a result: what was done, with links"))?,
+                ),
+                _ => ("update", ""),
+            };
+            let links = arguments.get("links").cloned().unwrap_or(Value::Null);
+            let url = format!("{}/agentmux/work/{}/{}", local_url.trim_end_matches('/'), id, segment);
+            let body = serde_json::json!({
+                "agent_id": self_id,
+                "attempt": attempt,
+                "note": str_arg("note"),
+                "checklist": arguments.get("checklist").filter(|c| c.is_array()),
+                "pr_url": links.get("pr").and_then(|v| v.as_str()),
+                "branch": links.get("branch").and_then(|v| v.as_str()),
+                "text": text,
+            });
+            let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
+                .map_err(|e| anyhow::anyhow!("work {segment} request failed: {e}"))?;
+            let status = resp.status();
+            let reply = resp.text().await.unwrap_or_default();
+            if status == reqwest::StatusCode::CONFLICT {
+                anyhow::bail!(
+                    "This task is no longer yours, or that attempt number is old. Check it with \
+                     Tasks list; claim again if you still want work."
+                );
+            }
+            if !status.is_success() {
+                anyhow::bail!("Tasks {segment} failed: HTTP {status} — {reply}");
+            }
+            let v: Value = serde_json::from_str(&reply).unwrap_or(serde_json::json!({}));
+            Ok(match segment {
+                "ask" => format!(
+                    "Asked: task {id} now waits in the operator's Needs you column, and stays yours. \
+                     Their answer comes to you as a message."
+                ),
+                "submit" => finished_text(id, &v),
+                _ => format!("Updated task {id}."),
+            })
         }
         "WorkHeartbeat" | "WorkComplete" | "WorkRelease" => {
             require_agent_env(local_url, auth_key, block_id)?;
@@ -182,7 +258,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             }
             Ok(match segment {
                 "heartbeat" => format!("Lease extended on {id}."),
-                "complete" => format!("Completed {id}."),
+                "complete" => finished_text(id, &serde_json::from_str::<Value>(&text).unwrap_or(serde_json::json!({}))),
                 _ => {
                     // A release on the FINAL allowed attempt parks the item as
                     // `failed` rather than reopening it, so reporting "back to
@@ -236,7 +312,8 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             }
             let mut out = format!("{} work item(s):\n", items.len());
             for it in &items {
-                let id = it.get("id").and_then(|x| x.as_str()).unwrap_or("");
+                let id = it.get("num").and_then(|x| x.as_i64()).map(|n| format!("#{n}"))
+                    .unwrap_or_else(|| it.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string());
                 let st = it.get("state").and_then(|x| x.as_str()).unwrap_or("");
                 let title = it.get("title").and_then(|x| x.as_str()).unwrap_or("");
                 let holder = it.get("claimed_by").and_then(|x| x.as_str()).unwrap_or("");
@@ -256,4 +333,47 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         }
         _ => Err(not_in_family()),
     }
+}
+
+/// A task as an answer names it: `#12` when srv gave it a number, else its id.
+fn task_name(v: &Value, id: &str) -> String {
+    match v.get("num").and_then(|n| n.as_i64()) {
+        Some(n) => format!("task #{n}"),
+        None => format!("work item {id}"),
+    }
+}
+
+/// The answer to finishing a task (`complete`, `submit`): where it went, and
+/// the next task waiting for the caller, which it takes now (Kanban §6.5: an
+/// agent goes on through its backlog).
+fn finished_text(id: &str, v: &Value) -> String {
+    let state = v.get("state").and_then(|s| s.as_str()).unwrap_or("done");
+    let mut out = if state == "review" {
+        format!("Handed in task {id}: it waits for the operator's review in the Kanban.")
+    } else {
+        format!("Completed task {id}.")
+    };
+    match v.get("next").filter(|n| !n.is_null()) {
+        Some(next) => {
+            let num = next.get("num").and_then(|n| n.as_i64()).map(|n| format!("#{n}")).unwrap_or_default();
+            let title = next.get("title").and_then(|t| t.as_str()).unwrap_or("");
+            let who = match next.get("requested_by_kind").and_then(|k| k.as_str()) {
+                Some("operator") => " (requested by the operator)".to_string(),
+                Some("agent") => next
+                    .get("requested_by")
+                    .and_then(|r| r.as_str())
+                    .filter(|r| !r.is_empty())
+                    .map(|r| format!(" (requested by {r})"))
+                    .unwrap_or_default(),
+                _ => String::new(),
+            };
+            let more = v.get("waiting").and_then(|w| w.as_i64()).unwrap_or(1) - 1;
+            let after = if more > 0 { format!(" {more} more after it.") } else { String::new() };
+            out.push_str(&format!(
+                "\n\nNext in your backlog: {num} \"{title}\"{who}. Claim it with Tasks claim and start.{after}"
+            ));
+        }
+        None => out.push_str(" Your backlog is empty."),
+    }
+    out
 }

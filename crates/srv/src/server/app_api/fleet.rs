@@ -188,7 +188,7 @@ pub(crate) fn broadcast_action(route: Result<crate::bootstrap::AgentRoute, Strin
 /// `origin`. Either way the turn is labelled with `origin` where the controller
 /// tracks provenance at all (persistent and subprocess, the same agents a typed
 /// message can authorize a self-quit on).
-async fn deliver_broadcast_turn(
+pub(crate) async fn deliver_broadcast_turn(
     deps: &AgentTurnDeps,
     block_id: String,
     text: String,

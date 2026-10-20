@@ -48,6 +48,15 @@ pub mod work_state {
     pub const FAILED: &str = "failed";
     /// Withdrawn by a human/agent before completion.
     pub const CANCELLED: &str = "cancelled";
+    /// Waiting, not to be started until the operator says so (Kanban,
+    /// SPEC_WARDEN_KANBAN_2026_10_20.md §6.2). Never claimable.
+    pub const HELD: &str = "held";
+    /// Its holder asked the operator something (`Tasks` `ask`); the holder
+    /// keeps it and the lease is paused (`claim_expires` NULL).
+    pub const BLOCKED: &str = "blocked";
+    /// Handed in (`Tasks` `submit`), waiting for the operator to accept it or
+    /// send it back. The holder is kept, so a send-back returns it to them.
+    pub const REVIEW: &str = "review";
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -133,7 +142,7 @@ pub struct ClaimFilter {
     pub groups: Vec<String>,
 }
 
-fn row_to_item(row: &Row) -> rusqlite::Result<WorkItem> {
+pub(super) fn row_to_item(row: &Row) -> rusqlite::Result<WorkItem> {
     Ok(WorkItem {
         id: row.get("id")?,
         title: row.get("title")?,
@@ -176,14 +185,14 @@ pub enum HolderMatch {
 /// working. Each is its own conditional UPDATE, so each is a complete
 /// authorization on its own; the second runs only when the first matched
 /// nothing.
-const HOLDER_BY_UID: &str = "(claimed_by_uid <> '' AND claimed_by_uid = ?6)";
-const HOLDER_BY_NAME: &str = "((claimed_by_uid = '' OR ?6 = '') AND claimed_by = ?2)";
+pub(super) const HOLDER_BY_UID: &str = "(claimed_by_uid <> '' AND claimed_by_uid = ?6)";
+pub(super) const HOLDER_BY_NAME: &str = "((claimed_by_uid = '' OR ?6 = '') AND claimed_by = ?2)";
 
 /// Run a holder-only UPDATE (`sql` renders it around a holder predicate)
 /// with the UID predicate, then the name one. Every holder statement binds
 /// `?1` id, `?2` the request's name, `?3` the fence and `?6` the caller's UID
 /// (`''` when Unattributed).
-fn holder_update(
+pub(super) fn holder_update(
     conn: &rusqlite::Connection,
     sql: impl Fn(&str) -> String,
     params: &[&dyn rusqlite::ToSql],
@@ -199,7 +208,7 @@ fn holder_update(
     Ok(None)
 }
 
-const COLS: &str = "id, title, payload, kind, target_agent, target_group, priority, state, \
+pub(super) const COLS: &str = "id, title, payload, kind, target_agent, target_group, priority, state, \
                     claimed_by, claim_expires, attempts, max_attempts, created_by, \
                     created_at, updated_at, not_before, result, \
                     target_agent_uid, claimed_by_uid, created_by_uid";
@@ -269,7 +278,8 @@ impl Store {
                     attempts = attempts + 1,
                     updated_at = ?3
               WHERE id = (
-                    SELECT id FROM db_work_queue
+                    SELECT q.id FROM db_work_queue q
+                      LEFT JOIN db_work_cards c ON c.work_id = q.id
                      WHERE state = '{open}'
                        -- Defence in depth (Codex P2 on PR #2898): an item that
                        -- has burned its attempts must never be handed out
@@ -291,7 +301,13 @@ impl Store {
                                 AND (target_agent = '' OR target_agent = ?1)))
                        AND (target_group = ''{groups})
                        AND (?4 = '' OR kind = ?4)
-                     ORDER BY priority DESC, created_at ASC
+                     -- Kanban §6.5: an agent's own tasks (the requests it
+                     -- filed for later, or the operator gave it) before
+                     -- anyone's; then priority; then the operator's order in
+                     -- the backlog (a card's rank, in created_at units), else
+                     -- the order they were filed.
+                     ORDER BY (CASE WHEN target_agent_uid <> '' OR target_agent <> '' THEN 0 ELSE 1 END),
+                              priority DESC, COALESCE(c.rank, created_at) ASC
                      LIMIT 1
               )
               RETURNING {cols}",
@@ -475,10 +491,13 @@ impl Store {
                 "UPDATE db_work_queue
                     SET state = '{cancelled}', claimed_by = '', claimed_by_uid = '', claim_expires = NULL,
                         result = ?2, updated_at = ?3
-                  WHERE id = ?1 AND state IN ('{open}','{c}')",
+                  WHERE id = ?1 AND state IN ('{open}','{c}','{held}','{blocked}','{review}')",
                 cancelled = work_state::CANCELLED,
                 open = work_state::OPEN,
-                c = work_state::CLAIMED
+                c = work_state::CLAIMED,
+                held = work_state::HELD,
+                blocked = work_state::BLOCKED,
+                review = work_state::REVIEW,
             ),
             params![id, reason, now_ms],
         )?;
