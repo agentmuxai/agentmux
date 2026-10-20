@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build-slot-version: 1
+# build-slot-version: 2
 # build-slot: run one heavy build or test command while holding the host-wide
 # build slot, so only one such command runs on this machine at a time.
 # Spec: docs/specs/SPEC_BUILD_SLOT_ENFORCEMENT_2026_10_20.md. AgentMux installs this file to
@@ -23,6 +23,11 @@ POLL="${BUILD_SLOT_POLL:-3}"
 ME="${AGENTMUX_AGENT_ID:-${USER:-unknown}}"
 
 now() { date +%s; }
+# The "waiting" line goes to the terminal when there is one, even if stdout and stderr are
+# redirected to a file or a pipe: an agent's Bash wrapper stops a command that prints nothing
+# for 10 minutes, and a wait behind a long build prints nothing else. With no terminal
+# (cron, CI) it goes to stderr.
+wait_note() { { echo "$*" > /dev/tty; } 2>/dev/null || echo "$*" >&2; }
 mtime() { # file -> epoch seconds of last change, 0 if missing
   local f="$1" t
   [ -e "$f" ] || { echo 0; return; }
@@ -111,7 +116,7 @@ while :; do
     echo "build-slot: gave up after ${MAX_WAIT}s waiting. $(status | head -2 | tr '\n' ' ')" >&2; exit 75
   fi
   if [ "$said" -eq 0 ] || [ $((waited % 60)) -lt "$POLL" ]; then
-    echo "build-slot: waiting ($ME) — $(status | head -2 | tr '\n' ' ')" >&2; said=1
+    wait_note "build-slot: waiting ($ME) — $(status | head -2 | tr '\n' ' ')"; said=1
   fi
   sleep "$POLL"; waited=$((waited + POLL))
 done
