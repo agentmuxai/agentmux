@@ -42,7 +42,7 @@ Agent shells already put `~/.agentmux/tools/bin` ahead of the system PATH (`tool
 
 The shim finds the real cargo (the next one on PATH that is not its own directory), and for the heavy subcommands runs it as `build-slot.sh -- <real cargo> <args>`:
 
-`build` `check` `test` `clippy` `doc` `bench` `rustc` `rustdoc` `fix` `install` `package` (and their short forms), and the common third-party `nextest` `llvm-cov` `tarpaulin` `udeps` `miri`. A `+toolchain` or option before the subcommand is skipped when finding it. Everything else (`metadata`, `fmt`, `tree`, `update`, `clean`, …) runs cargo directly.
+`build` `check` `test` `clippy` `doc` `bench` `rustc` `rustdoc` `fix` `install` `package` (and their short forms), and the common third-party `nextest` `llvm-cov` `tarpaulin` `udeps` `miri`. A `+toolchain` or option before the subcommand, with the separate value of `-C`, `-Z`, `--config` and `--color`, is skipped when finding it. Everything else (`metadata`, `fmt`, `tree`, `update`, `clean`, …) runs cargo directly.
 
 **`cargo run` is deliberately not slotted.** It builds, but then keeps running a server or the app, and the slot must not be held for as long as that.
 

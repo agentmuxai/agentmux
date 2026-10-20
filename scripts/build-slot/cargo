@@ -25,10 +25,18 @@ if [ -z "$real" ]; then
   exit 127
 fi
 
-# The subcommand: the first word that is neither +toolchain nor an option.
+# The subcommand: the first word that is neither +toolchain nor an option, nor the
+# separate value of one of cargo's global options (`-C dir`, `-Z flag`, `--config k=v`,
+# `--color when`). The `--opt=value` and `-Zflag` spellings start with `-` and are skipped.
 sub=""
+skip=0
 for arg in "$@"; do
-  case "$arg" in +*|-*) ;; *) sub="$arg"; break ;; esac
+  if [ "$skip" = 1 ]; then skip=0; continue; fi
+  case "$arg" in
+    -C|-Z|--config|--color) skip=1 ;;
+    +*|-*) ;;
+    *) sub="$arg"; break ;;
+  esac
 done
 
 # `run` is left out on purpose: it builds, but then keeps running (a server, the app), and the

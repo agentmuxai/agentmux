@@ -244,7 +244,18 @@ mod tests {
         assert!(contains_all(&test, &["real", "cargo test -p x"]), "got {test:?}");
         let nightly = run_shim(true, false, &["+nightly", "--locked", "check"]).unwrap();
         assert!(nightly.starts_with("SLOT --reason cargo check -- "), "got {nightly:?}");
+        for args in [
+            &["-C", "dir", "test"][..],
+            &["-Z", "unstable-options", "test"][..],
+            &["--config", "build.jobs=2", "test"][..],
+            &["--color", "never", "test"][..],
+            &["--config=build.jobs=2", "-Zunstable-options", "test"][..],
+        ] {
+            let out = run_shim(true, false, args).unwrap();
+            assert!(out.starts_with("SLOT --reason cargo test -- "), "{args:?} should be slotted, got {out:?}");
+        }
         assert_eq!(run_shim(true, false, &["metadata"]).unwrap(), "REAL metadata");
+        assert_eq!(run_shim(true, false, &["-C", "dir", "metadata"]).unwrap(), "REAL -C dir metadata");
         assert_eq!(run_shim(true, false, &["run", "-p", "srv"]).unwrap(), "REAL run -p srv", "run keeps running, so it is not slotted");
         assert_eq!(run_shim(true, false, &[]).unwrap(), "REAL");
     }
