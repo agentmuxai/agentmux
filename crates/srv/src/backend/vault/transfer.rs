@@ -150,7 +150,11 @@ pub fn export(store: &Store, ids: Option<&[String]>, passphrase: &str, path: &Pa
 fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let dir = path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
     let tmp = dir.join(format!(".{}.tmp", uuid::Uuid::new_v4().simple()));
-    std::fs::write(&tmp, bytes).map_err(|e| format!("couldn't write the file: {e}"))?;
+    std::fs::write(&tmp, bytes).map_err(|e| {
+        // A write that stopped part way (a full disk) leaves ciphertext beside the destination.
+        let _ = std::fs::remove_file(&tmp);
+        format!("couldn't write the file: {e}")
+    })?;
     std::fs::rename(&tmp, path).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
         format!("couldn't save the file there: {e}")
@@ -400,20 +404,32 @@ pub struct ImportResult {
 
 /// Writes a staged import: all of it or none of it.
 pub fn commit(store: &Store, token: &str, duplicates: Duplicates) -> Result<ImportResult, String> {
-    let staged = {
+    let taken = {
         let mut held = staged().lock().unwrap_or_else(|p| p.into_inner());
         held.remove(token)
     };
-    let Some(staged) = staged.filter(|s| s.at.elapsed() < STAGED_TTL) else {
+    let Some(staged_import) = taken.filter(|s| s.at.elapsed() < STAGED_TTL) else {
         return Err("this import has expired: choose the file again".into());
     };
+    match write_staged(store, &staged_import, duplicates) {
+        Ok(result) => Ok(result),
+        Err(e) => {
+            // Nothing was written: the import stays staged, so Import can be pressed again.
+            staged().lock().unwrap_or_else(|p| p.into_inner()).insert(token.to_string(), staged_import);
+            Err(e)
+        }
+    }
+}
+
+/// Writes `incoming`, all of it or none of it.
+fn write_staged(store: &Store, incoming: &Staged, duplicates: Duplicates) -> Result<ImportResult, String> {
     let key = seal::key(store.vault_count().map_err(|e| e.to_string())? == 0)?;
     let now = now_ms();
     let mut inserts: Vec<VaultRow> = Vec::new();
     let mut updates: Vec<VaultRow> = Vec::new();
     let mut skipped = 0;
     let mut taken: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for e in &staged.entries {
+    for e in &incoming.entries {
         if e.duplicate_of.is_some() && duplicates == Duplicates::Skip {
             skipped += 1;
             continue;
@@ -470,7 +486,7 @@ pub fn commit(store: &Store, token: &str, duplicates: Duplicates) -> Result<Impo
     }
     store.vault_write_many(&inserts, &updates).map_err(|e| e.to_string())?;
     let result = ImportResult { added: inserts.len(), replaced: updates.len(), skipped };
-    record(store, "", "", PERSON, "imported", &staged.file_name, &format!("{} added, {} replaced, {} skipped", result.added, result.replaced, result.skipped));
+    record(store, "", "", PERSON, "imported", &incoming.file_name, &format!("{} added, {} replaced, {} skipped", result.added, result.replaced, result.skipped));
     Ok(result)
 }
 

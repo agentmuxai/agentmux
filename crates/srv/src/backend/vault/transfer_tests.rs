@@ -301,3 +301,39 @@ fn a_suggested_passphrase_is_eight_words_and_different_each_time() {
     assert!(a.len() >= MIN_PASSPHRASE);
     assert_ne!(a, suggest_passphrase().unwrap());
 }
+
+// A failed write leaves the import staged, so pressing Import again doesn't need the file opened again.
+#[test]
+fn a_failed_write_leaves_the_import_staged_to_try_again() {
+    let s = store();
+    seed(&s);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("r.vault");
+    export(&s, None, PASS, &path).unwrap();
+    wipe(&s);
+    let p = inspect(&s, &path, Some(PASS)).unwrap();
+    // The write fails: the table isn't there.
+    s.conn().lock().unwrap().execute_batch("ALTER TABLE db_vault_entries RENAME TO db_vault_entries_away").unwrap();
+    assert!(commit(&s, &p.token, Duplicates::Skip).is_err());
+    s.conn().lock().unwrap().execute_batch("ALTER TABLE db_vault_entries_away RENAME TO db_vault_entries").unwrap();
+    let done = commit(&s, &p.token, Duplicates::Skip).unwrap();
+    assert_eq!(done.added, 3, "the same staged import, written on the second try");
+}
+
+// A write that stops part way doesn't leave ciphertext beside the destination.
+#[test]
+fn a_failed_file_write_leaves_no_temp_file() {
+    let s = store();
+    seed(&s);
+    let dir = tempfile::tempdir().unwrap();
+    // The destination's folder doesn't exist: the temp file can't be written.
+    let path = dir.path().join("no-such-folder").join("x.vault");
+    assert!(export(&s, None, PASS, &path).is_err());
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    // The destination is a folder: the write succeeds but the rename can't, and the temp file goes.
+    let taken = dir.path().join("taken.vault");
+    std::fs::create_dir(&taken).unwrap();
+    assert!(export(&s, None, PASS, &taken).is_err());
+    let leftovers: Vec<_> = std::fs::read_dir(dir.path()).unwrap().flatten().map(|e| e.file_name()).collect();
+    assert_eq!(leftovers.len(), 1, "only the folder: {leftovers:?}");
+}
