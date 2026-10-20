@@ -137,7 +137,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     let supervised =
         std::env::var(agentmux_common::srv_stderr::SUPERVISOR_PREPARES_ENV).as_deref() == Ok("1");
     if supervised {
-        if let Some(reason) = migrations::data_needs_preparing(&mux_data_dir, &code_version) {
+        if let Some(reason) = crate::boot_timing::time("data_gate", || migrations::data_needs_preparing(&mux_data_dir, &code_version)) {
             tracing::info!("startup: data needs preparing, exiting for the launcher: {reason}");
             eprintln!("{}", agentmux_common::srv_stderr::needs_prepare_line(&reason));
             std::process::exit(agentmux_common::srv_stderr::NEEDS_PREPARE_EXIT);
@@ -146,7 +146,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         prepare_in_process(&mux_data_dir, &db_dir, &code_version);
     }
 
-    let mstore_raw = Store::open(&db_dir.join("objects.db")).unwrap_or_else(|e| {
+    let mstore_raw = crate::boot_timing::time("open_objects_db", || Store::open(&db_dir.join("objects.db"))).unwrap_or_else(|e| {
         tracing::error!("Failed to open object store: {}", e);
         std::process::exit(1);
     });
@@ -155,7 +155,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // unusual envs); mutations still hit SQLite, just don't mirror.
     // See docs/specs/SPEC_SHARED_AGENT_REGISTRY_2026_05_12.md.
     if let Some(root) = registry::resolve_shared_registry_dir() {
-        match registry::Registry::open(root.clone()) {
+        match crate::boot_timing::time("open_agent_registry", || registry::Registry::open(root.clone())) {
             Ok(reg) => {
                 tracing::info!(root = %root.display(), "registry: shared agent registry attached");
                 // Best-effort catch-up pass, run every startup (not just the
@@ -201,7 +201,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // store opens): the user-agent definition ids to seed conversations for.
     let mut backfill_def_ids: Vec<String> = Vec::new();
     if let Some(def_dir) = registry::resolve_shared_definitions_dir() {
-        match registry::DefinitionStore::open(def_dir.clone()) {
+        match crate::boot_timing::time("open_definition_store", || registry::DefinitionStore::open(def_dir.clone())) {
             Ok(def_store) => {
                 // Capture user-agent ids for the transcript backfill (below).
                 backfill_def_ids = crate::boot_timing::time("def_store_list_active", || {
@@ -240,7 +240,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     }
     // Identity M4a: token → UID for request attribution, on this channel's
     // object store only (spec §6.5.3).
-    match mstore_raw.attach_token_index() {
+    match crate::boot_timing::time("attach_token_index", || mstore_raw.attach_token_index()) {
         Ok(_) => tracing::info!("identity: agent token index attached"),
         Err(e) => tracing::warn!(error = %e, "identity: agent token index unavailable — requests stay unattributed"),
     }
@@ -251,7 +251,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // is simply off for this process (agents get no WAN key), which degrades
     // every WAN jekt to today's unsigned `TRUST=network-claimed`.
     match backend::storage::wan_identity::resolve_wan_identity_path() {
-        Some(path) => match backend::storage::wan_identity::WanIdentityStore::open(&path).and_then(|store| {
+        Some(path) => match crate::boot_timing::time("open_wan_db", || backend::storage::wan_identity::WanIdentityStore::open(&path)).and_then(|store| {
             let instance = store.instance_ensure(&crate::backend::reactive::registry::local_host_label())?;
             Ok((store, instance))
         }) {
@@ -278,7 +278,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // Identity M4a: lets spawn sites tell a row-backed block from a row-less
     // one when the environment carries no UID.
     backend::identity_spawn::attach_row_store(mstore.clone());
-    let filestore = Arc::new(FileStore::open(&db_dir.join("filestore.db")).unwrap_or_else(|e| {
+    let filestore = Arc::new(crate::boot_timing::time("open_filestore_db", || FileStore::open(&db_dir.join("filestore.db"))).unwrap_or_else(|e| {
         tracing::error!("Failed to open file store: {}", e);
         std::process::exit(1);
     }));
@@ -297,7 +297,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                     tracing::warn!(dir = %dir.display(), error = %e, "global transcripts: failed to create dir — disabled, falling back to per-channel store");
                     None
                 } else {
-                    match FileStore::open_global_transcripts(&dir.join("filestore.db")) {
+                    match crate::boot_timing::time("open_transcripts_db", || FileStore::open_global_transcripts(&dir.join("filestore.db"))) {
                         Ok(fs) => {
                             tracing::info!(dir = %dir.display(), "global transcripts: store attached");
                             Some(Arc::new(fs))
@@ -326,7 +326,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                 tracing::warn!(path = %path.display(), error = %e, "shared store: failed to create dir — disabled");
                 None
             } else {
-                match Store::open_shared(&path) {
+                match crate::boot_timing::time("open_shared_store", || Store::open_shared(&path)) {
                     Ok(s) => {
                         let reason = agentmux_common::isolated_auth_reason();
                         if reason.is_isolated() {
@@ -370,7 +370,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     if !agentmux_common::isolated_auth_enabled() {
         if let (Some(ss), Some(path)) = (shared_store.as_ref(), registry::resolve_shared_store_path()) {
             if Arc::ptr_eq(ss, &id_store) {
-                crate::adoption::run_at_boot(ss, &path);
+                crate::boot_timing::time("adoption_scan", || crate::adoption::run_at_boot(ss, &path));
             }
         }
     }
@@ -391,7 +391,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                 tracing::warn!(path = %path.display(), error = %e, "identity store: failed to create dir — falling back to per-channel store");
                 mstore.clone()
             } else {
-                match Store::open_identity_store(&path) {
+                match crate::boot_timing::time("open_identity_store", || Store::open_identity_store(&path)) {
                     Ok(s) => {
                         tracing::info!(path = %path.display(), "identity store: attached (always global)");
                         Arc::new(s)
@@ -442,7 +442,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // is fatal: without the log, a srv crash mid-saga leaves
     // unrecoverable state divergence.
     let saga_log = Arc::new(
-        crate::sagas::log::SagaLog::open(&db_dir.join("sagas.db")).unwrap_or_else(|e| {
+        crate::boot_timing::time("open_sagas_db", || crate::sagas::log::SagaLog::open(&db_dir.join("sagas.db"))).unwrap_or_else(|e| {
             tracing::error!("Failed to open saga log: {}", e);
             std::process::exit(1);
         }),
