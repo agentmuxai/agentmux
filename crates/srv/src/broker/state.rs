@@ -21,13 +21,14 @@
 
 use std::collections::HashMap;
 
-/// After this many consecutive TRANSIENT refresh failures, a credential is
-/// considered permanently broken rather than retried forever — the sweep
-/// loop stops hammering a dead refresh_token on every tick. `ensure_fresh`
-/// (on-demand, e.g. right before a reconnect attempt) still re-checks
-/// freshness even from `NeedsReauth`: if an external login has since
-/// succeeded, `is_fresh()` will report true and state naturally moves back
-/// to `Fresh`. No explicit "clear" API needed.
+/// After this many consecutive TRANSIENT refresh failures the server answered
+/// (5xx, rate limits, unparseable replies), a credential moves to
+/// `NeedsReauth { rejected: false }`. An unreachable server never counts
+/// (`RefreshErrorKind::Unreachable`). The sweep keeps retrying a credential
+/// that wasn't refused; `ensure_fresh` (on-demand, e.g. right before a
+/// reconnect attempt) re-checks freshness from any `NeedsReauth`: if an
+/// external login has since succeeded, `is_fresh()` will report true and state
+/// naturally moves back to `Fresh`. No explicit "clear" API needed.
 pub const NEEDS_REAUTH_THRESHOLD: u32 = 5;
 
 /// Coordination state for one registered credential.
@@ -44,8 +45,11 @@ pub enum CredentialState {
     /// `Refreshing` would otherwise lose it before `RefreshFailed` can read
     /// it back out to increment.
     Refreshing { prior_failures: u32 },
-    /// Last refresh attempt failed with a transient error (network, parse,
-    /// etc.) — will be retried on the next `ensure_fresh`/sweep tick.
+    /// Last refresh attempt failed with a transient error (no answer from the
+    /// server, a 5xx, a parse failure) — will be retried on the next
+    /// `ensure_fresh`/sweep tick. An unreachable server leaves
+    /// `consecutive_failures` where it was: being offline never counts toward
+    /// `NEEDS_REAUTH_THRESHOLD`.
     Failed {
         consecutive_failures: u32,
         last_error: String,
@@ -53,11 +57,11 @@ pub enum CredentialState {
     /// Either `consecutive_failures` crossed `NEEDS_REAUTH_THRESHOLD`, or a
     /// refresh closure explicitly reported
     /// `RefreshErrorKind::PermanentAuthFailure` (no need to accumulate
-    /// failures for an error already known permanent). Retrying
-    /// automatically is pointless; a human needs to log in again.
-    /// `rejected` tells the two apart: true when the credential itself was
-    /// refused, false when transient failures merely piled up (which a
-    /// returning network can still cure through an on-demand check).
+    /// failures for an error already known permanent). `rejected` tells the
+    /// two apart: true when the credential itself was refused (only a human
+    /// login helps; the sweep stops retrying it), false when answered
+    /// transient failures merely piled up (the sweep and on-demand checks keep
+    /// retrying, and a recovering server cures it).
     NeedsReauth {
         since_unix: u64,
         reason: String,
@@ -68,8 +72,14 @@ pub enum CredentialState {
 /// What a registered refresh closure's failure means for scheduling.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RefreshErrorKind {
-    /// Network blip, parse failure, transient server error — worth retrying.
+    /// The server answered with a transient error, or the answer couldn't be
+    /// parsed — worth retrying.
     Transient(String),
+    /// The server couldn't be reached at all: no HTTP response (DNS, connect,
+    /// reset, timeout). Says nothing about the credential, so it never counts
+    /// toward `NEEDS_REAUTH_THRESHOLD`; the sweep keeps retrying until the
+    /// network is back.
+    Unreachable(String),
     /// The credential itself is rejected (e.g. an OAuth server's
     /// `invalid_grant` for a revoked/expired refresh_token) — retrying with
     /// the SAME credential will never succeed; only a fresh login fixes it.
@@ -79,7 +89,9 @@ pub enum RefreshErrorKind {
 impl RefreshErrorKind {
     fn message(&self) -> &str {
         match self {
-            RefreshErrorKind::Transient(m) | RefreshErrorKind::PermanentAuthFailure(m) => m,
+            RefreshErrorKind::Transient(m)
+            | RefreshErrorKind::Unreachable(m)
+            | RefreshErrorKind::PermanentAuthFailure(m) => m,
         }
     }
 }
@@ -139,7 +151,9 @@ pub enum Event {
         consecutive_failures: u32,
         error: String,
     },
-    BecameNeedsReauth { id: String, reason: String },
+    /// The server couldn't be reached; the failure count is unchanged.
+    BecameUnreachable { id: String, error: String },
+    BecameNeedsReauth { id: String, reason: String, rejected: bool },
 }
 
 fn now_unix() -> u64 {
@@ -259,6 +273,16 @@ pub fn update(
                 Some(CredentialState::Refreshing { prior_failures }) => *prior_failures,
                 _ => 0,
             };
+            if matches!(error, RefreshErrorKind::Unreachable(_)) {
+                states.insert(
+                    id.clone(),
+                    CredentialState::Failed {
+                        consecutive_failures: prior_failures,
+                        last_error: reason.clone(),
+                    },
+                );
+                return vec![Event::BecameUnreachable { id, error: reason }];
+            }
             let consecutive_failures = prior_failures + 1;
             if permanent || consecutive_failures >= NEEDS_REAUTH_THRESHOLD {
                 states.insert(
@@ -269,7 +293,7 @@ pub fn update(
                         rejected: permanent,
                     },
                 );
-                vec![Event::BecameNeedsReauth { id, reason }]
+                vec![Event::BecameNeedsReauth { id, reason, rejected: permanent }]
             } else {
                 states.insert(
                     id.clone(),
@@ -527,6 +551,62 @@ mod tests {
             m.get("cred"),
             Some(CredentialState::NeedsReauth { rejected: false, .. })
         ));
+    }
+
+    /// A long offline stretch is many unreachable refreshes; none of them is
+    /// evidence against the credential.
+    #[test]
+    fn an_unreachable_server_never_escalates_to_needs_reauth() {
+        let mut m = registered();
+        let gen = m.generation_of("cred");
+        for i in 1..=(NEEDS_REAUTH_THRESHOLD * 4) {
+            m.dispatch(Command::CheckRequested { id: "cred".into() });
+            let events = m.dispatch(Command::RefreshFailed {
+                id: "cred".into(),
+                error: RefreshErrorKind::Unreachable(format!("connect error {i}")),
+                generation: gen,
+            });
+            assert_eq!(
+                events,
+                vec![Event::BecameUnreachable {
+                    id: "cred".into(),
+                    error: format!("connect error {i}"),
+                }]
+            );
+        }
+        assert_eq!(
+            m.get("cred"),
+            Some(&CredentialState::Failed {
+                consecutive_failures: 0,
+                last_error: format!("connect error {}", NEEDS_REAUTH_THRESHOLD * 4),
+            })
+        );
+    }
+
+    /// Offline neither adds to nor clears the count of failures the server
+    /// itself answered with.
+    #[test]
+    fn unreachable_refreshes_keep_the_count_of_answered_failures() {
+        let mut m = registered();
+        let gen = m.generation_of("cred");
+        let mut fail = |m: &mut Harness, error: RefreshErrorKind| {
+            m.dispatch(Command::CheckRequested { id: "cred".into() });
+            m.dispatch(Command::RefreshFailed { id: "cred".into(), error, generation: gen })
+        };
+        fail(&mut m, RefreshErrorKind::Transient("503".into()));
+        fail(&mut m, RefreshErrorKind::Transient("503".into()));
+        for _ in 0..10 {
+            fail(&mut m, RefreshErrorKind::Unreachable("offline".into()));
+        }
+        let events = fail(&mut m, RefreshErrorKind::Transient("503".into()));
+        assert_eq!(
+            events,
+            vec![Event::BecameFailed {
+                id: "cred".into(),
+                consecutive_failures: 3,
+                error: "503".into(),
+            }]
+        );
     }
 
     #[test]

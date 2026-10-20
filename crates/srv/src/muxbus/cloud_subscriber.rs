@@ -1397,8 +1397,8 @@ pub(crate) async fn load_valid_token(
 /// it) *except* 408/429, which mean the request itself was throttled or
 /// timed out, not that the refresh_token was rejected — treating those as
 /// permanent would strand the credential in `NeedsReauth` past a temporary
-/// rate limit (reagent P2 on #2275). Everything else (network blips, 5xx,
-/// response parse failures) is worth retrying on the next sweep tick.
+/// rate limit (#2275). No response at all is `Unreachable` (never counts
+/// toward needs-reauth); 5xx and parse failures are retried on the next tick.
 fn classify_refresh_token_error(e: crate::muxbus::pkce::RefreshTokenError) -> RefreshErrorKind {
     use crate::muxbus::pkce::RefreshTokenError;
     match &e {
@@ -1408,9 +1408,10 @@ fn classify_refresh_token_error(e: crate::muxbus::pkce::RefreshTokenError) -> Re
         {
             RefreshErrorKind::PermanentAuthFailure(e.to_string())
         }
-        RefreshTokenError::Rejected { .. }
-        | RefreshTokenError::Network(_)
-        | RefreshTokenError::ParseFailed(_) => RefreshErrorKind::Transient(e.to_string()),
+        RefreshTokenError::Network(_) => RefreshErrorKind::Unreachable(e.to_string()),
+        RefreshTokenError::Rejected { .. } | RefreshTokenError::ParseFailed(_) => {
+            RefreshErrorKind::Transient(e.to_string())
+        }
     }
 }
 
@@ -1780,10 +1781,10 @@ mod tests {
     }
 
     #[test]
-    fn network_and_parse_errors_are_transient() {
+    fn network_errors_are_unreachable_and_parse_errors_transient() {
         assert!(matches!(
             classify_refresh_token_error(RefreshTokenError::Network("timeout".into())),
-            RefreshErrorKind::Transient(_)
+            RefreshErrorKind::Unreachable(_)
         ));
         assert!(matches!(
             classify_refresh_token_error(RefreshTokenError::ParseFailed("bad json".into())),

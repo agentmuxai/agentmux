@@ -12,6 +12,7 @@ import {
     muxbusDeliveryLine,
     muxbusIndicator,
     muxbusOffersSignIn,
+    muxbusSignOutWarning,
     RECONNECTING_QUIET_MS,
     type MuxBusDeliveryStatus,
 } from "./muxbus-delivery";
@@ -70,6 +71,18 @@ describe("muxbusDeliveryLine", () => {
         expect(muxbusOffersSignIn(at("needs_sign_in"))).toBe(true);
         expect(muxbusOffersSignIn(at("connected"))).toBe(false);
         expect(muxbusOffersSignIn(at("reconnecting"))).toBe(false);
+    });
+});
+
+describe("muxbusSignOutWarning", () => {
+    it("warns only while MuxBus can't be reached", () => {
+        const text = muxbusSignOutWarning(at("reconnecting", { since_ms: NOW }));
+        expect(text).toContain(clockTime(NOW));
+        expect(text).toContain("can't sign in again until MuxBus is reachable");
+        for (const state of ["connected", "needs_sign_in", "signed_out"] as const) {
+            expect(muxbusSignOutWarning(at(state))).toBeNull();
+        }
+        expect(muxbusSignOutWarning(null)).toBeNull();
     });
 });
 
