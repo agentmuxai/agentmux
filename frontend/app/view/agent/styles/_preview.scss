@@ -63,13 +63,13 @@
 
     // Diffs
     .agent-preview-line--add {
-        background: color-mix(in srgb, green 15%, transparent);
+        background: var(--success-bg);
     }
     .agent-preview-line--del {
-        background: color-mix(in srgb, red 15%, transparent);
+        background: var(--error-bg);
     }
     .agent-preview-line--hunk {
-        background: color-mix(in srgb, blue 10%, transparent);
+        background: var(--accent-bg);
         color: var(--accent-color);
         opacity: 0.85;
     }

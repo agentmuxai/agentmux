@@ -6,7 +6,7 @@
 1974 crates/cef/src/client/lifecycle.rs
 1524 crates/cef/src/commands/cli_login.rs
 2217 crates/cef/src/commands/window_pool.rs
-1517 crates/cef/src/lib.rs
+1518 crates/cef/src/lib.rs
 1632 crates/cef/src/state/mod.rs
 2183 crates/cef/src/ui_tasks/window.rs
 2493 crates/common/src/data_paths.rs
@@ -28,7 +28,7 @@
 2494 crates/srv/src/backend/storage/migrations.rs
 1799 crates/srv/src/backend/storage/muxbus.rs
 3354 crates/srv/src/identity/resolver/inject.rs
-2194 crates/srv/src/muxbus/cloud_subscriber.rs
+2185 crates/srv/src/muxbus/cloud_subscriber.rs
 2161 crates/srv/src/persist_subscriber.rs
 1509 crates/srv/src/registry/migrate.rs
 2243 crates/srv/src/server/agent_handlers/input.rs

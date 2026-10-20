@@ -24,6 +24,7 @@ use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
+use super::import::{self, Incoming, Mapping, MappingNeeded, ReadError, Source};
 use super::kinds::{self, VaultSection};
 use super::seal::{self, Parts};
 use super::{new_id, record, validate, PERSON};
@@ -45,31 +46,13 @@ const MAX_STAGED: usize = 4;
 const AGE_MAGIC: &[u8] = b"age-encryption.org/v1";
 
 #[derive(Serialize, Deserialize)]
-struct FileEntry {
-    #[serde(default)]
-    id: String,
-    kind: String,
-    label: String,
-    #[serde(default)]
-    fields: BTreeMap<String, String>,
-    #[serde(default)]
-    tags: Vec<String>,
-    #[serde(default)]
-    parts: BTreeMap<String, String>,
-    #[serde(default)]
-    created_at: i64,
-    #[serde(default)]
-    updated_at: i64,
-}
-
-#[derive(Serialize, Deserialize)]
 struct VaultFile {
     format: String,
     version: u32,
     exported_at: i64,
     #[serde(default)]
     app_version: String,
-    entries: Vec<FileEntry>,
+    entries: Vec<Incoming>,
 }
 
 fn passphrase_of(s: &str) -> SecretString {
@@ -116,7 +99,7 @@ pub fn export(store: &Store, ids: Option<&[String]>, passphrase: &str, path: &Pa
     let mut entries = Vec::with_capacity(rows.len());
     for row in &rows {
         let parts = seal::open(&key, &row.id, &row.sealed)?;
-        entries.push(FileEntry {
+        entries.push(Incoming {
             id: row.id.clone(),
             kind: row.kind.clone(),
             label: row.label.clone(),
@@ -164,10 +147,12 @@ fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
 // ── Import: inspect ──────────────────────────────────────────────────────────
 
 /// What `inspect` couldn't do yet.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum InspectError {
     /// The file is encrypted and no passphrase was given.
     NeedsPassphrase,
+    /// A CSV no reader knows: which column is which is the person's to say.
+    NeedsMapping(MappingNeeded),
     Other(String),
 }
 
@@ -234,6 +219,11 @@ pub struct ImportPreview {
     pub duplicates: usize,
     pub sections: Vec<PreviewSection>,
     pub skipped: Vec<Skipped>,
+    /// What the file is, found from its contents.
+    pub source: Source,
+    pub source_label: String,
+    /// The file holds every secret in it unencrypted: the person is offered to delete it.
+    pub plaintext_file: bool,
 }
 
 /// How many entries of each section the preview lists.
@@ -252,6 +242,11 @@ fn fingerprint(kind: &kinds::Kind, fields: &BTreeMap<String, String>, parts: &Pa
 
 /// Reads `path`, decrypts it with `passphrase`, and stages it for `commit`.
 pub fn inspect(store: &Store, path: &Path, passphrase: Option<&str>) -> Result<ImportPreview, InspectError> {
+    inspect_with(store, path, passphrase, None)
+}
+
+/// [`inspect`], with the person's column choices for a CSV no reader recognises.
+pub fn inspect_with(store: &Store, path: &Path, passphrase: Option<&str>, mapping: Option<&Mapping>) -> Result<ImportPreview, InspectError> {
     let meta = std::fs::metadata(path).map_err(|e| format!("couldn't read that file: {e}"))?;
     if !meta.is_file() {
         return Err("that isn't a file".to_string().into());
@@ -261,22 +256,33 @@ pub fn inspect(store: &Store, path: &Path, passphrase: Option<&str>) -> Result<I
     }
     let mut head = Vec::new();
     std::fs::File::open(path).and_then(|f| f.take(MAX_FILE_BYTES).read_to_end(&mut head)).map_err(|e| format!("couldn't read that file: {e}"))?;
-    let plain = decrypt(&head, passphrase)?;
-    let file: VaultFile = serde_json::from_slice(&plain).map_err(|_| "this isn't a Vault file: its contents aren't in the expected shape".to_string())?;
-    drop(plain);
-    if file.format != FORMAT {
-        return Err(format!("this isn't a Vault file (its format is {:?})", file.format).into());
-    }
-    if file.version > VERSION {
-        return Err(format!("this file was made by a newer AgentMux (format version {}); update AgentMux to import it", file.version).into());
-    }
-    if file.entries.len() > MAX_ENTRIES {
+    let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    // An age file is a Vault export; anything else is another service's plaintext export.
+    let (source, incoming, mut skipped, plaintext_file) = if head.starts_with(AGE_MAGIC) {
+        let plain = decrypt(&head, passphrase)?;
+        let file: VaultFile = serde_json::from_slice(&plain).map_err(|_| "this isn't a Vault file: its contents aren't in the expected shape".to_string())?;
+        drop(plain);
+        if file.format != FORMAT {
+            return Err(format!("this isn't a Vault file (its format is {:?})", file.format).into());
+        }
+        if file.version > VERSION {
+            return Err(format!("this file was made by a newer AgentMux (format version {}); update AgentMux to import it", file.version).into());
+        }
+        (Source::Vault, file.entries, Vec::new(), false)
+    } else {
+        match import::read(&head, &file_name, mapping) {
+            Ok(i) => (i.source, i.entries, i.skipped.into_iter().map(|(label, reason)| Skipped { label, reason }).collect(), true),
+            Err(ReadError::NeedsMapping(m)) => return Err(InspectError::NeedsMapping(m)),
+            Err(ReadError::Other(e)) => return Err(e.into()),
+        }
+    };
+    drop(head);
+    if incoming.len() > MAX_ENTRIES {
         return Err(format!("this file has more than {MAX_ENTRIES} entries, more than the Vault imports").into());
     }
     let existing = existing_fingerprints(store);
-    let mut skipped = Vec::new();
     let mut entries = Vec::new();
-    for e in file.entries {
+    for e in incoming {
         let Some(kind) = kinds::kind(&e.kind) else {
             skipped.push(Skipped { label: e.label, reason: format!("unknown kind {:?}", e.kind) });
             continue;
@@ -305,7 +311,6 @@ pub fn inspect(store: &Store, path: &Path, passphrase: Option<&str>) -> Result<I
             duplicate_of,
         });
     }
-    let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let mut sections: Vec<PreviewSection> = Vec::new();
     for e in &entries {
         let section = e.kind.section;
@@ -328,6 +333,9 @@ pub fn inspect(store: &Store, path: &Path, passphrase: Option<&str>) -> Result<I
         duplicates: entries.iter().filter(|e| e.duplicate_of.is_some()).count(),
         sections,
         skipped,
+        source,
+        source_label: source.label().to_string(),
+        plaintext_file,
     };
     let mut held = staged().lock().unwrap_or_else(|p| p.into_inner());
     held.retain(|_, s| s.at.elapsed() < STAGED_TTL);

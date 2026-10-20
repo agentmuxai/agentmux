@@ -14,6 +14,10 @@ vi.mock("@/app/view/accounts/AgentMuxConnectPanel", () => ({
     useMuxBusStatus: () => ({ connect, refresh, loading }),
 }));
 
+vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { ConnectivityStatusCommand: vi.fn(async () => null) } }));
+vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
+
+import { acceptConnectivity } from "@/store/connectivity";
 import { acceptMuxbusDelivery, RECONNECTING_QUIET_MS } from "@/store/muxbus-delivery";
 import { MuxBusIndicator } from "./MuxBusIndicator";
 
@@ -43,6 +47,22 @@ describe("MuxBusIndicator", () => {
         expect(item.classList.contains("status-muxbus--warn")).toBe(true);
         fireEvent.click(item);
         expect(connect).not.toHaveBeenCalled();
+    });
+
+    it("leaves reconnecting to the Offline indicator while that names MuxBus, but still asks for a sign-in", () => {
+        const since = Date.now() - RECONNECTING_QUIET_MS - 1_000;
+        const muxbus = (state: string, revision: number) =>
+            acceptConnectivity({
+                revision,
+                services: [{ service: "muxbus", label: "MuxBus", state, since_ms: since, last_error: null }],
+            });
+        muxbus("offline", 1);
+        acceptMuxbusDelivery({ state: "reconnecting", since_ms: since });
+        const { container } = render(() => <MuxBusIndicator />);
+        expect(container.textContent).toBe("");
+        acceptMuxbusDelivery({ state: "needs_sign_in", since_ms: since });
+        expect(screen.getByRole("button").textContent).toContain("MuxBus: sign in");
+        muxbus("online", 2);
     });
 
     it("is red when the sign-in stopped working, and clicking starts the sign-in", () => {

@@ -3,8 +3,8 @@
 
 //! The persistent CLI's stdout reader task, started by `spawn_process`
 //! (`spawn.rs`): control frames, session-id capture, resume-state events,
-//! API retry state, failure classification, the task feed and the output
-//! append.
+//! API retry state, the API's reachability, failure classification, the
+//! task feed and the output append.
 
 use super::*;
 
@@ -174,6 +174,7 @@ impl PersistentSubprocessController {
                     }
                 }
                 api_retry.observe(&parsed, || inner_read.lock().unwrap().spawn_generation);
+                crate::connectivity::observe_claude_frame(&parsed);
                 if let Some(store) = mstore_read.as_deref() {
                     let now_ms = agentmux_common::time::now_ms();
                     task_feed.apply(

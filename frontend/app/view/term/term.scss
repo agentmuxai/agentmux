@@ -177,7 +177,7 @@
     font-family: var(--font-mono);
     padding: var(--space-0-5) var(--space-1-5);
     border-radius: 0;
-    background: rgba(200, 120, 0, 0.75);
+    background: rgba(200, 120, 0, 0.75); /* stylelint-disable-line color-no-hex -- fixed amber under the white text below */
     /* Pure white on the amber warning badge — intentional contrast. */
     color: #fff; /* stylelint-disable-line color-no-hex */
     opacity: 0.85;

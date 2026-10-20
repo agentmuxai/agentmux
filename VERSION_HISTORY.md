@@ -1,5 +1,55 @@
 # AgentMux Version History
 
+## 0.59.36 — 2026-10-20
+
+- Agent History can open an agent's archived conversations, jump to any session or date and page forward from there, and shows how many sessions the conversation holds
+- Agents in browser panes can fill address, city, ZIP and email fields that a site marks autocomplete=new-password to stop autofill, and can tick checkboxes a site hides behind a styled label; a field AgentMux still won't let an agent fill says why
+- The nightly performance check opens a perf-regression issue when a change is confirmed by an extra A/B pair, comments on later flagged nights and closes it when a night is clean
+- The nightly performance check keeps a history of every night's medians on a perf-data branch, draws the last 30 nights as charts in its summary and reports a slow drift once
+- A new Vault pane keeps your secrets (ID numbers, cards and bank accounts, API keys, logins and notes) encrypted on this computer; agents can list entries by name and ask you for a new one, but never see a value
+- An agent pane's background history fill no longer holds the tool results it would unload in the next pass: they arrive unloaded.
+- Agent History reads a whole conversation: older pages keep loading as you scroll up (or with Show older), a short page fills the pane, and hover panels no longer get stuck on screen
+- An idle srv uses about 90% less CPU: it no longer reads the process table when no pane is open, and its presence publisher no longer spins while publishing is off
+- SQLite is upgraded from 3.45.0 to 3.51.3, which fixes a bug that could silently corrupt a database file shared by several AgentMux instances (the shared transcript store)
+- An update that can't be moved into place beside the running AgentMux is retried for a few seconds, and otherwise unpacks into the channel's own updates folder instead of inside the old version's data
+- Swarm and the reveal path now keep a short trace of selections, list rebuilds and clicks that never arrive, to find why a click on an agent sometimes does nothing
+- Show folder in the update panel and the widgets settings opens the folder again, and says why when it can't.
+- Agent History opens a conversation even when a piece of its stored transcript is damaged: the damaged 64 KB reads as blank instead of failing the whole read
+- The Toolchain pane now follows the theme: it paints the theme's surface, its status pills use the theme's success and warning washes with readable text on every theme, greys and faded text became theme tokens, and text sizes and spacing come from the shared scales. Its copy-details and install buttons use the shared buttons.
+- fix(tearoff): dragging a pane with several tabs out of the window tears off the whole pane, and redocking a floating pane puts all its tabs back
+- A quit and relaunch (an upgrade's included) keeps each window's theme and opacity, and the log says how many windows came back.
+- Removed the old agent launch dialog and the add-account and new-bundle dialogs it opened, which nothing in the app could open since the new-agent panel replaced them. When a provider sign-in can't open a terminal, the error now says to click Log in again instead of pointing at a Connect button that no longer exists.
+- fix(srv): a corrupt zone in the shared transcript store is an incident, not a WARN: appends to it stop and its readers use the pane's own copy, the user and the agent are told once
+- The Vault says up front what may ask you and when (the keychain on macOS, a locked keyring on Linux, nothing on Windows), and never asks for administrator rights
+- Clicking an agent in Swarm no longer needs a second click when the list updates under the pointer: a mouse press selects the agent at once, rows are updated in place, and Enter or Space selects the focused row
+- The shared transcript store is checkpointed only when frames are waiting in its write-ahead log, its log file is capped at 64 MB, and one instance trims it every half hour; an idle store no longer runs four checkpoints a second
+- feat(agents): an agent's cargo waits for the host-wide build slot, so only one heavy build or test runs at a time
+- A shared Pill component (neutral, ok, warn, error and accent tones) joins the UI kit, with its text readable on every theme; the Toolchain pane's status chips use it.
+- fix(srv): the notice for a damaged transcript zone shows in every open window when it is recorded, not at the next window start
+- The shared transcript store is stamped so that earlier AgentMux builds, which still carry the old SQLite, can no longer open it; they keep working from their own copy of each transcript
+- fix(srv): resume, the agent's segment log, continuity state, archives and the snapshot mirror treat a corrupt shared transcript zone like the transcript path does: they stop using it and fall back to the channel's own copy
+- Running a drone no longer fails with a foreign key error: drone runs are kept per version while drone definitions live in the shared store, and deleting a drone removes its runs
+- An agent pane now says when Claude is retrying an API request it couldn't make (for example with the network down), counts down to the next attempt and offers Stop; a turn that ends with "connection refused" is treated as a network error you can retry.
+- The backup taken before migrations no longer misses recent changes: it copies each database through SQLite instead of copying the file, and also covers identity-store.db
+- After the app window restarts, the splash shows its startup steps again instead of an empty list
+- Storage usage counts each channel's data again, History finds conversations from older per-channel accounts, and session archives go to ~/.agentmux/archives as documented
+- sagas.db no longer grows forever: sagas that finished cleanly over 30 days ago are pruned after startup
+- Losing the internet no longer makes AgentMux think its MuxBus sign-in needs renewing: it keeps retrying until the network is back, and Sign out asks before deleting the sign-in while MuxBus can't be reached.
+- Internal: srv's ready, migrating and event lines are formatted and parsed in one place (agentmux-common's srv_stderr) instead of three
+- docs(ci): the merge-queue and fast-gates spec is marked implemented, with the PR that shipped each phase
+- The startup splash no longer freezes between steps: a row such as "Connecting the window" or "Loading the interface" counts up until the next step starts, and shows how long that took
+- The Vault can show or copy an entry's value after Windows Hello confirms it's you; a copied value clears from the clipboard after 30 seconds and stays out of Windows' clipboard history
+- Forking an older session of an agent now opens the fork with that conversation's history up to where the session ended, instead of an empty pane
+- Editor: code is coloured for light themes too (its syntax colours follow the theme), its banners and status dots use theme colours, and a new CI check stops colour literals from growing in stylesheets.
+- AgentMux's own informational notes to agents (MuxBus paused/resumed, upgraded, background work stopped, damaged transcript copy, overlap) no longer start a turn: they wait and go with the agent's next message, and a MuxBus pause that ends before then arrives as one note.
+- Toolchain pane: tools are cards in groups with a status dot, like the MCP and Remotes panes, with a filter box, details that open under a card (path, install command, install it for me), a port field for external widgets, and a busy Refresh button.
+- fix(srv): the memory record, the bundle sidecar and Global Memory's record treat a corrupt zone of the shared store as an incident and stop using it
+- The Vault can export to a password-protected .vault file (an age file you can also open with the age tool) and import from one, with a preview, a choice for duplicates, and all-or-nothing writes
+- When a build has no layout of its own to restore, it offers the layout another build (an older version or another local build) saved, and Layouts → Restore layout from another build… lists them.
+- fix(srv): the Agent History list, its size indicator and the agent record leave a corrupt zone of the shared store out instead of failing for every agent
+- Agents keep a Kanban of their work: the Tasks tool files the operator's requests in an agent's own backlog, gives tasks numbers, and lets an agent post progress, ask the operator, and hand work in for review; a finished task names the next one, and an idle agent is reminded of what is waiting
+- Warden has a Kanban section, pinned on the widget bar: every task agents are on or have waiting, grouped by agent, with what needs you, what waits for your review, and a history per task; start, answer, accept or send back from there
+
 ## 0.59.35 — 2026-10-19
 
 - The memory lab reports CPU seconds per process group and round time next to memory, compares several runs per side, and checks that a swapped srv comes from the portable's commit

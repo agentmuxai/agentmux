@@ -47,6 +47,7 @@ mod input_owner;
 mod reducer;
 mod renderer_map;
 mod saga_dispatch;
+mod side_buttons;
 mod sidecar;
 mod state;
 mod ui_tasks;

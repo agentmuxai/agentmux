@@ -1766,6 +1766,25 @@
     }
   },
   {
+    "command": "connectivity.status",
+    "request": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestTs": {
+      "imports": [
+        "NoArgsReq"
+      ],
+      "name": "NoArgsReq | null"
+    },
+    "response": "agentmux_srv::connectivity::ConnectivityStatus",
+    "responseName": "ConnectivityStatus",
+    "responseTs": {
+      "imports": [
+        "ConnectivityStatus"
+      ],
+      "name": "ConnectivityStatus"
+    }
+  },
+  {
     "command": "connensure",
     "request": "serde_json::value::Value",
     "requestName": "Value",

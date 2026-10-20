@@ -24,7 +24,7 @@
     border-radius: 0;
 
     &[data-variant="err"] {
-        background: rgba(239, 68, 68, 0.08);
+        background: var(--error-bg);
     }
 }
 
@@ -43,11 +43,11 @@
     font-size: 0.8em;
 
     &--ok {
-        color: #22c55e;
+        color: var(--success-color);
     }
 
     &--err {
-        color: #ef4444;
+        color: var(--error-color);
     }
 }
 
@@ -59,14 +59,14 @@
 
 .warden-audit-error {
     opacity: 0.8;
-    color: #ef4444;
+    color: var(--error-color);
     font-size: 0.95em;
     @include mixins.truncate;
 }
 
 .warden-audit-reason {
     opacity: 0.8;
-    color: #60a5fa;
+    color: var(--accent-color);
     font-size: 0.95em;
     @include mixins.truncate;
 }

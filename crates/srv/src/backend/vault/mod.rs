@@ -9,6 +9,7 @@
 //! ones. Everything here is blocking (the store, the keychain): call it off
 //! the async runtime.
 
+pub mod import;
 pub mod kinds;
 pub mod requests;
 pub mod seal;

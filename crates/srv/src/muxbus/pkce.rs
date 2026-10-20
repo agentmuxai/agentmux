@@ -371,12 +371,9 @@ pub async fn refresh_token(
         ("client_id", creds.client_id.as_str()),
         ("refresh_token", creds.refresh_token.as_str()),
     ];
-    let resp = http_client
-        .post(&token_url)
-        .form(&params)
-        .send()
-        .await
-        .map_err(|e| RefreshTokenError::Network(e.to_string()))?;
+    let sent = http_client.post(&token_url).form(&params).send().await;
+    crate::connectivity::report_http(crate::connectivity::Service::Muxbus, &sent);
+    let resp = sent.map_err(|e| RefreshTokenError::Network(e.to_string()))?;
     if !resp.status().is_success() {
         let status = resp.status().as_u16();
         let body = resp.text().await.unwrap_or_default();

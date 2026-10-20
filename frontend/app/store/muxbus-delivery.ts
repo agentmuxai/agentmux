@@ -64,9 +64,14 @@ export interface MuxBusIndicator {
 /**
  * What the status bar shows, or null for nothing: connected is quiet, a
  * channel that isn't signed in shows nothing new, and reconnecting stays
- * quiet for its first {@link RECONNECTING_QUIET_MS}.
+ * quiet for its first {@link RECONNECTING_QUIET_MS}, and altogether while
+ * `unreachableShown` (the Offline indicator already names MuxBus).
  */
-export function muxbusIndicator(s: MuxBusDeliveryStatus | null | undefined, nowMs: number): MuxBusIndicator | null {
+export function muxbusIndicator(
+    s: MuxBusDeliveryStatus | null | undefined,
+    nowMs: number,
+    unreachableShown = false
+): MuxBusIndicator | null {
     if (!s) return null;
     switch (s.state) {
         case "needs_sign_in":
@@ -77,7 +82,7 @@ export function muxbusIndicator(s: MuxBusDeliveryStatus | null | undefined, nowM
                 signIn: true,
             };
         case "reconnecting":
-            if (nowMs - s.since_ms < RECONNECTING_QUIET_MS) return null;
+            if (unreachableShown || nowMs - s.since_ms < RECONNECTING_QUIET_MS) return null;
             return {
                 tone: "warn",
                 label: "MuxBus reconnecting…",

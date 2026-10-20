@@ -997,6 +997,7 @@ declare global {
         "preview:showhiddenfiles"?: boolean;
         "tab:preset"?: string;
         "tab:confirmclose"?: boolean;
+        "mouse:sidebuttons"?: boolean;
         "splash:disabled"?: boolean;
         "app:runinbackground"?: boolean;
         "app:showtray"?: boolean;
