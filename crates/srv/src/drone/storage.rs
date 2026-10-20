@@ -30,6 +30,13 @@ pub trait DroneStore {
         drone_id: &str,
         limit: i64,
     ) -> Result<Vec<DroneRun>, StoreError>;
+    /// Delete every run of `drone_id` from this store. Runs live in the
+    /// version's `objects.db` and definitions in the shared store, so no FK
+    /// cascades a definition's delete to its runs (m0038); the delete handler
+    /// calls this instead. Returns rows deleted.
+    fn drone_runs_delete_for(&self, drone_id: &str) -> Result<usize, StoreError>;
+    /// Delete one run by its id. Returns rows deleted.
+    fn drone_run_delete(&self, run_id: &str) -> Result<usize, StoreError>;
 }
 
 impl DroneStore for Store {
@@ -209,5 +216,15 @@ impl DroneStore for Store {
             out.push(r?);
         }
         Ok(out)
+    }
+
+    fn drone_runs_delete_for(&self, drone_id: &str) -> Result<usize, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        Ok(conn.execute("DELETE FROM db_drone_runs WHERE drone_id = ?1", params![drone_id])?)
+    }
+
+    fn drone_run_delete(&self, run_id: &str) -> Result<usize, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        Ok(conn.execute("DELETE FROM db_drone_runs WHERE id = ?1", params![run_id])?)
     }
 }
