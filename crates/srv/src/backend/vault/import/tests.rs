@@ -251,3 +251,10 @@ fn more_rows_than_the_cap_are_refused() {
     }
     assert!(err_of(text.as_bytes(), "big.csv").contains("more than"));
 }
+
+#[test]
+fn a_bitwarden_item_with_null_lists_still_comes_in() {
+    let i = read_ok(r#"{"folders": null, "items": [{"type": 1, "name": "Site", "fields": null, "login": {"username": "me", "password": "pw", "uris": null}}]}"#, "x.json");
+    assert_eq!(i.entries.len(), 1);
+    assert_eq!(i.entries[0].parts["password"], "pw");
+}

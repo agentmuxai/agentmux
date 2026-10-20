@@ -10,13 +10,22 @@ use serde::Deserialize;
 
 use super::{Imported, Incoming, ReadError, Source, MAX_ITEMS};
 
+/// A list that an export may leave out or write as `null`.
+fn list<'de, D, T>(d: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Option::<Vec<T>>::deserialize(d)?.unwrap_or_default())
+}
+
 #[derive(Deserialize)]
 struct Export {
     #[serde(default)]
     encrypted: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "list")]
     folders: Vec<Folder>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "list")]
     items: Vec<Item>,
 }
 
@@ -37,7 +46,7 @@ struct Item {
     login: Option<Login>,
     card: Option<Card>,
     identity: Option<Identity>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "list")]
     fields: Vec<Custom>,
 }
 
@@ -46,7 +55,7 @@ struct Login {
     username: Option<String>,
     password: Option<String>,
     totp: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "list")]
     uris: Vec<Uri>,
 }
 

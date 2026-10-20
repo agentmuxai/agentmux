@@ -181,7 +181,10 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                 let path = file_path(&body)?;
                 let pass = body.get("passphrase").and_then(Value::as_str);
                 // For a CSV no reader knows: the person's choice of columns.
-                let mapping: Option<vault::import::Mapping> = body.get("mapping").filter(|m| !m.is_null()).and_then(|m| serde_json::from_value(m.clone()).ok());
+                let mapping: Option<vault::import::Mapping> = match body.get("mapping").filter(|m| !m.is_null()) {
+                    Some(m) => Some(serde_json::from_value(m.clone()).map_err(|e| format!("invalid column mapping: {e}"))?),
+                    None => None,
+                };
                 match vault::transfer::inspect_with(&store, &path, pass, mapping.as_ref()) {
                     Ok(preview) => Ok((json!({ "preview": preview }), false)),
                     Err(vault::transfer::InspectError::NeedsPassphrase) => Ok((json!({ "needs_passphrase": true }), false)),
