@@ -1,6 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import http from "node:http";
 import net from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -204,6 +205,55 @@ describe("fault proxy", () => {
         expect(await nextData(r.socket)).toBeNull();
         await proxy.setMode("pass");
         expect(await nextData(r.socket, 1000)).toBe("held");
+    });
+
+    it("an upstream reset during blackhole reaches the client only at the thaw", async () => {
+        await start();
+        const far = [];
+        const origin = net.createServer((s) => {
+            s.on("error", () => {});
+            far.push(s);
+        });
+        await new Promise((r) => origin.listen(0, "127.0.0.1", r));
+        try {
+            const r = track(await connectVia(proxy.port, `127.0.0.1:${origin.address().port}`));
+            const ended = closedOrReset(r.socket);
+            await proxy.setMode("blackhole");
+            far[0].resetAndDestroy();
+            const early = await Promise.race([ended, new Promise((res) => setTimeout(() => res("still open"), 300))]);
+            expect(early).toBe("still open");
+            await proxy.setMode("pass");
+            expect(["ECONNRESET", "closed"]).toContain(await ended);
+        } finally {
+            await new Promise((r) => origin.close(r));
+        }
+    });
+
+    it("a plain-HTTP request held by blackhole is forwarded once back to pass", async () => {
+        await start("blackhole");
+        const origin = http.createServer((_req, res) => res.end("hello"));
+        await new Promise((r) => origin.listen(0, "127.0.0.1", r));
+        try {
+            const answered = new Promise((resolve, reject) => {
+                const req = http.get(
+                    { host: "127.0.0.1", port: proxy.port, path: `http://127.0.0.1:${origin.address().port}/` },
+                    (res) => {
+                        let body = "";
+                        res.on("data", (d) => (body += d));
+                        res.on("end", () => resolve({ status: res.statusCode, body }));
+                    }
+                );
+                req.on("error", reject);
+                req.on("socket", (socket) => sockets.push(socket));
+            });
+            await new Promise((r) => setTimeout(r, 300));
+            expect(lines.at(-1)).toContain("[blackhole] -> no answer");
+            await proxy.setMode("pass");
+            expect(await answered).toEqual({ status: 200, body: "hello" });
+        } finally {
+            origin.closeAllConnections();
+            await new Promise((r) => origin.close(r));
+        }
     });
 
     it("switching to refuse cuts tunnels that are already open", async () => {

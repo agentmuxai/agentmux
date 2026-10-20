@@ -59,7 +59,7 @@ export async function startProxy({
     const state = createState(mode);
     /** Every CONNECT not yet closed: `pending` (no answer yet), `connecting`, `open`, or `frozen`. */
     const conns = new Set();
-    /** Plain-HTTP requests left hanging by `blackhole`, so `close()` can end them. */
+    /** Plain-HTTP requests held by `blackhole`, answered at the next mode change or ended by `close()`. */
     const hanging = new Set();
     let listening = false;
     let timer = null;
@@ -94,6 +94,8 @@ export async function startProxy({
             say(conn, "pass", "tunnel open");
         });
         up.on("error", (err) => {
+            // While frozen the client must notice nothing; "close" records it for the thaw.
+            if (conn.status === "frozen") return;
             if (conn.status !== "connecting") return conn.client.destroy();
             conn.status = "failed";
             // A real failure upstream is passed on in the same shape the fault modes use.
@@ -101,7 +103,10 @@ export async function startProxy({
             else reset(conn.client);
             say(conn, "pass", `upstream ${err.code ?? err.message}`);
         });
-        up.on("close", (hadError) => hadError && conn.client.destroy());
+        up.on("close", (hadError) => {
+            if (conn.status === "frozen") conn.upstreamGone = hadError ? "reset" : "closed";
+            else if (hadError) conn.client.destroy();
+        });
     }
 
     function freeze(conn) {
@@ -124,7 +129,13 @@ export async function startProxy({
         const { status } = conn;
         if (mode === "pass") {
             if (status === "pending") openTunnel(conn);
-            else if (status === "frozen") {
+            else if (status === "frozen" && conn.upstreamGone) {
+                // The far end went away while frozen; the client learns it only now.
+                if (conn.upstreamGone === "reset") reset(conn.client);
+                else conn.client.end();
+                conns.delete(conn);
+                say(conn, mode, `thawed, upstream had ${conn.upstreamGone === "reset" ? "reset" : "closed"}`);
+            } else if (status === "frozen") {
                 pipeBoth(conn);
                 say(conn, mode, "thawed");
             }
@@ -173,18 +184,21 @@ export async function startProxy({
                 .writeHead(400, { "content-type": "text/plain" })
                 .end("net-fault: this port is the proxy; the control API is on the control port\n");
         }
-        const mode = decide(state, url.hostname);
+        const held = { req, res, url };
+        res.on("close", () => hanging.delete(held));
+        answer(held, decide(state, url.hostname));
+    }
+
+    /** Answers one plain-HTTP request in `mode`; under `blackhole` it waits in `hanging`. */
+    function answer(held, mode) {
+        const { req, res, url } = held;
         log(
             `${stamp()} ${req.method} ${url.host} [${mode}] -> ${{ pass: "forwarded", refuse: "reset", dns: "502 ENOTFOUND", blackhole: "no answer" }[mode]}`
         );
         if (mode === "refuse") return reset(req.socket);
         if (mode === "dns")
             return res.writeHead(502, { "x-net-fault": "dns" }).end(`getaddrinfo ENOTFOUND ${url.hostname}\n`);
-        if (mode === "blackhole") {
-            hanging.add(req.socket);
-            req.socket.on("close", () => hanging.delete(req.socket));
-            return;
-        }
+        if (mode === "blackhole") return void hanging.add(held);
         const up = http.request(url, { method: req.method, headers: req.headers }, (ur) => {
             res.writeHead(ur.statusCode ?? 502, ur.headers);
             ur.pipe(res);
@@ -232,6 +246,13 @@ export async function startProxy({
             for (const conn of [...conns]) {
                 const mode = decide(state, conn.host, now);
                 if (mode !== conn.applied) act(conn, mode);
+            }
+            for (const held of [...hanging]) {
+                const mode = decide(state, held.url.hostname, now);
+                if (mode !== "blackhole") {
+                    hanging.delete(held);
+                    answer(held, mode);
+                }
             }
             const wantListen = !refusesEverything(state, now);
             if (wantListen && !listening) {
@@ -324,7 +345,7 @@ export async function startProxy({
         async close() {
             clearTimeout(timer);
             for (const conn of [...conns]) cut(conn);
-            for (const socket of hanging) socket.destroy();
+            for (const { req } of hanging) req.socket.destroy();
             control.close();
             if (listening) unlisten();
         },
