@@ -1352,6 +1352,30 @@ export const GeneratedApi = {
   InstallToolCommand(client: RpcClient, data: CommandInstallToolData, opts?: RpcOpts): Promise<InstallToolResult> {
     return client.rpcCall("installtool", data, opts);
   },
+  // command "kanban.act"
+  KanbanActCommand(
+    client: RpcClient,
+    data: import("@/app/view/warden-kanban/kanban-types").KanbanActRequest,
+    opts?: RpcOpts
+  ): Promise<import("@/app/view/warden-kanban/kanban-types").KanbanActResult> {
+    return client.rpcCall("kanban.act", data, opts);
+  },
+  // command "kanban.list"
+  KanbanListCommand(
+    client: RpcClient,
+    data: Record<string, never>,
+    opts?: RpcOpts
+  ): Promise<import("@/app/view/warden-kanban/kanban-types").KanbanBoard> {
+    return client.rpcCall("kanban.list", data, opts);
+  },
+  // command "kanban.task"
+  KanbanTaskCommand(
+    client: RpcClient,
+    data: { id: string },
+    opts?: RpcOpts
+  ): Promise<import("@/app/view/warden-kanban/kanban-types").KanbanTaskDetail> {
+    return client.rpcCall("kanban.task", data, opts);
+  },
   // command "linkagentidentity"
   LinkAgentIdentityCommand(client: RpcClient, data: CommandLinkAgentIdentityData, opts?: RpcOpts): Promise<void> {
     return client.rpcCall("linkagentidentity", data, opts);

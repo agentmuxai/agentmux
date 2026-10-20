@@ -98,6 +98,7 @@ mod blockstats;
 mod history_agents;
 mod history_usage;
 mod shells;
+mod kanban;
 pub(crate) mod layout_intent;
 
 /// Register all MuxAPI handlers on the RPC engine.
@@ -133,6 +134,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     history_agents::register(engine, state);
     history_usage::register(engine, state);
     shells::register(engine, state);
+    kanban::register(engine, state);
 }
 
 #[cfg(test)]

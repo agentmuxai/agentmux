@@ -294,6 +294,15 @@ async fn app_main() {
         state.http_client.clone(),
         state.local_web_url.clone(),
     );
+    // The Kanban: idle agents are reminded of the tasks waiting for them,
+    // and a PR opened on a task is linked to it (SPEC_WARDEN_KANBAN_2026_10_20.md).
+    backend::kanban::install(
+        Arc::clone(&state.mstore),
+        Arc::clone(&state.identity_store),
+        Arc::clone(&state.config_watcher),
+        state.broker.clone(),
+    );
+    tokio::spawn(backend::kanban::run_reminder_loop());
     // An agent's AgentMux MCP server that didn't connect is noticed and
     // repaired (`agent:mcpselfheal`).
     backend::mcp_health::install(Arc::clone(&state.config_watcher));

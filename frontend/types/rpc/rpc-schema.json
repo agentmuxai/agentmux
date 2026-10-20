@@ -3484,6 +3484,63 @@
     }
   },
   {
+    "command": "kanban.act",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "serde_json::value::Value",
+    "responseName": "Value",
+    "responseTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    }
+  },
+  {
+    "command": "kanban.list",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "serde_json::value::Value",
+    "responseName": "Value",
+    "responseTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    }
+  },
+  {
+    "command": "kanban.task",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "serde_json::value::Value",
+    "responseName": "Value",
+    "responseTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    }
+  },
+  {
     "command": "layout.applyIntent",
     "request": "agentmux_srv::backend::rpc_types::layout::CommandLayoutIntentData",
     "requestName": "CommandLayoutIntentData",
