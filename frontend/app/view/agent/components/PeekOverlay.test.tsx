@@ -847,3 +847,28 @@ describe("PeekOverlay", () => {
         });
     });
 });
+
+describe("PeekOverlay reads show without leaking", () => {
+    it("a pointer leaving the panel makes no computation outside a root", () => {
+        // A caller's `show={a() && b()}` compiles to a getter that makes a memo
+        // on every read. Read from an event handler (no owner), each one leaked,
+        // and Solid warned "computations created outside a `createRoot`".
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const row = makeRow();
+        const [hovered, setHovered] = createSignal(true);
+        const [hasContent] = createSignal(true);
+        render(() => (
+            <PeekOverlay show={hovered() && hasContent()} rowEl={() => row}>
+                <span>peek content</span>
+            </PeekOverlay>
+        ));
+        const panel = screen.getByText("peek content").parentElement!;
+        panel.dispatchEvent(new MouseEvent("mouseenter"));
+        panel.dispatchEvent(new MouseEvent("mouseleave"));
+        setHovered(false);
+        panel.dispatchEvent(new MouseEvent("mouseleave"));
+        const leaks = warn.mock.calls.filter((c) => String(c[0]).includes("createRoot"));
+        warn.mockRestore();
+        expect(leaks).toEqual([]);
+    });
+});

@@ -65,10 +65,13 @@ import { injectDayDividers } from "./day-dividers";
 import { HistoryNavigator, type HistoryMode } from "./HistoryNavigator";
 import type { DocumentNode, DocumentState, FilterState } from "../types";
 
-/** Lines per fetch. Larger than the live pane's 200 — a reading posture
- *  wants fewer load-older stops; still bounded well under the backend's
- *  10k per-request cap. */
-const HISTORY_PAGE = 600;
+/** Lines per fetch. Most transcript lines are streaming fragments, so 600
+ *  lines came to about a dozen rows, less than a screen; still bounded well
+ *  under the backend's 10k per-request cap. */
+export const HISTORY_PAGE = 3_000;
+
+/** Older pages loaded on their own while what is shown doesn't fill the pane. */
+const FILL_MAX_PAGES = 8;
 
 /** Appended records are shown at most this often (spec §6.9). */
 export const HISTORY_PUBLISH_MIN_INTERVAL_MS = 1_000;
@@ -157,9 +160,13 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
     const [rawNodes, setRawNodes] = createSignal<DocumentNode[]>([]);
     let accLines: string[] = [];
     let accStamps: (number | undefined)[] = [];
-    const newParser = (): HistoryParser =>
-        new HistoryParser(props.outputFormat(), props.agentName?.(), { includeResumedOutcomes: true });
-    let parser = newParser();
+    // Ids are built from each node's own transcript line (`idFirstLine`), so
+    // a node keeps its id when an older page rebuilds the parser: the scroll
+    // anchor finds it again, and its row (with an open hover panel) is kept
+    // rather than replaced under the pointer.
+    const newParser = (firstLine: number): HistoryParser =>
+        new HistoryParser(props.outputFormat(), props.agentName?.(), { includeResumedOutcomes: true, idFirstLine: firstLine });
+    let parser = newParser(0);
     const [historyOffset, setHistoryOffset] = createSignal(0);
     const [totalLines, setTotalLines] = createSignal(0);
     const [loading, setLoading] = createSignal(true);
@@ -345,7 +352,7 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
         dirty = false;
         accLines = [];
         accStamps = [];
-        parser = newParser();
+        parser = newParser(0);
         batch(() => {
             setStale(false);
             setLoading(true);
@@ -379,6 +386,7 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
             if (!current()) return;
             accLines = resp.lines ?? [];
             accStamps = stampsOf(resp);
+            parser = newParser(offset);
             parser.feed(accLines, accStamps);
             batch(() => {
                 publishNow();
@@ -388,6 +396,7 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
                 setLoading(false);
             });
             c.settle(historyPin(offset, resp));
+            void fillPane(seq);
         } catch (err) {
             if (!current()) return;
             // Follow from the next record rather than not at all.
@@ -470,7 +479,7 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
         dirty = false;
         accLines = [];
         accStamps = [];
-        parser = newParser();
+        parser = newParser(0);
         batch(() => {
             setStale(false);
             setLoading(true);
@@ -497,6 +506,7 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
             if (!current()) return;
             accLines = resp.lines ?? [];
             accStamps = stampsOf(resp);
+            parser = newParser(offset);
             parser.feed(accLines, accStamps);
             batch(() => {
                 publishNow();
@@ -506,6 +516,7 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
                 setLoading(false);
             });
             queueMicrotask(() => scrollToBottom?.("history-jump"));
+            void fillPane(seq);
         } catch (err) {
             if (!current()) return;
             batch(() => {
@@ -650,7 +661,7 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
             accStamps = [...stampsOf(resp), ...accStamps];
             // Rebuild the parser over the whole range; records appended from
             // now on continue from this one.
-            parser = newParser();
+            parser = newParser(newOffset);
             parser.feed(accLines, accStamps);
             batch(() => {
                 publishNow();
@@ -664,8 +675,48 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
         }
     };
 
+    let rootEl: HTMLDivElement | undefined;
+    const scroller = (): HTMLElement | null => rootEl?.querySelector<HTMLElement>(".agent-document") ?? null;
+    const nextFrame = (): Promise<void> => new Promise((r) => requestAnimationFrame(() => r()));
+
+    /**
+     * Load older pages while what is shown doesn't fill the pane. Without
+     * this, a short page has nothing to scroll, so scrolling up never asks
+     * for more and the reader is stuck on it.
+     */
+    const fillPane = async (seq: number): Promise<void> => {
+        for (let i = 0; i < FILL_MAX_PAGES; i++) {
+            await nextFrame();
+            await nextFrame();
+            const el = scroller();
+            if (seq !== loadSeq || disposed || !el || historyOffset() === 0) return;
+            // A pane with no height (a hidden tab) has nothing to fill yet.
+            if (el.clientHeight === 0 || el.scrollHeight > el.clientHeight) return;
+            await loadOlder();
+        }
+    };
+
+    /**
+     * An older page, keeping what the reader was looking at in place: the
+     * page lands above it, and the scroll position moves down by its height.
+     * For "Show older" and a wheel turned up at the very top, where the list
+     * sees no scroll and asks for nothing.
+     */
+    const showOlder = async (): Promise<void> => {
+        const el = scroller();
+        const fromBottom = el ? el.scrollHeight - el.scrollTop : null;
+        await loadOlder();
+        await nextFrame();
+        const after = scroller();
+        if (after && fromBottom !== null) after.scrollTop = Math.max(0, after.scrollHeight - fromBottom);
+    };
+    const onWheel = (e: WheelEvent): void => {
+        const el = scroller();
+        if (e.deltaY < 0 && el && el.scrollTop <= 0 && historyOffset() > 0 && !loadingOlder()) void showOlder();
+    };
+
     return (
-        <div class="agent-history-view">
+        <div class="agent-history-view" ref={rootEl}>
             <div class="agent-history-header">
                 <div class="agent-history-title">Agent History</div>
                 <HistoryNavigator
@@ -674,9 +725,11 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
                     mode={mode}
                     archiveZone={archiveZone}
                     hasNewer={() => endLine() < totalLines()}
+                    hasOlder={() => historyOffset() > 0}
                     onOpenArchive={openArchive}
                     onJump={jumpTo}
                     onShowNewer={() => void loadNewer()}
+                    onShowOlder={() => void showOlder()}
                     onLatest={() => void backToLatest()}
                 />
                 <Show when={stale()}>
@@ -704,7 +757,7 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
                                     : "no recorded history"}
                 </div>
             </div>
-            <div class="agent-history-body">
+            <div class="agent-history-body" onWheel={onWheel}>
                 <AgentDocumentView
                     followingRef={(f) => setFollowingSource(() => f)}
                     scrollToBottomRef={(fn) => (scrollToBottom = fn)}

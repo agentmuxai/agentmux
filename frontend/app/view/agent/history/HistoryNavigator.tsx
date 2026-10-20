@@ -31,10 +31,13 @@ export interface HistoryNavigatorProps {
     archiveZone: Accessor<string | null>;
     /** Lines below what is loaded: "Show newer" has something to show. */
     hasNewer: Accessor<boolean>;
+    /** Lines above what is loaded: "Show older" has something to show. */
+    hasOlder?: Accessor<boolean>;
     onOpenArchive: (zone: string | null) => void;
     /** Show the conversation up to line `line`. */
     onJump: (line: number) => void;
     onShowNewer: () => void;
+    onShowOlder?: () => void;
     onLatest: () => void;
 }
 
@@ -179,6 +182,11 @@ export function HistoryNavigator(props: HistoryNavigatorProps): JSX.Element {
                     if (end !== null) void locate({ at_ms: end });
                 }}
             />
+            <Show when={props.hasOlder?.() && props.onShowOlder}>
+                <Button tone="quiet" density="compact" icon="arrow-up" onClick={() => props.onShowOlder?.()}>
+                    Show older
+                </Button>
+            </Show>
             <Show when={props.mode() !== "live" && props.hasNewer()}>
                 <Button tone="quiet" density="compact" onClick={() => props.onShowNewer()}>
                     Show newer

@@ -79,7 +79,7 @@ vi.mock("../components/AgentDocumentView", () => ({
     },
 }));
 
-import { AgentHistoryView, HISTORY_PUBLISH_MIN_INTERVAL_MS } from "./AgentHistoryView";
+import { AgentHistoryView, HISTORY_PAGE, HISTORY_PUBLISH_MIN_INTERVAL_MS } from "./AgentHistoryView";
 
 const ev = (event: object): string => JSON.stringify(event);
 const text = (content: string) => ev({ type: "text", content });
@@ -199,11 +199,11 @@ describe("AgentHistoryView follows the transcript", () => {
         setDormant(false);
         await flush(HISTORY_PUBLISH_MIN_INTERVAL_MS);
 
-        // A reload reads the newest page (600 lines) from the end — no
+        // A reload reads the newest page (HISTORY_PAGE lines) from the end — no
         // 6,000-line catch-up read, and no hole below the loaded range.
         const last = reads[reads.length - 1];
         expect(last.offset + last.limit).toBe(disk.lines.length);
-        expect(last.limit).toBe(600);
+        expect(last.limit).toBe(HISTORY_PAGE);
         expect(texts().at(-1)).toBe("latest");
     });
 
@@ -220,7 +220,7 @@ describe("AgentHistoryView follows the transcript", () => {
 
         const last = reads[reads.length - 1];
         expect(last.offset + last.limit).toBe(disk.lines.length);
-        expect(last.limit).toBe(600);
+        expect(last.limit).toBe(HISTORY_PAGE);
         expect(texts().at(-1)).toBe("latest");
     });
 

@@ -82,7 +82,7 @@
 import { useHiddenTabMarker } from "@/app/platform/pane-overlay";
 import clsx from "clsx";
 import { autoUpdate } from "@floating-ui/dom";
-import { createSignal, createComputed, createEffect, on, onCleanup, Show, untrack, type JSX } from "solid-js";
+import { createSignal, createComputed, createEffect, createMemo, on, onCleanup, Show, untrack, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { findScrollContainerRect } from "./hover-anchor";
 import { BOTTOM_MARGIN_PX, computePeekHorizontal, computePeekVertical, READABLE_WIDTH_CHARS } from "./peek-placement";
@@ -251,7 +251,11 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
     // panel unmount for one update (show false, linger not yet set) and remount
     // when the linger arrived — a flicker of its own.
     const bridges = () => (props.align ?? "end") !== "stretch";
-    const [open, setOpen] = createSignal(props.show);
+    // `show` read through one memo owned by this component: a caller's
+    // `show={a() && b()}` compiles to a getter that makes a new memo on every
+    // read, and a read from a timer or an event handler (no owner) leaks it.
+    const show = createMemo(() => props.show);
+    const [open, setOpen] = createSignal(show());
     let held = false;
     let bridgeTimer: ReturnType<typeof setTimeout> | undefined;
     let bridgeStartedAt = 0;
@@ -294,7 +298,7 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
     };
     const endLinger = () => {
         clearBridgeTimer();
-        if (!held && !props.show) {
+        if (!held && !show()) {
             releaseBridge();
             setOpen(false);
         }
@@ -311,7 +315,7 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
     };
     createComputed(
         on(
-            () => props.show,
+            () => show(),
             (show) => {
                 clearBridgeTimer();
                 if (show) {
@@ -340,7 +344,7 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
     // cleared even if the caller's row element changes meanwhile.
     let markedRow: HTMLElement | undefined;
     createComputed(() => {
-        const openAfterLeave = open() && !props.show;
+        const openAfterLeave = open() && !show();
         untrack(() => {
             if (openAfterLeave) {
                 markedRow = props.rowEl();
@@ -512,7 +516,7 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
             mouseMoveRaf = requestAnimationFrame(() => {
                 mouseMoveRaf = null;
                 // A pinned panel does not follow the pointer (see pinnedOffsetY).
-                if (props.show && pinnedOffsetY == null) update();
+                if (show() && pinnedOffsetY == null) update();
             });
         };
         row.addEventListener("mousemove", onMouseMove);
@@ -564,7 +568,7 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
     };
 
     createEffect(() => {
-        if (props.show) {
+        if (show()) {
             update();
         }
     });
@@ -592,7 +596,7 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
                         held = false;
                         // Pointer left the panel: linger briefly (it may be heading
                         // back to the row, whose mouseenter will re-show it).
-                        if (!props.show) startLinger();
+                        if (!show()) startLinger();
                     }}
                     style={floatingStyle()}
                 >
