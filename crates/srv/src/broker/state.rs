@@ -43,8 +43,13 @@ pub enum CredentialState {
     /// from whatever `Failed` state (if any) preceded this attempt — the
     /// only place that count lives, since transitioning through
     /// `Refreshing` would otherwise lose it before `RefreshFailed` can read
-    /// it back out to increment.
-    Refreshing { prior_failures: u32 },
+    /// it back out to increment. `prior_reauth` keeps the `NeedsReauth` an
+    /// on-demand check started from, so a refresh that can't reach the server
+    /// puts it back instead of forgetting a refusal while offline.
+    Refreshing {
+        prior_failures: u32,
+        prior_reauth: Option<Box<CredentialState>>,
+    },
     /// Last refresh attempt failed with a transient error (no answer from the
     /// server, a 5xx, a parse failure) — will be retried on the next
     /// `ensure_fresh`/sweep tick. An unreachable server leaves
@@ -211,15 +216,16 @@ pub fn update(
                 // it with a bare Refreshing here would otherwise strand
                 // RefreshFailed with no way to read the prior count back
                 // out and every failure would reset to 1.
-                let prior_failures = match state {
+                let (prior_failures, prior_reauth) = match state {
                     CredentialState::Failed {
                         consecutive_failures,
                         ..
-                    } => *consecutive_failures,
-                    CredentialState::Fresh | CredentialState::NeedsReauth { .. } => 0,
+                    } => (*consecutive_failures, None),
+                    CredentialState::Fresh => (0, None),
+                    CredentialState::NeedsReauth { .. } => (0, Some(Box::new(state.clone()))),
                     CredentialState::Refreshing { .. } => unreachable!("matched above"),
                 };
-                states.insert(id.clone(), CredentialState::Refreshing { prior_failures });
+                states.insert(id.clone(), CredentialState::Refreshing { prior_failures, prior_reauth });
                 let generation = *generations.get(&id).unwrap_or(&0);
                 vec![Event::RunFreshnessCheck { id, generation }]
             }
@@ -269,18 +275,21 @@ pub fn update(
             }
             let reason = error.message().to_string();
             let permanent = matches!(error, RefreshErrorKind::PermanentAuthFailure(_));
-            let prior_failures = match states.get(&id) {
-                Some(CredentialState::Refreshing { prior_failures }) => *prior_failures,
-                _ => 0,
+            let (prior_failures, prior_reauth) = match states.get(&id) {
+                Some(CredentialState::Refreshing { prior_failures, prior_reauth }) => {
+                    (*prior_failures, prior_reauth.clone())
+                }
+                _ => (0, None),
             };
             if matches!(error, RefreshErrorKind::Unreachable(_)) {
-                states.insert(
-                    id.clone(),
-                    CredentialState::Failed {
+                let back = match prior_reauth {
+                    Some(prior) => *prior,
+                    None => CredentialState::Failed {
                         consecutive_failures: prior_failures,
                         last_error: reason.clone(),
                     },
-                );
+                };
+                states.insert(id.clone(), back);
                 return vec![Event::BecameUnreachable { id, error: reason }];
             }
             let consecutive_failures = prior_failures + 1;
@@ -375,7 +384,7 @@ mod tests {
         );
         assert_eq!(
             m.get("cred"),
-            Some(&CredentialState::Refreshing { prior_failures: 0 })
+            Some(&CredentialState::Refreshing { prior_failures: 0, prior_reauth: None })
         );
     }
 
@@ -389,7 +398,7 @@ mod tests {
         // did not disturb the in-flight state.
         assert_eq!(
             m.get("cred"),
-            Some(&CredentialState::Refreshing { prior_failures: 0 })
+            Some(&CredentialState::Refreshing { prior_failures: 0, prior_reauth: None })
         );
     }
 
@@ -426,7 +435,7 @@ mod tests {
         );
         assert_eq!(
             m.get("cred"),
-            Some(&CredentialState::Refreshing { prior_failures: 0 })
+            Some(&CredentialState::Refreshing { prior_failures: 0, prior_reauth: None })
         );
     }
 
@@ -609,6 +618,30 @@ mod tests {
         );
     }
 
+    /// An on-demand check of a refused credential that can't reach the
+    /// server must not forget the refusal: offline is no news about it.
+    #[test]
+    fn an_unreachable_refresh_keeps_a_refusal() {
+        let mut m = registered();
+        let gen = m.generation_of("cred");
+        m.dispatch(Command::CheckRequested { id: "cred".into() });
+        m.dispatch(Command::RefreshFailed {
+            id: "cred".into(),
+            error: RefreshErrorKind::PermanentAuthFailure("invalid_grant".into()),
+            generation: gen,
+        });
+        let refused = m.get("cred").cloned();
+        m.dispatch(Command::CheckRequested { id: "cred".into() });
+        let events = m.dispatch(Command::RefreshFailed {
+            id: "cred".into(),
+            error: RefreshErrorKind::Unreachable("offline".into()),
+            generation: gen,
+        });
+        assert_eq!(events, vec![Event::BecameUnreachable { id: "cred".into(), error: "offline".into() }]);
+        assert_eq!(m.get("cred").cloned(), refused);
+        assert!(matches!(m.get("cred"), Some(CredentialState::NeedsReauth { rejected: true, .. })));
+    }
+
     #[test]
     fn check_requested_on_needs_reauth_still_runs_a_fresh_check_on_demand() {
         // A human may have logged in again out-of-band (e.g. muxbus.login)
@@ -659,7 +692,7 @@ mod tests {
         m.dispatch(Command::CheckRequested { id: "cred".into() });
         assert_eq!(
             m.get("cred"),
-            Some(&CredentialState::Refreshing { prior_failures: 0 })
+            Some(&CredentialState::Refreshing { prior_failures: 0, prior_reauth: None })
         );
         m.dispatch(Command::Register { id: "cred".into() });
         assert_eq!(m.get("cred"), Some(&CredentialState::Fresh));
