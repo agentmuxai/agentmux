@@ -36,7 +36,7 @@ socket2 = { version = "0.5.5", features = ["all"] }
 uuid = { version = "1", features = ["v4", "v5"] }
 chrono = "0.4"
 tokio-util = { version = "0.7", features = ["io", "rt"] }
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.39", features = ["bundled"] }
 # TypeScript type generation for the RPC bindings (backend/rpc/schema.rs, and
 # the export_bindings_rpc_schema test that feeds scripts/gen-rpc-stubs.mjs).
 # serde-json-impl gives serde_json::Value a TS impl (JsonValue), which
