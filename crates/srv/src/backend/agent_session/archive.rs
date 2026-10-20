@@ -8,7 +8,7 @@ use crate::backend::storage::filestore::FileStore;
 use super::global_store::global_transcript_store;
 use super::helpers::{now_ms, write_zone_file};
 use super::session_io::{OUTPUT_FILE, SNAPSHOT_FILE, TSIDX_FILE};
-use super::zone_naming::{agent_archive_zone, is_valid_definition_id, validate_and_current};
+use super::zone_naming::{agent_archive_zone, agent_current_zone, is_valid_definition_id, validate_and_current};
 
 /// Archive `agent:<defId>:current` to `agent:<defId>:archive:<now_ms>`.
 ///
@@ -42,6 +42,24 @@ pub fn archive_session(
 /// archives only there, so an archive written to the per-channel store drops
 /// out of the agent's history.
 pub(crate) fn archive_session_in(
+    filestore: &FileStore,
+    global: Option<&FileStore>,
+    definition_id: &str,
+) -> Result<Option<(String, i64)>, String> {
+    use crate::backend::transcript::damage;
+    let zone = validate_and_current(definition_id)?;
+    // A zone found corrupt is archived from this channel's copy, the path of an install with no
+    // shared store. A failure that is the corruption is not retried here: the move may have
+    // cleared this channel's current already, so the next call is the one that takes the other path.
+    let global = global.filter(|_| !damage::is_damaged(&zone));
+    let result = archive_session_with(filestore, global, definition_id);
+    if let (Err(e), true) = (&result, global.is_some()) {
+        damage::note_corrupt_text(&zone, "archive", e);
+    }
+    result
+}
+
+fn archive_session_with(
     filestore: &FileStore,
     global: Option<&FileStore>,
     definition_id: &str,
@@ -182,11 +200,15 @@ pub(crate) fn archive_session_in(
 /// with it. `before_move` runs once there is something to archive.
 fn archive_global_current(gfs: &FileStore, definition_id: &str, before_move: impl FnOnce()) -> Result<GlobalArchive, String> {
     let current_zone = validate_and_current(definition_id)?;
+    let seen = |op: &str, e: crate::backend::storage::error::StoreError| {
+        crate::backend::transcript::damage::note_if_shared(gfs, &current_zone, "archive", &e);
+        format!("{op}: {e}")
+    };
     let has = |name: &str| -> Result<bool, String> {
-        Ok(gfs.stat(&current_zone, name).map_err(|e| format!("stat: {e}"))?.is_some_and(|f| f.size > 0))
+        Ok(gfs.stat(&current_zone, name).map_err(|e| seen("stat", e))?.is_some_and(|f| f.size > 0))
     };
     // A snapshot written through the cache may not be in the database yet.
-    gfs.flush_cache().map_err(|e| format!("flush before archive: {e}"))?;
+    gfs.flush_cache().map_err(|e| seen("flush before archive", e))?;
     if !has(SNAPSHOT_FILE)? && !has(OUTPUT_FILE)? {
         return Ok(GlobalArchive::Nothing);
     }
@@ -359,12 +381,19 @@ pub(crate) fn list_archives_in(
     }
     let prefix = format!("agent:{}:archive:", definition_id);
     let limit = if limit == 0 { 20 } else { limit.min(100) };
+    // A zone found corrupt is not listed from.
+    let global = global.filter(|_| !crate::backend::transcript::damage::is_damaged(&agent_current_zone(definition_id)));
 
     let mut matches: Vec<(u64, String, &FileStore)> = Vec::new();
     for store in global.into_iter().chain(std::iter::once(filestore)) {
-        let zones = store
-            .zone_ids_with_prefix(&prefix)
-            .map_err(|e| format!("zone_ids_with_prefix: {e}"))?;
+        let is_global = global.is_some_and(|g| std::ptr::eq(g, store));
+        let zones = match store.zone_ids_with_prefix(&prefix) {
+            Ok(zones) => zones,
+            // The shared store answers with a corrupt file: the archives it held are left out of the list,
+            // and the per-channel ones are listed.
+            Err(e) if is_global && crate::backend::transcript::damage::note_if_shared(store, &agent_current_zone(definition_id), "archive list", &e) => continue,
+            Err(e) => return Err(format!("zone_ids_with_prefix: {e}")),
+        };
         for zone in zones {
             let Some(Ok(ts)) = zone.strip_prefix(&prefix).map(str::parse::<u64>) else {
                 continue;
@@ -497,5 +526,49 @@ mod preview_tests {
         assert_eq!(snapshot_preview(&bytes), ("fix the bug".to_string(), 3));
         assert_eq!(snapshot_preview(b"not json"), (String::new(), 0));
         assert_eq!(snapshot_preview(br#"{"nodes":{}}"#), (String::new(), 0));
+    }
+}
+
+#[cfg(test)]
+mod damage_tests {
+    use super::*;
+    use crate::backend::transcript::damage::{self, test_support};
+
+    fn snapshot(content: &str) -> Vec<u8> {
+        serde_json::to_vec(&serde_json::json!({ "nodes": [{ "type": "user_message", "message": content }] })).unwrap()
+    }
+
+    #[test]
+    fn an_archive_that_finds_the_shared_zone_corrupt_marks_it_and_the_next_one_uses_this_channels_copy() {
+        let def = "def-arch-damage-1";
+        let zone = agent_current_zone(def);
+        let (own, gfs) = (FileStore::open_in_memory().unwrap(), FileStore::open_in_memory().unwrap());
+        write_zone_file(&own, &zone, SNAPSHOT_FILE, &snapshot("asked")).unwrap();
+        let _shared = test_support::register(&gfs);
+        test_support::corrupt(&gfs);
+
+        // The first call meets the corruption: marked, and the failure is reported as before.
+        assert!(archive_session_in(&own, Some(&gfs), def).is_err());
+        assert!(damage::is_damaged(&zone));
+        // This channel's current was not cleared by a move that never started: the next call archives it, from this channel.
+        let (archive_zone, _) = archive_session_in(&own, Some(&gfs), def).unwrap().expect("archived from this channel's copy");
+        assert!(archive_zone.starts_with(&format!("agent:{def}:archive:")));
+        assert!(own.stat(&archive_zone, SNAPSHOT_FILE).unwrap().is_some_and(|f| f.size > 0), "the archive is in this channel's store");
+    }
+
+    #[test]
+    fn archives_are_listed_from_this_channel_when_the_shared_store_is_corrupt() {
+        let def = "def-arch-damage-2";
+        let archive = format!("agent:{def}:archive:1700000000000");
+        let (own, gfs) = (FileStore::open_in_memory().unwrap(), FileStore::open_in_memory().unwrap());
+        write_zone_file(&own, &archive, SNAPSHOT_FILE, &snapshot("older")).unwrap();
+        let _shared = test_support::register(&gfs);
+        test_support::corrupt(&gfs);
+        let rows = list_archives_in(&own, Some(&gfs), def, 10).expect("the list is answered from this channel");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].archive_zoneid, archive);
+        assert!(damage::is_damaged(&agent_current_zone(def)));
+        // Marked: the shared store is not asked again.
+        assert_eq!(list_archives_in(&own, Some(&gfs), def, 10).unwrap().len(), 1);
     }
 }

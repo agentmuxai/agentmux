@@ -135,13 +135,37 @@ pub(crate) fn zone_for(agent_uid: &str) -> Option<String> {
 }
 
 fn append(fs: &FileStore, zone: &str, event: &Event) -> Result<(), String> {
+    use crate::backend::transcript::damage;
+    // A log found corrupt is not written to again in this process.
+    if damage::is_damaged(zone) {
+        return Err("the agent's segment log is damaged".to_string());
+    }
+    let seen = |op: &str, e: crate::backend::storage::error::StoreError| {
+        damage::note_if_shared(fs, zone, "segment log", &e);
+        format!("{op}: {e}")
+    };
     let mut line = serde_json::to_vec(event).map_err(|e| format!("encode segment event: {e}"))?;
     line.push(b'\n');
-    if fs.stat(zone, SEGMENTS_FILE).map_err(|e| format!("stat segments: {e}"))?.is_none() {
+    if fs.stat(zone, SEGMENTS_FILE).map_err(|e| seen("stat segments", e))?.is_none() {
         // Two srvs can race to create it; losing that race is fine.
         let _ = fs.make_file(zone, SEGMENTS_FILE, FileMeta::default(), FileOpts::default());
     }
-    fs.append_data(zone, SEGMENTS_FILE, &line).map_err(|e| format!("append segment event: {e}"))
+    fs.append_data(zone, SEGMENTS_FILE, &line).map_err(|e| seen("append segment event", e))
+}
+
+/// The segment log's bytes: `None` for none, or for a log found corrupt (marked here, the first time).
+fn read_log(fs: &FileStore, zone: &str) -> Option<Vec<u8>> {
+    use crate::backend::transcript::damage;
+    if damage::is_damaged(zone) {
+        return None;
+    }
+    match fs.read_file(zone, SEGMENTS_FILE) {
+        Ok(data) => data,
+        Err(e) => {
+            damage::note_if_shared(fs, zone, "segment log", &e);
+            None
+        }
+    }
 }
 
 fn events_in(bytes: &[u8]) -> impl Iterator<Item = Event> + '_ {
@@ -150,9 +174,25 @@ fn events_in(bytes: &[u8]) -> impl Iterator<Item = Event> + '_ {
 
 /// The id of the agent's newest segment, from the end of its log.
 fn newest_segment_id(fs: &FileStore, zone: &str) -> Option<String> {
-    let file = fs.stat(zone, SEGMENTS_FILE).ok()??;
+    use crate::backend::transcript::damage;
+    if damage::is_damaged(zone) {
+        return None;
+    }
+    let file = match fs.stat(zone, SEGMENTS_FILE) {
+        Ok(file) => file?,
+        Err(e) => {
+            damage::note_if_shared(fs, zone, "segment log", &e);
+            return None;
+        }
+    };
     let offset = (file.size - TAIL_WINDOW_BYTES).max(0);
-    let (_, data) = fs.read_at(zone, SEGMENTS_FILE, offset, file.size - offset).ok()?;
+    let (_, data) = match fs.read_at(zone, SEGMENTS_FILE, offset, file.size - offset) {
+        Ok(read) => read,
+        Err(e) => {
+            damage::note_if_shared(fs, zone, "segment log", &e);
+            return None;
+        }
+    };
     let mut newest: Option<(i64, String)> = None;
     for event in events_in(&data) {
         if let Event::Start(s) = event {
@@ -216,7 +256,7 @@ pub(crate) fn record_end_with_provider_bytes(
 /// running, or its srv died before it could record one.
 pub(crate) fn segments(fs: &FileStore, agent_uid: &str) -> Vec<Segment> {
     let Some(zone) = zone_for(agent_uid) else { return Vec::new() };
-    let Ok(Some(data)) = fs.read_file(&zone, SEGMENTS_FILE) else { return Vec::new() };
+    let Some(data) = read_log(fs, &zone) else { return Vec::new() };
     fold(events_in(&data))
 }
 
@@ -950,5 +990,62 @@ mod tests {
         assert_eq!(exit_reason(0), EndReason::Exited);
         assert_eq!(exit_reason(1), EndReason::Crashed);
         assert_eq!(exit_reason(-1), EndReason::Crashed);
+    }
+}
+
+#[cfg(test)]
+mod damage_tests {
+    use super::*;
+    use crate::backend::transcript::damage::{self, test_support};
+
+    fn start_for(uid: &str) -> Start {
+        Start {
+            segment_id: String::new(),
+            agent_uid: uid.into(),
+            definition_id: None,
+            provider: "claude".into(),
+            config_dir: None,
+            provider_session_id: None,
+            cwd: "C:/work".into(),
+            channel: "stable".into(),
+            agentmux_version: "0.59.34".into(),
+            block_id: "block-damage".into(),
+            zone: None,
+            byte_start: None,
+            started_at_ms: 1,
+            continuity_rung: Rung::Fresh,
+            predecessor_segment_id: None,
+            lease_epoch: None,
+            identity_key: None,
+            forked_from: None,
+        }
+    }
+
+    #[test]
+    fn a_segment_log_found_corrupt_is_marked_and_not_written_or_read_again() {
+        let uid = "uid-damage-seg-1";
+        let zone = zone_for(uid).unwrap();
+        let fs = FileStore::open_in_memory().unwrap();
+        let _shared = test_support::register(&fs);
+        record_start(&fs, start_for(uid)).unwrap();
+        test_support::corrupt(&fs);
+
+        assert!(record_start(&fs, start_for(uid)).is_err());
+        assert!(damage::is_damaged(&zone), "the failed write is the incident");
+        assert_eq!(segments(&fs, uid), Vec::new(), "a damaged log has no chain to offer");
+        let again = record_start(&fs, start_for(uid)).unwrap_err();
+        assert!(again.contains("damaged"), "{again}");
+    }
+
+    #[test]
+    fn a_read_of_a_corrupt_log_marks_it_and_another_agents_log_is_untouched() {
+        let (damaged, fine) = ("uid-damage-seg-2", "uid-damage-seg-3");
+        let fs = FileStore::open_in_memory().unwrap();
+        let _shared = test_support::register(&fs);
+        record_start(&fs, start_for(damaged)).unwrap();
+        test_support::corrupt(&fs);
+        assert!(segments(&fs, damaged).is_empty());
+        assert!(damage::is_damaged(&zone_for(damaged).unwrap()));
+        assert!(!damage::is_damaged(&zone_for(fine).unwrap()), "only the zone that failed is marked");
     }
 }

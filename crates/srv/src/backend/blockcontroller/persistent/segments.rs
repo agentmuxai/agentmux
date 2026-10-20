@@ -30,8 +30,14 @@ use agentmux_common::time::now_ms;
 /// Size of `output` in the global zone, read from the database rather than
 /// this process's cache, so another channel's appends count.
 fn zone_size(zone: &str) -> Option<i64> {
-    let gfs = crate::backend::agent_session::global_transcript_store()?;
-    gfs.line_state(zone, crate::backend::agent_session::OUTPUT_FILE).ok()?.map(|s| s.size)
+    let gfs = crate::backend::transcript::damage::global_for(zone)?;
+    match gfs.line_state(zone, crate::backend::agent_session::OUTPUT_FILE) {
+        Ok(state) => state.map(|s| s.size),
+        Err(e) => {
+            crate::backend::transcript::damage::note_if_shared(gfs, zone, "tail read", &e);
+            None
+        }
+    }
 }
 
 impl PersistentSubprocessController {
