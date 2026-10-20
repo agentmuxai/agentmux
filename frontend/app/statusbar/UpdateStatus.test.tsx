@@ -307,3 +307,38 @@ describe("Maintenance: Check for update", () => {
         expect(screen.getByRole("button", { name: "Check for update" })).toBeTruthy();
     });
 });
+
+
+describe("Maintenance on a Microsoft Store install", () => {
+    const STORE = { ...AVAILABLE, install: "windows-store", can_download: false };
+
+    it("offers the Store, never the release page or a download, and says the Store may lag", async () => {
+        updateStatus.mockResolvedValue(STORE);
+        render(() => <MaintenanceSection />);
+        fireEvent.click(await screen.findByRole("button", { name: "Update in the Store" }));
+        expect(openLink).toHaveBeenCalledTimes(1);
+        expect(openLink).toHaveBeenCalledWith("ms-windows-store://pdp/?productid=9P9QCXNNCRK3");
+        expect(updateDownload).not.toHaveBeenCalled();
+        expect(installAppUpdate).not.toHaveBeenCalled();
+        expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
+        expect(screen.getByText(/Microsoft Store updates this install.*v0\.59\.27 may not be there yet/)).toBeTruthy();
+    });
+
+    it("a Store install below the upgrade floor is not sent anywhere: the Store can't make the intermediate step", async () => {
+        updateStatus.mockResolvedValue({ ...STORE, install_first: "0.58.0" });
+        render(() => <MaintenanceSection />);
+        expect(await screen.findByText(/The Microsoft Store can only install the latest version/)).toBeTruthy();
+        expect(screen.getByText(/v0\.58\.0 or later/)).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Update in the Store" })).toBeNull();
+        expect(screen.queryByRole("button", { name: /Get v0\.58\.0/ })).toBeNull();
+        expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
+        expect(openLink).not.toHaveBeenCalled();
+    });
+
+    it("other installs keep their Download button and no Store note", async () => {
+        updateStatus.mockResolvedValue(AVAILABLE);
+        render(() => <MaintenanceSection />);
+        expect(await screen.findByRole("button", { name: "Download" })).toBeTruthy();
+        expect(screen.queryByText(/Microsoft Store updates this install/)).toBeNull();
+    });
+});
