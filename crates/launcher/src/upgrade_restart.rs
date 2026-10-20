@@ -126,10 +126,11 @@ fn file_sha256(path: &Path) -> Option<String> {
 }
 
 /// What to restart into, if `req` names a newer release than `own_version`
-/// that fits this install (in `own_dir`, with its data in `data_dir`): a
-/// portable of exactly that version beside a portable, or that version's
+/// that fits this install (in `own_dir`, with its data in `data_dir` and its
+/// channel in `channel_dir`): a portable of exactly that version beside a
+/// portable (or, on Linux, where srv unpacked it, `upgrade_linux`), or that version's
 /// installer in this version's own `updates/<v>/` on a `setup.exe` install.
-pub fn staged(req: &UpgradeRequest, own_dir: &Path, data_dir: &Path, own_version: &str) -> Result<Staged, String> {
+pub fn staged(req: &UpgradeRequest, own_dir: &Path, data_dir: &Path, channel_dir: &Path, own_version: &str) -> Result<Staged, String> {
     match (version_core(&req.version), version_core(own_version)) {
         (Some(new), Some(own)) if new > own => {}
         _ => return Err(format!("{} isn't newer than {own_version}", req.version)),
@@ -141,7 +142,7 @@ pub fn staged(req: &UpgradeRequest, own_dir: &Path, data_dir: &Path, own_version
                 .ok()
                 .and_then(|exe| agentmux_common::runtime_mode::running_appimage(&exe));
             let own_root = crate::upgrade_linux::portable_root(own_dir);
-            crate::upgrade_linux::check_target(launcher, &req.version, own_root.as_deref(), own_appimage.as_deref(), data_dir)?;
+            crate::upgrade_linux::check_target(launcher, &req.version, own_root.as_deref(), own_appimage.as_deref(), data_dir, channel_dir)?;
             Ok(Staged::Launcher(launcher.clone()))
         }
         UpgradeTarget::Launcher(launcher) => {
@@ -512,21 +513,21 @@ mod tests {
         let own = root.path().join("agentmux-0.59.26-x64-portable");
         portable(&own, "0.59.26");
         let new = portable(&root.path().join("agentmux-0.59.27-x64-portable"), "0.59.27");
-        assert_eq!(staged(&req("0.59.27", &new), &own, &data, "0.59.26").unwrap(), Staged::Launcher(new.clone()));
+        assert_eq!(staged(&req("0.59.27", &new), &own, &data, &data, "0.59.26").unwrap(), Staged::Launcher(new.clone()));
 
         // Not newer, or not the version it claims.
-        assert!(staged(&req("0.59.27", &new), &own, &data, "0.59.27").is_err());
-        assert!(staged(&req("0.59.28", &new), &own, &data, "0.59.26").is_err());
+        assert!(staged(&req("0.59.27", &new), &own, &data, &data, "0.59.27").is_err());
+        assert!(staged(&req("0.59.28", &new), &own, &data, &data, "0.59.26").is_err());
         // Not a launcher, or not absolute.
         let other = root.path().join("agentmux-0.59.27-x64-portable/runtime/agentmux-0.59.27.exe");
-        assert!(staged(&req("0.59.27", &other), &own, &data, "0.59.26").is_err());
-        assert!(staged(&req("0.59.27", Path::new("agentmux.exe")), &own, &data, "0.59.26").is_err());
+        assert!(staged(&req("0.59.27", &other), &own, &data, &data, "0.59.26").is_err());
+        assert!(staged(&req("0.59.27", Path::new("agentmux.exe")), &own, &data, &data, "0.59.26").is_err());
         // This AgentMux isn't a portable, including a setup.exe install,
         // which has the portable's runtime/ and marker too.
         let installed = root.path().join("Programs/AgentMux");
         portable(&installed, "0.59.26");
         std::fs::write(installed.join("unins000.exe"), b"").unwrap();
-        assert!(staged(&req("0.59.27", &new), &installed, &data, "0.59.26").is_err());
+        assert!(staged(&req("0.59.27", &new), &installed, &data, &data, "0.59.26").is_err());
     }
 
     #[test]
@@ -541,7 +542,7 @@ mod tests {
         let installer = updates.join("AgentMux-0.59.27-x64-setup.exe");
         std::fs::write(&installer, b"").unwrap();
         let Staged::Installer { installer: got, sha256, own_dir } =
-            staged(&setup_req("0.59.27", &installer), &own, &data, "0.59.26").unwrap()
+            staged(&setup_req("0.59.27", &installer), &own, &data, &data, "0.59.26").unwrap()
         else {
             panic!("expected the installer")
         };
@@ -549,25 +550,25 @@ mod tests {
 
         // Changed since srv checked it, or no proper digest to check against.
         std::fs::write(&installer, b"not the release").unwrap();
-        let err = staged(&setup_req("0.59.27", &installer), &own, &data, "0.59.26").unwrap_err();
+        let err = staged(&setup_req("0.59.27", &installer), &own, &data, &data, "0.59.26").unwrap_err();
         assert!(err.contains("download it again"), "{err}");
         std::fs::write(&installer, b"").unwrap();
         let mut upper = setup_req("0.59.27", &installer);
         upper.target = UpgradeTarget::Installer { installer: installer.clone(), sha256: EMPTY_SHA256.to_uppercase() };
-        assert!(staged(&upper, &own, &data, "0.59.26").is_err());
+        assert!(staged(&upper, &own, &data, &data, "0.59.26").is_err());
 
         // Not that version's name, not in this version's updates, or older.
         let renamed = updates.join("setup.exe");
         std::fs::write(&renamed, b"").unwrap();
-        assert!(staged(&setup_req("0.59.27", &renamed), &own, &data, "0.59.26").is_err());
+        assert!(staged(&setup_req("0.59.27", &renamed), &own, &data, &data, "0.59.26").is_err());
         let elsewhere = root.path().join("AgentMux-0.59.27-x64-setup.exe");
         std::fs::write(&elsewhere, b"").unwrap();
-        assert!(staged(&setup_req("0.59.27", &elsewhere), &own, &data, "0.59.26").is_err());
-        assert!(staged(&setup_req("0.59.27", &installer), &own, &data, "0.59.27").is_err());
+        assert!(staged(&setup_req("0.59.27", &elsewhere), &own, &data, &data, "0.59.26").is_err());
+        assert!(staged(&setup_req("0.59.27", &installer), &own, &data, &data, "0.59.27").is_err());
         // A portable never runs an installer.
         let portable_dir = root.path().join("agentmux-0.59.26-x64-portable");
         portable(&portable_dir, "0.59.26");
-        assert!(staged(&setup_req("0.59.27", &installer), &portable_dir, &data, "0.59.26").is_err());
+        assert!(staged(&setup_req("0.59.27", &installer), &portable_dir, &data, &data, "0.59.26").is_err());
     }
 
     #[test]

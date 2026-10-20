@@ -207,10 +207,12 @@ async fn run(asset: &ReleaseAsset, version: &str, root: &Path) -> Result<PathBuf
     set(version, "unpacking", asset.size, asset.size, None, Staged::None);
     // The new folder keeps this AgentMux's data channel, a local build's too.
     let channel = crate::backend::reactive::registry::local_channel_id();
-    // Next to the running folder, so it's where the user expects; under
-    // this version's `updates/` when that folder's parent can't be written.
+    // Next to the running folder, so it's where the user expects; under the
+    // channel's own `updates/` when that folder's parent can't be written.
+    let instance_dir = agentmux_common::DataPaths::from_env().map(|p| p.instance_dir);
+    let fallback = fallback_parent(instance_dir.as_deref(), version, &dir);
     let mut last = String::new();
-    for parent in [root.parent().map(Path::to_path_buf), Some(dir.clone())].into_iter().flatten() {
+    for parent in [root.parent().map(Path::to_path_buf), Some(fallback)].into_iter().flatten() {
         match unpack_portable(&file, version, &parent, &channel).await {
             Ok(folder) => {
                 let _ = tokio::fs::remove_file(&file).await;
@@ -226,6 +228,40 @@ async fn run(asset: &ReleaseAsset, version: &str, root: &Path) -> Result<PathBuf
     let _ = tokio::fs::remove_file(&file).await;
     Err(last)
 }
+
+/// Where a portable is unpacked when the running folder's parent can't take
+/// it: `<channel>/updates/<version>/`, outside every version's data folder.
+/// Under this version's `data/updates/` the new version would run from inside
+/// the old one's data, so removing an old version would remove the running
+/// one, and each later update would nest one level deeper. `dir` (this
+/// version's `updates/<version>/`) only when the channel isn't known. The
+/// launcher accepts a portable here (`upgrade_linux::check_target` on Linux;
+/// any folder on Windows). Like a portable beside the running one, it is the
+/// user's to remove: it may be the version they run.
+fn fallback_parent(instance_dir: Option<&Path>, version: &str, dir: &Path) -> PathBuf {
+    instance_dir.map(|d| d.join("updates").join(version)).unwrap_or_else(|| dir.to_path_buf())
+}
+
+/// `rename`, tried again for a few seconds while Windows refuses it: a folder
+/// just unpacked is often still open to antivirus scanning its new files, and
+/// the move fails with "Access is denied" until the scan lets go.
+async fn rename_when_free(from: &Path, to: &Path) -> std::io::Result<()> {
+    let mut wait = Duration::from_millis(250);
+    let mut waited = Duration::ZERO;
+    loop {
+        match tokio::fs::rename(from, to).await {
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied && waited < RENAME_PATIENCE => {
+                tokio::time::sleep(wait).await;
+                waited += wait;
+                wait = (wait * 2).min(Duration::from_secs(2));
+            }
+            other => return other,
+        }
+    }
+}
+
+/// How long [`rename_when_free`] keeps trying.
+const RENAME_PATIENCE: Duration = Duration::from_secs(10);
 
 /// The installer's name in `updates/<version>/` once verified: the release's.
 fn installer_path(dir: &Path, asset: &ReleaseAsset) -> PathBuf {
@@ -597,7 +633,7 @@ async fn unpack_portable(file: &Path, version: &str, parent: &Path, channel: &st
         Ok(()) if fits(&canonical) => record_channel(&canonical, channel).map(|()| canonical),
         Ok(()) => {
             let target = free_folder(parent, &name);
-            match tokio::fs::rename(unpacked_root(&partial), &target).await {
+            match rename_when_free(&unpacked_root(&partial), &target).await {
                 Ok(()) => Ok(target),
                 // The other one's move won the race.
                 Err(_) if fits(&canonical) => record_channel(&canonical, channel).map(|()| canonical),
@@ -613,6 +649,52 @@ async fn unpack_portable(file: &Path, version: &str, parent: &Path, channel: &st
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_fallback_unpacks_outside_every_versions_data_folder() {
+        let channel = Path::new("/home/u/.agentmux/channels/local-main");
+        let own = channel.join("versions").join("0.59.30").join("data").join("updates").join("0.59.34");
+        let parent = fallback_parent(Some(channel), "0.59.34", &own);
+        assert_eq!(parent, channel.join("updates").join("0.59.34"));
+        assert!(!parent.starts_with(channel.join("versions")));
+        // Without the channel, this version's own updates/ as before.
+        assert_eq!(fallback_parent(None, "0.59.34", &own), own);
+    }
+
+    #[tokio::test]
+    async fn a_rename_that_works_is_done_at_once_and_a_missing_source_fails_at_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let (from, to) = (dir.path().join("a"), dir.path().join("b"));
+        std::fs::create_dir(&from).unwrap();
+        rename_when_free(&from, &to).await.unwrap();
+        assert!(to.is_dir() && !from.exists());
+        // Not "Access is denied": no waiting.
+        let started = std::time::Instant::now();
+        assert!(rename_when_free(&dir.path().join("missing"), &dir.path().join("c")).await.is_err());
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    /// A file held open without delete sharing blocks moving its folder, as
+    /// a scanner's handle does; the move goes through once it is closed.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_rename_refused_while_a_file_inside_is_open_goes_through_once_it_closes() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (from, to) = (dir.path().join("unpacked"), dir.path().join("agentmux-portable"));
+        std::fs::create_dir(&from).unwrap();
+        std::fs::write(from.join("agentmux.exe"), b"x").unwrap();
+        // FILE_SHARE_READ only: no FILE_SHARE_DELETE.
+        let held = std::fs::OpenOptions::new().read(true).share_mode(0x1).open(from.join("agentmux.exe")).unwrap();
+        assert_eq!(std::fs::rename(&from, &to).unwrap_err().kind(), std::io::ErrorKind::PermissionDenied);
+        let release = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(600)).await;
+            drop(held);
+        });
+        rename_when_free(&from, &to).await.unwrap();
+        release.await.unwrap();
+        assert!(to.join("agentmux.exe").is_file());
+    }
 
     #[test]
     fn an_installer_found_in_place_is_reused_only_if_it_hashes_right() {
