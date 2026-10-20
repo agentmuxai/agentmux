@@ -167,3 +167,21 @@ fn an_older_session_needs_a_transcript_a_session_and_a_place_to_end() {
     assert!(copy_older_session_history(&gfs, PARENT, FORK, "s", "session_id", &parent, 0).is_err());
     assert!(copy_older_session_history(&gfs, PARENT, PARENT, "s", "session_id", &parent, 10).is_err());
 }
+
+#[test]
+fn a_fork_of_a_session_in_an_archived_conversation_copies_from_the_archive() {
+    let gfs = FileStore::open_in_memory().unwrap();
+    // After a New conversation the parent's current zone is empty and its
+    // sessions are in the archive.
+    let archive = "agent:parent-def:archive:1000";
+    let data: String = (0..3).map(|n| line("archived-session", n)).collect();
+    gfs.make_file(archive, OUTPUT_FILE, FileMeta::new(), FileOpts::default()).unwrap();
+    gfs.append_lines(archive, OUTPUT_FILE, data.as_bytes()).unwrap();
+
+    assert_eq!(copy_parent_history(&gfs, PARENT, FORK, "archived-session", "session_id").unwrap(), ForkHistory::NoParentHistory);
+    let out = copy_older_session_history(&gfs, PARENT, FORK, "archived-session", "session_id", archive, data.len() as i64).unwrap();
+
+    assert!(matches!(out, ForkHistory::Copied { .. }), "got {out:?}");
+    assert_eq!(read_all(&gfs, &agent_current_zone(FORK), OUTPUT_FILE), data.as_bytes());
+    assert_eq!(read_all(&gfs, archive, OUTPUT_FILE), data.as_bytes(), "the archive is untouched");
+}
