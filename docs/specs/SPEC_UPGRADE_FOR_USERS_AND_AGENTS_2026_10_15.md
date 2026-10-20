@@ -489,7 +489,9 @@ Each phase is small and useful on its own.
      Store** and opens the Store page (`ms-windows-store://pdp/?productid=9P9QCXNNCRK3`;
      the host opens exactly that link, on Windows only), with a note that
      the Store gets each release after GitHub does (the `.msix` is uploaded
-     by hand). Installing through the Store API is not built.
+     by hand). A Store install below the release's upgrade floor is offered nothing
+     and told why: the Store installs only the latest, and a standalone build
+     would sit beside it. Installing through the Store API is not built.
    - **3c** macOS, **3e** AppImage and Linux portable, **3g** `.deb`/`.rpm`.
 4. **Agents.**
    - **4a**: the `App` tool's `version` and `upgrade`, with the gate, the

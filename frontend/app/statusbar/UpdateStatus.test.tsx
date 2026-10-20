@@ -324,14 +324,15 @@ describe("Maintenance on a Microsoft Store install", () => {
         expect(screen.getByText(/Microsoft Store updates this install.*v0\.59\.27 may not be there yet/)).toBeTruthy();
     });
 
-    it("a Store install below the upgrade floor still goes to the Store, not to a standalone build", async () => {
+    it("a Store install below the upgrade floor is not sent anywhere: the Store can't make the intermediate step", async () => {
         updateStatus.mockResolvedValue({ ...STORE, install_first: "0.58.0" });
         render(() => <MaintenanceSection />);
-        fireEvent.click(await screen.findByRole("button", { name: "Update in the Store" }));
-        expect(openLink).toHaveBeenCalledTimes(1);
-        expect(openLink).toHaveBeenCalledWith("ms-windows-store://pdp/?productid=9P9QCXNNCRK3");
+        expect(await screen.findByText(/The Microsoft Store can only install the latest version/)).toBeTruthy();
+        expect(screen.getByText(/v0\.58\.0 or later/)).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Update in the Store" })).toBeNull();
         expect(screen.queryByRole("button", { name: /Get v0\.58\.0/ })).toBeNull();
-        expect(screen.queryByText(/install v0\.58\.0 first/)).toBeNull();
+        expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
+        expect(openLink).not.toHaveBeenCalled();
     });
 
     it("other installs keep their Download button and no Store note", async () => {
