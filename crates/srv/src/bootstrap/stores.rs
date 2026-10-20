@@ -138,12 +138,12 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     let channel = std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string());
     let code_version = std::env::var("AGENTMUX_VERSION")
         .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string());
-    // Snapshots live under the agentmux home root (sibling of `channels/`)
-    // so they survive channel switches and aren't counted against any one
-    // channel's data dir. Honor AGENTMUX_HOME_OVERRIDE for tests; else
-    // default to the OS-level `~/.agentmux/`. Matches `resolve_root` in
-    // agentmux-common — kept inline here to avoid threading the full
-    // DataPaths plumbing into main.rs for one path.
+    // Snapshots live in this version's own data directory, `<data>/snapshots/`:
+    // `get_mux_data_dir()` answers with the data directory once
+    // AGENTMUX_DATA_HOME is set above (#3372). They sit beside the databases
+    // they copy, and pruning keeps 5 there. AGENTMUX_HOME_OVERRIDE wins in
+    // tests. (Before #3372 they went to `~/.agentmux/snapshots/`; older
+    // snapshots stay there.)
     let snapshots_dir = std::env::var_os("AGENTMUX_HOME_OVERRIDE")
         .filter(|s| !s.is_empty())
         .map(std::path::PathBuf::from)
