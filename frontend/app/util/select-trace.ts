@@ -165,8 +165,11 @@ export function createSelectTrace(opts: SelectTraceOptions = {}) {
             }, CLICK_GRACE_MS);
         },
 
-        /** A click arrived: the press was not lost. */
-        clicked() {
+        /** A click arrived on the row with this block id and it is still in the document:
+         *  the press was not lost. A click that landed on the list instead (the pressed
+         *  row was replaced) does not count. */
+        clicked(blockId: string | null, el: { isConnected: boolean } | null) {
+            if (!press || !el?.isConnected || blockId !== press.blockId) return;
             if (graceTimer != null) clearTimer(graceTimer);
             graceTimer = null;
             press = null;

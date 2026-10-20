@@ -64,7 +64,7 @@ describe("pressed rows whose click never arrives", () => {
         const { trace, logs, advance } = harness();
         trace.pressed("block-aaaaaaaa", { isConnected: true });
         trace.released();
-        trace.clicked();
+        trace.clicked("block-aaaaaaaa", { isConnected: true });
         advance(CLICK_GRACE_MS * 2);
         expect(trace.counters().lostClicks).toBe(0);
         expect(logs).toEqual([]);
@@ -84,6 +84,17 @@ describe("pressed rows whose click never arrives", () => {
         expect(c.lostClicksRowGone).toBe(1);
         expect(logs[0]).toContain("block-aa");
         expect(logs[0]).toContain("rebuilt under the pointer");
+    });
+
+    it("a click that landed on the list, or on another row, does not save the press", () => {
+        const { trace, advance } = harness();
+        trace.pressed("block-aaaaaaaa", { isConnected: false });
+        trace.released();
+        trace.clicked(null, null);
+        trace.clicked("block-bbbbbbbb", { isConnected: true });
+        trace.clicked("block-aaaaaaaa", { isConnected: false });
+        advance(CLICK_GRACE_MS);
+        expect(trace.counters().lostClicks).toBe(1);
     });
 
     it("a release with no press on a row is ignored", () => {

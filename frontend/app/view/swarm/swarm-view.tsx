@@ -73,7 +73,10 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
             if (card && blockId) selectTrace.pressed(blockId, card);
         };
         const onUp = () => selectTrace.released();
-        const onClick = () => selectTrace.clicked();
+        const onClick = (e: MouseEvent) => {
+            const card = (e.target as Element | null)?.closest<HTMLElement>(".swarm-agent-card") ?? null;
+            selectTrace.clicked(card?.dataset.blockId ?? null, card);
+        };
         root.addEventListener("pointerdown", onDown, true);
         root.addEventListener("pointerup", onUp, true);
         root.addEventListener("pointercancel", onUp, true);
