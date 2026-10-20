@@ -6,6 +6,9 @@
 //
 //   node nightly.mjs plan   [--b-run <id>] --out plan.json   picks the builds to compare, writes plan.json and the step outputs
 //   node nightly.mjs report --plan plan.json [--compare compare.md] [--spread spread.md]   the markdown for the job summary
+//   node nightly.mjs flagged --compare compare.json   whether the first matrix flagged anything (sets the `flagged` output)
+//   node nightly.mjs issue --plan plan.json --initial compare.json --final final.json   opens, comments on or closes the perf-regression issue
+//   node nightly.mjs failure --result <success|failure|cancelled|skipped>   opens, comments on or closes the perf-run-failed issue from the job's result
 //
 // `plan` needs `gh` and GH_TOKEN (the runner has both) and GITHUB_REPOSITORY.
 
@@ -15,6 +18,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { mergesOf, pickBuilds, planMarkdown } from "./lib/nightlyplan.mjs";
+import { flaggedMeasures, reportIssue, reportRunFailure } from "./lib/perfissue.mjs";
 
 const WORKFLOW = "ci-nightly-artifacts.yml";
 const ARTIFACT = "windows-portable";
@@ -53,6 +57,43 @@ function plan(argv) {
     if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, lines.join("\n") + "\n");
 }
 
+/** Whether the first matrix flagged anything (so a confirmation pair is run); sets the `flagged` step output. */
+function flagged(argv) {
+    let n = 0;
+    try {
+        n = flaggedMeasures(JSON.parse(readFileSync(flag(argv, "--compare"), "utf8"))).length;
+    } catch {
+        // no comparison was written (B alone, or the lab did not finish): nothing to confirm
+    }
+    const line = `flagged=${n > 0}`;
+    console.log(`${line} (${n} measure(s) flagged by the first matrix)`);
+    if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, line + "\n");
+}
+
+/** Opens, comments on or closes the perf-regression issue from the night's result (lib/perfissue.mjs). */
+function issue(argv) {
+    const read = (name) => {
+        const path = flag(argv, name);
+        try {
+            return path ? JSON.parse(readFileSync(path, "utf8")) : null;
+        } catch {
+            return null; // the lab did not get as far as writing it: the state is unknown and nothing is done
+        }
+    };
+    const repo = process.env.GITHUB_REPOSITORY;
+    const runUrl = `${process.env.GITHUB_SERVER_URL ?? "https://github.com"}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+    const run = (args) => execFileSync(process.env.GH_BIN || "gh", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, shell: Boolean(process.env.GH_BIN) }).trim();
+    reportIssue({ env: { REPO: repo, RUN_URL: runUrl, DRY_RUN: process.env.DRY_RUN }, plan: read("--plan"), initial: read("--initial"), final: read("--final"), gh: run });
+}
+
+/** The performance job's own result (the workflow's `needs.compare.result`) as the perf-run-failed issue (lib/perfissue.mjs). */
+function failure(argv) {
+    const repo = process.env.GITHUB_REPOSITORY;
+    const runUrl = `${process.env.GITHUB_SERVER_URL ?? "https://github.com"}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+    const run = (args) => execFileSync(process.env.GH_BIN || "gh", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, shell: Boolean(process.env.GH_BIN) }).trim();
+    reportRunFailure({ env: { REPO: repo, RUN_URL: runUrl, RUN_ID: process.env.GITHUB_RUN_ID, DRY_RUN: process.env.DRY_RUN }, result: flag(argv, "--result"), gh: run });
+}
+
 function report(argv) {
     const plan = JSON.parse(readFileSync(flag(argv, "--plan") ?? "plan.json", "utf8"));
     const parts = [planMarkdown(plan)];
@@ -67,8 +108,11 @@ function main() {
     const [cmd, ...rest] = process.argv.slice(2);
     if (cmd === "plan") plan(rest);
     else if (cmd === "report") report(rest);
+    else if (cmd === "flagged") flagged(rest);
+    else if (cmd === "issue") issue(rest);
+    else if (cmd === "failure") failure(rest);
     else {
-        console.error("usage: nightly.mjs plan [--b-run <id>] [--out plan.json] | report --plan plan.json [--compare compare.md] [--spread spread.md]");
+        console.error("usage: nightly.mjs plan [--b-run <id>] [--out plan.json] | report --plan plan.json [--compare compare.md] [--spread spread.md] | flagged --compare compare.json | issue --plan plan.json --initial compare.json --final final.json | failure --result <job result>");
         process.exit(2);
     }
 }
