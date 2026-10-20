@@ -113,8 +113,13 @@ impl StageTimeline {
                 });
             }
             StartupEvent::StageEnd { stage, duration_ms, status, detail } => {
-                if let Some(row) = self.stages.iter_mut().rev().find(|r| r.stage == stage) {
-                    row.done = Some((duration_ms, status, detail));
+                if let Some(i) = self.stages.iter().rposition(|r| r.stage == stage) {
+                    let observed = self.stages[i].started_at.elapsed().as_millis() as u64;
+                    self.stages[i].done = Some((duration_ms, status, detail));
+                    // A stage reported after the fact (macOS `dlopen`: begin and
+                    // end sent together once the work is done) ran during the gap
+                    // before it, so its time is taken back out of that gap.
+                    self.shrink_gap_before(i, duration_ms.saturating_sub(observed));
                 }
                 if self.stages.iter().all(|r| r.done.is_some()) {
                     if let Some(label) = gap_label_after(stage) {
@@ -140,6 +145,23 @@ impl StageTimeline {
                     }
                 }
             }
+        }
+    }
+
+    /// Take `ms` out of the closed gap row just before `self.stages[i]`,
+    /// dropping the gap if what remains is under [`GAP_MIN_MS`].
+    fn shrink_gap_before(&mut self, i: usize, ms: u64) {
+        if ms == 0 || i == 0 {
+            return;
+        }
+        let gap = &mut self.stages[i - 1];
+        let Some((gap_ms, _, _)) = gap.done.as_mut() else { return };
+        if gap.stage != GAP_STAGE {
+            return;
+        }
+        *gap_ms = gap_ms.saturating_sub(ms);
+        if *gap_ms < GAP_MIN_MS {
+            self.stages.remove(i - 1);
         }
     }
 
@@ -506,6 +528,30 @@ mod tests {
         tl.apply_tick(vec![begin("paint")]);
         tl.apply_tick(vec![end("paint", 5)]);
         assert_eq!(tl.stages.last().unwrap().stage, "paint", "nothing follows paint");
+    }
+
+    #[test]
+    fn a_stage_reported_after_the_fact_is_taken_out_of_the_gap_before_it() {
+        let mut tl = StageTimeline::new();
+        tl.apply_tick(vec![begin("host")]);
+        tl.apply_tick(vec![end("host", 30)]);
+        age_gap(&mut tl, 1000);
+        // dlopen's begin and end arrive together, after 700 ms of loading.
+        tl.apply_tick(vec![begin("dlopen"), end("dlopen", 700)]);
+        tl.apply_tick(vec![]);
+        let gap = tl.stages.iter().find(|r| r.stage == GAP_STAGE).expect("300 ms of the gap remain");
+        let ms = gap.done.as_ref().unwrap().0;
+        assert!((300..400).contains(&ms), "gap keeps only the time dlopen didn't report, got {ms}");
+
+        // When the after-the-fact stage covers the whole gap, the gap goes.
+        let mut tl = StageTimeline::new();
+        tl.apply_tick(vec![begin("host")]);
+        tl.apply_tick(vec![end("host", 30)]);
+        age_gap(&mut tl, 500);
+        tl.apply_tick(vec![begin("dlopen"), end("dlopen", 500)]);
+        tl.apply_tick(vec![]);
+        let stages: Vec<&str> = tl.stages.iter().map(|r| r.stage).collect();
+        assert_eq!(stages, vec!["host", "dlopen"]);
     }
 
     #[test]
