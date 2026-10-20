@@ -155,16 +155,24 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     let id_store = state.id_store.clone();
+    let mstore = state.mstore.clone();
     let broker = state.broker.clone();
     engine.register_typed(
         COMMAND_DELETE_DRONE,
         move |cmd: DeleteDroneReq, _ctx| {
             let id_store = id_store.clone();
+            let mstore = mstore.clone();
             let broker = broker.clone();
             async move {
                 let deleted = id_store
                     .drone_delete(&cmd.id)
                     .map_err(|e| format!("deletedrone: {e}"))?;
+                // The runs are in this version's store, the definition in the
+                // shared one, so nothing cascades (m0038). Other versions keep
+                // their own runs of it.
+                if let Err(e) = mstore.drone_runs_delete_for(&cmd.id) {
+                    tracing::warn!(drone_id = %cmd.id, "deletedrone: removing its runs failed: {e}");
+                }
                 if deleted {
                     broker.publish_event::<crate::backend::mps_events::DronesChanged>(&(), vec![], 0);
                 }

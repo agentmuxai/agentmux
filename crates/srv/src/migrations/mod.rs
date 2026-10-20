@@ -85,6 +85,7 @@ mod m0034_identity_history_backfill;
 mod m0035_agent_owns_its_provider;
 mod m0036_drop_bundle_mcp;
 mod m0037_retire_old_pane_names;
+mod m0038_drop_drone_runs_definition_fk;
 mod runner;
 #[cfg(test)]
 mod phase5_tests;
@@ -258,4 +259,5 @@ static REGISTRY: &[&(dyn Migration + Sync)] = &[
     &m0035_agent_owns_its_provider::M0035AgentOwnsItsProvider,
     &m0036_drop_bundle_mcp::M0036DropBundleMcp,
     &m0037_retire_old_pane_names::M0037RetireOldPaneNames,
+    &m0038_drop_drone_runs_definition_fk::M0038DropDroneRunsDefinitionFk,
 ];
