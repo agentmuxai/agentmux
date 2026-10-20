@@ -284,6 +284,18 @@ it. A night with nothing to compare, or where the lab did not write its comparis
 open/comment/close decision is `decide` from `scripts/ci-nightly-status.mjs`, shared with the `nightly-red` issue).
 To see what the issue step would do without writing anything, dispatch the workflow with `dry-run-issue` set.
 
+### History and trend
+
+Each night on the standard workload (12 agents, 10 rounds) adds one line to `perf/history.jsonl` on the `perf-data` branch: the date, both
+builds, the medians of every measure (`a`, `b`, `change_pct`, `flag`), what flagged, whether the confirmation pair backed it and the open
+`perf-regression` issue. The format is section 4.9 of
+[`SPEC_NIGHTLY_PERF_REGRESSION_2026_10_19.md`](../../../docs/specs/SPEC_NIGHTLY_PERF_REGRESSION_2026_10_19.md); the nightly GitHub email reads the last
+line. Only the workflow writes the branch, and only on main; a run with other panes or rounds, or from another branch, writes nothing.
+
+The job summary draws the last 30 nights of app memory, app and srv CPU, round time and srv bytes written as Mermaid charts, and says when
+the last 7 nights' median is more than 15% above the 30 nights before (a slow drift: said once, on the issue, the night it starts; a drifting
+night does not close the issue). `nightly.mjs history` does this and `lib/perfhistory.mjs` holds the line, the file, the drift and the charts.
+
 A night that does not finish (the lab fails, or the job times out) opens one `perf-run-failed` issue, with a comment for
 each later failed night; the first night that finishes closes it (`nightly.mjs failure`, the `failed` job). A cancelled
 run says nothing; a job that hit its timeout counts as failed (GitHub reports it as cancelled, so its annotations are read). Without it a failing check would show only as a red run in Actions and the history would quietly stop growing.
