@@ -224,8 +224,11 @@ async fn fill(state: &Arc<AppState>, root: &mut super::cdp::CdpSession, req: &Fi
         return Err(format!("this field holds at most {max} characters and the value is longer: nothing was typed"));
     }
     let date = date_type(&located.facts);
+    // The date parser's own errors quote what it couldn't read, which here is the
+    // Vault value: say it without it.
     let typed = match &date {
-        Some(ty) => super::dates::to_input_value(ty, &req.text)?,
+        Some(ty) => super::dates::to_input_value(ty, &req.text)
+            .map_err(|_| format!("the value isn't a date this {ty} field can take (a date of birth is best kept as YYYY-MM-DD): nothing was typed"))?,
         None => req.text.clone(),
     };
 
@@ -358,6 +361,17 @@ mod tests {
         }
         let checkbox = located(facts("input", &[("type", "checkbox")], "Agree"));
         assert!(check_still_approved(&checkbox, &request_for(&checkbox)).unwrap_err().contains("takes typed text"));
+    }
+
+    // Fields that take a date are set whole; a value that can't be read as one is refused
+    // without quoting it, since the date parser's own message would.
+    #[test]
+    fn a_date_that_cant_be_read_is_refused_without_quoting_it() {
+        let ty = date_type(&facts("input", &[("type", "date")], "Date of birth")).expect("a date field");
+        assert_eq!(super::super::dates::to_input_value(&ty, "1990-05-06").unwrap(), "1990-05-06");
+        let err = super::super::dates::to_input_value(&ty, "05/06/1990").unwrap_err();
+        assert!(err.contains("05/06/1990"), "the parser's own error quotes it: {err}");
+        assert!(date_type(&facts("input", &[("type", "text")], "")).is_none());
     }
 
     #[test]

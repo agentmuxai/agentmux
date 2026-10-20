@@ -283,6 +283,32 @@ async fn an_unverified_caller_is_refused_before_anything_is_read() {
     assert!(routes(&s).is_empty());
 }
 
+// An error from the host that quotes the value (a date parser's does) never reaches the agent.
+#[tokio::test]
+async fn a_host_error_that_quotes_the_value_is_cleaned_before_the_agent_sees_it() {
+    let s = setup(ssn_field("https://irs.gov")).await;
+    s.state.identity_store.vault_grant_add(&s.entry, "https://irs.gov", 1).unwrap();
+    let app = Router::new().route(
+        "/agentmux/browser/:route",
+        post(|Path(route): Path<String>| async move {
+            if route == "field_info" {
+                Json(json!({ "ok": true, "data": ssn_field("https://irs.gov") }))
+            } else {
+                Json(json!({ "ok": false, "error": "\"123-45-6789\" isn't a real date" }))
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    *s.state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port, token: "host-token".into() });
+    let (status, body) = fill(&s, &s.entry).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(!body.to_string().contains("123-45"), "{body}");
+    assert!(body.to_string().contains("[hidden]") && body.to_string().contains("isn't a real date"), "{body}");
+    assert!(!activity_text(&s).contains("123-45"));
+}
+
 #[tokio::test]
 async fn the_host_refusing_the_fill_is_reported_as_failed_and_leaks_nothing() {
     let s = setup(ssn_field("https://irs.gov")).await;

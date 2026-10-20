@@ -213,6 +213,9 @@ pub(crate) async fn handle_vault_fill(
         "expect_fingerprint": field.fingerprint,
     });
     let filled = proxy_value(&state, "vault_fill", body, HOST_WAIT).await;
+    // Whatever the host says, the value isn't in it: an error that quotes it (a
+    // parser's, a page's) is cleaned before the agent can see it.
+    let filled = filled.map_err(|(code, e)| (code, if value.is_empty() { e } else { e.replace(value.as_str(), "[hidden]") }));
     drop(value);
     match filled {
         Ok(data) => {
