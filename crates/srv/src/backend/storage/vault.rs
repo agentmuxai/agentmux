@@ -37,6 +37,14 @@ pub(super) const VAULT_SCHEMA: &str = "
         target      TEXT NOT NULL DEFAULT '',
         outcome     TEXT NOT NULL DEFAULT ''
     );
+    -- Where the person let an agent use an entry without asking again: the
+    -- origin of a site, for one entry (spec section 6.4).
+    CREATE TABLE IF NOT EXISTS db_vault_grants (
+        entry_id   TEXT NOT NULL,
+        origin     TEXT NOT NULL,
+        granted_at INTEGER NOT NULL,
+        PRIMARY KEY (entry_id, origin)
+    );
     -- Which AgentMux instances show a Vault pane now, until when: agents'
     -- whole-window captures of AgentMux are refused while any does.
     CREATE TABLE IF NOT EXISTS db_vault_on_screen (
@@ -110,9 +118,51 @@ impl Store {
         Ok(n > 0)
     }
 
+    /// Deletes an entry and the grants it had.
     pub fn vault_delete(&self, id: &str) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
-        Ok(conn.execute("DELETE FROM db_vault_entries WHERE id = ?1", params![id])? > 0)
+        let tx = conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM db_vault_grants WHERE entry_id = ?1", params![id])?;
+        let n = tx.execute("DELETE FROM db_vault_entries WHERE id = ?1", params![id])?;
+        tx.commit()?;
+        Ok(n > 0)
+    }
+
+    pub fn vault_grant_add(&self, entry_id: &str, origin: &str, at_ms: i64, entry_created_at: i64) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        // Only for the entry the person was asked about: they have minutes to answer,
+        // in which time it can be deleted, and a re-created one of the same name (its
+        // id comes from its kind and label, its `created_at` is new) must not inherit
+        // the site.
+        conn.execute(
+            "INSERT OR REPLACE INTO db_vault_grants (entry_id, origin, granted_at) SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM db_vault_entries WHERE id = ?1 AND created_at = ?4)",
+            params![entry_id, origin, at_ms, entry_created_at],
+        )?;
+        Ok(())
+    }
+
+    pub fn vault_grant_revoke(&self, entry_id: &str, origin: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        Ok(conn.execute("DELETE FROM db_vault_grants WHERE entry_id = ?1 AND origin = ?2", params![entry_id, origin])? > 0)
+    }
+
+    pub fn vault_grant_check(&self, entry_id: &str, origin: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let n: i64 = conn.query_row("SELECT COUNT(*) FROM db_vault_grants WHERE entry_id = ?1 AND origin = ?2", params![entry_id, origin], |r| r.get(0))?;
+        Ok(n > 0)
+    }
+
+    /// Every entry's grants: entry id to its origins, oldest first.
+    pub fn vault_grants(&self) -> Result<std::collections::HashMap<String, Vec<String>>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT entry_id, origin FROM db_vault_grants ORDER BY granted_at, origin")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        let mut out: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+        for row in rows {
+            let (id, origin) = row?;
+            out.entry(id).or_default().push(origin);
+        }
+        Ok(out)
     }
 
     pub fn vault_get(&self, id: &str) -> Result<Option<VaultRow>, StoreError> {
@@ -271,6 +321,31 @@ mod tests {
         assert!(s.vault_delete("a").unwrap());
         assert!(!s.vault_delete("a").unwrap());
         assert_eq!(s.vault_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn a_grant_is_for_one_entry_and_one_site_and_goes_with_the_entry() {
+        let s = store();
+        s.vault_insert(&row("a", "A")).unwrap();
+        s.vault_insert(&row("b", "B")).unwrap();
+        // An entry deleted while its prompt was open: the late "Always" writes nothing.
+        s.vault_grant_add("gone", "https://irs.gov", 1, 1).unwrap();
+        assert!(s.vault_grants().unwrap().is_empty());
+        s.vault_grant_add("a", "https://irs.gov", 1, 1).unwrap();
+        s.vault_grant_add("a", "https://irs.gov", 2, 1).unwrap();
+        s.vault_grant_add("a", "https://ssa.gov", 3, 1).unwrap();
+        // The same id with another `created_at` is a different entry.
+        s.vault_grant_add("b", "https://irs.gov", 4, 99).unwrap();
+        assert!(!s.vault_grant_check("b", "https://irs.gov").unwrap());
+        assert!(s.vault_grant_check("a", "https://irs.gov").unwrap());
+        assert!(!s.vault_grant_check("a", "https://evil.example").unwrap(), "another site");
+        assert!(!s.vault_grant_check("b", "https://irs.gov").unwrap(), "another entry");
+        assert_eq!(s.vault_grants().unwrap()["a"], ["https://irs.gov", "https://ssa.gov"]);
+        assert!(s.vault_grant_revoke("a", "https://irs.gov").unwrap());
+        assert!(!s.vault_grant_revoke("a", "https://irs.gov").unwrap());
+        assert!(!s.vault_grant_check("a", "https://irs.gov").unwrap(), "a revoked grant asks again");
+        s.vault_delete("a").unwrap();
+        assert!(s.vault_grants().unwrap().is_empty(), "deleting an entry deletes its grants");
     }
 
     #[test]

@@ -55,6 +55,7 @@ fn shape_error(what: &str) -> String {
 pub(crate) fn publish(state: &AppState) {
     let event = crate::backend::mps_events::VaultEvent {
         requests: requests::requests().list(),
+        uses: crate::backend::vault::uses::uses().list(),
         changed_ms: agentmux_common::time::now_ms_u64(),
     };
     state.broker.publish_event::<crate::backend::mps_events::Vault>(&event, vec![], 0);
@@ -99,6 +100,7 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                         "entries": entries,
                         "problem": problem,
                         "requests": requests::requests().list(),
+                        "uses": vault::uses::uses().list(),
                         "backend": crate::identity::secret_store::backend_name(),
                     }),
                     false,
@@ -147,7 +149,30 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                 requests::requests().answer(id, requests::Answer::Declined);
                 Ok((json!({}), true))
             }
-            "requests" => Ok((json!({ "requests": requests::requests().list() }), false)),
+            "requests" => Ok((json!({ "requests": requests::requests().list(), "uses": vault::uses::uses().list() }), false)),
+            // The person's answer to an agent's use of an entry (spec section 6.4).
+            "answer_use" => {
+                let s = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+                let (id, word) = (s("id"), s("decision"));
+                let decision = vault::uses::Decision::parse(&word).ok_or_else(|| "decision is once, always or deny".to_string())?;
+                let request = vault::uses::uses().get(&id).ok_or_else(|| "that request is no longer waiting".to_string())?;
+                if decision == vault::uses::Decision::Always && !request.offer_always {
+                    return Err("Always isn't offered here: the field doesn't look like what the entry is".into());
+                }
+                if !vault::uses::uses().answer(&id, decision) {
+                    return Err("that request is no longer waiting".into());
+                }
+                Ok((json!({}), true))
+            }
+            "revoke_grant" => {
+                let s = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+                let (entry, origin) = (s("entry_id"), s("origin"));
+                if !store.vault_grant_revoke(&entry, &origin).map_err(|e| e.to_string())? {
+                    return Err("there is no such grant".into());
+                }
+                vault::record(&store, &entry, "", vault::PERSON, "revoked a site", &origin, "done");
+                Ok((json!({}), true))
+            }
             // A pane says it is showing (or no longer is). Only the host can
             // say so: an agent clearing it could then capture the window. Each
             // pane has its own note, so one pane hiding can't clear another's.

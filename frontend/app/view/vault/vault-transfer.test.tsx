@@ -25,6 +25,7 @@ const entry = (id: string, label: string, kind: string, section: VaultEntryInfo[
     created_at: 1,
     updated_at: 1,
     last_used_at: 0,
+    grants: [],
 });
 const ENTRIES = [entry("ssn-alex", "Alex", "ssn", "personal"), entry("api-key-stripe", "Stripe", "api-key", "api-keys")];
 

@@ -11,7 +11,7 @@ use super::snapshot::DomFacts;
 /// Split a field name or label into lower-case words at spaces, punctuation,
 /// camelCase and letter/digit boundaries: `taxpayerTIN` → `taxpayer`, `tin`;
 /// `SSNInput` → `ssn`, `input`; `last4ssn` → `last`, `4`, `ssn`.
-fn words_of(text: &str) -> Vec<String> {
+pub(super) fn words_of(text: &str) -> Vec<String> {
     let chars: Vec<char> = text.chars().collect();
     let mut words = Vec::new();
     let mut cur = String::new();
@@ -43,7 +43,7 @@ fn words_of(text: &str) -> Vec<String> {
 /// ITIN or TIN? A guard for mistakes and page tricks, so a false alarm (a
 /// field about tin cans) only means the user fills it. A company's EIN isn't
 /// one: it is printed on public filings.
-fn names_a_tax_id(texts: &[&str]) -> bool {
+pub(super) fn names_a_tax_id(texts: &[&str]) -> bool {
     texts.iter().any(|t| {
         let words = words_of(t);
         let squashed: String = words.concat();
@@ -54,7 +54,7 @@ fn names_a_tax_id(texts: &[&str]) -> bool {
 }
 
 /// Does any of these name a password: password, passphrase, passcode, PIN, pw?
-fn names_a_password(texts: &[&str]) -> bool {
+pub(super) fn names_a_password(texts: &[&str]) -> bool {
     texts.iter().any(|t| {
         words_of(t).iter().any(|w| {
             w.contains("password") || w.contains("passwd") || w.contains("passphrase") || w.contains("passcode")
@@ -73,6 +73,10 @@ pub fn is_secret(f: &DomFacts) -> bool {
 /// Why [`is_secret`] holds, in words for the agent and the person: the
 /// snapshot's mark and the refusal name it, so a false alarm is easy to see.
 pub fn secret_reason(f: &DomFacts) -> Option<&'static str> {
+    // A field the Vault filled holds a value no agent may read back, whatever its name.
+    if f.attrs.contains_key(super::vault_fill::TAINT_ATTR) {
+        return Some("it holds a value filled from the Vault");
+    }
     if f.local_name == "input" && f.attr("type").eq_ignore_ascii_case("password") {
         return Some("it is a password field");
     }
