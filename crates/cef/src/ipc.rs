@@ -478,6 +478,8 @@ async fn route_command(
         // ---- Clipboard (CEF can't use navigator.clipboard without permission policy) ----
         "vault_reveal" => commands::vault::reveal(state, args).await,
         "vault_copy" => commands::vault::copy(state, args).await,
+        "vault_export" => commands::vault_files::export(state, args).await,
+        "vault_import" => commands::vault_files::import(state, args).await,
         "read_clipboard" => commands::clipboard::read_clipboard(),
         "write_clipboard" => commands::clipboard::write_clipboard(args),
         "read_clipboard_attachments" => commands::clipboard::read_clipboard_attachments(),
@@ -789,6 +791,11 @@ async fn route_command(
             // them through here.
             if matches!(op.as_str(), "reveal" | "record_copy") {
                 return Err("that is only done by Reveal and Copy, after Windows Hello confirms it's you".to_string());
+            }
+            // A file path is only ever one the person chose in the host's own
+            // dialog (vault_export, vault_import), never one the page names.
+            if matches!(op.as_str(), "export" | "import_inspect") {
+                return Err("export and import choose their file in a window of their own".to_string());
             }
             let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
             let auth_key = state.auth_key.lock().clone();

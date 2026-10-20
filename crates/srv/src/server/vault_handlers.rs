@@ -36,6 +36,15 @@ fn error(status: StatusCode, message: impl Into<String>) -> Response {
     (status, Json(json!({ "error": message.into() }))).into_response()
 }
 
+/// The file the host chose, which must be an absolute path.
+fn file_path(body: &Value) -> Result<std::path::PathBuf, String> {
+    let p = std::path::PathBuf::from(body.get("path").and_then(Value::as_str).unwrap_or(""));
+    if !p.is_absolute() {
+        return Err("a file path is needed".into());
+    }
+    Ok(p)
+}
+
 /// A malformed entry or change, said without serde's own message, which can
 /// quote the value it couldn't read.
 fn shape_error(what: &str) -> String {
@@ -158,6 +167,36 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                 Ok((json!({ "activity": vault::activity(&store, limit)? }), false))
             }
             "kept" => Ok((json!({ "kept": kept(&st) }), false)),
+            // Export and import: the host picks the file in its native dialog and
+            // passes the path, so no agent chooses one (spec section 8.1).
+            "suggest_passphrase" => Ok((json!({ "passphrase": vault::transfer::suggest_passphrase()? }), false)),
+            "export" => {
+                let path = file_path(&body)?;
+                let pass = body.get("passphrase").and_then(Value::as_str).unwrap_or("").to_string();
+                let ids: Option<Vec<String>> = body.get("ids").and_then(|v| serde_json::from_value(v.clone()).ok());
+                let out = vault::transfer::export(&store, ids.as_deref(), &pass, &path)?;
+                Ok((json!({ "count": out.count, "file_name": out.file_name }), true))
+            }
+            "import_inspect" => {
+                let path = file_path(&body)?;
+                let pass = body.get("passphrase").and_then(Value::as_str);
+                match vault::transfer::inspect(&store, &path, pass) {
+                    Ok(preview) => Ok((json!({ "preview": preview }), false)),
+                    Err(vault::transfer::InspectError::NeedsPassphrase) => Ok((json!({ "needs_passphrase": true }), false)),
+                    Err(vault::transfer::InspectError::Other(why)) => Err(why),
+                }
+            }
+            "import_commit" => {
+                let token = body.get("token").and_then(Value::as_str).unwrap_or("");
+                let duplicates: vault::transfer::Duplicates = serde_json::from_value(body.get("duplicates").cloned().unwrap_or(json!("skip")))
+                    .map_err(|_| "duplicates is skip, replace or keep_both".to_string())?;
+                let result = vault::transfer::commit(&store, token, duplicates)?;
+                Ok((json!({ "result": result }), true))
+            }
+            "import_cancel" => {
+                vault::transfer::cancel(body.get("token").and_then(Value::as_str).unwrap_or(""));
+                Ok((json!({}), false))
+            }
             other => Err(format!("unknown Vault operation {other:?}")),
         }
     })

@@ -1,6 +1,6 @@
 # SPEC: the Vault: one pane for the person's secrets, which agents use without seeing them
 
-**Status:** active — P1 (§4, §11) shipped in #5180; P2a (§5: the pane, the store, the `Vault` tool, agents kept out) and P2b (Reveal and Copy, Windows) are built; P2c to P8 remain. The operator took the recommended answers to §13 on 2026-10-19.
+**Status:** active — P1 (§4, §11) shipped in #5180; P2a (§5: the pane, the store, the `Vault` tool, agents kept out) P2b (Reveal and Copy, Windows) and P2c (`.vault` export and import) are built; P3 to P8 remain. The operator took the recommended answers to §13 on 2026-10-19.
 **Date:** 2026-10-19
 **Author:** Agent2 #6 (agent2-6@narko), at the operator's request
 **Trigger (operator, 2026-10-19):** an agent filling a US state's corporate-registry certificate request form was refused on the address, city, ZIP and email fields, then could not tick a checkbox, so the person had to finish the form by hand. "Agentmux needs to be able to fill in personal information including ssn." … "we'll need to pivot into that work now, write a spec to file." On a first draft that put saved values in Settings: "sounds like we may need a new pane type, a vault, or settings wouldn't really make sense" … "api keys and anything secret can be kept there." … "we want rich features, like support for pw protected encrypted export file (.vault file), and imports from kdbx files and last pass, and any other popular services should be supported."
@@ -216,9 +216,10 @@ Only the person, from the Vault pane (**Import…** and **Export…** in its hea
 
 - **What the person picks:** all entries, some sections, or chosen entries; a passphrase, typed twice, with a strength meter and a **Suggest one** button (a random word passphrase); where to save it.
 - **What it holds:** each entry's label, kind, section, owner, notes, every value and one-time-code seed. Not grants, Activity or the "Kept by AgentMux" items, which belong to this install.
-- **Format, version 1:** an [age](https://age-encryption.org/v1) file encrypted to the passphrase (age's scrypt recipient), whose plaintext is UTF-8 JSON in a schema that P2 documents in a reference page of its own (`{"format": "agentmux-vault", "version": 1, "exported_at", "app_version", "entries": [...]}`). The extension is `.vault`.
+- **Format, version 1:** an [age](https://age-encryption.org/v1) file encrypted to the passphrase (age's scrypt recipient), whose plaintext is UTF-8 JSON in the schema documented in `docs/api/VAULT_FILE_FORMAT.md` (`{"format": "agentmux-vault", "version": 1, "exported_at", "app_version", "entries": [...]}`). The extension is `.vault`.
   - *Why age:* a reviewed, standard format with authenticated encryption and a password-hardening step, so AgentMux adds no cryptography of its own, and the person can open their own export without AgentMux (`age -d backup.vault > vault.json`). The Rust `age` crate is maintained and permissively licensed. (§13 question 6 has the alternative.)
-  - Size cap 64 MiB. Plaintext is held in `Zeroizing` buffers and never written to disk.
+  - Size cap 64 MiB. Plaintext is held in `Zeroizing` buffers and never written to disk. The file is written beside its destination and renamed, so it appears whole or not at all. Opening a file refuses scrypt work factors above 22.
+  - **Built in P2c.** The export dialog lists the entries by section (all selected), asks for the passphrase twice with a strength meter and **Suggest one** (eight random words from a 256-word list: 64 bits, which scrypt slows down), then the host asks where to save. A passphrase is at least 8 characters.
 - **Reminders:** the pane shows when the Vault was last exported and suggests one after many changes, since keychain items don't move to a new machine by themselves.
 
 ### 8.3 Export to other formats
@@ -248,6 +249,9 @@ The pane's import wizard: pick the source, then the file; a password or key file
 Attachments, passkeys and file items can't be imported; the preview lists how many were skipped and why.
 
 ### 8.5 Import: the preview
+
+Built in P2c for `.vault` files: the host asks which file, srv decrypts it into memory (a wrong or missing passphrase writes nothing), and the dialog shows counts per section, the first five entries of each, which are duplicates, and what can't come in with the reason. Nothing is written until **Import**, which writes all of it in one transaction or none of it. What srv holds waits ten minutes and is dropped when the dialog closes. An entry keeps its id from the file when it is free.
+
 
 - Counts per Vault section, and the first entries of each, values hidden.
 - **Duplicates:** an incoming entry with the same site and username (logins), or the same kind and value (others), as an existing one is marked. The person chooses per import: skip, replace, or keep both.
