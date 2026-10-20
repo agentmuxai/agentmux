@@ -176,7 +176,7 @@ fn attribution(store: &Store, id: &str, sha: &str) -> (String, String, String, S
 /// overrides the attribution (the startup comparison). Returns whether
 /// anything was recorded.
 pub(crate) fn sync_entry(fs: &FileStore, store: &Store, scope: &str, id: &str, source: Option<&str>) -> Result<bool, StoreError> {
-    let row = store.bundle_get(id)?.filter(|b| b.is_global);
+    let row = live(store.bundle_get(id))?.filter(|b| b.is_global);
     let wanted = row.as_ref().map(|b| (crate::backend::storage::bundle_versions::content_hash(&b.name, &b.instructions), b));
     let (src, detail, by, by_uid) = match (&wanted, source) {
         (_, Some(s)) => (s.to_string(), String::new(), String::new(), String::new()),
@@ -228,7 +228,7 @@ pub(crate) fn sync_entry(fs: &FileStore, store: &Store, scope: &str, id: &str, s
 
 /// Record the Global Memory order if it differs from the record's.
 pub(crate) fn sync_order(fs: &FileStore, store: &Store, scope: &str) -> Result<bool, StoreError> {
-    let ids: Vec<String> = store.bundle_list_global()?.into_iter().map(|b| b.id).collect();
+    let ids: Vec<String> = live(store.bundle_list_global())?.into_iter().map(|b| b.id).collect();
     fs.zone_txn(&zone(scope), |z| {
         let mut heads = read_heads(z.read(HEADS_FILE)?)?;
         if heads.order == ids {
@@ -249,7 +249,7 @@ pub(crate) fn sync_order(fs: &FileStore, store: &Store, scope: &str) -> Result<b
 pub(crate) fn sync_all(fs: &FileStore, store: &Store, scope: &str) -> Result<usize, StoreError> {
     let first = heads(fs, scope)?.entries.is_empty();
     let source = if first { "baseline" } else { "legacy-build" };
-    let mut ids: HashSet<String> = store.bundle_list_global()?.into_iter().map(|b| b.id).collect();
+    let mut ids: HashSet<String> = live(store.bundle_list_global())?.into_iter().map(|b| b.id).collect();
     ids.extend(heads(fs, scope)?.entries.into_iter().filter(|(_, h)| h.sha256.is_some()).map(|(id, _)| id));
     let mut n = 0;
     for id in ids {
@@ -329,7 +329,7 @@ fn missing_from(fs: &FileStore, store: &Store, zone: &str) -> Result<(String, Ve
         if h.sha256.is_none() || h.is_system {
             continue;
         }
-        if store.bundle_get(&id)?.is_some_and(|b| b.is_global) {
+        if live(store.bundle_get(&id))?.is_some_and(|b| b.is_global) {
             continue;
         }
         out.push((id, h.clone()));
@@ -385,15 +385,15 @@ pub(crate) fn import(fs: &FileStore, store: &Store, list_id: &str, index: usize)
         list.zones.get(index).cloned().ok_or_else(|| StoreError::Other("bad-choice".into()))?
     };
     let mut report = ImportReport::default();
-    let mut next_order = store.bundle_list_global()?.iter().map(|b| b.sort_order).max().unwrap_or(0) + 1;
+    let mut next_order = live(store.bundle_list_global())?.iter().map(|b| b.sort_order).max().unwrap_or(0) + 1;
     for (id, head) in missing_from(fs, store, &zone)?.1 {
         let Some(sha) = head.sha256.as_deref() else { continue };
         let Some(bytes) = fs.read_files_consistent(&zone, &[&format!("blob/{sha}")])?.pop().flatten() else { continue };
         let Ok(b) = serde_json::from_slice::<Body>(&bytes) else { continue };
-        let taken = store.bundle_list()?.into_iter().any(|x| x.name == b.name && x.id != id);
+        let taken = live(store.bundle_list())?.into_iter().any(|x| x.name == b.name && x.id != id);
         let name = if taken {
             report.renamed += 1;
-            store.resolve_unique_bundle_name(&format!("{} ({})", b.name, &id[..id.len().min(8)]))?
+            live(store.resolve_unique_bundle_name(&format!("{} ({})", b.name, &id[..id.len().min(8)])))?
         } else {
             b.name.clone()
         };
@@ -405,7 +405,7 @@ pub(crate) fn import(fs: &FileStore, store: &Store, list_id: &str, index: usize)
         let now = agentmux_common::time::now_ms();
         bundle.created_at = now;
         bundle.updated_at = now;
-        store.bundle_upsert_with_version(&bundle, "armory-ui", "", "import", &format!("from {scope}"))?;
+        live(store.bundle_upsert_with_version(&bundle, "armory-ui", "", "import", &format!("from {scope}")))?;
         next_order += 1;
         report.added += 1;
     }
@@ -416,6 +416,12 @@ pub(crate) fn import(fs: &FileStore, store: &Store, list_id: &str, index: usize)
 enum Job {
     Change(GlobalMemoryChange),
     SyncAll,
+}
+
+/// A call on the live Global Memory store (`Store`), whose errors have the same type as the record's (`FileStore`).
+/// Its corruption is not the shared record's: it is turned into a plain error here so it is never marked as damage to the record.
+fn live<T>(r: Result<T, StoreError>) -> Result<T, StoreError> {
+    r.map_err(|e| StoreError::Other(format!("live store: {e}")))
 }
 
 fn process(fs: &FileStore, store: &Store, scope: &str, job: Job) {
@@ -448,10 +454,8 @@ pub(crate) fn import_sources_checked(fs: &FileStore, store: &Store) -> Result<Im
     if damage::is_damaged(damage::GLOBAL_MEMORY_ZONE) {
         return Err(DAMAGED.to_string());
     }
-    import_sources(fs, store).map_err(|e| {
-        damage::note_corrupt(damage::GLOBAL_MEMORY_ZONE, "global memory import", &e);
-        e.to_string()
-    })
+    // It reads other channels' record zones too, so a failure here is not marked as this channel's record's.
+    import_sources(fs, store).map_err(|e| e.to_string())
 }
 
 /// [`import`] for the RPC; see [`import_sources_checked`].
@@ -460,10 +464,7 @@ pub(crate) fn import_checked(fs: &FileStore, store: &Store, list_id: &str, index
     if damage::is_damaged(damage::GLOBAL_MEMORY_ZONE) {
         return Err(DAMAGED.to_string());
     }
-    import(fs, store, list_id, index).map_err(|e| {
-        damage::note_corrupt(damage::GLOBAL_MEMORY_ZONE, "global memory import", &e);
-        e.to_string()
-    })
+    import(fs, store, list_id, index).map_err(|e| e.to_string())
 }
 
 /// Handle for queueing the start-up comparison once seeding is done.
