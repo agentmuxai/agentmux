@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build-slot-version: 3
+# build-slot-version: 4
 # build-slot: run one heavy build or test command while holding the host-wide
 # build slot, so only one such command runs on this machine at a time.
 # Spec: docs/specs/SPEC_BUILD_SLOT_ENFORCEMENT_2026_10_20.md. AgentMux installs this file to
@@ -12,6 +12,10 @@
 # The slot is a directory created with mkdir (atomic). The holder refreshes a heartbeat
 # file every 20 s; a slot whose heartbeat is older than STALE_SECS belongs to a dead
 # process and is taken over. Waiters line up by ticket, oldest first.
+# The whole script is one function, called on the last line. Bash reads a script a piece
+# at a time, so a copy of this file replaced while a wait is still running it would break
+# that wait mid-line; a function is parsed in full before anything in it runs.
+main() {
 set -u
 
 ROOT="${AGENTMUX_BUILD_SLOT_DIR:-$HOME/.agentmux/shared/locks/build}"
@@ -147,3 +151,5 @@ BUILD_SLOT_HELD=1 "$@"
 rc=$?
 echo "build-slot: released (exit $rc)" >&2
 exit "$rc"
+}
+main "$@"; exit $?

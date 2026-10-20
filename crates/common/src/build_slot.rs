@@ -138,6 +138,11 @@ mod tests {
         assert!(SHIM_SH.contains(SHIM_MARKER), "the cargo shim must carry its marker");
         assert!(SHIM_CMD.contains(SHIM_MARKER), "the cargo.cmd shim must carry its marker");
         assert!(!lf(SCRIPT).contains('\r') && !lf(SHIM_SH).contains('\r'));
+        // One function, called on the last line: bash reads a script a piece at a time, so a
+        // wait still running an older copy would break mid-line when the file is replaced.
+        let lines: Vec<&str> = SCRIPT.lines().filter(|l| !l.trim().is_empty()).collect();
+        assert_eq!(lines.last().copied(), Some("main \"$@\"; exit $?"), "the script must end by calling main");
+        assert!(lines.contains(&"main() {"), "the script body must be one function");
         assert!(crlf(SHIM_CMD).contains("\r\n") && !crlf(SHIM_CMD).replace("\r\n", "").contains('\n'));
     }
 

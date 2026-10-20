@@ -27,6 +27,8 @@ build-slot.sh status                                       who holds the slot, w
 - **One slot per machine**, shared by every agent, clone, repository and AgentMux channel: the directory `~/.agentmux/shared/locks/build/slot`, created with `mkdir` (atomic).
 - **A queue**: a waiter takes a ticket and runs in order of arrival. It prints who holds the slot and for how long, and gives up after 60 minutes with exit code 75.
 - **A dead holder frees the slot.** The holder refreshes a heartbeat file every 20 s; a slot with no heartbeat for 90 s is taken over. Each holder writes a unique token and removes the slot only if the token is still its own, so a late exit cannot free the slot under its successor.
+- **A wait whose parent is gone leaves the queue** (a stopped background task, a closed pane), and a signal stops a waiter within a poll. `BUILD_SLOT_DETACHED=1` turns the parent check off for a wait started on purpose with `nohup` or `setsid`.
+- **The whole script is one function**, called on its last line, and it is installed by writing a temporary file and renaming it. Bash reads a script a piece at a time, so a file rewritten in place under a running wait broke that wait mid-line (it happened on 2026-10-20, to three agents' queued runs).
 - **Nesting**: a command started inside the slot (`task package` calling cargo) runs without waiting for itself (`BUILD_SLOT_HELD=1`).
 - **The wrapped command's exit code** is the script's exit code.
 - **Needs only bash**, `mkdir`, `date`, `stat` and `sleep`: Git Bash on Windows, Linux and macOS.
