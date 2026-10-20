@@ -545,9 +545,9 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
                                                 top: `${portOffsetY(meta.outputs.length, i()) - 6}px`,
                                                 background:
                                                     h.id === "true"
-                                                        ? "#10b981"
+                                                        ? "var(--success-color)"
                                                         : h.id === "false"
-                                                          ? "#6b7280"
+                                                          ? "var(--secondary-text-color)"
                                                           : meta.color,
                                             }}
                                             onPointerDown={(e) => startConn(e, n.id, h.id)}

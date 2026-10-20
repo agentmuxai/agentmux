@@ -15,8 +15,8 @@
     border-radius: 0;
 
     &--active {
-        background: rgba(34, 197, 94, 0.15);
-        color: #22c55e;
+        background: var(--success-bg);
+        color: var(--main-text-color);
     }
 
     &--idle {
