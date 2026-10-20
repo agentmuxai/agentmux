@@ -26,6 +26,11 @@ pub fn set_state(state: &Arc<AppState>) {
     super::watch::install(state);
 }
 
+/// The app state the top-level window hook was given, if it has been.
+pub fn app_state() -> Option<Arc<AppState>> {
+    STATE.get().cloned()
+}
+
 /// Step `window`'s machine and run what it returns. Tells the window's frontend
 /// when whether it is active, or where the keyboard is, changed
 /// (`input-owner-changed`).

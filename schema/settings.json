@@ -141,6 +141,11 @@
           "default": false,
           "description": "Ask before closing a tab. Off by default: a tab closes at once."
         },
+        "mouse:sidebuttons": {
+          "type": "boolean",
+          "default": true,
+          "description": "The mouse side buttons (Back / Forward) re-select the previous / next pane you selected, across tabs. Off leaves them to the page."
+        },
         "tab:skipcloseconfirm": {
           "type": "boolean",
           "deprecated": true,

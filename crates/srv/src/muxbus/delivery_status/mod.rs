@@ -158,6 +158,7 @@ pub fn set_link(link: Link) {
 /// reported `expired`. Holds its resume or expiry note, if it has one; call
 /// after the pull's own messages are delivered, so the note comes last.
 pub fn fetched(agent: &str, delivered: usize, expired: &[ExpiredItem]) {
+    crate::connectivity::report(crate::connectivity::Service::Muxbus, crate::connectivity::Outcome::Answered);
     let broker = broker_state();
     let effects = rt().machine.lock().unwrap_or_else(|e| e.into_inner()).relay_answered(agent, broker.as_ref(), now_ms());
     apply(effects);

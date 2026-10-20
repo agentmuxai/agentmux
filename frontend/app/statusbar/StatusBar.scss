@@ -545,6 +545,19 @@
     }
 }
 
+// ── Offline indicator (ConnectivityIndicator.tsx) ──────────────────────────
+// Shown only when a service can't be reached: red when not at all, amber
+// when some of its requests keep failing.
+.status-connectivity {
+    &--warn {
+        color: var(--warning-color);
+    }
+
+    &--error {
+        color: var(--error-color);
+    }
+}
+
 // ── Cloud delivery indicator (MuxBusIndicator.tsx) ─────────────────────────
 // Shown only when cloud messages stopped arriving: amber while MuxBus can't
 // be reached, red when the sign-in stopped working (click to sign in).

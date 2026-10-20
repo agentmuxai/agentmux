@@ -470,8 +470,8 @@
         padding: var(--space-3);
         margin: var(--space-2) 0;
         border-radius: 0;
-        background: rgba(245, 158, 11, 0.08);
-        border: 1px solid rgba(245, 158, 11, 0.3);
+        background: var(--warning-bg);
+        border: 1px solid var(--warning-line);
 
         .nodejs-notice-icon {
             font-size: 18px;

@@ -400,10 +400,10 @@
         width: 6px;
         height: 6px;
         border-radius: 50%;
-        background: #34d399;
+        background: var(--success-color);
         flex-shrink: 0;
         align-self: center;
-        box-shadow: 0 0 4px rgba(52, 211, 153, 0.5);
+        box-shadow: 0 0 4px color-mix(in srgb, var(--success-color) 50%, transparent);
         // Above the open button's stretched ::after, so its tooltip (where the
         // agent is open) still shows.
         position: relative;
@@ -411,8 +411,8 @@
     }
 
     .agent-recent-sessions-row--active {
-        border-color: color-mix(in srgb, #34d399 40%, var(--border-color));
-        background: color-mix(in srgb, #34d399 4%, transparent);
+        border-color: color-mix(in srgb, var(--success-color) 40%, var(--border-color));
+        background: color-mix(in srgb, var(--success-color) 4%, transparent);
     }
 
     // Row actions menu — chevron toggle. The right half of the footer row; it

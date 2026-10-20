@@ -3,7 +3,8 @@
 
 /**
  * The status bar's cloud indicator: quiet while cloud messages arrive, amber
- * "MuxBus reconnecting…" once the relay has been unreachable a while, red
+ * "MuxBus reconnecting…" once the relay has been unreachable a while (unless
+ * the Offline indicator already says so), red
  * "MuxBus: sign in" when the sign-in stopped working (click to sign in).
  * Nothing for a channel that isn't signed in. State: `@/store/muxbus-delivery`.
  */
@@ -11,6 +12,7 @@
 import { createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 
 import { useMuxBusStatus } from "@/app/view/accounts/AgentMuxConnectPanel";
+import { connectivity, connectivityCoversMuxbus } from "@/store/connectivity";
 import { muxbusDelivery, muxbusIndicator } from "@/store/muxbus-delivery";
 
 /** How often the indicator re-reads the clock, for the reconnecting delay. */
@@ -24,7 +26,7 @@ export function MuxBusIndicator(): JSX.Element {
         const timer = window.setInterval(() => setNow(Date.now()), INDICATOR_CLOCK_MS);
         onCleanup(() => window.clearInterval(timer));
     });
-    const indicator = () => muxbusIndicator(muxbusDelivery(), now());
+    const indicator = () => muxbusIndicator(muxbusDelivery(), now(), connectivityCoversMuxbus(connectivity(), now()));
     const signIn = () => {
         if (!indicator()?.signIn || muxbus.loading()) return;
         void muxbus.connect();

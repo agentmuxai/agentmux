@@ -23,7 +23,7 @@
 
 .bundle-import-select-error,
 .bundle-import-error {
-    color: var(--color-error, #e5484d);
+    color: var(--error-color);
     white-space: pre-wrap;
 }
 
@@ -41,7 +41,7 @@
 .bundle-import-input {
     padding: 6px 8px;
     border-radius: 4px;
-    border: 1px solid var(--color-border, #444);
+    border: 1px solid var(--border-color);
     background: transparent;
 }
 
@@ -51,13 +51,13 @@
 }
 
 .bundle-import-hint-warn {
-    color: var(--color-warning, #f5a524);
+    color: var(--warning-color);
     opacity: 1;
 }
 
 .bundle-import-link-btn {
     @include mixins.button-reset;
-    color: var(--color-accent, #4d9de5);
+    color: var(--accent-color);
     text-decoration: underline;
     cursor: pointer;
     font: inherit;
@@ -121,8 +121,8 @@
     font-size: 0.75em;
     padding: 2px 6px;
     border-radius: 3px;
-    background: rgba(245, 165, 36, 0.15);
-    color: var(--color-warning, #f5a524);
+    background: var(--warning-bg);
+    color: var(--warning-color);
 }
 
 .bundle-import-rename-input {
@@ -130,7 +130,7 @@
     min-width: 160px;
     padding: 4px 6px;
     border-radius: 4px;
-    border: 1px solid var(--color-border, #444);
+    border: 1px solid var(--border-color);
     background: transparent;
 }
 
@@ -148,7 +148,7 @@
     font-size: 0.85em;
     padding: 8px;
     border-radius: 4px;
-    background: rgba(128, 128, 128, 0.1);
+    background: var(--tint-4);
 }
 
 .bundle-import-requirements-summary {
@@ -160,7 +160,7 @@
     position: relative;
     padding: 8px 28px 8px 8px;
     border-radius: 4px;
-    background: rgba(245, 165, 36, 0.1);
+    background: var(--warning-bg);
     font-size: 0.85em;
 }
 

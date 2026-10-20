@@ -93,20 +93,20 @@
         width: 8px;
         height: 8px;
         border-radius: 50%;
-        background: rgba(255, 255, 255, 0.4);
+        background: var(--tertiary-text-color);
         flex: 0 0 auto;
 
         &.is-valid {
-            background: #4ade80; // green-400
+            background: var(--success-color);
         }
         &.is-expired {
-            background: #fbbf24; // amber-400
+            background: var(--warning-color);
         }
         &.is-needs_reauth {
-            background: #f87171; // red-400
+            background: var(--error-color);
         }
         &.is-unknown {
-            background: rgba(255, 255, 255, 0.4);
+            background: var(--tertiary-text-color);
         }
     }
 

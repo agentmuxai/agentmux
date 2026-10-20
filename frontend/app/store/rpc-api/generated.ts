@@ -214,6 +214,7 @@ import type { CommandVoiceCheckPathData } from "@/types/rpc/CommandVoiceCheckPat
 import type { CommandWriteAgentConfigData } from "@/types/rpc/CommandWriteAgentConfigData";
 import type { CommandWriteAgentConfigResult } from "@/types/rpc/CommandWriteAgentConfigResult";
 import type { CommandWriteEditorFileData } from "@/types/rpc/CommandWriteEditorFileData";
+import type { ConnectivityStatus } from "@/types/rpc/ConnectivityStatus";
 import type { ContainerImageCheckResult } from "@/types/rpc/ContainerImageCheckResult";
 import type { ContainerRuntimeAvailableResult } from "@/types/rpc/ContainerRuntimeAvailableResult";
 import type { CopyForkHistoryResult } from "@/types/rpc/CopyForkHistoryResult";
@@ -835,6 +836,10 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<Array<HostSession>> {
     return client.rpcCall("connsessions", data, opts);
+  },
+  // command "connectivity.status"
+  ConnectivityStatusCommand(client: RpcClient, opts?: RpcOpts): Promise<ConnectivityStatus> {
+    return client.rpcCall("connectivity.status", {}, opts);
   },
   // command "containerimagecheck"
   ContainerImageCheckCommand(

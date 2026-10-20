@@ -90,3 +90,7 @@ An incoming entry duplicates one already in the Vault when:
 
 You then choose, for the whole import: **skip** the duplicates, **replace** the entries
 you have (they keep their ids), or **keep both**.
+
+## Other services' exports
+
+AgentMux also imports files other password managers write, which are plaintext: see the Vault spec's section 8.8 for the list. They are not Vault files and are not encrypted, so the pane offers to delete one once it is imported.

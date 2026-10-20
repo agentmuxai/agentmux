@@ -199,6 +199,8 @@ pub(super) async fn claim_and_deliver(
     let delivered_at = claimed.delivered_at;
     let claimed_ids: std::collections::HashSet<String> = claimed.acknowledged.into_iter().collect();
     let mut delivered_count = 0usize;
+    // A name the subscription holds through the pane's agent is delivered to the pane.
+    let target = super::live_names::delivery_target(handler, agent_id).await;
 
     for inj in &body.injections {
         if !claimed_ids.contains(&inj.id) {
@@ -339,7 +341,7 @@ pub(super) async fn claim_and_deliver(
         }
 
         let mut req = InjectionRequest {
-            target_agent: agent_id.to_string(),
+            target_agent: target.clone(),
             message: inj.message.clone(),
             source_agent: inj.source_agent.clone(),
             request_id: Some(inj.id.clone()),

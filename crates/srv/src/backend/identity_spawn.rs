@@ -91,6 +91,11 @@ pub(crate) fn attach_row_store(store: Arc<Store>) {
     let _ = ROW_STORE.set(store);
 }
 
+/// The object store [`attach_row_store`] attached; `None` before boot does.
+pub(crate) fn row_store() -> Option<&'static Arc<Store>> {
+    ROW_STORE.get()
+}
+
 /// Whether `block_id` shows an agent that has a row — the same block → row
 /// resolution `build_persistent_spawn_env` uses, which also finds the row a
 /// template-based continuation folded into. A synchronous store read; spawn

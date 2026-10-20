@@ -202,6 +202,7 @@ export const WpsEvent = {
     AgentShutdownPendingCleared: "agent:shutdown-pending-cleared",
     AmbientSpent: "ambient:spent",
     BlockReveal: "block:reveal",
+    ConnectivityChanged: "connectivity:changed",
     MuxbusStatus: "muxbus:status",
     NotificationActivate: "notification:activate",
     NotificationState: "notification:state",

@@ -9,6 +9,7 @@ mod boot_timing;
 mod bootstrap;
 mod broker;
 mod config;
+mod connectivity;
 mod event_log;
 mod headless;
 mod identity;

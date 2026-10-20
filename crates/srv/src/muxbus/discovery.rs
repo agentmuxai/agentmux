@@ -132,7 +132,9 @@ fn keep_last_good(previous: Option<&CloudSettings>, fetched: Option<CloudSetting
 
 async fn fetch(http: &reqwest::Client, base: &str) -> Option<CloudSettings> {
     let url = format!("{}{}", base.trim_end_matches('/'), DISCOVERY_PATH);
-    let resp = match http.get(&url).timeout(FETCH_TIMEOUT).send().await {
+    let sent = http.get(&url).timeout(FETCH_TIMEOUT).send().await;
+    crate::connectivity::report_http(crate::connectivity::Service::Muxbus, &sent);
+    let resp = match sent {
         Ok(r) => r,
         Err(e) => {
             tracing::debug!(url = %url, error = %e, "cloud discovery: fetch failed; using defaults");
