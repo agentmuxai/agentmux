@@ -207,6 +207,8 @@ events! {
     BlockActivity: super::mps::EVENT_BLOCK_ACTIVITY => BlockActivityEvent,
     /// One message from a language server (`lsp::supervisor`).
     LspMessage: "lsp:message" => LspMessageEvent,
+    /// A service's reachability changed (`connectivity`).
+    ConnectivityChanged: crate::connectivity::EVENT_CONNECTIVITY_CHANGED => crate::connectivity::ConnectivityStatus,
     /// Cloud delivery's state changed (`muxbus::delivery_status`).
     MuxbusStatus: crate::muxbus::delivery_status::EVENT_MUXBUS_STATUS => crate::backend::rpc_types::MuxBusDeliveryStatus,
     /// A mobile viewer paired with this machine (`http_viewer`).

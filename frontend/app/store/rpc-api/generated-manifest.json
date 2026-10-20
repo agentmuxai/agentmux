@@ -260,6 +260,10 @@
             "dataType": "{ connname: string; blockid?: string }"
         },
         {
+            "command": "connectivity.status",
+            "method": "ConnectivityStatusCommand"
+        },
+        {
             "command": "containerimagecheck",
             "method": "ContainerImageCheckCommand"
         },

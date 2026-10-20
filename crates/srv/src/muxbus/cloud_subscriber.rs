@@ -652,9 +652,9 @@ async fn connect_and_run(
     let request = ClientRequestBuilder::new(uri)
         .with_header("Authorization", format!("Bearer {}", token));
 
-    let (ws_stream, _) = connect_async_tls_with_config(request, None, false, None)
-        .await
-        .map_err(|e| format!("connect: {e}"))?;
+    let connected = connect_async_tls_with_config(request, None, false, None).await;
+    crate::connectivity::report_ws_connect(crate::connectivity::Service::Muxbus, connected.as_ref().err());
+    let (ws_stream, _) = connected.map_err(|e| format!("connect: {e}"))?;
 
     tracing::info!("cloud_subscriber: WebSocket connected");
     delivery_status::set_link(delivery_status::Link::Connected);

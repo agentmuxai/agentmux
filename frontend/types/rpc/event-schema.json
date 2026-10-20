@@ -369,6 +369,15 @@
     }
   },
   {
+    "event": "connectivity:changed",
+    "payloadTs": {
+      "imports": [
+        "ConnectivityStatus"
+      ],
+      "name": "ConnectivityStatus"
+    }
+  },
+  {
     "event": "controllerstatus",
     "payloadTs": {
       "imports": [
