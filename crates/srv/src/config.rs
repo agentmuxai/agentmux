@@ -88,7 +88,8 @@ pub enum SrvCommand {
         /// none, back up, and run the pending migrations, each reported on
         /// stderr for the splash. The upgrade step of
         /// SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15 §10.
-        #[arg(long)]
+        /// It writes, so it can't be combined with the read-only flags.
+        #[arg(long, conflicts_with_all = ["dry_run", "list", "verify"])]
         prepare: bool,
     },
 }
@@ -386,5 +387,15 @@ mod tests {
         let second = Config::from_env_and_args(&args).unwrap().lan_key;
         assert_ne!(first, second, "each process launch must mint its own lan_key");
         clear_env();
+    }
+
+    #[test]
+    fn migrate_prepare_refuses_the_read_only_flags() {
+        use clap::Parser;
+        for flag in ["--dry-run", "--list", "--verify"] {
+            let parsed = CliArgs::try_parse_from(["agentmux-srv", "migrate", "--prepare", flag]);
+            assert!(parsed.is_err(), "--prepare {flag} must be refused");
+        }
+        assert!(CliArgs::try_parse_from(["agentmux-srv", "migrate", "--prepare"]).is_ok());
     }
 }
