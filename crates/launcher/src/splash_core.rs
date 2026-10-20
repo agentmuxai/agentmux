@@ -54,6 +54,31 @@ pub struct StageEntry {
     pub subs: Vec<SubEntry>,
 }
 
+/// The `stage` of a row the timeline opens itself when a stage ends and the
+/// next has not begun, so a row is always running between show and dismiss
+/// and the time between stages is measured instead of frozen
+/// (`docs/reports/REPORT_STARTUP_ARCHITECTURE_AND_MIGRATIONS_AUDIT_2026_10_20.md`
+/// §4, F1/F2).
+pub const GAP_STAGE: &str = "gap";
+
+/// A gap shorter than this is dropped when the next stage begins: it would
+/// only add a row for time nobody waited on.
+pub const GAP_MIN_MS: u64 = 150;
+
+/// What runs after `stage` ends and before the next stage reports, as the
+/// gap row's label. `None` after the last stage: nothing follows it.
+pub fn gap_label_after(stage: &str) -> Option<&'static str> {
+    match stage {
+        "paint" => None,
+        "prep" | "migrations" => Some("Starting the backend"),
+        "backend" => Some("Starting the window"),
+        "host" => Some("Connecting the window"),
+        "dlopen" => Some("Starting the browser engine"),
+        "cef_init" => Some("Loading the interface"),
+        _ => Some("Waiting for the next step"),
+    }
+}
+
 /// Identifies which row a `Begin` event created, so the same-tick deferral
 /// in `apply_tick` can recognize an `End` for a row created in the very same
 /// batch.
@@ -79,6 +104,7 @@ impl StageTimeline {
     fn apply_one(&mut self, ev: StartupEvent) {
         match ev {
             StartupEvent::StageBegin { stage, label } => {
+                self.close_gap(Instant::now());
                 self.stages.push(StageEntry {
                     stage,
                     label,
@@ -90,6 +116,17 @@ impl StageTimeline {
             StartupEvent::StageEnd { stage, duration_ms, status, detail } => {
                 if let Some(row) = self.stages.iter_mut().rev().find(|r| r.stage == stage) {
                     row.done = Some((duration_ms, status, detail));
+                }
+                if self.stages.iter().all(|r| r.done.is_some()) {
+                    if let Some(label) = gap_label_after(stage) {
+                        self.stages.push(StageEntry {
+                            stage: GAP_STAGE,
+                            label,
+                            started_at: Instant::now(),
+                            done: None,
+                            subs: Vec::new(),
+                        });
+                    }
                 }
             }
             StartupEvent::SubBegin { stage, id, label } => {
@@ -104,6 +141,21 @@ impl StageTimeline {
                     }
                 }
             }
+        }
+    }
+
+    /// End an open gap row at `at`: keep it with its duration, or drop it if
+    /// it was shorter than [`GAP_MIN_MS`].
+    fn close_gap(&mut self, at: Instant) {
+        let Some(last) = self.stages.last_mut() else { return };
+        if last.stage != GAP_STAGE || last.done.is_some() {
+            return;
+        }
+        let ms = at.saturating_duration_since(last.started_at).as_millis() as u64;
+        if ms < GAP_MIN_MS {
+            self.stages.pop();
+        } else {
+            last.done = Some((ms, StartupStatus::Ok, None));
         }
     }
 
@@ -198,6 +250,9 @@ impl StageTimeline {
         for ev in deferred {
             self.apply_one(ev);
         }
+        // A gap open at readiness ran until now: it is real time, not an
+        // interrupted step.
+        self.close_gap(at);
         for stage in &mut self.stages {
             if stage.done.is_none() {
                 let ms = at.saturating_duration_since(stage.started_at).as_millis() as u64;
@@ -405,6 +460,67 @@ mod tests {
     }
     fn end(stage: &'static str, ms: u64) -> StartupEvent {
         StartupEvent::StageEnd { stage, duration_ms: ms, status: StartupStatus::Ok, detail: None }
+    }
+
+    /// Backdate the open gap row so the next begin sees it as `ms` long.
+    fn age_gap(tl: &mut StageTimeline, ms: u64) {
+        let gap = tl.stages.last_mut().unwrap();
+        assert_eq!(gap.stage, GAP_STAGE);
+        gap.started_at = gap.started_at.checked_sub(Duration::from_millis(ms)).unwrap();
+    }
+
+    #[test]
+    fn a_stage_ending_with_none_open_opens_a_gap_named_for_what_runs_next() {
+        let mut tl = StageTimeline::new();
+        tl.apply_tick(vec![begin("host")]);
+        tl.apply_tick(vec![end("host", 30)]);
+        let gap = tl.stages.last().unwrap();
+        assert_eq!((gap.stage, gap.label), (GAP_STAGE, "Connecting the window"));
+        assert!(gap.done.is_none(), "the gap row is the one running");
+    }
+
+    #[test]
+    fn the_next_stage_closes_a_long_gap_with_its_duration_and_drops_a_short_one() {
+        let mut tl = StageTimeline::new();
+        tl.apply_tick(vec![begin("host")]);
+        tl.apply_tick(vec![end("host", 30)]);
+        age_gap(&mut tl, 1200);
+        tl.apply_tick(vec![begin("cef_init")]);
+        let stages: Vec<&str> = tl.stages.iter().map(|r| r.stage).collect();
+        assert_eq!(stages, vec!["host", GAP_STAGE, "cef_init"]);
+        assert!(tl.stages[1].done.as_ref().unwrap().0 >= 1200);
+
+        tl.apply_tick(vec![end("cef_init", 80)]);
+        tl.apply_tick(vec![begin("paint")]);
+        let stages: Vec<&str> = tl.stages.iter().map(|r| r.stage).collect();
+        assert_eq!(stages, vec!["host", GAP_STAGE, "cef_init", "paint"], "a gap under GAP_MIN_MS leaves no row");
+    }
+
+    #[test]
+    fn no_gap_follows_the_last_stage_or_a_stage_with_another_still_open() {
+        let mut tl = StageTimeline::new();
+        tl.apply_tick(vec![begin("backend"), begin("host")]);
+        tl.apply_tick(vec![end("backend", 10)]);
+        assert_eq!(tl.stages.len(), 2, "host is still open: no gap");
+        tl.apply_tick(vec![end("host", 10)]);
+        age_gap(&mut tl, 500);
+        tl.apply_tick(vec![begin("paint")]);
+        tl.apply_tick(vec![end("paint", 5)]);
+        assert_eq!(tl.stages.last().unwrap().stage, "paint", "nothing follows paint");
+    }
+
+    #[test]
+    fn finalize_keeps_an_open_gap_as_real_time_not_interrupted() {
+        let mut tl = StageTimeline::new();
+        tl.apply_tick(vec![begin("cef_init")]);
+        tl.apply_tick(vec![end("cef_init", 10)]);
+        age_gap(&mut tl, 400);
+        tl.finalize_running(Instant::now());
+        let gap = tl.stages.last().unwrap();
+        assert_eq!(gap.stage, GAP_STAGE);
+        let (ms, status, detail) = gap.done.as_ref().unwrap();
+        assert!(*ms >= 400);
+        assert_eq!((*status, detail.as_deref()), (StartupStatus::Ok, None));
     }
 
     #[test]
