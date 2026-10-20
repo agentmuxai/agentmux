@@ -1,6 +1,6 @@
 # Spec: a Kanban section in Warden, where agents keep their work current and the operator follows it
 
-**Status:** active. srv and MCP (the task model, the agents' `Tasks` actions, the reminder, the operator's RPCs) in #5231; the Warden Kanban section, its palette command and widget-bar button in #PR_UI. Remaining: Phase 4 (§9), the Swarm-to-card link (§6.14) and Codex plans (§6.12).
+**Status:** active. srv and MCP (the task model, the agents' `Tasks` actions, the reminder, the operator's RPCs) in #5231; the Warden Kanban section, its palette command and widget-bar button in #5235. Remaining: Phase 4 (§9), the Swarm-to-card link (§6.14) and Codex plans (§6.12).
 **Date:** 2026-10-20
 **Author:** Loap-3@narko, at the operator's request
 **Verified against:** `agentmux` `main` @ `30daa7c28` (2026-10-20), by reading code. The survey of other products in §3 is from public sources read the same day (§12).
