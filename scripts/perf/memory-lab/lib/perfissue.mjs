@@ -5,7 +5,7 @@
 // open/comment/close rule is `decide` of scripts/ci-nightly-status.mjs (one issue per streak, a comment for each later flagged
 // night, closed by a clean one).
 
-import { decide } from "../../../ci-nightly-status.mjs";
+import { decide, timedOut } from "../../../ci-nightly-status.mjs";
 
 export const PERF_LABEL = "perf-regression";
 export const PERF_TITLE = "nightly performance regression";
@@ -21,14 +21,19 @@ export function flaggedMeasures(compareJson) {
  * What the night says, for the issue rule:
  * - "red": the comparison was made and a flag holds on all the runs together (the confirmation pair included);
  * - "green": the comparison was made and nothing is flagged;
- * - "unknown": there was nothing to compare, or the lab did not finish: no issue is opened, commented on or closed.
+ * - "unknown": there was nothing to compare, or the lab did not finish, or the first matrix flagged something and the confirmation
+ *   pair added no runs (so the flag is not confirmed): no issue is opened, commented on or closed.
  *
  * `initial`: the first matrix's compare.json; `final`: the compare.json over every run (the same file when no confirmation was needed).
  */
 export function perfState({ hasA, initial, final }) {
     if (!hasA || !final || !initial) return "unknown";
+    if (flaggedMeasures(initial).length && !confirmationRan(initial, final)) return "unknown";
     return flaggedMeasures(final).length ? "red" : "green";
 }
+
+/** Whether a confirmation pair finished: the comparison over every run has more runs than the first matrix's. */
+const confirmationRan = (initial, final) => (final?.head?.length ?? 0) > (initial?.head?.length ?? 0);
 
 const fmt = (x) => (x == null ? "n/a" : String(Math.round(x * 10) / 10));
 const sign = (n) => (n == null ? "n/a" : n > 0 ? `+${n}%` : `${n}%`);
@@ -36,13 +41,13 @@ const sign = (n) => (n == null ? "n/a" : n > 0 ? `+${n}%` : `${n}%`);
 /** The issue's body, or a comment's: what is flagged, between which builds, what was merged between them, and where the numbers are. */
 export function issueBody({ plan, initial, final, runUrl, kind = "regression" }) {
     const flagged = flaggedMeasures(final);
-    const initiallyFlagged = flaggedMeasures(initial).map((f) => f.name);
+    const pair = confirmationRan(initial, final);
     const run = (r) => `\`${r.sha.slice(0, 9)}\` (nightly artifacts run ${r.id}, ${String(r.createdAt).slice(0, 10)})`;
     const lines = [];
     lines.push(
         kind === "drift"
             ? "The nightly performance check sees a slow drift: no single night flagged, but the last 7 nights' median is more than 15% above the 30 nights before it for the measures below."
-            : `The nightly performance check flagged ${flagged.length === 1 ? "a measure" : `${flagged.length} measures`} on all of its runs together${initiallyFlagged.length ? " (a confirmation pair was run)" : ""}: B is worse than A by more than the margin in \`scripts/perf/memory-lab/budget.json\`, and the two sides' ranges do not overlap.`
+            : `The nightly performance check flagged ${flagged.length === 1 ? "a measure" : `${flagged.length} measures`} on all of its runs together${pair ? " (a confirmation pair was run)" : ""}: B is worse than A by more than the margin in \`scripts/perf/memory-lab/budget.json\`, and the two sides' ranges do not overlap.`
     );
     lines.push("", "| measure | A | B | change |", "|---|---:|---:|---:|");
     for (const f of flagged) lines.push(`| ${f.name} | ${fmt(f.a)} | ${fmt(f.b)} | ${sign(f.changePct)} |`);
@@ -96,6 +101,7 @@ export const FAILED_TITLE = "nightly perf run failed";
 /**
  * What the performance job's own result says, for the same one-issue-per-streak rule: "red" when the job failed or timed out,
  * "green" when it succeeded, "unknown" for a cancelled or skipped job (a cancelled run says nothing, as for the nightly).
+ * GitHub reports a job that hit its timeout-minutes as `cancelled` too: `timedOutResult` tells the two apart first.
  */
 export function runState(result) {
     if (result === "failure") return "red";
@@ -103,12 +109,30 @@ export function runState(result) {
     return "unknown";
 }
 
+/**
+ * "failure" for a `cancelled` result whose job hit its timeout (the check-run annotations say so, as `ci-nightly-status.mjs` reads them),
+ * else the result as it was. `jobs`: the run's jobs; `annotationsOf(job)`: that job's check-run annotations.
+ */
+export function timedOutResult(result, jobs, annotationsOf) {
+    if (result !== "cancelled") return result;
+    for (const job of jobs ?? []) {
+        if (job.conclusion !== "cancelled") continue;
+        try {
+            if (timedOut(annotationsOf(job))) return "failure";
+        } catch {
+            // the annotations could not be read: stay cancelled, which reports nothing
+        }
+    }
+    return result;
+}
+
 /** The failing steps of the performance job, from the jobs API's `jobs` (`conclusion` of the job and of each step). */
 export function failedSteps(jobs) {
     const names = [];
     for (const job of jobs ?? []) {
-        if (job.conclusion !== "failure" && job.conclusion !== "timed_out") continue;
-        const steps = (job.steps ?? []).filter((st) => st.conclusion === "failure" || st.conclusion === "timed_out").map((st) => st.name);
+        // a timed-out job is `cancelled`, and so are its steps from the one that was running
+        if (job.conclusion !== "failure" && job.conclusion !== "timed_out" && !(job.conclusion === "cancelled" && job.timedOut)) continue;
+        const steps = (job.steps ?? []).filter((st) => st.conclusion === "failure" || st.conclusion === "timed_out" || (job.timedOut && st.conclusion === "cancelled")).map((st) => st.name);
         names.push(...(steps.length ? steps.map((n) => `${job.name}: ${n}`) : [job.name]));
     }
     return names;
@@ -122,13 +146,22 @@ export function failedBody({ runUrl, steps }) {
 }
 
 /** Opens, comments on or closes the `perf-run-failed` issue from the job's result; the rule is `decide`. Returns the writes it made (or would with DRY_RUN). */
-export function reportRunFailure({ env, result, gh, log = console.log }) {
+export function reportRunFailure({ env, result: given, gh, log = console.log }) {
     const { REPO, RUN_URL, DRY_RUN } = env;
     const writes = [];
+    let jobs = [];
+    try {
+        jobs = JSON.parse(gh(["api", "--paginate", "--slurp", `repos/${REPO}/actions/runs/${env.RUN_ID}/jobs?per_page=100`])).flatMap((p) => p.jobs);
+    } catch {
+        // without the jobs a timeout cannot be told from a cancel, and the steps are not named: the link says the rest
+    }
+    const annotationsOf = (job) => JSON.parse(gh(["api", "--paginate", "--slurp", `repos/${REPO}/check-runs/${job.id}/annotations?per_page=100`])).flat();
+    const result = timedOutResult(given, jobs, annotationsOf);
+    if (result !== given) jobs = jobs.map((j) => (j.conclusion === "cancelled" ? { ...j, timedOut: true } : j));
     const state = runState(result);
     const open = JSON.parse(gh(["issue", "list", "--repo", REPO, "--label", FAILED_LABEL, "--state", "open", "--json", "number"])).map((i) => i.number);
     const action = decide(state, open);
-    log(`The nightly performance job ${result}; open ${FAILED_LABEL} issues: [${open.join(", ")}]; action: ${action.action}.`);
+    log(`The nightly performance job ${result}${result === given ? "" : ` (${given}: it hit its timeout)`}; open ${FAILED_LABEL} issues: [${open.join(", ")}]; action: ${action.action}.`);
     const write = (args) => {
         writes.push(args);
         if (DRY_RUN) log(`[dry run] gh ${args.join(" ")}`);
@@ -139,13 +172,7 @@ export function reportRunFailure({ env, result, gh, log = console.log }) {
         for (const n of action.issues) write(["issue", "close", String(n), "--repo", REPO, "--comment", `The nightly performance check finished again: ${RUN_URL}`]);
         return writes;
     }
-    let steps = [];
-    try {
-        steps = failedSteps(JSON.parse(gh(["api", `repos/${REPO}/actions/runs/${env.RUN_ID}/jobs`, "--jq", ".jobs"])));
-    } catch {
-        // the names are a convenience: the link says the rest
-    }
-    const body = failedBody({ runUrl: RUN_URL, steps });
+    const body = failedBody({ runUrl: RUN_URL, steps: failedSteps(jobs) });
     if (action.action === "comment") write(["issue", "comment", String(action.issues[0]), "--repo", REPO, "--body", body]);
     else {
         write(["label", "create", FAILED_LABEL, "--repo", REPO, "--color", "B60205", "--description", "The nightly performance check did not finish", "--force"]);

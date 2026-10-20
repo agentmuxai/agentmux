@@ -225,13 +225,19 @@ jobs:
 
   # A night that did not finish (the lab failed, or the job timed out) would otherwise show only as a red run nobody
   # watches, and the history would quietly stop growing. One `perf-run-failed` issue per streak of failed nights; the
-  # first night that finishes closes it. A cancelled run says nothing.
+  # first night that finishes closes it. A job that hit its timeout counts as failed (GitHub reports it as cancelled, so
+  # its annotations are read); a plain cancel says nothing. Only on main, as for the nightly's own issue.
   failed:
     name: report a night that did not finish
     needs: compare
-    if: ${{ always() && needs.compare.result != 'skipped' }}
+    if: ${{ always() && github.ref == 'refs/heads/main' && needs.compare.result != 'skipped' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+      actions: read
+      checks: read # a cancelled job's annotations say whether it timed out
     steps:
       - uses: actions/checkout@v4
         with:
