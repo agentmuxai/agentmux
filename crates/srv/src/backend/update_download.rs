@@ -211,8 +211,9 @@ async fn run(asset: &ReleaseAsset, version: &str, root: &Path) -> Result<PathBuf
     // channel's own `updates/` when that folder's parent can't be written.
     let instance_dir = agentmux_common::DataPaths::from_env().map(|p| p.instance_dir);
     let fallback = fallback_parent(instance_dir.as_deref(), version, &dir);
+    let beside = beside_parent(root, instance_dir.as_deref());
     let mut last = String::new();
-    for parent in [root.parent().map(Path::to_path_buf), Some(fallback)].into_iter().flatten() {
+    for parent in [beside, Some(fallback)].into_iter().flatten() {
         match unpack_portable(&file, version, &parent, &channel).await {
             Ok(folder) => {
                 let _ = tokio::fs::remove_file(&file).await;
@@ -240,6 +241,15 @@ async fn run(asset: &ReleaseAsset, version: &str, root: &Path) -> Result<PathBuf
 /// user's to remove: it may be the version they run.
 fn fallback_parent(instance_dir: Option<&Path>, version: &str, dir: &Path) -> PathBuf {
     instance_dir.map(|d| d.join("updates").join(version)).unwrap_or_else(|| dir.to_path_buf())
+}
+
+/// The folder beside the running `install` (a portable's folder or an
+/// AppImage) to put the next version in, unless that folder is inside the
+/// channel's own tree: then the running version was itself put in a fallback
+/// (`updates/<v>/` of the channel or of an old version's data), and staging
+/// beside it would nest the new version under the old one's folder.
+fn beside_parent(install: &Path, instance_dir: Option<&Path>) -> Option<PathBuf> {
+    install.parent().filter(|p| !instance_dir.is_some_and(|d| p.starts_with(d))).map(Path::to_path_buf)
 }
 
 /// `rename`, tried again for a few seconds while Windows refuses it: a folder
@@ -324,8 +334,9 @@ async fn run_appimage(asset: &ReleaseAsset, version: &str, appimage: &Path) -> R
     if let Some(root) = fallback.parent().filter(|r| *r != updates) {
         remove_abandoned_downloads(root).await;
     }
+    let beside = beside_parent(appimage, instance_dir.as_deref());
     let mut last = String::new();
-    for dir in [appimage.parent().map(Path::to_path_buf), Some(fallback)].into_iter().flatten() {
+    for dir in [beside, Some(fallback)].into_iter().flatten() {
         match fetch_file(asset, version, &dir, Some(&channel)).await {
             Ok(file) => return Ok(file),
             Err(e) => {
@@ -666,6 +677,19 @@ mod tests {
         assert!(!parent.starts_with(channel.join("versions")));
         // Without the channel, this version's own updates/ as before.
         assert_eq!(fallback_parent(None, "0.59.34", &own), own);
+    }
+
+    #[test]
+    fn a_version_running_from_a_fallback_is_not_staged_beside() {
+        let channel = Path::new("/home/u/.agentmux/channels/local-main");
+        let desktop = Path::new("/home/u/Desktop/AgentMux-0.59.34");
+        assert_eq!(beside_parent(desktop, Some(channel)).as_deref(), Some(Path::new("/home/u/Desktop")));
+        // Put in the channel's fallback, or in an old version's data/updates/.
+        let in_channel = channel.join("updates/0.59.34/AgentMux-0.59.34");
+        let in_old_data = channel.join("versions/0.59.30/data/updates/0.59.34/AgentMux-0.59.34");
+        assert_eq!(beside_parent(&in_channel, Some(channel)), None);
+        assert_eq!(beside_parent(&in_old_data, Some(channel)), None);
+        assert!(beside_parent(&in_channel, None).is_some());
     }
 
     #[tokio::test]
