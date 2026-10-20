@@ -6,7 +6,7 @@
 //!
 //! When a launch detects an existing `objects.db` whose `user_version` is
 //! behind the binary's `OBJECT_SCHEMA_VERSION`, copy the SQLite DBs into
-//! `~/.agentmux/snapshots/<channel>-pre-v<code-version>-<ISO8601>.bak/`
+//! `<data>/snapshots/<channel>-pre-v<code-version>-<ISO8601>.bak/` (this version's data directory)
 //! BEFORE any migration mutates them, then prune to the newest
 //! [`MAX_SNAPSHOTS_PER_CHANNEL`] per channel.
 //!

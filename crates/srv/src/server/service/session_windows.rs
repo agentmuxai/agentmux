@@ -87,7 +87,7 @@ pub(crate) fn saved_appearance(store: &Store, w: &Window) -> serde_json::Map<Str
 /// The meta patch a record entry's `window` section gives its restored window:
 /// the name, and the appearance that is a theme (a string) and an opacity (a
 /// number). Nothing else a record says reaches a row.
-fn patch_of(window: &Value) -> serde_json::Map<String, Value> {
+pub(crate) fn patch_of(window: &Value) -> serde_json::Map<String, Value> {
     let mut patch = serde_json::Map::new();
     if let Some(name) = window.get("name").and_then(|v| v.as_str()).map(str::trim).filter(|n| !n.is_empty()) {
         patch.insert(NAME_KEY.to_string(), json!(name));
@@ -243,6 +243,8 @@ pub(crate) fn save_on_last_close(
         if !window.is_empty() {
             snapshot["window"] = Value::Object(window);
         }
+        // When it was closed, for another build offering it (`session_other_builds`).
+        snapshot["saved_at_ms"] = json!(agentmux_common::time::now_ms());
         super::session_restore::save_last_session_snapshot(store, snapshot);
     }
 }
@@ -290,7 +292,7 @@ pub(crate) fn forget_windows_left_by_quit(store: &Store) -> usize {
 }
 
 /// Set (or, with `None`, remove) one of the client's meta keys.
-fn set_client_meta(store: &Store, key: &str, value: Option<Value>) {
+pub(crate) fn set_client_meta(store: &Store, key: &str, value: Option<Value>) {
     let result = store.with_tx(|tx| {
         let Some(mut client) = tx.get_all::<Client>()?.into_iter().next() else {
             return Ok(());
@@ -363,6 +365,24 @@ pub(crate) async fn restore_all(state: &AppState, record: &Value) -> Result<Opti
         (Some(main), _) => Ok(Some(main)),
         (None, Some(e)) => Err(e),
         (None, None) => Ok(None),
+    }
+}
+
+/// Add restored workspaces for the main window to open beside it
+/// (`entries`: placement plus `workspaceid`, as [`restore_all`] queues them)
+/// and their windows' meta patches, keeping any already waiting.
+pub(crate) fn queue_restored_windows(store: &Store, entries: Vec<Value>, metas: serde_json::Map<String, Value>) {
+    let client = store.get_all::<Client>().ok().and_then(|cs| cs.into_iter().next());
+    let meta_of = |key: &str| client.as_ref().and_then(|c| c.meta.get(key).cloned());
+    if !entries.is_empty() {
+        let mut waiting = meta_of(WAITING_META_KEY).and_then(|v| v.as_array().cloned()).unwrap_or_default();
+        waiting.extend(entries);
+        set_client_meta(store, WAITING_META_KEY, Some(Value::Array(waiting)));
+    }
+    if !metas.is_empty() {
+        let mut names = meta_of(NAMES_META_KEY).and_then(|v| v.as_object().cloned()).unwrap_or_default();
+        names.extend(metas);
+        set_client_meta(store, NAMES_META_KEY, Some(Value::Object(names)));
     }
 }
 

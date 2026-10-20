@@ -54,7 +54,8 @@ const h = vi.hoisted(() => {
         setTheme: vi.fn((_: string) => Promise.resolve()),
         setOpacity: vi.fn(),
     };
-    return { createTab, openNewWindow, openModal, CommandPaletteModal, store, settings, caps, win, menu: { items: [] as MenuItem[], close: vi.fn() } };
+    const chooseOtherBuild = vi.fn(() => Promise.resolve());
+    return { chooseOtherBuild, createTab, openNewWindow, openModal, CommandPaletteModal, store, settings, caps, win, menu: { items: [] as MenuItem[], close: vi.fn() } };
 });
 
 // keymodel.ts imports the store as "@/app/store/global", the menu as "@/store/global".
@@ -79,6 +80,7 @@ vi.mock("@/app/store/window-opacity-store", () => ({
 }));
 vi.mock("@/app/store/window-identity", () => ({ windowId: () => "w-a" }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
+vi.mock("./restore-other-build", () => ({ chooseLayoutFromOtherBuild: h.chooseOtherBuild }));
 vi.mock("@/app/store/command-registry", () => ({ commandRegistry: { run: vi.fn(() => false) } }));
 vi.mock("@/app/hook/useVoiceInput", () => ({ getVoiceSession: vi.fn() }));
 vi.mock("@/app/host/host-caps", () => ({
@@ -283,16 +285,28 @@ describe("on a host without multiWindow", () => {
 // SPEC_LAYOUT_FILES_2026_09_25.md §6.1: ☰ → Layouts → "Save layout…", between
 // Opacity and the divider above Settings (placement per the 08-13 spec §5.1).
 describe("Layouts entry", () => {
-    it("sits after Opacity and offers Save layout… and Open layout…", () => {
+    it("sits after Opacity and offers Save layout…, Open layout… and Restore layout from another build…", () => {
         render(() => <HamburgerMenu />);
         const labels = h.menu.items.map((i) => i.label);
         const at = labels.indexOf("Layouts");
         expect(at).toBe(labels.indexOf("Opacity") + 1);
         expect(h.menu.items[at + 1].divider).toBe(true);
-        expect(h.menu.items[at].subItems?.map((i) => i.label)).toEqual(["Save layout…", "Open layout…"]);
+        expect(h.menu.items[at].subItems?.map((i) => i.label)).toEqual([
+            "Save layout…",
+            "Open layout…",
+            "Restore layout from another build…",
+        ]);
         for (const item of h.menu.items[at].subItems ?? []) {
             expect(typeof item.onClick).toBe("function");
         }
+        cleanup();
+    });
+
+    it("lists the layouts other builds saved", () => {
+        render(() => <HamburgerMenu />);
+        const layouts = h.menu.items.find((i) => i.label === "Layouts");
+        layouts?.subItems?.find((i) => i.label === "Restore layout from another build…")?.onClick?.(new MouseEvent("click"));
+        expect(h.chooseOtherBuild).toHaveBeenCalledTimes(1);
         cleanup();
     });
 });

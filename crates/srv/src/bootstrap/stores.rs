@@ -138,12 +138,12 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     let channel = std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string());
     let code_version = std::env::var("AGENTMUX_VERSION")
         .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string());
-    // Snapshots live under the agentmux home root (sibling of `channels/`)
-    // so they survive channel switches and aren't counted against any one
-    // channel's data dir. Honor AGENTMUX_HOME_OVERRIDE for tests; else
-    // default to the OS-level `~/.agentmux/`. Matches `resolve_root` in
-    // agentmux-common — kept inline here to avoid threading the full
-    // DataPaths plumbing into main.rs for one path.
+    // Snapshots live in this version's own data directory, `<data>/snapshots/`:
+    // `get_mux_data_dir()` answers with the data directory once
+    // AGENTMUX_DATA_HOME is set above (#3372). They sit beside the databases
+    // they copy, and pruning keeps 5 there. AGENTMUX_HOME_OVERRIDE wins in
+    // tests. (Before #3372 they went to `~/.agentmux/snapshots/`; older
+    // snapshots stay there.)
     let snapshots_dir = std::env::var_os("AGENTMUX_HOME_OVERRIDE")
         .filter(|s| !s.is_empty())
         .map(std::path::PathBuf::from)
@@ -200,7 +200,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         }
     };
     if pre_migration_count > 0 {
-        eprintln!("AGENTMUXSRV-MIGRATING migrations:{}", pre_migration_count);
+        eprintln!("{}", agentmux_common::srv_stderr::migrating_line("migrations", pre_migration_count));
     }
     match migrations::run_pending_migrations(&mux_data_dir) {
         Ok(0) => {}
@@ -550,6 +550,8 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     });
     if first_launch {
         tracing::info!("First launch: created initial data");
+        // Its window may offer a layout another build saved.
+        crate::server::service::session_other_builds::remember_first_launch_default(&mstore);
     }
     // A window whose close a quit outran: the session record restores it.
     crate::server::service::forget_windows_left_by_quit(&mstore);

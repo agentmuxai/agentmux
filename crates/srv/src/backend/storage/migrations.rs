@@ -793,8 +793,8 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             ended_at     INTEGER NOT NULL DEFAULT 0,
             block_states TEXT NOT NULL DEFAULT '{}',
             output       TEXT NOT NULL DEFAULT '',
-            error        TEXT NOT NULL DEFAULT '',
-            FOREIGN KEY (drone_id) REFERENCES db_drone_definitions(id) ON DELETE CASCADE
+            error        TEXT NOT NULL DEFAULT ''
+            -- No FK to db_drone_definitions: definitions live in the shared store (m0038).
         );
         CREATE INDEX IF NOT EXISTS idx_drone_runs_drone_started
             ON db_drone_runs(drone_id, started_at DESC);

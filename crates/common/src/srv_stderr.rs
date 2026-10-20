@@ -15,9 +15,8 @@
 //!   to run; supervisors extend their ESTART deadline. A new version's first
 //!   start prints `AGENTMUXSRV-MIGRATING copying-previous-version:<v>` before
 //!   copying the previous version's databases (`bootstrap/carry_forward.rs`);
-//!   supervisors match the prefix only. (Still emitted and
-//!   parsed with inline literals at the three sites above — not migrated to
-//!   this module yet; only the new line below lives here.)
+//!   supervisors match the prefix only ([`migrating_line`],
+//!   [`is_migrating_line`]).
 //! - `AGENTMUXSRV-MIGRATION-BEGIN id:<id> description:<text>` /
 //!   `AGENTMUXSRV-MIGRATION-END id:<id> duration_ms:<n>` — one pending
 //!   migration is starting / has finished, inside the `AGENTMUXSRV-MIGRATING`
@@ -37,13 +36,76 @@
 //!   `docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md`; before it,
 //!   a failed migration was a `warn!` and srv booted anyway against a store in
 //!   an unknown state.
-//! - `AGENTMUXSRV-ESTART ...` — ready. Parsed separately by each supervisor;
-//!   unchanged.
+//! - `AGENTMUXSRV-ESTART ws:<addr> web:<addr> version:<v> buildtime:<t>
+//!   instance:<id> pending_migrations:<n>` — ready ([`Estart`]).
+//! - `AGENTMUXSRV-EVENT:<json>` — a startup event for the launcher to log
+//!   ([`parse_event_line`]).
 //! - `AGENTMUXSRV-UPGRADE version:<v> launcher:<path>` (a portable) or
 //!   `… installer:<path>` (a `setup.exe` install) — any time after ESTART: the
 //!   user chose "Upgrade & restart" and `<path>` is the launcher, or the
 //!   installer, of a release srv downloaded and verified. The launcher checks it again, asks
 //!   the user itself, and restarts into it (`crates/launcher/src/upgrade_restart.rs`).
+
+/// Prefix of the line srv writes when it is ready to serve.
+pub const ESTART_PREFIX: &str = "AGENTMUXSRV-ESTART";
+
+/// The fields of an `ESTART_PREFIX` line. Endpoints are `host:port`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Estart {
+    pub ws_endpoint: String,
+    pub web_endpoint: String,
+    pub version: String,
+    pub build_time: String,
+    pub instance_id: String,
+    /// Migrations still pending after srv's own run; non-zero only when one
+    /// could not be applied.
+    pub pending_migrations: usize,
+}
+
+pub fn estart_line(e: &Estart) -> String {
+    format!(
+        "{} ws:{} web:{} version:{} buildtime:{} instance:{} pending_migrations:{}",
+        ESTART_PREFIX, e.ws_endpoint, e.web_endpoint, e.version, e.build_time, e.instance_id, e.pending_migrations
+    )
+}
+
+/// Parse an `ESTART_PREFIX` line; `None` for any other line. A missing field
+/// reads as empty (or 0), as both supervisors always read it.
+pub fn parse_estart_line(line: &str) -> Option<Estart> {
+    let rest = line.strip_prefix(ESTART_PREFIX)?;
+    let parts: Vec<&str> = rest.split_whitespace().collect();
+    let get = |prefix: &str| parts.iter().find_map(|p| p.strip_prefix(prefix)).unwrap_or_default().to_string();
+    Some(Estart {
+        ws_endpoint: get("ws:"),
+        web_endpoint: get("web:"),
+        version: get("version:"),
+        build_time: get("buildtime:"),
+        instance_id: get("instance:"),
+        pending_migrations: get("pending_migrations:").parse().unwrap_or(0),
+    })
+}
+
+/// Prefix of the line srv writes before slow work that precedes ESTART
+/// (migrations, copying the previous version's data); supervisors extend
+/// their ESTART deadline when they see it.
+pub const MIGRATING_PREFIX: &str = "AGENTMUXSRV-MIGRATING";
+
+/// `AGENTMUXSRV-MIGRATING <what>:<detail>`, e.g. `migrations:3`.
+pub fn migrating_line(what: &str, detail: impl std::fmt::Display) -> String {
+    format!("{MIGRATING_PREFIX} {what}:{detail}")
+}
+
+pub fn is_migrating_line(line: &str) -> bool {
+    line.starts_with(MIGRATING_PREFIX)
+}
+
+/// Prefix of a startup event line; the rest of the line is its JSON.
+pub const EVENT_PREFIX: &str = "AGENTMUXSRV-EVENT:";
+
+/// The JSON of an `EVENT_PREFIX` line; `None` for any other line.
+pub fn parse_event_line(line: &str) -> Option<&str> {
+    line.strip_prefix(EVENT_PREFIX)
+}
 
 /// Prefix of the line srv writes to stderr immediately before exiting 1
 /// because `run_pending_migrations` failed. Supervisors match on this to fail
@@ -189,6 +251,36 @@ pub fn parse_upgrade_line(line: &str) -> Option<UpgradeRequest> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn estart_line_round_trips() {
+        let e = Estart {
+            ws_endpoint: "127.0.0.1:61001".into(),
+            web_endpoint: "127.0.0.1:61002".into(),
+            version: "0.59.34".into(),
+            build_time: "20261020.101010".into(),
+            instance_id: "inst-1".into(),
+            pending_migrations: 2,
+        };
+        let line = estart_line(&e);
+        assert_eq!(
+            line,
+            "AGENTMUXSRV-ESTART ws:127.0.0.1:61001 web:127.0.0.1:61002 version:0.59.34 buildtime:20261020.101010 instance:inst-1 pending_migrations:2"
+        );
+        assert_eq!(parse_estart_line(&line), Some(e));
+        assert_eq!(parse_estart_line("AGENTMUXSRV-MIGRATING migrations:1"), None);
+        let bare = parse_estart_line("AGENTMUXSRV-ESTART ws:127.0.0.1:1").unwrap();
+        assert_eq!((bare.ws_endpoint.as_str(), bare.pending_migrations), ("127.0.0.1:1", 0));
+    }
+
+    #[test]
+    fn migrating_and_event_lines() {
+        assert_eq!(migrating_line("migrations", 3), "AGENTMUXSRV-MIGRATING migrations:3");
+        assert!(is_migrating_line(&migrating_line("copying-previous-version", "0.59.33")));
+        assert!(!is_migrating_line("AGENTMUXSRV-MIGRATION-BEGIN id:x description:y"));
+        assert_eq!(parse_event_line(r#"AGENTMUXSRV-EVENT:{"a":1}"#), Some(r#"{"a":1}"#));
+        assert_eq!(parse_event_line("AGENTMUXSRV-ESTART ws:x"), None);
+    }
 
     #[test]
     fn upgrade_line_round_trips_a_path_with_spaces() {

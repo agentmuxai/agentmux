@@ -263,6 +263,17 @@ async fn app_main() {
 
     boot_timing::log_summary();
 
+    // After ESTART, off the boot path: drop sagas that finished cleanly over
+    // 30 days ago, so sagas.db stops growing.
+    let saga_log = Arc::clone(&state.saga_log);
+    tokio::task::spawn_blocking(move || {
+        match saga_log.prune_finished_older_than(std::time::Duration::from_secs(30 * 24 * 60 * 60)) {
+            Ok(0) => {}
+            Ok(n) => tracing::info!("[saga] pruned {n} saga(s) that finished over 30 days ago"),
+            Err(e) => tracing::warn!("[saga] pruning finished sagas failed: {e}"),
+        }
+    });
+
     // 7. Build router and serve on both listeners
     // Clone Arcs that are needed after `state` is moved into build_routers.
     let state_for_exit = state.clone();

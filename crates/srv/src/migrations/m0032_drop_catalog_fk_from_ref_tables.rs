@@ -47,15 +47,15 @@ use super::{Migration, MigrationContext, MigrationError, MigrationScope, VerifyO
 pub struct M0032DropCatalogFkFromRefTables;
 
 /// One ref table this migration may need to rebuild.
-struct TableSpec {
-    name: &'static str,
+pub(super) struct TableSpec {
+    pub(super) name: &'static str,
     /// The ref column that used to FK to a catalog table (`skill_id` or
     /// `mcp_id`) — checked via `PRAGMA foreign_key_list` to decide whether a
     /// rebuild is still needed.
-    ref_col: &'static str,
+    pub(super) ref_col: &'static str,
     /// The catalog table the ref column used to point at, for the same check.
-    catalog_table: &'static str,
-    create_sql: &'static str,
+    pub(super) catalog_table: &'static str,
+    pub(super) create_sql: &'static str,
 }
 
 const TABLES: &[TableSpec] = &[
@@ -107,7 +107,7 @@ const TABLES: &[TableSpec] = &[
 /// either this migration already rebuilt it, or it's a fresh install whose
 /// base schema already declares the trimmed FK set. `Ok(true)` for a missing
 /// table too: nothing to rebuild is the same as already done.
-fn already_dropped(conn: &Connection, spec: &TableSpec) -> Result<bool, String> {
+pub(super) fn already_dropped(conn: &Connection, spec: &TableSpec) -> Result<bool, String> {
     let exists: bool = conn
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
@@ -131,7 +131,7 @@ fn already_dropped(conn: &Connection, spec: &TableSpec) -> Result<bool, String> 
 
 /// Rebuild one table so its catalog-pointing FK is gone, preserving every
 /// other constraint and every row verbatim.
-fn rebuild_table(conn: &Connection, spec: &TableSpec) -> Result<(), String> {
+pub(super) fn rebuild_table(conn: &Connection, spec: &TableSpec) -> Result<(), String> {
     let old_name = format!("{}_pre_drop_catalog_fk", spec.name);
     conn.execute_batch("PRAGMA foreign_keys=OFF;")
         .map_err(|e| format!("{}: foreign_keys off: {e}", spec.name))?;

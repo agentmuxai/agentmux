@@ -160,6 +160,16 @@ export function registerDefaultCommands(): void {
         execute: () => createBlock({ meta: { view: "tower" } }),
     });
     commandRegistry.register({
+        id: "open:kanban",
+        label: "Open Kanban",
+        category: "Open",
+        icon: "table-columns",
+        // Warden's Kanban section (SPEC_WARDEN_KANBAN_2026_10_20.md §6.1): the tab's Warden, or a new one
+        // (what open-warden.ts does; the store layer doesn't import views).
+        execute: () =>
+            openOrFocusPaneByView("warden", { meta: { view: "warden", "warden:section": "kanban" } }, { "warden:section": "kanban" }),
+    });
+    commandRegistry.register({
         id: "open:vault",
         label: "Open Vault",
         category: "Open",
