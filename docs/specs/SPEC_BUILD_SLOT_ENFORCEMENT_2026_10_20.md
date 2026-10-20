@@ -31,7 +31,7 @@ build-slot.sh status                                       who holds the slot, w
 - **The wrapped command's exit code** is the script's exit code.
 - **Needs only bash**, `mkdir`, `date`, `stat` and `sleep`: Git Bash on Windows, Linux and macOS.
 
-The standard that tells agents what counts as heavy and how to behave is `docs/standards/DEV_HOST_BUILD_SLOT.md` in the private infrastructure repository; this spec covers what AgentMux does about it.
+What counts as heavy and how agents behave around the slot (queue etiquette, not killing another agent's build) is the team's dev-host standard and is given to agents in their instructions; this spec covers what AgentMux does about it.
 
 ## 4. The enforcement: a `cargo` in the way
 
