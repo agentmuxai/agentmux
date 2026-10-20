@@ -280,7 +280,38 @@ export function rawFontSizes(scss) {
     return declarations(scss, { includeMixins: true }).filter((d) => d.property === "font-size" && /^\d*\.?\d+(px|rem)$/.test(unimportant(d.value)));
 }
 
-const COLOUR_LITERAL = /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?)\((?!\s*(?:var\(|from\b))[^)]*\)/gi;
+// Functions are the ones that take literal channels; `rgb(from var(--x) …)` and
+// `rgba(var(--x-rgb), 0.2)` are built from a token and are skipped.
+const COLOUR_LITERAL =
+    /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\((?!\s*(?:var\(|from\b))[^)]*\)/gi;
+
+const NAMED_COLOURS = (
+    "aliceblue antiquewhite aqua aquamarine azure beige bisque blanchedalmond blue blueviolet brown burlywood cadetblue " +
+    "chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen " +
+    "darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue " +
+    "darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick " +
+    "floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink " +
+    "indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan " +
+    "lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray " +
+    "lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue " +
+    "mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred " +
+    "midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid " +
+    "palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple " +
+    "rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue " +
+    "slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet wheat " +
+    "whitesmoke yellow yellowgreen"
+).split(" ");
+const NAMED_COLOUR = new RegExp(`(?<![\\w-])(?:${NAMED_COLOURS.join("|")})(?![\\w-])`, "gi");
+// Properties whose value can be a colour. Others (`font-family: tan`, a `grid-area` name) are not looked at.
+const COLOUR_PROPERTY =
+    /^(?:--.+|color|fill|stroke|caret-color|accent-color|scrollbar-color|background(?:-color|-image)?|border(?:-(?:top|right|bottom|left))?(?:-color)?|outline(?:-color)?|text-decoration(?:-color)?|column-rule(?:-color)?|box-shadow|text-shadow)$/;
+
+/** The named colours in a value, leaving out names inside `var(…)`, `url(…)` and strings. */
+function namedColours(property, value) {
+    if (!COLOUR_PROPERTY.test(property)) return [];
+    const bare = value.replace(/var\([^)]*\)|url\([^)]*\)|"[^"]*"|'[^']*'/g, " ");
+    return bare.match(NAMED_COLOUR) ?? [];
+}
 
 /** Pure black or white, with or without alpha: a shadow or a scrim, the same on every theme. */
 function isNeutral(literal) {
@@ -292,8 +323,7 @@ function isNeutral(literal) {
 /** Colour literals in a stylesheet's declarations, other than pure black and white. */
 export function colourLiterals(scss) {
     return declarations(scss, { includeMixins: true }).flatMap((d) =>
-        (d.value.match(COLOUR_LITERAL) ?? [])
-            .filter((literal) => !isNeutral(literal))
+        [...(d.value.match(COLOUR_LITERAL) ?? []).filter((literal) => !isNeutral(literal)), ...namedColours(d.property, d.value)]
             .map((literal) => ({ selector: d.selector, property: d.property, literal, line: d.line }))
     );
 }
