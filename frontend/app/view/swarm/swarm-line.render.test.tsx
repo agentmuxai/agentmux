@@ -59,7 +59,7 @@ const model = {
 function line(l: SwarmLine) {
     const { container } = render(() => (
         <div class="swarm-view" tabIndex={-1}>
-            <AgentRow node={treeNode(l)} focusedBlockId={() => null} model={model} />
+            <AgentRow node={() => treeNode(l)} focusedBlockId={() => null} model={model} />
         </div>
     ));
     return container.querySelector(".swarm-activity-summary") as HTMLElement | null;
