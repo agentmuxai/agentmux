@@ -468,7 +468,6 @@ async function performTearOff(
                     error: msg,
                     blockId: payload.blockId,
                 });
-                // via the workspace switcher and the user can close it.
                 await rollBackPaneTearOff({ blockId: payload.blockId, members }, newWsId, sourceTabId, sourceWsId);
                 return;
             }
