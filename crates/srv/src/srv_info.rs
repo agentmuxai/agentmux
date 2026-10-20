@@ -30,6 +30,16 @@ pub fn agentmux_home() -> Option<std::path::PathBuf> {
     HOME_DIR.get().cloned().flatten().map(std::path::PathBuf::from)
 }
 
+/// The account-wide AgentMux root, for code that means `~/.agentmux` itself
+/// (`archives/`, `channels/`, `shared/`). Inside srv, after startup,
+/// `agentmux_common::data_paths::agentmux_root()` answers with this version's
+/// data directory instead (see [`HOME_DIR`]); this answers with the root
+/// captured before that, and falls back to the resolver where nothing was
+/// captured (tests, tools that don't run srv's `main`).
+pub fn agentmux_root() -> Option<std::path::PathBuf> {
+    agentmux_home().or_else(|| agentmux_common::data_paths::agentmux_root().ok())
+}
+
 /// The `srvinfo` event: srv's version, and the machine it runs on.
 #[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]

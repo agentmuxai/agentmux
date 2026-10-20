@@ -160,7 +160,7 @@ pub(crate) fn resolve_global_shared_root() -> Option<PathBuf> {
     // on that None to disable cleanly ("No shared root (CI, a bare cargo
     // run) — nothing to re-key"). An infallible resolver made every one of
     // those branches unreachable.
-    agentmux_common::data_paths::agentmux_root().ok().map(|root| root.join("shared"))
+    crate::srv_info::agentmux_root().map(|root| root.join("shared"))
 }
 
 #[cfg(test)]

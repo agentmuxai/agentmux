@@ -61,12 +61,11 @@ impl ClaudeHistoryAdapter {
         // ~/.agentmux/shared so discovery still works in plain/test contexts.
         let shared_dir = std::env::var_os("AGENTMUX_SHARED_DIR")
             .map(PathBuf::from)
-            .or_else(|| agentmux_common::data_paths::agentmux_root().ok().map(|root| root.join("shared")));
-        // `home_dir` is re-derived the same way `DataPaths::from_env()`
-        // itself derives it (AGENTMUX_HOME_OVERRIDE or the OS home dir),
-        // not read from an env var AgentMux doesn't currently export for
-        // this purpose.
-        let agentmux_home = agentmux_common::DataPaths::from_env().map(|paths| paths.home_dir);
+            .or_else(|| crate::srv_info::agentmux_root().map(|root| root.join("shared")));
+        // The account-wide root, not `DataPaths::from_env().home_dir`: inside
+        // srv that answers with this version's data directory, which has no
+        // `channels/` or `dev/` to scan.
+        let agentmux_home = crate::srv_info::agentmux_root();
         Self::with_roots(dirs::home_dir(), shared_dir, agentmux_home)
     }
 

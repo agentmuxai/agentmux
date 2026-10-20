@@ -312,7 +312,7 @@ pub fn default_archive_dir() -> Option<PathBuf> {
     // "disable the archiver", with an explicit comment saying a relative
     // fallback would otherwise write archives under the CWD. Routing this
     // through the infallible get_mux_data_dir() silently defeated that guard.
-    agentmux_common::data_paths::agentmux_root().ok().map(|root| root.join("archives"))
+    crate::srv_info::agentmux_root().map(|root| root.join("archives"))
 }
 
 // ---------------------------------------------------------------------------
