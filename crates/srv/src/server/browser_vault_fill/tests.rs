@@ -96,7 +96,7 @@ async fn setup(field: Value) -> Setup {
 }
 
 async fn fill(s: &Setup, vault: &str) -> (StatusCode, Value) {
-    let req = VaultFillRequest { auth: s.auth.clone(), pane: None, ref_: "e7".into(), vault: vault.into() };
+    let req = VaultFillRequest { auth: s.auth.clone(), pane: None, ref_: "e7".into(), vault: Some(vault.into()), request_kind: None, request_label: None };
     let resp = handle_vault_fill(State(s.state.clone()), None, Json(req)).await;
     let status = resp.status();
     let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
@@ -108,7 +108,7 @@ async fn fill(s: &Setup, vault: &str) -> (StatusCode, Value) {
 async fn answer_when_asked(agent: String, decision: Decision) -> UseRequest {
     for _ in 0..200 {
         if let Some(u) = uses::uses().list().into_iter().find(|u| u.agent == agent) {
-            uses::uses().answer(&u.id, decision);
+            uses::uses().answer(&u.id, UseAnswer::of(decision));
             return u;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
@@ -165,7 +165,7 @@ async fn a_dropped_call_takes_its_prompt_down() {
     let asking = {
         let (state, auth, entry) = (s.state.clone(), s.auth.clone(), s.entry.clone());
         tokio::spawn(async move {
-            let req = VaultFillRequest { auth, pane: None, ref_: "e7".into(), vault: entry };
+            let req = VaultFillRequest { auth, pane: None, ref_: "e7".into(), vault: Some(entry), request_kind: None, request_label: None };
             handle_vault_fill(State(state), None, Json(req)).await
         })
     };
@@ -181,7 +181,7 @@ async fn a_dropped_call_takes_its_prompt_down() {
     asking.abort();
     let _ = asking.await;
     assert!(uses::uses().get(&asked.id).is_none(), "the dropped call's request is gone");
-    assert!(!uses::uses().answer(&asked.id, Decision::Once), "and it can't be answered");
+    assert!(!uses::uses().answer(&asked.id, UseAnswer::of(Decision::Once)), "and it can't be answered");
     assert!(typed(&s).is_none());
 }
 
@@ -280,7 +280,7 @@ async fn an_unverified_caller_is_refused_before_anything_is_read() {
     let s = setup(ssn_field("https://irs.gov")).await;
     let mut forged = s.auth.clone();
     forged.sig = "not-a-signature".into();
-    let req = VaultFillRequest { auth: forged, pane: None, ref_: "e7".into(), vault: s.entry.clone() };
+    let req = VaultFillRequest { auth: forged, pane: None, ref_: "e7".into(), vault: Some(s.entry.clone()), request_kind: None, request_label: None };
     let resp = handle_vault_fill(State(s.state.clone()), None, Json(req)).await;
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     assert!(routes(&s).is_empty());
@@ -394,4 +394,115 @@ async fn an_entry_made_again_while_the_person_decided_is_not_typed() {
 
 fn vault_get_created(s: &Setup) -> i64 {
     s.state.identity_store.vault_get(&s.entry).unwrap().unwrap().created_at
+}
+
+// ── A value nobody has stored yet: the person types it in the prompt (spec §6.5) ──
+
+async fn request_value(s: &Setup, kind: &str, label: &str) -> (StatusCode, Value) {
+    let req = VaultFillRequest { auth: s.auth.clone(), pane: None, ref_: "e7".into(), vault: None, request_kind: Some(kind.into()), request_label: Some(label.into()) };
+    let resp = handle_vault_fill(State(s.state.clone()), None, Json(req)).await;
+    let status = resp.status();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    (status, serde_json::from_slice(&body).unwrap_or_default())
+}
+
+/// Answers `agent`'s waiting use with a typed value, as the person would.
+async fn type_when_asked(agent: String, value: &'static str, save: bool) -> UseRequest {
+    for _ in 0..200 {
+        if let Some(u) = uses::uses().list().into_iter().find(|u| u.agent == agent) {
+            uses::uses().answer(&u.id, UseAnswer { decision: Decision::Once, value: Some(value.to_string().into()), save });
+            return u;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("the use was never asked about");
+}
+
+#[tokio::test]
+async fn a_value_the_person_types_is_filled_and_forgotten_unless_they_keep_it() {
+    let s = setup(ssn_field("https://irs.gov")).await;
+    let before = s.state.identity_store.vault_count().unwrap();
+    let typing = tokio::spawn(type_when_asked(s.auth.agent_id.clone(), "987-65-4321", false));
+    let (status, body) = request_value(&s, "ssn", "Sam's SSN").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let asked = typing.await.unwrap();
+    assert!(asked.needs_value && !asked.offer_always, "the person types it, and no Always");
+    assert_eq!((asked.entry_label.as_str(), asked.kind.as_str(), asked.what.as_str()), ("Sam's SSN", "ssn", "Social Security number"));
+    assert!(asked.reason.contains("no Vault entry"), "{}", asked.reason);
+
+    // The host was asked to type what the person typed, bound to the site and field they saw.
+    let sent = typed(&s).expect("typed");
+    assert_eq!(sent["text"], "987-65-4321");
+    assert_eq!((sent["expect_origin"].as_str(), sent["expect_fingerprint"].as_str()), (Some("https://irs.gov"), Some("fp-1")));
+    // The agent hears it was filled, by the person, and not kept; never the value.
+    assert_eq!(body["data"]["typed_by_the_person"], true);
+    assert_eq!(body["data"]["kept_in_vault"], false);
+    assert!(!body.to_string().contains("987-65"), "{body}");
+    assert_eq!(s.state.identity_store.vault_count().unwrap(), before, "nothing was kept");
+    let log = activity_text(&s);
+    assert!(log.contains("typed by the person") && !log.contains("987-65"), "{log}");
+}
+
+#[tokio::test]
+async fn saving_a_typed_value_keeps_it_with_a_grant_for_the_site() {
+    let s = setup(ssn_field("https://irs.gov")).await;
+    let typing = tokio::spawn(type_when_asked(s.auth.agent_id.clone(), "987-65-4321", true));
+    let (status, body) = request_value(&s, "ssn", "Sam's SSN").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    typing.await.unwrap();
+    assert_eq!(body["data"]["kept_in_vault"], true);
+    let id = body["data"]["filled_from_vault"].as_str().unwrap().to_string();
+    assert_eq!(id, "ssn-sam-s-ssn");
+    let row = s.state.identity_store.vault_get(&id).unwrap().expect("kept");
+    assert_eq!(row.label, "Sam's SSN");
+    let opened = seal::open(&seal::test_key(), &id, &row.sealed).unwrap();
+    assert_eq!(opened.get("value"), Some("987-65-4321"));
+    assert!(s.state.identity_store.vault_grant_check(&id, "https://irs.gov").unwrap(), "the field fits, so the site is granted");
+    assert!(!body.to_string().contains("987-65"), "{body}");
+    // The next fill from it asks nothing.
+    let (status, again) = fill(&s, &id).await;
+    assert_eq!(status, StatusCode::OK, "{again}");
+}
+
+#[tokio::test]
+async fn saving_into_a_field_that_doesnt_fit_keeps_the_value_without_a_grant() {
+    let mut comment = ssn_field("https://irs.gov");
+    comment["slots"] = json!([]);
+    let s = setup(comment).await;
+    let typing = tokio::spawn(type_when_asked(s.auth.agent_id.clone(), "987-65-4321", true));
+    let (status, body) = request_value(&s, "ssn", "Sam's SSN").await;
+    typing.await.unwrap();
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let id = body["data"]["filled_from_vault"].as_str().unwrap();
+    assert!(!s.state.identity_store.vault_grant_check(id, "https://irs.gov").unwrap());
+}
+
+#[tokio::test]
+async fn a_request_for_a_value_is_refused_for_a_password_a_login_a_bad_kind_or_no_label() {
+    let mut pw = ssn_field("https://irs.gov");
+    pw["password_like"] = json!(true);
+    let s = setup(pw).await;
+    let (status, body) = request_value(&s, "ssn", "x").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body.to_string().contains("password or one-time-code"), "{body}");
+    for (kind, label, why) in [("login", "Example", "password"), ("rocket", "x", "unknown kind"), ("ssn", "  ", "needs a label")] {
+        let (status, body) = request_value(&s, kind, label).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{kind}: {body}");
+        assert!(body.to_string().contains(why), "{kind}: {body}");
+    }
+    assert!(typed(&s).is_none() && uses::uses().list().iter().all(|u| u.agent != s.auth.agent_id));
+    // An entry and a request for a value together is a mistake.
+    let req = VaultFillRequest { auth: s.auth.clone(), pane: None, ref_: "e7".into(), vault: Some(s.entry.clone()), request_kind: Some("ssn".into()), request_label: Some("x".into()) };
+    let resp = handle_vault_fill(State(s.state.clone()), None, Json(req)).await;
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn denying_a_request_for_a_value_types_nothing() {
+    let s = setup(ssn_field("https://irs.gov")).await;
+    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Deny));
+    let (status, _) = request_value(&s, "ssn", "Sam's SSN").await;
+    ask.await.unwrap();
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(typed(&s).is_none());
 }

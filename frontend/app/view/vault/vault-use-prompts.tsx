@@ -10,7 +10,7 @@ import { createEffect, createRoot, createSignal, on, Show, type JSX } from "soli
 
 import { Modal } from "@/app/element/modal";
 import { ModalBody, ModalFooter, ModalHeader } from "@/app/element/modal-parts";
-import { Button } from "@/app/element/ui";
+import { Button, Field, TextInput } from "@/app/element/ui";
 import { modalsModel, type ModalCloseProps } from "@/app/store/modalmodel";
 import type { UseRequest } from "@/types/rpc/UseRequest";
 import { answerUse, followVault, refreshVaultRequests, vaultAvailable, vaultUses, type UseDecision } from "./vault-store";
@@ -28,6 +28,9 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
     const u = props.use;
     const [error, setError] = createSignal<string | null>(null);
     const [busy, setBusy] = createSignal(false);
+    // When no entry holds the value yet, the person types it here (spec §6.5).
+    const [typed, setTyped] = createSignal("");
+    const [save, setSave] = createSignal(false);
     // Answered elsewhere (another window), or the agent gave up: this prompt goes.
     createEffect(() => {
         if (!vaultUses().some((x) => x.id === u.id)) props.close();
@@ -35,7 +38,9 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
     const decide = async (decision: UseDecision) => {
         setBusy(true);
         try {
-            await answerUse(u.id, decision);
+            await answerUse(u.id, decision, u.needs_value && decision !== "deny" ? { value: typed(), save: save() } : undefined);
+            // The typed value doesn't outlive the answer.
+            setTyped("");
             props.close();
         } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
@@ -50,15 +55,44 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
     };
     return (
         <Modal open={true} scope="window" onClose={() => void decide("deny")} size="sm" closeOnBackdropClick={false} closeOnEscape={!busy()}>
-            <ModalHeader title={`${u.agent} wants to fill your ${u.what}`} />
+            <ModalHeader title={u.needs_value ? `${u.agent} needs your ${u.what}` : `${u.agent} wants to fill your ${u.what}`} />
             <ModalBody>
                 <p>
                     Into <strong>{u.field}</strong> on <strong>{siteOf(u.origin)}</strong>
                     <span class="warden-manager-dim"> ({u.origin})</span>
                 </p>
-                <p>
-                    From your Vault entry <strong>{u.entry_label}</strong>. You're asked because: {u.reason}.
-                </p>
+                <Show
+                    when={u.needs_value}
+                    fallback={
+                        <p>
+                            From your Vault entry <strong>{u.entry_label}</strong>. You're asked because: {u.reason}.
+                        </p>
+                    }
+                >
+                    <form
+                        onSubmit={(e) => {
+                            e.preventDefault();
+                            if (typed()) void decide("once");
+                        }}
+                    >
+                        <Field label={u.entry_label} layout="stacked" description={`You're asked because ${u.reason}.`}>
+                            <TextInput
+                                type="password"
+                                autocomplete="new-password"
+                                spellcheck={false}
+                                autofocus
+                                value={typed()}
+                                onInput={(e) => setTyped(e.currentTarget.value)}
+                                disabled={busy()}
+                            />
+                        </Field>
+                        <label class="vault-check">
+                            <input type="checkbox" checked={save()} onChange={(e) => setSave(e.currentTarget.checked)} disabled={busy()} />
+                            Save to the Vault as "{u.entry_label}"
+                        </label>
+                        <input type="submit" hidden />
+                    </form>
+                </Show>
                 <p class="warden-manager-dim">{"The agent never sees the value. Check the site is the one you expect."}</p>
                 <Show when={error()}>
                     <div class="warden-manager-error" role="alert">
@@ -70,8 +104,8 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
                 <Button data-modal-dismiss tone="danger" disabled={busy()} onClick={() => void decide("deny")}>
                     Deny
                 </Button>
-                <Button disabled={busy()} onClick={() => void decide("once")}>
-                    Allow once
+                <Button tone={u.needs_value ? "accent" : "neutral"} disabled={busy() || (u.needs_value && !typed())} onClick={() => void decide("once")}>
+                    {u.needs_value ? "Fill it in" : "Allow once"}
                 </Button>
                 <Show when={u.offer_always}>
                     <Button tone="attention" disabled={busy()} onClick={() => void decide("always")}>

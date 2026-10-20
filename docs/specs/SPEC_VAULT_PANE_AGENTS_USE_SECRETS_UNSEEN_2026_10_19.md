@@ -1,6 +1,6 @@
 # SPEC: the Vault: one pane for the person's secrets, which agents use without seeing them
 
-**Status:** active — P1 (§4, §11) shipped in #5180; P2a (§5: the pane, the store, the `Vault` tool, agents kept out) P2b (Reveal and Copy, Windows), P2c (`.vault` export and import) and P3 (§6.1 to §6.4, §6.6, as §6.7 says) are built; P5 is partly built (the CSV, JSON and .env importers, §8.8); P4, P6 to P8 and the rest of P5 remain. The operator took the recommended answers to §13 on 2026-10-19.
+**Status:** active — P1 (§4, §11) shipped in #5180; P2a (§5: the pane, the store, the `Vault` tool, agents kept out) P2b (Reveal and Copy, Windows), P2c (`.vault` export and import), P3 (§6.1 to §6.4, §6.6, as §6.7 says) and P4 (§6.5) are built; P5 is partly built (the CSV, JSON and .env importers, §8.8); P6 to P8 and the rest of P5 remain. The operator took the recommended answers to §13 on 2026-10-19.
 **Date:** 2026-10-19
 **Author:** Agent2 #6 (agent2-6@narko), at the operator's request
 **Trigger (operator, 2026-10-19):** an agent filling a US state's corporate-registry certificate request form was refused on the address, city, ZIP and email fields, then could not tick a checkbox, so the person had to finish the form by hand. "Agentmux needs to be able to fill in personal information including ssn." … "we'll need to pivot into that work now, write a spec to file." On a first draft that put saved values in Settings: "sounds like we may need a new pane type, a vault, or settings wouldn't really make sense" … "api keys and anything secret can be kept there." … "we want rich features, like support for pw protected encrypted export file (.vault file), and imports from kdbx files and last pass, and any other popular services should be supported."
@@ -200,6 +200,16 @@ What shipped, and where it differs from §6.1 to §6.6:
 - **What the taint does not cover.** It lives in the page's own markup, so a page's script can remove it, and a page that holds the value can also just show it: the page is the one party that receives the value in any design, and the Vault doesn't claim to protect a value from the site it was typed into. What it keeps is the value from an *agent* reading the page after a fill. The page's validation message is page text too and can echo the value reformatted, so the agent is told only that the page flagged the value as invalid, never the message. `eval` stays refused on driven panes (above), which is what stops an agent reading the field's `.value` itself. A grant and an approval are tied to the entry's `created_at`: an entry deleted and made again while the person decides has the same id, and is neither granted the site nor typed.
 - **Activity** records each use as `filled a web form`: the agent, the entry, the site and field, and `done`, `denied`, `refused`, `failed` or `timed out`. The pane's Warden view of these is still §5.6.
 
+### 6.8 Built in P4: a value no entry holds yet
+
+`Browser` `request_value {ref, kind, label}` is §6.5's second route (the first, `fill` naming a missing id, is refused with a pointer to this and to `Vault` `request`): the agent asks the person to type one value into one field.
+
+- **The prompt is the use prompt of §6.7 with a field.** It says the agent needs the person's SSN (or card number, and so on) for the site and field, and why they are asked; the value is typed into a password-type input that belongs to AgentMux, not the page. **Fill it in** is disabled until something is typed; **Deny** needs nothing. "Always on this site" is never offered: there is no entry to grant. **Save to the Vault as "<label>"** is unticked by default.
+- **The value's path** is the person's keyboard, then the host's Vault route to srv (it is never logged, and the host's relay logs only the operation's name), then the same one request to the host that types it. srv holds it in a `Zeroizing` buffer for the length of the fill, and drops it unless the box was ticked.
+- **Kept only on request, and only once the page has taken it.** With the box ticked and the fill done, srv makes the entry (id from kind and label, as ever), and grants the site if the field looks like what the entry is. If keeping it fails, the agent is told it was typed but not kept.
+- **Which kinds:** the kind's main part (a card's number, a bank account's account number); never a login, so never a password. Every other refusal of §6.7 applies: a password-like field, an unknown site, a field that takes no text.
+- **What comes back:** that the person typed it, whether it was kept (and the new entry's id if so), and where it went; never the value.
+
 ## 7. Agents run commands with a Vault entry
 
 ### 7.1 The action
@@ -347,7 +357,7 @@ Fix (built in P1):
 | **P2b** | Reveal and Copy with OS confirmation and the clipboard clear (§5.3), built for Windows Hello; the macOS and Linux confirmations follow | Reveal asks Windows Hello; a copied value is gone from the clipboard 30 s later |
 | **P2c** | `.vault` export and import (§8.1, §8.2, §8.5), so there is a backup early | The person exports the Vault, deletes the entries and imports them back |
 | **P3** | Browser fill from the Vault (§6.1 to §6.4, §6.6), taint, grants. Built (§6.7); Activity and grants in Warden (§5.6) follow | An agent fills an SSN fixture field; its result, snapshot, screenshot and transcript have no trace of the value; another origin is asked |
-| **P4** | §6.5: the banner's value field and **Save to Vault**; `request_value` | A form with an SSN field is done by the agent plus one value typed in the banner |
+| **P4** | §6.5: the prompt's value field and **Save to Vault**; `request_value`. Built (§6.8) | A form with an SSN field is done by the agent plus one value typed in the banner |
 | **P5** | Importers, first wave (§8.4): KeePass `.kdbx`, LastPass, 1Password, Bitwarden, the browsers' CSVs, `.env`, any CSV; plaintext-file handling (§8.6); fuzzing (§8.7); KeePass export (§8.3). Built so far: all but `.kdbx`, `.1pux`, Bitwarden's password-protected JSON and KeePass export (§8.8) | Each imports its real-export fixture with the right kinds and no loss the preview didn't list |
 | **P6** | Importers, second wave: Proton Pass, Dashlane, Keeper, NordPass, RoboForm, Enpass, Zoho Vault, Sticky Password | The same, per source |
 | **P7** | §7: `Terminal` `run` with `secrets`, scrubbing, approval, grants | A command reads `STRIPE_API_KEY` from the Vault; its echoed output shows `[vault:<id>]` |
