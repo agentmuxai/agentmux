@@ -230,7 +230,12 @@ fn forward_progress_line(line: &str, stage: &'static str, sink: &crate::startup_
     if let Some(b) = p::parse_step_begin_line(line) {
         sink.sub_begin(stage, b.id, b.label);
     } else if let Some(e) = p::parse_step_end_line(line) {
-        sink.sub_end(stage, e.id, e.duration_ms, ok, None);
+        if e.ok {
+            sink.sub_end(stage, e.id, e.duration_ms, ok, None);
+        } else {
+            let failed = crate::startup_events::StartupStatus::Error;
+            sink.sub_end(stage, e.id, e.duration_ms, failed, Some("failed".to_string()));
+        }
     } else if let Some(b) = p::parse_migration_begin_line(line) {
         sink.sub_begin(stage, b.id, b.description);
     } else if let Some(e) = p::parse_migration_end_line(line) {

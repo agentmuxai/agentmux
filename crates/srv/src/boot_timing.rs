@@ -133,12 +133,24 @@ pub fn time<T>(step: &'static str, f: impl FnOnce() -> T) -> T {
 /// same lines report `agentmux-srv migrate --prepare`'s steps) and records
 /// the time like [`time`], so the splash and the boot summary come from one
 /// call.
-pub fn step<T>(id: &'static str, label: &str, f: impl FnOnce() -> T) -> T {
+pub fn step<T: StepOutcome>(id: &'static str, label: &str, f: impl FnOnce() -> T) -> T {
     eprintln!("{}", agentmux_common::srv_stderr::step_begin_line(id, label));
     let t = Instant::now();
     let out = time(id, f);
-    eprintln!("{}", agentmux_common::srv_stderr::step_end_line(id, t.elapsed().as_millis() as u64));
+    eprintln!("{}", agentmux_common::srv_stderr::step_end_line(id, t.elapsed().as_millis() as u64, out.succeeded()));
     out
+}
+
+/// Whether a [`step`]'s result means it worked, so a failed step's end line
+/// says so and the splash shows it failed, not done.
+pub trait StepOutcome {
+    fn succeeded(&self) -> bool;
+}
+
+impl<T, E> StepOutcome for Result<T, E> {
+    fn succeeded(&self) -> bool {
+        self.is_ok()
+    }
 }
 
 /// Report a step that is only worth showing once it is known to have taken
@@ -146,7 +158,7 @@ pub fn step<T>(id: &'static str, label: &str, f: impl FnOnce() -> T) -> T {
 /// the time it took.
 pub fn step_done(id: &'static str, label: &str, ms: u64) {
     eprintln!("{}", agentmux_common::srv_stderr::step_begin_line(id, label));
-    eprintln!("{}", agentmux_common::srv_stderr::step_end_line(id, ms));
+    eprintln!("{}", agentmux_common::srv_stderr::step_end_line(id, ms, true));
     if let Ok(mut guard) = recorder().lock() {
         if let Some(timings) = guard.as_mut() {
             timings.steps.push((id, ms));

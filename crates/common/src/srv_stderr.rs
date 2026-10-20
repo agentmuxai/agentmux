@@ -32,7 +32,7 @@
 //!   any other stderr line, same as it already did for the unparsed line
 //!   before this existed.
 //! - `AGENTMUXSRV-STEP-BEGIN id:<id> label:<text>` /
-//!   `AGENTMUXSRV-STEP-END id:<id> duration_ms:<n>` — one data-preparation
+//!   `AGENTMUXSRV-STEP-END id:<id> duration_ms:<n>[ status:error]` — one data-preparation
 //!   step besides a migration: copying the previous version's data, a
 //!   snapshot, waiting for another AgentMux's migrations, the backup. Written
 //!   by srv's startup and by `agentmux-srv migrate --prepare`; the launcher
@@ -189,14 +189,17 @@ pub struct StepBegin {
 pub struct StepEnd {
     pub id: String,
     pub duration_ms: u64,
+    /// `false` when the step failed (`status:error` on the line).
+    pub ok: bool,
 }
 
 pub fn step_begin_line(id: &str, label: &str) -> String {
     format!("{STEP_BEGIN_PREFIX} id:{id} label:{}", one_line(label))
 }
 
-pub fn step_end_line(id: &str, duration_ms: u64) -> String {
-    format!("{STEP_END_PREFIX} id:{id} duration_ms:{duration_ms}")
+pub fn step_end_line(id: &str, duration_ms: u64, ok: bool) -> String {
+    let status = if ok { "" } else { " status:error" };
+    format!("{STEP_END_PREFIX} id:{id} duration_ms:{duration_ms}{status}")
 }
 
 pub fn parse_step_begin_line(line: &str) -> Option<StepBegin> {
@@ -209,8 +212,10 @@ pub fn parse_step_begin_line(line: &str) -> Option<StepBegin> {
 pub fn parse_step_end_line(line: &str) -> Option<StepEnd> {
     let rest = line.strip_prefix(STEP_END_PREFIX)?.trim_start().strip_prefix("id:")?;
     let (id, rest) = rest.split_once(' ')?;
-    let duration_ms = rest.trim().strip_prefix("duration_ms:")?.trim().parse().ok()?;
-    Some(StepEnd { id: id.to_string(), duration_ms })
+    let mut fields = rest.split_whitespace();
+    let duration_ms = fields.next()?.strip_prefix("duration_ms:")?.parse().ok()?;
+    let ok = !fields.any(|f| f == "status:error");
+    Some(StepEnd { id: id.to_string(), duration_ms, ok })
 }
 
 /// Prefix of the line srv writes to stderr just before applying one pending
@@ -355,8 +360,11 @@ mod tests {
             parse_step_begin_line(&begin),
             Some(StepBegin { id: "copy_previous_version".into(), label: "Copying your data | from 0.59.33".into() })
         );
-        let end = step_end_line("backup", 812);
-        assert_eq!(parse_step_end_line(&end), Some(StepEnd { id: "backup".into(), duration_ms: 812 }));
+        let end = step_end_line("backup", 812, true);
+        assert_eq!(parse_step_end_line(&end), Some(StepEnd { id: "backup".into(), duration_ms: 812, ok: true }));
+        let failed = step_end_line("copy_previous_version", 40, false);
+        assert_eq!(failed, "AGENTMUXSRV-STEP-END id:copy_previous_version duration_ms:40 status:error");
+        assert_eq!(parse_step_end_line(&failed).map(|e| e.ok), Some(false));
         assert_eq!(parse_step_begin_line(&migration_begin_line("0001_x", "y")), None);
         assert!(parse_migration_begin_line(&begin).is_none());
         assert!(!is_migrating_line(&begin));

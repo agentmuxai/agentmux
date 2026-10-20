@@ -568,3 +568,20 @@ fn prepare_copies_the_previous_version_forward_migrates_and_backs_up_once() {
     assert!(backup.join("store.db").exists());
     assert!(!backup.join("objects.db").exists(), "no second copy of the carried-forward objects.db");
 }
+
+/// A previous version whose data can't be copied is a failure, not a fresh
+/// start: the new version must not come up without the user's data.
+#[test]
+fn prepare_fails_when_the_previous_versions_data_cannot_be_copied() {
+    let home = TempHome::new();
+    home.mark_as_existing_install();
+    let versions = home.home().join("channels").join("stable").join("versions");
+    let old_db = versions.join("0.1.0").join("data").join("db");
+    std::fs::create_dir_all(&old_db).unwrap();
+    std::fs::write(old_db.join("objects.db"), b"not a database").unwrap();
+    let data_dir = versions.join("0.2.0").join("data");
+
+    let code = super::prepare::run_for_version(&data_dir, home.home(), &home.shared_store(), "0.2.0");
+    assert_eq!(code, 1);
+    assert!(!data_dir.join("db").join("objects.db").exists(), "no fresh objects.db in place of the user's data");
+}
