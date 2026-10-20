@@ -59,14 +59,16 @@ afterEach(() => cleanup());
 describe("ToolchainView", () => {
     it("shows each tool as a card with its status once probed", async () => {
         render(() => <ToolchainView />);
-        const git = await screen.findByRole("button", { name: "Git" });
+        const git = await screen.findByRole("button", { name: /^Git,/ });
         await waitFor(() => expect(within(git).getByText("9.9.9")).toBeInTheDocument());
         expect(within(git).getByRole("img", { name: "Installed" })).toBeInTheDocument();
         // A required tool that is missing is flagged for the user; an optional one is not.
-        const python = screen.getByRole("button", { name: "Python" });
+        const python = screen.getByRole("button", { name: /^Python,/ });
         await waitFor(() => expect(within(python).getByRole("img", { name: "Not found" })).toBeInTheDocument());
         expect(python.className).toContain("is-attention");
-        const ollama = screen.getByRole("button", { name: "Ollama" });
+        // The status is part of the card's accessible name, not only its dot.
+        expect(python).toHaveAccessibleName("Python, Not found");
+        const ollama = screen.getByRole("button", { name: /^Ollama,/ });
         await waitFor(() =>
             expect(within(ollama).getByRole("img", { name: "Not installed (optional)" })).toBeInTheDocument()
         );
@@ -75,7 +77,7 @@ describe("ToolchainView", () => {
 
     it("groups tools under headings", async () => {
         render(() => <ToolchainView />);
-        await screen.findByRole("button", { name: "Git" });
+        await screen.findByRole("button", { name: /^Git,/ });
         for (const name of ["Core tools", "Local models", "Agent CLIs", "External widgets"]) {
             expect(screen.getByRole("heading", { name })).toBeInTheDocument();
         }
@@ -83,7 +85,7 @@ describe("ToolchainView", () => {
 
     it("opens a missing tool's details with its install action, one card at a time", async () => {
         render(() => <ToolchainView />);
-        const python = await screen.findByRole("button", { name: "Python" });
+        const python = await screen.findByRole("button", { name: /^Python,/ });
         await waitFor(() => expect(within(python).getByRole("img", { name: "Not found" })).toBeInTheDocument());
         fireEvent.click(python);
         expect(python).toHaveAttribute("aria-expanded", "true");
@@ -91,20 +93,20 @@ describe("ToolchainView", () => {
         fireEvent.click(within(python).getByRole("button", { name: "Install" }));
         expect(openExternal).toHaveBeenCalledTimes(1);
         // Another card closes the first, and the same card again closes itself.
-        fireEvent.click(screen.getByRole("button", { name: "Git" }));
+        fireEvent.click(screen.getByRole("button", { name: /^Git,/ }));
         expect(python).toHaveAttribute("aria-expanded", "false");
-        expect(screen.getByRole("button", { name: "Git" })).toHaveAttribute("aria-expanded", "true");
-        fireEvent.click(screen.getByRole("button", { name: "Git" }));
-        expect(screen.getByRole("button", { name: "Git" })).toHaveAttribute("aria-expanded", "false");
+        expect(screen.getByRole("button", { name: /^Git,/ })).toHaveAttribute("aria-expanded", "true");
+        fireEvent.click(screen.getByRole("button", { name: /^Git,/ }));
+        expect(screen.getByRole("button", { name: /^Git,/ })).toHaveAttribute("aria-expanded", "false");
     });
 
     it("narrows every group with the filter, and says when nothing matches", async () => {
         render(() => <ToolchainView />);
-        await screen.findByRole("button", { name: "Git" });
+        await screen.findByRole("button", { name: /^Git,/ });
         const filter = screen.getByPlaceholderText("Filter tools");
         fireEvent.input(filter, { target: { value: "git" } });
-        expect(screen.getByRole("button", { name: "Git" })).toBeInTheDocument();
-        expect(screen.queryByRole("button", { name: "Python" })).toBeNull();
+        expect(screen.getByRole("button", { name: /^Git,/ })).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /^Python,/ })).toBeNull();
         expect(screen.queryByRole("heading", { name: "Local models" })).toBeNull();
         fireEvent.input(filter, { target: { value: "zzzz" } });
         expect(screen.getByText(/No tools match/)).toBeInTheDocument();
@@ -112,7 +114,7 @@ describe("ToolchainView", () => {
 
     it("probes again on Refresh and shows it busy meanwhile", async () => {
         render(() => <ToolchainView />);
-        await screen.findByRole("button", { name: "Git" });
+        await screen.findByRole("button", { name: /^Git,/ });
         await waitFor(() => expect(rpc.WidgetHealthCommand).toHaveBeenCalled());
         const before = rpc.ResolveCliCommand.mock.calls.length;
         let finish: () => void = () => {};

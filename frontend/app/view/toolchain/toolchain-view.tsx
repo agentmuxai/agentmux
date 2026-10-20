@@ -447,7 +447,7 @@ export function ToolchainView(): JSX.Element {
                     <Card
                         class="toolchain-card"
                         data-tool={row().id}
-                        aria-label={row().label}
+                        aria-label={`${row().label}, ${status().label}`}
                         icon={<i class={rowIconClass(row().icon, row().brandIcon)} />}
                         title={row().label}
                         subtitle={status().subtitle}
@@ -534,7 +534,7 @@ export function ToolchainView(): JSX.Element {
                     <Card
                         class="toolchain-card"
                         data-widget={row().id}
-                        aria-label={row().label}
+                        aria-label={`${row().label}, ${status().label}`}
                         icon={<i class={rowIconClass(row().icon)} />}
                         title={row().label}
                         subtitle={status().subtitle}
