@@ -85,7 +85,7 @@ export function createSelectTrace(opts: SelectTraceOptions = {}) {
 
     const flushSummary = () => {
         const c = counters;
-        if (c.rebuilds === 0 && c.presses === 0 && c.reveals === 0) return;
+        if (c.rebuilds === 0 && c.presses === 0 && c.reveals === 0 && c.lostClicks === 0) return;
         const causes = Object.entries(c.rebuildsByCause)
             .sort((a, b) => b[1] - a[1])
             .map(([k, v]) => `${k}=${v}`)
