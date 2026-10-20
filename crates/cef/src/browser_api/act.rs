@@ -184,6 +184,31 @@ pub struct ActData {
 
 /// Scroll into view and report the centre, in viewport coordinates.
 const CLICK_POINT: &str = r#"function () {
+  // A checkbox or radio the page hides (display: none) behind a label drawn
+  // as the box has no box of its own: click its label, at a point where the
+  // label itself is hit, not a link or button inside it.
+  const choice = this.tagName === "INPUT" && /^(checkbox|radio)$/i.test(this.type);
+  if (choice && this.getClientRects().length === 0) {
+    const label = Array.from(this.labels || []).find(l => l.getClientRects().length > 0);
+    if (!label) return { error: "the element is not visible" };
+    label.scrollIntoView({ block: "center", inline: "center" });
+    const doc = label.ownerDocument;
+    const clear = (x, y) => {
+      const at = doc.elementFromPoint(x, y);
+      if (!at || !label.contains(at)) return false;
+      for (let n = at; n && n !== label; n = n.parentElement) {
+        if (n.matches("a[href], button, select, textarea, input, [role=button], [role=link]")) return false;
+      }
+      return true;
+    };
+    for (const el of [label, ...label.querySelectorAll("*")]) {
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) continue;
+      const x = r.left + r.width / 2, y = r.top + r.height / 2;
+      if (clear(x, y)) return { x, y };
+    }
+    return { error: "the label of this checkbox is covered by something else; ask the user to tick it" };
+  }
   this.scrollIntoView({ block: "center", inline: "center" });
   const r = this.getBoundingClientRect();
   if (r.width === 0 && r.height === 0) return { error: "the element is not visible" };
@@ -308,7 +333,14 @@ const COMMIT_INFO: &str = concat!(
       .replace(/([a-z])([A-Z])/g, "$1 $2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2").replace(/(?<=[a-zA-Z])(?=[0-9])|(?<=[0-9])(?=[a-zA-Z])/g, " ")
       .toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
     const taxId = words.some(w => w === "ssn" || w === "itin" || w === "tin") || /socialsecurity|taxpayerid/.test(words.join(""));
-    return taxId || ty === "password" || /one-time-code|cc-|password/.test(ac) || /pass(word|code)?|otp|one.?time|cvc|cvv|card.?num|security.?code/.test(nm);
+    // As snapshot.rs's `secret_reason`: a password autocomplete token counts
+    // only on a field also called a password, since sites put
+    // autocomplete="new-password" on ordinary fields to stop autofill.
+    const tokens = ac.split(/\s+/).filter(Boolean);
+    const calledPassword = words.some(w => /password|passwd|passphrase|passcode/.test(w) || w === "pin" || w === "pw" || w === "pwd");
+    const passwordToken = tokens.includes("current-password") || tokens.includes("new-password");
+    return taxId || ty === "password" || tokens.includes("one-time-code") || tokens.some(t => t.startsWith("cc-")) ||
+      (passwordToken && calledPassword) || /pass(word|code)?|otp|one.?time|cvc|cvv|card.?num|security.?code/.test(nm);
   };
   // A form's own properties can be shadowed by controls named after them
   // (<input name="action">, <input name="elements">): read them through the
@@ -504,6 +536,92 @@ async fn describe(cdp: &mut CdpSession, backend: i64) -> Option<DomFacts> {
     Some(facts.with_label(&label))
 }
 
+/// The most hidden checkboxes and radios one frame's snapshot adds.
+const MAX_HIDDEN_CHOICES: usize = 200;
+
+/// Checkbox and radio inputs with no box of their own whose label has one,
+/// each followed by that label: the inputs a page hides behind a label drawn
+/// as the box.
+const HIDDEN_CHOICES: &str = r#"(() => {
+  const out = [];
+  for (const el of document.querySelectorAll("input[type=checkbox], input[type=radio]")) {
+    if (out.length >= 2 * MAX) break;
+    if (el.getClientRects().length > 0) continue;
+    const label = Array.from(el.labels || []).find(l => l.getClientRects().length > 0);
+    if (label) out.push(el, label);
+  }
+  return out;
+})()"#;
+
+/// A hidden choice's state and name, read from the input with its label as
+/// the argument. The label's own text, without that of controls nested in it.
+const CHOICE_FACTS: &str = r#"function (label) {
+  const c = label.cloneNode(true);
+  c.querySelectorAll("select, input, textarea, button, option").forEach(n => n.remove());
+  const name = (this.getAttribute("aria-label") || c.textContent).replace(/\s+/g, " ").trim().slice(0, 200);
+  return { radio: String(this.type).toLowerCase() === "radio", checked: !!this.checked, disabled: !!this.disabled, name };
+}"#;
+
+/// The hidden checkboxes and radios in `frame_id` (or the main frame), for
+/// [`snapshot::add_hidden_choices`]. Best effort: a failed lookup adds none,
+/// and the page reads as it did before.
+pub(super) async fn hidden_choices(cdp: &mut CdpSession, frame_id: Option<&str>) -> Vec<snapshot::HiddenChoice> {
+    const GROUP: &str = "agentmux-hidden-choices";
+    let mut out = Vec::new();
+    let Ok(ctx) = isolated_context(cdp, frame_id).await else { return out };
+    let expression = HIDDEN_CHOICES.replace("2 * MAX", &(2 * MAX_HIDDEN_CHOICES).to_string());
+    let listed = call(
+        cdp,
+        "Runtime.evaluate",
+        json!({ "expression": expression, "contextId": ctx, "objectGroup": GROUP, "returnByValue": false }),
+    )
+    .await;
+    let Some(list) = listed.ok().and_then(|v| v.pointer("/result/objectId").and_then(|o| o.as_str()).map(str::to_string)) else {
+        return out;
+    };
+    let props = call(cdp, "Runtime.getProperties", json!({ "objectId": list, "ownProperties": true })).await;
+    let mut elements: Vec<(usize, String)> = props
+        .ok()
+        .and_then(|p| p.get("result").and_then(|r| r.as_array()).cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|p| {
+            let index = p.get("name")?.as_str()?.parse::<usize>().ok()?;
+            Some((index, p.pointer("/value/objectId")?.as_str()?.to_string()))
+        })
+        .collect();
+    elements.sort_by_key(|(i, _)| *i);
+    for pair in elements.chunks_exact(2) {
+        let (input, label) = (&pair[0].1, &pair[1].1);
+        let (Some(input_backend), Some(label_backend)) = (backend_of(cdp, input).await, backend_of(cdp, label).await) else {
+            continue;
+        };
+        let facts = call(
+            cdp,
+            "Runtime.callFunctionOn",
+            json!({ "objectId": input, "functionDeclaration": CHOICE_FACTS, "arguments": [{ "objectId": label }], "returnByValue": true }),
+        )
+        .await;
+        let Some(f) = facts.ok().and_then(|v| v.pointer("/result/value").cloned()) else { continue };
+        out.push(snapshot::HiddenChoice {
+            input_backend,
+            label_backend,
+            radio: f.get("radio").and_then(Value::as_bool).unwrap_or(false),
+            name: f.get("name").and_then(Value::as_str).unwrap_or("").to_string(),
+            checked: f.get("checked").and_then(Value::as_bool).unwrap_or(false),
+            disabled: f.get("disabled").and_then(Value::as_bool).unwrap_or(false),
+        });
+    }
+    let _ = cdp.call("Runtime.releaseObjectGroup", json!({ "objectGroup": GROUP })).await;
+    out
+}
+
+/// The backend node id of a page object.
+async fn backend_of(cdp: &mut CdpSession, object_id: &str) -> Option<i64> {
+    let v = cdp.call("DOM.describeNode", json!({ "objectId": object_id })).await.ok()?;
+    v.pointer("/node/backendNodeId").and_then(|b| b.as_i64())
+}
+
 pub(super) async fn page_url(cdp: &mut CdpSession) -> String {
     cdp.call("Runtime.evaluate", json!({ "expression": "location.href", "returnByValue": true }))
         .await
@@ -572,14 +690,20 @@ async fn refuse_typing_in_frame(cdp: &mut CdpSession, frame_id: Option<&str>) ->
                     Ask the user to fill it in the pane."
             .to_string());
     }
-    if raw.map(DomFacts::from_described).as_ref().is_some_and(snapshot::is_secret) {
-        return Err(SECRET_REFUSAL.to_string());
+    if let Some(why) = raw.map(DomFacts::from_described).as_ref().and_then(snapshot::secret_reason) {
+        return Err(secret_refusal(why));
     }
     Ok(())
 }
 
-const SECRET_REFUSAL: &str = "this is a password, one-time-code, card or Social Security / taxpayer ID field: AgentMux never lets an agent type into one. \
-     Ask the user to fill it in the pane themselves, then take a new snapshot.";
+/// The refusal for a secret field, naming what made it one, so a false alarm
+/// is easy to see and report.
+fn secret_refusal(why: &str) -> String {
+    format!(
+        "this is a password, one-time-code, card or Social Security / taxpayer ID field ({why}): AgentMux never lets an agent type into one. \
+         Ask the user to fill it in the pane themselves, then take a new snapshot."
+    )
+}
 
 // ── Routes ──────────────────────────────────────────────────────────────────
 
@@ -645,7 +769,9 @@ pub async fn snapshot_route(
             return fail(e);
         }
     };
-    let nodes: Vec<Value> = tree.get("nodes").and_then(|n| n.as_array()).cloned().unwrap_or_default();
+    let mut nodes: Vec<Value> = tree.get("nodes").and_then(|n| n.as_array()).cloned().unwrap_or_default();
+    let hidden = hidden_choices(&mut cdp, None).await;
+    snapshot::add_hidden_choices(&mut nodes, &hidden);
     let scope = match &req.scope_match {
         Some(q) => match snapshot::first_match(&nodes, q) {
             Some(b) => Some(b),
@@ -757,7 +883,9 @@ pub async fn find_route(
             return fail(e);
         }
     };
-    let nodes: Vec<Value> = tree.get("nodes").and_then(|n| n.as_array()).cloned().unwrap_or_default();
+    let mut nodes: Vec<Value> = tree.get("nodes").and_then(|n| n.as_array()).cloned().unwrap_or_default();
+    let hidden = hidden_choices(&mut cdp, None).await;
+    snapshot::add_hidden_choices(&mut nodes, &hidden);
     let needs_facts = |n: &&Value| {
         let role = n.pointer("/role/value").and_then(|v| v.as_str()).unwrap_or("");
         snapshot::VALUE_ROLES.contains(&role) || role == "button"
@@ -899,8 +1027,8 @@ async fn act(
             Ok(warn_if_changed(after, &value))
         }
         "fill" => {
-            if snapshot::is_secret(&facts) {
-                return Err(SECRET_REFUSAL.to_string());
+            if let Some(why) = snapshot::secret_reason(&facts) {
+                return Err(secret_refusal(why));
             }
             if facts.is_file_input() {
                 return Err("this is a file input: it takes a file upload, not text".to_string());
@@ -921,8 +1049,8 @@ async fn act(
             // Focusing ran the page's own handlers, which could have turned
             // the field into a secret one, or moved focus to one (insertText
             // types wherever focus is): check both before writing.
-            if describe(cdp, backend).await.as_ref().is_some_and(snapshot::is_secret) {
-                return Err(SECRET_REFUSAL.to_string());
+            if let Some(why) = describe(cdp, backend).await.as_ref().and_then(snapshot::secret_reason) {
+                return Err(secret_refusal(why));
             }
             refuse_typing_in_frame(cdp, frame_id).await?;
             if text.is_empty() {
