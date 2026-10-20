@@ -1,6 +1,6 @@
 # RCA: tearing a pane with several pane tabs out of the window moves only its visible tab
 
-**Status:** fixed by the PR that carries this file (section 8 says how). Written 2026-10-19; the code reading was checked against `main` at `f77c81f50`. Nothing here was reproduced in a controlled run before the fix; section 2 says what the observation rests on.
+**Status:** analysis. Fixed by the PR that carries this file (section 8 says how). Written 2026-10-19; the code reading was checked against `main` at `f77c81f50`. Nothing here was reproduced in a controlled run before the fix; section 2 says what the observation rests on.
 **Author:** Maop@starpower, at the operator's request
 **Trigger (operator, 2026-10-19, testing a dev build on macOS):** "If I tear out a pane tab, it works nice, but if I tear a pane with multiple pane tabs, it appears to tear off only the selected pane tab. It should actually tear the entire pane (including all pane tabs in that pane). Investigate whether this is cross platform too."
 **Related:** [`SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md`](../specs/SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md) §3.5 (the tear-off design, which names this as a known gap), [`SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md`](../specs/SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md), [`SPEC_PANE_TEAROFF_MOTHER_RESIZE_2026_06_20.md`](../specs/SPEC_PANE_TEAROFF_MOTHER_RESIZE_2026_06_20.md)
