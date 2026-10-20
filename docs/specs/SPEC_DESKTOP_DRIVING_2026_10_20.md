@@ -75,7 +75,7 @@ One tool, `Desktop`, with an `action`, like the other MuxAPI tools. It is listed
 | `scroll` | `window`, `x`, `y`, `dx`, `dy` | A wheel scroll at a point. |
 | `type` | `window`, `text` (at most 500 characters) | Types text into the focused control. |
 | `key` | `window`, `keys` (for example `ctrl+s`) | Presses a key or chord. |
-| `wait` | `ms` (at most 5000) | Waits. |
+| `wait` | `ms` (at most 5000) | Waits. It touches no app, so it does not ask srv. |
 | `release` | `window` | Gives up the grant early. |
 
 Phase 2 adds `drag`, and `tree` (the accessibility tree of the window with names, roles and bounds, which is the structured route inside this tool). Phase 3 adds macOS and Phase 4 Linux.
@@ -84,7 +84,7 @@ Phase 2 adds `drag`, and `tree` (the accessibility tree of the window with names
 
 `x` and `y` are pixels **of the image the last `look` returned**, not screen coordinates. The agent never sees the monitor layout or DPI scale. On each input action the tool:
 
-1. re-reads the window's rectangle and DPI;
+1. re-reads the window's rectangle (`GetWindowRect`: the whole window, invisible resize borders included, which is the area `look` captures; `xcap`'s own rectangle is the visible frame and a few pixels smaller);
 2. **refuses if the window moved, resized or changed DPI since the `look`**, with "look again";
 3. maps the point back to the screen, and **refuses if it falls outside the window**;
 4. checks that the window is the foreground window and that the point belongs to it, so a click cannot land on another app that covered it. If not: refuse and say which window is in the way.
@@ -152,15 +152,16 @@ agent (MCP client)
    ▼
 crates/mcp  tools/desktop.rs
    │  1. validate arguments, resolve the window (window_capture.rs: tiers, own instance)
-   │  2. POST /agentmux/desktop/authorize { agent, app, action }
-   │        ← allow | deny | stopped | needs-approval (blocks until the user answers, up to 10 min)
+   │  2. POST /api/v1/agent/desktop/authorize { action, window: { id, app, title } }
+   │        ← allow | refused | denied | stopped | no_answer (waits while the user is asked, up to 10 min)
    │  3. perform the action: xcap capture, or SendInput (Windows)
-   │  4. POST /agentmux/desktop/record { grant, action, result }   → audit line
+   │  4. POST /api/v1/agent/desktop/record { grant, action, details, result }   → audit line
    ▼
 crates/srv  server/app_api/desktop.rs
       grants (in memory), blocklist, rate limits, stop flag, approval prompt via the host UI
 ```
 
+- **Routes.** Agent routes (signed with the agent's per-agent auth, like `RequestUpgrade`): `/api/v1/agent/desktop/policy` (for `apps`: is it on, and each window's state), `authorize`, `record` and `release`. Host-only routes, which an agent cannot call: `/api/v1/host/desktop_request` (the user's answer to a prompt) and `/api/v1/host/desktop_stop` (Stop). The prompt and the Driving bar read the `app:desktop` event and the `app.desktop` command.
 - **srv is the single gate.** It owns grants, the blocklist, limits, the stop flag and the audit line. The tool never acts without an `allow`.
 - **The tool performs the action.** Capture and enumeration already live in `crates/mcp` (`window_capture.rs`, with `xcap`); moving them is not needed. Input injection is added there, behind the same `authorize` call.
 - **Windows input:** `SendInput` through `windows-sys`, which srv already depends on at version 0.59. Add `Win32_UI_Input_KeyboardAndMouse` as a feature flag (Phase 2 picks between `windows-sys` and the `windows` 0.61 crate already in the tree for UI Automation), and a `windows-sys` target dependency in `crates/mcp` at the same version, so the lockfile gains no new package.

@@ -330,3 +330,73 @@ pub(crate) async fn handle_host_stop(
     tell(&body.block_id, "[AgentMux] The user pressed Stop on your desktop control. Your grants are gone; ask them before controlling an app again.");
     Json(json!({ "ok": true, "revoked": revoked })).into_response()
 }
+
+#[cfg(test)]
+mod tests {
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use serde_json::json;
+    use tower::ServiceExt;
+
+    async fn post(app: &axum::Router, uri: &str, host_token: Option<&str>, body: serde_json::Value) -> (StatusCode, serde_json::Value) {
+        let mut b = Request::builder()
+            .uri(uri)
+            .method("POST")
+            .header("X-AuthKey", "test-secret-key")
+            .header("Content-Type", "application/json");
+        if let Some(token) = host_token {
+            b = b.header("X-Host-Token", token);
+        }
+        let resp = app.clone().oneshot(b.body(Body::from(body.to_string())).unwrap()).await.unwrap();
+        let status = resp.status();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        (status, serde_json::from_slice(&body).unwrap_or_default())
+    }
+
+    async fn router() -> axum::Router {
+        let state = crate::server::tests::test_state();
+        *state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port: 1, token: "host-ipc-token".into() });
+        crate::server::build_router(state)
+    }
+
+    // §5.4: the user's answer and Stop come only through the host. The
+    // instance auth key, which every agent has, isn't enough.
+    #[tokio::test]
+    async fn only_the_host_can_answer_a_prompt_or_press_stop() {
+        let app = router().await;
+        for (uri, body) in [
+            ("/api/v1/host/desktop_request", json!({ "id": "r1", "choice": "timed" })),
+            ("/api/v1/host/desktop_stop", json!({ "block_id": "b1" })),
+        ] {
+            let (s, out) = post(&app, uri, None, body.clone()).await;
+            assert_eq!(s, StatusCode::FORBIDDEN, "{uri}: {out}");
+            let (s, _) = post(&app, uri, Some("not-the-token"), body).await;
+            assert_eq!(s, StatusCode::FORBIDDEN, "{uri}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_host_gets_through_and_an_unknown_prompt_is_a_conflict() {
+        let app = router().await;
+        let (s, out) = post(&app, "/api/v1/host/desktop_request", Some("host-ipc-token"), json!({ "id": "nope", "choice": "timed" })).await;
+        assert_eq!(s, StatusCode::CONFLICT, "{out}");
+        let (s, out) = post(&app, "/api/v1/host/desktop_stop", Some("host-ipc-token"), json!({ "block_id": "no-such-pane" })).await;
+        assert_eq!(s, StatusCode::OK, "{out}");
+        assert_eq!(out["revoked"], 0);
+    }
+
+    // An agent whose signature doesn't check out never reaches the gate.
+    #[tokio::test]
+    async fn an_agent_route_without_a_valid_signature_is_refused() {
+        let app = router().await;
+        let window = json!({ "id": 1, "app": "notepad.exe", "title": "t" });
+        for (uri, body) in [
+            ("/api/v1/agent/desktop/authorize", json!({ "agent_id": "x", "ts_secs": 1, "sig": "bad", "action": "look", "window": window })),
+            ("/api/v1/agent/desktop/policy", json!({ "agent_id": "x", "ts_secs": 1, "sig": "bad", "windows": [] })),
+            ("/api/v1/agent/desktop/release", json!({ "agent_id": "x", "ts_secs": 1, "sig": "bad", "window": window })),
+        ] {
+            let (s, out) = post(&app, uri, None, body).await;
+            assert_eq!(s, StatusCode::UNAUTHORIZED, "{uri}: {out}");
+        }
+    }
+}
