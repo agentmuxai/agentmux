@@ -134,7 +134,7 @@ mod tests {
         let from = from_previous_version(&new, "0.59.27").unwrap();
         assert!(from.ends_with("versions/0.59.26"));
         assert_eq!(marker(&new), "previous");
-        assert!(!new.join("objects.db.carrying").exists());
+        assert!(!new.join("objects.db.copying").exists());
     }
 
     #[test]
