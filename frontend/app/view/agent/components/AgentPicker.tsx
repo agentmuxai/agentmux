@@ -627,7 +627,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // The agent may be in another window tab, or a background tab of a
     // multi-tab pane: revealBlock switches to it (SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md).
     const handleSwitchToExisting = (blockId: string): void => {
-        void revealBlock(blockId);
+        void revealBlock(blockId, { source: "picker" });
     };
 
     // My Agents row menu → View History (docs/specs/SPEC_AGENT_DELETE_2026_09_16.md

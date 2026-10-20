@@ -26,12 +26,15 @@ import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import type { LayoutNode } from "@/layout/lib/types";
 import { emitPaneLocate } from "./pane-locate";
+import { selectTrace } from "./select-trace";
 
 export interface RevealOptions {
     /** The tab holding the block, when the caller already knows it. */
     tabId?: string;
     /** Put the caret in the block (its composer / terminal). Default true. */
     focusCaret?: boolean;
+    /** Who asked, for the selection trace: "swarm", "tower", "tokens", "picker". */
+    source?: string;
 }
 
 /** How long to wait for a just-activated tab's layout to contain the block. */
@@ -137,8 +140,17 @@ export async function revealBlockLocally(blockId: string, opts: RevealOptions = 
  * Spec §4.3.
  */
 export async function revealBlock(blockId: string, opts: RevealOptions = {}): Promise<void> {
-    if (await revealBlockLocally(blockId, opts)) return;
-    await revealInOtherWindow(blockId);
+    const done = selectTrace.revealStarted(opts.source ?? "unknown", blockId);
+    try {
+        if (await revealBlockLocally(blockId, opts)) {
+            done(true);
+            return;
+        }
+        await revealInOtherWindow(blockId);
+        done(true, "other-window");
+    } finally {
+        done(false);
+    }
 }
 
 async function revealInOtherWindow(blockId: string): Promise<void> {

@@ -109,7 +109,7 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
 
     const handleAgentClick = (row: AgentUsage) => {
         if (!row.blockId) return;
-        void revealBlock(row.blockId);
+        void revealBlock(row.blockId, { source: "tokens" });
         props.onClose();
     };
 

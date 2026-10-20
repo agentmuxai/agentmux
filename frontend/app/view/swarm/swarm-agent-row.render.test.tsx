@@ -132,7 +132,7 @@ describe("AgentRow — select-to-focus", () => {
 
         fireEvent.click(container.querySelector(".swarm-agent-card")!);
 
-        expect(focusBlockMock).toHaveBeenCalledExactlyOnceWith(BLOCK);
+        expect(focusBlockMock).toHaveBeenCalledExactlyOnceWith(BLOCK, { source: "swarm" });
     });
 
     it("the row's click handler stops propagation, so it can't also reach the Swarm pane's own click-to-focus", () => {
@@ -160,7 +160,7 @@ describe("AgentRow — select-to-focus", () => {
         fireEvent.click(container.querySelector(".swarm-agent-card")!);
 
         expect(toggle).not.toHaveBeenCalled();
-        expect(focusBlockMock).toHaveBeenCalledExactlyOnceWith(BLOCK);
+        expect(focusBlockMock).toHaveBeenCalledExactlyOnceWith(BLOCK, { source: "swarm" });
     });
 
     // The Swarm root is focusable, so a press would move DOM focus into the
