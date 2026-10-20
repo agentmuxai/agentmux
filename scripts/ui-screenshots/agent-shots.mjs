@@ -17,9 +17,11 @@
 //
 // A conversation shot creates its agent through the new-agent panel under the
 // picker's Claude Code card, in a window tab of its own, as a user would, so
-// the agent starts with no history. The panel leaves the agent unbound, so the shot clicks the pane's
-// "Bind: dev@acme.example" for the demo account. Cleanup closes the tab, which
-// stops the agent, and deletes it.
+// the agent starts with no history. The panel binds the provider's first
+// account, the demo one; the sign-in shot removes that account while it
+// creates its agent, so the agent starts unbound, then adds it back for the
+// pane's "Bind: dev@acme.example". Cleanup closes the tab, which stops the
+// agent, and deletes it.
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -222,9 +224,8 @@ export async function createAgent(session, name, { settled = true, maximized = t
     if (!agentPane) throw new Error(`${name}'s pane didn't open`);
     await maximize(session, agentPane);
     if (settled) {
-        // The form doesn't bind the account itself: the pane offers
-        // "Bind: dev@acme.example", as it does for any unbound agent when an
-        // account exists.
+        // The panel binds the demo account, so the pane usually signs in by
+        // itself; if it offers "Bind: dev@acme.example" instead, click it.
         await waitFor(
             session,
             `${paneText(agentPane, "Logged in")} || [...document.querySelectorAll(${JSON.stringify(`${agentPane} button`)})].some((b) => b.offsetParent && b.innerText.includes("Bind:"))`,
@@ -280,6 +281,26 @@ export async function turnDone(session, pane) {
     await waitFor(session, `!!document.querySelector(${JSON.stringify(`${pane} .agent-working-row--worked`)}) && !(${working(pane)})`, "the turn to finish", 45000);
 }
 
+/** Saves the demo account as a signed-in Claude account. Deleting it later
+ *  leaves its folder: srv removes only login folders under its own identities
+ *  folder, and this one is in the capture home. */
+async function addDemoAccount(session) {
+    const accountDir = join(captureHome(), "demo-accounts", "claude");
+    await session.evaluate(`RpcApi.UpsertIdentityAccountCommand(TabRpcClient, { id: ${JSON.stringify(DEMO_ACCOUNT.id)}, name: ${JSON.stringify(DEMO_ACCOUNT.email)},
+        provider: "claude", kind: "oauth", display_name: ${JSON.stringify(DEMO_ACCOUNT.email)}, status: "valid",
+        secret_ref: { backend: "oauth_config_dir", dir: ${JSON.stringify(accountDir.replace(/\\/g, "/"))} } })`);
+}
+
+/** The picker agents use the demo account (an agent loses its link when its
+ *  account is deleted); linking again is harmless. */
+async function linkPickerAgents(session) {
+    await session.evaluate(`(async () => {
+        for (const d of await ${agentsNamed(PICKER_AGENTS)}) {
+            await RpcApi.LinkAgentIdentityCommand(TabRpcClient, { agent_id: d.id, account_id: ${JSON.stringify(DEMO_ACCOUNT.id)}, provider: "claude" });
+        }
+    })()`);
+}
+
 /** Installs the stand-in, adds the demo account, makes sure each picker agent
  *  has had a session, and reloads the page so the picker sees Claude Code as
  *  installed. */
@@ -295,9 +316,7 @@ export async function setup(session) {
         credentialsFile(),
         JSON.stringify({ claudeAiOauth: { accessToken: "demo-placeholder", refreshToken: "demo-placeholder", expiresAt: 4102444800000, scopes: ["user:inference"] } }) + "\n"
     );
-    await session.evaluate(`RpcApi.UpsertIdentityAccountCommand(TabRpcClient, { id: ${JSON.stringify(DEMO_ACCOUNT.id)}, name: ${JSON.stringify(DEMO_ACCOUNT.email)},
-        provider: "claude", kind: "oauth", display_name: ${JSON.stringify(DEMO_ACCOUNT.email)}, status: "valid",
-        secret_ref: { backend: "oauth_config_dir", dir: ${JSON.stringify(accountDir.replace(/\\/g, "/"))} } })`);
+    await addDemoAccount(session);
     await session.evaluate("location.reload()");
     await session.wait(1500);
     await waitFor(session, `!!(window.RpcApi && document.querySelector(".window-header"))`, "the page to reload");
@@ -307,13 +326,7 @@ export async function setup(session) {
     // agents deleted before.
     await deleteAgent(session, SHOT_AGENT);
     for (const name of PICKER_AGENTS) await deleteOrphanBundles(session, name);
-    // The picker agents use the demo account (an agent loses its link when
-    // its account is deleted); linking again is harmless.
-    await session.evaluate(`(async () => {
-        for (const d of await ${agentsNamed(PICKER_AGENTS)}) {
-            await RpcApi.LinkAgentIdentityCommand(TabRpcClient, { agent_id: d.id, account_id: ${JSON.stringify(DEMO_ACCOUNT.id)}, provider: "claude" });
-        }
-    })()`);
+    await linkPickerAgents(session);
     // My Agents lists the agents that have had a session started by the
     // picker; each picker agent that hasn't is created afresh and says hello.
     const listed = await session.evaluate(`(async () => {
@@ -371,7 +384,21 @@ function conversationShot(def) {
         ...def,
         inTab: async (session) => {
             await deleteAgent(session, SHOT_AGENT);
-            const pane = await createAgent(session, SHOT_AGENT, { settled: def.settled ?? true, maximized: def.maximized ?? true });
+            const opts = { settled: def.settled ?? true, maximized: def.maximized ?? true };
+            let pane;
+            if (def.unbound) {
+                // The panel binds the provider's first account: create the
+                // agent with none, then add it back so the pane offers to bind it.
+                await session.evaluate(`RpcApi.DeleteIdentityAccountCommand(TabRpcClient, { id: ${JSON.stringify(DEMO_ACCOUNT.id)} })`);
+                try {
+                    pane = await createAgent(session, SHOT_AGENT, opts);
+                } finally {
+                    await addDemoAccount(session);
+                    await linkPickerAgents(session);
+                }
+            } else {
+                pane = await createAgent(session, SHOT_AGENT, opts);
+            }
             // inPane may return a crop; null means the whole window.
             const crop = await def.inPane(session, pane);
             return crop === undefined ? pane : crop;
@@ -405,6 +432,7 @@ export const shots = [
         title: "A new agent that isn't signed in",
         description: "A new agent with no account bound yet: log in, log in from a terminal, or bind an account you already have.",
         settled: false,
+        unbound: true,
         inPane: async (session, pane) => {
             await waitFor(session, paneText(pane, "Not signed in"), "the Not signed in row", 30000);
         },
