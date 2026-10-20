@@ -391,19 +391,18 @@ pub(super) fn apply_pending(
         .parent()
         .map(|p| p.join(MIGRATION_LOCK_FILE))
         .unwrap_or_else(|| PathBuf::from(MIGRATION_LOCK_FILE));
-    let lock_wait = Instant::now();
-    let _shared_lock = MigrationLock::acquire(&shared_lock_path, MIGRATION_LOCK_WAIT)
-        .map_err(|e| format!("run_pending_migrations: {}", e))?;
     let channel_db_dir = data_dir.join("db");
-    if let Err(e) = std::fs::create_dir_all(&channel_db_dir) {
-        return Err(format!("run_pending_migrations: create channel db dir: {}", e));
-    }
-    let _channel_lock = MigrationLock::acquire(&channel_db_dir.join(MIGRATION_LOCK_FILE), MIGRATION_LOCK_WAIT)
-        .map_err(|e| format!("run_pending_migrations: {}", e))?;
-    let waited = lock_wait.elapsed().as_millis() as u64;
-    if waited >= 250 {
-        crate::boot_timing::step_done("migration_lock", "Waiting for another AgentMux to finish migrating", waited);
-    }
+    // A splash row once the wait passes 250 ms, while it is still waiting.
+    let (_shared_lock, _channel_lock) =
+        crate::boot_timing::step_if_slow("migration_lock", "Waiting for other AgentMux", || {
+            let shared = MigrationLock::acquire(&shared_lock_path, MIGRATION_LOCK_WAIT)
+                .map_err(|e| format!("run_pending_migrations: {}", e))?;
+            std::fs::create_dir_all(&channel_db_dir)
+                .map_err(|e| format!("run_pending_migrations: create channel db dir: {}", e))?;
+            let channel = MigrationLock::acquire(&channel_db_dir.join(MIGRATION_LOCK_FILE), MIGRATION_LOCK_WAIT)
+                .map_err(|e| format!("run_pending_migrations: {}", e))?;
+            Ok::<_, String>((shared, channel))
+        })?;
 
     let (shared_store, channel_store) = open_stores_for_preview(shared_store_path, data_dir)
         .map_err(|e| format!("run_pending_migrations: {}", e))?;
