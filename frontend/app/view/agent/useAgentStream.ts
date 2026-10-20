@@ -180,6 +180,12 @@ interface UseAgentStreamOpts {
      * of the cascade follow-up sequence. See `agent-pane-model.ts`.
      */
     model: AgentPaneModel;
+    /**
+     * Whether this pane's flushes run every frame: the focused pane that is
+     * following the bottom. False, they run at the scheduler's lower rate.
+     * Omitted: every frame.
+     */
+    fullRateFlush?: () => boolean;
     outputFormat: string;
     /** Reactive accessor for the pane document nodes (`model.document`). */
     documentNodes: Accessor<DocumentNode[]>;
@@ -262,6 +268,7 @@ function agentColorOf(blockId: string): string | undefined {
 export function useAgentStream({
     blockId,
     model,
+    fullRateFlush,
     outputFormat,
     documentNodes,
     turnPhase,
@@ -304,7 +311,7 @@ export function useAgentStream({
     // uniformly, for every producer this hook has, with no changes needed
     // to any of them individually — exactly the point of there being one
     // choke point already.
-    const rawQueue = createStreamFlushQueue(model);
+    const rawQueue = createStreamFlushQueue(model, { fullRate: fullRateFlush });
 
     // The pane's context window for memory sizing: the meter's own reading
     // (reported by Claude Code, else the model table) when it has one; the

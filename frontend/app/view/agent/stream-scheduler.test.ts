@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
     INPUT_WINDOW_MS,
+    LOW_RATE_MIN_WAIT_MS,
     MAX_PANES_PER_FRAME_WHILE_INTERACTING,
     STARVATION_MS,
     __markInputForTests,
@@ -255,5 +256,83 @@ describe("stream scheduler", () => {
         document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "x", bubbles: true }));
         frame();
         expect(order).toEqual(["a"]);
+    });
+});
+
+
+describe("a pane that is not at full rate", () => {
+    /** Run `n` frames 16.7 ms apart; every flush asks for the next one at once, as a streaming pane does. */
+    function streamFor(n: number, fullRate?: () => boolean): number {
+        let flushed = 0;
+        const ask = (): void => requestStreamFlush("p", () => {
+            flushed++;
+            ask();
+        }, fullRate);
+        ask();
+        for (let i = 0; i < n; i++) {
+            clock += 16.7;
+            frame();
+        }
+        return flushed;
+    }
+
+    it("flushes about every other frame, where a pane at full rate flushes every frame", () => {
+        expect(streamFor(60)).toBe(60);
+        __resetStreamSchedulerForTests();
+        clock = 1000;
+        frames = [];
+        expect(streamFor(60, () => false)).toBe(30);
+    });
+
+    it("flushes every frame while it is at full rate, and follows the answer from frame to frame", () => {
+        let full = true;
+        expect(streamFor(10, () => full)).toBe(10);
+        full = false;
+        let flushed = 0;
+        const ask = (): void => requestStreamFlush("q", () => { flushed++; ask(); }, () => full);
+        ask();
+        for (let i = 0; i < 10; i++) {
+            clock += 16.7;
+            frame();
+        }
+        expect(flushed).toBe(5);
+    });
+
+    it("waits LOW_RATE_MIN_WAIT_MS from its first request, and tokens arriving meanwhile ride the same flush", () => {
+        const flush = vi.fn();
+        requestStreamFlush("p", flush, () => false);
+        clock += LOW_RATE_MIN_WAIT_MS - 1;
+        requestStreamFlush("p", flush, () => false); // more tokens: keeps its place and its request time
+        frame();
+        expect(flush).not.toHaveBeenCalled();
+        expect(hasPendingStreamFlush("p")).toBe(true);
+        clock += 1;
+        frame();
+        expect(flush).toHaveBeenCalledTimes(1);
+        expect(hasPendingStreamFlush("p")).toBe(false);
+    });
+
+    it("is flushed like any other when the question throws", () => {
+        const flush = vi.fn();
+        requestStreamFlush("p", flush, () => {
+            throw new Error("no answer");
+        });
+        frame();
+        expect(flush).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not use up a frame's turn while the user is typing: a pane that is due goes first", () => {
+        const slow = vi.fn();
+        const other = vi.fn();
+        requestStreamFlush("slow", slow, () => false);
+        requestStreamFlush("other", other);
+        __markInputForTests();
+        frame(); // one pane per frame while interacting: the one that is due, not the one that waits
+        expect(other).toHaveBeenCalledTimes(1);
+        expect(slow).not.toHaveBeenCalled();
+        clock += LOW_RATE_MIN_WAIT_MS;
+        __markInputForTests();
+        frame();
+        expect(slow).toHaveBeenCalledTimes(1);
     });
 });

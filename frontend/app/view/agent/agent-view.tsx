@@ -22,6 +22,7 @@ import {
 } from "@/app/store/agentActivity";
 import { AgentPaneProviders } from "./agent-media";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
+import { getFocusedBlockId } from "@/app/store/block-component-registry";
 import { getRecentDispatches } from "@/app/store/command-source";
 import { resolveContextMenuRegion } from "@/app/block/context-menu-region";
 import { ContextMenuModel } from "@/app/store/contextmenu";
@@ -815,6 +816,9 @@ export const AgentPresentationView = ({
         // default-safe against post-unmount races — the disposed-flag
         // check is centralized in the model rather than per call site.
         model: paneModel,
+        // The pane the user is in, at the bottom of its feed, flushes every
+        // frame; the others every other frame (stream-scheduler.ts).
+        fullRateFlush: () => getFocusedBlockId() === model.blockId && liveFeed.followingBottom(),
         outputFormat: outputFormat(),
         documentNodes: paneModel.document,
         // turnPhase is the SoT for "is a stop in flight". useAgentStream

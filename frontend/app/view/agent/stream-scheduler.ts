@@ -30,6 +30,15 @@
  *    waits at most about STARVATION_MS (for the budget to rise) plus
  *    ceil(N / 2) frames.
  *
+ *  - Rate: a pane that says it isn't at full rate (`fullRate()` is false: not
+ *    the focused pane, or not following the bottom) flushes at most about every
+ *    other frame, 30 Hz on a 60 Hz display. Its request becomes due
+ *    LOW_RATE_MIN_WAIT_MS after it was first made, so tokens that arrive in
+ *    between ride the same flush (nothing is dropped) and the pane shows them up
+ *    to one frame later. The focused pane that follows the bottom, where the
+ *    user is reading, keeps every frame. Twelve streaming panes cost the page
+ *    twelve flushes a frame; the eleven nobody is typing into now cost half.
+ *
  * Each flush is isolated: one pane's exception is reported (rethrown on a
  * microtask, so window.onerror and the render trail still see it) without
  * stopping the other panes' flushes in the same frame.
@@ -42,10 +51,27 @@ export const INPUT_WINDOW_MS = 150;
 export const STARVATION_MS = 100;
 /** Hard cap on panes flushed in one frame while the user is interacting. */
 export const MAX_PANES_PER_FRAME_WHILE_INTERACTING = 2;
+/** A pane not at full rate flushes once its request is this old: between one
+ *  and two frames at 60 Hz, so it flushes every other frame, not every third. */
+export const LOW_RATE_MIN_WAIT_MS = 25;
 
 interface Request {
     flush: () => void;
     requestedAt: number;
+    /** False: this pane flushes at the lower rate. Absent: every frame. */
+    fullRate?: () => boolean;
+}
+
+/** Whether `req` flushes in the frame at `t`. */
+function isDue(req: Request, t: number): boolean {
+    if (!req.fullRate) return true;
+    let full = true;
+    try {
+        full = req.fullRate();
+    } catch {
+        // A pane that can't say is flushed like any other: never held back by a bug here.
+    }
+    return full || t - req.requestedAt >= LOW_RATE_MIN_WAIT_MS;
 }
 
 // Insertion order is request order: re-requesting after a flush puts a pane
@@ -117,7 +143,7 @@ function runFrame(): void {
     rafId = null;
     const t = now();
     const interacting = t - lastInputAt < INPUT_WINDOW_MS;
-    const entries = [...pending.entries()];
+    const entries = [...pending.entries()].filter(([, req]) => isDue(req, t));
     let ran = 0;
     if (!interacting) {
         for (const [id, req] of entries) {
@@ -145,15 +171,18 @@ function runFrame(): void {
 /**
  * Ask for `flush` to run in an upcoming frame. Idempotent per pane: a pane
  * that already has a request keeps its place in the queue (and its original
- * request time, which the starvation guard uses); the newest `flush` is kept.
+ * request time, which the starvation guard and the lower rate use); the newest
+ * `flush` is kept. `fullRate`: whether the pane flushes every frame (see the
+ * policy above); omitted, it does.
  */
-export function requestStreamFlush(paneId: string, flush: () => void): void {
+export function requestStreamFlush(paneId: string, flush: () => void, fullRate?: () => boolean): void {
     listenForInput();
     const existing = pending.get(paneId);
     if (existing) {
         existing.flush = flush;
+        existing.fullRate = fullRate;
     } else {
-        pending.set(paneId, { flush, requestedAt: now() });
+        pending.set(paneId, { flush, requestedAt: now(), fullRate });
     }
     arm();
 }

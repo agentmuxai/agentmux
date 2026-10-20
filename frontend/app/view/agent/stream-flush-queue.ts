@@ -178,8 +178,11 @@ export interface StreamFlushQueue {
  * into ONE `batch()` and dispatched through it, in the documented order:
  * StreamFlush → ToolChunkAppend → ShellNodeCreate → ShellChunkAppend →
  * ShellStatusUpdate → StreamFlushObserved.
+ *
+ * `opts.fullRate`: whether the pane flushes every frame; false puts it at the
+ * scheduler's lower rate (stream-scheduler.ts).
  */
-export function createStreamFlushQueue(model: AgentPaneModel): StreamFlushQueue {
+export function createStreamFlushQueue(model: AgentPaneModel, opts?: { fullRate?: () => boolean }): StreamFlushQueue {
     let pendingNew: DocumentNode[] = [];
     let pendingUpdates: DocumentNode[] = [];
     let pendingChunks: PendingChunk[] = [];
@@ -279,7 +282,7 @@ export function createStreamFlushQueue(model: AgentPaneModel): StreamFlushQueue 
     // user isn't interacting, or one pane per frame (oldest first, with a
     // starvation guard) while they are. Idempotent while a request is pending.
     function scheduleFlush() {
-        requestStreamFlush(schedulerId, flushPendingNodes);
+        requestStreamFlush(schedulerId, flushPendingNodes, opts?.fullRate);
     }
 
     return {
