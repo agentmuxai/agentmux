@@ -188,7 +188,48 @@ pub fn write_secret_text(text: &str) -> Result<(), String> {
     write_clipboard_text(text)
 }
 
-/// Empties the clipboard if it still holds exactly `text`.
+/// Empties the clipboard if it still holds exactly `text`. On Windows the
+/// comparison and the clear happen in one open of the clipboard, so something
+/// copied in between can't be erased.
+#[cfg(target_os = "windows")]
+pub fn clear_if_holds(text: &str) -> Result<(), String> {
+    use windows_sys::Win32::System::DataExchange::*;
+    use windows_sys::Win32::System::Memory::*;
+    use windows_sys::Win32::System::Ole::CF_UNICODETEXT;
+    unsafe {
+        let mut opened = false;
+        for _ in 0..10 {
+            if OpenClipboard(std::ptr::null_mut()) != 0 {
+                opened = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        if !opened {
+            return Err("the clipboard is in use by another program".into());
+        }
+        let mut holds = false;
+        let handle = GetClipboardData(CF_UNICODETEXT as u32);
+        if !handle.is_null() {
+            let ptr = GlobalLock(handle) as *const u16;
+            if !ptr.is_null() {
+                let mut len = 0;
+                while *ptr.add(len) != 0 {
+                    len += 1;
+                }
+                holds = String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len)) == text;
+                GlobalUnlock(handle);
+            }
+        }
+        if holds {
+            EmptyClipboard();
+        }
+        CloseClipboard();
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
 pub fn clear_if_holds(text: &str) -> Result<(), String> {
     if read_clipboard_text()? == text {
         write_clipboard_text("")?;

@@ -44,7 +44,14 @@ export function VaultRevealDialog(props: { entry: VaultEntryInfo; onClose: () =>
         timers.delete(part);
         setShown(part, "");
     };
-    const hideAll = () => parts.forEach((p) => hide(p.name));
+    // Bumped whenever everything is hidden (focus lost, dialog closed): a
+    // Reveal that was still waiting for Windows Hello when that happened
+    // finds it changed and shows nothing.
+    let concealed = 0;
+    const hideAll = () => {
+        concealed++;
+        parts.forEach((p) => hide(p.name));
+    };
     onMount(() => window.addEventListener("blur", hideAll));
     onCleanup(() => {
         window.removeEventListener("blur", hideAll);
@@ -68,7 +75,9 @@ export function VaultRevealDialog(props: { entry: VaultEntryInfo; onClose: () =>
 
     const reveal = (part: string) =>
         run(part, async () => {
+            const before = concealed;
             const value = await revealVaultPart(entry.id, part, entry.label);
+            if (concealed !== before) return;
             setShown(part, value);
             timers.set(part, setTimeout(() => hide(part), REVEAL_SHOWN_MS));
         });

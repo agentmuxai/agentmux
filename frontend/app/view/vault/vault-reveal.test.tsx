@@ -88,6 +88,23 @@ describe("Reveal and Copy", () => {
         await waitFor(() => expect(part("cvc").textContent).not.toContain("123"));
     });
 
+    it("shows nothing when the window lost focus while Windows Hello was still open", async () => {
+        let answer: (v: unknown) => void = () => {};
+        vaultReveal.mockReturnValue(new Promise((r) => (answer = r)));
+        open();
+        await screen.findByRole("dialog");
+        fireEvent.click(within(part("number")).getByRole("button", { name: /Reveal/ }));
+        await waitFor(() => expect(vaultReveal).toHaveBeenCalledTimes(1));
+        window.dispatchEvent(new Event("blur"));
+        answer({ value: "4111111111111111" });
+        await waitFor(() => expect(within(part("number")).getByRole("button", { name: /Reveal/ })).not.toBeDisabled());
+        expect(part("number").textContent).not.toContain("4111");
+        // A fresh Reveal after that works.
+        vaultReveal.mockResolvedValue({ value: "4111111111111111" });
+        fireEvent.click(within(part("number")).getByRole("button", { name: /Reveal/ }));
+        await waitFor(() => expect(part("number").textContent).toContain("4111111111111111"));
+    });
+
     it("copies on the host and says when it clears, without the value reaching the page", async () => {
         vaultCopy.mockResolvedValue({ clears_in_secs: 30 });
         const { container } = open();
