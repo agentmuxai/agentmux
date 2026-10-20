@@ -622,6 +622,17 @@ pub async fn spawn_srv(
                     crate::startup_events::StartupStatus::Ok,
                     None,
                 );
+            } else if let Some(s) = agentmux_common::srv_stderr::parse_step_begin_line(&line) {
+                // Copy-forward, snapshot, lock wait, backup: sub-rows of
+                // "backend" like the migrations they come with.
+                sink_for_migrations.sub_begin("backend", s.id, s.label);
+            } else if let Some(e) = agentmux_common::srv_stderr::parse_step_end_line(&line) {
+                let (status, detail) = if e.ok {
+                    (crate::startup_events::StartupStatus::Ok, None)
+                } else {
+                    (crate::startup_events::StartupStatus::Error, Some("failed".to_string()))
+                };
+                sink_for_migrations.sub_end("backend", e.id, e.duration_ms, status, detail);
             } else if let Some(req) = agentmux_common::srv_stderr::parse_upgrade_line(&line) {
                 crate::log(&format!("[srv {} upgrade] {}", pid_for_log, line));
                 crate::upgrade_restart::forward(req);

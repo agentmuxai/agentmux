@@ -86,6 +86,8 @@ mod m0035_agent_owns_its_provider;
 mod m0036_drop_bundle_mcp;
 mod m0037_retire_old_pane_names;
 mod m0038_drop_drone_runs_definition_fk;
+mod backup;
+mod prepare;
 mod runner;
 #[cfg(test)]
 mod phase5_tests;

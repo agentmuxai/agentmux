@@ -28,7 +28,6 @@
 2494 crates/srv/src/backend/storage/migrations.rs
 1799 crates/srv/src/backend/storage/muxbus.rs
 3354 crates/srv/src/identity/resolver/inject.rs
-1538 crates/srv/src/migrations/runner.rs
 2185 crates/srv/src/muxbus/cloud_subscriber.rs
 2161 crates/srv/src/persist_subscriber.rs
 1509 crates/srv/src/registry/migrate.rs

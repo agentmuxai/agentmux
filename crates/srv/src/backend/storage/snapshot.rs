@@ -229,7 +229,9 @@ pub fn maybe_snapshot_pre_migration(
         "pre-migration snapshot needed",
     );
     fs::create_dir_all(snapshots_dir).map_err(|e| SnapshotError::io(snapshots_dir, e))?;
-    let snap = create_snapshot(db_dir, snapshots_dir, channel, code_version)?;
+    let snap = crate::boot_timing::step("snapshot", "Taking a snapshot of this version's data", || {
+        create_snapshot(db_dir, snapshots_dir, channel, code_version)
+    })?;
     let pruned = prune_snapshots(snapshots_dir, channel)?;
     if pruned > 0 {
         info!(pruned, channel, "pruned old snapshots");

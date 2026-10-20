@@ -524,3 +524,64 @@ fn an_upgrade_that_skips_many_versions_applies_every_later_migration_once_in_reg
     }
     assert_eq!(home.apply_all(None).applied, 0);
 }
+
+/// `migrate --prepare` end to end: a new version with no data of its own
+/// starts from the newest older version's databases, has every migration
+/// applied, and its backup holds the shared store but not `objects.db`
+/// (the older version's folder already is that copy).
+#[test]
+fn prepare_copies_the_previous_version_forward_migrates_and_backs_up_once() {
+    let home = TempHome::new();
+    home.mark_as_existing_install();
+    let versions = home.home().join("channels").join("stable").join("versions");
+    let old_db = versions.join("0.1.0").join("data").join("db");
+    std::fs::create_dir_all(&old_db).unwrap();
+    drop(Store::open(&old_db.join("objects.db")).unwrap());
+    Connection::open(old_db.join("objects.db"))
+        .unwrap()
+        .execute_batch("CREATE TABLE prepare_marker (v TEXT); INSERT INTO prepare_marker VALUES ('from 0.1.0');")
+        .unwrap();
+    let data_dir = versions.join("0.2.0").join("data");
+
+    let code = super::prepare::run_for_version(&data_dir, home.home(), &home.shared_store(), "0.2.0");
+    assert_eq!(code, 0);
+
+    let new_objects = data_dir.join("db").join("objects.db");
+    let marker: String = Connection::open(&new_objects)
+        .unwrap()
+        .query_row("SELECT v FROM prepare_marker", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(marker, "from 0.1.0", "the previous version's data was carried forward");
+
+    let channel = read_applied_ids(&new_objects).unwrap();
+    let shared = read_applied_ids(&home.shared_store()).unwrap();
+    for m in REGISTRY.iter() {
+        let applied = match m.scope() {
+            MigrationScope::Global => &shared,
+            MigrationScope::Channel => &channel,
+        };
+        assert!(applied.contains(&m.id().to_string()), "{} applied by prepare", m.id());
+    }
+
+    let backups = home.home().join("shared").join("backups");
+    let backup = std::fs::read_dir(&backups).unwrap().next().unwrap().unwrap().path();
+    assert!(backup.join("store.db").exists());
+    assert!(!backup.join("objects.db").exists(), "no second copy of the carried-forward objects.db");
+}
+
+/// A previous version whose data can't be copied is a failure, not a fresh
+/// start: the new version must not come up without the user's data.
+#[test]
+fn prepare_fails_when_the_previous_versions_data_cannot_be_copied() {
+    let home = TempHome::new();
+    home.mark_as_existing_install();
+    let versions = home.home().join("channels").join("stable").join("versions");
+    let old_db = versions.join("0.1.0").join("data").join("db");
+    std::fs::create_dir_all(&old_db).unwrap();
+    std::fs::write(old_db.join("objects.db"), b"not a database").unwrap();
+    let data_dir = versions.join("0.2.0").join("data");
+
+    let code = super::prepare::run_for_version(&data_dir, home.home(), &home.shared_store(), "0.2.0");
+    assert_eq!(code, 1);
+    assert!(!data_dir.join("db").join("objects.db").exists(), "no fresh objects.db in place of the user's data");
+}
