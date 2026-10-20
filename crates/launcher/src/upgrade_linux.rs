@@ -237,6 +237,11 @@ mod tests {
         assert!(check_target(&new, "0.59.30", None, Some(&own), &data, &chan).is_err(), "not executable yet");
         std::fs::set_permissions(&new, std::fs::Permissions::from_mode(0o755)).unwrap();
         assert!(check_target(&new, "0.59.30", None, Some(&own), &data, &chan).is_ok());
+        // srv's fallback when the folder beside this one can't be written.
+        std::fs::create_dir_all(chan.join("updates/0.59.30")).unwrap();
+        let in_channel = chan.join("updates/0.59.30/AgentMux_0.59.30_amd64.AppImage");
+        std::fs::copy(&new, &in_channel).unwrap();
+        assert!(check_target(&in_channel, "0.59.30", None, Some(&own), &data, &chan).is_ok());
         assert!(check_target(&new, "0.59.30", Some(root.path()), None, &data, &chan).is_err(), "not an AppImage install");
         assert!(check_target(&new, "0.59.31", None, Some(&own), &data, &chan).is_err());
     }

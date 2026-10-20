@@ -229,8 +229,8 @@ async fn run(asset: &ReleaseAsset, version: &str, root: &Path) -> Result<PathBuf
     Err(last)
 }
 
-/// Where a portable is unpacked when the running folder's parent can't take
-/// it: `<channel>/updates/<version>/`, outside every version's data folder.
+/// Where a portable is unpacked, or an AppImage put, when the running
+/// folder's parent can't take it: `<channel>/updates/<version>/`, outside every version's data folder.
 /// Under this version's `data/updates/` the new version would run from inside
 /// the old one's data, so removing an old version would remove the running
 /// one, and each later update would nest one level deeper. `dir` (this
@@ -310,15 +310,18 @@ async fn run_installer(asset: &ReleaseAsset, version: &str) -> Result<PathBuf, S
     fetch_file(asset, version, &updates.join(version), None).await
 }
 
-/// Put the next AppImage beside this one, or in `updates/<version>/` when that
-/// folder can't be written; executable, with this AgentMux's channel recorded
-/// beside it, so the new version opens this one's data.
+/// Put the next AppImage beside this one, or in the channel's
+/// `updates/<version>/` ([`fallback_parent`]) when that folder can't be
+/// written; executable, with this AgentMux's channel recorded beside it, so
+/// the new version opens this one's data.
 async fn run_appimage(asset: &ReleaseAsset, version: &str, appimage: &Path) -> Result<PathBuf, String> {
     let updates = updates_root();
     remove_abandoned_downloads(&updates).await;
     let channel = crate::backend::reactive::registry::local_channel_id();
+    let instance_dir = agentmux_common::DataPaths::from_env().map(|p| p.instance_dir);
+    let fallback = fallback_parent(instance_dir.as_deref(), version, &updates.join(version));
     let mut last = String::new();
-    for dir in [appimage.parent().map(Path::to_path_buf), Some(updates.join(version))].into_iter().flatten() {
+    for dir in [appimage.parent().map(Path::to_path_buf), Some(fallback)].into_iter().flatten() {
         match fetch_file(asset, version, &dir, Some(&channel)).await {
             Ok(file) => return Ok(file),
             Err(e) => {
