@@ -29,10 +29,12 @@ afterEach(() => {
 });
 
 describe("the default widget bar", () => {
-    it("pins eleven widgets, in the operator's order", () => {
+    it("pins twelve widgets, in the operator's order", () => {
         expect(getPinnedKeys({}, wmap)).toEqual([
             "agent",
             "swarm",
+            // Warden's Kanban section (SPEC_WARDEN_KANBAN_2026_10_20.md §6.1).
+            "kanban",
             "memory",
             "files",
             "connectors",

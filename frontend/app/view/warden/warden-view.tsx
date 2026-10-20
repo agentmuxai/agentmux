@@ -9,10 +9,12 @@ import { WardenLanManager } from "@/app/view/warden-lan/warden-lan-manager";
 import { WardenInternetStub } from "@/app/view/warden-internet/warden-internet-stub";
 import { WardenAuditManager } from "@/app/view/warden-audit/warden-audit-manager";
 import { WardenHistoryManager } from "@/app/view/warden-history/warden-history-manager";
+import { WardenKanbanManager } from "@/app/view/warden-kanban/warden-kanban-manager";
 import { WARDEN_SECTION_LABELS, type WardenSection, type WardenViewModel } from "./warden-model";
 import "./warden-view.scss";
 
 const RAIL: TabItem<WardenSection>[] = [
+    { id: "kanban",   label: WARDEN_SECTION_LABELS.kanban,   icon: "table-columns" },
     { id: "host",     label: WARDEN_SECTION_LABELS.host,     icon: "server" },
     { id: "lan",      label: WARDEN_SECTION_LABELS.lan,      icon: "network-wired" },
     { id: "internet", label: WARDEN_SECTION_LABELS.internet, icon: "globe" },
@@ -48,6 +50,9 @@ export function WardenView(props: { model: WardenViewModel }): JSX.Element {
                      * poll loop, unaffected by visibility; History loads when
                      * first shown and on Refresh.
                      */}
+                    <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "kanban" }}>
+                        <WardenKanbanManager visible={section() === "kanban"} onNeedsCount={model.setKanbanNeeds} />
+                    </div>
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "host" }}>
                         <WardenHostManager />
                     </div>
