@@ -24,6 +24,12 @@ vi.mock("@/app/view/warden-internet/warden-internet-stub", () => ({
 vi.mock("@/app/view/warden-audit/warden-audit-manager", () => ({
     WardenAuditManager: () => <div data-testid="audit-manager" />,
 }));
+vi.mock("@/app/view/warden-kanban/warden-kanban-manager", () => ({
+    WardenKanbanManager: (props: { visible: boolean; onNeedsCount?: (n: number) => void }) => {
+        props.onNeedsCount?.(2);
+        return <div data-testid="kanban-manager" data-visible={String(props.visible)} />;
+    },
+}));
 vi.mock("@/app/view/warden-history/warden-history-manager", () => ({
     WardenHistoryManager: (props: { wardenBlockId: string; visible: boolean }) => (
         <div data-testid="history-manager" data-block={props.wardenBlockId} data-visible={String(props.visible)} />
@@ -63,11 +69,11 @@ describe("WardenView rail", () => {
         ));
     }
 
-    it("orders the rail as Host, LAN, Internet, Audit, History", () => {
+    it("orders the rail as Kanban, Host, LAN, Internet, Audit, History", () => {
         renderWarden();
         const rail = screen.getByRole("tablist", { name: "Warden section" });
         const labels = Array.from(rail.querySelectorAll('[role="tab"]')).map((el) => el.textContent);
-        expect(labels).toEqual(["Host", "LAN", "Internet", "Audit", "History"]);
+        expect(labels).toEqual(["Kanban", "Host", "LAN", "Internet", "Audit", "History"]);
     });
 
     it("defaults to the Host section active and visible", () => {
@@ -93,13 +99,22 @@ describe("WardenView rail", () => {
         expect(screen.getByTestId("host-manager")).toBeInTheDocument();
     });
 
-    it("all 5 sections mount simultaneously (keep-mounted pane pattern)", () => {
+    it("all 6 sections mount simultaneously (keep-mounted pane pattern)", () => {
         renderWarden();
+        expect(screen.getByTestId("kanban-manager")).toBeInTheDocument();
         expect(screen.getByTestId("host-manager")).toBeInTheDocument();
         expect(screen.getByTestId("lan-manager")).toBeInTheDocument();
         expect(screen.getByTestId("internet-stub")).toBeInTheDocument();
         expect(screen.getByTestId("audit-manager")).toBeInTheDocument();
         expect(screen.getByTestId("history-manager")).toBeInTheDocument();
+    });
+
+    it("Kanban knows when it is shown, so it only fetches then", () => {
+        renderWarden();
+        const kanban = screen.getByTestId("kanban-manager");
+        expect(kanban.dataset.visible).toBe("false");
+        screen.getByRole("tab", { name: "Kanban" }).click();
+        expect(kanban.dataset.visible).toBe("true");
     });
 
     it("History gets the Warden block and knows when it is shown", () => {
@@ -142,6 +157,12 @@ describe("WardenView pane title", () => {
         expect(model.viewName()).toBe("Audit");
         const auditPane = screen.getByTestId("audit-manager").closest(".bundle-manager-pane");
         expect(auditPane?.classList.contains("is-hidden")).toBe(false);
+    });
+
+    it("on the Kanban section, the title counts the tasks that need the operator", () => {
+        const { model } = renderWarden();
+        screen.getByRole("tab", { name: "Kanban" }).click();
+        expect(model.viewName()).toBe("Kanban · 2 need you");
     });
 
     it("selecting a section from the keyboard writes warden:section and updates viewName()", () => {
