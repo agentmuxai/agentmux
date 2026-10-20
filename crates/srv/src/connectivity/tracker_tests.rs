@@ -1,0 +1,178 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+use super::*;
+use crate::connectivity::ANTHROPIC;
+
+const T0: i64 = 1_800_000_000_000;
+
+fn api() -> Service {
+    Service::ModelApi(&ANTHROPIC)
+}
+
+fn down(error: &str) -> Outcome {
+    Outcome::Unreachable(error.to_string())
+}
+
+fn state_of(t: &Tracker, id: &str) -> (Reachability, i64) {
+    let status = t.status();
+    let s = status.services.iter().find(|s| s.service == id).unwrap_or_else(|| panic!("{id} in {status:?}"));
+    (s.state, s.since_ms)
+}
+
+#[test]
+fn transport_failures_in_a_row_make_a_service_offline() {
+    let mut t = Tracker::new(0, T0);
+    let first = t.report(api(), down("connection refused"), T0 + 1_000).expect("left online");
+    assert_eq!(state_of(&t, "model_api:anthropic"), (Reachability::Degraded, T0 + 1_000));
+    assert_eq!(first.services[1].last_error.as_deref(), Some("connection refused"));
+    assert_eq!(t.report(api(), down("connection refused"), T0 + 2_000), None, "still degraded: nothing to send");
+    let offline = t.report(api(), down("connection refused"), T0 + 3_000).expect("went offline");
+    assert_eq!(state_of(&t, "model_api:anthropic"), (Reachability::Offline, T0 + 3_000));
+    assert!(offline.revision > first.revision);
+    assert_eq!(t.report(api(), down("connection refused"), T0 + 4_000), None);
+    assert_eq!(state_of(&t, "model_api:anthropic").1, T0 + 3_000, "since is when it went offline");
+}
+
+#[test]
+fn any_answer_brings_an_offline_service_back_online() {
+    let mut t = Tracker::new(0, T0);
+    for i in 0..OFFLINE_AFTER {
+        t.report(Service::Muxbus, down("dns"), T0 + i64::from(i));
+    }
+    assert_eq!(state_of(&t, "muxbus").0, Reachability::Offline);
+    t.report(Service::Muxbus, Outcome::Answered, T0 + 10_000).expect("back");
+    assert_eq!(state_of(&t, "muxbus"), (Reachability::Online, T0 + 10_000));
+    assert_eq!(t.status().services[1].last_error, None);
+}
+
+#[test]
+fn some_failing_and_some_answered_is_degraded() {
+    let mut t = Tracker::new(0, T0);
+    t.report(Service::Muxbus, Outcome::Answered, T0);
+    t.report(Service::Muxbus, down("reset"), T0 + 1_000);
+    t.report(Service::Muxbus, Outcome::Answered, T0 + 2_000);
+    t.report(Service::Muxbus, down("reset"), T0 + 3_000);
+    t.report(Service::Muxbus, Outcome::Answered, T0 + 4_000);
+    assert_eq!(state_of(&t, "muxbus"), (Reachability::Degraded, T0 + 3_000), "two failures in the last minute");
+    // Once the failures are more than a minute old, an answer is all there is.
+    t.report(Service::Muxbus, Outcome::Answered, T0 + 3_000 + DEGRADED_WINDOW_MS + 1);
+    assert_eq!(state_of(&t, "muxbus").0, Reachability::Online);
+}
+
+#[test]
+fn one_stray_failure_then_an_answer_is_online_again() {
+    let mut t = Tracker::new(0, T0);
+    t.report(api(), down("reset"), T0);
+    t.report(api(), Outcome::Answered, T0 + 500);
+    assert_eq!(state_of(&t, "model_api:anthropic"), (Reachability::Online, T0 + 500));
+}
+
+#[test]
+fn a_first_answer_adds_the_service_without_a_change_to_send() {
+    let mut t = Tracker::new(0, T0);
+    assert_eq!(t.report(api(), Outcome::Answered, T0), None);
+    assert_eq!(state_of(&t, "model_api:anthropic"), (Reachability::Online, T0));
+}
+
+#[test]
+fn the_internet_is_offline_only_when_two_services_are_and_none_answers() {
+    let mut t = Tracker::new(0, T0);
+    for i in 0..OFFLINE_AFTER {
+        t.report(api(), down("refused"), T0 + i64::from(i));
+    }
+    assert_eq!(state_of(&t, "internet").0, Reachability::Online, "one host down is that host's problem");
+    for i in 0..OFFLINE_AFTER {
+        t.report(Service::Muxbus, down("refused"), T0 + 100 + i64::from(i));
+    }
+    assert_eq!(state_of(&t, "internet"), (Reachability::Offline, T0 + 102));
+    t.report(Service::Muxbus, Outcome::Answered, T0 + 5_000);
+    assert_eq!(state_of(&t, "internet"), (Reachability::Online, T0 + 5_000));
+    assert_eq!(state_of(&t, "model_api:anthropic").0, Reachability::Offline);
+}
+
+#[test]
+fn the_internet_row_comes_first() {
+    let mut t = Tracker::new(0, T0);
+    t.report(Service::Muxbus, Outcome::Answered, T0);
+    t.report(api(), Outcome::Answered, T0);
+    let ids: Vec<String> = t.status().services.into_iter().map(|s| s.service).collect();
+    assert_eq!(ids, ["internet", "model_api:anthropic", "muxbus"]);
+}
+
+#[test]
+fn an_online_service_is_never_probed() {
+    let mut t = Tracker::new(0, T0);
+    t.report(api(), Outcome::Answered, T0);
+    assert_eq!(t.next_probe_due(), None);
+    assert!(t.take_due_probes(T0 + 3_600_000).is_empty());
+}
+
+#[test]
+fn probes_back_off_from_five_seconds_to_a_minute() {
+    let mut t = Tracker::new(0, T0);
+    t.report(api(), down("refused"), T0);
+    assert_eq!(t.next_probe_due(), Some(T0 + PROBE_FIRST_MS));
+    assert!(t.take_due_probes(T0 + PROBE_FIRST_MS - 1).is_empty(), "not due yet");
+    let mut now = T0 + PROBE_FIRST_MS;
+    let mut waits = Vec::new();
+    for _ in 0..6 {
+        let due = t.take_due_probes(now);
+        assert_eq!(due.len(), 1);
+        assert_eq!(t.next_probe_due(), None, "running, not scheduled");
+        let (service, ticket) = due.into_iter().next().unwrap();
+        t.probe_finished(&service, ticket, down("refused"), now);
+        let next = t.next_probe_due().unwrap();
+        waits.push(next - now);
+        now = next;
+    }
+    assert_eq!(waits, [10_000, 20_000, 40_000, 60_000, 60_000, 60_000]);
+}
+
+#[test]
+fn a_failed_probe_means_offline() {
+    let mut t = Tracker::new(0, T0);
+    t.report(Service::Muxbus, down("reset"), T0);
+    assert_eq!(state_of(&t, "muxbus").0, Reachability::Degraded);
+    let (service, ticket) = t.take_due_probes(T0 + PROBE_FIRST_MS).remove(0);
+    t.probe_finished(&service, ticket, down("timed out"), T0 + PROBE_FIRST_MS + 5_000).expect("changed");
+    assert_eq!(state_of(&t, "muxbus"), (Reachability::Offline, T0 + PROBE_FIRST_MS + 5_000));
+}
+
+#[test]
+fn an_answered_probe_ends_the_probing() {
+    let mut t = Tracker::new(0, T0);
+    for i in 0..OFFLINE_AFTER {
+        t.report(api(), down("refused"), T0 + i64::from(i));
+    }
+    let (service, ticket) = t.take_due_probes(T0 + 60_000).remove(0);
+    t.probe_finished(&service, ticket, Outcome::Answered, T0 + 60_100).expect("back");
+    assert_eq!(state_of(&t, "model_api:anthropic"), (Reachability::Online, T0 + 60_100));
+    assert_eq!(t.next_probe_due(), None);
+}
+
+#[test]
+fn a_probe_that_outlived_its_schedule_changes_nothing() {
+    let mut t = Tracker::new(0, T0);
+    t.report(api(), down("refused"), T0);
+    let (service, stale) = t.take_due_probes(T0 + PROBE_FIRST_MS).remove(0);
+    // Meanwhile the CLI got through, then the connection dropped again.
+    t.report(api(), Outcome::Answered, T0 + 6_000);
+    t.report(api(), down("refused"), T0 + 7_000);
+    assert_eq!(t.probe_finished(&service, stale, down("refused"), T0 + 8_000), None);
+    assert_eq!(state_of(&t, "model_api:anthropic"), (Reachability::Degraded, T0 + 7_000));
+    assert_eq!(t.next_probe_due(), Some(T0 + 7_000 + PROBE_FIRST_MS), "the new schedule stands");
+}
+
+#[test]
+fn the_status_serializes_snake_case() {
+    let mut t = Tracker::new(41, T0);
+    t.report(Service::Muxbus, down("dns error"), T0);
+    let v = serde_json::to_value(t.status()).unwrap();
+    assert_eq!(v["revision"], serde_json::json!(42));
+    assert_eq!(
+        v["services"][1],
+        serde_json::json!({ "service": "muxbus", "label": "MuxBus", "state": "degraded", "since_ms": T0, "last_error": "dns error" })
+    );
+    assert_eq!(v["services"][0]["state"], "online");
+}

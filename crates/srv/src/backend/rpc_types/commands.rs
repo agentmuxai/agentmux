@@ -124,6 +124,8 @@ pub const COMMAND_AGENT_SHUTDOWN_KEEP: &str = "agentshutdownkeep";
 pub const COMMAND_AGENT_STOP: &str = "agentstop";
 /// The API retry a pane's CLI is waiting on, as of now (`backend::agent_api_retry`).
 pub const COMMAND_AGENT_API_RETRY: &str = "agentapiretry";
+/// Each service's reachability, as of now (`connectivity`).
+pub const COMMAND_CONNECTIVITY_STATUS: &str = "connectivity.status";
 /// Backend half of the `/btw` slash command — a fast, one-shot, tool-less
 /// side question answered against a fresh throwaway block, without
 /// touching the asking pane's own persisted transcript or blocking/queuing

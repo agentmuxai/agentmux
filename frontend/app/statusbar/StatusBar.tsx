@@ -5,6 +5,7 @@ import { getApi, windowCountAtom, backendStatusAtom, isDev } from "@/store/globa
 import { createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { BackendStatus } from "./BackendStatus";
 import { ConfigStatus } from "./ConfigStatus";
+import { ConnectivityIndicator } from "./ConnectivityIndicator";
 import { GpuStatus } from "./GpuStatus";
 import { HostPopover } from "./HostPopover";
 import { InstancePanel } from "./InstancePanel";
@@ -99,6 +100,7 @@ function registerBuiltinStatusBarItems(): void {
         ["history-usage", "right", () => <HistoryUsageIndicator />],
         ["token-usage", "right", () => <TokenUsageIndicator />],
         ["config", "right", () => <ConfigStatus />],
+        ["connectivity", "right", () => <ConnectivityIndicator />],
         ["muxbus", "right", () => <MuxBusIndicator />],
         ["version-skew", "right", () => <VersionSkewStatus />],
         ["update", "right", () => <UpdateStatus />],

@@ -280,6 +280,7 @@ pub(crate) async fn relay_inject(
         .json(&body)
         .send()
         .await;
+    crate::connectivity::report_http(crate::connectivity::Service::Muxbus, &resp);
 
     let resp = match resp {
         Ok(r) => r,
