@@ -387,6 +387,7 @@ partial list.
 | [`SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19`](SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md) | Spec: Native Memory Version Control — Single Source of Truth, Two Views (Stash + Armory) |
 | [`SPEC_MIGRATION_FRAMEWORK_2026_06_24`](SPEC_MIGRATION_FRAMEWORK_2026_06_24.md) | Migration Framework Spec |
 | [`SPEC_MONOLITH_MODULE_SPLITS_2026_09_22`](SPEC_MONOLITH_MODULE_SPLITS_2026_09_22.md) | SPEC — Split the two largest `agentmux-srv` files into directory modules |
+| [`SPEC_MOUSE_SIDE_BUTTONS_PANE_AND_TAB_NAV_2026_10_19`](SPEC_MOUSE_SIDE_BUTTONS_PANE_AND_TAB_NAV_2026_10_19.md) | Mouse side buttons walk back and forward through the panes you selected, and the caret follows |
 | [`SPEC_MUXBUS_CROSS_CHANNEL_DUPLICATE_DELIVERY_2026_07_04`](SPEC_MUXBUS_CROSS_CHANNEL_DUPLICATE_DELIVERY_2026_07_04.md) | Plan: muxbus cross-channel duplicate delivery |
 | [`SPEC_MUXBUS_KEYCHAIN_PER_CHANNEL_2026_10_02`](SPEC_MUXBUS_KEYCHAIN_PER_CHANNEL_2026_10_02.md) | MuxBus cloud sign-in: scope the keychain tokens to the channel |
 | [`SPEC_MUXBUS_SIGN_IN_PER_CHANNEL_2026_10_08`](SPEC_MUXBUS_SIGN_IN_PER_CHANNEL_2026_10_08.md) | SPEC: each channel signs in to MuxBus on its own |
