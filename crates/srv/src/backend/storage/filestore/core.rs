@@ -17,7 +17,7 @@ use super::lines::count_all;
 use super::types::{FileMeta, FileOpts, MuxFile};
 use crate::backend::storage::error::StoreError;
 use crate::backend::storage::migrations::{
-    check_schema_compat, run_filestore_migrations, stamp_version, FILESTORE_SCHEMA_VERSION, GLOBAL_TRANSCRIPT_STORE_VERSION,
+    check_schema_compat, run_filestore_migrations, stamp_version, FILESTORE_SCHEMA_VERSION,
 };
 
 /// Default part size: 64KB (matches Go's DefaultPartDataSize).
@@ -75,6 +75,17 @@ impl Drop for TimedConn<'_> {
         }
     }
 }
+
+/// `user_version` value stamped into the GLOBAL transcript store
+/// (`shared/agents/transcripts/filestore.db`) by builds that bundle SQLite 3.51.3
+/// or later. The schema is the same as [`FILESTORE_SCHEMA_VERSION`]'s; the number
+/// is a lock: a build older than this one refuses a `user_version` above its own
+/// (`check_schema_compat`), so it cannot open the shared store with its old
+/// SQLite (3.45.0), whose WAL-reset bug can corrupt a database several processes
+/// write. Such a build runs on without the global store, as it does when that
+/// store can't be opened (`bootstrap/stores.rs`).
+/// RCA_UPGRADE_0_59_30_TO_0_59_34_ISSUES_2026_10_19.md section 6.
+pub const GLOBAL_TRANSCRIPT_STORE_VERSION: i64 = 2;
 
 /// Connections that only read, for a file-backed store. In WAL mode a reader
 /// sees every committed write and never waits for a writer, so reads taken

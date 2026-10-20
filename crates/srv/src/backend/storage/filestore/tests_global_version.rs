@@ -7,7 +7,8 @@
 
 use super::*;
 use crate::backend::storage::error::StoreError;
-use crate::backend::storage::migrations::{FILESTORE_SCHEMA_VERSION, GLOBAL_TRANSCRIPT_STORE_VERSION};
+use crate::backend::storage::migrations::FILESTORE_SCHEMA_VERSION;
+use super::core::GLOBAL_TRANSCRIPT_STORE_VERSION;
 use std::path::Path;
 
 fn user_version(path: &Path) -> i64 {

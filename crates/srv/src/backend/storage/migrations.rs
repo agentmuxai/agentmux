@@ -471,16 +471,6 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 12;
 pub const OBJECT_SCHEMA_VERSION: i64 = 44;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
-/// `user_version` value stamped into the GLOBAL transcript store
-/// (`shared/agents/transcripts/filestore.db`) by builds that bundle SQLite 3.51.3
-/// or later. The schema is the same as [`FILESTORE_SCHEMA_VERSION`]'s; the number
-/// is a lock: a build older than this one refuses a `user_version` above its own
-/// (`check_schema_compat`), so it cannot open the shared store with its old
-/// SQLite (3.45.0), whose WAL-reset bug can corrupt a database several processes
-/// write. Such a build runs on without the global store, as it does when that
-/// store can't be opened (`bootstrap/stores.rs`).
-/// RCA_UPGRADE_0_59_30_TO_0_59_34_ISSUES_2026_10_19.md section 6.
-pub const GLOBAL_TRANSCRIPT_STORE_VERSION: i64 = 2;
 /// `user_version` value stamped into `sagas.db`.
 pub const SAGA_LOG_SCHEMA_VERSION: i64 = 1;
 
