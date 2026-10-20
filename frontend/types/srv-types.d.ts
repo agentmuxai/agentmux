@@ -826,6 +826,16 @@ declare global {
         "agent:historySourceBlockId"?: string;
         /** Last classified agent failure; set on error exit, cleared on clean exit. */
         "agent:last_failure"?: import("@/types/rpc/AgentFailure").AgentFailure;
+        /** Messages typed while the agent's model API was unreachable, not yet
+         *  sent, and the agent they were typed to. Frontend-only
+         *  (view/agent/offline/useOfflineInput.ts). */
+        "agent:held_input"?: {
+            agentId: string;
+            messages: { id: string; text: string; heldAt: number; attachments?: import("@/types/rpc/AttachmentRef").AttachmentRef[] }[];
+        } | null;
+        /** The turn AgentMux last retried by itself after the API came back, so
+         *  it isn't retried twice. Frontend-only, as above. */
+        "agent:auto_retried_turn"?: { text: string; at: number } | null;
         "agent:runtime"?: {
             permissionMode?: string;
             model?: string | null;
@@ -1097,6 +1107,7 @@ declare global {
         "attachments:retentiondays"?: number;
         "agent:askquestiontimeoutms"?: number;
         "agent:overlapnotes"?: boolean;
+        "agent:retryonreconnect"?: boolean;
         "agent:mcpselfheal"?: boolean;
         "agent:transcriptsinglecopy"?: boolean;
         "agent:turnscopedtail"?: boolean;

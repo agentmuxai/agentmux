@@ -33,7 +33,9 @@
  * not the pane is visible, like the question timeout, so a transient failure in
  * a background pane recovers on its own. It counts down to a fixed `retryAt`
  * rather than decrementing per tick, so a throttled background window fires on
- * time when its timer finally runs instead of falling behind.
+ * time when its timer finally runs instead of falling behind. A network
+ * failure whose API srv tracks arms no countdown: it waits for the API to
+ * answer (`reconnect`, offline/offline-input.ts).
  *
  * Spec: docs/specs/SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md §4–§6,
  * docs/analysis/REPORT_TIMERS_DEADLINES_AND_CLOCKS_AUDIT_2026_10_17.md §4.2.
@@ -47,6 +49,7 @@ import { getBlockMetaKeyAtom } from "@/app/store/global";
 import { addEventListener as addPaneEventListener } from "@/app/store/agent-pane-state-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import type { PaneFailure } from "@/app/store/agent-pane-state/types";
+import type { AgentFailure } from "@/types/rpc/AgentFailure";
 import { failureToRow, isTransient, type FailureRow } from "../failure/failure-accessory";
 import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
 import { copyErrorReport } from "@/app/errors/CopyErrorButton";
@@ -147,6 +150,13 @@ export interface UseAgentFailureOptions {
      * no Take over. Spec: SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md §4.6.
      */
     onTakeOver?: (turnAttempted: boolean) => Promise<void>;
+    /** The pane's offline recovery (offline/offline-input.ts): a failure it
+     *  waits on gets no timed retry, and the row's meta says what happens
+     *  once the API is back. */
+    reconnect?: {
+        waitsForReconnect: (code: AgentFailure["code"]) => boolean;
+        reconnectHint: Accessor<string | null>;
+    };
 }
 
 export interface UseAgentFailureResult {
@@ -277,7 +287,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 // Reducer-side: records state.failure AND unconditionally ends
                 // a still-working turn — see FailureObserved's reducer case.
                 opts.model.dispatchPane({ type: "FailureObserved", failure: f, at: Date.now() });
-                if (isTransient(f.code)) armAutoRetry();
+                if (isTransient(f.code) && !opts.reconnect?.waitsForReconnect(f.code)) armAutoRetry();
             }, MOS.makeORef("block", opts.blockId));
 
         // Restore the full auto-retry budget once the LAST turn genuinely
@@ -416,6 +426,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 takeoverArmed: takeoverArmed(),
                 takingOver: takingOver(),
                 copyState: copyState(),
+                reconnectHint: opts.reconnect?.reconnectHint() ?? null,
             },
             {
                 retry: doRetry,

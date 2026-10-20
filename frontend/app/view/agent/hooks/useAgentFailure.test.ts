@@ -108,7 +108,7 @@ const makeFakeModel = () => {
 const simulateFreshTurnStartClearingFailure = (model: { dispatchPane: (c: unknown) => AgentPaneEvent[] }) =>
     model.dispatchPane({ type: "FailureCleared" });
 
-const mkUI = (onRetry: () => void) => {
+const mkUI = (onRetry: () => void, reconnect?: Parameters<typeof useAgentFailure>[0]["reconnect"]) => {
     const { model, failure } = makeFakeModel();
     const ui = useAgentFailure({
         blockId: BLOCK_ID,
@@ -119,6 +119,7 @@ const mkUI = (onRetry: () => void) => {
         onLoginViaTerminal() {},
         onOpenAccounts() {},
         onNewSession() {},
+        reconnect,
     });
     return { ui, model };
 };
@@ -698,6 +699,50 @@ describe("useAgentFailure — Copy error", () => {
             fire("agentfailure", transient());
             expect(button(ui, "Copied")).toBeUndefined();
             expect(button(ui, "Copy error")).toBeDefined();
+            dispose();
+        });
+    });
+});
+
+describe("useAgentFailure — a network failure that waits for its API", () => {
+    beforeEach(() => {
+        hub.handlers.clear();
+        hub.persistedFailure = null;
+        __resetListeners();
+        vi.useFakeTimers();
+    });
+    afterEach(() => vi.useRealTimers());
+
+    const counting = (ui: UseAgentFailureResult) => (ui.row()?.actions ?? []).some((a) => a.label?.startsWith("Retry now ("));
+    const network = (): AgentFailure => ({ code: "network", title: "Can't reach the API", detail: "", retryable: true });
+
+    it("arms no timed retry, and shows what happens when the API is back", async () => {
+        await createRoot(async (dispose) => {
+            const onRetry = vi.fn();
+            const { ui } = mkUI(onRetry, {
+                waitsForReconnect: (code) => code === "network",
+                reconnectHint: () => "retries by itself when the API is back",
+            });
+            await Promise.resolve();
+            fire("agentfailure", network());
+            vi.advanceTimersByTime(600_000);
+            expect(onRetry).not.toHaveBeenCalled();
+            expect(ui.row()?.meta).toContain("retries by itself when the API is back");
+            expect((ui.row()?.actions ?? []).some((a) => a.label === "Retry now")).toBe(true);
+            // Other transient classes keep their ladder.
+            fire("agentfailure", transient());
+            expect(counting(ui)).toBe(true);
+            dispose();
+        });
+    });
+
+    it("keeps the timed retry for a network failure nothing waits on", async () => {
+        await createRoot(async (dispose) => {
+            const onRetry = vi.fn();
+            const { ui } = mkUI(onRetry, { waitsForReconnect: () => false, reconnectHint: () => null });
+            await Promise.resolve();
+            fire("agentfailure", network());
+            expect(counting(ui)).toBe(true);
             dispose();
         });
     });

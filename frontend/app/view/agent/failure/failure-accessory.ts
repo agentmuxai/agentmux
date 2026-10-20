@@ -98,6 +98,9 @@ export interface FailureViewState {
      *  `PaneRowAction` has no feedback mechanism of its own. Defaults to
      *  "idle". */
     copyState?: "idle" | "copied" | "failed";
+    /** While a network failure waits for its API to answer again: what
+     *  happens then, added to the meta line. */
+    reconnectHint?: string | null;
 }
 
 /** Per-class sigil. */
@@ -150,6 +153,7 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
     if (f.signal != null) meta.push(`signal ${f.signal}`);
     else if (f.exitCode != null) meta.push(`exit ${f.exitCode}`);
     if (f.retryable) meta.push("retryable");
+    if (view.reconnectHint) meta.push(view.reconnectHint);
 
     const retryLabel = view.autoRetryIn != null ? `Retry now (${view.autoRetryIn}s)` : "Retry now";
     const retry: PaneRowAction = {

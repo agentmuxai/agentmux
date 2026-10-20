@@ -91,6 +91,7 @@ import { useAgentControllerStatus } from "./hooks/useAgentControllerStatus";
 import { useAgentDecisions } from "./hooks/useAgentDecisions";
 import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
 import { useAgentFailure } from "./hooks/useAgentFailure";
+import { useOfflineInput } from "./offline/useOfflineInput";
 import { useAccountBinding } from "./failure/useAccountBinding";
 import { useAuthHealth, useSyntheticAuthRow } from "./failure/useAuthHealth";
 import { requestAgentTakeover } from "./failure/takeover";
@@ -1019,6 +1020,10 @@ export const AgentPresentationView = ({
             void status.startLaunchFlow();
         }
     };
+    // Input held while the model API is unreachable; a network-failed turn retried when it's back.
+    const offline = useOfflineInput({
+        blockId: model.blockId, paneModel, provider, agentId: () => agentId, send: handleSendMessage, stop: commands.stopAgent,
+    });
     // Pre-launch auth failure → the "Not signed in" failure row
     // (failure/useAuthHealth.ts).
     useSyntheticAuthRow({ canRetry: status.canRetry, paneModel });
@@ -1046,6 +1051,7 @@ export const AgentPresentationView = ({
         model: paneModel,
         failure: (() => paneModel.state.failure),
         onRetry: retryLastTurn,
+        reconnect: offline,
         // live_elsewhere — take the agent over from the other AgentMux
         // instance running it, then re-run the refused turn if there was one
         // (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md §4.6).
@@ -1397,6 +1403,7 @@ export const AgentPresentationView = ({
                 workingRowVisible={workingRowVisible}
                 workingRowLoading={workingRowLoading}
                 onStop={commands.stopAgent}
+                offline={offline}
             />
 
             {/* Composer status strip — single 28-32px row with live
@@ -1421,15 +1428,8 @@ export const AgentPresentationView = ({
                 providerId={provider()?.id ?? ""}
                 agentMode={block()?.meta?.["agentMode"] as string | undefined}
                 compacting={paneModel.state.compacting}
-                // Route through handleSendMessage — same pattern as the
-                // SlashHelpPanel's onInvoke above, and for the same reason:
-                // this needs the same pre-TurnStart wasAlreadyWorking
-                // snapshot the composer path computes, not a bare
-                // commands.sendMessage() call (which would default
-                // wasAlreadyWorking to false regardless of the pane's real
-                // turn state). "/compact" is deliberately NOT a registered
-                // SlashCommand — see AgentComposerStrip's onCompact doc
-                // comment for why that would break instead of help.
+                // Through handleSendMessage for its pre-TurnStart wasAlreadyWorking snapshot, like SlashHelpPanel's
+                // onInvoke below. "/compact" is deliberately NOT a registered SlashCommand (see AgentComposerStrip).
                 onCompact={() => {
                     void handleSendMessage("/compact");
                 }}
@@ -1468,7 +1468,7 @@ export const AgentPresentationView = ({
                 </Show>
                 <AgentFooter
                     agentName={agentName()}
-                    onSendMessage={handleSendMessage}
+                    onSendMessage={offline.submit}
                     onTyping={() => {
                         scrollToBottomFn?.("typing");
                     }}

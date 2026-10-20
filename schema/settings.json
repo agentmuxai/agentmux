@@ -594,6 +594,11 @@
           "default": true,
           "description": "While a message streams, update the still-open last block's text in place instead of rebuilding that block on every update (a growing code block, paragraph, list item or table cell). Set false to restore rebuilding it each time. Takes effect when a message is next rendered. See docs/specs/TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md."
         },
+        "agent:retryonreconnect": {
+          "type": "boolean",
+          "default": true,
+          "description": "When an agent's turn failed because its model API couldn't be reached, retry it once by itself when the API answers again, if no tool ran in it and you haven't typed in that pane since. Set false to only offer a Retry button. See docs/specs/SPEC_OFFLINE_RESILIENCE_2026_10_20.md §4.3."
+        },
         "agent:overlapnotes": {
           "type": "boolean",
           "default": true,
