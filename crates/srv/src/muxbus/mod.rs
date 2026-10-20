@@ -99,7 +99,7 @@ mod tests {
         let expired = creds("client", -10);
         assert!(stale_sign_in_reason(Some(&needs_reauth(false)), &expired, None).is_none());
         assert!(stale_sign_in_reason(Some(&CredentialState::Fresh), &expired, None).is_none());
-        let failed = CredentialState::Failed { consecutive_failures: 2, last_error: "net".to_string() };
+        let failed = CredentialState::Failed { consecutive_failures: 2, last_error: "net".to_string(), offline: false };
         assert!(stale_sign_in_reason(Some(&failed), &expired, None).is_none());
         assert!(stale_sign_in_reason(None, &expired, None).is_none());
     }

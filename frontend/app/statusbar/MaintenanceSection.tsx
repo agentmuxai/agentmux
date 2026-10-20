@@ -185,6 +185,15 @@ export const MaintenanceSection = (): JSX.Element => {
         }
     };
 
+    // Opens a folder, or shows a file in its folder; a failure is shown, like the other actions here.
+    const reveal = async (path: string) => {
+        setStartError(null);
+        try {
+            await getApi().revealInFileExplorer(path);
+        } catch (e: any) {
+            setStartError(`Couldn't open ${path}: ${String(e?.message ?? e)}`);
+        }
+    };
     const runUpgrade = (now: boolean) => {
         setStartError(null);
         upgradeAndRestart(now).catch((e) => setStartError(String(e?.message ?? e)));
@@ -288,7 +297,7 @@ export const MaintenanceSection = (): JSX.Element => {
                             <Button
                                 density="compact"
                                 class="maintenance-btn"
-                                onClick={() => getApi().openNativePath(download()!.folder!)}
+                                onClick={() => void reveal(download()!.folder!)}
                             >
                                 Show folder
                             </Button>
@@ -299,7 +308,7 @@ export const MaintenanceSection = (): JSX.Element => {
                             <Button
                                 density="compact"
                                 class="maintenance-btn"
-                                onClick={() => getApi().revealInFileExplorer(download()!.installer!)}
+                                onClick={() => void reveal(download()!.installer!)}
                             >
                                 {appUpdate()?.install === "linux-appimage" ? "Show file" : "Show installer"}
                             </Button>

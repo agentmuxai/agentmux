@@ -98,13 +98,11 @@ impl PersistentSubprocessController {
         let Some(zone) = global_prior_zone(self.mstore.as_deref(), &self.block_id) else {
             return false;
         };
-        let Some(gfs) = crate::backend::agent_session::global_transcript_store() else {
+        // A zone found corrupt has no prior transcript to offer; the pane's own was asked above.
+        let Some(gfs) = crate::backend::transcript::damage::global_for(&zone) else {
             return false;
         };
-        matches!(
-            gfs.stat(&zone, crate::backend::agent_session::OUTPUT_FILE),
-            Ok(Some(ref f)) if f.size > 0
-        )
+        global_zone_has_output(&gfs, &zone)
     }
 
     /// The session to continue on a first spawn that holds no id of its own
@@ -135,8 +133,8 @@ impl PersistentSubprocessController {
     /// resumes it forks it: a fork never writes into its parent's conversation.
     pub(super) fn inherited_fork_session(&self) -> Option<String> {
         let zone = global_prior_zone(self.mstore.as_deref(), &self.block_id)?;
-        let gfs = crate::backend::agent_session::global_transcript_store()?;
-        crate::backend::agent_session::fork_history::inherited_session(gfs, &zone)
+        let gfs = crate::backend::transcript::damage::global_for(&zone)?;
+        crate::backend::agent_session::fork_history::inherited_session(&gfs, &zone)
     }
 
     /// AgentMux's record of the conversation this pane renders, as a
@@ -144,8 +142,9 @@ impl PersistentSubprocessController {
     /// (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §4.4).
     pub(super) fn continuation_packet(&self) -> Option<String> {
         let zone = global_prior_zone(self.mstore.as_deref(), &self.block_id);
-        let gfs = crate::backend::agent_session::global_transcript_store();
-        let global = zone.as_deref().zip(gfs.map(|g| &**g)).map(|(z, g)| (g, z));
+        // A zone found corrupt is left out: the packet is built from the pane's own transcript.
+        let gfs = zone.as_deref().and_then(crate::backend::transcript::damage::global_for);
+        let global = zone.as_deref().zip(gfs.as_deref()).map(|(z, g)| (g, z));
         let (tail, starts_mid_line) = packet_history_tail(
             self.filestore.as_deref(),
             &self.block_id,
@@ -778,8 +777,8 @@ pub(crate) fn pane_history_tail(
         return Some(tail);
     }
     let zone = global_prior_zone(mstore, block_id)?;
-    let gfs = crate::backend::agent_session::global_transcript_store()?;
-    read_transcript_tail(gfs, &zone, crate::backend::agent_session::OUTPUT_FILE, max_bytes)
+    let gfs = crate::backend::transcript::damage::global_for(&zone)?;
+    read_transcript_tail(&gfs, &zone, crate::backend::agent_session::OUTPUT_FILE, max_bytes)
 }
 
 /// The transcript a continuation packet is built from: the agent's global
@@ -821,11 +820,88 @@ pub(super) fn global_prior_zone(mstore: Option<&Store>, block_id: &str) -> Optio
 /// The last `max_bytes` of a transcript, and whether that window starts
 /// partway into the file (so its first line is a fragment).
 fn read_transcript_tail(fs: &FileStore, zone: &str, name: &str, max_bytes: i64) -> Option<(Vec<u8>, bool)> {
-    let file = fs.stat(zone, name).ok()??;
+    use crate::backend::transcript::damage;
+    let file = match fs.stat(zone, name) {
+        Ok(file) => file?,
+        Err(e) => {
+            damage::note_if_shared(fs, zone, "tail read", &e);
+            return None;
+        }
+    };
     if file.size <= 0 {
         return None;
     }
     let offset = (file.size - max_bytes).max(0);
-    let (actual_offset, data) = fs.read_at(zone, name, offset, file.size - offset).ok()?;
+    let (actual_offset, data) = match fs.read_at(zone, name, offset, file.size - offset) {
+        Ok(read) => read,
+        Err(e) => {
+            damage::note_if_shared(fs, zone, "tail read", &e);
+            return None;
+        }
+    };
     (!data.is_empty()).then_some((data, actual_offset > 0))
+}
+
+/// Whether `zone` of the shared store holds an `output`; a corrupt answer marks the zone damaged ([`damage`](crate::backend::transcript::damage))
+/// and is "no".
+fn global_zone_has_output(gfs: &FileStore, zone: &str) -> bool {
+    match gfs.stat(zone, crate::backend::agent_session::OUTPUT_FILE) {
+        Ok(file) => file.is_some_and(|f| f.size > 0),
+        Err(e) => {
+            crate::backend::transcript::damage::note_if_shared(gfs, zone, "resume check", &e);
+            false
+        }
+    }
+}
+
+#[cfg(test)]
+mod damage_tests {
+    use super::*;
+    use crate::backend::storage::filestore::{FileMeta, FileOpts};
+    use crate::backend::transcript::damage::{self, test_support};
+
+    const OWN: &[u8] = b"{\"type\":\"user\",\"own\":1}\n";
+
+    fn with_output(fs: &FileStore, zone: &str, name: &str, body: &[u8]) {
+        fs.make_file(zone, name, FileMeta::default(), FileOpts::default()).unwrap();
+        fs.append_lines(zone, name, body).unwrap();
+    }
+
+    #[test]
+    fn a_corrupt_shared_zone_has_no_prior_output_and_is_marked() {
+        let zone = "agent:resume-damage-1:current";
+        let gfs = FileStore::open_in_memory().unwrap();
+        with_output(&gfs, zone, "output", b"{\"g\":1}\n");
+        let _shared = test_support::register(&gfs);
+        assert!(global_zone_has_output(&gfs, zone), "healthy: as before");
+        test_support::corrupt(&gfs);
+        assert!(!global_zone_has_output(&gfs, zone));
+        assert!(damage::is_damaged(zone));
+    }
+
+    #[test]
+    fn the_continuation_packet_tail_comes_from_the_panes_own_transcript_when_the_shared_zone_is_corrupt() {
+        let zone = "agent:resume-damage-2:current";
+        let (own, gfs) = (FileStore::open_in_memory().unwrap(), FileStore::open_in_memory().unwrap());
+        with_output(&own, "blk-resume-damage-2", PERSISTENT_OUTPUT_SUBJECT, OWN);
+        with_output(&gfs, zone, "output", b"{\"g\":1}\n");
+        let _shared = test_support::register(&gfs);
+        let (tail, _) = packet_history_tail(Some(&own), "blk-resume-damage-2", Some((&gfs, zone)), 1000).unwrap();
+        assert_eq!(tail, b"{\"g\":1}\n", "healthy: the shared zone, as before");
+        test_support::corrupt(&gfs);
+        let (tail, _) = packet_history_tail(Some(&own), "blk-resume-damage-2", Some((&gfs, zone)), 1000).unwrap();
+        assert_eq!(tail, OWN, "the pane's own transcript builds the packet");
+        assert!(damage::is_damaged(zone));
+    }
+
+    #[test]
+    fn a_tail_read_error_that_is_not_corruption_marks_nothing() {
+        let zone = "agent:resume-damage-3:current";
+        let gfs = FileStore::open_in_memory().unwrap();
+        let _shared = test_support::register(&gfs);
+        gfs.conn().lock().unwrap().execute_batch("DROP TABLE db_wave_file;").unwrap();
+        assert!(read_transcript_tail(&gfs, zone, "output", 100).is_none());
+        assert!(!global_zone_has_output(&gfs, zone));
+        assert!(!damage::is_damaged(zone));
+    }
 }

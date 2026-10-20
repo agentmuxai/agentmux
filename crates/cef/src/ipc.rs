@@ -476,6 +476,10 @@ async fn route_command(
         "close_window_by_label" => commands::window::close_window_by_label(state, args),
 
         // ---- Clipboard (CEF can't use navigator.clipboard without permission policy) ----
+        "vault_reveal" => commands::vault::reveal(state, args).await,
+        "vault_copy" => commands::vault::copy(state, args).await,
+        "vault_export" => commands::vault_files::export(state, args).await,
+        "vault_import" => commands::vault_files::import(state, args).await,
         "read_clipboard" => commands::clipboard::read_clipboard(),
         "write_clipboard" => commands::clipboard::write_clipboard(args),
         "read_clipboard_attachments" => commands::clipboard::read_clipboard_attachments(),
@@ -781,6 +785,18 @@ async fn route_command(
             // The log names the operation, never what it carries.
             let body = args.clone();
             let op = body.get("op").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            // These are only ever sent by the host's own commands (vault_reveal and
+            // vault_copy), after the OS has confirmed the person: a value is only
+            // fetched then, and only then is a copy reported. The page can't send
+            // them through here.
+            if matches!(op.as_str(), "reveal" | "record_copy") {
+                return Err("that is only done by Reveal and Copy, after Windows Hello confirms it's you".to_string());
+            }
+            // A file path is only ever one the person chose in the host's own
+            // dialog (vault_export, vault_import), never one the page names.
+            if matches!(op.as_str(), "export" | "import_inspect") {
+                return Err("export and import choose their file in a window of their own".to_string());
+            }
             let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
             let auth_key = state.auth_key.lock().clone();
             let ipc_token = state.ipc_token.clone();

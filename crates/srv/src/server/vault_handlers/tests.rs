@@ -188,3 +188,70 @@ async fn a_malformed_entry_is_refused_without_quoting_its_value() {
     assert_eq!(s, StatusCode::BAD_REQUEST);
     assert!(!body.to_string().contains("123456789"), "{body}");
 }
+
+// Only the host can fetch a value (after the OS confirmed the person); an agent holding the instance key can't.
+#[tokio::test]
+async fn only_the_host_can_fetch_a_value() {
+    let app = app().await;
+    let (_, body) = send(&app, post("/api/v1/host/vault", &[HOST], new_ssn())).await;
+    let id = body["data"]["id"].as_str().unwrap().to_string();
+    let ask = json!({ "op": "reveal", "id": id, "part": "value", "action": "copied" });
+    let (s, body) = send(&app, post("/api/v1/host/vault", &[], ask.clone())).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    assert!(!body.to_string().contains("123-45"), "{body}");
+    let (s, body) = send(&app, post("/api/v1/host/vault", &[HOST], ask)).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(body["data"]["value"], "123-45-6789");
+    // Nothing an agent can read carries it.
+    let (_, listed) = send(&app, get("/api/v1/vault")).await;
+    assert!(!listed.to_string().contains("123-45"));
+    let (_, act) = send(&app, post("/api/v1/host/vault", &[HOST], json!({ "op": "activity" }))).await;
+    assert!(!act.to_string().contains("copied"), "fetching for a copy isn't a copy: {act}");
+    let report = json!({ "op": "record_copy", "id": id, "part": "value", "done": true });
+    let (s, _) = send(&app, post("/api/v1/host/vault", &[], report.clone())).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "an agent can't write the audit trail");
+    let (s, _) = send(&app, post("/api/v1/host/vault", &[HOST], report)).await;
+    assert_eq!(s, StatusCode::OK);
+    let (_, act) = send(&app, post("/api/v1/host/vault", &[HOST], json!({ "op": "activity" }))).await;
+    assert!(act.to_string().contains("copied") && !act.to_string().contains("123-45"), "{act}");
+}
+
+// Export and import go through the host only, and a value is never in what comes back.
+#[tokio::test]
+async fn export_and_import_work_through_the_host_without_a_value_in_any_answer() {
+    let app = app().await;
+    let host = |body: Value| post("/api/v1/host/vault", &[HOST], body);
+    send(&app, host(new_ssn())).await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("out.vault").to_string_lossy().into_owned();
+    let export = json!({ "op": "export", "path": path, "passphrase": "correct horse battery staple" });
+
+    let (s, _) = send(&app, post("/api/v1/host/vault", &[], export.clone())).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "an agent can't export");
+    let (s, body) = send(&app, host(json!({ "op": "export", "path": "relative.vault", "passphrase": "correct horse battery staple" }))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{body}");
+    let (s, body) = send(&app, host(export)).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!((body["data"]["count"].clone(), body["data"]["file_name"].clone()), (json!(1), json!("out.vault")));
+
+    let (_, body) = send(&app, host(json!({ "op": "import_inspect", "path": path }))).await;
+    assert_eq!(body["data"]["needs_passphrase"], true);
+    let (s, body) = send(&app, host(json!({ "op": "import_inspect", "path": path, "passphrase": "wrong wrong wrong" }))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert!(body.to_string().contains("didn't open"));
+    let (_, body) = send(&app, host(json!({ "op": "import_inspect", "path": path, "passphrase": "correct horse battery staple" }))).await;
+    assert!(!body.to_string().contains("123-45"), "{body}");
+    let token = body["data"]["preview"]["token"].as_str().unwrap().to_string();
+    assert_eq!(body["data"]["preview"]["duplicates"], 1);
+    let (s, body) = send(&app, host(json!({ "op": "import_commit", "token": token, "duplicates": "keep_both" }))).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["result"]["added"], 1);
+    assert!(!body.to_string().contains("123-45"));
+    let (_, listed) = send(&app, get("/api/v1/vault")).await;
+    assert_eq!(listed["entries"].as_array().unwrap().len(), 2);
+    let (s, body) = send(&app, host(json!({ "op": "import_commit", "token": "nope", "duplicates": "skip" }))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert!(body.to_string().contains("expired"));
+    let (_, p) = send(&app, host(json!({ "op": "suggest_passphrase" }))).await;
+    assert_eq!(p["data"]["passphrase"].as_str().unwrap().split('-').count(), 8);
+}

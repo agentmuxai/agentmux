@@ -207,7 +207,7 @@ pub(crate) fn compute_and_ensure_bundle_dir(
 /// Direct-account sibling of `compute_and_ensure_bundle_dir` (issue
 /// #1624 PR-C Part B) — bypasses the bundle system entirely. Mints a
 /// fresh `account_id` when `existing_account_id` is empty (first-time
-/// OAuth connect from the launch modal); reuses it when non-empty
+/// OAuth connect); reuses it when non-empty
 /// (Reconnect — refresh tokens in place, same isolation dir, same
 /// account row updated in place).
 ///

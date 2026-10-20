@@ -306,7 +306,7 @@ pub struct AgentInstance {
     pub created_at: i64,
     /// Legacy Identity-bundle id column — `db_identity_bundles` was
     /// dropped in Phase 4c of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md.
-    /// The launch modal now writes an account_id here instead; credential
+    /// A launch now writes an account_id here instead; credential
     /// resolution and display names both go through
     /// `db_agent_identity_links`/`db_accounts`. Empty string means no
     /// account was picked at launch.
@@ -314,12 +314,12 @@ pub struct AgentInstance {
     pub identity_id: String,
     /// FK to `db_bundles.id`. Empty string means "use the blank
     /// singleton" (= vanilla CLI, no instructions). Set at
-    /// instantiation via the launch modal's Bundle dropdown.
+    /// instantiation from the agent's first bundle.
     #[serde(default)]
     pub memory_id: String,
     /// User-chosen instance name (becomes `AGENTMUX_AGENT_ID` in the
     /// spawn env). Empty for pre-v8 rows and for un-named launches.
-    /// Drives the "Continue agent" dropdown in the launch modal.
+    /// Drives `listnamedagents` (My Agents).
     #[serde(default)]
     pub instance_name: String,
     /// Absolute path returned by `allocate_agent_workdir` at spawn.

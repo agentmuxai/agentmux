@@ -5,11 +5,15 @@
 //! per-agent bookkeeping behind the resume note. Pure: times come in as
 //! unix ms, and [`hhmm`] is the one place they become wall-clock text.
 //!
+//! Each note waits for its agent's next turn (`reactive::held_notes`), one
+//! per [`Note::key`]: a pause that ends before that turn reaches the agent as
+//! one [`outage_note`] instead of a pause note and a resume note.
+//!
 //! Every note starts with [`NOTE_MARKER`]. Only srv writes one:
 //! `reactive::sanitize::neutralize_markers` quotes the marker inside any jekt
 //! or forwarded text, the way it quotes `[BROADCAST:`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde::Deserialize;
 
@@ -165,6 +169,19 @@ pub fn pause_note(since_ms: i64, reason: &str) -> String {
     )
 }
 
+/// The note an agent gets in place of a pause note still waiting for its
+/// turn when delivery resumes at `until_ms`. `again`: an earlier outage's
+/// note, from `since_ms`, was waiting too.
+pub fn outage_note(since_ms: i64, until_ms: i64, reason: &str, again: bool) -> String {
+    format!(
+        "{NOTE_MARKER} Cloud messages were paused {}{}\u{2013}{} ({reason}). Review and CI notices from that time may \
+         not have arrived; check your PRs directly.",
+        if again { "on and off " } else { "" },
+        hhmm(since_ms),
+        hhmm(until_ms)
+    )
+}
+
 /// The note an agent gets when delivery resumes. `delivered` is `None` when
 /// its first pull after resuming didn't come in time to count.
 pub fn resume_note(at_ms: i64, delivered: Option<usize>, expired: &[ExpiredItem]) -> String {
@@ -200,11 +217,47 @@ pub fn delayed_prefix(created_ms: Option<i64>, now_ms: i64) -> String {
     }
 }
 
-/// A note for one agent, ready to deliver.
+/// A note for one agent, ready to hold for its next turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Note {
     pub agent: String,
     pub text: String,
+    pub kind: NoteKind,
+}
+
+/// What a note says, which decides the one slot it waits in ([`Note::key`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NoteKind {
+    Paused,
+    /// An [`outage_note`], held only in place of the agent's waiting pause
+    /// note. `seen` is held instead when that note went with a turn already.
+    Outage { seen: String },
+    Resumed,
+    Expired,
+}
+
+/// Where a pause note waits.
+pub const PAUSED_KEY: &str = "muxbus:paused";
+/// Where an outage note waits.
+pub const OUTAGE_KEY: &str = "muxbus:outage";
+/// Where a resume note waits.
+pub const RESUMED_KEY: &str = "muxbus:resumed";
+
+impl Note {
+    fn new(agent: &str, text: String, kind: NoteKind) -> Note {
+        Note { agent: agent.to_string(), text, kind }
+    }
+
+    /// The slot this note waits in; a newer note in it replaces this one.
+    /// Expiry notes differ by what expired, so only a repeat replaces one.
+    pub fn key(&self) -> String {
+        match self.kind {
+            NoteKind::Paused => PAUSED_KEY.to_string(),
+            NoteKind::Outage { .. } => OUTAGE_KEY.to_string(),
+            NoteKind::Resumed => RESUMED_KEY.to_string(),
+            NoteKind::Expired => format!("muxbus:expired:{}", self.text),
+        }
+    }
 }
 
 /// Which agents were told delivery paused, and which still await their
@@ -218,6 +271,9 @@ pub struct NoteBook {
     /// Since when delivery is back, and the agents whose resume note waits
     /// for their first pull.
     resume: Option<(i64, HashSet<String>)>,
+    /// Since when each agent's last outage note says delivery was paused,
+    /// should that note still be waiting when the next pause ends.
+    outage_since: HashMap<String, i64>,
 }
 
 impl NoteBook {
@@ -235,20 +291,45 @@ impl NoteBook {
         let mut out = Vec::new();
         for agent in agents {
             if self.told_paused.insert(agent.clone()) {
-                out.push(Note { agent: agent.clone(), text: pause_note(since_ms, reason) });
+                out.push(Note::new(agent, pause_note(since_ms, reason), NoteKind::Paused));
             }
         }
         out
     }
 
-    /// Delivery is back: every agent told about the pause gets a resume
-    /// note after its first pull (see [`Self::fetched`]).
-    pub fn resumed(&mut self, at_ms: i64) {
-        self.pause = None;
-        let told = std::mem::take(&mut self.told_paused);
-        if !told.is_empty() {
-            self.resume = Some((at_ms, told));
+    /// The agents told about the current pause.
+    pub fn told_paused(&self) -> Vec<String> {
+        let mut agents: Vec<String> = self.told_paused.iter().cloned().collect();
+        agents.sort();
+        agents
+    }
+
+    /// Delivery is back at `at_ms`. An agent whose pause note still waits
+    /// (`waiting(agent, PAUSED_KEY)`) gets an outage note in its place now,
+    /// going back to an earlier outage whose note waits too
+    /// (`waiting(agent, OUTAGE_KEY)`). Every other agent told about the pause
+    /// gets a resume note after its first pull (see [`Self::fetched`]).
+    pub fn resumed(&mut self, at_ms: i64, waiting: impl Fn(&str, &str) -> bool) -> Vec<Note> {
+        let pause = self.pause.take();
+        let mut told: Vec<String> = std::mem::take(&mut self.told_paused).into_iter().collect();
+        told.sort();
+        let mut out = Vec::new();
+        let mut after_pull = HashSet::new();
+        for agent in told {
+            let Some((since_ms, reason)) = pause.filter(|_| waiting(&agent, PAUSED_KEY)) else {
+                after_pull.insert(agent);
+                continue;
+            };
+            let earlier = self.outage_since.get(&agent).copied().filter(|s| *s < since_ms && waiting(&agent, OUTAGE_KEY));
+            let from = earlier.unwrap_or(since_ms);
+            self.outage_since.insert(agent.clone(), from);
+            let text = outage_note(from, at_ms, reason, earlier.is_some());
+            out.push(Note::new(&agent, text, NoteKind::Outage { seen: resume_note(at_ms, None, &[]) }));
         }
+        if !after_pull.is_empty() {
+            self.resume = Some((at_ms, after_pull));
+        }
+        out
     }
 
     /// An agent's pull came back with `delivered` messages and `expired`
@@ -260,10 +341,10 @@ impl NoteBook {
                 if waiting.is_empty() {
                     self.resume = None;
                 }
-                return Some(Note { agent: agent.to_string(), text });
+                return Some(Note::new(agent, text, NoteKind::Resumed));
             }
         }
-        expired_note(expired).map(|text| Note { agent: agent.to_string(), text })
+        expired_note(expired).map(|text| Note::new(agent, text, NoteKind::Expired))
     }
 
     /// Resume notes still waiting after [`RESUME_NOTE_GRACE_MS`] go out
@@ -279,17 +360,17 @@ impl NoteBook {
         let Some((at_ms, waiting)) = self.resume.take() else { return Vec::new() };
         let mut agents: Vec<String> = waiting.into_iter().collect();
         agents.sort();
-        agents.into_iter().map(|agent| Note { agent, text: resume_note(at_ms, None, &[]) }).collect()
+        agents.into_iter().map(|agent| Note::new(&agent, resume_note(at_ms, None, &[]), NoteKind::Resumed)).collect()
     }
 }
 
-/// Tries for a note whose local delivery failed (one per tick), before it is
-/// given up with a warning.
+/// Tries for a note that couldn't be held (one per tick), before it is given
+/// up with a warning.
 pub const NOTE_ATTEMPTS: u32 = 8;
 
-/// Notes whose local delivery failed (the agent's input was briefly
-/// unavailable, say), retried on later ticks: the [`NoteBook`] has already
-/// counted them as told, so it won't produce them again.
+/// Notes that couldn't be held (the agent wasn't registered for a moment,
+/// say), retried on later ticks: the [`NoteBook`] has already counted them
+/// as told, so it won't produce them again.
 #[derive(Debug, Default)]
 pub struct RetryQueue {
     notes: Vec<(Note, u32)>,
@@ -313,12 +394,9 @@ impl RetryQueue {
 
     /// Delivery is back: a pause note still waiting would now be false.
     pub fn drop_pause_notes(&mut self) {
-        self.notes.retain(|(note, _)| !note.text.starts_with(PAUSE_NOTE_START));
+        self.notes.retain(|(note, _)| note.kind != NoteKind::Paused);
     }
 }
-
-/// How every pause note begins (see [`pause_note`]).
-const PAUSE_NOTE_START: &str = "[AgentMux] Cloud messages are paused";
 
 #[cfg(test)]
 mod tests {
@@ -328,12 +406,10 @@ mod tests {
 
     #[test]
     fn a_failed_note_is_retried_a_few_times_and_a_stale_pause_note_dropped() {
-        let note = |text: String| Note { agent: "a".into(), text };
         let mut q = RetryQueue::default();
-        assert!(pause_note(T0, "x").starts_with(PAUSE_NOTE_START));
-        assert!(q.failed(note(pause_note(T0, "x")), 1));
-        assert!(q.failed(note(resume_note(T0, Some(1), &[])), 1));
-        assert!(!q.failed(note("last try".into()), NOTE_ATTEMPTS), "given up after the last try");
+        assert!(q.failed(Note::new("a", pause_note(T0, "x"), NoteKind::Paused), 1));
+        assert!(q.failed(Note::new("a", resume_note(T0, Some(1), &[]), NoteKind::Resumed), 1));
+        assert!(!q.failed(Note::new("a", "last try".into(), NoteKind::Expired), NOTE_ATTEMPTS), "given up after the last try");
         q.drop_pause_notes();
         let due = q.take();
         assert_eq!(due.len(), 1);
@@ -438,6 +514,14 @@ mod tests {
             expired_note(&expired[1..]).unwrap(),
             "[AgentMux] Cloud messages expired undelivered: 1 message from agentx."
         );
+        let until = hhmm(T0 + 17 * 60_000);
+        assert_eq!(
+            outage_note(T0, T0 + 17 * 60_000, "MuxBus needs a sign-in", false),
+            format!(
+                "[AgentMux] Cloud messages were paused {since}\u{2013}{until} (MuxBus needs a sign-in). Review and CI \
+                 notices from that time may not have arrived; check your PRs directly."
+            )
+        );
     }
 
     #[test]
@@ -476,7 +560,7 @@ mod tests {
     fn the_resume_note_waits_for_the_agents_first_pull_and_counts_it() {
         let mut book = NoteBook::default();
         book.pause(T0, "MuxBus needs a sign-in", &agents(&["a", "b"]));
-        book.resumed(T0 + 600_000);
+        book.resumed(T0 + 600_000, seen);
         assert!(book.pause_late_joiners(&agents(&["z"])).is_empty(), "no pause notes after resuming");
         let note = book.fetched("a", 3, &[]).unwrap();
         assert_eq!(note.text, resume_note(T0 + 600_000, Some(3), &[]));
@@ -484,7 +568,7 @@ mod tests {
         // `b` never pulls: its note goes out without a count after the grace.
         assert!(book.tick(T0 + 600_000 + RESUME_NOTE_GRACE_MS - 1).is_empty());
         let late = book.tick(T0 + 600_000 + RESUME_NOTE_GRACE_MS);
-        assert_eq!(late, [Note { agent: "b".into(), text: resume_note(T0 + 600_000, None, &[]) }]);
+        assert_eq!(late, [Note::new("b", resume_note(T0 + 600_000, None, &[]), NoteKind::Resumed)]);
         assert!(book.tick(T0 + 10 * RESUME_NOTE_GRACE_MS).is_empty());
     }
 
@@ -492,10 +576,10 @@ mod tests {
     fn an_agent_never_told_of_a_pause_gets_no_resume_note() {
         let mut book = NoteBook::default();
         book.pause(T0, "x", &agents(&["a"]));
-        book.resumed(T0 + 1);
+        book.resumed(T0 + 1, seen);
         assert_eq!(book.fetched("newcomer", 2, &[]), None);
         let mut quiet = NoteBook::default();
-        quiet.resumed(T0);
+        quiet.resumed(T0, seen);
         assert_eq!(quiet.fetched("a", 1, &[]), None, "no pause note, no resume note");
     }
 
@@ -507,7 +591,7 @@ mod tests {
         assert_eq!(note.text, "[AgentMux] Cloud messages expired undelivered: CI notices for PR #54 (check their current state).");
         // Inside a resume, they go in the resume note instead.
         book.pause(T0, "x", &agents(&["a"]));
-        book.resumed(T0 + 1);
+        book.resumed(T0 + 1, seen);
         let note = book.fetched("a", 2, &expired).unwrap();
         assert!(note.text.contains("resumed at") && note.text.contains("expired undelivered while paused: CI notices"));
     }
@@ -516,10 +600,68 @@ mod tests {
     fn a_new_pause_flushes_resume_notes_still_waiting() {
         let mut book = NoteBook::default();
         book.pause(T0, "x", &agents(&["a"]));
-        book.resumed(T0 + 1);
+        book.resumed(T0 + 1, seen);
         let notes = book.pause(T0 + 2, "x", &agents(&["a"]));
         assert_eq!(notes.len(), 2, "{notes:?}");
         assert!(notes[0].text.contains("resumed at"));
         assert!(notes[1].text.contains("paused since"));
+    }
+
+    /// Every agent's pause note already went with a turn.
+    fn seen(_: &str, _: &str) -> bool {
+        false
+    }
+
+    #[test]
+    fn a_pause_and_its_end_before_the_agents_next_turn_are_one_note() {
+        let mut book = NoteBook::default();
+        book.pause(T0, "AgentMux can't reach MuxBus", &agents(&["a", "b"]));
+        let end = T0 + 17 * 60_000;
+        // `a` had no turn since its pause note; `b` did.
+        let notes = book.resumed(end, |agent, key| agent == "a" && key == PAUSED_KEY);
+        let expected = format!(
+            "[AgentMux] Cloud messages were paused {}\u{2013}{} (AgentMux can't reach MuxBus). Review and CI notices \
+             from that time may not have arrived; check your PRs directly.",
+            hhmm(T0),
+            hhmm(end)
+        );
+        assert_eq!(notes, [Note::new("a", expected, NoteKind::Outage { seen: resume_note(end, None, &[]) })]);
+        assert_eq!(notes[0].key(), OUTAGE_KEY);
+        assert_eq!(book.fetched("a", 2, &[]), None, "no resume note on top of it");
+        assert_eq!(book.fetched("b", 2, &[]).map(|n| n.kind), Some(NoteKind::Resumed), "b saw the pause");
+    }
+
+    #[test]
+    fn outages_before_the_agents_next_turn_stay_one_note() {
+        let mut book = NoteBook::default();
+        book.pause(T0, "x", &agents(&["a"]));
+        book.resumed(T0 + 60_000, |_, key| key == PAUSED_KEY);
+        book.pause(T0 + 120_000, "MuxBus needs a sign-in", &agents(&["a"]));
+        // The first outage's note still waits along with the new pause note.
+        let notes = book.resumed(T0 + 180_000, |_, _| true);
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].key(), OUTAGE_KEY, "it replaces the first one");
+        assert!(
+            notes[0].text.starts_with(&format!("[AgentMux] Cloud messages were paused on and off {}\u{2013}", hhmm(T0))),
+            "{}",
+            notes[0].text
+        );
+        assert!(notes[0].text.contains("(MuxBus needs a sign-in)"), "the latest reason");
+        // Once that note went with a turn, the next outage starts afresh.
+        book.pause(T0 + 240_000, "x", &agents(&["a"]));
+        let notes = book.resumed(T0 + 300_000, |_, key| key == PAUSED_KEY);
+        assert!(notes[0].text.contains(&format!("paused {}\u{2013}", hhmm(T0 + 240_000))), "{}", notes[0].text);
+    }
+
+    #[test]
+    fn each_kind_of_note_waits_in_one_slot() {
+        let mut book = NoteBook::default();
+        let pause = book.pause(T0, "x", &agents(&["a"])).remove(0);
+        assert_eq!(pause.key(), PAUSED_KEY);
+        let ci = [item(ExpiredKind::Ci, "g", Some("54"))];
+        let review = [item(ExpiredKind::Review, "g", Some("55"))];
+        let (one, other) = (book.fetched("z", 0, &ci).unwrap(), book.fetched("z", 0, &review).unwrap());
+        assert_eq!(one.key(), book.fetched("z", 0, &ci).unwrap().key(), "a repeat replaces it");
+        assert_ne!(one.key(), other.key(), "a different expiry doesn't");
     }
 }

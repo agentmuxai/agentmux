@@ -13,9 +13,13 @@ import type { VaultActivity } from "@/types/rpc/VaultActivity";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
 import type { VaultSection } from "@/types/rpc/VaultSection";
 import { VaultEntries } from "./vault-entries";
+import { VaultExportDialog } from "./vault-export";
+import { VaultImportDialog } from "./vault-import";
 import { VaultEntryForm, type VaultFormTarget } from "./vault-entry-form";
 import { formatWhen } from "./vault-format";
 import { SECTION_LABELS, vaultKind, type VaultPaneSection } from "./vault-kinds";
+import { vaultPromptNotes } from "./vault-prompts";
+import { getPlatform } from "@/util/platformutil";
 import type { VaultViewModel } from "./vault-model";
 import {
     declineRequest,
@@ -89,6 +93,23 @@ function VaultRequests(props: { onFill: (r: VaultRequest) => void }): JSX.Elemen
                 </Show>
             </div>
         </Show>
+    );
+}
+
+/** What may ask the person while they use the Vault, said before it does. */
+function VaultPromptsNote(props: { onClose: () => void }): JSX.Element {
+    return (
+        <div class="vault-prompts" role="note" aria-label="What the Vault may ask you">
+            <div class="vault-prompts-text">
+                <strong>What the Vault may ask you</strong>
+                <ul>
+                    <For each={vaultPromptNotes(getPlatform())}>{(line) => <li>{line}</li>}</For>
+                </ul>
+            </div>
+            <Button tone="quiet" density="compact" onClick={props.onClose}>
+                Got it
+            </Button>
+        </div>
     );
 }
 
@@ -244,6 +265,9 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
                         when={vaultAvailable()}
                         fallback={<div class="warden-section-stub vault-unavailable">The Vault needs the AgentMux desktop app.</div>}
                     >
+                        <Show when={model.promptsOpen()}>
+                            <VaultPromptsNote onClose={() => model.setMeta({ "vault:prompts-read": true })} />
+                        </Show>
                         <VaultRequests onFill={fill} />
                         <Show when={vaultError() ?? vaultProblem()}>
                             <div class="warden-manager-error vault-problem" role="alert">
@@ -266,6 +290,12 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
                             </div>
                         </TabbedPane>
                         <Show when={form()}>{(target) => <VaultEntryForm target={target()} onClose={() => setForm(null)} />}</Show>
+                        <Show when={model.transfer() === "export"}>
+                            <VaultExportDialog onClose={() => model.openTransfer(null)} />
+                        </Show>
+                        <Show when={model.transfer() === "import"}>
+                            <VaultImportDialog onClose={() => model.openTransfer(null)} />
+                        </Show>
                     </Show>
                 </div>
             </div>

@@ -6,7 +6,6 @@
 
 use crate::backend::storage::filestore::FileStore;
 
-use super::global_store::global_transcript_store;
 use super::helpers::{ensure_file, write_zone_file};
 use super::zone_naming::{agent_current_zone, is_valid_definition_id, validate_and_current};
 
@@ -43,7 +42,8 @@ pub fn write_session_state(
 ) -> Result<(), String> {
     let zone = validate_and_current(definition_id)?;
     write_zone_file(filestore, &zone, SNAPSHOT_FILE, content)?;
-    if let Some(gfs) = global_transcript_store() {
+    // A zone found corrupt is not mirrored to: this channel's copy above is the one kept.
+    if let Some(gfs) = crate::backend::transcript::damage::global_for(&zone) {
         // The GLOBAL mirror must be AGENT-anchored, not channel-anchored.
         // `sourceBlockId` names the LOCAL block whose `output` a restore reads,
         // and that id only exists in the writing channel. A different channel
@@ -55,8 +55,10 @@ pub fn write_session_state(
         // above keeps the real id for same-channel restore. See
         // docs/retro/retro-legacy-agent-history-cross-channel-2026-06-16.md.
         let global_content = normalize_snapshot_for_global(content);
-        if let Err(e) = write_zone_file(gfs, &zone, SNAPSHOT_FILE, &global_content) {
-            tracing::warn!(zone = %zone, error = %e, "global transcripts: snapshot mirror failed");
+        if let Err(e) = write_zone_file(&gfs, &zone, SNAPSHOT_FILE, &global_content) {
+            if !crate::backend::transcript::damage::note_corrupt_text(&zone, "snapshot mirror", &e) {
+                tracing::warn!(zone = %zone, error = %e, "global transcripts: snapshot mirror failed");
+            }
         }
     }
     Ok(())
@@ -167,6 +169,16 @@ pub fn read_session_state(
     definition_id: &str,
 ) -> Result<(Option<String>, Option<i64>), String> {
     let zone = validate_and_current(definition_id)?;
+    let global = crate::backend::transcript::damage::global_for(&zone);
+    read_session_state_in(filestore, global.as_deref(), &zone)
+}
+
+/// [`read_session_state`] with the global store given (`None`: none, or the agent's zone in it found corrupt).
+pub(crate) fn read_session_state_in(
+    filestore: &FileStore,
+    global: Option<&FileStore>,
+    zone: &str,
+) -> Result<(Option<String>, Option<i64>), String> {
     // Read the global store first: it always holds the agent-anchored
     // (sourceBlockId="") snapshot. The per-channel copy carries the
     // writing channel's local block id, which is stale the moment any
@@ -174,12 +186,16 @@ pub fn read_session_state(
     // Preferring global ensures cross-channel opens never get a foreign
     // sourceBlockId — the root cause of the blank-pane regression.
     // Per-channel is the fallback for pre-global-store builds only.
-    if let Some(gfs) = global_transcript_store() {
-        if let Some(found) = read_snapshot_from(gfs, &zone)? {
-            return Ok((Some(found.0), Some(found.1)));
+    if let Some(gfs) = global {
+        match read_snapshot_from(gfs, zone) {
+            Ok(Some(found)) => return Ok((Some(found.0), Some(found.1))),
+            Ok(None) => {}
+            // A corrupt shared zone falls through to this channel's copy.
+            Err(e) if crate::backend::transcript::damage::note_corrupt_text(zone, "snapshot read", &e) => {}
+            Err(e) => return Err(e),
         }
     }
-    if let Some(found) = read_snapshot_from(filestore, &zone)? {
+    if let Some(found) = read_snapshot_from(filestore, zone)? {
         return Ok((Some(found.0), Some(found.1)));
     }
     Ok((None, None))
@@ -198,4 +214,33 @@ pub(super) fn read_snapshot_from(store: &FileStore, zone: &str) -> Result<Option
         .map_err(|e| format!("read_file: {e}"))?
         .unwrap_or_default();
     Ok(Some((String::from_utf8_lossy(&bytes).into_owned(), file.modts)))
+}
+
+#[cfg(test)]
+mod damage_tests {
+    use super::*;
+    use crate::backend::transcript::damage::{self, test_support};
+
+    #[test]
+    fn a_corrupt_shared_snapshot_is_read_from_this_channels_copy_and_marks_the_zone() {
+        let zone = "agent:snap-damage-1:current";
+        let (own, gfs) = (FileStore::open_in_memory().unwrap(), FileStore::open_in_memory().unwrap());
+        write_zone_file(&own, zone, SNAPSHOT_FILE, b"{\"own\":1}").unwrap();
+        write_zone_file(&gfs, zone, SNAPSHOT_FILE, b"{\"global\":1}").unwrap();
+        // Healthy: the shared copy wins, as before.
+        assert_eq!(read_session_state_in(&own, Some(&gfs), zone).unwrap().0.as_deref(), Some("{\"global\":1}"));
+        test_support::corrupt(&gfs);
+        let (text, _) = read_session_state_in(&own, Some(&gfs), zone).unwrap();
+        assert_eq!(text.as_deref(), Some("{\"own\":1}"), "the channel's copy answers");
+        assert!(damage::is_damaged(zone));
+    }
+
+    #[test]
+    fn a_read_error_that_is_not_corruption_is_still_an_error() {
+        let zone = "agent:snap-damage-2:current";
+        let (own, gfs) = (FileStore::open_in_memory().unwrap(), FileStore::open_in_memory().unwrap());
+        gfs.conn().lock().unwrap().execute_batch("DROP TABLE db_wave_file;").unwrap();
+        assert!(read_session_state_in(&own, Some(&gfs), zone).is_err());
+        assert!(!damage::is_damaged(zone));
+    }
 }

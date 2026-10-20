@@ -30,6 +30,10 @@
             "dataType": "CommandAgentAnswerData"
         },
         {
+            "command": "agentapiretry",
+            "method": "AgentApiRetryCommand"
+        },
+        {
             "command": "agentcancel",
             "method": "AgentCancelCommand"
         },
@@ -629,6 +633,24 @@
         {
             "command": "installtool",
             "method": "InstallToolCommand"
+        },
+        {
+            "command": "kanban.act",
+            "method": "KanbanActCommand",
+            "dataType": "import(\"@/app/view/warden-kanban/kanban-types\").KanbanActRequest",
+            "returns": "import(\"@/app/view/warden-kanban/kanban-types\").KanbanActResult"
+        },
+        {
+            "command": "kanban.list",
+            "method": "KanbanListCommand",
+            "dataType": "Record<string, never>",
+            "returns": "import(\"@/app/view/warden-kanban/kanban-types\").KanbanBoard"
+        },
+        {
+            "command": "kanban.task",
+            "method": "KanbanTaskCommand",
+            "dataType": "{ id: string }",
+            "returns": "import(\"@/app/view/warden-kanban/kanban-types\").KanbanTaskDetail"
         },
         {
             "command": "linkagentidentity",

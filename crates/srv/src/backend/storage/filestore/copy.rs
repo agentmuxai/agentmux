@@ -8,7 +8,7 @@
 
 use rusqlite::{params, OptionalExtension};
 
-use super::core::FileStore;
+use super::core::{FileStore, PART_DATA_SIZE};
 use super::counter::new_gen;
 use crate::backend::storage::error::StoreError;
 
@@ -110,6 +110,77 @@ impl FileStore {
         })?;
         // Rows this process may have cached for the destination are stale.
         self.forget_cached(dst_zone, names);
+        Ok(copied)
+    }
+
+    /// Copy the first `len` bytes of each `(name, len)` from `src_zone` into
+    /// `dst_zone`, in one transaction, like [`Self::copy_files_to_zone`]: the
+    /// fork of an older session starts with its parent's transcript up to where
+    /// that session ends, and the sidecar up to the same point. A `len` past the
+    /// file's size takes the whole file; a name the source lacks is skipped.
+    /// Copies nothing and returns `Ok(None)` when `dst_zone` already holds any
+    /// of the names. The copies are uncounted (the counter catches up).
+    #[track_caller]
+    pub fn copy_prefixes_to_zone(&self, src_zone: &str, dst_zone: &str, prefixes: &[(&str, i64)]) -> Result<Option<u64>, StoreError> {
+        let now = agentmux_common::time::now_ms();
+        let pds = PART_DATA_SIZE as i64;
+        let copied = self.write_txn(|tx| {
+            for (name, _) in prefixes {
+                let exists = tx
+                    .query_row(
+                        "SELECT 1 FROM db_wave_file WHERE zoneid = ?1 AND name = ?2",
+                        params![dst_zone, name],
+                        |_| Ok(()),
+                    )
+                    .optional()?
+                    .is_some();
+                if exists {
+                    return Ok(None);
+                }
+            }
+            let mut copied = 0u64;
+            for (name, len) in prefixes {
+                let src: Option<(i64, String, String)> = tx
+                    .query_row(
+                        "SELECT size, opts, meta FROM db_wave_file WHERE zoneid = ?1 AND name = ?2",
+                        params![src_zone, name],
+                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                    )
+                    .optional()?;
+                let Some((size, opts, meta)) = src else { continue };
+                let len = (*len).clamp(0, size);
+                // Parts before the file row, as copy_files_to_zone does.
+                let whole = (len / pds) as i32;
+                tx.execute(
+                    "INSERT INTO db_file_data (zoneid, name, partidx, data)
+                     SELECT ?1, name, partidx, data FROM db_file_data
+                     WHERE zoneid = ?2 AND name = ?3 AND partidx < ?4",
+                    params![dst_zone, src_zone, name, whole],
+                )?;
+                let rest = (len % pds) as usize;
+                if rest > 0 {
+                    let part: Vec<u8> = tx.query_row(
+                        "SELECT data FROM db_file_data WHERE zoneid = ?1 AND name = ?2 AND partidx = ?3",
+                        params![src_zone, name, whole],
+                        |r| r.get(0),
+                    )?;
+                    tx.execute(
+                        "INSERT INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
+                        params![dst_zone, name, whole, &part[..rest.min(part.len())]],
+                    )?;
+                }
+                tx.execute(
+                    "INSERT INTO db_wave_file (zoneid, name, size, createdts, modts, opts, meta,
+                         gen, lines, lines_size, lines_tail, lines_modts, rev, lines_rev)
+                     VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6, ?7, 0, 0, 0, ?4, 0, 0)",
+                    params![dst_zone, name, len, now, opts, meta, new_gen()],
+                )?;
+                copied += len as u64;
+            }
+            Ok(Some(copied))
+        })?;
+        let names: Vec<&str> = prefixes.iter().map(|(n, _)| *n).collect();
+        self.forget_cached(dst_zone, &names);
         Ok(copied)
     }
 

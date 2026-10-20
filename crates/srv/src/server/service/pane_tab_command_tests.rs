@@ -103,7 +103,7 @@ async fn stack_b_onto_a(state: &AppState, tab_id: &str, a: &str, b: &str) {
         },
     )
     .await;
-    super::layout_helpers::queue_target_stack_push(state, tab_id, b, a).await.unwrap();
+    super::layout_helpers::queue_target_stack_push(state, tab_id, b, a, true).await.unwrap();
 }
 
 fn members(tree: &Option<LayoutNode>) -> Vec<String> {

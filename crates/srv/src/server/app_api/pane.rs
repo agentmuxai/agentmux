@@ -1205,7 +1205,7 @@ pub async fn open_pane(state: &AppState, mut cmd: CommandPaneOpenData) -> Result
         }
         crate::server::service::publish_events(state, &events);
         if let Err(e) =
-            crate::server::service::layout_helpers::queue_target_stack_push(state, &tab_id, &block_id, &target).await
+            crate::server::service::layout_helpers::queue_target_stack_push(state, &tab_id, &block_id, &target, true).await
         {
             tracing::warn!(block_id = %block_id, "pane.open: stack_onto_block_id: stackpush queue failed: {e}");
         }

@@ -239,7 +239,7 @@ function Detail(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu }) {
                         icon="arrow-up-right-from-square"
                         label="Show this pane"
                         density="compact"
-                        onClick={() => void revealBlock(props.entry.id)}
+                        onClick={() => void revealBlock(props.entry.id, { source: "tower" })}
                     />
                 </Show>
                 <span class="tower-toolbar-spacer" />

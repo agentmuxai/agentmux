@@ -3043,7 +3043,7 @@
 
     #[test]
     fn instance_list_named_dropdown_mode_excludes_continuations() {
-        // Launch-modal "Continue agent" dropdown / `listnamedagents`
+        // `listnamedagents`
         // registry-enrichment path: `include_continuations = false`.
         // Symmetric with `registry_upsert_if_named`'s mirror filter —
         // a chain shows up as ONE entry (the head), not N entries

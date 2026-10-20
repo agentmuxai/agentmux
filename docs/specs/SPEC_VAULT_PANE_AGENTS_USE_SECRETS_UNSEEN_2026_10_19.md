@@ -1,6 +1,6 @@
 # SPEC: the Vault: one pane for the person's secrets, which agents use without seeing them
 
-**Status:** active — P1 (§4, §11) shipped in #5180; P2a (§5: the pane, the store, the `Vault` tool, agents kept out) is built; P2b to P8 remain. The operator took the recommended answers to §13 on 2026-10-19.
+**Status:** active — P1 (§4, §11) shipped in #5180; P2a (§5: the pane, the store, the `Vault` tool, agents kept out) P2b (Reveal and Copy, Windows) and P2c (`.vault` export and import) are built; P3 to P8 remain. The operator took the recommended answers to §13 on 2026-10-19.
 **Date:** 2026-10-19
 **Author:** Agent2 #6 (agent2-6@narko), at the operator's request
 **Trigger (operator, 2026-10-19):** an agent filling a US state's corporate-registry certificate request form was refused on the address, city, ZIP and email fields, then could not tick a checkbox, so the person had to finish the form by hand. "Agentmux needs to be able to fill in personal information including ssn." … "we'll need to pivot into that work now, write a spec to file." On a first draft that put saved values in Settings: "sounds like we may need a new pane type, a vault, or settings wouldn't really make sense" … "api keys and anything secret can be kept there." … "we want rich features, like support for pw protected encrypted export file (.vault file), and imports from kdbx files and last pass, and any other popular services should be supported."
@@ -100,7 +100,11 @@ Each entry also shows its **grants** (§6.4, §7.3) with a revoke button, and it
 ### 5.3 Locked, revealed, captured
 
 - Values are hidden in the pane: it shows each entry's label, plain fields and the main value's last characters (§5.5), never a value. Secret parts are typed into hidden inputs and never sent back to the pane; changing an entry replaces only the parts the person types.
-- **Reveal** and **Copy** (P2b) ask the OS to confirm the person (Windows Hello, Touch ID, the desktop's polkit prompt). Copied values are cleared from the clipboard after 30 seconds and kept out of the clipboard history. The pane relocks after a few minutes idle or when the window loses focus for long, and on sleep.
+- **Reveal** and **Copy** (built in P2b) ask the OS to confirm the person each time, through the host: Windows Hello (`UserConsentVerifier`: PIN, fingerprint or face). Touch ID and the desktop's polkit prompt aren't built; there Reveal and Copy are disabled and say so. Nothing is unlocked for a session, so there is nothing to relock: a confirmation covers one Reveal or Copy.
+  - **Copy** never brings the value into the page: the host confirms the person, fetches the value from srv as the host, writes it to the clipboard and clears it 30 seconds later if the clipboard still holds it. On Windows it is marked to stay out of the clipboard history and the cloud clipboard (`CanIncludeInClipboardHistory`, `CanUploadToCloudClipboard`) and out of clipboard monitors (`ExcludeClipboardContentFromMonitorProcessing`); if marking fails the copy is cleared and refused.
+  - **Reveal** returns the value to the pane, which shows it for 15 seconds and hides it on **Hide**, when the window loses focus and when the dialog closes. Losing focus while a Reveal or Copy is waiting is ignored: the Windows Hello prompt takes focus from the window, and that is expected.
+  - The host's `vault_op` relay refuses the `reveal` operation, so a value only comes through `vault_reveal` or `vault_copy`, which confirm the person first. Each use is logged in Activity (who, which entry and part, never the value) and noted on the entry as its last use; a copy is logged once the host reports the clipboard has it (or that it failed), so the trail never says copied when nothing was.
+  - If Windows Hello isn't set up, the error says how to set it up. The account-password fallback listed in §5.7 isn't built yet.
 - **Agents can't capture it** (built in P2a):
   - `UI` `query` and `click` already reach only the caller's own pane, and the Vault's forms and confirmations are drawn inside the Vault pane, so neither reaches it. `UI` `keys` sends only keys from the shortcut table, as key events that type no text.
   - `UI` `screenshot` is clipped to the caller's own pane. A Vault pane magnified or floating over it would be inside the clip, so the host finds every element marked `data-agent-hidden` (the Vault's root) inside the clip just before and just after the capture, and srv blacks those boxes out as it does secret fields (#5089). If the page can't be asked, the screenshot is refused.
@@ -128,6 +132,17 @@ An entry's id is made once from its kind and label (`ssn-alex`, then `ssn-alex-2
 ### 5.6 Activity and grants in Warden too
 
 The operator decided on 2026-10-19 that the Vault stays its own pane, and that Warden also shows its oversight half: the record of agents' uses of entries and the standing "Always" grants, as a section or as Audit events, linked both ways with the Vault. Built with the grants, in P3.
+
+### 5.7 What the person is asked, and when
+
+The operator asked on 2026-10-20 that people know before they're asked. The Vault pane opens with a note saying, for this OS, what may ask the person and when (dismissed with **Got it**, reopened from the header's ⓘ), and the first save, which creates the Vault key, says what is about to ask. Nothing in the Vault asks for administrator rights (UAC, sudo), and no agent sees or answers any of these prompts. Each step that adds a prompt adds its row here and its line to the note (`frontend/app/view/vault/vault-prompts.ts`).
+
+| When | Windows | macOS | Linux | Since |
+|---|---|---|---|---|
+| Saving, changing or listing entries | nothing | the first time AgentMux uses the Vault key, and again after AgentMux updates: allow AgentMux to use the keychain item (**Always Allow**; Deny leaves the entries unopenable) | if the keyring is locked: its password, once | P2a |
+| Reveal or Copy | Windows Hello (PIN, fingerprint or face); needs Hello set up (an account-password fallback is not built) | Touch ID or the account password (not built; Reveal and Copy are disabled) | the desktop's polkit prompt (not built; disabled) | P2b |
+| An agent asks for an entry | AgentMux's own prompt in every window: Fill it in, or Not now | the same | the same | P2a |
+| Importing an encrypted file | the file's own password, typed in the pane | the same | the same | P2c, P5 |
 
 ## 6. Agents fill browser fields from the Vault
 
@@ -201,9 +216,10 @@ Only the person, from the Vault pane (**Import…** and **Export…** in its hea
 
 - **What the person picks:** all entries, some sections, or chosen entries; a passphrase, typed twice, with a strength meter and a **Suggest one** button (a random word passphrase); where to save it.
 - **What it holds:** each entry's label, kind, section, owner, notes, every value and one-time-code seed. Not grants, Activity or the "Kept by AgentMux" items, which belong to this install.
-- **Format, version 1:** an [age](https://age-encryption.org/v1) file encrypted to the passphrase (age's scrypt recipient), whose plaintext is UTF-8 JSON in a schema that P2 documents in a reference page of its own (`{"format": "agentmux-vault", "version": 1, "exported_at", "app_version", "entries": [...]}`). The extension is `.vault`.
+- **Format, version 1:** an [age](https://age-encryption.org/v1) file encrypted to the passphrase (age's scrypt recipient), whose plaintext is UTF-8 JSON in the schema documented in `docs/api/VAULT_FILE_FORMAT.md` (`{"format": "agentmux-vault", "version": 1, "exported_at", "app_version", "entries": [...]}`). The extension is `.vault`.
   - *Why age:* a reviewed, standard format with authenticated encryption and a password-hardening step, so AgentMux adds no cryptography of its own, and the person can open their own export without AgentMux (`age -d backup.vault > vault.json`). The Rust `age` crate is maintained and permissively licensed. (§13 question 6 has the alternative.)
-  - Size cap 64 MiB. Plaintext is held in `Zeroizing` buffers and never written to disk.
+  - Size cap 64 MiB. Plaintext is held in `Zeroizing` buffers and never written to disk. The file is written beside its destination and renamed, so it appears whole or not at all. Opening a file refuses scrypt work factors above 22.
+  - **Built in P2c.** The export dialog lists the entries by section (all selected), asks for the passphrase twice with a strength meter and **Suggest one** (eight random words from a 256-word list: 64 bits, which scrypt slows down), then the host asks where to save. A passphrase is at least 8 characters.
 - **Reminders:** the pane shows when the Vault was last exported and suggests one after many changes, since keychain items don't move to a new machine by themselves.
 
 ### 8.3 Export to other formats
@@ -233,6 +249,9 @@ The pane's import wizard: pick the source, then the file; a password or key file
 Attachments, passkeys and file items can't be imported; the preview lists how many were skipped and why.
 
 ### 8.5 Import: the preview
+
+Built in P2c for `.vault` files: the host asks which file, srv decrypts it into memory (a wrong or missing passphrase writes nothing), and the dialog shows counts per section, the first five entries of each, which are duplicates, and what can't come in with the reason. Nothing is written until **Import**, which writes all of it in one transaction or none of it. What srv holds waits ten minutes and is dropped when the dialog closes. An entry keeps its id from the file when it is free.
+
 
 - Counts per Vault section, and the first entries of each, values hidden.
 - **Duplicates:** an incoming entry with the same site and username (logins), or the same kind and value (others), as an existing one is marked. The person chooses per import: skip, replace, or keep both.
@@ -292,7 +311,7 @@ Fix (built in P1):
 |---|---|---|
 | **P1** | §4 (autocomplete rule, reasons) and §11 (hidden checkboxes). Small, independent, ships first | The triggering form's submitter block and checkbox are filled by the agent with no hand-off |
 | **P2a** | The Vault pane and store (§5): sections, add, change and delete, Activity, "Kept by AgentMux"; agents kept out of it (§5.3); the `Vault` tool's `list` and `request` | The person keeps an SSN, a card and an API key in the Vault; an agent asks for one and gets its id; no agent route returns a value, a tail or a field |
-| **P2b** | Reveal and Copy with OS confirmation, the clipboard clear, relocking (§5.3) | Reveal asks Windows Hello; a copied value is gone from the clipboard 30 s later |
+| **P2b** | Reveal and Copy with OS confirmation and the clipboard clear (§5.3), built for Windows Hello; the macOS and Linux confirmations follow | Reveal asks Windows Hello; a copied value is gone from the clipboard 30 s later |
 | **P2c** | `.vault` export and import (§8.1, §8.2, §8.5), so there is a backup early | The person exports the Vault, deletes the entries and imports them back |
 | **P3** | Browser fill from the Vault (§6.1 to §6.4, §6.6), taint, grants; Activity and grants in Warden (§5.6) | An agent fills an SSN fixture field; its result, snapshot, screenshot and transcript have no trace of the value; another origin is asked |
 | **P4** | §6.5: the banner's value field and **Save to Vault**; `request_value` | A form with an SSN field is done by the agent plus one value typed in the banner |

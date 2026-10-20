@@ -182,7 +182,7 @@ impl Registry {
     }
 
     /// Move record into `retired/` (soft delete — keeps the working
-    /// dir intact, drops it from the launch-modal dropdown). Idempotent.
+    /// dir intact, drops it from the named-agent lists). Idempotent.
     pub fn retire(&self, instance_id: &str) -> Result<(), RegistryError> {
         let _g = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
         let from = self.active_path(instance_id);

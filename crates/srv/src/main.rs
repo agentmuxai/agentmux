@@ -263,11 +263,23 @@ async fn app_main() {
 
     boot_timing::log_summary();
 
+    // After ESTART, off the boot path: drop sagas that finished cleanly over
+    // 30 days ago, so sagas.db stops growing.
+    let saga_log = Arc::clone(&state.saga_log);
+    tokio::task::spawn_blocking(move || {
+        match saga_log.prune_finished_older_than(std::time::Duration::from_secs(30 * 24 * 60 * 60)) {
+            Ok(0) => {}
+            Ok(n) => tracing::info!("[saga] pruned {n} saga(s) that finished over 30 days ago"),
+            Err(e) => tracing::warn!("[saga] pruning finished sagas failed: {e}"),
+        }
+    });
+
     // 7. Build router and serve on both listeners
     // Clone Arcs that are needed after `state` is moved into build_routers.
     let state_for_exit = state.clone();
     let wal_mstore = Arc::clone(&state.mstore);
     let wal_filestore = Arc::clone(&state.filestore);
+    let wal_global_transcripts = state.global_transcript_store.clone();
     let config_watcher_for_lan = Arc::clone(&state.config_watcher);
     let dev_proxy_registry = state.dev_proxy.clone();
     let fleet_feed = Arc::clone(&state.fleet_feed);
@@ -293,10 +305,20 @@ async fn app_main() {
         state.http_client.clone(),
         state.local_web_url.clone(),
     );
+    // The Kanban: idle agents are reminded of the tasks waiting for them,
+    // and a PR opened on a task is linked to it (SPEC_WARDEN_KANBAN_2026_10_20.md).
+    backend::kanban::install(
+        Arc::clone(&state.mstore),
+        Arc::clone(&state.identity_store),
+        Arc::clone(&state.config_watcher),
+        state.broker.clone(),
+    );
+    tokio::spawn(backend::kanban::run_reminder_loop());
     // An agent's AgentMux MCP server that didn't connect is noticed and
     // repaired (`agent:mcpselfheal`).
     backend::mcp_health::install(Arc::clone(&state.config_watcher));
     backend::transcript::append::install_config(Arc::clone(&state.config_watcher));
+    backend::transcript::damage::install_broker(Arc::clone(&state.broker));
     // A leader hears from its workers (SPEC_AGENT_WORKERS_2026_10_15.md §3.3).
     backend::worker_notes::install(
         Arc::clone(&state.broker),
@@ -339,6 +361,7 @@ async fn app_main() {
     // Periodic WAL checkpoint — prevents unbounded WAL file growth during
     // long-running sessions.
     bootstrap::spawn_wal_checkpoint_loop(stdin_token.clone(), wal_mstore, wal_filestore);
+    bootstrap::spawn_global_transcripts_truncate_loop(stdin_token.clone(), wal_global_transcripts);
 
     // The fleet feed's change detection (`backend::fleet_feed`): compares the
     // reachable agents, their kinds and states and this machine's channel

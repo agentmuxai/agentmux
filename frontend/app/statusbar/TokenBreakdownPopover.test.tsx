@@ -29,9 +29,9 @@ vi.mock("@/app/util/menu-position", () => ({
         style: { position: "fixed", left: "0px", top: "0px" },
     })),
 }));
-const focusBlockMock = vi.fn(async (_blockId: string) => {});
+const focusBlockMock = vi.fn(async (_blockId: string, _opts?: unknown) => {});
 vi.mock("@/app/util/reveal-block", () => ({
-    revealBlock: (blockId: string) => focusBlockMock(blockId),
+    revealBlock: (blockId: string, opts?: unknown) => focusBlockMock(blockId, opts),
 }));
 
 import { TokenBreakdownPopover } from "./TokenBreakdownPopover";
@@ -95,7 +95,7 @@ describe("TokenBreakdownPopover — by-agent regroup", () => {
         const row = screen.getByText("Manoz").closest("button") as HTMLButtonElement;
         fireEvent.click(row);
 
-        expect(focusBlockMock).toHaveBeenCalledWith("block-1");
+        expect(focusBlockMock).toHaveBeenCalledWith("block-1", { source: "tokens" });
     });
 
     it("does not throw when clicking the ambient row (no blockId to focus)", () => {

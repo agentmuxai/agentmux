@@ -167,6 +167,19 @@ declare global {
          *  host, which srv trusts and agents can't impersonate. Answers srv's
          *  `data`. SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §5.4. */
         vault?(op: string, args?: Record<string, unknown>): Promise<unknown>;
+        /** Show one Vault value: the host has the OS (Windows Hello) confirm the
+         *  person, then fetches it from srv. Rejects "cancelled" if they dismiss it. */
+        vaultReveal?(args: { id: string; part: string; label: string }): Promise<unknown>;
+        /** Copy one Vault value on the host (it never reaches the page) and clear
+         *  the clipboard 30 s later. Answers `{ clears_in_secs }`. */
+        vaultCopy?(args: { id: string; part: string; label: string }): Promise<unknown>;
+        /** Export the Vault to a `.vault` file: the host asks where to save, then srv
+         *  writes it encrypted to `passphrase`. Answers `{ count, file_name }`, or
+         *  `{ cancelled: true }`. */
+        vaultExport?(args: { ids?: string[]; passphrase: string; default_name: string }): Promise<unknown>;
+        /** Import from a `.vault` file: with no `pick_id` the host asks which file;
+         *  with one it reads the same file again with `passphrase`. */
+        vaultImport?(args: { pick_id?: string; passphrase?: string }): Promise<unknown>;
         /** Ask to adopt memory folders (payload: window_label, agent_id, list_id, choices, summary). */
         requestMemoryAdoption(args: Record<string, unknown>): Promise<void>;
         /** Ask to release a memory folder (payload: window_label, agent_id, list_id, index, summary). */
@@ -471,8 +484,8 @@ declare global {
         sendLog: (log: string) => void;
         sendLogStructured: (level: string, module: string, message: string, data: Record<string, any> | null) => void;
         onQuicklook: (filePath: string) => void;
-        openNativePath(filePath: string): void;
-        revealInFileExplorer(filePath: string): void;
+        /** Opens a folder in the file manager, or shows a file in its folder. Rejects with the host's reason. */
+        revealInFileExplorer(filePath: string): Promise<void>;
         /** Native "open file" dialog. Resolves to the chosen absolute path,
          *  or null if the user cancelled. See
          *  docs/specs/SPEC_MEDIA_PANE_2026_07_26.md. */

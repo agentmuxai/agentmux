@@ -37,25 +37,3 @@
     justify-content: flex-end;
     margin-bottom: var(--space-1);
 }
-
-.install-details-copy {
-    padding: 0 var(--space-1-5);
-    font-size: var(--text-xs);
-    color: var(--secondary-text-color);
-    background: transparent;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    cursor: default;
-
-    &:hover:not(:disabled) {
-        color: var(--main-text-color);
-    }
-
-    &:disabled {
-        opacity: 0.5;
-    }
-
-    &:focus-visible {
-        @include mixins.focus-ring;
-    }
-}

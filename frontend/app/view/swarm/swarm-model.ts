@@ -25,7 +25,8 @@ import { contextReadingFromMeta } from "@/app/store/agent-pane-state/context-rea
 import { resolveSwarmLine, type SwarmLine } from "@/app/store/swarm-line";
 import type { SupervisorMode } from "@/types/rpc/SupervisorMode";
 import { remoteSections, type SwarmOtherInstances } from "./swarm-remote";
-import { createSignal, type Accessor, type Setter } from "solid-js";
+import { createSignal, untrack, type Accessor, type Setter } from "solid-js";
+import { sameList, traced } from "@/app/util/select-trace";
 import { groupBackgroundTasks, type AgentBackgroundTasks } from "./swarm-background";
 import { toolDetail } from "@/app/view/agent/tool-meta/tool-descriptors";
 import { onSubagentNamed, withSubagentName } from "./subagent-naming";
@@ -923,28 +924,28 @@ export class SwarmViewModel {
 
     private _subagents = createSignal<ActiveSubagent[]>([]);
     subagentsAtom: Accessor<ActiveSubagent[]> = this._subagents[0];
-    private setSubagents: Setter<ActiveSubagent[]> = this._subagents[1];
+    private setSubagents: Setter<ActiveSubagent[]> = traced("subagents", this._subagents);
 
     // Active background shells (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20
     // Phase 1) — fetched separately via shell.ListActive; buildTree() groups
     // by block_id the same way it does for subagents/dispatches above.
     private _shells = createSignal<ActiveShell[]>([]);
     shellsAtom: Accessor<ActiveShell[]> = this._shells[0];
-    private setShells: Setter<ActiveShell[]> = this._shells[1];
+    private setShells: Setter<ActiveShell[]> = traced("shells", this._shells);
 
     // Cron jobs (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 2) —
     // fetched separately via cron.ListActive; buildTree() groups by
     // block_id the same way it does for shells above.
     private _crons = createSignal<ActiveCron[]>([]);
     cronsAtom: Accessor<ActiveCron[]> = this._crons[0];
-    private setCrons: Setter<ActiveCron[]> = this._crons[1];
+    private setCrons: Setter<ActiveCron[]> = traced("crons", this._crons);
 
     // Background tasks for the whole fleet, from the durable registry —
     // fetched via ListBackgroundTasksCommand (empty blockid); buildTree()
     // groups by block_id and nests each under the subagent that owns it.
     private _backgroundTasks = createSignal<BackgroundTaskView[]>([]);
     backgroundTasksAtom: Accessor<BackgroundTaskView[]> = this._backgroundTasks[0];
-    private setBackgroundTasks: Setter<BackgroundTaskView[]> = this._backgroundTasks[1];
+    private setBackgroundTasks: Setter<BackgroundTaskView[]> = traced("background", this._backgroundTasks);
 
     // Per-block todo checklist + in-flight tool, pushed by the backend's
     // `agent:progress` sweep. Push-only (no fetch-on-open counterpart): the
@@ -952,24 +953,24 @@ export class SwarmViewModel {
     // mid-session fills in within one sweep rather than needing its own RPC.
     private _progress = createSignal<Map<string, AgentProgress>>(new Map());
     progressAtom: Accessor<Map<string, AgentProgress>> = this._progress[0];
-    private setProgress: Setter<Map<string, AgentProgress>> = this._progress[1];
+    private setProgress: Setter<Map<string, AgentProgress>> = traced("progress", this._progress);
 
     // AgentDispatches (SPEC §5) — one per Agent-tool-or-Workflow-tool call.
     // Fetched separately from subagentsAtom via subagent.ListDispatches;
     // buildTree() cross-references the two by dispatch_id/parent_block_id.
     private _dispatches = createSignal<AgentDispatch[]>([]);
     dispatchesAtom: Accessor<AgentDispatch[]> = this._dispatches[0];
-    private setDispatches: Setter<AgentDispatch[]> = this._dispatches[1];
+    private setDispatches: Setter<AgentDispatch[]> = traced("dispatches", this._dispatches);
 
     // Map of blockId → "running" | "idle" — updated by controllerstatus events
     private _agentStatuses = createSignal<Map<string, "running" | "idle">>(new Map());
     agentStatusesAtom: Accessor<Map<string, "running" | "idle">> = this._agentStatuses[0];
-    private setAgentStatuses: Setter<Map<string, "running" | "idle">> = this._agentStatuses[1];
+    private setAgentStatuses: Setter<Map<string, "running" | "idle">> = traced("status", this._agentStatuses);
 
     // Ordered list of tracked block IDs (preserves server-side ordering)
     private _trackedBlockIds = createSignal<string[]>([]);
     trackedBlockIdsAtom: Accessor<string[]> = this._trackedBlockIds[0];
-    private setTrackedBlockIds: Setter<string[]> = this._trackedBlockIds[1];
+    private setTrackedBlockIds: Setter<string[]> = traced("tracked-ids", this._trackedBlockIds);
 
     // Fleet control (SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md) — which
     // top-level agent blockIds are currently checked for a bulk action.
@@ -1057,7 +1058,7 @@ export class SwarmViewModel {
     // un-retire action — see SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20 §6.
     private _retiredRowKeys = createSignal<Map<string, number>>(loadRetiredRowKeysFromStorage());
     retiredRowKeysAtom: Accessor<Map<string, number>> = this._retiredRowKeys[0];
-    private rawSetRetiredRowKeys: Setter<Map<string, number>> = this._retiredRowKeys[1];
+    private rawSetRetiredRowKeys: Setter<Map<string, number>> = traced("retired", this._retiredRowKeys);
     /** Every write to `_retiredRowKeys` must go through this — persists to
      *  localStorage alongside the in-memory update, so a raw
      *  `this.rawSetRetiredRowKeys` call is a bug (nothing enforces this at
@@ -1343,7 +1344,7 @@ export class SwarmViewModel {
         try {
             const { block_ids } = await RpcApi.AgentTrackedBlocksCommand(TabRpcClient, {});
             const ids: string[] = block_ids ?? [];
-            this.setTrackedBlockIds(ids);
+            if (!sameList(untrack(this.trackedBlockIdsAtom), ids)) this.setTrackedBlockIds(ids);
             // Codex P2 on PR #3219: subscribeToBlockStatuses tears down and
             // rebuilds every per-block status subscription (each unsub/sub
             // flushes its own MPS eventsub command) plus issues a fresh

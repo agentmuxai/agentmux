@@ -3,7 +3,7 @@
 
 //! Identity injection at agent CLI spawn time.
 //!
-//! When an agent instance is launched, the launch modal records an
+//! When an agent instance is launched, the launch records an
 //! `identity_id` on the `db_agent_instances` row (v7 schema). Right
 //! before the CLI subprocess starts, this module:
 //!

@@ -68,12 +68,28 @@ pub(crate) struct StateVersion {
 /// `zone` holds now. A version that covers more bytes than `output` has left
 /// belongs to a conversation that has since been archived.
 pub(crate) fn latest_state(fs: &FileStore, zone: &str) -> Option<StateVersion> {
-    let file = fs.stat(zone, STATE_FILE).ok()??;
+    use crate::backend::transcript::damage;
+    if damage::is_damaged(zone) {
+        return None;
+    }
+    let file = match fs.stat(zone, STATE_FILE) {
+        Ok(file) => file?,
+        Err(e) => {
+            damage::note_if_shared(fs, zone, "tail read", &e);
+            return None;
+        }
+    };
     if file.size <= 0 {
         return None;
     }
     let offset = (file.size - LATEST_WINDOW_BYTES).max(0);
-    let (_, data) = fs.read_at(zone, STATE_FILE, offset, file.size - offset).ok()?;
+    let (_, data) = match fs.read_at(zone, STATE_FILE, offset, file.size - offset) {
+        Ok(read) => read,
+        Err(e) => {
+            damage::note_if_shared(fs, zone, "tail read", &e);
+            return None;
+        }
+    };
     let latest = String::from_utf8_lossy(&data)
         .lines()
         .rev()
@@ -84,13 +100,23 @@ pub(crate) fn latest_state(fs: &FileStore, zone: &str) -> Option<StateVersion> {
 
 fn append_version(fs: &FileStore, zone: &str, version: &StateVersion) -> Result<(), String> {
     use crate::backend::storage::filestore::{FileMeta, FileOpts};
+    if crate::backend::transcript::damage::is_damaged(zone) {
+        return Err("the agent's zone is damaged".to_string());
+    }
     let mut line = serde_json::to_vec(version).map_err(|e| format!("encode state: {e}"))?;
     line.push(b'\n');
-    if fs.stat(zone, STATE_FILE).map_err(|e| format!("stat state: {e}"))?.is_none() {
+    let stat = fs.stat(zone, STATE_FILE).map_err(|e| {
+        crate::backend::transcript::damage::note_if_shared(fs, zone, "append", &e);
+        format!("stat state: {e}")
+    })?;
+    if stat.is_none() {
         fs.make_file(zone, STATE_FILE, FileMeta::default(), FileOpts::default())
             .map_err(|e| format!("make state file: {e}"))?;
     }
-    fs.append_data(zone, STATE_FILE, &line).map_err(|e| format!("append state: {e}"))
+    fs.append_data(zone, STATE_FILE, &line).map_err(|e| {
+        crate::backend::transcript::damage::note_if_shared(fs, zone, "append", &e);
+        format!("append state: {e}")
+    })
 }
 
 /// Whether the person turns since `latest` warrant a new version.
@@ -324,15 +350,23 @@ async fn update(mstore: &Store, block_id: &str) -> Result<Option<StateVersion>, 
     let Some((zone, cli_path)) = eligible(&block.meta) else { return Ok(None) };
     let Some(_flight) = InFlight::claim(&zone) else { return Ok(None) };
     let gfs = global_transcript_store().ok_or("no global transcript store")?;
+    // A zone found corrupt gets no new summary (the running one is left as it is).
+    if crate::backend::transcript::damage::is_damaged(&zone) {
+        return Ok(None);
+    }
 
-    let size = gfs.stat(&zone, OUTPUT_FILE).map_err(|e| format!("stat output: {e}"))?.map_or(0, |f| f.size);
+    let seen = |op: &str, e: crate::backend::storage::error::StoreError| {
+        crate::backend::transcript::damage::note_if_shared(gfs, &zone, "tail read", &e);
+        format!("{op}: {e}")
+    };
+    let size = gfs.stat(&zone, OUTPUT_FILE).map_err(|e| seen("stat output", e))?.map_or(0, |f| f.size);
     let latest = latest_state(gfs, &zone);
     let from = latest.as_ref().map_or(0, |v| v.based_on);
     if size <= from {
         return Ok(None);
     }
     let start = from.max(size - READ_CAP_BYTES);
-    let (_, bytes) = gfs.read_at(&zone, OUTPUT_FILE, start, size - start).map_err(|e| format!("read output: {e}"))?;
+    let (_, bytes) = gfs.read_at(&zone, OUTPUT_FILE, start, size - start).map_err(|e| seen("read output", e))?;
     let turns = turns_from_stream(&bytes, start > from);
     let now = now_ms();
     if !should_update(latest.as_ref(), person_turns(&turns), now) {
@@ -612,5 +646,34 @@ mod tests {
         assert!(InFlight::claim("agent:y:current").is_some());
         drop(first);
         assert!(InFlight::claim("agent:x:current").is_some());
+    }
+}
+
+#[cfg(test)]
+mod damage_tests {
+    use super::*;
+    use crate::backend::transcript::damage::{self, test_support};
+
+    #[test]
+    fn a_corrupt_zone_has_no_latest_state_and_takes_no_new_version() {
+        let zone = "agent:def-damage-cs-1:current";
+        let fs = FileStore::open_in_memory().unwrap();
+        let _shared = test_support::register(&fs);
+        test_support::corrupt(&fs);
+        assert!(latest_state(&fs, zone).is_none());
+        assert!(damage::is_damaged(zone), "the failed read is the incident");
+        let v = StateVersion { version: 1, created_at_ms: 1, based_on: 1, sha256: String::new(), text: String::new(), tokens: None };
+        assert!(append_version(&fs, zone, &v).unwrap_err().contains("damaged"));
+    }
+
+    #[test]
+    fn a_failed_append_that_is_corruption_marks_the_zone() {
+        let zone = "agent:def-damage-cs-2:current";
+        let fs = FileStore::open_in_memory().unwrap();
+        let _shared = test_support::register(&fs);
+        test_support::corrupt(&fs);
+        let v = StateVersion { version: 1, created_at_ms: 1, based_on: 1, sha256: String::new(), text: String::new(), tokens: None };
+        assert!(append_version(&fs, zone, &v).is_err());
+        assert!(damage::is_damaged(zone));
     }
 }

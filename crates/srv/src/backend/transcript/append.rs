@@ -107,7 +107,7 @@ pub(crate) fn mirror_append_to_global(gfs: &Arc<FileStore>, zone: &str, data: &[
     // Global zones are agent transcripts by construction — always stamp
     // (§4.4), keyed at the offset this append actually landed at (codex P2 on
     // PR #2508), in the same transaction as the append.
-    append_transcript_lines(gfs, zone, OUTPUT_FILE, data, true, "global transcripts")
+    append_transcript_lines(gfs, zone, OUTPUT_FILE, data, true, "global transcripts", true)
 }
 
 /// `append_lines` on a transcript file, creating it on first write (or if
@@ -115,9 +115,18 @@ pub(crate) fn mirror_append_to_global(gfs: &Arc<FileStore>, zone: &str, data: &[
 /// last line is closed, not continued (`filestore/counter.rs`). With `stamp`,
 /// the `output.tsidx` receive-time record is written in the same transaction
 /// (one commit, not two). Errors are logged and swallowed.
-fn append_transcript_lines(fs: &Arc<FileStore>, zone: &str, name: &str, data: &[u8], stamp: bool, what: &str) -> Option<AppendPos> {
+///
+/// `shared` is a write to the shared store's zone: one found corrupt (here or
+/// by a reader) is not written to again in this process
+/// ([`damage`](crate::backend::transcript::damage)), and the first corrupt error
+/// is an incident, not only a WARN line.
+fn append_transcript_lines(fs: &Arc<FileStore>, zone: &str, name: &str, data: &[u8], stamp: bool, what: &str, shared: bool) -> Option<AppendPos> {
     use crate::backend::agent_session::TSIDX_FILE;
     use crate::backend::storage::error::StoreError;
+    use crate::backend::transcript::damage;
+    if shared && damage::is_damaged(zone) {
+        return None;
+    }
     let append = || {
         if stamp {
             fs.append_lines_stamped(zone, name, data, TSIDX_FILE)
@@ -125,11 +134,17 @@ fn append_transcript_lines(fs: &Arc<FileStore>, zone: &str, name: &str, data: &[
             fs.append_lines(zone, name, data)
         }
     };
+    let failed = |e: &StoreError| {
+        if shared && damage::note_corrupt(zone, "append", e) {
+            return;
+        }
+        tracing::warn!(zone = %zone, error = %e, "{what}: append failed");
+    };
     match append() {
         Ok(pos) => return Some(pos),
         Err(StoreError::NotFound) => {}
         Err(e) => {
-            tracing::warn!(zone = %zone, error = %e, "{what}: append failed");
+            failed(&e);
             return None;
         }
     }
@@ -140,13 +155,13 @@ fn append_transcript_lines(fs: &Arc<FileStore>, zone: &str, name: &str, data: &[
         crate::backend::storage::filestore::FileOpts::default(),
     ) {
         if !matches!(e, StoreError::AlreadyExists) {
-            tracing::warn!(zone = %zone, error = %e, "{what}: make_file failed; skipping write");
+            if !(shared && damage::note_corrupt(zone, "append", &e)) {
+                tracing::warn!(zone = %zone, error = %e, "{what}: make_file failed; skipping write");
+            }
             return None;
         }
     }
-    append()
-        .map_err(|e| tracing::warn!(zone = %zone, error = %e, "{what}: append failed"))
-        .ok()
+    append().map_err(|e| failed(&e)).ok()
 }
 
 /// The agent-transcript half of [`crate::backend::blockcontroller::shell::handle_append_block_file`] (Phase 5a-3,
@@ -215,7 +230,7 @@ pub(crate) fn append_transcript_with(
     }
     let write_block_copy = !global_only || global_pos.as_ref().is_some_and(Option::is_none);
     if let Some(fs) = filestore.filter(|_| write_block_copy) {
-        if let Some(p) = append_transcript_lines(fs, block_id, OUTPUT_FILE, &records, stamp_tsidx, "filestore") {
+        if let Some(p) = append_transcript_lines(fs, block_id, OUTPUT_FILE, &records, stamp_tsidx, "filestore", false) {
             // Past the `\n` that closed a torn last line, if one was written.
             offset = Some(p.records_offset.max(0) as u64);
             if let Some(c) = p.counted {
@@ -340,4 +355,58 @@ pub(crate) fn resolve_global_output_zone(
         .must_get::<crate::backend::obj::Block>(block_id)
         .ok()?;
     crate::backend::agent_session::agent_zone_for_block_meta(&block.meta)
+}
+
+#[cfg(test)]
+mod damage_tests {
+    use super::*;
+    use crate::backend::storage::filestore::{FileMeta, FileOpts};
+    use crate::backend::transcript::damage::{self, test_support};
+
+    const LINE: &[u8] = b"{\"type\":\"user\"}
+";
+
+    fn own_copy(own: &FileStore, block: &str) -> Vec<u8> {
+        own.read_file(block, "output").unwrap().unwrap_or_default()
+    }
+
+    #[test]
+    fn a_corrupt_error_on_the_shared_zone_marks_it_and_the_blocks_copy_keeps_the_line() {
+        for (n, single_copy) in [(1, false), (2, true)] {
+            let (own, gfs) = (Arc::new(FileStore::open_in_memory().unwrap()), Arc::new(FileStore::open_in_memory().unwrap()));
+            test_support::corrupt(&gfs);
+            let (block, zone) = (format!("blk-damage-append-{n}"), format!("agent:damage-append-{n}:current"));
+            assert!(!damage::is_damaged(&zone));
+            append_transcript_with(None, &block, LINE, Some(&own), Some((&gfs, zone.as_str())), true, None, single_copy);
+            assert!(damage::is_damaged(&zone), "single_copy={single_copy}: the first corrupt error marks the zone");
+            assert_eq!(own_copy(&own, &block), LINE, "single_copy={single_copy}: the block's copy has the line, so nothing is lost");
+        }
+    }
+
+    #[test]
+    fn a_damaged_zone_is_not_written_to_again_but_the_blocks_copy_is() {
+        let (own, gfs) = (Arc::new(FileStore::open_in_memory().unwrap()), Arc::new(FileStore::open_in_memory().unwrap()));
+        let (block, zone) = ("blk-damage-append-3", "agent:damage-append-3:current");
+        // The shared store is healthy again (or was never what failed): the zone stays out of it.
+        damage::note_corrupt(zone, "append", &StoreError::Sqlite(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CORRUPT),
+            None,
+        )));
+        use crate::backend::storage::error::StoreError;
+        append_transcript_with(None, block, LINE, Some(&own), Some((&gfs, zone)), true, None, true);
+        append_transcript_with(None, block, LINE, Some(&own), Some((&gfs, zone)), true, None, false);
+        assert!(gfs.stat(zone, "output").unwrap().is_none(), "nothing was sent to the shared store");
+        assert_eq!(own_copy(&own, block), [LINE, LINE].concat());
+        assert!(mirror_append_to_global(&gfs, zone, LINE).is_none());
+    }
+
+    #[test]
+    fn a_zone_that_is_not_damaged_is_written_as_before() {
+        let (own, gfs) = (Arc::new(FileStore::open_in_memory().unwrap()), Arc::new(FileStore::open_in_memory().unwrap()));
+        let (block, zone) = ("blk-damage-append-4", "agent:damage-append-4:current");
+        gfs.make_file(zone, "output", FileMeta::default(), FileOpts::default()).unwrap();
+        append_transcript_with(None, block, LINE, Some(&own), Some((&gfs, zone)), true, None, false);
+        assert_eq!(gfs.read_file(zone, "output").unwrap().unwrap(), LINE);
+        assert!(!damage::is_damaged(zone));
+    }
 }

@@ -448,15 +448,32 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // `node_count` is 0 here: counting messages would mean reading
                     // the whole transcript, so the tile shows none rather than a
                     // guess.
-                    let from_transcript = match histories.get(&inst.definition_id) {
-                        Some(HistoryRead::Transcript(h)) => Some((
+                    let transcript_row = |h: &crate::backend::agent_session::history_summary::AgentHistory| {
+                        (
                             true,
                             if h.last_activity_ms > 0 { h.last_activity_ms } else { inst.started_at },
                             h.last_user_message.clone(),
                             0usize,
                             false,
-                        )),
+                        )
+                    };
+                    let from_transcript = match histories.get(&inst.definition_id) {
+                        Some(HistoryRead::Transcript(h)) => Some(transcript_row(h)),
                         Some(HistoryRead::Failed) => Some((false, inst.started_at, String::new(), 0usize, true)),
+                        // The agent's zone in the shared store is corrupt
+                        // (`transcript::damage`): this channel's own copy of the
+                        // conversation, kept under the pane's block id, answers.
+                        Some(HistoryRead::Damaged) => {
+                            if inst.block_id.is_empty() {
+                                None
+                            } else {
+                                match crate::backend::agent_session::history_summary::read_block_history(&filestore, &inst.block_id) {
+                                    HistoryRead::Transcript(h) => Some(transcript_row(&h)),
+                                    HistoryRead::NoTranscript => None,
+                                    HistoryRead::Failed | HistoryRead::Damaged => Some((false, inst.started_at, String::new(), 0usize, true)),
+                                }
+                            }
+                        }
                         // No transcript: fall back to this channel's per-block
                         // snapshot, which old builds wrote.
                         Some(HistoryRead::NoTranscript) | None => None,

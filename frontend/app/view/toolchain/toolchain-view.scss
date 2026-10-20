@@ -1,7 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Ported from the toolchain modal's stylesheet — adapted for a full-height pane layout.
+// The Toolchain pane. Its tools are element/ui cards in groups, like the MCP
+// and Remotes panes; colours come from the theme and sizes from the shared
+// scales. What is here is the pane's layout and the inside of a card's
+// details. See docs/reports/REPORT_TOOLCHAIN_PANE_THEME_INTEGRATION_2026_10_19.md.
 
 @use "../../mixins.scss";
 
@@ -11,25 +14,27 @@
     width: 100%;
     height: 100%;
     overflow: hidden;
+    // The frame behind a pane is darker than the theme's surface; painting the
+    // surface also lets a translucent window show through, as in the other
+    // panes (SPEC_TOWER_THEME_SURFACE_AND_COLOR_2026_10_17.md §1.1).
+    background: var(--main-bg-color);
 }
 
+// The shared section header, as the bar over the scrolling list.
 .toolchain-view-header {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: var(--space-1);
-    padding: var(--space-2) var(--space-3);
-    border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
+    flex-wrap: wrap;
+    padding: var(--space-1-5) var(--space-2);
+    border-bottom: 1px solid var(--border-color);
 }
 
 .toolchain-body {
     display: flex;
     flex-direction: column;
-    gap: var(--space-4);
+    gap: var(--space-2);
     flex: 1 1 auto;
     overflow-y: auto;
-    padding: var(--space-3);
+    padding: var(--space-2);
 }
 
 .toolchain-section {
@@ -38,209 +43,98 @@
     gap: var(--space-1);
 }
 
-.toolchain-section-title {
-    margin: 0 0 var(--space-1);
-    font-size: 0.78rem;
-    font-weight: 600;
-    @include mixins.label-caps;
-    opacity: 0.6;
-}
-
-// ── Environment ───────────────────────────────────────────────────────
+// ── Environment and old CLI versions ──────────────────────────────────
 
 .toolchain-env-line {
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    font-size: 0.85rem;
-    padding: 2px 0;
-}
-
-// ── Old CLI versions ──────────────────────────────────────────────────
-
-.toolchain-prune-list {
-    margin: 4px 0 6px;
-    padding-left: 18px;
-    font-size: 0.85rem;
-    opacity: 0.85;
-}
-
-.toolchain-error {
-    color: var(--error-color);
+    font-size: var(--text-sm);
+    padding: var(--space-0-5) 0;
 }
 
 .toolchain-env-key {
-    min-width: 92px;
-    opacity: 0.6;
+    min-width: 8em;
+    color: var(--secondary-text-color);
 }
 
 .toolchain-path-toggle {
     align-self: flex-start;
-    margin-top: 2px;
+    margin-top: var(--space-0-5);
 }
 
 .toolchain-path-dump {
     margin: var(--space-1) 0 0;
     padding: var(--space-2);
     border-radius: var(--radius-md);
-    background: rgba(127, 127, 127, 0.1);
-    font-size: 0.75rem;
-    line-height: 1.45;
+    background: var(--tint-2);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
     max-height: 180px;
     overflow-y: auto;
     white-space: pre;
 }
 
-// ── Tool rows ─────────────────────────────────────────────────────────
-
-.toolchain-row {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--space-3);
-    padding: var(--space-2);
-    border-radius: var(--radius-md);
-
-    &:hover {
-        background: rgba(127, 127, 127, 0.07);
-    }
+.toolchain-prune-list {
+    margin: var(--space-1) 0 var(--space-1-5);
+    padding-left: var(--space-5);
+    font-size: var(--text-sm);
+    color: var(--secondary-text-color);
 }
 
-.toolchain-row--missing .toolchain-row-name {
-    opacity: 0.85;
+// A failure the user should see: the error wash and line, as the other panes'
+// notices.
+.toolchain-notice {
+    padding: var(--space-1-5) var(--space-2);
+    border: 1px solid var(--error-line);
+    background: var(--error-bg);
+    color: var(--main-text-color);
+    font-size: var(--text-xs);
 }
 
-.toolchain-row-icon {
-    width: 20px;
-    text-align: center;
-    margin-top: 3px;
-    opacity: 0.8;
-}
+// ── A card's details ──────────────────────────────────────────────────
 
-.toolchain-row-main {
-    flex: 1;
-    min-width: 0;
+.toolchain-detail {
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: var(--space-1-5);
+    padding: var(--space-2);
+    min-width: 0;
+    font-size: var(--text-xs);
 }
 
-.toolchain-row-title {
+.toolchain-detail-note {
+    margin: 0;
+    color: var(--secondary-text-color);
+}
+
+.toolchain-detail-label {
+    margin-top: var(--space-1);
+    font-size: var(--text-2xs);
+    font-weight: 600;
+    @include mixins.label-caps;
+    color: var(--secondary-text-color);
+}
+
+.toolchain-detail-value {
+    min-width: 0;
+    padding: var(--space-1) var(--space-1-5);
+    border: 1px solid var(--border-color);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--main-text-color);
+    overflow-wrap: anywhere;
+}
+
+.toolchain-detail-row {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: var(--space-2);
-}
-
-.toolchain-row-name {
-    font-weight: 600;
-    font-size: 0.9rem;
-}
-
-.toolchain-row-path {
-    font-size: 0.74rem;
-    opacity: 0.55;
-    @include mixins.truncate;
-}
-
-.toolchain-widget-desc {
-    white-space: normal;
-    overflow: visible;
-    text-overflow: unset;
-}
-
-.toolchain-widget-port {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: 4px;
-}
-
-.toolchain-widget-port-label {
-    font-size: 0.72rem;
-    opacity: 0.5;
-    min-width: 26px;
-}
-
-.toolchain-widget-port-input {
-    width: 60px;
-    font-size: 0.78rem;
-    padding: 1px 5px;
-    border-radius: 4px;
-    border: 1px solid var(--border-color);
-    background: rgba(127, 127, 127, 0.08);
-    color: inherit;
-    text-align: right;
-
-    &:focus {
-        outline: none;
-        border-color: var(--accent-color);
-    }
-
-    &::-webkit-inner-spin-button,
-    &::-webkit-outer-spin-button {
-        -webkit-appearance: none;
-    }
-    -moz-appearance: textfield;
-}
-
-.toolchain-row-cmd {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-
-    code {
-        font-size: 0.74rem;
-        padding: 1px 6px;
-        border-radius: 4px;
-        background: rgba(127, 127, 127, 0.12);
-    }
-}
-
-.toolchain-row-actions {
-    display: flex;
-    align-items: center;
     gap: var(--space-1);
-    margin-top: 2px;
 }
 
-// ── Pills ─────────────────────────────────────────────────────────────
-
-.toolchain-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 0.72rem;
-    font-weight: 500;
-    padding: 1px 8px;
-    border-radius: 999px;
-    background: rgba(127, 127, 127, 0.15);
-
-    &--ok {
-        background: rgba(46, 160, 67, 0.18);
-        color: var(--success-color);
-    }
-    &--warn {
-        background: rgba(219, 154, 4, 0.18);
-        color: var(--warning-color);
-    }
-    &--muted {
-        opacity: 0.7;
-    }
-    &--update {
-        background: rgba(219, 154, 4, 0.18);
-        color: var(--warning-color);
-    }
-}
-
-// ── Buttons ───────────────────────────────────────────────────────────
-
-// Toolchain actions are element/ui Buttons (neutral, ghost ones quiet).
-
-// Link-style actions are quiet element/ui Buttons.
-
-// "or install it now" is an accent Button on its own line. The doubled class
-// outranks .ui-button whatever order the stylesheets load in.
-.ui-button.toolchain-link-btn--install-now {
-    display: flex;
-    width: fit-content;
+.toolchain-port-input {
+    width: 6em;
+    text-align: right;
 }

@@ -26,12 +26,15 @@ import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import type { LayoutNode } from "@/layout/lib/types";
 import { emitPaneLocate } from "./pane-locate";
+import { selectTrace } from "./select-trace";
 
 export interface RevealOptions {
     /** The tab holding the block, when the caller already knows it. */
     tabId?: string;
     /** Put the caret in the block (its composer / terminal). Default true. */
     focusCaret?: boolean;
+    /** Who asked, for the selection trace: "swarm", "tower", "tokens", "picker". */
+    source?: string;
 }
 
 /** How long to wait for a just-activated tab's layout to contain the block. */
@@ -137,22 +140,31 @@ export async function revealBlockLocally(blockId: string, opts: RevealOptions = 
  * Spec §4.3.
  */
 export async function revealBlock(blockId: string, opts: RevealOptions = {}): Promise<void> {
-    if (await revealBlockLocally(blockId, opts)) return;
-    await revealInOtherWindow(blockId);
+    const done = selectTrace.revealStarted(opts.source ?? "unknown", blockId);
+    try {
+        if (await revealBlockLocally(blockId, opts)) {
+            done(true);
+            return;
+        }
+        done(await revealInOtherWindow(blockId), "other-window");
+    } finally {
+        done(false);
+    }
 }
 
-async function revealInOtherWindow(blockId: string): Promise<void> {
+/** Whether another window (or workspace) was found to hold the block. */
+async function revealInOtherWindow(blockId: string): Promise<boolean> {
     try {
         const r = await RpcApi.BlockRevealCommand(TabRpcClient, { block_id: blockId });
         if (r?.found && r.window_id) {
             await raiseWindowById(r.window_id);
-            return;
+            return true;
         }
     } catch (e) {
         // An older srv without block.reveal: fall back below.
         console.warn("[reveal-block] block.reveal failed", { blockId, error: String(e) });
     }
-    await activateTabInOtherWorkspace(blockId);
+    return activateTabInOtherWorkspace(blockId);
 }
 
 /** Raise the window whose `Window` oid is `windowId`. */
@@ -176,7 +188,7 @@ async function loadObject<T extends MuxObj>(otype: string, oid: string): Promise
 /** Fallback when srv can't name an open window for the block: activate its
  *  tab in the workspace that holds it and raise that workspace's window.
  *  Selects the window tab, not the pane or its tab. */
-async function activateTabInOtherWorkspace(blockId: string): Promise<void> {
+async function activateTabInOtherWorkspace(blockId: string): Promise<boolean> {
     // We need Tab.blockids to find which tab holds the block: layout models for
     // other windows' tabs aren't available in this renderer.
     // Walk the open windows, not WorkspaceService.ListWorkspaces: that skips
@@ -194,7 +206,8 @@ async function activateTabInOtherWorkspace(blockId: string): Promise<void> {
             if (!tab?.blockids?.includes(blockId)) continue;
             await WorkspaceService.SetActiveTab(wsData.oid, tabId);
             await raiseWindowById(windowId);
-            return;
+            return true;
         }
     }
+    return false;
 }

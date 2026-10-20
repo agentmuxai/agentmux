@@ -30,9 +30,14 @@ pub(crate) async fn handle_close_window(state: &AppState, call: &WebCallType) ->
     // Read SQLite (source of truth during migration).
     // And its name, which the last close's session record keeps: the row is
     // gone by then.
-    let (ws_id, window_name): (Option<String>, Option<String>) = match store.get::<Window>(&window_id) {
-        Ok(Some(w)) => (Some(w.workspaceid.clone()), super::session_windows::saved_name(store, &w)),
-        Ok(None) => (None, None),
+    let (ws_id, window_name, window_appearance): (Option<String>, Option<String>, serde_json::Map<String, serde_json::Value>) =
+        match store.get::<Window>(&window_id) {
+        Ok(Some(w)) => (
+            Some(w.workspaceid.clone()),
+            super::session_windows::saved_name(store, &w),
+            super::session_windows::saved_appearance(store, &w),
+        ),
+        Ok(None) => (None, None, Default::default()),
         Err(e) => {
             return WebReturnType::error(format!(
                 "CloseWindow: window lookup failed: {}",
@@ -140,7 +145,7 @@ pub(crate) async fn handle_close_window(state: &AppState, call: &WebCallType) ->
                     .unwrap_or(false);
                 // Best-effort: a failure here must never block the close itself.
                 if will_empty_windowids {
-                    super::session_windows::save_on_last_close(store, &ws_id, window_name.as_deref());
+                    super::session_windows::save_on_last_close(store, &ws_id, window_name.as_deref(), &window_appearance);
                 }
                 close_workspace(state, ws_id).await;
             }
@@ -194,7 +199,7 @@ pub(crate) async fn handle_close_window(state: &AppState, call: &WebCallType) ->
                 .map(|c| c.windowids.is_empty())
                 .unwrap_or(false);
             if will_empty_windowids {
-                super::session_windows::save_on_last_close(store, &ws_id, window_name.as_deref());
+                super::session_windows::save_on_last_close(store, &ws_id, window_name.as_deref(), &window_appearance);
             }
             close_workspace(state, ws_id).await;
         }

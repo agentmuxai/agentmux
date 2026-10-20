@@ -41,6 +41,7 @@ import { CopyButton } from "../element/copybutton";
 import { getEffectiveTitle, isUsableFocusRingColor, pickReadableTextColor } from "./autotitle";
 import { BlockFrameProps } from "./blocktypes";
 import { resolveContextMenuRegion } from "./context-menu-region";
+import { floaterPaneBlockId } from "@/app/workspace/floater-panes";
 import { FloatingMaximizeButton } from "./floating-maximize";
 import { canTackFloatingPane, FloatingAlwaysOnTopButton } from "./floating-ontop";
 import { FloatingRedockButton } from "./floating-redock";
@@ -367,6 +368,14 @@ function EndIcons(props: {
         return label.startsWith("floating-") ? label : null;
     });
 
+    // A floater's window state (maximize, "always on top") is keyed on the first
+    // block of its tab, whichever tab of a stacked pane is visible, so it stays put
+    // when the user switches tabs (floating-pane-workspace.tsx reads the same block).
+    const floatingStateBlockId = () => {
+        const tabId = atoms.activeTabId();
+        return (floatingLabel() && tabId ? floaterPaneBlockId(tabId) : undefined) ?? props.blockId();
+    };
+
     const closeDecl: IconButtonDecl = {
         elemtype: "iconbutton",
         icon: "xmark",
@@ -420,13 +429,13 @@ function EndIcons(props: {
                         {/* "Always on top" tack, outermost of the window controls
                         (SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27 §4). */}
                         <Show when={canTackFloatingPane(floatingLabel())}>
-                            <FloatingAlwaysOnTopButton label={floatingLabel()!} blockId={props.blockId()} />
+                            <FloatingAlwaysOnTopButton label={floatingLabel()!} blockId={floatingStateBlockId()} />
                         </Show>
                         {/* Redock just left of Maximize, part of the primary window controls
                         (SPEC_FLOATING_PANE_REDOCK_BUTTON_2026_10_15,
                         SPEC_FLOATING_PANE_WINDOW_CONTROLS_REFINEMENTS_2026_10_16 §3.1). */}
                         <FloatingRedockButton />
-                        <FloatingMaximizeButton label={floatingLabel()!} blockId={props.blockId()} />
+                        <FloatingMaximizeButton label={floatingLabel()!} blockId={floatingStateBlockId()} />
                     </Show>
                 }
             >

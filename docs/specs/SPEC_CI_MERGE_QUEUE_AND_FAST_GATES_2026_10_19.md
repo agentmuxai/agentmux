@@ -1,6 +1,6 @@
 # Spec: CI that keeps main green: a merge queue with fast gates, quicker PR builds, and a red-main alert
 
-**Status:** active. Phase 0 shipped in #5118; Phase 1 (every required check reports in a merge queue) in #5119. Left: Phase 2 (turn the queue on), 3 (agents' merging), 4 (quicker PR builds), 5 (red-main alert), 6 (the Codex sweep).
+**Status:** implemented. Phase 0 in #5118; Phase 1 (every required check reports in a merge queue) in #5119; Phase 2 (the queue is on: the `main` ruleset, id 25365400, with a merge-queue rule) enabled 2026-10-19, its canary being #5120; Phase 3 (agents merge with `gh-agent pr merge`, which queues the PR) is in the Workspace Rules Global Memory entry "Merging into agentmux main goes through a merge queue"; Phase 4 (a quicker Ubuntu Rust leg) in #5122; Phase 5 (a red main opens a `main-red` issue) in #5121; Phase 6 (the Codex sweep runs from its own workflow file) in #5120, and its scheduled runs succeed.
 **Date:** 2026-10-19
 **Author:** Lazo
 **Verified against:** `agentmux` `main` @ `4c16363db` (2026-10-19), by reading the workflows and measuring recent runs through the Actions API.

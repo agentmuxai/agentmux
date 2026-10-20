@@ -5,15 +5,16 @@ export type StartProviderAuthReq = { providerId: string,
  * Vestigial — bundle mode (a successful auth adding the account to
  * a named group of accounts) was retired in Phase 4c of
  * SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md. Kept on the wire
- * shape only; `direct_account` is always true in practice.
+ * shape only; no frontend caller sends it.
  */
 intoBundleId?: string, 
 /**
- * Always `true` in practice — `AuthFlowController` (the sole
- * frontend caller) hardcodes `directAccount: true`. A successful
- * auth persists a standalone `IdentityAccount`; the actual
- * agent<->account link is written later, once the agent exists, by
- * the launch-flow reconcile.
+ * When `true`, srv mints or reuses the account and a successful auth
+ * persists a standalone `IdentityAccount`; the agent<->account link is
+ * written later, once the agent exists. No frontend caller sets it
+ * since the launch modal (whose `AuthFlowController` sent `true`) was
+ * removed: the agent pane's login (`flows/login-backend.ts`) leaves it
+ * `false` and persists the account itself.
  */
 directAccount: boolean, 
 /**

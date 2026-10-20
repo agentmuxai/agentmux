@@ -65,7 +65,6 @@ export default tseslint.config(
         // own rule. Excluded here rather than fixed: adopting those plugins
         // repo-wide is a separate, unrelated effort.
         ignores: [
-            "frontend/app/view/agent/components/AgentLaunchModal.tsx",
             "frontend/app/view/agent/components/AgentQuestionPanel.tsx",
             "frontend/app/view/editor/editor-view.tsx",
         ],

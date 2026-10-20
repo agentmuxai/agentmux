@@ -511,6 +511,31 @@ fn deliver_agent_message_routes_to_the_app_server_controller_not_pty() {
     remove_controller_entry_only(block_id);
 }
 
+/// srv's held `[AgentMux]` notes go only with a message that went: one the
+/// controller refused, or one left to the keystroke fallback, leaves them held.
+#[test]
+fn held_notes_stay_held_when_the_message_does_not_go() {
+    let refused = "block-held-notes-refused";
+    register_controller(
+        refused,
+        Arc::new(app_server_controller::AppServerController::new(refused.to_string(), None, None, None, None)),
+    );
+    let pty = "block-held-notes-pty";
+    register_controller(pty, subprocess_controller(pty));
+    let handler = crate::backend::reactive::ReactiveHandler::new();
+    for (agent, block_id) in [("held-refused", refused), ("held-pty", pty)] {
+        handler.register_agent(agent, block_id, None).unwrap();
+        handler.hold_system_note(agent, "k", "[AgentMux] note").unwrap();
+        let _ = deliver_agent_message(block_id, "hello from another agent");
+        assert!(handler.holds_system_note(agent, "k"), "{block_id}: still held");
+        let (message, notes) = crate::backend::reactive::held_notes::attach(block_id, "next");
+        assert_eq!(message, "next\n\n[AgentMux] note");
+        notes.delivered();
+    }
+    remove_controller_entry_only(refused);
+    remove_controller_entry_only(pty);
+}
+
 /// Controllers that DO have a structured channel must keep the behavior they
 /// had — the fix adds a branch, it does not reroute persistent/ACP agents.
 #[test]

@@ -16,8 +16,11 @@ import { ensureCapability, getCapability, isAvailable, watchCapability } from "@
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { SystemToolInstallInline } from "./SystemToolInstallInline";
 import { CliDiskSpace } from "./CliDiskSpace";
+import { toolNotes, toolStatus, widgetStatus } from "./toolchain-status";
+import { WidgetPortField } from "./WidgetPortField";
 import "./toolchain-view.scss";
-import { Button } from "@/app/element/ui";
+import { Button, Card, CardGrid, FilterInput, IconButton, Pill } from "@/app/element/ui";
+import { matchesEveryWord } from "@/app/util/fuzzysearch";
 
 // ── Port/localStorage helpers (unchanged from modal) ─────────────────────────
 
@@ -288,11 +291,16 @@ export function ToolchainView(): JSX.Element {
         for (const id of requiredIds) void ensureCapability(id);
     });
 
-    const refresh = () => {
+    const [refreshing, setRefreshing] = createSignal(false);
+    const refresh = async () => {
+        setRefreshing(true);
         rows.forEach((_, i) => setRows(i, { loading: true, found: false, version: undefined }));
-        rows.forEach((_, i) => void probe(i, { force: true }));
         wrows.forEach((_, i) => setWrows(i, { cliLoading: true, cliFound: false, healthLoading: false, running: false, statusCode: undefined }));
-        wrows.forEach((_, i) => void probeWidget(i));
+        try {
+            await Promise.all([...rows.map((_, i) => probe(i, { force: true })), ...wrows.map((_, i) => probeWidget(i))]);
+        } finally {
+            setRefreshing(false);
+        }
     };
 
     const [latestLoading, setLatestLoading] = createSignal(false);
@@ -396,165 +404,240 @@ export function ToolchainView(): JSX.Element {
         setUnavailableInstalls((prev) => new Set(prev).add(id));
     };
 
-    const renderRow = (row: ToolRow): JSX.Element => (
-        <div class="toolchain-row" classList={{ "toolchain-row--missing": !row.loading && !row.found }}>
-            <i class={`toolchain-row-icon ${rowIconClass(row.icon, row.brandIcon)}`} aria-hidden="true" />
-            <div class="toolchain-row-main">
-                <div class="toolchain-row-title">
-                    <span class="toolchain-row-name">{row.label}</span>
-                    <Show when={row.loading}>
-                        <span class="toolchain-pill toolchain-pill--muted">Checking…</span>
+    // One card is open at a time, across every group.
+    const [openKey, setOpenKey] = createSignal<string | null>(null);
+    const toggleOpen = (key: string) => setOpenKey((cur) => (cur === key ? null : key));
+    const [filter, setFilter] = createSignal("");
+
+    const toolKey = (row: ToolRow) => `${row.kind}:${row.id}`;
+    const widgetKey = (row: WidgetRow) => `widget:${row.id}`;
+    const toolByKey = (key: string) => rows.find((r) => toolKey(r) === key);
+    const widgetIndex = (key: string) => wrows.findIndex((w) => widgetKey(w) === key);
+
+    const toolKeys = (kind: ToolRow["kind"]) =>
+        rows
+            .filter((r) => r.kind === kind && matchesEveryWord(filter(), r.label, r.id, r.version))
+            .map(toolKey);
+    const widgetKeys = () => wrows.filter((w) => matchesEveryWord(filter(), w.label, w.id, w.description)).map(widgetKey);
+    const nothingMatches = () =>
+        filter() !== "" &&
+        toolKeys("core").length === 0 &&
+        toolKeys("local").length === 0 &&
+        toolKeys("provider").length === 0 &&
+        widgetKeys().length === 0;
+
+    const toolActions = (row: ToolRow): JSX.Element => (
+        <>
+            <Show when={!row.loading && !row.found && row.installUrl}>
+                <Button density="compact" icon="arrow-up-right-from-square" onClick={() => open(row.installUrl)}>
+                    Install
+                </Button>
+            </Show>
+            <Show when={row.docsUrl}>
+                <IconButton density="compact" icon="book" label="Docs" onClick={() => open(row.docsUrl)} />
+            </Show>
+        </>
+    );
+
+    const toolCard = (key: string): JSX.Element => (
+        <Show when={toolByKey(key)}>
+            {(row) => {
+                const status = () => toolStatus(row(), rowDrift(row()));
+                const notes = () => toolNotes(row(), rowDrift(row()));
+                return (
+                    <Card
+                        class="toolchain-card"
+                        data-tool={row().id}
+                        aria-label={`${row().label}, ${status().label}`}
+                        icon={<i class={rowIconClass(row().icon, row().brandIcon)} />}
+                        title={row().label}
+                        subtitle={status().subtitle}
+                        meta={notes().map((n) => (
+                            <span title={n.title}>{n.text}</span>
+                        ))}
+                        status={{ tone: status().tone, label: status().label }}
+                        attention={status().attention}
+                        muted={!row().loading && !row().found && row().optional}
+                        selected={openKey() === key}
+                        onSelect={() => toggleOpen(key)}
+                        actions={toolActions(row())}
+                    />
+                );
+            }}
+        </Show>
+    );
+
+    const toolDetail = (key: string): JSX.Element => (
+        <Show when={toolByKey(key)}>
+            {(row) => (
+                <div class="toolchain-detail">
+                    <Show when={row().found && row().path}>
+                        <span class="toolchain-detail-label">Path</span>
+                        <code class="toolchain-detail-value">{row().path}</code>
                     </Show>
-                    <Show when={!row.loading && row.found}>
-                        <span class="toolchain-pill toolchain-pill--ok">
-                            <i class="fa-solid fa-check" /> {row.version ?? "installed"}
-                        </span>
-                        <Show when={row.source === "local_install"}>
-                            <span class="toolchain-pill toolchain-pill--muted">managed</span>
-                        </Show>
-                        <Show when={row.kind === "provider" && row.source === "system_path"}>
-                            <span
-                                class="toolchain-pill toolchain-pill--muted"
-                                title="AgentMux doesn't install this CLI: it runs the copy you installed"
-                            >
-                                your install
-                            </span>
-                        </Show>
-                        {/* Drift, split by who can act on it. `behind-pin` is
-                            the user's — loud, and paired with the install
-                            action below, which reinstalls at the pin. The pin
-                            trailing upstream is OURS; it is shown quietly and
-                            never as a call to action, because the user cannot
-                            fix it. Previously this compared installed against
-                            upstream by string equality, which both missed
-                            behind-pin entirely and pushed users AHEAD of the
-                            version we validated. */}
-                        {(() => {
-                            const d = rowDrift(row);
-                            return (
-                                <>
-                                    <Show when={d.drift === "behind-pin"}>
-                                        <span
-                                            class="toolchain-pill toolchain-pill--update"
-                                            title={`AgentMux is validated against ${d.pinned}; you have ${d.installed}`}
-                                        >
-                                            <i class="fa-solid fa-circle-up" />{" "}
-                                            {d.pinned} available
-                                        </span>
-                                    </Show>
-                                    <Show when={d.drift === "current"}>
-                                        <span class="toolchain-pill toolchain-pill--muted">
-                                            <i class="fa-solid fa-circle-check" /> up to date
-                                        </span>
-                                    </Show>
-                                    <Show when={d.drift === "ahead-of-pin"}>
-                                        <span
-                                            class="toolchain-pill toolchain-pill--muted"
-                                            title={`Newer than the ${d.pinned} AgentMux validates against — not a problem, just untested here`}
-                                        >
-                                            ahead of pin
-                                        </span>
-                                    </Show>
-                                    <Show when={d.currency === "pin-behind-upstream"}>
-                                        <span
-                                            class="toolchain-pill toolchain-pill--muted"
-                                            title={`AgentMux pins ${d.pinned}; upstream has ${d.latest}. Nothing for you to do — this is ours to bump.`}
-                                        >
-                                            pin {d.pinned} · upstream {d.latest}
-                                        </span>
-                                    </Show>
-                                </>
-                            );
-                        })()}
+                    <For each={toolNotes(row(), rowDrift(row())).filter((n) => n.title)}>
+                        {(n) => <p class="toolchain-detail-note">{n.title}</p>}
+                    </For>
+                    <Show when={row().loading}>
+                        <p class="toolchain-detail-note">Looking for {row().label} on this machine…</p>
                     </Show>
-                    <Show when={!row.loading && !row.found}>
-                        <span class="toolchain-pill" classList={{ "toolchain-pill--warn": !row.optional, "toolchain-pill--muted": row.optional }}>
-                            {row.optional ? "Not installed (optional)" : "Not found"}
-                        </span>
+                    <Show when={!row().loading && !row().found}>
+                        <p class="toolchain-detail-note">Not found on this machine's PATH.</p>
+                        <Show when={row().installCommand}>
+                            <span class="toolchain-detail-label">Install command</span>
+                            <div class="toolchain-detail-row">
+                                <code class="toolchain-detail-value">{row().installCommand}</code>
+                                <IconButton density="compact" icon="copy" label="Copy command" onClick={() => copy(row().installCommand)} />
+                            </div>
+                        </Show>
+                        <Show when={row().kind === "core" && SYSTEM_INSTALLABLE_IDS.has(row().id) && !unavailableInstalls().has(row().id)}>
+                            <div class="toolchain-detail-row">
+                                <Button onClick={() => toggleInstallPanel(row().id)} pressed={expandedInstalls().has(row().id)}>
+                                    Install it for me
+                                </Button>
+                            </div>
+                        </Show>
+                        <Show when={expandedInstalls().has(row().id)}>
+                            <SystemToolInstallInline
+                                toolId={row().id}
+                                onInstalled={() => {
+                                    toggleInstallPanel(row().id);
+                                    const idx = rows.findIndex((r) => r.id === row().id);
+                                    if (idx !== -1) void probe(idx, { force: true });
+                                }}
+                                onUnavailable={() => markUnavailable(row().id)}
+                            />
+                        </Show>
                     </Show>
                 </div>
-                <Show when={row.found && row.path}>
-                    <div class="toolchain-row-path" title={row.path}>{row.path}</div>
-                </Show>
-                <Show when={!row.loading && !row.found && row.installCommand}>
-                    <div class="toolchain-row-cmd">
-                        <code>{row.installCommand}</code>
-                        <Button tone="quiet" class="toolchain-link-btn" onClick={() => copy(row.installCommand)} title="Copy">
-                            <i class="fa-solid fa-copy" />
-                        </Button>
-                    </div>
-                </Show>
-                <Show
-                    when={
-                        !row.loading && !row.found && row.kind === "core" &&
-                        SYSTEM_INSTALLABLE_IDS.has(row.id) && !unavailableInstalls().has(row.id)
-                    }
-                >
-                    <Button
-                        tone="accent"
-                        class="toolchain-link-btn toolchain-link-btn--install-now"
-                        onClick={() => toggleInstallPanel(row.id)}
-                    >
-                        or install it now
-                    </Button>
-                    <Show when={expandedInstalls().has(row.id)}>
-                        <SystemToolInstallInline
-                            toolId={row.id}
-                            onInstalled={() => {
-                                toggleInstallPanel(row.id);
-                                const idx = rows.findIndex((r) => r.id === row.id);
-                                if (idx !== -1) void probe(idx, { force: true });
-                            }}
-                            onUnavailable={() => markUnavailable(row.id)}
-                        />
+            )}
+        </Show>
+    );
+
+    const effectivePort = (w: WidgetRow) => w.customPort ?? w.defaultPort;
+
+    /** Use `port` for a widget, or its default when `port` is undefined, and look again. */
+    const applyPort = (key: string, port: number | undefined) => {
+        const idx = widgetIndex(key);
+        if (idx === -1) return;
+        const next = port === wrows[idx].defaultPort ? undefined : port;
+        if (next === wrows[idx].customPort) return;
+        setWrows(idx, { customPort: next, cliLoading: true, cliFound: false, healthLoading: false, running: false });
+        saveWidgetPort(wrows[idx].id, next);
+        void probeWidget(idx);
+    };
+
+    const widgetCard = (key: string): JSX.Element => (
+        <Show when={wrows[widgetIndex(key)]}>
+            {(row) => {
+                const status = () => widgetStatus(row(), effectivePort(row()));
+                return (
+                    <Card
+                        class="toolchain-card"
+                        data-widget={row().id}
+                        aria-label={`${row().label}, ${status().label}`}
+                        icon={<i class={rowIconClass(row().icon)} />}
+                        title={row().label}
+                        subtitle={status().subtitle}
+                        status={{ tone: status().tone, label: status().label }}
+                        selected={openKey() === key}
+                        onSelect={() => toggleOpen(key)}
+                        actions={
+                            <>
+                                <Show when={row().running}>
+                                    <Button
+                                        density="compact"
+                                        icon="arrow-up-right-from-square"
+                                        onClick={() =>
+                                            void createBlock({
+                                                meta: {
+                                                    view: "browser",
+                                                    url: `http://127.0.0.1:${effectivePort(row())}${row().embedPath}`,
+                                                    "frame:title": row().label,
+                                                },
+                                            })
+                                        }
+                                    >
+                                        Open pane
+                                    </Button>
+                                </Show>
+                                <Show when={row().docsUrl}>
+                                    <IconButton density="compact" icon="book" label="Docs" onClick={() => open(row().docsUrl)} />
+                                </Show>
+                            </>
+                        }
+                    />
+                );
+            }}
+        </Show>
+    );
+
+    const widgetDetail = (key: string): JSX.Element => (
+        <Show when={wrows[widgetIndex(key)]}>
+            {(row) => (
+                <div class="toolchain-detail">
+                    <p class="toolchain-detail-note">{row().description}</p>
+                    <Show when={!row().running && row().requires.some((id) => !isAvailable(id))}>
+                        <p class="toolchain-detail-note">
+                            Requires: {row().requires.filter((id) => !isAvailable(id)).join(", ")}
+                        </p>
                     </Show>
-                </Show>
-            </div>
-            <div class="toolchain-row-actions">
-                <Show when={!row.loading && !row.found && row.installUrl}>
-                    <Button class="toolchain-btn" onClick={() => open(row.installUrl)}>
-                        Install <i class="fa-solid fa-arrow-up-right-from-square" />
-                    </Button>
-                </Show>
-                <Show when={row.docsUrl}>
-                    <Button tone="quiet" class="toolchain-link-btn" onClick={() => open(row.docsUrl)} title="Docs">
-                        <i class="fa-solid fa-book" />
-                    </Button>
-                </Show>
-            </div>
-        </div>
+                    <WidgetPortField
+                        port={effectivePort(row())}
+                        defaultPort={row().defaultPort}
+                        custom={row().customPort !== undefined}
+                        onApply={(port) => applyPort(key, port)}
+                    />
+                </div>
+            )}
+        </Show>
+    );
+
+    const group = (title: string, keys: () => string[], card: (key: string) => JSX.Element, detail: (key: string) => JSX.Element) => (
+        <Show when={keys().length > 0}>
+            <h4 class="ui-card-group-heading">{title}</h4>
+            <CardGrid
+                ariaLabel={title}
+                items={keys()}
+                keyOf={(k) => k}
+                renderCard={card}
+                selectedKey={openKey()}
+                renderDetail={detail}
+                onClose={() => setOpenKey(null)}
+            />
+        </Show>
     );
 
     return (
-        <div class="toolchain-view">
-            <div class="toolchain-view-header">
-                <Button tone="quiet" class="toolchain-btn toolchain-btn--ghost" onClick={refresh}>
-                    <i class="fa-solid fa-rotate" /> Refresh
-                </Button>
-                <Button
-                    tone="quiet"
-                    class="toolchain-btn toolchain-btn--ghost"
-                    onClick={() => void checkLatestVersions()}
-                    disabled={latestLoading()}
-                    title="Fetch latest published versions from npm registry"
-                >
-                    <i class={`fa-solid ${latestLoading() ? "fa-spinner fa-spin" : "fa-arrow-up"}`} />
-                    {latestLoading() ? " Checking…" : " Check latest versions"}
-                </Button>
+        <div class="toolchain-view ui-density-compact">
+            <div class="ui-card-section-header toolchain-view-header">
+                <span class="ui-card-section-title">Toolchain</span>
                 {/* The one-glance answer to "am I behind?" — counts only what
                     the user can act on. A pin trailing upstream is ours and is
                     deliberately excluded, so this never nags about something
                     they cannot fix. */}
                 <Show when={behindCount() > 0}>
-                    <span class="toolchain-pill toolchain-pill--update" title="Reinstall from each row to move to the version AgentMux validates against">
-                        <i class="fa-solid fa-circle-up" />{" "}
+                    <Pill tone="warn" icon="circle-up" title="Reinstall from each row to move to the version AgentMux validates against">
                         {behindCount()} {behindCount() === 1 ? "tool is" : "tools are"} behind
-                    </span>
+                    </Pill>
                 </Show>
+                <FilterInput class="ui-card-section-filter" value={filter()} onInput={setFilter} placeholder="Filter tools" />
+                <Button tone="quiet" icon="rotate" busy={refreshing()} onClick={() => void refresh()}>
+                    Refresh
+                </Button>
+                <Button
+                    tone="quiet"
+                    icon="arrow-up"
+                    busy={latestLoading()}
+                    onClick={() => void checkLatestVersions()}
+                    title="Fetch latest published versions from npm registry"
+                >
+                    Check latest versions
+                </Button>
             </div>
             <div class="toolchain-body">
                 <section class="toolchain-section">
-                    <h3 class="toolchain-section-title">Environment</h3>
+                    <h4 class="ui-card-group-heading">Environment</h4>
                     <Show when={env()} fallback={<div class="toolchain-env-line">Loading…</div>}>
                         {(e) => (
                             <>
@@ -564,15 +647,19 @@ export function ToolchainView(): JSX.Element {
                                 </div>
                                 <div class="toolchain-env-line">
                                     <span class="toolchain-env-key">PATH source</span>
-                                    <span class="toolchain-pill" classList={{
-                                        "toolchain-pill--ok": e().pathSource === "login-shell",
-                                        "toolchain-pill--warn": e().pathSource === "inherited" && plat !== "windows",
-                                        "toolchain-pill--muted": e().pathSource === "fallback-dirs" || plat === "windows",
-                                    }}>
+                                    <Pill
+                                        tone={
+                                            e().pathSource === "login-shell"
+                                                ? "ok"
+                                                : e().pathSource === "inherited" && plat !== "windows"
+                                                  ? "warn"
+                                                  : "neutral"
+                                        }
+                                    >
                                         {pathSourceLabel(e().pathSource)}
-                                    </span>
+                                    </Pill>
                                 </div>
-                                <Button tone="quiet" class="toolchain-link-btn toolchain-path-toggle" onClick={() => setShowPath((v) => !v)}>
+                                <Button tone="quiet" class="toolchain-path-toggle" onClick={() => setShowPath((v) => !v)}>
                                     {showPath() ? "Hide" : "Show"} effective PATH
                                 </Button>
                                 <Show when={showPath()}>
@@ -587,93 +674,13 @@ export function ToolchainView(): JSX.Element {
 
                 <CliDiskSpace />
 
-                <section class="toolchain-section">
-                    <h3 class="toolchain-section-title">Core tools</h3>
-                    <For each={rows.filter((r) => r.kind === "core")}>{renderRow}</For>
-                </section>
-
-                <section class="toolchain-section">
-                    <h3 class="toolchain-section-title">Local models</h3>
-                    <For each={rows.filter((r) => r.kind === "local")}>{renderRow}</For>
-                </section>
-
-                <section class="toolchain-section">
-                    <h3 class="toolchain-section-title">Agent CLIs</h3>
-                    <For each={rows.filter((r) => r.kind === "provider")}>{renderRow}</For>
-                </section>
-
-                <section class="toolchain-section">
-                    <h3 class="toolchain-section-title">External Widgets</h3>
-                    <For each={wrows}>
-                        {(row, i) => (
-                            <div class="toolchain-row" classList={{ "toolchain-row--missing": !row.cliLoading && !row.cliFound && !row.running }}>
-                                <i class={`toolchain-row-icon ${rowIconClass(row.icon)}`} aria-hidden="true" />
-                                <div class="toolchain-row-main">
-                                    <div class="toolchain-row-title">
-                                        <span class="toolchain-row-name">{row.label}</span>
-                                        <Show when={row.running}>
-                                            <span class="toolchain-pill toolchain-pill--ok">
-                                                <i class="fa-solid fa-circle" style="font-size:0.5em;vertical-align:middle" /> Running
-                                            </span>
-                                        </Show>
-                                        <Show when={!row.cliLoading && row.cliFound && !row.running}>
-                                            <span class="toolchain-pill toolchain-pill--muted">Installed</span>
-                                        </Show>
-                                        <Show when={row.cliLoading || row.healthLoading}>
-                                            <span class="toolchain-pill toolchain-pill--muted">Checking…</span>
-                                        </Show>
-                                        <Show when={!row.cliLoading && !row.healthLoading && !row.cliFound && !row.running}>
-                                            <span class="toolchain-pill toolchain-pill--muted">
-                                                {row.installKind === "manual" ? "Not detected" : "Not installed"}
-                                            </span>
-                                        </Show>
-                                    </div>
-                                    <div class="toolchain-row-path toolchain-widget-desc">{row.description}</div>
-                                    <Show when={!row.running && row.requires.some((id) => !isAvailable(id))}>
-                                        <div class="toolchain-row-path">
-                                            Requires: {row.requires.filter((id) => !isAvailable(id)).join(", ")}
-                                        </div>
-                                    </Show>
-                                    <div class="toolchain-widget-port">
-                                        <span class="toolchain-widget-port-label">Port</span>
-                                        <input
-                                            class="toolchain-widget-port-input"
-                                            type="number" min="1" max="65535"
-                                            value={row.customPort ?? row.defaultPort}
-                                            onBlur={(e) => {
-                                                const val = parseInt(e.currentTarget.value, 10);
-                                                if (isNaN(val) || val <= 0 || val > 65535) { e.currentTarget.value = String(row.customPort ?? row.defaultPort); return; }
-                                                const newPort = val === row.defaultPort ? undefined : val;
-                                                setWrows(i(), { customPort: newPort, cliLoading: true, cliFound: false, healthLoading: false, running: false });
-                                                saveWidgetPort(row.id, newPort);
-                                                void probeWidget(i());
-                                            }}
-                                        />
-                                        <Show when={row.customPort !== undefined}>
-                                            <Button tone="quiet" class="toolchain-link-btn" title="Reset to default port"
-                                                onClick={() => { setWrows(i(), { customPort: undefined, cliLoading: true, cliFound: false, healthLoading: false, running: false }); saveWidgetPort(row.id, undefined); void probeWidget(i()); }}>
-                                                <i class="fa-solid fa-rotate-left" />
-                                            </Button>
-                                        </Show>
-                                    </div>
-                                </div>
-                                <div class="toolchain-row-actions">
-                                    <Show when={row.running}>
-                                        <Button class="toolchain-btn"
-                                            onClick={() => void createBlock({ meta: { view: "browser", url: `http://127.0.0.1:${row.customPort ?? row.defaultPort}${row.embedPath}`, "frame:title": row.label } })}>
-                                            Open Pane <i class="fa-solid fa-arrow-up-right-from-square" />
-                                        </Button>
-                                    </Show>
-                                    <Show when={row.docsUrl}>
-                                        <Button tone="quiet" class="toolchain-link-btn" onClick={() => open(row.docsUrl)} title="Docs">
-                                            <i class="fa-solid fa-book" />
-                                        </Button>
-                                    </Show>
-                                </div>
-                            </div>
-                        )}
-                    </For>
-                </section>
+                {group("Core tools", () => toolKeys("core"), toolCard, toolDetail)}
+                {group("Local models", () => toolKeys("local"), toolCard, toolDetail)}
+                {group("Agent CLIs", () => toolKeys("provider"), toolCard, toolDetail)}
+                {group("External widgets", widgetKeys, widgetCard, widgetDetail)}
+                <Show when={nothingMatches()}>
+                    <div class="ui-card-empty">No tools match “{filter()}”.</div>
+                </Show>
             </div>
         </div>
     );

@@ -12,8 +12,15 @@ use super::*;
 pub fn emit_estart(ws_port: u16, web_port: u16, version: &str, build_time: &str, instance_id: &str) {
     let pending_migrations = migrations::count_pending_migrations(&base::get_mux_data_dir());
     eprintln!(
-        "AGENTMUXSRV-ESTART ws:127.0.0.1:{} web:127.0.0.1:{} version:{} buildtime:{} instance:{} pending_migrations:{}",
-        ws_port, web_port, version, build_time, instance_id, pending_migrations
+        "{}",
+        agentmux_common::srv_stderr::estart_line(&agentmux_common::srv_stderr::Estart {
+            ws_endpoint: format!("127.0.0.1:{ws_port}"),
+            web_endpoint: format!("127.0.0.1:{web_port}"),
+            version: version.to_string(),
+            build_time: build_time.to_string(),
+            instance_id: instance_id.to_string(),
+            pending_migrations,
+        })
     );
 }
 
@@ -104,6 +111,37 @@ pub fn spawn_wal_checkpoint_loop(
                 tracing::warn!(error = %e, "wal_checkpoint(TRUNCATE) on filestore.db failed");
             } else {
                 tracing::debug!("wal_checkpoint(TRUNCATE): filestore.db ok");
+            }
+        }
+    });
+}
+
+/// The shared transcript store's WAL is cut back by one srv on the machine (the
+/// owner of `filestore.db.owner`, [`TruncateOwner`]): a first look two minutes
+/// after start, then every half hour. The PASSIVE checkpoints
+/// (`filestore/checkpointer.rs`) keep the WAL's content copied back; this gives
+/// the disk back and starts the log afresh. The TRUNCATE runs on its own
+/// connection, so this srv's appends don't wait behind it.
+pub fn spawn_global_transcripts_truncate_loop(token: tokio_util::sync::CancellationToken, store: Option<Arc<FileStore>>) {
+    let Some(store) = store else { return };
+    let Some(mut owner) = crate::backend::storage::filestore::TruncateOwner::for_store(&store) else { return };
+    tokio::spawn(async move {
+        let mut wait = std::time::Duration::from_secs(2 * 60);
+        loop {
+            tokio::select! {
+                _ = tokio::time::sleep(wait) => {}
+                _ = token.cancelled() => break,
+            }
+            wait = std::time::Duration::from_secs(30 * 60);
+            if !owner.is_owner() {
+                continue;
+            }
+            let store = Arc::clone(&store);
+            match tokio::task::spawn_blocking(move || store.checkpoint_truncate_apart()).await {
+                Ok(Ok(true)) => tracing::debug!("wal_checkpoint(TRUNCATE): global transcripts ok"),
+                Ok(Ok(false)) => tracing::debug!("wal_checkpoint(TRUNCATE): global transcripts busy; the next pass finishes"),
+                Ok(Err(e)) => tracing::warn!(error = %e, "wal_checkpoint(TRUNCATE) on the global transcript store failed"),
+                Err(e) => tracing::warn!(error = %e, "global transcript store truncate task failed"),
             }
         }
     });

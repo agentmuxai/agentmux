@@ -76,6 +76,17 @@ impl Drop for TimedConn<'_> {
     }
 }
 
+/// `user_version` value stamped into the GLOBAL transcript store
+/// (`shared/agents/transcripts/filestore.db`) by builds that bundle SQLite 3.51.3
+/// or later. The schema is the same as [`FILESTORE_SCHEMA_VERSION`]'s; the number
+/// is a lock: a build older than this one refuses a `user_version` above its own
+/// (`check_schema_compat`), so it cannot open the shared store with its old
+/// SQLite (3.45.0), whose WAL-reset bug can corrupt a database several processes
+/// write. Such a build runs on without the global store, as it does when that
+/// store can't be opened (`bootstrap/stores.rs`).
+/// RCA_UPGRADE_0_59_30_TO_0_59_34_ISSUES_2026_10_19.md section 6.
+pub const GLOBAL_TRANSCRIPT_STORE_VERSION: i64 = 2;
+
 /// Connections that only read, for a file-backed store. In WAL mode a reader
 /// sees every committed write and never waits for a writer, so reads taken
 /// through these don't queue behind the writer's mutex — which, on the global
@@ -106,7 +117,7 @@ impl ReaderPool {
             &self.path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
-        conn.execute_batch("PRAGMA busy_timeout=5000; PRAGMA query_only=1;")?;
+        conn.execute_batch(&format!("PRAGMA busy_timeout=5000; PRAGMA query_only=1; {}", super::checkpointer::JOURNAL_SIZE_LIMIT))?;
         Ok(conn)
     }
 
@@ -140,8 +151,19 @@ pub struct FileStore {
 impl FileStore {
     /// Open a FileStore backed by a file on disk.
     pub fn open(path: &Path) -> Result<Self, StoreError> {
+        Self::open_at(path, FILESTORE_SCHEMA_VERSION)
+    }
+
+    /// Open the machine-wide transcript store (`shared/agents/transcripts/filestore.db`),
+    /// which every srv shares. It is stamped [`GLOBAL_TRANSCRIPT_STORE_VERSION`], so
+    /// builds that predate it (and bundle the SQLite with the WAL-reset bug) refuse it.
+    pub fn open_global_transcripts(path: &Path) -> Result<Self, StoreError> {
+        Self::open_at(path, GLOBAL_TRANSCRIPT_STORE_VERSION)
+    }
+
+    fn open_at(path: &Path, schema_version: i64) -> Result<Self, StoreError> {
         let conn = Connection::open(path)?;
-        let mut store = Self::configure_and_migrate(conn)?;
+        let mut store = Self::configure_and_migrate(conn, schema_version)?;
         // Checkpoints off the write path: a thread with its own connection
         // runs them, and this connection stops running them inside whichever
         // write crosses the threshold (checkpointer.rs). Only if the thread
@@ -161,7 +183,7 @@ impl FileStore {
     /// does not exist.
     pub fn open_read_only(path: &Path) -> Result<Self, StoreError> {
         let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-        conn.execute_batch("PRAGMA busy_timeout=5000;")?;
+        conn.execute_batch(&format!("PRAGMA busy_timeout=5000; {}", super::checkpointer::JOURNAL_SIZE_LIMIT))?;
         Ok(Self {
             conn: Mutex::new(conn),
             last_stamp: Mutex::new(HashMap::new()),
@@ -177,14 +199,14 @@ impl FileStore {
     #[allow(dead_code)]
     pub fn open_in_memory() -> Result<Self, StoreError> {
         let conn = Connection::open_in_memory()?;
-        Self::configure_and_migrate(conn)
+        Self::configure_and_migrate(conn, FILESTORE_SCHEMA_VERSION)
     }
 
     /// Open an in-memory FileStore with a custom LRU byte cap.  Used in tests.
     #[allow(dead_code)]
     pub fn open_in_memory_with_cap(max_bytes: usize) -> Result<Self, StoreError> {
         let conn = Connection::open_in_memory()?;
-        let mut store = Self::configure_and_migrate(conn)?;
+        let mut store = Self::configure_and_migrate(conn, FILESTORE_SCHEMA_VERSION)?;
         store.cache_max_bytes = max_bytes;
         Ok(store)
     }
@@ -222,6 +244,14 @@ impl FileStore {
         &self.conn
     }
 
+    /// Forgets every cached file, so the next read goes to the database: a test that
+    /// damages the database file under a store that has just written to it.
+    #[cfg(test)]
+    pub(crate) fn drop_cache_for_test(&self) {
+        self.cache.lock().unwrap().clear();
+        *self.cache_total_bytes.lock().unwrap() = 0;
+    }
+
     /// Run `PRAGMA wal_checkpoint(TRUNCATE)` on the filestore connection.
     /// Same semantics as `Store::checkpoint` — 5s busy_timeout, partial
     /// truncate on contention is safe.
@@ -231,11 +261,33 @@ impl FileStore {
         Ok(())
     }
 
-    fn configure_and_migrate(mut conn: Connection) -> Result<Self, StoreError> {
+    /// The database file, for a file-backed store.
+    pub fn path(&self) -> Option<&Path> {
+        self.readers.as_ref().map(|r| r.path.as_path())
+    }
+
+    /// `PRAGMA wal_checkpoint(TRUNCATE)` on a connection of its own, so this
+    /// store's writer mutex is not held while the checkpoint waits for other
+    /// connections' readers and writers (up to `busy_timeout`). Cuts the WAL
+    /// file back to nothing when it can; returns whether it ran to the end (a
+    /// busy store lets it stop early, and the next call finishes). An in-memory
+    /// store has no file: it uses its own connection.
+    pub fn checkpoint_truncate_apart(&self) -> Result<bool, StoreError> {
+        let Some(readers) = self.readers.as_ref() else {
+            self.checkpoint()?;
+            return Ok(true);
+        };
+        let conn = Connection::open(&readers.path)?;
+        conn.execute_batch(&format!("PRAGMA busy_timeout=5000; {}", super::checkpointer::JOURNAL_SIZE_LIMIT))?;
+        let busy: i64 = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE);", [], |r| r.get(0))?;
+        Ok(busy == 0)
+    }
+
+    fn configure_and_migrate(mut conn: Connection, schema_version: i64) -> Result<Self, StoreError> {
         // The global transcript store is opened by every srv instance on the
         // machine, possibly at the same moment. busy_timeout comes first so
         // every lock below waits instead of failing.
-        conn.execute_batch("PRAGMA busy_timeout=5000;")?;
+        conn.execute_batch(&format!("PRAGMA busy_timeout=5000; {}", super::checkpointer::JOURNAL_SIZE_LIMIT))?;
         // Switching a rollback-journal database (new, or created by an old
         // build) to WAL upgrades a read lock to an exclusive one. Two
         // connections doing that at once deadlock, and SQLite fails one at
@@ -269,9 +321,9 @@ impl FileStore {
         // deadlock with this one on a lock upgrade.
         {
             let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            check_schema_compat(&tx, FILESTORE_SCHEMA_VERSION, "filestore.db")?;
+            check_schema_compat(&tx, schema_version, "filestore.db")?;
             run_filestore_migrations(&tx)?;
-            stamp_version(&tx, FILESTORE_SCHEMA_VERSION)?;
+            stamp_version(&tx, schema_version)?;
             tx.commit()?;
         }
         Ok(Self {
@@ -704,21 +756,9 @@ impl FileStore {
         let num_parts = ((start_idx + data_len - 1) / PART_DATA_SIZE as i64 + 1) as i32;
         let start_part = (start_idx / PART_DATA_SIZE as i64) as i32;
 
-        // Load parts from DB
+        // Load parts from DB, past a damaged one (parts.rs).
         let conn = self.lock_conn();
-        let mut stmt = conn.prepare(
-            "SELECT partidx, data FROM db_file_data WHERE zoneid = ?1 AND name = ?2 ORDER BY partidx",
-        )?;
-        let rows = stmt.query_map(params![zone_id, name], |row| {
-            Ok((row.get::<_, i32>(0)?, row.get::<_, Vec<u8>>(1)?))
-        })?;
-
-        let mut parts_map: HashMap<i32, Vec<u8>> = HashMap::new();
-        for row in rows {
-            let (idx, data) = row?;
-            parts_map.insert(idx, data);
-        }
-        drop(stmt);
+        let parts_map = super::parts::load_parts(&conn, zone_id, name, start_part, start_part + num_parts - 1, file.size)?;
         drop(conn);
 
         // Assemble data

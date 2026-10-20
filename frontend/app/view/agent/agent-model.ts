@@ -17,7 +17,7 @@ import { Logger } from "@/util/logger";
 import { translateError } from "@/app/errors/translate";
 import { buildInstanceSlug } from "./defaults/instance-slug";
 import { archiveThenReturnToPicker, newSessionArchives } from "./start-new-session";
-import type { LaunchOverrides } from "./components/AgentLaunchModal";
+import type { LaunchOverrides } from "./launch-overrides";
 import { buildConfigFiles, deriveSlug } from "./agent-config-builder";
 import { checkNodejsForProvider, ensureProviderAuthDir, agentmuxHome, resolveCliBin, resolveEffectiveLaunchProvider, resolveInitialRuntimeConfig, resolveLaunchRuntime, commitLaunch } from "./agent-launch-env";
 import { realAccountIdOrEmpty } from "./identity-carry-over";
@@ -796,8 +796,8 @@ export class AgentViewModel {
                 RpcApi.CreateAgentInstanceCommand(TabRpcClient, {
                     definition_id: agent.id,
                     block_id: blockId,
-                    // PR-F.3: launch modal carries the user's bundle
-                    // picks. Empty / "blank" no longer buys ambient-creds
+                    // PR-F.3: the caller's account and bundle picks.
+                    // Empty / "blank" no longer buys ambient-creds
                     // fallback — the backend resolver's layer-3 gate now
                     // requires a real bound account for any oauth-class
                     // provider regardless of identity_id's value (#2463
@@ -809,12 +809,12 @@ export class AgentViewModel {
                     identity_id: overrides?.accountId,
                     memory_id: overrides?.bundleId,
                     // v8: named-agent continuation. The instance name
-                    // is the AGENTMUX_AGENT_ID the user picked in the
-                    // modal; finalWorkDir is the path that
+                    // is the AGENTMUX_AGENT_ID the user picked;
+                    // finalWorkDir is the path that
                     // WriteAgentConfigCommand resolved (after slug
-                    // collision suffixing). Both are persisted so the
-                    // launch modal's "Continue agent" dropdown can
-                    // surface this instance later. See
+                    // collision suffixing). Both are persisted so
+                    // `listnamedagents` can surface this instance
+                    // later. See
                     // SPEC_NAMED_AGENT_CONTINUATION_2026_05_12.md.
                     instance_name: instanceName,
                     working_directory: finalWorkDir,
@@ -906,7 +906,7 @@ export class AgentViewModel {
 
             // Write-through: link this agent definition directly to the
             // selected account for its own provider. Issue #1624 PR-C
-            // Part B — the launch modal now picks an account directly
+            // Part B — the caller now passes an account directly
             // (no bundle-of-bindings to reconcile against), so this
             // collapses to a single upsert. `agent_identity_link`'s
             // `ON CONFLICT(agent_id, provider) DO UPDATE` (identities.rs)
@@ -950,8 +950,7 @@ export class AgentViewModel {
                     `direct identity link write-through failed: ${e?.message ?? String(e)}`,
                 );
             }
-            // Picking a conversation back up (My agents, the launch modal's
-            // Continue): once the pane runs, the agent says where it is. A fork
+            // Picking a conversation back up (My agents): once the pane runs, the agent says where it is. A fork
             // is a new branch, not a resume.
             if (launchResumesConversation(forkSessionArgs.continueSessionId, overrides?.forkSession)) {
                 await requestCatchUp(blockId, "resumed").catch(() => {});

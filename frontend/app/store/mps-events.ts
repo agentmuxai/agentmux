@@ -60,6 +60,9 @@ export const WpsEvent = {
     // path — `{status:"retrying"|"resolved"}`. See
     // docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md §6.2.
     AgentResumeRetry: "agent-resume-retry",
+    // A Claude CLI request is being retried, or no longer is (`{ retry }`,
+    // `null` when cleared); see useApiRetryState.ts.
+    AgentApiRetry: "agent-api-retry",
     // Published by SubagentWatcher::scan_session_subagents (pane-reopen
     // cold-backfill entry point) — `{status:"started"|"done"}`. See
     // docs/retro/retro-activity-dock-flicker-survives-debounce-fix-2026-08-24.md §5.
@@ -147,6 +150,8 @@ export const WpsEvent = {
     WidgetRequests: "widgetrequests",
     /** The Vault changed, or agents' requests for entries did: `{ requests, changed_ms }`. */
     Vault: "vault",
+    /** srv recorded an incident (a corrupt transcript zone, `backend::transcript::damage`): its notice shows now, not at the next window start. */
+    IncidentRecorded: "incident:recorded",
     /** A call to action srv holds open started or ended (the waiting tone). */
     UserAttention: "userattention",
     LanInstances: "laninstances",

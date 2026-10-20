@@ -9,8 +9,8 @@
 
 import { PaneRestoreGlyph } from "@/app/element/pane-control-glyphs";
 import * as MOS from "@/app/store/mos";
-import { WorkspaceService } from "@/app/store/services";
 import { holdRedock } from "@/app/workspace/floating-redock-guard";
+import { floaterPanes, redockFloaterPane } from "@/app/workspace/floater-panes";
 import { atoms, getApi } from "@/store/global";
 import { IconButton } from "@/element/iconbutton";
 import type { JSX } from "solid-js";
@@ -76,18 +76,15 @@ export async function redockFloaterInto(target: RedockTarget): Promise<boolean> 
         console.warn("[floating-redock] the target window has no active tab");
         return false;
     }
-    // Non-reactive read (no owner in a click handler): the floater's tab, and every block in it.
-    const sourceTab = MOS.getObjectValue<Tab>(MOS.makeORef("tab", sourceTabId));
-    const blockIds = sourceTab?.blockids ?? [];
-    if (blockIds.length === 0) return false;
+    // The floater's panes (a pane torn off with several tabs goes back whole).
+    const panes = floaterPanes(sourceTabId);
+    if (panes.length === 0) return false;
     try {
-        for (const blockId of blockIds) {
-            await WorkspaceService.RedockFloatingPane(
-                blockId,
-                sourceTabId,
-                sourceWs.oid,
-                targetWs.activetabid,
-                targetWs.oid
+        for (const pane of panes) {
+            await redockFloaterPane(
+                pane,
+                { tabId: sourceTabId, workspaceId: sourceWs.oid },
+                { tabId: targetWs.activetabid, workspaceId: targetWs.oid }
             );
         }
     } catch (e) {

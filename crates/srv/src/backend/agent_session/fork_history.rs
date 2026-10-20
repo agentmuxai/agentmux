@@ -37,7 +37,9 @@ pub enum ForkHistory {
     NoParentHistory,
     /// The parent's transcript doesn't end in the session being forked (a
     /// fork of an older conversation): the fork's CLI continues that one, so
-    /// showing the parent's later history would be wrong. Nothing copied.
+    /// showing the parent's later history would be wrong. Nothing copied here;
+    /// [`copy_older_session_history`] copies the history up to where that
+    /// session ends.
     NotTheLastSession,
     /// The fork already has history of its own. Nothing copied.
     ForkHasHistory,
@@ -66,12 +68,7 @@ pub fn copy_parent_history(
     if last != session_id {
         return Ok(ForkHistory::NotTheLastSession);
     }
-    // The mark first: a crash after it leaves a fork without history, never
-    // history without the mark that keeps its resume a fork.
-    if gfs.stat(&fork, FORK_MARK_FILE).map_err(|e| format!("stat fork mark: {e}"))?.is_none() {
-        let mark = serde_json::json!({ "from": parent_id, "session_id": session_id, "at_ms": now_ms() });
-        write_zone_file(gfs, &fork, FORK_MARK_FILE, mark.to_string().as_bytes())?;
-    }
+    write_fork_mark(gfs, &fork, parent_id, session_id)?;
     // One copy of all four files, in one transaction, so the pane state can't
     // come from a different moment than the transcript. The pane state is
     // written through the cache, so the cache is flushed to the database first.
@@ -89,6 +86,86 @@ pub fn copy_parent_history(
         return Ok(ForkHistory::NotTheLastSession);
     }
     tracing::info!(parent = %parent_id, fork = %fork_id, session_id = %session_id, bytes, "fork: copied its parent's history");
+    Ok(ForkHistory::Copied { bytes })
+}
+
+/// The mark first: a crash after it leaves a fork without history, never
+/// history without the mark that keeps its resume a fork.
+fn write_fork_mark(gfs: &FileStore, fork_zone: &str, parent_id: &str, session_id: &str) -> Result<(), String> {
+    if gfs.stat(fork_zone, FORK_MARK_FILE).map_err(|e| format!("stat fork mark: {e}"))?.is_none() {
+        let mark = serde_json::json!({ "from": parent_id, "session_id": session_id, "at_ms": now_ms() });
+        write_zone_file(gfs, fork_zone, FORK_MARK_FILE, mark.to_string().as_bytes())?;
+    }
+    Ok(())
+}
+
+/// A fork of an OLDER session (`session_id` is not the one the parent's
+/// transcript ends in): the fork's transcript is the parent's `output` in
+/// `src_zone` up to `end`, the byte where that session's last line ends
+/// (from the agent's record: `RecordSession.ranges`), and its `output.tsidx`
+/// up to the same point. The parent's snapshot and running summary describe
+/// where the parent is now, not this point, so they are not copied.
+///
+/// `src_zone` is the parent's current zone, or the archived conversation
+/// that session ended in. A session that continued across zones has only its
+/// last zone's part copied.
+pub fn copy_older_session_history(
+    gfs: &FileStore,
+    parent_id: &str,
+    fork_id: &str,
+    session_id: &str,
+    session_id_field: &str,
+    src_zone: &str,
+    end: i64,
+) -> Result<ForkHistory, String> {
+    if !is_valid_definition_id(parent_id) || !is_valid_definition_id(fork_id) || parent_id == fork_id {
+        return Err(format!("copyforkhistory: invalid definition ids {parent_id:?} -> {fork_id:?}"));
+    }
+    if session_id.trim().is_empty() || session_id_field.is_empty() || end <= 0 {
+        return Err("copyforkhistory: no session to fork".to_string());
+    }
+    let fork = agent_current_zone(fork_id);
+    let Some(output) = gfs.stat(src_zone, OUTPUT_FILE).map_err(|e| format!("stat transcript: {e}"))? else {
+        return Ok(ForkHistory::NoParentHistory);
+    };
+    let end = end.min(output.size);
+    // A session ends at the end of a line: a cut anywhere else is a record that
+    // no longer matches the transcript.
+    let (_, last_byte) = gfs.read_at(src_zone, OUTPUT_FILE, end - 1, 1).map_err(|e| format!("read transcript: {e}"))?;
+    if last_byte != b"
+" {
+        return Ok(ForkHistory::NotTheLastSession);
+    }
+    // The sidecar up to the same point. Without one (or when it can't be read)
+    // the copy has no receive times, as an old transcript has none.
+    let tsidx_len = match gfs.stat(src_zone, TSIDX_FILE).map_err(|e| format!("stat sidecar: {e}"))? {
+        Some(side) if side.size > 0 => {
+            let read = |off: i64, len: i64| -> Result<Option<Vec<u8>>, crate::backend::storage::error::StoreError> {
+                let (_, data) = gfs.read_at(src_zone, TSIDX_FILE, off, len)?;
+                Ok((data.len() as i64 == len).then_some(data))
+            };
+            crate::backend::blockcontroller::shell::stamps::cut_before(&read, side.size, end as u64)
+                .map_err(|e| format!("cut sidecar: {e}"))?
+                .unwrap_or(0)
+        }
+        _ => 0,
+    };
+    write_fork_mark(gfs, &fork, parent_id, session_id)?;
+    gfs.flush_cache().map_err(|e| format!("flush before copy: {e}"))?;
+    let mut prefixes = vec![(OUTPUT_FILE, end)];
+    if tsidx_len > 0 {
+        prefixes.push((TSIDX_FILE, tsidx_len));
+    }
+    let Some(bytes) = gfs.copy_prefixes_to_zone(src_zone, &fork, &prefixes).map_err(|e| format!("copy transcript: {e}"))? else {
+        return Ok(ForkHistory::ForkHasHistory);
+    };
+    // What counts is the copy: it must end in the session the fork continues
+    // (a record that is stale, or a cut in the middle of another session).
+    if last_session(gfs, &fork, session_id_field)?.as_deref() != Some(session_id) {
+        gfs.delete_files(&fork, &[OUTPUT_FILE, TSIDX_FILE]).map_err(|e| format!("undo copy: {e}"))?;
+        return Ok(ForkHistory::NotTheLastSession);
+    }
+    tracing::info!(parent = %parent_id, fork = %fork_id, session_id = %session_id, zone = %src_zone, bytes, "fork: copied its parent's history up to an older session");
     Ok(ForkHistory::Copied { bytes })
 }
 

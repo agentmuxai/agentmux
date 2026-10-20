@@ -395,17 +395,18 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
         }
         evs
     };
-    // A window a session restore rebuilt gets back the name it had
-    // (session_windows.rs): the main one, and each reopened beside it.
-    // The saved name is forgotten only once it is written.
-    let name_events = match super::session_windows::restored_window_name(store, &ws_id) {
+    // A window a session restore rebuilt gets back the name, theme and opacity
+    // it had (session_windows.rs): the main one, and each reopened beside it.
+    // They are forgotten only once written.
+    let restored_meta = super::session_windows::restored_window_meta(store, &ws_id);
+    let name_events = match (!restored_meta.is_empty()).then_some(restored_meta) {
         None => Vec::new(),
-        Some(name) => {
+        Some(patch) => {
             let evs = dispatch_to_reducer(
                 state,
                 agentmux_common::ipc::Command::UpdateWindowMeta {
                     window_id: window_id.clone(),
-                    meta_patch: serde_json::json!({ "window:displayname": name }),
+                    meta_patch: serde_json::Value::Object(patch),
                 },
             )
             .await;
@@ -417,7 +418,7 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
                 }
             }
             if written {
-                super::session_windows::forget_restored_window_name(store, &ws_id);
+                super::session_windows::forget_restored_window_meta(store, &ws_id);
             }
             evs
         }

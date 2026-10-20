@@ -199,6 +199,25 @@ pub(crate) async fn read_range(
     mstore: Arc<crate::backend::storage::store::Store>,
     cmd: CommandBlockfileReadRangeData,
 ) -> Result<BlockfileReadRangeResult, String> {
+    let damaged = crate::backend::transcript::damage::damaged_count();
+    let first = read_range_once(broker.clone(), filestore.clone(), global_store.clone(), mstore.clone(), cmd.clone()).await;
+    if crate::backend::transcript::damage::damaged_count() == damaged {
+        return first;
+    }
+    // That read found the agent's shared zone corrupt (an index rebuild or a read
+    // failed on it, or on another agent's at the same time). The zone is marked
+    // now, so the source resolves to the block's own copy: answer from it, not
+    // with the failure.
+    read_range_once(broker, filestore, global_store, mstore, cmd).await
+}
+
+async fn read_range_once(
+    broker: Arc<crate::backend::mps::Broker>,
+    filestore: Arc<crate::backend::storage::filestore::FileStore>,
+    global_store: Option<Arc<crate::backend::storage::filestore::FileStore>>,
+    mstore: Arc<crate::backend::storage::store::Store>,
+    cmd: CommandBlockfileReadRangeData,
+) -> Result<BlockfileReadRangeResult, String> {
     tracing::info!(block_id = %cmd.block_id, filename = %cmd.filename, offset = cmd.offset, limit = cmd.limit, "blockfile:read_range");
     let started = std::time::Instant::now();
     let mut clock = ReadRangeClock::default();

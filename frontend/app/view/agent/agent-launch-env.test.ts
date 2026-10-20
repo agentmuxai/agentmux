@@ -483,7 +483,7 @@ describe("resolveLaunchRuntime — what the agent remembers sits between a fork 
         expect(r.runtimeConfig).toMatchObject({ model: "haiku", effort: "low" });
     });
 
-    it("a choice made in the launch modal beats everything, and the definition's --model cannot override it", () => {
+    it("a choice made when creating the agent beats everything, and the definition's --model cannot override it", () => {
         const r = launchEnv.resolveLaunchRuntime("haiku", claude, "--model opus", { model: "sonnet" }, { model: "opus" });
         expect(r.runtimeConfig.model).toBe("haiku");
         expect(r.paneFlags).toBe("");

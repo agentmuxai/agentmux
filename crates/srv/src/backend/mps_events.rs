@@ -94,6 +94,8 @@ events! {
     AgentMessageAccepted: super::mps::EVENT_AGENT_MESSAGE_ACCEPTED => crate::backend::blockcontroller::MessageAcceptedEvent,
     /// A stale `--resume` is being retried, or the retry resolved.
     AgentResumeRetry: super::mps::EVENT_AGENT_RESUME_RETRY => ResumeRetryEvent,
+    /// A Claude CLI request is being retried, or no longer is.
+    AgentApiRetry: super::mps::EVENT_AGENT_API_RETRY => crate::backend::agent_api_retry::ApiRetryEvent,
     /// One line of a closing agent pane's shutdown log (`sagas::close_pane::publish_shutdown`).
     AgentShutdown: crate::sagas::close_pane::EVENT_AGENT_SHUTDOWN => crate::sagas::close_pane::ShutdownLineEvent,
     /// A call to action srv holds open started, or ended (`backend::user_attention`).
@@ -173,6 +175,8 @@ events! {
     SrvInfo: "srvinfo" => crate::srv_info::SrvInfo,
     /// The full config, redacted for the renderer: on connect, and when it changes.
     Config: super::mps::EVENT_CONFIG => ConfigEvent,
+    /// An incident srv recorded (`backend::transcript::damage`): the window shows its notice now.
+    IncidentRecorded: crate::backend::transcript::damage::EVENT_INCIDENT_RECORDED => IncidentEvent,
     /// What one ambient model call spent (`ambient::spend`).
     AmbientSpent: crate::ambient::spend::EVENT_AMBIENT_SPENT => crate::ambient::spend::AmbientSpentEvent,
     /// A process joined an agent pane's tree, or left it (`process_tracker::registry`).
@@ -517,6 +521,41 @@ pub struct CredentialsRevokedEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub account_id: Option<String>,
+}
+
+/// `incident:recorded`: an incident, as `agentmux_common::incidents::Incident` and the window's notice carry it.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct IncidentEvent {
+    pub id: String,
+    /// Milliseconds since the epoch; a JSON number on the wire, as the window's incident record has it.
+    #[ts(type = "number")]
+    pub at_ms: u64,
+    pub kind: String,
+    pub what: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cause: Option<String>,
+    pub did: Vec<String>,
+    pub lost: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub evidence: Option<String>,
+}
+
+impl From<&agentmux_common::incidents::Incident> for IncidentEvent {
+    fn from(i: &agentmux_common::incidents::Incident) -> Self {
+        IncidentEvent {
+            id: i.id.clone(),
+            at_ms: i.at_ms,
+            kind: i.kind.clone(),
+            what: i.what.clone(),
+            cause: i.cause.clone(),
+            did: i.did.clone(),
+            lost: i.lost.clone(),
+            evidence: i.evidence.clone(),
+        }
+    }
 }
 
 /// `files:changed`: the folder that changed, as the Files pane shows it.

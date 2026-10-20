@@ -246,8 +246,7 @@ export interface AgentAuthPanelProps {
      *  button on the login panel so a stuck login has an exit besides
      *  closing the pane. Wired to useAgentControllerStatus's cancelLogin. */
     onCancelLogin?: () => void;
-    /** Explicit "Use terminal instead" fallback on the login panel — mirrors
-     *  PreLaunchAuthPanel's identical secondary action
+    /** Explicit "Use terminal instead" fallback on the login panel
      *  (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.3 surface 2). Wired to
      *  useAgentControllerStatus's loginViaTerminal, which cancels this
      *  session's own login child itself (tier 1 starting a second one would
@@ -275,8 +274,8 @@ export function AgentAuthPanel(props: AgentAuthPanelProps): JSX.Element {
                 {(url) => (
                     // AgentQuestionPanel-style card chrome (border/bg/shadow) —
                     // InAppLoginPanel itself ships with none, since its other
-                    // two callers (PreLaunchAuthPanel, the Connectors/Stash Modal)
-                    // already provide their own box. This is the one context
+                    // caller (ClaudeLoginPanel, in Connectors and the Stash)
+                    // already provides its own box. This is the one context
                     // that renders it bare in normal document flow, so it
                     // needs its own card here to read as a distinct prompt
                     // instead of loose, unbordered text.

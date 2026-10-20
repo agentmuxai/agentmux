@@ -4,4 +4,5 @@
 //! Agent transcript writing.
 
 pub mod append;
+pub mod damage;
 pub mod source;

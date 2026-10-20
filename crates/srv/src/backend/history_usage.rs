@@ -34,7 +34,7 @@ impl Roots {
     /// The roots on this machine, or `None` when they can't be resolved.
     pub fn on_this_machine() -> Option<Roots> {
         let shared = crate::registry::resolve_global_shared_root()?;
-        let root = agentmux_common::data_paths::agentmux_root().ok()?;
+        let root = crate::srv_info::agentmux_root()?;
         Some(Roots {
             identities: shared.join("identities"),
             transcripts_db: crate::registry::resolve_shared_transcripts_dir()?.join("filestore.db"),
@@ -134,7 +134,17 @@ fn largest_agents(transcripts: Option<&FileStore>, name_of: impl Fn(&str) -> Opt
         .iter()
         .filter_map(|zone| {
             let id = zone.strip_prefix("agent:")?.strip_suffix(":current")?;
-            let bytes = fs.stat(zone, crate::backend::agent_session::OUTPUT_FILE).ok()??.size.max(0) as u64;
+            if crate::backend::transcript::damage::is_damaged(zone) {
+                return None;
+            }
+            let file = match fs.stat(zone, crate::backend::agent_session::OUTPUT_FILE) {
+                Ok(file) => file?,
+                Err(e) => {
+                    crate::backend::transcript::damage::note_if_shared(fs, zone, "history size", &e);
+                    return None;
+                }
+            };
+            let bytes = file.size.max(0) as u64;
             (bytes > 0).then(|| HistoryUsageAgent {
                 definition_id: id.to_string(),
                 name: name_of(id).unwrap_or_else(|| id.to_string()),

@@ -46,6 +46,7 @@ pub mod vault;
 pub mod viewer_devices;
 pub mod agent_input_history;
 pub mod widget_storage;
+pub mod work_board;
 pub mod work_claims;
 pub mod work_queue;
 

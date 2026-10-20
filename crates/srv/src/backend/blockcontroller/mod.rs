@@ -791,19 +791,25 @@ pub fn deliver_agent_message_from(
 ) -> Result<AgentDelivery, String> {
     let ctrl =
         get_controller(block_id).ok_or_else(|| format!("no controller for block {block_id}"))?;
+    // srv's held `[AgentMux]` notes go with this message; they are held
+    // again if it doesn't go, or goes as keystrokes.
+    let (message, held) = crate::backend::reactive::held_notes::attach(block_id, message);
 
     if let Some(persistent_ctrl) = ctrl
         .as_any()
         .downcast_ref::<persistent::PersistentSubprocessController>()
     {
-        return Ok(match persistent_ctrl.send_user_message_with_images_from(message.to_string(), origin, inline.to_vec())? {
+        let outcome = persistent_ctrl.send_user_message_with_images_from(message, origin, inline.to_vec())?;
+        held.delivered();
+        return Ok(match outcome {
             SendOutcome::Sent => AgentDelivery::Structured,
             SendOutcome::Deferred => AgentDelivery::StructuredDeferred,
         });
     }
 
     if session_agent::is_session_agent_type(ctrl.controller_type()) {
-        ctrl.send_input(BlockInputUnion::data(message.as_bytes().to_vec()), None)?;
+        ctrl.send_input(BlockInputUnion::data(message.into_bytes()), None)?;
+        held.delivered();
         return Ok(AgentDelivery::Structured);
     }
 
@@ -811,11 +817,28 @@ pub fn deliver_agent_message_from(
         .as_any()
         .downcast_ref::<app_server_controller::AppServerController>()
     {
-        app_server_ctrl.send_message(message.to_string())?;
+        app_server_ctrl.send_message(message)?;
+        held.delivered();
         return Ok(AgentDelivery::Structured);
     }
 
     Ok(AgentDelivery::Pty)
+}
+
+/// srv's own note `text` for the agent in `block_id`, about the work at hand:
+/// into its running turn where the controller can join one atomically (a
+/// persistent agent: `PersistentSubprocessController::note_into_turn_or_hold`),
+/// else held under `key` for its next turn. It never starts a turn; the other
+/// controllers can only queue a message as a turn of its own, so theirs is
+/// always held. Returns whether it joined a turn.
+pub fn system_note_into_turn_or_hold(block_id: &str, key: &str, text: &str) -> bool {
+    if let Some(ctrl) = get_controller(block_id) {
+        if let Some(p) = ctrl.as_any().downcast_ref::<persistent::PersistentSubprocessController>() {
+            return p.note_into_turn_or_hold(key, text);
+        }
+    }
+    crate::backend::reactive::held_notes::hold(block_id, key, text);
+    false
 }
 
 /// Is this forced replace merely a runtime-config change (model / effort /

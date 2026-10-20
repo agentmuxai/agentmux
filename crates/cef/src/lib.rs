@@ -1324,6 +1324,7 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     run_message_loop();
 
     tracing::info!("CEF message loop exited, shutting down");
+    commands::vault::clear_clipboard_on_shutdown();
 
     // Kill the backend sidecar. (The launcher's Job Object also reaps it once
     // we exit; kill explicitly for promptness.)

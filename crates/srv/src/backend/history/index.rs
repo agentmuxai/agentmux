@@ -484,7 +484,7 @@ pub(crate) fn search_candidates(
 fn default_isolated_roots() -> Vec<PathBuf> {
     let shared = std::env::var_os("AGENTMUX_SHARED_DIR")
         .map(PathBuf::from)
-        .or_else(|| agentmux_common::data_paths::agentmux_root().ok().map(|root| root.join("shared")));
+        .or_else(|| crate::srv_info::agentmux_root().map(|root| root.join("shared")));
     match shared {
         Some(s) => vec![s.join("providers"), s.join("identities")],
         None => Vec::new(),

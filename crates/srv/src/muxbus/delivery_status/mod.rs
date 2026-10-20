@@ -15,10 +15,12 @@
 //! **What follows from it** ([`machine::Effect`]):
 //! - one OS notification when a needs-sign-in episode starts (the notify
 //!   Router's `CloudSignedOut` kind), taken down when it ends;
-//! - after [`machine::PAUSE_NOTICE_MS`] paused, one AgentMux system note to
+//! - after [`machine::PAUSE_NOTICE_MS`] paused, one AgentMux system note for
 //!   every agent subscribed to the cloud, and one more when delivery resumes,
-//!   with what was delivered and what expired meanwhile ([`notes`]). The
-//!   notes are delivered locally by srv, never through the relay; see
+//!   with what was delivered and what expired meanwhile ([`notes`]). Each
+//!   waits for the agent's next turn and never starts one
+//!   (`reactive::held_notes`); a pause that ends before that turn is one
+//!   note. The notes come from srv itself, never through the relay; see
 //!   [`notes::NOTE_MARKER`] for why one can't be forged.
 
 mod machine;
@@ -31,7 +33,7 @@ use std::time::Duration;
 use agentmux_common::time::now_ms;
 pub use machine::Link;
 use machine::{Effect, Machine};
-use notes::{ExpiredItem, Note, NoteBook, RetryQueue};
+use notes::{ExpiredItem, Note, NoteBook, NoteKind, RetryQueue, OUTAGE_KEY, PAUSED_KEY, RESUMED_KEY};
 
 use crate::backend::eventbus::EventBus;
 use crate::backend::mps::Broker;
@@ -110,7 +112,7 @@ fn run_tick() {
     send_owed_sign_in_notice();
     let retries = rt().retry.lock().unwrap_or_else(|e| e.into_inner()).take();
     for (note, attempts) in retries {
-        deliver_one(note, attempts + 1);
+        hold_one(note, attempts + 1);
     }
     let notes = {
         let mut book = rt().book.lock().unwrap_or_else(|e| e.into_inner());
@@ -118,7 +120,7 @@ fn run_tick() {
         notes.extend(book.tick(now));
         notes
     };
-    deliver(notes);
+    hold(notes);
 }
 
 /// The current state, for `muxbus.status`.
@@ -153,14 +155,14 @@ pub fn set_link(link: Link) {
 }
 
 /// One agent's pull answered: `delivered` messages reached it and the relay
-/// reported `expired`. Sends its resume or expiry note, if it has one; call
+/// reported `expired`. Holds its resume or expiry note, if it has one; call
 /// after the pull's own messages are delivered, so the note comes last.
 pub fn fetched(agent: &str, delivered: usize, expired: &[ExpiredItem]) {
     let broker = broker_state();
     let effects = rt().machine.lock().unwrap_or_else(|e| e.into_inner()).relay_answered(agent, broker.as_ref(), now_ms());
     apply(effects);
     let note = rt().book.lock().unwrap_or_else(|e| e.into_inner()).fetched(agent, delivered, expired);
-    deliver(note.into_iter().collect());
+    hold(note.into_iter().collect());
 }
 
 /// `agent`'s pull (fetch or claim) got no usable answer from the relay,
@@ -210,13 +212,26 @@ fn apply(effects: Vec<Effect>) {
                 }
             }
             Effect::PauseNote { since_ms, reason } => {
-                tracing::warn!(reason, "muxbus delivery: paused for two minutes, telling the agents");
+                tracing::warn!(reason, "muxbus delivery: paused for two minutes, a note waits for each agent's next turn");
                 let notes = rt().book.lock().unwrap_or_else(|e| e.into_inner()).pause(since_ms, reason, &subscribed_agents());
-                deliver(notes);
+                hold(notes);
             }
             Effect::Resumed { at_ms } => {
                 rt().retry.lock().unwrap_or_else(|e| e.into_inner()).drop_pause_notes();
-                rt().book.lock().unwrap_or_else(|e| e.into_inner()).resumed(at_ms);
+                // Asked before the book is locked: the handler takes its own lock.
+                let told = rt().book.lock().unwrap_or_else(|e| e.into_inner()).told_paused();
+                let handler = crate::backend::reactive::handler::get_global_handler();
+                let waiting: std::collections::HashSet<(String, &str)> = told
+                    .iter()
+                    .flat_map(|agent| [PAUSED_KEY, OUTAGE_KEY].map(|key| (agent.clone(), key)))
+                    .filter(|(agent, key)| handler.holds_system_note(agent, key))
+                    .collect();
+                let notes = rt()
+                    .book
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .resumed(at_ms, |agent, key| waiting.contains(&(agent.to_string(), key)));
+                hold(notes);
             }
         }
     }
@@ -231,21 +246,73 @@ fn router() -> Option<Arc<crate::backend::notify::router::Router>> {
     router
 }
 
-fn deliver(notes: Vec<Note>) {
+fn hold(notes: Vec<Note>) {
     for note in notes {
-        deliver_one(note, 1);
+        hold_one(note, 1);
     }
 }
 
-/// Deliver `note` (its `attempt`-th try); a failure is retried on later ticks.
-fn deliver_one(note: Note, attempt: u32) {
+/// Hold `note` for its agent's next turn (its `attempt`-th try); a failure is
+/// retried on later ticks. An outage note takes the place of the agent's
+/// waiting pause note, or, if that went with a turn meanwhile, its `seen` note
+/// is held instead.
+fn hold_one(note: Note, attempt: u32) {
     let handler = crate::backend::reactive::handler::get_global_handler();
-    if let Err(e) = handler.deliver_system_note(&note.agent, &note.text) {
+    let held = match &note.kind {
+        NoteKind::Outage { seen } => handler
+            .replace_held_system_note(&note.agent, PAUSED_KEY, OUTAGE_KEY, &note.text)
+            .and_then(|replaced| if replaced { Ok(()) } else { handler.hold_system_note(&note.agent, RESUMED_KEY, seen) }),
+        _ => handler.hold_system_note(&note.agent, &note.key(), &note.text),
+    };
+    if let Err(e) = held {
         let agent = note.agent.clone();
         if rt().retry.lock().unwrap_or_else(|e| e.into_inner()).failed(note, attempt) {
-            tracing::info!(agent = %agent, attempt, error = %e, "muxbus delivery: system note not delivered, will retry");
+            tracing::info!(agent = %agent, attempt, error = %e, "muxbus delivery: system note not held, will retry");
         } else {
-            tracing::warn!(agent = %agent, error = %e, "muxbus delivery: system note not delivered, giving up");
+            tracing::warn!(agent = %agent, error = %e, "muxbus delivery: system note not held, giving up");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::reactive::held_notes;
+
+    fn note(agent: &str, text: &str, kind: NoteKind) -> Note {
+        Note { agent: agent.to_string(), text: text.to_string(), kind }
+    }
+
+    /// The notes are held, never sent: the global handler here has no sender
+    /// at all, so any attempt to send one would fail and be queued for retry.
+    #[test]
+    fn a_pause_note_waits_for_the_next_turn_and_its_end_replaces_it() {
+        let handler = crate::backend::reactive::handler::get_global_handler();
+        let (agent, block) = ("delivery-status-test-a", "delivery-status-test-block-a");
+        handler.register_agent(agent, block, None).unwrap();
+        hold(vec![note(agent, "[AgentMux] paused", NoteKind::Paused)]);
+        assert!(handler.holds_system_note(agent, PAUSED_KEY));
+        hold(vec![note(agent, "[AgentMux] were paused", NoteKind::Outage { seen: "[AgentMux] resumed".into() })]);
+        assert!(!handler.holds_system_note(agent, PAUSED_KEY));
+        let (message, notes) = held_notes::attach(block, "hi");
+        notes.delivered();
+        assert_eq!(message, "hi\n\n[AgentMux] were paused", "one note, not two");
+        assert!(rt().retry.lock().unwrap().take().iter().all(|(n, _)| n.agent != agent), "nothing failed");
+        handler.unregister_block(block);
+    }
+
+    #[test]
+    fn an_agent_that_saw_the_pause_gets_the_plain_resume_note() {
+        let handler = crate::backend::reactive::handler::get_global_handler();
+        let (agent, block) = ("delivery-status-test-b", "delivery-status-test-block-b");
+        handler.register_agent(agent, block, None).unwrap();
+        hold(vec![note(agent, "[AgentMux] paused", NoteKind::Paused)]);
+        let (_, notes) = held_notes::attach(block, "a turn during the pause");
+        notes.delivered();
+        hold(vec![note(agent, "[AgentMux] were paused", NoteKind::Outage { seen: "[AgentMux] resumed".into() })]);
+        let (message, notes) = held_notes::attach(block, "hi");
+        notes.delivered();
+        assert_eq!(message, "hi\n\n[AgentMux] resumed");
+        handler.unregister_block(block);
     }
 }

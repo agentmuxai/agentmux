@@ -107,6 +107,14 @@ export function WidgetsSection(): JSX.Element {
     const [confirmRemove, setConfirmRemove] = createSignal<string | null>(null);
     const [replacePath, setReplacePath] = createSignal<string | null>(null);
 
+    const reveal = async (path: string) => {
+        try {
+            await getApi().revealInFileExplorer(path);
+            setError(null);
+        } catch (e) {
+            setError(`Couldn't open ${path}: ${errorText(e)}`);
+        }
+    };
     const run = async (key: string, f: () => Promise<WidgetPackageInfo[] | void>) => {
         setBusy(key);
         try {
@@ -173,7 +181,7 @@ export function WidgetsSection(): JSX.Element {
                     </Button>
                     <Show when={widgetsDir()}>
                         {(dir) => (
-                            <Button icon="folder-open" onClick={() => getApi().openNativePath(dir())}>
+                            <Button icon="folder-open" onClick={() => void reveal(dir())}>
                                 Open widgets folder
                             </Button>
                         )}
@@ -272,7 +280,7 @@ export function WidgetsSection(): JSX.Element {
                                                 Turn on
                                             </Button>
                                         </Show>
-                                        <Button icon="folder-open" onClick={() => getApi().openNativePath(pkg.folder)}>
+                                        <Button icon="folder-open" onClick={() => void reveal(pkg.folder)}>
                                             Show folder
                                         </Button>
                                         <Show when={!pkg.implied}>

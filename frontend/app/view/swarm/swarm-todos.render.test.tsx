@@ -63,7 +63,7 @@ function modelStub(collapsed: boolean): SwarmViewModel {
 
 function renderRow(node: AgentTreeNode, collapsed = false) {
     registerPane(BLOCK);
-    return render(() => <AgentRow node={node} focusedBlockId={() => null} model={modelStub(collapsed)} />);
+    return render(() => <AgentRow node={() => node} focusedBlockId={() => null} model={modelStub(collapsed)} />);
 }
 
 const TODOS: TodoItem[] = [

@@ -718,6 +718,25 @@
     }
   },
   {
+    "command": "agentapiretry",
+    "request": "agentmux_srv::backend::agent_api_retry::CommandAgentApiRetryData",
+    "requestName": "CommandAgentApiRetryData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentApiRetryData"
+      ],
+      "name": "CommandAgentApiRetryData"
+    },
+    "response": "agentmux_srv::backend::agent_api_retry::ApiRetryEvent",
+    "responseName": "ApiRetryEvent",
+    "responseTs": {
+      "imports": [
+        "ApiRetryEvent"
+      ],
+      "name": "ApiRetryEvent"
+    }
+  },
+  {
     "command": "agentcancel",
     "request": "agentmux_srv::backend::rpc_types::block::CommandAgentCancelData",
     "requestName": "CommandAgentCancelData",
@@ -3462,6 +3481,63 @@
         "InstallToolResult"
       ],
       "name": "InstallToolResult"
+    }
+  },
+  {
+    "command": "kanban.act",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "serde_json::value::Value",
+    "responseName": "Value",
+    "responseTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    }
+  },
+  {
+    "command": "kanban.list",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "serde_json::value::Value",
+    "responseName": "Value",
+    "responseTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    }
+  },
+  {
+    "command": "kanban.task",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "serde_json::value::Value",
+    "responseName": "Value",
+    "responseTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
     }
   },
   {

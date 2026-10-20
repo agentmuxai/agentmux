@@ -45,11 +45,12 @@ use crate::{
 /// immediately before calling this function, so the old thread tears itself
 /// down via its own normal dismiss path instead of leaking forever.
 #[cfg(target_os = "windows")]
-fn respawn_splash_for_restart(dir_hash: &str, seq: u32) -> Option<String> {
+fn respawn_splash_for_restart(dir_hash: &str, seq: u32, sink: &startup_events::StartupEventSink) -> Option<String> {
     if crate::splash_config::splash_disabled() {
         return None;
     }
-    let (_sink, rx) = startup_events::StartupEventSink::new();
+    // The launcher's own sink, so the restarted host's stages reach this splash.
+    let rx = sink.reconnect();
     let unique_id = format!("{}-r{}", dir_hash, seq);
     crate::splash::spawn_splash(&unique_id, rx, true)
 }
@@ -700,7 +701,7 @@ pub(crate) async fn run_windows(
     let exit_code = loop {
         tokio::select! {
             Some(req) = upgrade_requests.recv() => {
-                match crate::upgrade_restart::staged(&req, launcher_exe_dir, &paths.data_dir, version) {
+                match crate::upgrade_restart::staged(&req, launcher_exe_dir, &paths.data_dir, &paths.common.instance_dir, version) {
                     Ok(staged) => {
                         log(&format!("upgrade: srv asks to restart into {staged}; asking the user"));
                         let tx = upgrade_yes_tx.clone();
@@ -993,7 +994,7 @@ pub(crate) async fn run_windows(
                             crate::splash::dismiss_splash(prev_event);
                         }
                         restart_splash_seq += 1;
-                        splash_event_name = respawn_splash_for_restart(&dir_hash, restart_splash_seq);
+                        splash_event_name = respawn_splash_for_restart(&dir_hash, restart_splash_seq, &startup_sink);
                         match spawn_host_supervised(
                             real_exe,
                             args,
@@ -1077,7 +1078,7 @@ pub(crate) async fn run_windows(
                             crate::splash::dismiss_splash(prev_event);
                         }
                         restart_splash_seq += 1;
-                        splash_event_name = respawn_splash_for_restart(&dir_hash, restart_splash_seq);
+                        splash_event_name = respawn_splash_for_restart(&dir_hash, restart_splash_seq, &startup_sink);
                         match spawn_host_supervised(
                             real_exe,
                             args,

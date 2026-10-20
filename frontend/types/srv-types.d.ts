@@ -201,7 +201,7 @@ declare global {
     // rename_all so the field shapes match without translation.
     // ────────────────────────────────────────────────────────────────
 
-    /** Identifies "which agent" — same shape for launch modal + drone Agent block. */
+    /** Identifies "which agent" — same shape for an agent launch + drone Agent block. */
     type AgentRef = {
         identityId?: string;
         memoryId?: string;
@@ -860,10 +860,12 @@ declare global {
         // block remount and names the pane (section-pane.tsx, warden-model.ts).
         "connectors:section"?: "accounts" | "mcp" | "remotes";
         "memory:section"?: "global" | "personal" | "skills" | "bundles";
-        "warden:section"?: "host" | "lan" | "internet" | "audit" | "history";
+        "warden:section"?: "kanban" | "host" | "lan" | "internet" | "audit" | "history";
         "vault:section"?: "personal" | "cards" | "api-keys" | "logins" | "notes" | "kept" | "activity";
         // An agent's Vault request to open the form for (vault-model.ts); cleared once shown.
         "vault:request"?: string | null;
+        // The note on what may ask the person, dismissed (vault-model.ts).
+        "vault:prompts-read"?: boolean | null;
         // Set once by quick-fork.ts right after a fork lands on a provider
         // with no --fork-session equivalent and a parent session existed to
         // lose; ForkProviderFallbackBanner (agent-view.tsx) reads it.

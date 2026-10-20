@@ -1016,15 +1016,15 @@ pub fn reveal_in_file_explorer(args: &serde_json::Value) -> Result<serde_json::V
 /// "Always on top" floaters down so the (unowned) dialog can't end up behind
 /// one (SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27 §3.1). No-op elsewhere.
 #[cfg(target_os = "windows")]
-fn host_dialog_guard() -> crate::floating_pane::HostDialogGuard {
+pub(super) fn host_dialog_guard() -> crate::floating_pane::HostDialogGuard {
     crate::floating_pane::HostDialogGuard::new()
 }
 #[cfg(not(target_os = "windows"))]
-fn host_dialog_guard() -> NoDialogGuard {
+pub(super) fn host_dialog_guard() -> NoDialogGuard {
     NoDialogGuard
 }
 #[cfg(not(target_os = "windows"))]
-struct NoDialogGuard;
+pub(super) struct NoDialogGuard;
 
 
 

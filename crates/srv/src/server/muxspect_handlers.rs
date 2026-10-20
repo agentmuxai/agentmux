@@ -1459,7 +1459,7 @@ mod tests {
         let (own, global, zone) = (FileStore::open_in_memory().unwrap(), FileStore::open_in_memory().unwrap(), "agent:error-frame-global:current");
         global.make_file(zone, "output", FileMeta::new(), FileOpts::default()).unwrap();
         global.append_lines(zone, "output", format!("{}\n", error_frame_line("[AgentMux] no credentials for claude: bind an account in Connectors → Accounts.")).as_bytes()).unwrap();
-        let found = last_error_frame(&TranscriptSource { fs: &global, zone: zone.to_string(), global: true }).expect("the frame in the agent zone");
+        let found = last_error_frame(&TranscriptSource { fs: &global, zone: zone.to_string(), global: true, own: None }).expect("the frame in the agent zone");
         assert_eq!(found.source, "identity");
         assert!(last_error_frame(&TranscriptSource::own(&own, "blk")).is_none());
     }

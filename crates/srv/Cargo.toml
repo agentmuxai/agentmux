@@ -36,7 +36,7 @@ socket2 = { version = "0.5.5", features = ["all"] }
 uuid = { version = "1", features = ["v4", "v5"] }
 chrono = "0.4"
 tokio-util = { version = "0.7", features = ["io", "rt"] }
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.39", features = ["bundled"] }
 # TypeScript type generation for the RPC bindings (backend/rpc/schema.rs, and
 # the export_bindings_rpc_schema test that feeds scripts/gen-rpc-stubs.mjs).
 # serde-json-impl gives serde_json::Value a TS impl (JsonValue), which
@@ -69,6 +69,8 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 keyring = "2"
 # Zero plaintext secret buffers on drop.
 zeroize = { version = "1", features = ["zeroize_derive"] }
+# The Vault's `.vault` files are age files encrypted to a passphrase (SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §8.2).
+age = { version = "0.11", default-features = false }
 mdns-sd = "0.12"
 # Interface enumeration for LAN listener bind addresses (backend/lan_listeners.rs).
 # Already in the tree transitively via mdns-sd, so declaring it directly adds no

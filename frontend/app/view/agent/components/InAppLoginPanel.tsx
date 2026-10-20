@@ -6,12 +6,10 @@
  * URL + Open/Copy, a paste-code box wired to `setProviderAuth`, a live phase
  * line, and Cancel / "Use terminal instead" actions.
  *
- * Extracted from `PreLaunchAuthPanel.tsx` (its original and still-primary
- * caller — the launch surface, spec §3.3 surface 1) so the Connectors/Stash
- * surface (§3.3 surface 3) can reuse the identical UI instead of a second
- * hand-rolled copy. Decoupled from `PreLaunchAuthPanel`'s own
- * `AuthFlowController`/`AuthState` reducer — callers pass `authUrl` directly
- * (the only field of that reducer's state this component ever read).
+ * Extracted from the launch modal's sign-in panel (spec §3.3 surface 1;
+ * both since removed) so the agent pane (§3.3 surface 2) and the
+ * Connectors/Stash surface (§3.3 surface 3) share one UI instead of
+ * hand-rolled copies. Callers pass `authUrl` directly.
  *
  * See docs/specs/SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md.
  */
@@ -21,6 +19,7 @@ import { loginBackend } from "../flows/login-backend";
 import { getApi } from "@/app/store/global";
 import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
 import { createEffect, createSignal, Show, type JSX } from "solid-js";
+import "./InAppLoginPanel.scss";
 
 /** Live phase of the in-app login session, surfaced as a status line. */
 export type InAppLoginPhase = "starting" | "waiting-authorize" | "fallback" | "terminal-polling";
@@ -89,11 +88,11 @@ export const InAppLoginPanel = (p: InAppLoginPanelProps): JSX.Element => {
     };
 
     return (
-        <div class="pre-launch-auth-panel-waiting">
-            <div class="pre-launch-auth-panel-waiting-title">
+        <div class="in-app-login-waiting">
+            <div class="in-app-login-waiting-title">
                 🔐 Sign in to {p.providerLabel}
             </div>
-            <div class="pre-launch-auth-panel-hint">{phaseText()}</div>
+            <div class="in-app-login-hint">{phaseText()}</div>
             {/* reagent P1 on PR #2410: gate on phase too, not just authUrl's
                 presence. "Use terminal instead" kills the tier-1 login child
                 (cancelCliLogin) and moves phase to "fallback"/"terminal-
@@ -114,19 +113,19 @@ export const InAppLoginPanel = (p: InAppLoginPanelProps): JSX.Element => {
             >
                 {(url) => (
                     <>
-                        <div class="pre-launch-auth-panel-step">
-                            <div class="pre-launch-auth-panel-url-label">
+                        <div class="in-app-login-step">
+                            <div class="in-app-login-url-label">
                                 1 · Authorize in your browser
                             </div>
-                            <div class="pre-launch-auth-panel-hint">
+                            <div class="in-app-login-hint">
                                 Your browser should have opened automatically. If it didn't, copy this backup link and open it manually:
                             </div>
-                            <div class="pre-launch-auth-panel-url-row">
-                                <code class="pre-launch-auth-panel-url-text" title={url()}>
+                            <div class="in-app-login-url-row">
+                                <code class="in-app-login-url-text" title={url()}>
                                     {url()}
                                 </code>
                             </div>
-                            <div class="pre-launch-auth-panel-url-actions">
+                            <div class="in-app-login-url-actions">
                                 <Button
                                     className="grey solid"
                                     onClick={() => {
@@ -153,17 +152,17 @@ export const InAppLoginPanel = (p: InAppLoginPanelProps): JSX.Element => {
                                 </Button>
                             </div>
                         </div>
-                        <div class="pre-launch-auth-panel-step">
-                            <div class="pre-launch-auth-panel-url-label">
+                        <div class="in-app-login-step">
+                            <div class="in-app-login-url-label">
                                 2 · Paste the authorization code
                             </div>
-                            <div class="pre-launch-auth-panel-hint">
+                            <div class="in-app-login-hint">
                                 After you authorize, the page shows a code — paste it here:
                             </div>
-                            <div class="pre-launch-auth-panel-callback-row">
+                            <div class="in-app-login-callback-row">
                                 <input
                                     ref={inputRef}
-                                    class="pre-launch-auth-panel-url-input"
+                                    class="in-app-login-url-input"
                                     type="text"
                                     placeholder="Paste the authorization code…"
                                     value={pasteCode()}
@@ -209,13 +208,13 @@ export const InAppLoginPanel = (p: InAppLoginPanelProps): JSX.Element => {
                                 </Button>
                             </div>
                             <Show when={pasteResult()}>
-                                <div class="pre-launch-auth-panel-hint">{pasteResult()}</div>
+                                <div class="in-app-login-hint">{pasteResult()}</div>
                             </Show>
                         </div>
                     </>
                 )}
             </Show>
-            <div class="pre-launch-auth-panel-inapp-actions">
+            <div class="in-app-login-actions">
                 <Button onClick={() => p.onCancel()}>Cancel login</Button>
                 {/* Explicit terminal fallback — never auto-launched (spec
                     §3.2). Hidden once the flow is already in the terminal

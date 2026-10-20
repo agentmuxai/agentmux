@@ -113,7 +113,7 @@ export function makeFilePathHandler(getCwd: () => string | undefined): (rawPath:
             api.openExternal(`vscode://file/${encodeURI(resolved)}:${line}`);
         } else {
             // Reveal in file explorer (Explorer/Finder/file manager)
-            api.revealInFileExplorer(resolved);
+            void Promise.resolve(api.revealInFileExplorer(resolved)).catch(console.error);
         }
     };
 }

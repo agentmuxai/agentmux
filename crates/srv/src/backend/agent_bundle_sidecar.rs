@@ -78,9 +78,14 @@ pub(crate) fn claim_unless_live(
 /// Record a freshly provisioned bundle at runtime, best-effort (the global
 /// store may be off).
 pub(crate) fn record(uid: &str, memory_id: &str) {
-    let Some(fs) = crate::backend::agent_session::global_transcript_store() else { return };
-    if let Err(e) = claim(fs, uid, memory_id) {
-        tracing::warn!(uid, error = %e, "agent bundle sidecar not recorded");
+    use crate::backend::transcript::damage;
+    // A memory record found corrupt is not written to again in this process.
+    let zone = damage::memory_zone(uid);
+    let Some(fs) = damage::global_for(&zone) else { return };
+    if let Err(e) = claim(&fs, uid, memory_id) {
+        if !damage::note_corrupt(&zone, "bundle record", &e) {
+            tracing::warn!(uid, error = %e, "agent bundle sidecar not recorded");
+        }
     }
 }
 
@@ -89,7 +94,7 @@ pub(crate) fn record(uid: &str, memory_id: &str) {
 pub(crate) fn open_global() -> Option<FileStore> {
     let dir = crate::registry::resolve_shared_transcripts_dir()?;
     std::fs::create_dir_all(&dir).ok()?;
-    FileStore::open(&dir.join("filestore.db")).ok()
+    FileStore::open_global_transcripts(&dir.join("filestore.db")).ok()
 }
 
 #[cfg(test)]
@@ -115,5 +120,31 @@ mod tests {
         assert_eq!(get(&fs, "agent-a").unwrap().as_deref(), Some("b2"));
         // A live record still wins.
         assert_eq!(claim_unless_live(&fs, "agent-a", "b3", &live).unwrap(), "b2");
+    }
+}
+
+#[cfg(test)]
+mod damage_tests {
+    use super::*;
+    use crate::backend::transcript::damage::{self, test_support};
+    use std::sync::Arc;
+
+    #[test]
+    fn a_corrupt_shared_store_marks_the_agents_memory_record_and_it_is_not_written_again() {
+        let uid = "uid-sidecar-damage-1";
+        let fs = Arc::new(FileStore::open_in_memory().unwrap());
+        let _g = test_support::use_global(&fs);
+        record(uid, "mem-1");
+        assert_eq!(claim(&fs, uid, "mem-2").unwrap(), "mem-1", "healthy: the first bundle is the record");
+        test_support::corrupt(&fs);
+        let other = "uid-sidecar-damage-2";
+        record(other, "mem-9");
+        assert!(damage::is_damaged(&damage::memory_zone(other)), "the failed write is the incident");
+        assert!(!damage::is_damaged(&damage::memory_zone(uid)), "another agent's record is untouched");
+        // Marked: a repaired store is not written to either, in this process.
+        let fixed = Arc::new(FileStore::open_in_memory().unwrap());
+        let _g2 = test_support::use_global(&fixed);
+        record(other, "mem-10");
+        assert!(claim(&fixed, other, "mem-11").unwrap() == "mem-11", "nothing was recorded for the marked agent");
     }
 }

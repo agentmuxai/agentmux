@@ -40,7 +40,7 @@ import { PROVIDER_FLAGS_META_KEY } from "./launch-args";
 import { effectiveRuntime } from "./runtime-capabilities";
 import { PROVIDERS, resolveProviderAlias } from "./providers";
 import { lastLinkedAccountId } from "./providers/provider-id-aliases";
-import type { LaunchOverrides } from "./components/AgentLaunchModal";
+import type { LaunchOverrides } from "./launch-overrides";
 import { Logger } from "@/util/logger";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 import { setBlockMeta } from "@/app/store/block-meta";

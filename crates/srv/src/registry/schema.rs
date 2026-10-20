@@ -115,7 +115,7 @@ pub enum ValidationError {
 }
 
 /// Per-row validation. Fails fast on anything that would let a
-/// malformed file be returned to the launch modal. Validation
+/// malformed file be returned to the frontend. Validation
 /// failures are skipped (not auto-fixed), logged, and the file stays
 /// on disk for ops triage.
 pub fn validate(filename_stem: &str, rec: &NamedAgentRecord) -> Result<(), ValidationError> {

@@ -127,6 +127,10 @@
         border-radius: 0;
     }
 
+    &:focus-visible {
+        @include mixins.focus-ring;
+    }
+
     &--active {
         background: var(--highlight-bg-color);
         // inset box-shadow draws on all four sides inside the element and is

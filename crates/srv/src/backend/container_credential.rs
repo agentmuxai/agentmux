@@ -116,7 +116,7 @@ pub fn container_route_allowed(path: &str) -> bool {
     if let Some(rest) = path.strip_prefix("/agentmux/work/") {
         return match rest.split('/').collect::<Vec<_>>().as_slice() {
             [id] => is_id(id),
-            [id, "heartbeat" | "complete" | "release"] => is_id(id),
+            [id, "heartbeat" | "complete" | "release" | "update" | "ask" | "submit"] => is_id(id),
             _ => false,
         };
     }

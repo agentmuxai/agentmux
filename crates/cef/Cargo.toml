@@ -50,6 +50,7 @@ resources_path = "resources"
 
 [dependencies]
 agentmux-common = { path = "../common" }
+zeroize = "1"
 # CEF 154, all platforms (SPEC_CEF_MILESTONE_UPGRADE_152_TO_154_2026_09_27.md);
 # one milestone everywhere since 152's Phase E collapsed the temporary
 # cef_win/cef_unix staged-rollout split. Still goes through [patch.crates-io] below
@@ -116,6 +117,15 @@ windows-sys = { version = "0.59", features = [
     # MSAA hooks; later events like EVENT_OBJECT_LOCATIONCHANGE
     # piggyback on the same infrastructure).
     "Win32_UI_Accessibility",
+] }
+
+# Windows Hello (commands/vault.rs): Reveal and Copy confirm the person first.
+windows-future = "0.2"
+windows = { version = "0.61", features = [
+    "Foundation",
+    "Security_Credentials_UI",
+    "Win32_Foundation",
+    "Win32_System_WinRT",
 ] }
 
 [target.'cfg(target_os = "windows")'.build-dependencies]

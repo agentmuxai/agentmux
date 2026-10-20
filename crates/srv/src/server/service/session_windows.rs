@@ -24,11 +24,21 @@
 //!
 //! Names come back too: each window's own (`window:displayname`, under
 //! `window.name`) and its workspace's (`name`). The restore names each
-//! workspace as it creates it; a window's name waits in the client's meta
+//! workspace as it creates it.
+//!
+//! So does each window's appearance: its own theme and opacity
+//! (`window:theme`, `window:opacity`, [`INHERITED_KEYS`]), under `window.meta`.
+//! They live only on the Window row, and a quit deletes the row, so without
+//! this every quit and relaunch put them back to the defaults
+//! (`RCA_UPGRADE_0_59_30_TO_0_59_34_ISSUES_2026_10_19.md` §2). `window:transparent`
+//! is not among them: it is a setting of the whole app, in settings.json.
+//!
+//! A window's name and appearance wait in the client's meta
 //! (`session:restored_window_names`, by workspace) for the window that opens
-//! onto that workspace, which `CreateWindow` names
-//! ([`restored_window_name`]), and is forgotten only once that name is
-//! written ([`forget_restored_window_name`]).
+//! onto that workspace, which `CreateWindow` writes onto its row
+//! ([`restored_window_meta`]), and is forgotten only once that is written
+//! ([`forget_restored_window_meta`]). The value is the window's meta patch;
+//! the bare name an earlier version left still reads.
 //!
 //! The record keeps the main window's tabs at its top level too, the shape it
 //! always had, so an older AgentMux reading it still restores that window. A
@@ -37,6 +47,7 @@
 use agentmux_common::ipc::Event;
 use serde_json::{json, Value};
 
+use super::window_inherit::INHERITED_KEYS;
 use crate::backend::obj::{Client, Window, Workspace};
 use crate::backend::service::{WebCallType, WebReturnType};
 use crate::backend::storage::store::Store;
@@ -45,8 +56,12 @@ use crate::server::AppState;
 /// Restored workspaces waiting for the main window to open them.
 const WAITING_META_KEY: &str = "session:restored_windows";
 
-/// Restored windows' names, by workspace, waiting for their windows.
+/// Restored windows' names and appearance, by workspace, waiting for their
+/// windows. (Named for what it first held: a name.)
 const NAMES_META_KEY: &str = "session:restored_window_names";
+
+/// The Window meta key of the name the user gave the window.
+const NAME_KEY: &str = "window:displayname";
 
 /// The name window `w` goes by in a session record: the user's, or one a
 /// restore still holds for it, whose write to the window failed: the next
@@ -55,10 +70,52 @@ pub(crate) fn saved_name(store: &Store, w: &Window) -> Option<String> {
     window_name(w).or_else(|| restored_window_name(store, &w.workspaceid))
 }
 
+/// The appearance a session record keeps for window `w`: its own theme and
+/// opacity, or those a restore still holds for it, whose write to the window
+/// failed (the next save keeps them, as it keeps a name).
+pub(crate) fn saved_appearance(store: &Store, w: &Window) -> serde_json::Map<String, Value> {
+    let waiting = restored_window_meta(store, &w.workspaceid);
+    INHERITED_KEYS
+        .iter()
+        .filter_map(|k| {
+            let v = w.meta.get(*k).filter(|v| !v.is_null()).or_else(|| waiting.get(*k))?;
+            Some((k.to_string(), v.clone()))
+        })
+        .collect()
+}
+
+/// The meta patch a record entry's `window` section gives its restored window:
+/// the name, and the appearance that is a theme (a string) and an opacity (a
+/// number). Nothing else a record says reaches a row.
+fn patch_of(window: &Value) -> serde_json::Map<String, Value> {
+    let mut patch = serde_json::Map::new();
+    if let Some(name) = window.get("name").and_then(|v| v.as_str()).map(str::trim).filter(|n| !n.is_empty()) {
+        patch.insert(NAME_KEY.to_string(), json!(name));
+    }
+    let meta = window.get("meta");
+    if let Some(theme) = meta.and_then(|m| m.get("window:theme")).filter(|v| v.is_string()) {
+        patch.insert("window:theme".to_string(), theme.clone());
+    }
+    if let Some(opacity) = meta.and_then(|m| m.get("window:opacity")).filter(|v| v.is_number()) {
+        patch.insert("window:opacity".to_string(), opacity.clone());
+    }
+    patch
+}
+
+/// What waits for one workspace, as a patch: an object of meta, or the bare
+/// name an earlier version left.
+fn waiting_patch(v: &Value) -> serde_json::Map<String, Value> {
+    match v {
+        Value::String(name) => patch_of(&json!({ "name": name })),
+        Value::Object(o) => patch_of(&json!({ "name": o.get(NAME_KEY), "meta": o })),
+        _ => serde_json::Map::new(),
+    }
+}
+
 /// The name the user gave window `w`, if any.
 pub(crate) fn window_name(w: &Window) -> Option<String> {
     w.meta
-        .get("window:displayname")
+        .get(NAME_KEY)
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|n| !n.is_empty())
@@ -119,6 +176,10 @@ pub(crate) fn snapshot_session(store: &Store, for_quit: bool) -> Option<Value> {
             if let Some(name) = saved_name(store, &w) {
                 entry["window"]["name"] = json!(name);
             }
+            let appearance = saved_appearance(store, &w);
+            if !appearance.is_empty() {
+                entry["window"]["meta"] = Value::Object(appearance);
+            }
             Some(entry)
         })
         .collect();
@@ -156,10 +217,15 @@ fn is_recent_quit_record(record: &Value, now_ms: i64) -> bool {
 }
 
 /// The close that empties `Client.windowids`, before `ws_id` is deleted:
-/// saves that workspace as the session, with the closing window's `name`
-/// (read before its row was pruned), unless this close is one of a quit's
-/// that already saved every window.
-pub(crate) fn save_on_last_close(store: &Store, ws_id: &str, name: Option<&str>) {
+/// saves that workspace as the session, with the closing window's `name` and
+/// `appearance` (read before its row was pruned), unless this close is one of
+/// a quit's that already saved every window.
+pub(crate) fn save_on_last_close(
+    store: &Store,
+    ws_id: &str,
+    name: Option<&str>,
+    appearance: &serde_json::Map<String, Value>,
+) {
     let kept = super::session_restore::load_last_session_snapshot(store)
         .is_some_and(|r| is_recent_quit_record(&r, agentmux_common::time::now_ms()));
     if kept {
@@ -167,8 +233,15 @@ pub(crate) fn save_on_last_close(store: &Store, ws_id: &str, name: Option<&str>)
         return;
     }
     if let Some(mut snapshot) = super::session_restore::snapshot_workspace(store, ws_id) {
+        let mut window = serde_json::Map::new();
         if let Some(name) = name.map(str::trim).filter(|n| !n.is_empty()) {
-            snapshot["window"] = json!({ "name": name });
+            window.insert("name".to_string(), json!(name));
+        }
+        if !appearance.is_empty() {
+            window.insert("meta".to_string(), Value::Object(appearance.clone()));
+        }
+        if !window.is_empty() {
+            snapshot["window"] = Value::Object(window);
         }
         super::session_restore::save_last_session_snapshot(store, snapshot);
     }
@@ -247,18 +320,24 @@ fn set_client_meta(store: &Store, key: &str, value: Option<Value>) {
 pub(crate) async fn restore_all(state: &AppState, record: &Value) -> Result<Option<(String, Vec<Event>)>, String> {
     let mut main = None;
     let mut waiting = Vec::new();
-    let mut names = serde_json::Map::new();
+    let mut waiting_meta = serde_json::Map::new();
     let mut first_err = None;
+    let mut restored_count = 0usize;
     for (i, window) in windows_of(record).iter().enumerate() {
         let restored = super::session_restore::restore_workspace(state, window).await;
-        if let (Ok(Some((ws_id, _))), Some(name)) =
-            (&restored, window.pointer("/window/name").and_then(|v| v.as_str()).filter(|n| !n.trim().is_empty()))
-        {
-            names.insert(ws_id.clone(), json!(name));
+        if let Ok(Some((ws_id, _))) = &restored {
+            let patch = window.get("window").map(patch_of).unwrap_or_default();
+            if !patch.is_empty() {
+                waiting_meta.insert(ws_id.clone(), Value::Object(patch));
+            }
         }
         match restored {
-            Ok(Some(restored)) if main.is_none() => main = Some(restored),
+            Ok(Some(restored)) if main.is_none() => {
+                restored_count += 1;
+                main = Some(restored);
+            }
             Ok(Some((ws_id, events))) => {
+                restored_count += 1;
                 super::reducer_helpers::publish_events(state, &events);
                 let mut entry = window.get("window").cloned().unwrap_or_else(|| json!({}));
                 entry["workspaceid"] = json!(ws_id);
@@ -271,11 +350,15 @@ pub(crate) async fn restore_all(state: &AppState, record: &Value) -> Result<Opti
             }
         }
     }
-    if !waiting.is_empty() {
-        tracing::info!(windows = waiting.len() + 1, "session_restore: restored every window of the last session");
+    // One line for every restore, a one-window one included: after a quit the
+    // store loads no workspace, tab, block or window, which reads like data loss
+    // unless this says the layout came back from the record.
+    if restored_count > 0 {
+        let from = if record.get("saved_for").and_then(|v| v.as_str()) == Some("quit") { "quit" } else { "last-close" };
+        tracing::info!(windows = restored_count, "session_restore: restored {} window(s) from the {} record", restored_count, from);
     }
     set_client_meta(&state.mstore, WAITING_META_KEY, (!waiting.is_empty()).then(|| Value::Array(waiting)));
-    set_client_meta(&state.mstore, NAMES_META_KEY, (!names.is_empty()).then(|| Value::Object(names)));
+    set_client_meta(&state.mstore, NAMES_META_KEY, (!waiting_meta.is_empty()).then(|| Value::Object(waiting_meta)));
     match (main, first_err) {
         (Some(main), _) => Ok(Some(main)),
         (None, Some(e)) => Err(e),
@@ -283,38 +366,44 @@ pub(crate) async fn restore_all(state: &AppState, record: &Value) -> Result<Opti
     }
 }
 
-/// The name a restored window had, for the window now opening onto its
-/// workspace `ws_id` (`CreateWindow`). It stays until
-/// [`forget_restored_window_name`]: a window whose name couldn't be written
-/// (srv stopped in between, a failed write) gets it on its next try.
-pub(crate) fn restored_window_name(store: &Store, ws_id: &str) -> Option<String> {
+/// The name and appearance a restored window had, as the meta patch for the
+/// window now opening onto its workspace `ws_id` (`CreateWindow`). It stays
+/// until [`forget_restored_window_meta`]: a window whose meta couldn't be
+/// written (srv stopped in between, a failed write) gets it on its next try.
+pub(crate) fn restored_window_meta(store: &Store, ws_id: &str) -> serde_json::Map<String, Value> {
     store
         .get_all::<Client>()
         .ok()
         .and_then(|cs| cs.into_iter().next())
-        .and_then(|c| c.meta.get(NAMES_META_KEY)?.get(ws_id)?.as_str().map(str::to_string))
+        .and_then(|c| c.meta.get(NAMES_META_KEY)?.get(ws_id).map(waiting_patch))
+        .unwrap_or_default()
 }
 
-/// `ws_id`'s window has its name: forget it, once. Read, remove and write
+/// The name a restored window had, for the window now opening onto `ws_id`.
+pub(crate) fn restored_window_name(store: &Store, ws_id: &str) -> Option<String> {
+    restored_window_meta(store, ws_id).get(NAME_KEY).and_then(|v| v.as_str()).map(str::to_string)
+}
+
+/// `ws_id`'s window has its meta: forget it, once. Read, remove and write
 /// back in one transaction: restored windows open together, and two of these
-/// must not each write back the name the other removed.
-pub(crate) fn forget_restored_window_name(store: &Store, ws_id: &str) -> Option<String> {
+/// must not each write back the entry the other removed.
+pub(crate) fn forget_restored_window_meta(store: &Store, ws_id: &str) -> Option<serde_json::Map<String, Value>> {
     let taken = store.with_tx(|tx| {
         let Some(mut client) = tx.get_all::<Client>()?.into_iter().next() else { return Ok(None) };
-        let Some(mut names) = client.meta.get(NAMES_META_KEY).and_then(|v| v.as_object().cloned()) else {
+        let Some(mut waiting) = client.meta.get(NAMES_META_KEY).and_then(|v| v.as_object().cloned()) else {
             return Ok(None);
         };
-        let Some(name) = names.remove(ws_id) else { return Ok(None) };
-        if names.is_empty() {
+        let Some(entry) = waiting.remove(ws_id) else { return Ok(None) };
+        if waiting.is_empty() {
             client.meta.remove(NAMES_META_KEY);
         } else {
-            client.meta.insert(NAMES_META_KEY.to_string(), Value::Object(names));
+            client.meta.insert(NAMES_META_KEY.to_string(), Value::Object(waiting));
         }
         tx.update(&mut client)?;
-        Ok(name.as_str().map(str::to_string))
+        Ok(Some(waiting_patch(&entry)))
     });
     taken.unwrap_or_else(|e| {
-        tracing::warn!(error = %e, "session_restore: couldn't forget a restored window's name");
+        tracing::warn!(error = %e, "session_restore: couldn't forget a restored window's meta");
         None
     })
 }

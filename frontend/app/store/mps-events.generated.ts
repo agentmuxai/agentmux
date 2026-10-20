@@ -13,6 +13,7 @@ import type { AgentRuntimeEvent } from "@/types/rpc/AgentRuntimeEvent";
 import type { AgentTurnEvent } from "@/types/rpc/AgentTurnEvent";
 import type { AmbientNarrationEvent } from "@/types/rpc/AmbientNarrationEvent";
 import type { AmbientSpentEvent } from "@/types/rpc/AmbientSpentEvent";
+import type { ApiRetryEvent } from "@/types/rpc/ApiRetryEvent";
 import type { AppUpdateStatus } from "@/types/rpc/AppUpdateStatus";
 import type { AttachmentBatchDoneEvent } from "@/types/rpc/AttachmentBatchDoneEvent";
 import type { AttachmentFailedEvent } from "@/types/rpc/AttachmentFailedEvent";
@@ -32,6 +33,7 @@ import type { DispatchUpdatedEvent } from "@/types/rpc/DispatchUpdatedEvent";
 import type { DockClearEvent } from "@/types/rpc/DockClearEvent";
 import type { FilesChangedEvent } from "@/types/rpc/FilesChangedEvent";
 import type { FsOpEvent } from "@/types/rpc/FsOpEvent";
+import type { IncidentEvent } from "@/types/rpc/IncidentEvent";
 import type { InputHistoryChangedEvent } from "@/types/rpc/InputHistoryChangedEvent";
 import type { InstallChunkEvent } from "@/types/rpc/InstallChunkEvent";
 import type { InstallProgressEvent } from "@/types/rpc/InstallProgressEvent";
@@ -86,6 +88,7 @@ import type { WidgetStorageEvent } from "@/types/rpc/WidgetStorageEvent";
 /** Each typed broker event's payload, by its wire name. An event sent under a name per id
  *  (`agent:memory:changed:<agent id>`) is keyed by its prefix and any id. Subscribe with `onMuxEvent`. */
 export type MuxEventPayloads = {
+  "agent-api-retry": ApiRetryEvent;
   "agent-message-accepted": MessageAcceptedEvent;
   "agent-resume-retry": ResumeRetryEvent;
   "agent:inputhistory": InputHistoryChangedEvent;
@@ -133,6 +136,7 @@ export type MuxEventPayloads = {
   "files:op": FsOpEvent;
   "identity:no-direct-links": NoDirectLinksEvent;
   "identityaccounts:changed": null;
+  "incident:recorded": IncidentEvent;
   install_chunk: InstallChunkEvent;
   install_progress: InstallProgressEvent;
   laninstances: LanInstanceList;
@@ -189,6 +193,7 @@ export type MuxEventPayloads = {
 
 /** The typed events' wire names, apart from the per-id ones. */
 export const TYPED_MUX_EVENTS = [
+  "agent-api-retry",
   "agent-message-accepted",
   "agent-resume-retry",
   "agent:inputhistory",
@@ -236,6 +241,7 @@ export const TYPED_MUX_EVENTS = [
   "files:op",
   "identity:no-direct-links",
   "identityaccounts:changed",
+  "incident:recorded",
   "install_chunk",
   "install_progress",
   "laninstances",

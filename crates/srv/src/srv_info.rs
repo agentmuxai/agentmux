@@ -13,21 +13,35 @@ use std::sync::OnceLock;
 /// when srv started. Read before startup sets `AGENTMUX_DATA_HOME` to the data
 /// directory (`bootstrap/stores.rs`), after which the same resolver answers
 /// with the data directory instead.
-static HOME_DIR: OnceLock<Option<String>> = OnceLock::new();
+static HOME_DIR: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
 
 /// Record the AgentMux root. Call first thing in `main`, before anything
 /// changes the environment.
 pub fn capture_home_dir() {
     let _ = HOME_DIR.set(
-        agentmux_common::data_paths::agentmux_root()
-            .ok()
-            .map(|p| p.to_string_lossy().into_owned()),
+        // Kept as a PathBuf: a root that isn't valid UTF-8 must still name
+        // the same directory. Only the `srvinfo` payload stringifies it.
+        agentmux_common::data_paths::agentmux_root().ok(),
     );
 }
 
 /// The account-wide AgentMux root captured at startup (`capture_home_dir`).
 pub fn agentmux_home() -> Option<std::path::PathBuf> {
-    HOME_DIR.get().cloned().flatten().map(std::path::PathBuf::from)
+    HOME_DIR.get().cloned().flatten()
+}
+
+/// The account-wide AgentMux root, for code that means `~/.agentmux` itself
+/// (`archives/`, `channels/`, `shared/`). Inside srv, after startup,
+/// `agentmux_common::data_paths::agentmux_root()` answers with this version's
+/// data directory instead (see [`HOME_DIR`]); this answers with the root
+/// captured before that. Only when no capture ran (tests, tools that don't
+/// run srv's `main`) does it ask the resolver; a capture that ran and found
+/// no root stays `None`, since asking now would get the data directory.
+pub fn agentmux_root() -> Option<std::path::PathBuf> {
+    match HOME_DIR.get() {
+        Some(captured) => captured.clone(),
+        None => agentmux_common::data_paths::agentmux_root().ok(),
+    }
 }
 
 /// The `srvinfo` event: srv's version, and the machine it runs on.
@@ -51,7 +65,7 @@ pub fn srv_info(version: &str, host_name: &str) -> SrvInfo {
         platform: agentmux_common::platform_name::platform_name().to_string(),
         user_name: whoami::username(),
         host_name: host_name.to_string(),
-        home_dir: HOME_DIR.get().cloned().flatten(),
+        home_dir: agentmux_home().map(|p| p.to_string_lossy().into_owned()),
     }
 }
 

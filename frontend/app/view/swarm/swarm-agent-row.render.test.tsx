@@ -22,7 +22,8 @@ const focusBlockMock = vi.fn();
 vi.mock("@/app/util/reveal-block", () => ({ revealBlock: (...args: unknown[]) => focusBlockMock(...args) }));
 
 import { __resetAllSlots, dispatch, registerPane } from "@/app/store/agent-document-store";
-import { AgentRow } from "./swarm-view";
+import { AgentRow, AgentRowHost } from "./swarm-view";
+import { createSignal } from "solid-js";
 import type { AgentTreeNode, SwarmViewModel } from "./swarm-model";
 import type { DocumentNode } from "@/app/view/agent/types";
 import { NO_BACKGROUND_TASKS } from "./swarm-background";
@@ -88,7 +89,7 @@ function renderRow(collapsed: boolean, model: SwarmViewModel = modelStub(collaps
     // (reagentx P0 on #3955 — a guard that matched it never ran).
     return render(() => (
         <div class="swarm-view" tabIndex={-1}>
-            <AgentRow node={treeNode()} focusedBlockId={() => null} model={model} />
+            <AgentRow node={() => treeNode()} focusedBlockId={() => null} model={model} />
         </div>
     ));
 }
@@ -132,7 +133,7 @@ describe("AgentRow — select-to-focus", () => {
 
         fireEvent.click(container.querySelector(".swarm-agent-card")!);
 
-        expect(focusBlockMock).toHaveBeenCalledExactlyOnceWith(BLOCK);
+        expect(focusBlockMock).toHaveBeenCalledExactlyOnceWith(BLOCK, { source: "swarm" });
     });
 
     it("the row's click handler stops propagation, so it can't also reach the Swarm pane's own click-to-focus", () => {
@@ -160,7 +161,7 @@ describe("AgentRow — select-to-focus", () => {
         fireEvent.click(container.querySelector(".swarm-agent-card")!);
 
         expect(toggle).not.toHaveBeenCalled();
-        expect(focusBlockMock).toHaveBeenCalledExactlyOnceWith(BLOCK);
+        expect(focusBlockMock).toHaveBeenCalledExactlyOnceWith(BLOCK, { source: "swarm" });
     });
 
     // The Swarm root is focusable, so a press would move DOM focus into the
@@ -218,5 +219,147 @@ describe("AgentRow — select-to-focus", () => {
 
         expect(toggle).toHaveBeenCalledExactlyOnceWith(BLOCK);
         expect(focusBlockMock).not.toHaveBeenCalled();
+    });
+});
+
+/** A pointer event as the browser sends it; `pointerType` is set even where jsdom has no PointerEvent. */
+function pointer(type: string, target: Element, pointerType = "mouse", button = 0) {
+    const Ctor = (globalThis as { PointerEvent?: typeof MouseEvent }).PointerEvent ?? MouseEvent;
+    const ev = new Ctor(type, { bubbles: true, cancelable: true, button });
+    if ((ev as unknown as { pointerType?: string }).pointerType !== pointerType) {
+        Object.defineProperty(ev, "pointerType", { value: pointerType });
+    }
+    target.dispatchEvent(ev);
+}
+
+/**
+ * docs/specs/SPEC_PANE_SELECTION_STATE_MACHINE_AND_SWARM_CLICK_2026_10_18.md §6.1:
+ * a mouse press selects the agent at once, so a click lost to a rebuild cannot
+ * lose the selection; the click that follows does nothing more.
+ */
+describe("AgentRow — a press selects", () => {
+    it("selects on a mouse press, and the click that follows does not select again", () => {
+        registerPane(BLOCK);
+        const { container } = renderRow(false);
+        const card = container.querySelector(".swarm-agent-card")!;
+
+        pointer("pointerdown", card);
+        expect(focusBlockMock).toHaveBeenCalledExactlyOnceWith(BLOCK, { source: "swarm" });
+
+        fireEvent.click(card);
+        expect(focusBlockMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("a press whose click never arrives has already selected", () => {
+        registerPane(BLOCK);
+        const { container } = renderRow(false);
+
+        pointer("pointerdown", container.querySelector(".swarm-agent-card .swarm-agent-label")!);
+
+        expect(focusBlockMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("selects on the click after a press that did not select, and again on a later click", () => {
+        registerPane(BLOCK);
+        const { container } = renderRow(false);
+        const card = container.querySelector(".swarm-agent-card")!;
+
+        pointer("pointerdown", card, "touch");
+        fireEvent.click(card);
+        expect(focusBlockMock).toHaveBeenCalledTimes(1);
+
+        pointer("pointerdown", card);
+        fireEvent.click(card);
+        pointer("pointerdown", card);
+        fireEvent.click(card);
+        expect(focusBlockMock).toHaveBeenCalledTimes(3);
+    });
+
+    it("a right-button press and a press on a control inside the card do not select", () => {
+        registerPane(BLOCK);
+        const { container } = renderRow(false);
+        pointer("pointerdown", container.querySelector(".swarm-agent-card")!, "mouse", 2);
+        pointer("pointerdown", container.querySelector(".swarm-agent-card input[type=checkbox]")!);
+        expect(focusBlockMock).not.toHaveBeenCalled();
+    });
+
+    it("a press on the chevron does not select; its click still collapses", () => {
+        seedSleepingPane();
+        const toggle = vi.fn();
+        const { container } = renderRow(false, modelStub(false, toggle));
+        const chevron = container.querySelector(".swarm-agent-expand-icon")!;
+
+        pointer("pointerdown", chevron);
+        fireEvent.click(chevron);
+
+        expect(focusBlockMock).not.toHaveBeenCalled();
+        expect(toggle).toHaveBeenCalledTimes(1);
+    });
+
+    it("Enter and Space on the focused card select; other keys do not", () => {
+        registerPane(BLOCK);
+        const { container } = renderRow(false);
+        const card = container.querySelector(".swarm-agent-card") as HTMLElement;
+        expect(card.getAttribute("role")).toBe("button");
+        expect(card.tabIndex).toBe(0);
+
+        fireEvent.keyDown(card, { key: "Enter" });
+        fireEvent.keyDown(card, { key: " " });
+        fireEvent.keyDown(card, { key: "a" });
+        expect(focusBlockMock).toHaveBeenCalledTimes(2);
+
+        fireEvent.keyDown(card.querySelector("input[type=checkbox]")!, { key: " " });
+        expect(focusBlockMock).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe("AgentRowHost — a rebuilt tree updates the row in place", () => {
+    it("keeps the card and its name element, and shows the new node", () => {
+        registerPane(BLOCK);
+        const [rows, setRows] = createSignal(new Map([[BLOCK, treeNode()]]));
+        const { container } = render(() => (
+            <div class="swarm-view" tabIndex={-1}>
+                <AgentRowHost rowKey={BLOCK} rows={rows} focusedBlockId={() => null} model={modelStub(false)} />
+            </div>
+        ));
+        const card = container.querySelector(".swarm-agent-card")!;
+        const label = container.querySelector(".swarm-agent-label")!;
+        expect(label.textContent).toBe("AgentX");
+
+        setRows(new Map([[BLOCK, { ...treeNode(), agentName: "Renamed", agentStatus: "idle" as const }]]));
+
+        expect(container.querySelector(".swarm-agent-card")).toBe(card);
+        expect(container.querySelector(".swarm-agent-label")).toBe(label);
+        expect(label.textContent).toBe("Renamed");
+        expect(card.classList.contains("swarm-agent-card--idle")).toBe(true);
+    });
+
+    it("a press, then a rebuild before the release, still selects exactly once", () => {
+        registerPane(BLOCK);
+        const [rows, setRows] = createSignal(new Map([[BLOCK, treeNode()]]));
+        const { container } = render(() => (
+            <div class="swarm-view" tabIndex={-1}>
+                <AgentRowHost rowKey={BLOCK} rows={rows} focusedBlockId={() => null} model={modelStub(false)} />
+            </div>
+        ));
+        const card = container.querySelector(".swarm-agent-card")!;
+
+        pointer("pointerdown", card);
+        setRows(new Map([[BLOCK, { ...treeNode() }]]));
+        pointer("pointerup", container.querySelector(".swarm-agent-card")!);
+        fireEvent.click(container.querySelector(".swarm-agent-card")!);
+
+        expect(container.querySelector(".swarm-agent-card")).toBe(card);
+        expect(focusBlockMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the last node while the row leaves", () => {
+        registerPane(BLOCK);
+        const [rows, setRows] = createSignal(new Map([[BLOCK, treeNode()]]));
+        const { container } = render(() => (
+            <AgentRowHost rowKey={BLOCK} rows={rows} focusedBlockId={() => null} model={modelStub(false)} />
+        ));
+        setRows(new Map());
+        expect(container.querySelector(".swarm-agent-label")?.textContent).toBe("AgentX");
     });
 });

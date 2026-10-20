@@ -798,6 +798,7 @@ pub async fn run_agent_progress_loop(filestore: Arc<FileStore>, mstore: Arc<Stor
         states = returned_states;
         // Hands off and returns at once: the check runs on its own task.
         crate::backend::work_facts::overlap_notes::on_new_edits(edits);
+        crate::backend::kanban::on_new_prs(&prs);
         crate::backend::work_facts::overlap_notes::on_new_prs(prs);
         *snapshot().write() = states
             .iter()
@@ -927,7 +928,7 @@ mod tests {
         let zone = "agent:progress-global:current";
         let global = output_store(zone, "");
         let mut st = BlockState::default();
-        let source = TranscriptSource { fs: &global, zone: zone.to_string(), global: true };
+        let source = TranscriptSource { fs: &global, zone: zone.to_string(), global: true, own: None };
         assert!(!consume_new_output(&source, &mut st), "an empty zone has nothing");
         global
             .append_data(zone, "output", format!("{}\n", edit_call("e1", "Edit", "file_path", "/r/zone.rs")).as_bytes())
@@ -952,7 +953,7 @@ mod tests {
 
         let zone = "agent:progress-flip:current";
         let global = output_store(zone, &format!("{}\n", edit_call("g1", "Edit", "file_path", "/r/zone1.rs")));
-        let source = TranscriptSource { fs: &global, zone: zone.to_string(), global: true };
+        let source = TranscriptSource { fs: &global, zone: zone.to_string(), global: true, own: None };
         // What the zone already holds is backlog (a first sight), as for any new
         // source: nothing recorded as just edited, and nothing carried over from
         // the other copy; the cursor sits at the end of the zone.

@@ -4,9 +4,10 @@
 //! The note each agent gets when it resumes after AgentMux was upgraded
 //! (`docs/specs/SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md` §5.2,
 //! phase 4b): `[AgentMux] AgentMux was upgraded from 0.59.26 to 0.59.27 …`,
-//! once per agent, soon after it resumes (a message queued during the resume
-//! may come first; the note asks nothing of it). The agent that asked for the
-//! upgrade (`App` `upgrade`) gets it too, which is how it learns it is done.
+//! once per agent, with the first message it gets after it resumes: the note
+//! asks nothing of it, so it starts no turn (`reactive::held_notes`). The
+//! agent that asked for the upgrade (`App` `upgrade`) gets it too, which is
+//! how it learns it is done.
 //!
 //! srv records the version it runs in the channel folder ([`RECORD_FILE`],
 //! like `cli_notice`'s CLI versions): an installed build's data folder is
@@ -35,6 +36,8 @@ use serde::{Deserialize, Serialize};
 pub const RECORD_FILE: &str = "agentmux-last-version.json";
 /// How long after an upgrade resumed agents are still told.
 pub const PENDING_FOR: Duration = Duration::from_secs(60 * 60);
+/// Where the note waits for the agent's next turn.
+const NOTE_KEY: &str = "upgrade";
 /// How long after registering an agent is told, so its spawn has settled.
 const SETTLE: Duration = Duration::from_secs(1);
 /// A restored pane's controller can come up after the pane registers, so a
@@ -243,7 +246,7 @@ pub fn on_registered(block_id: &str) {
                     .find(|r| r.block_id == block_id)
                     .map(|r| r.uid.unwrap_or(r.agent_id))
                     .ok_or_else(|| Undelivered::Gone("not registered any more".to_string()))?;
-                handler.deliver_system_note(&target, &note_text(&state.upgraded)).map_err(Undelivered::Retry)
+                handler.hold_system_note(&target, NOTE_KEY, &note_text(&state.upgraded)).map_err(Undelivered::Retry)
             },
             RETRIES,
             RETRY_GAP,

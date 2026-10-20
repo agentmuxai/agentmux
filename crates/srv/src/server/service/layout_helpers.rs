@@ -33,6 +33,20 @@ pub(crate) async fn setup_torn_off_block_layout(
     new_tab_id: &str,
     block_id: &str,
 ) -> Result<(), String> {
+    setup_torn_off_stack_layout(state, new_tab_id, block_id, &[]).await
+}
+
+/// [`setup_torn_off_block_layout`] for a whole pane torn off with its tabs:
+/// the one leaf holds `members` as its `block_stack` (in order), with
+/// `block_id` the visible one. Fewer than two members seed a plain leaf.
+pub(crate) async fn setup_torn_off_stack_layout(
+    state: &super::super::AppState,
+    new_tab_id: &str,
+    block_id: &str,
+    members: &[String],
+) -> Result<(), String> {
+    let order = crate::sagas::tear_off_block::tear_off_order(block_id, members);
+    let stack = if order.len() > 1 { order_stack(&order, members) } else { Vec::new() };
     let node_id = uuid::Uuid::new_v4().to_string();
     // Phase E.4.B Phase 2 — construct typed LayoutNode (was inline JSON).
     let rootnode = LayoutNode {
@@ -42,6 +56,8 @@ pub(crate) async fn setup_torn_off_block_layout(
         children: Vec::new(),
         data: Some(LayoutNodeData {
             block_id: block_id.to_string(),
+            active_block_id: if stack.is_empty() { String::new() } else { block_id.to_string() },
+            block_stack: stack,
             ..Default::default()
         }),
         ..Default::default()
@@ -63,6 +79,17 @@ pub(crate) async fn setup_torn_off_block_layout(
     .await
 }
 
+/// The stack as the caller gave it (`tear_off_order` moves the visible block
+/// first, but the pane's tab order is the order of `members`).
+fn order_stack(order: &[String], members: &[String]) -> Vec<String> {
+    members.iter().filter(|m| order.contains(m)).fold(Vec::new(), |mut acc, m| {
+        if !acc.contains(m) {
+            acc.push(m.clone());
+        }
+        acc
+    })
+}
+
 /// Place a block (re-docked, re-placed by the orphan reaper) at the first
 /// free slot of its tab: srv's tree first, then the queued `insert` for the
 /// window showing the tab (`layout_intents::place_block`).
@@ -75,7 +102,7 @@ pub(crate) async fn queue_target_layout_insert(
 }
 
 /// Tell the frontend that `block_id` was added — already, in the reducer — as
-/// the visible tab of the pane holding `target_block_id`
+/// a tab of the pane holding `target_block_id`, the visible one when `activate`
 /// (`Command::CreateBlockInStack`). Matches
 /// `LayoutTreeActionType.StackPush = "stackpush"` in
 /// `frontend/layout/lib/types.ts`. SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3.
@@ -84,6 +111,7 @@ pub(crate) async fn queue_target_stack_push(
     tab_id: &str,
     block_id: &str,
     target_block_id: &str,
+    activate: bool,
 ) -> Result<(), String> {
     let action = LayoutActionData {
         actiontype: "stackpush".to_string(),
@@ -92,7 +120,7 @@ pub(crate) async fn queue_target_stack_push(
         nodesize: None,
         nodesizefraction: None,
         indexarr: None,
-        focused: true,
+        focused: activate,
         magnified: false,
         ephemeral: false,
         targetblockid: target_block_id.to_string(),

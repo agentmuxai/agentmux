@@ -48,17 +48,18 @@ export const ModalLayer: Component<ModalLayerProps> = (props) => {
 
     // Guard close: ESC (routed via the unified Modal's `onClose`) and a
     // would-be backdrop dismiss are blocked while a submit RPC is
-    // in-flight so the user can't lose error feedback or trigger a
-    // duplicate launch. `closeOnBackdropClick={false}` already prevents
-    // backdrop dismissal outright; this additionally gates ESC.
+    // in-flight so the user can't lose error feedback or submit twice.
+    // `closeOnBackdropClick={false}` already prevents backdrop dismissal
+    // outright; this additionally gates ESC. No current kind sets
+    // `submitting` (the launch / add-account / new-bundle modals that did
+    // are gone); kept for the next form-like kind, like the set below.
     const safeClose = () => {
         if (!submitting()) setCurrent(null);
     };
 
     // Pure browse/view modals have no in-flight submit or form input a
     // backdrop click could destroy, unlike the form-like kinds this guard
-    // exists for (launch-agent/add-account/new-memory) — so clicking
-    // outside should just close
+    // exists for — so clicking outside should just close
     // them, like any other dismissible overlay.
     //
     // CURRENTLY EMPTY. Its only member was "agent-stash" (the per-agent

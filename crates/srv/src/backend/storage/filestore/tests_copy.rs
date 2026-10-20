@@ -117,3 +117,52 @@ fn a_move_never_overwrites_a_destination_that_has_any_of_the_files() {
     assert_eq!(fs.move_files_to_zone(SRC, DST, &["output", "output.tsidx"]).unwrap(), None);
     assert_eq!(all(&fs, SRC, "output"), b"{\"src\":1}\n", "the source stays where it was");
 }
+
+
+#[test]
+fn a_prefix_copy_takes_the_first_bytes_of_each_file_and_is_a_file_of_its_own() {
+    let fs = mem();
+    let data = transcript();
+    file(&fs, SRC, "output");
+    fs.append_lines_stamped(SRC, "output", &data, "output.tsidx").unwrap();
+    let tsidx = all(&fs, SRC, "output.tsidx");
+
+    // Mid-way through the second part, at a line boundary.
+    let cut = data.iter().enumerate().filter(|(_, &b)| b == b'\n').map(|(i, _)| i + 1).find(|&e| e > 70_000).unwrap();
+    let side = tsidx.iter().position(|&b| b == b'\n').unwrap() + 1;
+    let copied = fs.copy_prefixes_to_zone(SRC, DST, &[("output", cut as i64), ("output.tsidx", side as i64), ("absent", 5)]).unwrap();
+
+    assert_eq!(copied, Some((cut + side) as u64));
+    assert_eq!(all(&fs, DST, "output"), &data[..cut]);
+    assert_eq!(all(&fs, DST, "output.tsidx"), &tsidx[..side]);
+    assert!(fs.line_state(DST, "absent").unwrap().is_none());
+
+    // A whole number of parts, a length past the end, and none at all.
+    let (a, b, c) = ("agent:a:current", "agent:b:current", "agent:c:current");
+    assert_eq!(fs.copy_prefixes_to_zone(SRC, a, &[("output", 65_536)]).unwrap(), Some(65_536));
+    assert_eq!(all(&fs, a, "output"), &data[..65_536]);
+    assert_eq!(fs.copy_prefixes_to_zone(SRC, b, &[("output", i64::MAX)]).unwrap(), Some(data.len() as u64));
+    assert_eq!(all(&fs, b, "output"), data);
+    assert_eq!(fs.copy_prefixes_to_zone(SRC, c, &[("output", 0)]).unwrap(), Some(0));
+    assert!(all(&fs, c, "output").is_empty());
+
+    // The copy is its own file: it counts its lines, appends land after the
+    // prefix, and the parent is untouched.
+    fs.append_lines(DST, "output", b"{\"type\":\"user\",\"fork\":true}\n").unwrap();
+    let fork = all(&fs, DST, "output");
+    assert!(fork.starts_with(&data[..cut]) && fork.ends_with(b"\"fork\":true}\n"));
+    assert_eq!(fork.len(), cut + 28);
+    assert_eq!(all(&fs, SRC, "output"), data);
+    let lines = fs.line_state(DST, "output").unwrap().unwrap().counted.expect("the counter catches up").lines;
+    assert_eq!(lines, fork.iter().filter(|&&b| b == b'\n').count() as u64);
+}
+
+#[test]
+fn a_prefix_copy_never_overwrites_a_destination_that_has_any_of_the_files() {
+    let fs = mem();
+    file(&fs, SRC, "output");
+    fs.append_lines(SRC, "output", b"{\"a\":1}\n").unwrap();
+    file(&fs, DST, "output.tsidx");
+    assert_eq!(fs.copy_prefixes_to_zone(SRC, DST, &[("output", 8), ("output.tsidx", 0)]).unwrap(), None);
+    assert!(fs.line_state(DST, "output").unwrap().is_none(), "nothing was copied");
+}
