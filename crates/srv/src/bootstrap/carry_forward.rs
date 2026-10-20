@@ -95,8 +95,11 @@ pub(super) fn from_previous_version(db_dir: &Path, version: &str) -> Option<Path
     // A large filestore.db takes a while to copy: the same line migrations
     // print moves the launcher's ESTART deadline from 30 s to 30 minutes.
     eprintln!(
-        "AGENTMUXSRV-MIGRATING copying-previous-version:{}",
-        from.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()
+        "{}",
+        agentmux_common::srv_stderr::migrating_line(
+            "copying-previous-version",
+            from.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()
+        )
     );
     let mut copied = Vec::new();
     for name in DATABASES {

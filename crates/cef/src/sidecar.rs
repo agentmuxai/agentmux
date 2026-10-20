@@ -89,7 +89,7 @@ pub fn use_launcher_endpoints(
              refusing to fall back to spawn_backend (would create a \
              duplicate srv against the same data dir). This is a \
              launcher bug; check the AGENTMUXSRV-ESTART parse path in \
-             crates/launcher/src/srv_spawner.rs::parse_estart."
+             agentmux_common::srv_stderr::parse_estart_line."
                 .to_string(),
         ));
     }
@@ -378,8 +378,8 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
         for line in reader.lines() {
             match line {
                 Ok(l) => {
-                    if l.starts_with("AGENTMUXSRV-ESTART") {
-                        let result = parse_estart(&l);
+                    if let Some(estart) = agentmux_common::srv_stderr::parse_estart_line(&l) {
+                        let result = BackendSpawnResult::from(estart);
                         tracing::info!(
                             "Backend started: ws={} web={} version={} instance={}",
                             result.ws_endpoint,
@@ -394,10 +394,10 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
                     {
                         tracing::error!("[agentmux-srv] MIGRATION FAILED: {}", reason);
                         let _ = failure_tx.blocking_send(reason);
-                    } else if l.starts_with("AGENTMUXSRV-MIGRATING") {
+                    } else if agentmux_common::srv_stderr::is_migrating_line(&l) {
                         tracing::info!("[agentmux-srv] {}", l);
                         let _ = migration_tx.blocking_send(());
-                    } else if let Some(event_data) = l.strip_prefix("AGENTMUXSRV-EVENT:") {
+                    } else if let Some(event_data) = agentmux_common::srv_stderr::parse_event_line(&l) {
                         tracing::debug!("Backend event: {}", event_data);
                         // Forward events to the frontend
                         if let Ok(payload) = serde_json::from_str::<serde_json::Value>(event_data)
@@ -607,26 +607,15 @@ fn resolve_backend_binary(
 }
 
 /// Parse the key=value fields out of a `AGENTMUXSRV-ESTART` line.
-fn parse_estart(line: &str) -> BackendSpawnResult {
-    let parts: Vec<&str> = line.split_whitespace().collect();
-    let get = |prefix: &str| -> String {
-        parts
-            .iter()
-            .find_map(|p| p.strip_prefix(prefix))
-            .unwrap_or_default()
-            .to_string()
-    };
-    let pending_migrations = parts
-        .iter()
-        .find_map(|p| p.strip_prefix("pending_migrations:"))
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(0);
-    BackendSpawnResult {
-        ws_endpoint: get("ws:"),
-        web_endpoint: get("web:"),
-        version: get("version:"),
-        instance_id: get("instance:"),
-        pending_migrations,
+impl From<agentmux_common::srv_stderr::Estart> for BackendSpawnResult {
+    fn from(e: agentmux_common::srv_stderr::Estart) -> Self {
+        BackendSpawnResult {
+            ws_endpoint: e.ws_endpoint,
+            web_endpoint: e.web_endpoint,
+            version: e.version,
+            instance_id: e.instance_id,
+            pending_migrations: e.pending_migrations,
+        }
     }
 }
 

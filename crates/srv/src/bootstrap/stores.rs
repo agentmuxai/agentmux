@@ -200,7 +200,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         }
     };
     if pre_migration_count > 0 {
-        eprintln!("AGENTMUXSRV-MIGRATING migrations:{}", pre_migration_count);
+        eprintln!("{}", agentmux_common::srv_stderr::migrating_line("migrations", pre_migration_count));
     }
     match migrations::run_pending_migrations(&mux_data_dir) {
         Ok(0) => {}
