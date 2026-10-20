@@ -55,6 +55,58 @@ fn previous_db_dir(versions_dir: &Path, current: (u64, u64, u64)) -> Option<Path
 /// the version directory copied from, or `None` when there was nothing to do
 /// or the copy failed (logged; the version then starts fresh).
 pub(crate) fn from_previous_version(db_dir: &Path, version: &str) -> Option<PathBuf> {
+    match try_from_previous_version(db_dir, version) {
+        Ok(from) => from,
+        Err(e) => {
+            tracing::warn!("carry-forward: {e}; starting fresh");
+            None
+        }
+    }
+}
+
+/// [`from_previous_version`], telling "nothing to copy" (`Ok(None)`) apart
+/// from "there was data to copy and copying it failed" (`Err`), which
+/// `migrate --prepare` must not treat as a fresh start: that would relaunch
+/// the new version without the user's data (`migrations/prepare.rs`). Copies
+/// that failed are removed again, so a retry starts clean.
+pub(crate) fn try_from_previous_version(db_dir: &Path, version: &str) -> Result<Option<PathBuf>, String> {
+    let Some(source) = source_for(db_dir, version) else {
+        return Ok(None);
+    };
+    let from = source.parent().and_then(Path::parent).map(Path::to_path_buf).unwrap_or_else(|| source.clone());
+    let from_name = from.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    std::fs::create_dir_all(db_dir).map_err(|e| format!("can't create {}: {e}", db_dir.display()))?;
+    // A large filestore.db takes a while to copy: the same line migrations
+    // print moves the launcher's ESTART deadline from 30 s to 30 minutes.
+    eprintln!("{}", agentmux_common::srv_stderr::migrating_line("copying-previous-version", &from_name));
+    crate::boot_timing::step("copy_previous_version", &format!("Copying from {from_name}"), || {
+        let mut copied = Vec::new();
+        for name in DATABASES {
+            let src = source.join(name);
+            let dst = db_dir.join(name);
+            // Already here: copied by a start that was cut short before objects.db.
+            if !src.is_file() || dst.exists() {
+                continue;
+            }
+            if let Err(e) = copy_database(&src, &dst) {
+                for dst in copied {
+                    let _ = std::fs::remove_file(dst);
+                }
+                return Err(format!("copying {name} from {}: {e}", from.display()));
+            }
+            copied.push(dst);
+        }
+        Ok(())
+    })?;
+    CARRIED_FORWARD.store(true, std::sync::atomic::Ordering::Relaxed);
+    tracing::info!(from = %from.display(), "carry-forward: started from the previous version's data");
+    Ok(Some(from))
+}
+
+/// The `data/db` of the newest older version in the same channel to copy
+/// from on the first start of `version`; `None` once `db_dir` has an
+/// `objects.db`, outside a `versions/<v>/data/db` layout, or with nothing older.
+pub(crate) fn source_for(db_dir: &Path, version: &str) -> Option<PathBuf> {
     if db_dir.join("objects.db").exists() {
         return None;
     }
@@ -65,48 +117,7 @@ pub(crate) fn from_previous_version(db_dir: &Path, version: &str) -> Option<Path
     if versions_dir.file_name()? != "versions" {
         return None;
     }
-    let source = previous_db_dir(versions_dir, current)?;
-    let from = source.parent()?.parent()?.to_path_buf();
-    if let Err(e) = std::fs::create_dir_all(db_dir) {
-        tracing::warn!(error = %e, "carry-forward: can't create {}; starting fresh", db_dir.display());
-        return None;
-    }
-    // A large filestore.db takes a while to copy: the same line migrations
-    // print moves the launcher's ESTART deadline from 30 s to 30 minutes.
-    eprintln!(
-        "{}",
-        agentmux_common::srv_stderr::migrating_line(
-            "copying-previous-version",
-            from.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()
-        )
-    );
-    let label = format!("Copying your data from {}", from.file_name().map(|n| n.to_string_lossy()).unwrap_or_default());
-    let copied_all = crate::boot_timing::step("copy_previous_version", &label, || {
-        let mut copied = Vec::new();
-        for name in DATABASES {
-            let src = source.join(name);
-            let dst = db_dir.join(name);
-            // Already here: copied by a start that was cut short before objects.db.
-            if !src.is_file() || dst.exists() {
-                continue;
-            }
-            if let Err(e) = copy_database(&src, &dst) {
-                tracing::warn!(error = %e, from = %from.display(), "carry-forward: copy failed; starting fresh");
-                for dst in copied {
-                    let _ = std::fs::remove_file(dst);
-                }
-                return false;
-            }
-            copied.push(dst);
-        }
-        true
-    });
-    if !copied_all {
-        return None;
-    }
-    CARRIED_FORWARD.store(true, std::sync::atomic::Ordering::Relaxed);
-    tracing::info!(from = %from.display(), "carry-forward: started from the previous version's data");
-    Some(from)
+    previous_db_dir(versions_dir, current)
 }
 
 static CARRIED_FORWARD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);

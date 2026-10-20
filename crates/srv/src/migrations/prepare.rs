@@ -28,7 +28,15 @@ pub(super) fn run(data_dir: &Path, home: &Path, shared_store_path: &Path) -> i32
 
 /// [`run`] for an explicit version, so a test needn't set the environment.
 pub(super) fn run_for_version(data_dir: &Path, home: &Path, shared_store_path: &Path, version: &str) -> i32 {
-    crate::bootstrap::carry_forward::from_previous_version(&data_dir.join("db"), version);
+    // A copy that failed must not turn into a fresh start: that would start
+    // the new version without the user's data. Failing leaves this version
+    // without an objects.db, so the next start asks for preparation again.
+    if let Err(e) = crate::bootstrap::carry_forward::try_from_previous_version(&data_dir.join("db"), version) {
+        let msg = format!("copying the previous version's data failed: {e}");
+        write_error_log(home, &msg);
+        eprintln!("{}", agentmux_common::srv_stderr::migration_failed_line(&msg));
+        return 1;
+    }
     match apply_pending(REGISTRY, home, shared_store_path, data_dir, Some(&STDERR_PROGRESS)) {
         Ok(outcome) => {
             emit_summary(outcome.applied, outcome.skipped);
