@@ -89,3 +89,67 @@ export function reportIssue({ env, plan, initial, final, gh, log = console.log }
     }
     return writes;
 }
+
+export const FAILED_LABEL = "perf-run-failed";
+export const FAILED_TITLE = "nightly perf run failed";
+
+/**
+ * What the performance job's own result says, for the same one-issue-per-streak rule: "red" when the job failed or timed out,
+ * "green" when it succeeded, "unknown" for a cancelled or skipped job (a cancelled run says nothing, as for the nightly).
+ */
+export function runState(result) {
+    if (result === "failure") return "red";
+    if (result === "success") return "green";
+    return "unknown";
+}
+
+/** The failing steps of the performance job, from the jobs API's `jobs` (`conclusion` of the job and of each step). */
+export function failedSteps(jobs) {
+    const names = [];
+    for (const job of jobs ?? []) {
+        if (job.conclusion !== "failure" && job.conclusion !== "timed_out") continue;
+        const steps = (job.steps ?? []).filter((st) => st.conclusion === "failure" || st.conclusion === "timed_out").map((st) => st.name);
+        names.push(...(steps.length ? steps.map((n) => `${job.name}: ${n}`) : [job.name]));
+    }
+    return names;
+}
+
+/** The body of the issue, or of a comment, for a run that failed. */
+export function failedBody({ runUrl, steps }) {
+    const lines = [`The nightly performance check did not finish, so tonight's history line and comparison are missing: ${runUrl}`];
+    if (steps.length) lines.push("", "Failed:", ...steps.map((n) => `- ${n}`));
+    return lines.join("\n");
+}
+
+/** Opens, comments on or closes the `perf-run-failed` issue from the job's result; the rule is `decide`. Returns the writes it made (or would with DRY_RUN). */
+export function reportRunFailure({ env, result, gh, log = console.log }) {
+    const { REPO, RUN_URL, DRY_RUN } = env;
+    const writes = [];
+    const state = runState(result);
+    const open = JSON.parse(gh(["issue", "list", "--repo", REPO, "--label", FAILED_LABEL, "--state", "open", "--json", "number"])).map((i) => i.number);
+    const action = decide(state, open);
+    log(`The nightly performance job ${result}; open ${FAILED_LABEL} issues: [${open.join(", ")}]; action: ${action.action}.`);
+    const write = (args) => {
+        writes.push(args);
+        if (DRY_RUN) log(`[dry run] gh ${args.join(" ")}`);
+        else gh(args);
+    };
+    if (action.action === "none") return writes;
+    if (action.action === "close") {
+        for (const n of action.issues) write(["issue", "close", String(n), "--repo", REPO, "--comment", `The nightly performance check finished again: ${RUN_URL}`]);
+        return writes;
+    }
+    let steps = [];
+    try {
+        steps = failedSteps(JSON.parse(gh(["api", `repos/${REPO}/actions/runs/${env.RUN_ID}/jobs`, "--jq", ".jobs"])));
+    } catch {
+        // the names are a convenience: the link says the rest
+    }
+    const body = failedBody({ runUrl: RUN_URL, steps });
+    if (action.action === "comment") write(["issue", "comment", String(action.issues[0]), "--repo", REPO, "--body", body]);
+    else {
+        write(["label", "create", FAILED_LABEL, "--repo", REPO, "--color", "B60205", "--description", "The nightly performance check did not finish", "--force"]);
+        write(["issue", "create", "--repo", REPO, "--title", FAILED_TITLE, "--label", FAILED_LABEL, "--body", `${body}\n\nOpened and closed by CI (perf-regression.yml): one issue while nights keep failing, with a comment for each; closed by the first night that finishes.`]);
+    }
+    return writes;
+}

@@ -284,6 +284,10 @@ it. A night with nothing to compare, or where the lab did not write its comparis
 open/comment/close decision is `decide` from `scripts/ci-nightly-status.mjs`, shared with the `nightly-red` issue).
 To see what the issue step would do without writing anything, dispatch the workflow with `dry-run-issue` set.
 
+A night that does not finish (the lab fails, or the job times out) opens one `perf-run-failed` issue, with a comment for
+each later failed night; the first night that finishes closes it (`nightly.mjs failure`, the `failed` job). A cancelled
+run says nothing. Without it a failing check would show only as a red run in Actions and the history would quietly stop growing.
+
 `.github/workflows/memory-soak.yml` stays as a manual run of one build, and `gate.mjs` checks its result against
 `budget.json`. Every line there is `null` and the mode is `report`, so it cannot fail on a number until the operator
 sets them; see

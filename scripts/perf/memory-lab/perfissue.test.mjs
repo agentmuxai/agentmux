@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { closeNote, flaggedMeasures, issueBody, perfState, reportIssue } from "./lib/perfissue.mjs";
+import { closeNote, failedSteps, flaggedMeasures, issueBody, perfState, reportIssue, reportRunFailure, runState } from "./lib/perfissue.mjs";
 
 const cell = (a, b, changePct, flag) => ({ a, b, change_pct: changePct, flag });
 const compare = (measures) => ({ measures, flags: Object.entries(measures).filter(([, m]) => m?.flag).map(([k]) => k) });
@@ -106,5 +106,49 @@ describe("the issue step", () => {
         const { writes, calls } = run([], { initial: worse, final: worse, dry: "1" });
         expect(writes).toHaveLength(2);
         expect(calls.every((c) => c[1] === "list")).toBe(true);
+    });
+});
+
+describe("a night that did not finish", () => {
+    it("is red for a failure or timeout, green for success, and says nothing when cancelled or skipped", () => {
+        expect([runState("failure"), runState("success"), runState("cancelled"), runState("skipped"), runState(undefined)]).toEqual(["red", "green", "unknown", "unknown", "unknown"]);
+    });
+
+    it("names the failed steps of the failed job", () => {
+        const jobs = [
+            { name: "lab", conclusion: "failure", steps: [{ name: "Checkout", conclusion: "success" }, { name: "Run the lab (A and B interleaved)", conclusion: "failure" }] },
+            { name: "other", conclusion: "success", steps: [{ name: "x", conclusion: "failure" }] },
+            { name: "timed", conclusion: "timed_out", steps: [] },
+        ];
+        expect(failedSteps(jobs)).toEqual(["lab: Run the lab (A and B interleaved)", "timed"]);
+    });
+
+    const run = (result, open, jobs = []) => {
+        const calls = [];
+        const gh = (a) => {
+            calls.push(a);
+            if (a[0] === "issue" && a[1] === "list") return JSON.stringify(open.map((number) => ({ number })));
+            if (a[0] === "api") return JSON.stringify(jobs);
+            return "";
+        };
+        const writes = reportRunFailure({ env: { REPO: "o/r", RUN_URL: "u", RUN_ID: "5" }, result, gh, log: () => {} });
+        return { writes, calls };
+    };
+
+    it("opens one perf-run-failed issue for the first failed night, with the failed step", () => {
+        const { writes } = run("failure", [], [{ name: "lab", conclusion: "failure", steps: [{ name: "Report", conclusion: "failure" }] }]);
+        expect(writes.map((w) => w.slice(0, 2).join(" "))).toEqual(["label create", "issue create"]);
+        expect(writes[1]).toContain("perf-run-failed");
+        expect(writes[1].join(" ")).toContain("- lab: Report");
+    });
+
+    it("comments on the open one for a later failed night, and closes it when a night finishes", () => {
+        expect(run("failure", [4, 8]).writes.map((w) => w.slice(0, 3).join(" "))).toEqual(["issue comment 4"]);
+        expect(run("success", [4, 8]).writes.map((w) => w.slice(0, 3).join(" "))).toEqual(["issue close 4", "issue close 8"]);
+    });
+
+    it("does nothing for a cancelled run, or a finished one with no open issue", () => {
+        expect(run("cancelled", [4]).writes).toEqual([]);
+        expect(run("success", []).writes).toEqual([]);
     });
 });

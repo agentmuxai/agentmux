@@ -222,3 +222,25 @@ jobs:
             perf-out/*/instance.log
           if-no-files-found: warn
           retention-days: 90
+
+  # A night that did not finish (the lab failed, or the job timed out) would otherwise show only as a red run nobody
+  # watches, and the history would quietly stop growing. One `perf-run-failed` issue per streak of failed nights; the
+  # first night that finishes closes it. A cancelled run says nothing.
+  failed:
+    name: report a night that did not finish
+    needs: compare
+    if: ${{ always() && needs.compare.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ inputs.dry-run-issue && '1' || '' }}
+          RESULT: ${{ needs.compare.result }}
+        run: node scripts/perf/memory-lab/nightly.mjs failure --result "$RESULT"
