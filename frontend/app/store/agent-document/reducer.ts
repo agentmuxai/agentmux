@@ -373,7 +373,11 @@ export function update(
             const scrubResult = scrubOrphanedInProgress(fresh, nowMs, {
                 hasContentAfter: state.nodes.length > 0,
             });
-            const scrubbedFresh = scrubResult ? scrubResult.nodes : fresh;
+            const scrubbed = scrubResult ? scrubResult.nodes : fresh;
+            // Planned against the whole document, as a pass would: a background
+            // launch's completion can sit in a newer node.
+            const stubIds = command.unloadResults ? new Set(planUnload([...scrubbed, ...state.nodes], { keepIds: new Set() })) : null;
+            const scrubbedFresh = stubIds?.size ? scrubbed.map((n) => (n.type === "tool" && stubIds.has(n.id) ? unloadResult(n) : n)) : scrubbed;
             const loadEvents: ReducerResult["events"] = [
                 {
                     type: "history-loaded",
