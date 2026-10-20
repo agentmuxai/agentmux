@@ -106,6 +106,32 @@ pub fn note_corrupt(zone: &str, op: &str, e: &StoreError) -> bool {
     true
 }
 
+/// [`note_corrupt`] for a reader that has already turned the error into text
+/// (the segment log, the archive and snapshot code return `String` errors): SQLite's
+/// own wording for a corrupt file is what is looked for.
+pub fn note_corrupt_text(zone: &str, op: &str, text: &str) -> bool {
+    if !(text.contains("database disk image is malformed") || text.contains("malformed database schema")) {
+        return false;
+    }
+    if DAMAGED.mark(zone) {
+        tracing::error!(
+            zone = %zone,
+            op = %op,
+            error = %text,
+            "shared transcript store: SQLITE_CORRUPT; no more writes to this zone and its readers use the block's own copy for the rest of this process"
+        );
+        announce(zone, op);
+    }
+    true
+}
+
+/// The shared transcript store, unless `zone` of it was found corrupt in this process: a
+/// reader with a copy of its own to fall back to asks this instead of
+/// `agent_session::global_transcript_store()`.
+pub fn global_for(zone: &str) -> Option<&'static std::sync::Arc<crate::backend::storage::filestore::FileStore>> {
+    crate::backend::agent_session::global_transcript_store().filter(|_| !is_damaged(zone))
+}
+
 /// [`note_corrupt`] when `fs` is the shared store itself, which a reader of
 /// either store (the index code takes a store and a zone) cannot tell otherwise;
 /// false, and nothing marked, for any other store.
@@ -124,8 +150,17 @@ fn is_shared(fs: &crate::backend::storage::filestore::FileStore) -> bool {
 }
 
 /// The agent's id in an `agent:<id>:current` (or `:archive:`) zone.
+///
+/// A transcript zone is keyed by the agent's id (`agentId` in the block's meta, the
+/// agent's own `definition_id`) and a segment log by its `AGENTMUX_AGENT_UID`
+/// (`db_agents.id`, see `Controller::stable_agent_uid`). The code names both as the
+/// agent's own id; if they ever differ for an agent, it gets a notice for each.
 fn agent_of(zone: &str) -> Option<&str> {
-    zone.strip_prefix("agent:")?.split(':').next().filter(|id| !id.is_empty())
+    zone.strip_prefix("agent:")
+        .or_else(|| zone.strip_prefix("agent-uid:"))?
+        .split(':')
+        .next()
+        .filter(|id| !id.is_empty())
 }
 
 fn short(id: &str) -> &str {
@@ -143,13 +178,27 @@ pub fn incident_for(zone: &str, op: &str) -> agentmux_common::incidents::Inciden
         "Before you repair the shared database, quit every AgentMux window and keep the shared/agents/transcripts folder as it is: repairing it needs the files in it.".to_string(),
     ];
     i.lost = vec!["Lines the shared database failed to take, and what was on its damaged pages.".to_string()];
-    // The full zone, which `what` shortens: a restart finds the same damage by it.
+    // The full agent id, which `what` shortens: a restart finds the same damage by it.
     i.evidence = i.evidence.map(|e| format!("{e}, {}", zone_tag(zone)));
     i
 }
 
+/// What a restart finds the same damage by: the agent, as one notice covers all of its zones
+/// (its transcript, segment log and archives), else the zone.
 fn zone_tag(zone: &str) -> String {
-    format!("zone {zone}")
+    agent_of(zone).map_or_else(|| format!("zone {zone}"), |id| format!("agent {id}"))
+}
+
+static TOLD: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// True the first time `tag` is asked: the agent is told once for all of its zones.
+fn first_to_tell(tag: &str) -> bool {
+    let mut told = TOLD.lock().unwrap_or_else(|e| e.into_inner());
+    if told.iter().any(|t| t == tag) {
+        return false;
+    }
+    told.push(tag.to_string());
+    true
 }
 
 /// What the agent is told, once.
@@ -200,6 +249,9 @@ fn announce(zone: &str, op: &str) {
         None => tracing::warn!(zone = %zone, "shared transcript store: no data folder to record the damage in"),
     }
     let Some(id) = agent_of(zone).map(str::to_string) else { return };
+    if !first_to_tell(&zone_tag(zone)) {
+        return;
+    }
     let text = agent_note();
     let tell = move || {
         let handler = crate::backend::reactive::get_global_handler();
@@ -428,6 +480,14 @@ mod tests {
         assert_eq!(data["what"], incident.what);
         assert_eq!(data["did"].as_array().unwrap().len(), incident.did.len());
         assert!(data.get("acknowledged_at_ms").is_none(), "{data}");
+    }
+
+    #[test]
+    fn an_agent_is_told_once_for_all_of_its_zones() {
+        assert!(first_to_tell(&zone_tag("agent:told-once-1:current")));
+        assert!(!first_to_tell(&zone_tag("agent:told-once-1:archive:17")), "its archive zone: same agent");
+        assert!(!first_to_tell(&zone_tag("agent-uid:told-once-1:segments")), "its segment log: same agent id");
+        assert!(first_to_tell(&zone_tag("agent:told-once-2:current")), "another agent is told");
     }
 
     #[test]
