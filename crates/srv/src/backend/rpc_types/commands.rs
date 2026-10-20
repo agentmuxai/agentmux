@@ -311,8 +311,8 @@ pub const COMMAND_DELETE_AGENT_INSTANCE: &str = "deleteagentinstance";
 /// Read (and optionally replace) the Runtime menu choices remembered for an
 /// agent: permission mode, model, effort. See `AgentLastRuntime`.
 pub const COMMAND_AGENT_LAST_RUNTIME: &str = "agentlastruntime";
-/// v8 — list named agent instances for the launch modal's "Continue
-/// agent" dropdown. Filters to non-hidden rows with a non-empty
+/// v8 — list named agent instances (the picker's My Agents, the Files
+/// pane). Filters to non-hidden rows with a non-empty
 /// instance_name, joined with its definition, account and bundle.
 pub const COMMAND_LIST_NAMED_AGENTS: &str = "listnamedagents";
 /// v8 — soft-delete (hide) a named agent instance from the dropdown.

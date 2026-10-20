@@ -379,12 +379,12 @@ export function primeAccountCache(): void {
     // broadcast, so accounts created/edited/deleted by ANY path — the in-app
     // OAuth login persist, API-key verify, upsert/delete RPCs from another
     // tab, the spawn-time expiry probe — propagate to every cache consumer
-    // (Connectors → Accounts, launch modal, pickers) without a reload.
+    // (Connectors → Accounts, pickers) without a reload.
     // Previously the cache was only refreshed by its own CRUD methods'
     // explicit calls, so backend-originated account creation (e.g. completing
     // an in-app OAuth login) left Connectors stale until reopen/reload, and
     // each consumer that wanted liveness had to hand-roll its own event
-    // subscription (AgentLaunchModal did exactly that).
+    // subscription (the since-removed launch modal did exactly that).
     //
     // App-lifetime subscription, deliberately never unsubscribed — the cache
     // itself is module-level app-lifetime state. Guarded so repeated

@@ -307,7 +307,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// `getagentbundles` / `setagentbundles`: an agent's Bundles list, the
 /// bundles picked for it in order (`Store::agent_bundle_ids`). Its own bundle
 /// isn't in it: launch always puts that first. Window-scoped, like
-/// `setagentcontent`: the new-agent form, the launch modal and the Stash call
+/// `setagentcontent`: the new-agent form and the Stash call
 /// these before the agent runs.
 fn register_agent_bundles(engine: &WshRpcEngine, state: &AppState) {
     let mstore = state.mstore.clone();

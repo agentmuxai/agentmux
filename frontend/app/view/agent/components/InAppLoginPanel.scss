@@ -1,0 +1,112 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Layout for the in-app login session panel (InAppLoginPanel): the
+// captured sign-in URL, the paste-code row and the action row. Its callers
+// supply the surrounding box. Button colors / hover / focus come from the
+// shared Button.
+
+.in-app-login-hint {
+    color: var(--secondary-text-color);
+    font-size: var(--text-sm);
+    line-height: 1.5;
+}
+
+.in-app-login-waiting {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.in-app-login-waiting-title {
+    font-weight: 500;
+    font-size: var(--text-md);
+}
+
+// Bordered sub-section for each numbered step (URL / paste-code) — mirrors
+// AgentQuestionPanel's per-question fieldset treatment so the login panel
+// reads as organized steps instead of one flat block of text.
+.in-app-login-step {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+    padding: var(--space-2);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+
+    & + & {
+        margin-top: var(--space-1);
+    }
+}
+
+.in-app-login-url-row {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: var(--space-2);
+    min-width: 0;
+}
+
+.in-app-login-url-actions {
+    display: flex;
+    flex-direction: row;
+    gap: var(--space-2);
+}
+
+.in-app-login-callback-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+// Bottom action row: Cancel + the explicit "Use terminal instead" fallback,
+// side by side.
+.in-app-login-actions {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.in-app-login-url-label {
+    font-size: var(--text-sm);
+    color: var(--secondary-text-color);
+}
+
+// The captured OAuth URL — this IS the backup link a user copies when the
+// browser didn't open, so it must be fully readable, not hidden behind a
+// hover tooltip. Wraps across lines (a 500-char state= query string can run
+// long) instead of truncating.
+.in-app-login-url-text {
+    display: block;
+    width: 100%;
+    padding: var(--space-2) var(--space-3);
+    background-color: var(--tint-2);
+    border: 1px solid var(--border-color);
+    border-radius: 0;
+    color: var(--main-text-color);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    line-height: 1.4;
+    white-space: normal;
+    word-break: break-all;
+    user-select: text;
+}
+
+.in-app-login-url-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: var(--space-2) var(--space-3);
+    background-color: var(--tint-2);
+    border: 1px solid var(--border-color);
+    border-radius: 0;
+    color: var(--main-text-color);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+
+    &:focus {
+        outline: 1px solid var(--accent-color);
+        outline-offset: -1px;
+    }
+}

@@ -179,8 +179,8 @@ pub struct AppState {
     /// adds resume-on-startup + `--diag sagas`.
     /// See `docs/specs/SPEC_SAGA_DURABILITY_2026-05-01.md`.
     pub saga_log: std::sync::Arc<crate::sagas::log::SagaLog>,
-    /// Pre-launch OAuth session state — one entry per in-flight
-    /// "Connect with OAuth" attempt from the launch modal. See
+    /// Provider login session state — one entry per in-flight
+    /// `auth.start` login. See
     /// `docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md`.
     pub auth_session_manager: std::sync::Arc<crate::identity::auth_session::AuthSessionManager>,
 

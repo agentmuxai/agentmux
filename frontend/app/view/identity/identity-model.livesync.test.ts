@@ -6,7 +6,7 @@
 // `identityaccounts:changed` broadcast, and that subscription's handler
 // must refresh the cache — so accounts created by backend-originated flows
 // (in-app OAuth login persist, API-key verify, upserts from another tab)
-// appear in Connectors / launch modal / pickers without a reload.
+// appear in Connectors / pickers without a reload.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 

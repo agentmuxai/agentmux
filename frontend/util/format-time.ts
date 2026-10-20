@@ -87,7 +87,7 @@ export function formatElapsedClock(ms: number): string {
 
 /**
  * Relative "time ago" form — consolidates 6+ independently-duplicated
- * implementations (`MyAgentsList.tsx`, `AgentLaunchModal.tsx`,
+ * implementations (`MyAgentsList.tsx`, the since-removed launch modal,
  * `AgentDisconnectedBanner.tsx`, `swarm-view.tsx`, `usenotification.tsx`,
  * `warden.tsx`, plus devtools-only copies). Migrated from
  * `MyAgentsList.tsx`'s `formatRelative` (the one with existing test

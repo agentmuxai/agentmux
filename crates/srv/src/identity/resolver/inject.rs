@@ -38,7 +38,7 @@ use super::secret::resolve_secret;
 /// server/agent_handlers/input.rs). Resolution flow:
 ///
 /// 1. Look up the active `AgentInstance` for this block. If none
-///    exists, the caller didn't go through the launch modal — return
+///    exists, the caller didn't go through a launch — return
 ///    immediately, no injection (unless the block names a deleted agent:
 ///    that is refused with `SpawnGateError::AgentDeleted`, #3577).
 /// 2. Read its `identity_id`. Empty / "blank" no longer short-circuits to
@@ -925,8 +925,8 @@ pub fn inject_identity_env_with_broker(
                                     "oauth probe: status updated"
                                 );
                                 // Publish accounts-changed so any live
-                                // account list (Connectors → Accounts,
-                                // launch modal) refreshes its Status
+                                // account list (Connectors → Accounts)
+                                // refreshes its Status
                                 // column without a reload — the account
                                 // row itself is what changed.
                                 if let Some(b) = broker.as_ref() {

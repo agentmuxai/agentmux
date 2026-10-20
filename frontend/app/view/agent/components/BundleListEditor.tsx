@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * BundleListEditor — pick an agent's bundles, in order: the new-agent form,
- * the launch modal and the Stash's Bundles tab
+ * BundleListEditor — pick an agent's bundles, in order: the new-agent form
+ * and the Stash's Bundles tab
  * (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6). Order matters: when
  * two bundles name the same skill, the first wins.
  *

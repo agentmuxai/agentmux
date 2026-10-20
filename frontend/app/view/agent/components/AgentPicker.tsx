@@ -46,7 +46,6 @@ import { readZoom } from "@/app/store/zoom-factor";
 import { revealBlock } from "@/app/util/reveal-block";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
-import { useModalLayer, type LaunchFormStateWire } from "@/element/modal-layer";
 import type { RecentSessionRow } from "@/types/rpc/RecentSessionRow";
 import { getPlatform } from "@/util/platformutil";
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
@@ -67,7 +66,6 @@ import { getApi } from "@/app/store/global";
 import { needsProbe, prereqShortfall, shortfallLabel, type PrereqProbe } from "../providers/prereq-check";
 import { resolveDrift, type PinDrift } from "../providers/version-drift";
 import { AgentCard } from "./AgentCard";
-import type { LaunchOverrides } from "./AgentLaunchModal";
 import { AgentPickerFilterBar, DEFAULT_AGENT_SORT, type AgentSortOption } from "./AgentPickerFilterBar";
 import { HiddenTemplatesSection } from "./HiddenTemplatesSection";
 import { MyAgentsList } from "./MyAgentsList";
@@ -289,7 +287,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         storeSort(sort);
     };
     const [agents, definitionsLoading] = useAgentDefinitions();
-    const modalLayer = useModalLayer();
+
 
     // Combined "picker content is ready to reveal" gate — true once BOTH
     // independent async sources feeding this view have resolved their
@@ -413,104 +411,13 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         }
     };
 
-    // Build the launch-agent request descriptor. Separated from the
-    // open call so the install→launch chain can hand the same shape
-    // to `modalLayer.replace()` for a crossfade (no shell teardown).
-    //
-    // `initialFormState` carries the user's in-progress launch-form
-    // edits through the "+ Add account / + New memory" round-trip —
-    // name, runtime, image, account, memory. Spec: Phase β of
-    // SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md; codex P2 on
-    // round 7 expanded preservation from identity+memory only to the
-    // full form.
-    const buildLaunchRequest = (agent: AgentDefinition, initialFormState?: Partial<LaunchFormStateWire>) => ({
-        kind: "launch-agent" as const,
-        agent,
-        originBlockId: props.model.blockId,
-        onSubmit: async (overrides: LaunchOverrides) => {
-            setLaunching(agent.id);
-            try {
-                await props.model.launchAgentDefinition(agent, overrides);
-                if (props.model.nodejsError) {
-                    // Surface the missing-Node banner inside the
-                    // picker after the layer closes the modal —
-                    // matches the pre-refactor behaviour.
-                    setNodejsError(props.model.nodejsError);
-                    props.model.nodejsError = null;
-                }
-                takeLaunchError();
-            } finally {
-                setLaunching(null);
-            }
-        },
-        initialFormState,
-        // OAuth Connect no longer routes through this callback (issue
-        // #1624 PR-C Part B) — it starts directly from the launch
-        // modal's auth panel. This now only fires for the "+ Add
-        // account" (manual/API-key) button.
-        onRequestAddAccount: async (current: LaunchFormStateWire) => {
-            // Same resolver as the launch (#2594), so the account added is
-            // one the agent can use.
-            const providerId = await resolveEffectiveLaunchProvider(agent);
-            // Thread the user's whole live form snapshot through the
-            // add-account round-trip so name/runtime/image/memory
-            // survive alongside the freshly-created account id.
-            modalLayer.replace({
-                kind: "add-account" as const,
-                originBlockId: props.model.blockId,
-                provider: providerId,
-                onCreated: (id: string) => {
-                    modalLayer.replace(
-                        buildLaunchRequest(agent, {
-                            ...current,
-                            accountId: id,
-                        })
-                    );
-                },
-                onCancel: () => {
-                    modalLayer.replace(buildLaunchRequest(agent, current));
-                },
-            });
-        },
-        onRequestNewBundle: (current: LaunchFormStateWire) => {
-            // Mirror of onRequestAddAccount above — thread the live
-            // form snapshot through the new-memory round-trip so the
-            // user's other edits (name, runtime, image, account)
-            // survive alongside the freshly-created memory id.
-            modalLayer.replace({
-                kind: "new-memory" as const,
-                originBlockId: props.model.blockId,
-                onCreated: (id: string) => {
-                    modalLayer.replace(
-                        buildLaunchRequest(agent, {
-                            ...current,
-                            bundleId: id,
-                            // The new bundle joins the list being edited.
-                            bundleIds: [...(current.bundleIds ?? []), id],
-                        })
-                    );
-                },
-                onCancel: () => {
-                    modalLayer.replace(buildLaunchRequest(agent, current));
-                },
-            });
-        },
-    });
-
-    const openLaunchModal = (agent: AgentDefinition) => {
-        modalLayer.open(buildLaunchRequest(agent));
-    };
-
     // Cascade follow-up (2026-05-23) — reattach via Recent Sessions.
-    // We bypass the launch modal entirely (no Identity / Memory picks
-    // to make — the row carries them) and call launchAgentDefinition
-    // directly with the same `continueOfInstanceId + workDirOverride`
-    // shape the modal's Continue dropdown produces. That keeps the
-    // continuation path single-sourced: same backend RPCs, same
-    // CreateAgentInstance lineage, same env injection. If the
-    // definition for this row no longer exists (rare, but possible if
-    // the user deleted it), fall back to the launch modal for the
-    // first matching definition so the user can pick a substitute.
+    // No form: the row carries the account and bundle, so this calls
+    // launchAgentDefinition directly with `continueOfInstanceId +
+    // workDirOverride`. That keeps the continuation path single-sourced:
+    // same backend RPCs, same CreateAgentInstance lineage, same env
+    // injection. If the row's definition no longer exists (rare, but
+    // possible if the user deleted it), it logs and does nothing.
     // See: MyAgentsList.tsx file header for the full mechanism
     // discussion.
     const handleReattach = async (row: RecentSessionRow) => {
@@ -706,72 +613,6 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 },
             ];
         });
-    };
-
-    // Option E (PR 2 of 2): when an agent has an in-progress session
-    // zone (`agent:<defId>:current`), a plain click on the card
-    // auto-continues into that session — no launch-modal round-trip.
-    // Modifier keys (Shift / Ctrl / Alt / Cmd) are the escape hatch:
-    // they force the launch modal even when a session exists, so the
-    // user can still pick a different identity / memory / runtime.
-    // The "+ New" button on the card archives the current zone and
-    // routes through `openLaunchModal` for a fresh start.
-    const autoContinue = async (agent: AgentDefinition) => {
-        setLaunching(agent.id);
-        try {
-            // Account / memory are launch-time picks that aren't
-            // stored on the AgentDefinition itself — they live on the
-            // last NamedAgentRow for this definition. We auto-continue
-            // by reusing the most-recent instance's pair so the spawn
-            // resolves credentials the same way as the previous run.
-            // Empty strings mean "none"; the spawn gate refuses an
-            // oauth-class agent that has no bound account.
-            let accountId = "";
-            let bundleId = "";
-            try {
-                const rows =
-                    (await RpcApi.ListNamedAgentsCommand(TabRpcClient, {
-                        definition_id: agent.id,
-                    })) ?? [];
-                const mostRecent = [...rows].sort((a, b) => (b.started_at ?? 0) - (a.started_at ?? 0))[0];
-                if (mostRecent) {
-                    // See identity-carry-over.ts's realAccountIdOrEmpty —
-                    // cross-checks against a fresh account fetch (not the
-                    // synchronous loadAccounts() cache, which can still be
-                    // mid-priming this early after app startup — reagentx
-                    // P2 on #2464) so a legacy sentinel like "default", or
-                    // a UUID-shaped-but-not-a-real-account legacy bundle
-                    // id, can't slip through and still fail
-                    // linkagentidentity's FOREIGN KEY constraint.
-                    // bundleId is intentionally NOT filtered — see
-                    // handleReattach's comment above.
-                    accountId = realAccountIdOrEmpty(
-                        mostRecent.identity_id,
-                        (await refreshAccountCache()).map((a) => a.id)
-                    );
-                    bundleId = mostRecent.memory_id;
-                }
-            } catch {
-                // best-effort — fall through with empty bundles.
-            }
-            await props.model.launchAgentDefinition(agent, {
-                instanceName: agent.name,
-                agentType: (agent.agent_type as "host" | "container") || "host",
-                environment: agent.agent_type === "container" ? "docker" : "local",
-                accountId,
-                bundleId,
-                // No `continueOfInstanceId` — the agent's session
-                // zone IS continuous now (E1, PR #1007). The new pane
-                // reads from `agent:<defId>:current` on mount.
-            });
-            if (props.model.nodejsError) {
-                setNodejsError(props.model.nodejsError);
-                props.model.nodejsError = null;
-            }
-            takeLaunchError();
-        } finally {
-            setLaunching(null);
-        }
     };
 
     // (`handleNewSession` removed in same cleanup as `handleSelect` —

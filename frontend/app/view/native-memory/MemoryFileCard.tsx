@@ -43,8 +43,7 @@ interface MemoryFileCardProps {
     claude?: boolean;
 }
 
-/** Relative modified-time label, same buckets as AgentLaunchModal's
- *  formatRelative. Returns "" for a missing/zero timestamp so the caller can
+/** Relative modified-time label. Returns "" for a missing/zero timestamp so the caller can
  *  omit the segment entirely rather than render a bogus "56y ago" for epoch
  *  zero. */
 export function formatFileAge(ms: number): string {

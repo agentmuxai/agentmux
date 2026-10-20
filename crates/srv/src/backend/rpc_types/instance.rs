@@ -53,7 +53,7 @@ pub struct CommandCreateAgentInstanceData {
     pub parent_instance_id: String,
     /// Legacy Identity-bundle id column — `db_identity_bundles` was
     /// dropped in Phase 4c of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md.
-    /// The launch modal now writes an account_id here instead (see
+    /// A launch now writes an account_id here instead (see
     /// agent-model.ts), and this value is used only for opaque
     /// same-value filtering (`listrecentsessions`/`listnamedagents`'
     /// `identity_id` param) — display names and credential resolution
@@ -61,13 +61,13 @@ pub struct CommandCreateAgentInstanceData {
     /// Empty = no account picked at launch.
     #[serde(default)]
     pub identity_id: String,
-    /// FK to db_bundles. Empty = blank singleton. Set by the launch
-    /// modal's Bundle dropdown.
+    /// FK to db_bundles. Empty = blank singleton. Set at launch from the
+    /// agent's first bundle.
     #[serde(default)]
     pub memory_id: String,
     /// User-chosen instance name (becomes `AGENTMUX_AGENT_ID` in the
-    /// spawn env). Powers the launch modal's "Continue agent"
-    /// dropdown. Empty = un-named, won't appear in the dropdown.
+    /// spawn env). Powers `listnamedagents` (My Agents). Empty =
+    /// un-named, won't appear there.
     #[serde(default)]
     pub instance_name: String,
     /// Absolute working directory path resolved by
@@ -78,13 +78,13 @@ pub struct CommandCreateAgentInstanceData {
     pub working_directory: String,
 }
 
-/// Request for `listnamedagents`. The launch modal's "Continue
-/// agent" dropdown calls this; an absent / zero `limit` defaults to
+/// Request for `listnamedagents`. My Agents and the Files pane call
+/// this; an absent / zero `limit` defaults to
 /// 200 (capped at 1000 to keep the wire payload bounded).
 ///
 /// `definition_id` is server-side filtering: when provided, only
-/// instances of that definition are returned. Required for the
-/// dropdown to behave correctly when a user has 200+ named agents
+/// instances of that definition are returned. Required for a
+/// per-definition list to behave correctly when a user has 200+ named agents
 /// across many definitions — without server filtering, the current
 /// definition's older instances could fall off the global cap.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -95,7 +95,7 @@ pub struct CommandListNamedAgentsData {
     pub definition_id: Option<String>,
 }
 
-/// One row of the launch modal's "Continue agent" dropdown. Joins
+/// One named agent (`listnamedagents`). Joins
 /// `db_agent_instances` with `db_agent_definitions` (for the definition's
 /// display name + provider), `db_agent_identity_links`/`db_accounts`
 /// (for the identity display name), and `db_bundles` (for bundle
