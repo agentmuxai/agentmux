@@ -69,7 +69,7 @@ export function createSelectTrace(opts: SelectTraceOptions = {}) {
 
     const entries: TraceEntry[] = [];
     let counters = emptyCounters();
-    let lastSummaryAt = now();
+    let summaryTimer: unknown = null;
     let revealSeq = 0;
     let revealsInFlight = 0;
     let pendingCauses = new Set<string>();
@@ -85,7 +85,6 @@ export function createSelectTrace(opts: SelectTraceOptions = {}) {
 
     const flushSummary = () => {
         const c = counters;
-        lastSummaryAt = now();
         if (c.rebuilds === 0 && c.presses === 0 && c.reveals === 0) return;
         const causes = Object.entries(c.rebuildsByCause)
             .sort((a, b) => b[1] - a[1])
@@ -100,8 +99,13 @@ export function createSelectTrace(opts: SelectTraceOptions = {}) {
         counters = emptyCounters();
     };
 
-    const maybeFlush = () => {
-        if (now() - lastSummaryAt >= SUMMARY_MS) flushSummary();
+    // The first event of a window starts its minute; the summary is written when it ends.
+    const armSummary = () => {
+        if (summaryTimer != null) return;
+        summaryTimer = setTimer(() => {
+            summaryTimer = null;
+            flushSummary();
+        }, SUMMARY_MS);
     };
 
     return {
@@ -116,7 +120,7 @@ export function createSelectTrace(opts: SelectTraceOptions = {}) {
             pendingCauses = new Set();
             counters.rebuilds++;
             for (const c of causes) counters.rebuildsByCause[c] = (counters.rebuildsByCause[c] ?? 0) + 1;
-            maybeFlush();
+            armSummary();
         },
 
         /** A reveal started. Returns a function to call with its outcome. */
@@ -125,6 +129,7 @@ export function createSelectTrace(opts: SelectTraceOptions = {}) {
             const overlap = revealsInFlight > 0;
             revealsInFlight++;
             counters.reveals++;
+            armSummary();
             if (overlap) counters.overlappingReveals++;
             const startedAt = now();
             let ended = false;
@@ -135,7 +140,6 @@ export function createSelectTrace(opts: SelectTraceOptions = {}) {
                 const ms = now() - startedAt;
                 const flags = `${found ? "" : " NOT-FOUND"}${overlap ? " OVERLAP" : ""}${note ? ` ${note}` : ""}`;
                 record(`[select] #${id} src=${source} blk=${short(blockId)} +${ms}ms${flags}`, !found || overlap || ms > 700);
-                maybeFlush();
             };
         },
 
@@ -145,6 +149,7 @@ export function createSelectTrace(opts: SelectTraceOptions = {}) {
             graceTimer = null;
             press = { blockId, el, downAt: now() };
             counters.presses++;
+            armSummary();
         },
 
         /** The button was released (or the press cancelled): a click should follow at once. */

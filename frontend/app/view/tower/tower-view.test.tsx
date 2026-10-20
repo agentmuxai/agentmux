@@ -464,7 +464,7 @@ describe("Tower", () => {
         renderTower();
         await screen.findByTestId("tower-rail-block-a");
         fireEvent.click(screen.getByRole("button", { name: "Show this pane" }));
-        expect(reveal).toHaveBeenCalledWith("block-a");
+        expect(reveal).toHaveBeenCalledWith("block-a", { source: "tower" });
         fireEvent.click(screen.getByTestId("tower-rail-agentmux"));
         await waitFor(() => expect(screen.queryByRole("button", { name: "Show this pane" })).toBeNull());
     });

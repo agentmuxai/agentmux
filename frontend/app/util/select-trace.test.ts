@@ -46,17 +46,24 @@ describe("rebuild causes", () => {
         expect(c.rebuildsByCause).toEqual({ status: 1, progress: 1, other: 1 });
     });
 
-    it("writes one summary line a minute and starts the next window empty", () => {
+    it("writes one summary line when the minute ends, even if nothing else happens, and starts the next window empty", () => {
         const { trace, logs, advance } = harness();
         trace.cause("poll-same");
         trace.rebuilt();
-        expect(logs).toEqual([]);
-        advance(60_000);
         trace.rebuilt();
+        advance(59_000);
+        expect(logs).toEqual([]);
+        advance(1_000);
         expect(logs).toHaveLength(1);
         expect(logs[0]).toContain("rebuilds=2");
         expect(logs[0]).toContain("poll-same=1");
         expect(trace.counters().rebuilds).toBe(0);
+
+        advance(120_000);
+        expect(logs).toHaveLength(1);
+        trace.rebuilt();
+        advance(60_000);
+        expect(logs).toHaveLength(2);
     });
 });
 
