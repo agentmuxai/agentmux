@@ -1,6 +1,6 @@
 # Spec: a nightly performance regression check
 
-**Status:** active. Phase 1 (the workflow) shipped in #5168, Phase 2 (the issue, `perf-run-failed`) in #5187, Phase 3 (history, charts, drift) in PR_PHASE3. Remaining: the email section (§4.7, Camper, in `a5af/shared-infrastructure`) and the later decisions in §5.5.
+**Status:** active. Phase 1 (the workflow) shipped in #5168, Phase 2 (the issue, `perf-run-failed`) in #5187, Phase 3 (history, charts, drift) in #5192. Remaining: the email section (§4.7, Camper, in `a5af/shared-infrastructure`) and the later decisions in §5.5.
 **Date:** 2026-10-19
 **Author:** Camper (coordinator); owner of the work: Loap-3
 **Builds on:**
@@ -158,7 +158,7 @@ One JSON object per line in `perf/history.jsonl`. The perf job writes it; the em
 0. **Measure the runner** (done, 2026-10-19, Loap-3): 12 agents, about 4.7 minutes a run; the noise per measure is in §4.4. It decided §4.3's size and §4.4's margins.
 1. **The workflow:** A/B download, interleaved runs, `compare.mjs`, summary table, merges between builds. Report only: no issue yet. Shipped in #5168.
 2. **The `perf-regression` issue,** with the confirmation pair, reusing `decide()` from `ci-nightly-status.mjs`, plus the `perf-run-failed` issue. Shipped in #5187.
-3. **History:** `perf-data`, the Mermaid charts, and the drift check. Shipped in PR_PHASE3.
+3. **History:** `perf-data`, the Mermaid charts, and the drift check. Shipped in #5192.
 4. **The email section** (`gh-reporter`, a PR in `a5af/shared-infrastructure`), once Phase 3 writes the history line. Owner: Camper.
 5. **Later, each a separate decision:**
    - a Linux leg (`ubuntu-latest`);
