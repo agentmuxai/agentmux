@@ -56,7 +56,8 @@ fn is_executable(path: &Path) -> bool {
 /// Check the new version srv names at `target` against this install. This
 /// install is a portable in `own_root`, or the AppImage `own_appimage`; the
 /// new version, of `version`, is where srv puts it: beside this one, or in
-/// this version's `updates/<v>/` in `data_dir`.
+/// `updates/<v>/` of the channel (`channel_dir`) or of this version's
+/// `data_dir`.
 /// - A portable: `agentmux.sh` of a folder whose `usr/share/agentmux/VERSION`
 ///   says `version` and which holds that version's srv.
 /// - An AppImage: that version's release file, executable.
@@ -66,12 +67,14 @@ pub fn check_target(
     own_root: Option<&Path>,
     own_appimage: Option<&Path>,
     data_dir: &Path,
+    channel_dir: &Path,
 ) -> Result<(), String> {
     if !target.is_absolute() || !target.is_file() {
         return Err(format!("{} isn't an AgentMux {version}", target.display()));
     }
     let dir = target.parent().ok_or("the new version has no folder")?;
-    let updates = data_dir.join("updates").join(version);
+    let updates = [data_dir, channel_dir].map(|d| d.join("updates").join(version));
+    let in_updates = |d: Option<&Path>| d.is_some_and(|d| updates.iter().any(|u| u == d));
     let name = target.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     if name == "agentmux.sh" {
         let own = own_root.ok_or("this AgentMux isn't a Linux portable")?;
@@ -82,7 +85,7 @@ pub fn check_target(
         if dir == own {
             return Err("that is the running AgentMux".into());
         }
-        if dir.parent() != own.parent() && dir.parent() != Some(updates.as_path()) {
+        if dir.parent() != own.parent() && !in_updates(dir.parent()) {
             return Err(format!("{} isn't where AgentMux put the new version", dir.display()));
         }
         return Ok(());
@@ -94,7 +97,7 @@ pub fn check_target(
     if target == own {
         return Err("that is the running AgentMux".into());
     }
-    if Some(dir) != own.parent() && dir != updates {
+    if Some(dir) != own.parent() && !in_updates(Some(dir)) {
         return Err(format!("{} isn't where AgentMux put the new version", target.display()));
     }
     Ok(())
@@ -198,21 +201,26 @@ mod tests {
     fn only_that_versions_portable_beside_this_one_or_in_updates_starts() {
         let root = tempfile::tempdir().unwrap();
         let data = root.path().join("data");
+        let chan = root.path().join("channel");
         let own = root.path().join("AgentMux");
         portable(&own, "0.59.29");
         assert_eq!(portable_root(&own.join("usr/bin")).as_deref(), Some(own.as_path()));
         assert_eq!(portable_root(&own.join("usr/lib")), None);
         let new = portable(&root.path().join("AgentMux-0.59.30"), "0.59.30");
-        assert!(check_target(&new, "0.59.30", Some(&own), None, &data).is_ok());
+        assert!(check_target(&new, "0.59.30", Some(&own), None, &data, &chan).is_ok());
         let staged = portable(&data.join("updates/0.59.30/AgentMux-0.59.30"), "0.59.30");
-        assert!(check_target(&staged, "0.59.30", Some(&own), None, &data).is_ok());
+        assert!(check_target(&staged, "0.59.30", Some(&own), None, &data, &chan).is_ok());
+        // srv's fallback when the folder beside this one can't be written.
+        let in_channel = portable(&chan.join("updates/0.59.30/AgentMux-0.59.30"), "0.59.30");
+        assert!(check_target(&in_channel, "0.59.30", Some(&own), None, &data, &chan).is_ok());
+        assert!(check_target(&in_channel, "0.59.30", Some(&own), None, &data, &root.path().join("other")).is_err());
         // Not that version, not this install's kind, the running one, or elsewhere.
-        assert!(check_target(&new, "0.59.31", Some(&own), None, &data).is_err());
-        assert!(check_target(&new, "0.59.30", None, Some(Path::new("/x.AppImage")), &data).is_err());
-        assert!(check_target(&own.join("agentmux.sh"), "0.59.29", Some(&own), None, &data).is_err());
+        assert!(check_target(&new, "0.59.31", Some(&own), None, &data, &chan).is_err());
+        assert!(check_target(&new, "0.59.30", None, Some(Path::new("/x.AppImage")), &data, &chan).is_err());
+        assert!(check_target(&own.join("agentmux.sh"), "0.59.29", Some(&own), None, &data, &chan).is_err());
         let far = portable(&root.path().join("elsewhere/AgentMux-0.59.30"), "0.59.30");
-        assert!(check_target(&far, "0.59.30", Some(&own), None, &data).is_err());
-        assert!(check_target(Path::new("agentmux.sh"), "0.59.30", Some(&own), None, &data).is_err());
+        assert!(check_target(&far, "0.59.30", Some(&own), None, &data, &chan).is_err());
+        assert!(check_target(Path::new("agentmux.sh"), "0.59.30", Some(&own), None, &data, &chan).is_err());
     }
 
     #[cfg(unix)]
@@ -221,14 +229,20 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir().unwrap();
         let data = root.path().join("data");
+        let chan = root.path().join("channel");
         let own = root.path().join("AgentMux_0.59.29_amd64.AppImage");
         std::fs::write(&own, b"").unwrap();
         let new = root.path().join("AgentMux_0.59.30_amd64.AppImage");
         std::fs::write(&new, b"").unwrap();
-        assert!(check_target(&new, "0.59.30", None, Some(&own), &data).is_err(), "not executable yet");
+        assert!(check_target(&new, "0.59.30", None, Some(&own), &data, &chan).is_err(), "not executable yet");
         std::fs::set_permissions(&new, std::fs::Permissions::from_mode(0o755)).unwrap();
-        assert!(check_target(&new, "0.59.30", None, Some(&own), &data).is_ok());
-        assert!(check_target(&new, "0.59.30", Some(root.path()), None, &data).is_err(), "not an AppImage install");
-        assert!(check_target(&new, "0.59.31", None, Some(&own), &data).is_err());
+        assert!(check_target(&new, "0.59.30", None, Some(&own), &data, &chan).is_ok());
+        // srv's fallback when the folder beside this one can't be written.
+        std::fs::create_dir_all(chan.join("updates/0.59.30")).unwrap();
+        let in_channel = chan.join("updates/0.59.30/AgentMux_0.59.30_amd64.AppImage");
+        std::fs::copy(&new, &in_channel).unwrap();
+        assert!(check_target(&in_channel, "0.59.30", None, Some(&own), &data, &chan).is_ok());
+        assert!(check_target(&new, "0.59.30", Some(root.path()), None, &data, &chan).is_err(), "not an AppImage install");
+        assert!(check_target(&new, "0.59.31", None, Some(&own), &data, &chan).is_err());
     }
 }

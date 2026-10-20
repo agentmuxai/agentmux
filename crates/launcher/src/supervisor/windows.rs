@@ -700,7 +700,7 @@ pub(crate) async fn run_windows(
     let exit_code = loop {
         tokio::select! {
             Some(req) = upgrade_requests.recv() => {
-                match crate::upgrade_restart::staged(&req, launcher_exe_dir, &paths.data_dir, version) {
+                match crate::upgrade_restart::staged(&req, launcher_exe_dir, &paths.data_dir, &paths.common.instance_dir, version) {
                     Ok(staged) => {
                         log(&format!("upgrade: srv asks to restart into {staged}; asking the user"));
                         let tx = upgrade_yes_tx.clone();
