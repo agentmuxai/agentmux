@@ -75,7 +75,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let mut resolved: Option<(CaptureTier, String)> = None;
             // Fail closed: if srv can't say, treat the Vault as showing.
             let vault_on_screen = if local_url.is_empty() || auth_key.is_empty() {
-                false
+                true
             } else {
                 crate::srv_http::srv_get_json(client, &format!("{}/api/v1/vault/on_screen", local_url.trim_end_matches('/')), auth_key, &[], "Vault on screen")
                     .await

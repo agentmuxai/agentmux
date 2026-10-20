@@ -178,3 +178,13 @@ async fn a_request_for_an_unknown_kind_or_without_a_label_is_refused() {
     let (s, _) = send(&app, post("/api/v1/vault/request", &[], json!({ "kind": "ssn", "label": "  " }))).await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
 }
+
+// A malformed save is refused without echoing what it carried.
+#[tokio::test]
+async fn a_malformed_entry_is_refused_without_quoting_its_value() {
+    let app = app().await;
+    let bad = json!({ "op": "create", "kind": "ssn", "label": "Alex", "parts": { "value": 123456789 } });
+    let (s, body) = send(&app, post("/api/v1/host/vault", &[HOST], bad)).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert!(!body.to_string().contains("123456789"), "{body}");
+}

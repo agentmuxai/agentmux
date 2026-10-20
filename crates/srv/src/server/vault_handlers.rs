@@ -36,6 +36,12 @@ fn error(status: StatusCode, message: impl Into<String>) -> Response {
     (status, Json(json!({ "error": message.into() }))).into_response()
 }
 
+/// A malformed entry or change, said without serde's own message, which can
+/// quote the value it couldn't read.
+fn shape_error(what: &str) -> String {
+    format!("{what} for the Vault isn't in the expected shape")
+}
+
 /// Tells every UI the Vault or its requests changed. Carries no entry.
 pub(crate) fn publish(state: &AppState) {
     let event = crate::backend::mps_events::VaultEvent {
@@ -91,7 +97,7 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
             }
             "create" => {
                 let request_id = body.get("request_id").and_then(Value::as_str).unwrap_or("").to_string();
-                let entry: NewEntry = serde_json::from_value(body).map_err(|e| format!("not an entry: {e}"))?;
+                let entry: NewEntry = serde_json::from_value(body).map_err(|_| shape_error("an entry"))?;
                 let id = vault::create(&store, entry)?;
                 if !request_id.is_empty() {
                     if let Some(req) = requests::requests().get(&request_id) {
@@ -102,7 +108,7 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                 Ok((json!({ "id": id }), true))
             }
             "update" => {
-                let change: EntryChange = serde_json::from_value(body).map_err(|e| format!("not a change: {e}"))?;
+                let change: EntryChange = serde_json::from_value(body).map_err(|_| shape_error("a change"))?;
                 vault::update(&store, change)?;
                 Ok((json!({}), true))
             }
@@ -129,8 +135,9 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                     return Err("on_screen needs the pane's id".into());
                 }
                 let on = body.get("on").and_then(Value::as_bool).unwrap_or(false);
-                let until = if on { agentmux_common::time::now_ms() + ON_SCREEN_MS } else { 0 };
-                store.vault_on_screen_set(&on_screen_key(pane), until).map_err(|e| e.to_string())?;
+                let now = agentmux_common::time::now_ms();
+                let until = if on { now + ON_SCREEN_MS } else { 0 };
+                store.vault_on_screen_set(&on_screen_key(pane), until, now).map_err(|e| e.to_string())?;
                 Ok((json!({}), false))
             }
             "activity" => {

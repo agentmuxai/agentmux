@@ -154,8 +154,9 @@ async fn handle_ipc(
         );
     }
 
-    // An SSH approval's answer can be a password: never logged.
-    if req.cmd == "ssh_approval_decide" {
+    // An SSH approval's answer can be a password, and a Vault operation can
+    // carry an entry's secret parts: never logged.
+    if req.cmd == "ssh_approval_decide" || req.cmd == "vault_op" {
         tracing::debug!("IPC request: cmd={} args=<redacted>", req.cmd);
     } else {
         tracing::debug!("IPC request: cmd={} args={}", req.cmd, req.args);

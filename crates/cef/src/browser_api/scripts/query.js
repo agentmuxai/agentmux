@@ -119,16 +119,6 @@
     return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
   };
 
-  // getBoundingClientRect() of blockId's own pane wrapper — used to build
-  // a CDP Page.captureScreenshot `clip` so a screenshot only covers one
-  // pane's subtree, not the whole shared window. Deliberately does NOT
-  // get the same "shared chrome is fine" exception __amq_allowed_for
-  // gives click/query: a screenshot's clip is a single rectangle that
-  // can't punch a hole for another agent's pane sitting geometrically
-  // between the caller's pane and a chrome element, so unlike an
-  // element-level filter it can't safely be widened — it stays strictly
-  // pane-only, always. Returns null if the pane isn't found (caller
-  // falls back to full-viewport capture).
   // Boxes of what an agent may never capture ([data-agent-hidden]: the
   // Vault pane) that overlap `clip`, as [x, y, width, height] from the
   // clip's origin. A pane screenshot is clipped to the caller's own pane,
@@ -146,6 +136,16 @@
     return out;
   };
 
+  // getBoundingClientRect() of blockId's own pane wrapper — used to build
+  // a CDP Page.captureScreenshot `clip` so a screenshot only covers one
+  // pane's subtree, not the whole shared window. Deliberately does NOT
+  // get the same "shared chrome is fine" exception __amq_allowed_for
+  // gives click/query: a screenshot's clip is a single rectangle that
+  // can't punch a hole for another agent's pane sitting geometrically
+  // between the caller's pane and a chrome element, so unlike an
+  // element-level filter it can't safely be widened — it stays strictly
+  // pane-only, always. Returns null if the pane isn't found (caller
+  // falls back to full-viewport capture).
   window.__amq_rect_of = (blockId) => {
     const sel = window.__amq_block_selector(blockId);
     if (!sel) return null;

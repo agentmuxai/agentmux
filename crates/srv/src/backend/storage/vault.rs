@@ -145,9 +145,11 @@ impl Store {
     }
 
     /// Notes that `instance` shows a Vault pane until `until_ms`, or (0)
-    /// that it no longer does.
-    pub fn vault_on_screen_set(&self, instance: &str, until_ms: i64) -> Result<(), StoreError> {
+    /// that it no longer does. Notes expired by `now_ms` go too: a pane in a
+    /// window that crashed never clears its own.
+    pub fn vault_on_screen_set(&self, instance: &str, until_ms: i64, now_ms: i64) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM db_vault_on_screen WHERE until_ms <= ?1", params![now_ms])?;
         if until_ms <= 0 {
             conn.execute("DELETE FROM db_vault_on_screen WHERE instance = ?1", params![instance])?;
         } else {
@@ -244,12 +246,17 @@ mod tests {
     fn on_screen_lasts_until_it_expires_or_is_cleared() {
         let s = store();
         assert!(!s.vault_on_screen(100).unwrap());
-        s.vault_on_screen_set("a", 200).unwrap();
+        s.vault_on_screen_set("a", 200, 100).unwrap();
         assert!(s.vault_on_screen(100).unwrap());
         assert!(!s.vault_on_screen(200).unwrap(), "expired");
-        s.vault_on_screen_set("a", 300).unwrap();
-        s.vault_on_screen_set("a", 0).unwrap();
+        s.vault_on_screen_set("a", 300, 100).unwrap();
+        s.vault_on_screen_set("a", 0, 100).unwrap();
         assert!(!s.vault_on_screen(100).unwrap(), "cleared");
+        // A note that expired is deleted by the next write, not only ignored.
+        s.vault_on_screen_set("crashed", 200, 100).unwrap();
+        s.vault_on_screen_set("b", 900, 500).unwrap();
+        let rows: i64 = s.conn.lock().unwrap().query_row("SELECT COUNT(*) FROM db_vault_on_screen", [], |r| r.get(0)).unwrap();
+        assert_eq!(rows, 1);
     }
 
     #[test]
