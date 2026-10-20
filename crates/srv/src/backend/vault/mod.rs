@@ -12,6 +12,8 @@
 pub mod kinds;
 pub mod requests;
 pub mod seal;
+pub mod transfer;
+mod wordlist;
 
 use std::collections::BTreeMap;
 
@@ -366,3 +368,5 @@ pub fn activity(store: &Store, limit: i64) -> Result<Vec<VaultActivity>, String>
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod transfer_tests;

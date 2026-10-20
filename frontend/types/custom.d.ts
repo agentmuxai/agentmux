@@ -173,6 +173,13 @@ declare global {
         /** Copy one Vault value on the host (it never reaches the page) and clear
          *  the clipboard 30 s later. Answers `{ clears_in_secs }`. */
         vaultCopy?(args: { id: string; part: string; label: string }): Promise<unknown>;
+        /** Export the Vault to a `.vault` file: the host asks where to save, then srv
+         *  writes it encrypted to `passphrase`. Answers `{ count, file_name }`, or
+         *  `{ cancelled: true }`. */
+        vaultExport?(args: { ids?: string[]; passphrase: string; default_name: string }): Promise<unknown>;
+        /** Import from a `.vault` file: with no `pick_id` the host asks which file;
+         *  with one it reads the same file again with `passphrase`. */
+        vaultImport?(args: { pick_id?: string; passphrase?: string }): Promise<unknown>;
         /** Ask to adopt memory folders (payload: window_label, agent_id, list_id, choices, summary). */
         requestMemoryAdoption(args: Record<string, unknown>): Promise<void>;
         /** Ask to release a memory folder (payload: window_label, agent_id, list_id, index, summary). */

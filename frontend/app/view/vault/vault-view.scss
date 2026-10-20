@@ -133,6 +133,23 @@
 }
 
 .vault-reveal-part {
+// Export and import.
+.vault-export-entries {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    max-height: 14em;
+    overflow-y: auto;
+    margin-bottom: var(--space-3);
+}
+
+.vault-export-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+
+.vault-check {
     display: flex;
     align-items: center;
     gap: var(--space-2);
@@ -148,4 +165,29 @@
     min-width: 0;
     overflow-wrap: anywhere;
     user-select: text;
+.vault-check-entry {
+    padding-left: 1.5em;
+}
+
+.vault-strength {
+    width: 100%;
+    margin-top: var(--space-1);
+}
+
+.vault-import-preview {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    max-height: 22em;
+    overflow-y: auto;
+
+    ul {
+        margin: var(--space-1) 0 0;
+        padding-left: 1.2em;
+        list-style: disc;
+    }
+}
+
+.vault-dup {
+    color: var(--warning-color);
 }
