@@ -153,17 +153,32 @@ impl<T, E> StepOutcome for Result<T, E> {
     }
 }
 
-/// Report a step that is only worth showing once it is known to have taken
-/// long (waiting for another process's lock): begin and end at once, with
-/// the time it took.
-pub fn step_done(id: &'static str, label: &str, ms: u64) {
-    eprintln!("{}", agentmux_common::srv_stderr::step_begin_line(id, label));
-    eprintln!("{}", agentmux_common::srv_stderr::step_end_line(id, ms, true));
-    if let Ok(mut guard) = recorder().lock() {
-        if let Some(timings) = guard.as_mut() {
-            timings.steps.push((id, ms));
+/// How long a [`step_if_slow`] runs before it is worth a splash row.
+pub const SLOW_STEP: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// A [`step`] that is usually instant and only sometimes waits (another
+/// process's migration lock): its begin line is written once it has run for
+/// [`SLOW_STEP`], while it is still running, and then its end line with the
+/// outcome. A fast one writes nothing.
+pub fn step_if_slow<T: StepOutcome>(id: &'static str, label: &str, f: impl FnOnce() -> T) -> T {
+    let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+    let begin = agentmux_common::srv_stderr::step_begin_line(id, label);
+    let watcher = std::thread::spawn(move || {
+        let slow = done_rx.recv_timeout(SLOW_STEP).is_err();
+        if slow {
+            eprintln!("{begin}");
         }
+        slow
+    });
+    let t = Instant::now();
+    let out = time(id, f);
+    let _ = done_tx.send(());
+    // The watcher has either written the begin line already or exits on the
+    // message, so this join is immediate.
+    if watcher.join().unwrap_or(false) {
+        eprintln!("{}", agentmux_common::srv_stderr::step_end_line(id, t.elapsed().as_millis() as u64, out.succeeded()));
     }
+    out
 }
 
 /// `time`, for an async step. Same no-lock-across-the-work property.
@@ -261,5 +276,18 @@ mod tests {
         // `open_stores_and_migrate` wraps passes that are themselves wrapped.
         let out = time("outer", || time("inner", || 7));
         assert_eq!(out, 7);
+    }
+
+    #[test]
+    fn step_if_slow_passes_the_result_through_fast_or_slow() {
+        let fast: Result<u8, String> = step_if_slow("fast_step", "Fast", || Ok(1));
+        assert_eq!(fast, Ok(1));
+        let t = std::time::Instant::now();
+        let slow: Result<u8, String> = step_if_slow("slow_step", "Slow", || {
+            sleep(SLOW_STEP + Duration::from_millis(50));
+            Err("timed out".into())
+        });
+        assert_eq!(slow, Err("timed out".to_string()));
+        assert!(t.elapsed() < SLOW_STEP * 4, "the watcher must not hold the caller up");
     }
 }
