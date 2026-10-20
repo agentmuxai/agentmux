@@ -150,7 +150,7 @@ describe("focusComposerWhenReady (launch path)", () => {
         expect(document.activeElement).toBe(ta);
     });
 
-    it("launch modal: waits while the content is inert, then focuses once the modal closes", () => {
+    it("modal: waits while the content is inert, then focuses once the modal closes", () => {
         const { block, ta, content } = makeBlock("blk");
         content.setAttribute("inert", "");
         const modal = document.createElement("div");

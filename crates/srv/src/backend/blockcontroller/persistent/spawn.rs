@@ -133,7 +133,7 @@ impl PersistentSubprocessController {
         // closing and hasn't exited yet — puts two CLIs on one transcript.
         // Refuse instead: the user closes the other one (or waits the few
         // seconds a close takes) and tries again. Covers every reopen path
-        // (picker reattach, launch modal, MCP), not just `agent.open`
+        // (picker reattach, a new agent's launch, MCP), not just `agent.open`
         // (SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md §4.7).
         // A spawn that forks reads the session and writes a new one, so a
         // live process on it is no conflict: a fork started while its parent

@@ -222,7 +222,7 @@ export function resolveInitialRuntimeConfig(
 /**
  * The runtime a launch starts with, and the provider flags its pane keeps.
  *
- * Precedence, setting by setting: a choice made in the launch modal
+ * Precedence, setting by setting: a choice made when creating the agent
  * (`overridesModel`), then the runtime of the pane being forked
  * (`forkCarryOver`), then what the user last picked for this agent
  * (`remembered`), then the definition's own flags, then the provider default.

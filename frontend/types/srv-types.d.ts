@@ -201,7 +201,7 @@ declare global {
     // rename_all so the field shapes match without translation.
     // ────────────────────────────────────────────────────────────────
 
-    /** Identifies "which agent" — same shape for launch modal + drone Agent block. */
+    /** Identifies "which agent" — same shape for an agent launch + drone Agent block. */
     type AgentRef = {
         identityId?: string;
         memoryId?: string;

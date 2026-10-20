@@ -3,9 +3,8 @@
 
 /**
  * Shared slug + timestamp helpers for building per-instance working
- * directories. Kept as a standalone module so the AgentLaunchModal
- * (for preview) and the AgentViewModel (for actual launch) agree on
- * the format without importing from each other's files.
+ * directories, used by the AgentViewModel at launch. (It was split out
+ * so the since-removed launch modal's preview could share the format.)
  *
  * Format: `<slug(name)>-MMDDh`, local time. Same-hour collisions are
  * resolved server-side by `crates/srv/src/server/app_api/agent_define.rs::

@@ -4,7 +4,7 @@ export type CommandCreateAgentInstanceData = { definition_id: string, block_id: 
 /**
  * Legacy Identity-bundle id column — `db_identity_bundles` was
  * dropped in Phase 4c of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md.
- * The launch modal now writes an account_id here instead (see
+ * A launch now writes an account_id here instead (see
  * agent-model.ts), and this value is used only for opaque
  * same-value filtering (`listrecentsessions`/`listnamedagents`'
  * `identity_id` param) — display names and credential resolution
@@ -13,14 +13,14 @@ export type CommandCreateAgentInstanceData = { definition_id: string, block_id: 
  */
 identity_id: string, 
 /**
- * FK to db_bundles. Empty = blank singleton. Set by the launch
- * modal's Bundle dropdown.
+ * FK to db_bundles. Empty = blank singleton. Set at launch from the
+ * agent's first bundle.
  */
 memory_id: string, 
 /**
  * User-chosen instance name (becomes `AGENTMUX_AGENT_ID` in the
- * spawn env). Powers the launch modal's "Continue agent"
- * dropdown. Empty = un-named, won't appear in the dropdown.
+ * spawn env). Powers `listnamedagents` (My Agents). Empty =
+ * un-named, won't appear there.
  */
 instance_name: string, 
 /**

@@ -53,7 +53,7 @@ Every new window's renderer creates its srv `Window` row with `WindowService.Cre
 | "Open in New Window" on a widget (`openNewWindowWithView`) | a window's renderer | yes |
 | Floating pane (pane pool) | a window's renderer | yes: the owner window |
 | Second launch of the exe, login start, a notification click for a workspace no window shows | host or launcher | no |
-| Session restore / crash reproject | srv's saved `Window` rows | no: the window has its own saved values |
+| Session restore / crash reproject | srv's saved `Window` rows (crash reproject), or the session record (restore after a quit) | no: the window has its own saved values |
 
 `open_new_window` already threads an opaque `initial_meta` through both the pool path and the cold path, so the creator's identity can travel the same way.
 
@@ -184,7 +184,9 @@ The copied keys are `window:theme` and `window:opacity`, each only if the source
 
 ### 6.4 Windows with no creator
 
-The second-exe launch, login start and a notification click for an unshown workspace open with the channel defaults (Settings → Appearance). Session restore and crash reproject keep each window's own saved meta. That already happens, since meta is persisted with the `Window` row.
+The second-exe launch, login start and a notification click for an unshown workspace open with the channel defaults (Settings → Appearance). Crash reproject keeps each window's own saved meta, since meta is persisted with the `Window` row.
+
+**Session restore does not do that by itself** (corrected 2026-10-20: this section said it did, and a quit and relaunch lost every window's theme and opacity). A graceful quit deletes the `Window` rows (`SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md`), so a restore has no saved meta to keep. The session record carries it instead: `snapshot_session` saves each window's `window:theme` and `window:opacity` under `window.meta`, the restore holds them for the window that opens onto each restored workspace, and `CreateWindow` writes them onto its new row next to the name (`session_windows.rs`; see RCA_UPGRADE_0_59_30_TO_0_59_34_ISSUES_2026_10_19.md §2 and 3). `window:transparent` is a setting of the whole app, in settings.json, not a window's meta, so it needs no saving. A record written by a version before this fix has no appearance, so only quits made after it keep a window's theme and opacity.
 
 ## 7. Plan
 

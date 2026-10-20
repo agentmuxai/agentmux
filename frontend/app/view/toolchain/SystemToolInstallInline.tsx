@@ -24,7 +24,7 @@
 
 import { createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 
-import { Button } from "@/element/button";
+import { Button } from "@/app/element/ui";
 import { InstallConfirm } from "@/element/install/InstallConfirm";
 import { InstallProgress } from "@/element/install/InstallProgress";
 import { createInstallSession } from "@/element/install/install-session";
@@ -148,7 +148,7 @@ export const SystemToolInstallInline = (props: SystemToolInstallInlineProps): JS
                             needsElevation={info().needsElevation}
                             brandIcon={brandIcon()}
                         >
-                            <Button onClick={() => void session.start()} className="green solid">
+                            <Button tone="accent" onClick={() => void session.start()}>
                                 {info().resolvedVersion ? `Install v${info().resolvedVersion} now` : "Install"}
                             </Button>
                         </InstallConfirm>

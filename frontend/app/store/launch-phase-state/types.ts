@@ -6,10 +6,10 @@
  * and login state (the mount-time launch flow, the pane's own login
  * attempts, and the recovery counter `/login` and binds share).
  *
- * A sibling of `launch-flow-state`, not part of it: that slice is the
- * pre-launch modal, which runs before any pane exists.
- * REPORT_REDUCER_STACK_AUDIT_2026_07_26.md §4.4 explains why the two stay
- * separate. Conventions: docs/specs/frontend-reducer-conventions-2026-05-03.md.
+ * It once had a sibling, `launch-flow-state`, for the pre-launch modal
+ * (before any pane exists); that modal and its slice have been removed.
+ * REPORT_REDUCER_STACK_AUDIT_2026_07_26.md §4.4 explains why the two were
+ * kept separate. Conventions: docs/specs/frontend-reducer-conventions-2026-05-03.md.
  */
 
 import type { LaunchPhase } from "@/app/view/agent/flows/launch-phase";

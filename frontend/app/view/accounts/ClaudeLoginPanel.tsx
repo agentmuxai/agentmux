@@ -7,10 +7,11 @@
  * (fresh account, no `linkTarget`) and the Agent Stash's per-binding
  * "Connect / Re-login" action (`linkTarget` + `existingAccountId`, refresh
  * not mint). Both reuse the exact same session logic and UI
- * (`InAppLoginPanel`) as the launch surface's `PreLaunchAuthPanel` — see
+ * (`InAppLoginPanel`) as the agent pane's own login — see
  * docs/specs/SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.3 surface 3.
  *
- * Deliberately simpler than PreLaunchAuthPanel's `AuthFlowController`: there
+ * Deliberately simpler than the since-removed launch modal's
+ * `AuthFlowController`: there
  * is no provider dropdown to switch away from mid-login (this panel is
  * Claude-only) and no launch sequence waiting on the result, so a plain
  * boolean in-flight guard + a few signals is enough — no action-token
@@ -81,8 +82,8 @@ export function ClaudeLoginPanel(props: {
     // 2026_07_27.md) — trusting the outcome string alone would show
     // "Signed in" for a login the resolver's spawn gate then blocks on the
     // agent's next spawn, with no account ever having existed. reagent P1
-    // on PR #2414: this panel omitted the check both PreLaunchAuthPanel and
-    // useAgentControllerStatus.ts's relogin() already make.
+    // on PR #2414: this panel omitted the check useAgentControllerStatus.ts's
+    // relogin() already makes (as did the since-removed launch modal).
     let registeredAccountId: string | undefined;
 
     // Kill a genuinely orphaned login (in-flight up to 5 min) if the panel
@@ -124,8 +125,8 @@ export function ClaudeLoginPanel(props: {
             // (the ordinary first-attempt / non-persist-failure retries).
             existingAccountId: registeredAccountId ?? props.existingAccountId,
             linkTarget: props.linkTarget,
-            // See PreLaunchAuthPanel's identical rationale: the in-app tier 1
-            // runs first; "Use terminal instead" re-runs with it skipped.
+            // The in-app tier 1 runs first; "Use terminal instead" re-runs
+            // with it skipped.
             skipTier1,
             awaitTier1Completion: true,
             setAuthUrl: (url) => {
@@ -186,8 +187,8 @@ export function ClaudeLoginPanel(props: {
 
             let outcome: ProviderLoginOutcome = await runAttempt(cliPath, authEnv, false);
             if (outcome === "inapp-timeout" && terminalRequested && !cancelled) {
-                // Same release/reset dance as PreLaunchAuthPanel's identical
-                // "Use terminal instead" handling — see its comment.
+                // "Use terminal instead" was asked for during the in-app tier:
+                // release the request and re-run with the terminal.
                 terminalRequested = false;
                 setPhase("fallback");
                 outcome = await runAttempt(cliPath, authEnv, true);
@@ -294,8 +295,7 @@ export function ClaudeLoginPanel(props: {
             // rejection here escaped `void start()`'s fire-and-forget call
             // (line ~208) as an unhandled rejection, leaving the panel
             // stuck on its starting phase forever with no error shown and
-            // no Retry button (same class of bug as PreLaunchAuthPanel's
-            // identical gap, reagent P2 on PR #2410).
+            // no Retry button (#2410).
             loginBackend().cancel().catch(() => {});
             const t = translateError(e);
             setError(`${t.title}: ${t.message}${t.retry ? ` — ${t.retry}` : ""}`);
@@ -358,10 +358,11 @@ export function ClaudeLoginPanel(props: {
                         // internal CLI tool AgentMux runs under the hood) —
                         // this panel is Connectors/Stash-facing, where the CLI
                         // implementation detail shouldn't surface. Contrast
-                        // PreLaunchAuthPanel, a different call site of this
-                        // same shared component, which correctly keeps
-                        // showing the real provider.displayName since that
-                        // surface is provider-generic across many CLIs.
+                        // the agent pane's login (AgentDocumentView), a
+                        // different call site of this same shared component,
+                        // which correctly keeps showing the real
+                        // provider.displayName since that surface is
+                        // provider-generic across many CLIs.
                         providerLabel="Anthropic"
                         authUrl={authUrl()}
                         phase={phase()}

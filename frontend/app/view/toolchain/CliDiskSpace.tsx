@@ -77,7 +77,7 @@ export const CliDiskSpace = (): JSX.Element => {
                     Agent CLIs are kept after an upgrade. This lists the ones nothing has used for 30 days and nothing is
                     running, and frees their space only when you ask.
                 </div>
-                <Button tone="quiet" class="toolchain-link-btn" onClick={check}>
+                <Button tone="quiet" onClick={check}>
                     Check for old versions
                 </Button>
             </Show>
@@ -110,11 +110,11 @@ export const CliDiskSpace = (): JSX.Element => {
                                     {formatBytes(r().reclaimable_bytes)} can be freed
                                 </div>
                                 {list(r().candidates)}
-                                <Button tone="quiet" class="toolchain-link-btn" onClick={() => remove(r().candidates.map((c) => c.dir))}>
+                                <Button tone="quiet" onClick={() => remove(r().candidates.map((c) => c.dir))}>
                                     Remove {r().candidates.length} · free {formatBytes(r().reclaimable_bytes)}
                                 </Button>
                             </Show>
-                            <Button tone="quiet" class="toolchain-link-btn" onClick={check}>
+                            <Button tone="quiet" onClick={check}>
                                 Check again
                             </Button>
                         </>
@@ -151,7 +151,7 @@ export const CliDiskSpace = (): JSX.Element => {
                                     or {r().skipped.length === 1 ? "it was" : "they were"} locked.
                                 </div>
                             </Show>
-                            <Button tone="quiet" class="toolchain-link-btn" onClick={check}>
+                            <Button tone="quiet" onClick={check}>
                                 Check again
                             </Button>
                         </>

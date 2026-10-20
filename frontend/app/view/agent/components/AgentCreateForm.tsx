@@ -30,7 +30,7 @@ import { isAvailable, watchCapability } from "@/app/store/toolchain-capabilities
 import { refreshAccountCache, type Account } from "@/app/view/identity/identity-model";
 import type { AgentDefinition, Bundle } from "@/app/store/rpc-api";
 // The field layout the bundle modal and this form share.
-import "./AgentNewBundleModal.scss";
+import "./AgentCreateForm.scss";
 
 /** What the user has entered for one harness, kept while the picker lives. */
 export interface CreateDraft {
@@ -310,15 +310,15 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
     return (
         <div class="agent-create-form" data-testid="agent-create-form">
             <Show when={modelOptions().length > 0}>
-                <p class="agent-create-form-hint agent-new-bundle-modal-harness-hint">
+                <p class="agent-create-form-hint">
                     {props.template.name} is the <strong>harness</strong>, the CLI tool that runs this agent. Pick which{" "}
                     <strong>model</strong> it uses below; the harness stays the same either way.
                 </p>
             </Show>
-            <label class="agent-new-bundle-modal-field">
-                <span class="agent-new-bundle-modal-label">Name</span>
+            <label class="agent-create-form-field">
+                <span class="agent-create-form-label">Name</span>
                 <TextInput
-                    class="agent-new-bundle-modal-input"
+                    class="agent-create-form-input"
                     autofocus
                     placeholder="Choose a name"
                     value={draft.name()}
@@ -328,14 +328,14 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
                     disabled={submitting()}
                     data-testid="create-from-template-name-input"
                 />
-                <span class="agent-new-bundle-modal-hint">
+                <span class="agent-create-form-note">
                     Name it for its job, like Reviewer or Docs writer, so you can tell your agents apart.
                 </span>
             </label>
-            <label class="agent-new-bundle-modal-field">
-                <span class="agent-new-bundle-modal-label">Runtime</span>
+            <label class="agent-create-form-field">
+                <span class="agent-create-form-label">Runtime</span>
                 <Select
-                    class="agent-new-bundle-modal-input"
+                    class="agent-create-form-input"
                     value={draft.runtime()}
                     onChange={(v) => pickRuntime(v as "host" | "container")}
                     disabled={submitting()}
@@ -348,31 +348,31 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
                     </option>
                 </Select>
                 <Show when={draft.runtime() === "host"}>
-                    <span class="agent-new-bundle-modal-hint">
+                    <span class="agent-create-form-note">
                         Runs directly on your machine with full access to your files, environment, and credentials.
                     </span>
                 </Show>
                 <Show when={draft.runtime() === "container"}>
-                    <span class="agent-new-bundle-modal-hint">
+                    <span class="agent-create-form-note">
                         Isolated Docker sandbox — the agent only sees its workspace.
                     </span>
                 </Show>
                 <Show when={containerSupported() && containerImageNote(imageAccess())}>
                     {(note) => (
-                        <span class="agent-new-bundle-modal-hint" data-testid="create-from-template-image-note">
+                        <span class="agent-create-form-note" data-testid="create-from-template-image-note">
                             {note()}
                         </span>
                     )}
                 </Show>
                 <Show when={!containerSupported()}>
-                    <span class="agent-new-bundle-modal-hint">{props.template.name} can only run on the host.</span>
+                    <span class="agent-create-form-note">{props.template.name} can only run on the host.</span>
                 </Show>
             </label>
             <Show when={modelOptions().length > 0}>
-                <label class="agent-new-bundle-modal-field">
-                    <span class="agent-new-bundle-modal-label">Model</span>
+                <label class="agent-create-form-field">
+                    <span class="agent-create-form-label">Model</span>
                     <Select
-                        class="agent-new-bundle-modal-input"
+                        class="agent-create-form-input"
                         value={draft.model()}
                         onChange={(v) => pickModel(v)}
                         disabled={submitting()}
@@ -380,17 +380,17 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
                     >
                         <For each={modelOptions()}>{(m) => <option value={m.value}>{m.label}</option>}</For>
                     </Select>
-                    <span class="agent-new-bundle-modal-hint">
+                    <span class="agent-create-form-note">
                         Which model {props.template.name} runs with. Changeable later from the agent pane's runtime
                         picker.
                     </span>
                 </label>
             </Show>
             <Show when={supportsCustomEndpoint()}>
-                <label class="agent-new-bundle-modal-field">
-                    <span class="agent-new-bundle-modal-label">Model Vendor / Custom Endpoint</span>
+                <label class="agent-create-form-field">
+                    <span class="agent-create-form-label">Model Vendor / Custom Endpoint</span>
                     <TextInput
-                        class="agent-new-bundle-modal-input"
+                        class="agent-create-form-input"
                         placeholder={`Default (${PROVIDERS[effectiveProviderId()]?.baseUrlEnvVar})`}
                         value={draft.modelVendorBaseUrl()}
                         onInput={(e) => draft.setModelVendorBaseUrl(e.currentTarget.value)}
@@ -398,7 +398,7 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
                         disabled={submitting()}
                         data-testid="create-from-template-vendor-base-url-input"
                     />
-                    <span class="agent-new-bundle-modal-hint">
+                    <span class="agent-create-form-note">
                         Redirect this agent's harness at a custom API endpoint (e.g. a proxy or alternate model
                         backend) instead of the default vendor. Leave blank to use the default.
                     </span>
@@ -406,8 +406,8 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
             </Show>
             {/* Several controls, so a group, not a <label>. Starts empty: the
                 agent gets Global Memory and its own bundle. */}
-            <div class="agent-new-bundle-modal-field" role="group" aria-labelledby="create-from-template-bundles-label">
-                <span class="agent-new-bundle-modal-label" id="create-from-template-bundles-label">
+            <div class="agent-create-form-field" role="group" aria-labelledby="create-from-template-bundles-label">
+                <span class="agent-create-form-label" id="create-from-template-bundles-label">
                     Bundles
                 </span>
                 <BundleListEditor
@@ -417,12 +417,12 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
                     disabled={submitting()}
                     testId="create-from-template-bundles"
                 />
-                <span class="agent-new-bundle-modal-hint">
+                <span class="agent-create-form-note">
                     In order: when two bundles name the same skill, the first wins.
                 </span>
             </div>
             <Show when={error()}>
-                <div class="agent-new-bundle-modal-error" role="alert" data-testid="create-from-template-error">
+                <div class="agent-create-form-error" role="alert" data-testid="create-from-template-error">
                     {error()}
                 </div>
             </Show>

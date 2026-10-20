@@ -16,8 +16,8 @@
  *     leaves DOM focus on the clicked picker button, which is removed ~200ms
  *     later, dropping focus to <body>. AgentFooter consumes the request when
  *     it mounts and moves focus into the composer as soon as it can: at once
- *     for a picker click, or — when launched from the launch modal, which
- *     inerts the pane content until it closes — once the modal is gone.
+ *     for a picker click, or — when launched from a modal, which inerts
+ *     the pane content until it closes — once the modal is gone.
  *
  * Spec: SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §3.
  */
@@ -27,9 +27,9 @@
  *  honoring it on some unrelated later mount would steal focus. */
 const REQUEST_TTL_MS = 10_000;
 
-/** How long a consumed request keeps trying to land focus. Covers the
- *  launch modal staying open (content inert) for the rest of the launch
- *  RPC chain after the agent's meta is written. */
+/** How long a consumed request keeps trying to land focus. Covers a
+ *  modal staying open (content inert) for the rest of the launch RPC
+ *  chain after the agent's meta is written. */
 export const LAUNCH_FOCUS_WINDOW_MS = 5_000;
 const LAUNCH_FOCUS_POLL_MS = 50;
 
@@ -98,8 +98,8 @@ function launchFocusReadiness(ta: HTMLTextAreaElement, blockId: string): Readine
     const active = document.activeElement;
     if (active === ta) return "stop"; // already there
     if (active && active !== document.body) {
-        // A modal (e.g. the launch modal while it finishes submitting) —
-        // it will close; wait for it.
+        // A modal (e.g. one still finishing its submit) — it will close;
+        // wait for it.
         if (active.closest(".modal-root")) return "wait";
         const owner = blockIdOf(active);
         // The user moved on to another pane during the launch.

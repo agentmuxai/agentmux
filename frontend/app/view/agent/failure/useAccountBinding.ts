@@ -54,8 +54,7 @@ export function useAccountBinding(opts: {
 }): AccountBinding {
     const deps = { ...defaultDeps, ...opts.deps };
 
-    // Cross-pane/cross-tab live account cache — same subscription pattern
-    // `AgentLaunchModal.tsx` already uses. Seeded synchronously (no network
+    // Cross-pane/cross-tab live account cache. Seeded synchronously (no network
     // round trip; the app-wide cache is already warm) then kept live.
     const [accountCache, setAccountCache] = createSignal<Account[]>(deps.loadAccounts());
     createEffect(() => {

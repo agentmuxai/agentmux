@@ -333,8 +333,26 @@ fn blob_ref<'a>(row: &'a rusqlite::Row<'_>, idx: usize) -> rusqlite::Result<&'a 
 /// Appends run one at a time under the connection lock, so one buffer is enough.
 static TAIL_SCRATCH: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 
-/// The bytes, and how many of them came from stored parts.
+/// The bytes, and how many of them came from stored parts. A damaged part
+/// reads as blank and counts as stored (parts.rs), for every reader here:
+/// the snapshot reader, and the counter catching up before it reads.
 fn read_bytes_covered(
+    conn: &Connection,
+    zone_id: &str,
+    name: &str,
+    offset: i64,
+    len: i64,
+) -> Result<(Vec<u8>, usize), StoreError> {
+    match read_bytes_covered_rows(conn, zone_id, name, offset, len) {
+        Err(StoreError::Sqlite(e)) if super::parts::is_corrupt(&e) => {
+            super::parts::read_covered_past_damage(conn, zone_id, name, offset, len)
+        }
+        other => other,
+    }
+}
+
+/// [`read_bytes_covered`] in one range query, failing on a damaged part.
+fn read_bytes_covered_rows(
     conn: &Connection,
     zone_id: &str,
     name: &str,

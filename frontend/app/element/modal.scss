@@ -133,7 +133,7 @@
 // inner selector alone (the at-rule itself adds none), so
 // `.modal-panel-body > *` carries its natural (0,1,0). The bundle
 // import order issue from Phase 1 is unchanged: a per-modal body
-// `min-width` (e.g. `.agent-launch-modal-body`) is also (0,1,0).
+// `min-width` (e.g. `.browser-auth-modal-body`) is also (0,1,0).
 // In compact mode we still need to win — make the selector
 // `.modal-panel-body[class]` to bump specificity to (0,2,0) without
 // requiring a wrapper class. muxreview + codex P1 on PR #1060 round 1.
@@ -350,7 +350,7 @@
         // Primary action sits at the bottom in compact mode (mobile-
         // app convention — thumb-reachable). Modal panels in this
         // codebase render Cancel FIRST and Submit SECOND in JSX
-        // order (e.g. BrowserAuthModal, AgentLaunchModal). Plain
+        // order (e.g. BrowserAuthModal). Plain
         // `column` preserves that order vertically: Cancel on top,
         // Submit at the bottom. `column-reverse` would flip them
         // and put a destructive/cancel action at the thumb position,

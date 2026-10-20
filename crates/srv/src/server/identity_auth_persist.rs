@@ -114,8 +114,7 @@ fn persist_oauth_direct_account(
 /// `(bundle_id, account_id)` pair `AuthSessionManager::finish_success`
 /// expects. `bundle_id` is always empty now: bundle mode (`db_identity_bundles`
 /// binding) was retired in Phase 4c of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md
-/// — confirmed unreachable from the frontend (`AuthFlowController` hardcodes
-/// `directAccount: true`). `_direct_account`/`_into_bundle_id` stay as
+/// — no frontend caller sends `intoBundleId`. `_direct_account`/`_into_bundle_id` stay as
 /// parameters so the wire request shape and the 4 call sites don't need
 /// touching. `dir` is the account's own isolation dir, resolved once at
 /// spawn time by `compute_and_ensure_*_dir` in the `auth.start` handler.
@@ -123,8 +122,8 @@ fn persist_oauth_direct_account(
 /// Guards on `account_id` being non-empty before persisting: `auth.start`
 /// only populates a real account_id when `direct_account` is true (via
 /// `compute_and_ensure_account_dir`, which always mints/reuses a real id);
-/// when `direct_account` is false (the wire default, still reachable by
-/// any caller other than the one production frontend path), `account_id`
+/// when `direct_account` is false (the wire default, and what the agent
+/// pane's login sends: it persists the account itself), `account_id`
 /// is `""`. Without this guard an empty id would flow into
 /// `persist_oauth_direct_account`'s `identity_upsert`, whose
 /// `ON CONFLICT(id) DO UPDATE` would silently overwrite/corrupt any prior
@@ -264,9 +263,8 @@ mod tests {
     #[test]
     fn persist_oauth_success_skips_persistence_when_account_id_is_empty() {
         // Reagent P1: `auth.start` sets account_id = "" whenever
-        // `direct_account` is false (the wire default) — a caller other
-        // than the one production frontend path (which always sends
-        // `directAccount: true`) can still reach this. Without the
+        // `direct_account` is false (the wire default, and what the agent
+        // pane's login sends) — so this path is live. Without the
         // empty-id guard, persist_oauth_direct_account's identity_upsert
         // would silently write/overwrite a db_accounts row with id="".
         let mstore = Arc::new(Store::open_in_memory().unwrap());

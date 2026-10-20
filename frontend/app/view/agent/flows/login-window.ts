@@ -16,7 +16,7 @@
  * closed by an older flow ending. A timer closes any reservation still unused
  * after `MAX_AGE_MS` (from the click), so nothing is left blank for good.
  *
- * `openOAuthBrowserPane` (and the launch modal's URL effect) navigate the
+ * `openOAuthBrowserPane` navigates the
  * reserved window when the URL arrives. A host that opens URLs in the system
  * browser (the desktop) reserves nothing (`reserveExternalWindow()` returns
  * null), and every caller keeps its usual path. One slot: a login reserves

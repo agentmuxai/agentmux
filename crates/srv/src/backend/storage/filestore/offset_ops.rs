@@ -5,12 +5,12 @@
 //! FileStore offset-based read/write operations.
 
 
-use std::collections::HashMap;
 
 use rusqlite::{params, OptionalExtension};
 
 use super::core::{FileStore, PART_DATA_SIZE};
 use super::counter::DROP_EPOCH_SQL;
+use super::parts::load_parts;
 use super::FileOpts;
 use crate::backend::storage::error::StoreError;
 
@@ -216,24 +216,9 @@ impl FileStore {
         let start_part = (actual_offset / pds) as i32;
         let end_part = ((actual_offset + actual_size - 1) / pds) as i32;
 
-        // Load parts from DB: one range query, not one query per 64 KB part —
-        // reading an 800 MB transcript part by part was 12,270 queries and
-        // took 12 s in a release build.
+        // Load parts from DB, past a damaged one (parts.rs).
         let conn = self.lock_conn();
-        let mut parts_map: HashMap<i32, Vec<u8>> = HashMap::new();
-        {
-            let mut stmt = conn.prepare_cached(
-                "SELECT partidx, data FROM db_file_data \
-                 WHERE zoneid = ?1 AND name = ?2 AND partidx BETWEEN ?3 AND ?4",
-            )?;
-            let rows = stmt.query_map(params![zone_id, name, start_part, end_part], |row| {
-                Ok((row.get::<_, i32>(0)?, row.get::<_, Vec<u8>>(1)?))
-            })?;
-            for row in rows {
-                let (part_idx, data) = row?;
-                parts_map.insert(part_idx, data);
-            }
-        }
+        let parts_map = load_parts(&conn, zone_id, name, start_part, end_part, file.size)?;
         drop(conn);
 
         // Assemble result

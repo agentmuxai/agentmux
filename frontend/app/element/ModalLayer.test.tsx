@@ -55,30 +55,30 @@ const req = (kind: string) => ({ kind }) as unknown as ModalLayerRequest;
 describe("ModalLayer", () => {
     it("tags the panel with the request kind", async () => {
         const { api, container } = renderLayer();
-        api().open(req("add-account"));
-        await waitFor(() => expect(container.querySelector(".modal-panel--add-account")).not.toBeNull());
-        api().replace(req("new-memory"));
-        await waitFor(() => expect(container.querySelector(".modal-panel--new-memory")).not.toBeNull());
-        expect(container.querySelector(".modal-panel--add-account")).toBeNull();
+        api().open(req("bundle-import-select"));
+        await waitFor(() => expect(container.querySelector(".modal-panel--bundle-import-select")).not.toBeNull());
+        api().replace(req("bundle-import-preview"));
+        await waitFor(() => expect(container.querySelector(".modal-panel--bundle-import-preview")).not.toBeNull());
+        expect(container.querySelector(".modal-panel--bundle-import-select")).toBeNull();
     });
 
     it("focuses the panel's initial-focus control on open", async () => {
         const { api } = renderLayer();
-        api().open(req("new-memory"));
-        await waitFor(() => expect(document.activeElement?.textContent).toBe("primary new-memory"));
+        api().open(req("bundle-import-preview"));
+        await waitFor(() => expect(document.activeElement?.textContent).toBe("primary bundle-import-preview"));
     });
 
     it("resets the panel's scroll and moves focus when content is replaced", async () => {
         const { api, container } = renderLayer();
-        api().open(req("new-memory"));
+        api().open(req("bundle-import-preview"));
         await waitFor(() => expect(container.querySelector(".modal-panel")).not.toBeNull());
         await nextFrame();
         const panel = container.querySelector<HTMLElement>(".modal-panel")!;
         panel.scrollTop = 250;
         expect(panel.scrollTop).toBe(250);
 
-        api().replace(req("add-account"));
-        await waitFor(() => expect(document.activeElement?.textContent).toBe("primary add-account"));
+        api().replace(req("bundle-import-select"));
+        await waitFor(() => expect(document.activeElement?.textContent).toBe("primary bundle-import-select"));
         // Same panel element survived the swap; its scroll was reset.
         expect(container.querySelector(".modal-panel")).toBe(panel);
         expect(panel.scrollTop).toBe(0);

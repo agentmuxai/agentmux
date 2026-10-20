@@ -1027,7 +1027,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // one-shot attempt can reach.
     //
     // Right after a launch (a one-shot request from the launch path) the
-    // claim is replaced by a retrying one: launching from the launch modal
+    // claim is replaced by a retrying one: a launch started from a modal
     // mounts this footer while the modal is still open, which
     // claimFocusOnMount deliberately skips, so it would never land.
     // SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §3.

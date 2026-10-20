@@ -1,0 +1,39 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+@use "../../../element/ui/line";
+
+// The new agent's fields in the panel under a harness card. The panel's
+// own layout (steps, actions, `.agent-create-form`) is AgentCreatePanel.scss.
+
+.agent-create-form-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    font-size: var(--text-sm);
+}
+
+.agent-create-form-label {
+    color: var(--main-text-color);
+    font-weight: 500;
+    font-size: var(--text-sm);
+}
+
+// Inputs and selects are element/ui's TextInput / Select; this only sizes them.
+.agent-create-form-input {
+    width: 100%;
+}
+
+.agent-create-form-note {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--secondary-text-color);
+    line-height: 1.4;
+}
+
+.agent-create-form-error {
+    padding: var(--space-1-5) var(--space-2);
+    @include line.notice(danger);
+    border-radius: 0;
+    font-size: var(--text-sm);
+}
