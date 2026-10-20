@@ -26,7 +26,7 @@ describe("which task each agent pane holds", () => {
         const board = {
             agents: [
                 { name: "A", uid: "uid-a", block_id: "b-a", state: "working" },
-                { name: "B", uid: null, block_id: "b-b", state: "idle" },
+                { name: "B", uid: null, block_id: "b-b", state: "waiting" },
             ],
             tasks: [
                 task("w1", "claimed", "A", "uid-a", 10),
@@ -40,8 +40,9 @@ describe("which task each agent pane holds", () => {
             now: 0,
         } as unknown as KanbanBoard;
         const held = heldByBlock(board);
-        expect(held.get("b-a")).toEqual({ id: "w2", num: 2, title: "task w2", state: "blocked" });
-        expect(held.get("b-b")?.id).toBe("w3");
+        expect(held.get("b-a")).toEqual({ id: "w2", num: 2, title: "task w2", state: "blocked", waiting: true });
+        // Claimed, but its agent waits on a question in its pane: waiting too.
+        expect(held.get("b-b")).toMatchObject({ id: "w3", waiting: true });
         expect(held.size).toBe(2);
     });
 });

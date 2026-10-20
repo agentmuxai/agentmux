@@ -23,6 +23,8 @@ export interface HeldTask {
     num: number;
     title: string;
     state: string;
+    /** Waiting on the operator: the agent asked through the task, or a question waits in its pane. */
+    waiting: boolean;
 }
 
 const POLL_MS = 30_000;
@@ -41,7 +43,13 @@ export function heldByBlock(board: KanbanBoard): Map<string, HeldTask> {
         const prev = out.get(agent.block_id);
         // An agent holding several: the one that moved last.
         if (!prev || t.updated_at > (board.tasks.find((x) => x.id === prev.id)?.updated_at ?? 0)) {
-            out.set(agent.block_id, { id: t.id, num: t.card.num, title: t.title, state: t.state });
+            out.set(agent.block_id, {
+                id: t.id,
+                num: t.card.num,
+                title: t.title,
+                state: t.state,
+                waiting: t.state === "blocked" || agent.state === "waiting",
+            });
         }
     }
     return out;
@@ -101,10 +109,10 @@ export function HeldTaskChip(props: { blockId: string }): JSX.Element {
             {(t) => (
                 <Button
                     density="compact"
-                    tone={t().state === "blocked" ? "attention" : "quiet"}
+                    tone={t().waiting ? "attention" : "quiet"}
                     icon="table-columns"
                     class="kanban-held-chip"
-                    title={`${t().state === "blocked" ? "Waiting on your answer: " : "On task "}#${t().num} ${t().title} (open it on the Kanban)`}
+                    title={`${t().waiting ? "Waiting on your answer: " : "On task "}#${t().num} ${t().title} (open it on the Kanban)`}
                     onClick={(e) => {
                         e.stopPropagation();
                         void openKanbanTask(t().id);
