@@ -34,6 +34,14 @@ pub fn spawn_background_subsystems(
     id_store: &Arc<Store>,
     identity_store: &Arc<Store>,
 ) -> BackgroundSubsystems {
+    // Agents' cargo waits for the host-wide build slot (build_slot.rs).
+    std::thread::spawn(|| match agentmux_common::build_slot::install_for_current_user() {
+        Ok(done) if !done.foreign.is_empty() => tracing::warn!(files = ?done.foreign, "build slot: left a cargo that is not ours in place"),
+        Ok(done) if !done.written.is_empty() => tracing::info!(files = ?done.written, "build slot installed"),
+        Ok(_) => {}
+        Err(e) => tracing::warn!(error = %e, "build slot: not installed"),
+    });
+
     // Event infrastructure
     let event_bus = Arc::new(EventBus::new());
     let broker = Arc::new(Broker::new());
