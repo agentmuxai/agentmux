@@ -108,7 +108,9 @@ fn db_files(roots: &ScanRoots) -> Vec<DbFile> {
                 continue;
             }
             // A WAL database's last writes are in its `-wal` until checkpointed.
-            let written_ms = modified_ms(&db_dir.join("objects.db-wal")).map_or(db_ms, |wal| wal.max(db_ms));
+            // An empty one holds none (a reader may have created it).
+            let wal = wal_of(&path);
+            let written_ms = if wal_len(&wal) > 0 { modified_ms(&wal).map_or(db_ms, |w| w.max(db_ms)) } else { db_ms };
             out.push(DbFile {
                 channel: channel.file_name().to_string_lossy().into_owned(),
                 version: version.file_name().to_string_lossy().into_owned(),
@@ -120,15 +122,35 @@ fn db_files(roots: &ScanRoots) -> Vec<DbFile> {
     out
 }
 
-/// The session record in the database at `path`, read-only. A read-only
-/// open may create the `-shm` index beside a WAL database, as any reader
-/// does; the database itself is not written.
+fn wal_of(db: &Path) -> PathBuf {
+    let mut name = db.as_os_str().to_owned();
+    name.push("-wal");
+    PathBuf::from(name)
+}
+
+fn wal_len(wal: &Path) -> u64 {
+    std::fs::metadata(wal).map(|m| m.len()).unwrap_or(0)
+}
+
+/// `path` as an SQLite URI with `immutable=1`.
+fn immutable_uri(path: &Path) -> String {
+    let p = path.to_string_lossy().replace('\\', "/").replace('%', "%25").replace('?', "%3f").replace('#', "%23");
+    let sep = if p.starts_with('/') { "//" } else { "///" };
+    format!("file:{sep}{p}?immutable=1")
+}
+
+/// The session record in the database at `path`, read-only. A database with
+/// nothing in its `-wal` is opened immutable, so not even the reader's
+/// `-wal`/`-shm` files are created; one with WAL content is opened as an
+/// ordinary reader, which reads that content and may add the `-shm` index.
 pub(crate) fn read_record(path: &Path) -> Result<Option<Value>, String> {
     use rusqlite::{OpenFlags, OptionalExtension};
-    let conn = rusqlite::Connection::open_with_flags(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
+    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    let conn = if wal_len(&wal_of(path)) == 0 {
+        rusqlite::Connection::open_with_flags(immutable_uri(path), flags | OpenFlags::SQLITE_OPEN_URI)
+    } else {
+        rusqlite::Connection::open_with_flags(path, flags)
+    }
     .map_err(|e| format!("open {}: {e}", path.display()))?;
     conn.busy_timeout(BUSY_TIMEOUT).map_err(|e| e.to_string())?;
     let data: Option<Vec<u8>> = conn

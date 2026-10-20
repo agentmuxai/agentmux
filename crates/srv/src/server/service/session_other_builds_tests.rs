@@ -109,8 +109,12 @@ fn a_locked_database_is_skipped_without_waiting_on_it() {
     build(root, "free", "0.59.31", Some(work_record(Some(1_000))));
     let holder = rusqlite::Connection::open(&locked).unwrap();
     holder
-        .execute_batch("PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE; UPDATE db_client SET version = version + 1;")
+        .execute_batch(
+            "PRAGMA locking_mode=EXCLUSIVE; UPDATE db_client SET version = version + 1;
+             BEGIN EXCLUSIVE; UPDATE db_client SET version = version + 1;",
+        )
         .unwrap();
+    assert!(wal_len(&wal_of(&locked)) > 0, "precondition: a live writer's WAL");
 
     let started = Instant::now();
     let found = discover(&roots(root, None), SCAN_BUDGET);
@@ -127,6 +131,36 @@ fn reading_a_record_leaves_the_database_unchanged() {
     let before = std::fs::read(&path).unwrap();
     assert_eq!(read_record(&path).unwrap(), Some(work_record(Some(1_000))));
     assert_eq!(std::fs::read(&path).unwrap(), before);
+    let dir_entries = std::fs::read_dir(path.parent().unwrap()).unwrap().count();
+    assert_eq!(dir_entries, 1, "no -wal or -shm left beside a checkpointed database");
+}
+
+#[test]
+fn a_record_still_in_the_wal_is_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_dir = dir.path().join("live").join("versions").join("0.59.32").join("data").join("db");
+    std::fs::create_dir_all(&db_dir).unwrap();
+    let path = db_dir.join("objects.db");
+    // Held open: its writes stay in the -wal, as a running build's do.
+    let store = Store::open(&path).unwrap();
+    let mut client = Client { oid: "c".into(), ..Default::default() };
+    client.meta.insert(SNAPSHOT_META_KEY.to_string(), work_record(Some(7)));
+    store.insert(&mut client).unwrap();
+    assert!(wal_len(&wal_of(&path)) > 0, "precondition: the record is in the WAL");
+    assert_eq!(read_record(&path).unwrap(), Some(work_record(Some(7))));
+    drop(store);
+}
+
+#[test]
+fn an_empty_wal_does_not_make_a_build_look_recent() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = build(dir.path(), "old", "0.59.32", Some(work_record(None)));
+    let old = std::time::SystemTime::now() - Duration::from_secs(3600);
+    std::fs::File::options().write(true).open(&path).unwrap().set_modified(old).unwrap();
+    std::fs::write(wal_of(&path), b"").unwrap();
+    let found = discover(&roots(dir.path(), None), SCAN_BUDGET);
+    assert_eq!(found[0].saved_at_ms, modified_ms(&path).unwrap());
+    assert!(!found[0].saved_at_exact);
 }
 
 #[test]
