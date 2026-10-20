@@ -180,9 +180,12 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
             "import_inspect" => {
                 let path = file_path(&body)?;
                 let pass = body.get("passphrase").and_then(Value::as_str);
-                match vault::transfer::inspect(&store, &path, pass) {
+                // For a CSV no reader knows: the person's choice of columns.
+                let mapping: Option<vault::import::Mapping> = body.get("mapping").filter(|m| !m.is_null()).and_then(|m| serde_json::from_value(m.clone()).ok());
+                match vault::transfer::inspect_with(&store, &path, pass, mapping.as_ref()) {
                     Ok(preview) => Ok((json!({ "preview": preview }), false)),
                     Err(vault::transfer::InspectError::NeedsPassphrase) => Ok((json!({ "needs_passphrase": true }), false)),
+                    Err(vault::transfer::InspectError::NeedsMapping(m)) => Ok((json!({ "needs_mapping": m }), false)),
                     Err(vault::transfer::InspectError::Other(why)) => Err(why),
                 }
             }

@@ -480,6 +480,7 @@ async fn route_command(
         "vault_copy" => commands::vault::copy(state, args).await,
         "vault_export" => commands::vault_files::export(state, args).await,
         "vault_import" => commands::vault_files::import(state, args).await,
+        "vault_import_delete" => commands::vault_files::delete_picked(args).await,
         "read_clipboard" => commands::clipboard::read_clipboard(),
         "write_clipboard" => commands::clipboard::write_clipboard(args),
         "read_clipboard_attachments" => commands::clipboard::read_clipboard_attachments(),
