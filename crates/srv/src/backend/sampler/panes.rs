@@ -57,7 +57,24 @@ pub fn from_snapshot(snap: &TowerSnapshot) -> Vec<PaneStat> {
 /// The live sampler: Tower's sample of this machine, with each pane named by
 /// `labels` (a pane `labels` doesn't know, such as one that was closed, is left out).
 pub fn tower_sampler(labels: impl Fn(&str) -> Option<BlockLabel> + Send + Sync + 'static) -> PaneSampler {
-    Arc::new(move || Ok(from_snapshot(&tower_snapshot(&labels)?)))
+    Arc::new(move || {
+        let tracked = crate::backend::process_tracker::registry::global().is_some_and(|r| r.has_tracked_blocks());
+        sample_if_panes(pidregistry::get_all().len(), tracked, || Ok(from_snapshot(&tower_snapshot(&labels)?)))
+    })
+}
+
+/// `sample`, unless there is no pane to measure: then no stats and no process-table
+/// read. The table would only hold the backend itself (left out of the stats), and
+/// reading it every pass is the whole cost of an idle srv.
+fn sample_if_panes(
+    registered_shells: usize,
+    tracked_blocks: bool,
+    sample: impl FnOnce() -> std::io::Result<Vec<PaneStat>>,
+) -> std::io::Result<Vec<PaneStat>> {
+    if registered_shells == 0 && !tracked_blocks {
+        return Ok(Vec::new());
+    }
+    sample()
 }
 
 /// Tower's sample of this machine's panes, each named by `labels`. Blocking:
@@ -77,6 +94,21 @@ pub fn tower_snapshot(labels: impl Fn(&str) -> Option<BlockLabel>) -> std::io::R
 mod tests {
     use super::*;
     use crate::backend::rpc_types::{TowerProcess, TowerTask};
+
+    #[test]
+    fn an_instance_with_no_pane_takes_no_process_snapshot() {
+        let taken = std::cell::Cell::new(0);
+        let sample = || {
+            taken.set(taken.get() + 1);
+            Ok(Vec::new())
+        };
+        assert!(sample_if_panes(0, false, sample).unwrap().is_empty());
+        assert_eq!(taken.get(), 0, "nothing registered and nothing tracked: nothing to measure");
+        sample_if_panes(1, false, sample).unwrap();
+        assert_eq!(taken.get(), 1, "a registered shell is measured");
+        sample_if_panes(0, true, sample).unwrap();
+        assert_eq!(taken.get(), 2, "a tracked agent pane is measured");
+    }
 
     fn process(pid: u32, role: TowerProcessRole, started: u64) -> TowerProcess {
         TowerProcess {

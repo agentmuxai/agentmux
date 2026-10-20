@@ -353,6 +353,11 @@ impl AgentProcessRegistry {
         agent_started(tracker.list_members(), &roots)
     }
 
+    /// Whether any block is tracked (a cheap check before a process-table read).
+    pub fn has_tracked_blocks(&self) -> bool {
+        !self.inner.lock().is_empty()
+    }
+
     /// Every tracked block's members for Tower: PIDs (plumbing included), the
     /// roots, the tracker's confidence and the tree's CPU account. The trackers
     /// are queried outside the registry lock.
