@@ -16,7 +16,9 @@ import type { VaultEntryInfo } from "@/types/rpc/VaultEntryInfo";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
 import type { VaultSection } from "@/types/rpc/VaultSection";
 import { kindsIn, vaultKind, type VaultInput } from "./vault-kinds";
-import { createEntry, updateEntry } from "./vault-store";
+import { firstSaveNotice } from "./vault-prompts";
+import { createEntry, updateEntry, vaultEntries } from "./vault-store";
+import { getPlatform } from "@/util/platformutil";
 
 export type VaultFormTarget =
     | { mode: "new"; section: VaultSection; request?: VaultRequest }
@@ -176,6 +178,14 @@ export function VaultEntryForm(props: { target: VaultFormTarget; onClose: (saved
                     {/* Enter in a field saves. */}
                     <input type="submit" hidden />
                 </form>
+                {/* The first save creates the Vault key: say what will ask, before it does. */}
+                <Show when={!editing && (vaultEntries() ?? []).length === 0 && firstSaveNotice(getPlatform())}>
+                    {(notice) => (
+                        <p class="vault-prompt-note" role="note">
+                            {notice()}
+                        </p>
+                    )}
+                </Show>
                 <Show when={error()}>
                     <div class="warden-manager-error" role="alert">
                         {error()}

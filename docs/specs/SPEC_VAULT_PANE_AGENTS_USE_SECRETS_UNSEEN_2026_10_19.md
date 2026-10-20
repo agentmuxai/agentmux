@@ -129,6 +129,17 @@ An entry's id is made once from its kind and label (`ssn-alex`, then `ssn-alex-2
 
 The operator decided on 2026-10-19 that the Vault stays its own pane, and that Warden also shows its oversight half: the record of agents' uses of entries and the standing "Always" grants, as a section or as Audit events, linked both ways with the Vault. Built with the grants, in P3.
 
+### 5.7 What the person is asked, and when
+
+The operator asked on 2026-10-20 that people know before they're asked. The Vault pane opens with a note saying, for this OS, what may ask the person and when (dismissed with **Got it**, reopened from the header's ⓘ), and the first save, which creates the Vault key, says what is about to ask. Nothing in the Vault asks for administrator rights (UAC, sudo), and no agent sees or answers any of these prompts. Each step that adds a prompt adds its row here and its line to the note (`frontend/app/view/vault/vault-prompts.ts`).
+
+| When | Windows | macOS | Linux | Since |
+|---|---|---|---|---|
+| Saving, changing or listing entries | nothing | the first time AgentMux uses the Vault key, and again after AgentMux updates: allow AgentMux to use the keychain item (**Always Allow**; Deny leaves the entries unopenable) | if the keyring is locked: its password, once | P2a |
+| Reveal or Copy | Windows Hello (PIN, fingerprint or face); the account password where Hello isn't set up | Touch ID or the account password | the desktop's polkit prompt | P2b |
+| An agent asks for an entry | AgentMux's own prompt in every window: Fill it in, or Not now | the same | the same | P2a |
+| Importing an encrypted file | the file's own password, typed in the pane | the same | the same | P2c, P5 |
+
 ## 6. Agents fill browser fields from the Vault
 
 ### 6.1 The action

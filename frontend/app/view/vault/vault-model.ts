@@ -19,6 +19,8 @@ export class VaultViewModel {
     viewName: Accessor<string>;
     /** Whether the pane is on screen (its tab active, its window shown). */
     shown: Accessor<boolean>;
+    /** The note on what may ask the person: open until they dismiss it. */
+    promptsOpen: Accessor<boolean>;
 
     constructor(ctx: PaneTabHostContext) {
         this.blockId = ctx.blockId;
@@ -35,5 +37,6 @@ export class VaultViewModel {
             return typeof r === "string" ? r : "";
         });
         this.viewName = createMemo<string>(() => SECTION_LABELS[this.sectionAtom()]);
+        this.promptsOpen = createMemo<boolean>(() => meta()?.["vault:prompts-read"] !== true);
     }
 }

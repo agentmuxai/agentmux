@@ -25,6 +25,7 @@ const vault = vi.fn(async (op: string, _args?: Record<string, unknown>): Promise
 });
 vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ approvals: { vault } }) }));
 
+import { setPlatform } from "@/util/platformutil";
 import { VaultViewModel } from "./vault-model";
 import { VaultView } from "./vault-view";
 
@@ -71,6 +72,7 @@ describe("the Vault pane", () => {
         cleanup();
         setBlockMeta({});
         setVisibility("active");
+        setPlatform("win32");
     });
 
     it("lists an entry by label and last characters, and marks itself hidden from agents", async () => {
@@ -179,6 +181,38 @@ describe("the Vault pane", () => {
         expect(calls("on_screen").map((c) => c.on)).toEqual([true, false]);
         release();
         await waitFor(() => expect(calls("on_screen").map((c) => c.on)).toEqual([true, false, true]));
+    });
+
+    it("says what may ask the person until they dismiss it", async () => {
+        setPlatform("darwin");
+        renderVault();
+        const note = await screen.findByRole("note", { name: "What the Vault may ask you" });
+        expect(note.textContent).toContain("Always Allow");
+        expect(note.textContent).toContain("never asks for administrator rights");
+        fireEvent.click(within(note).getByRole("button", { name: "Got it" }));
+        expect(blockMeta()["vault:prompts-read"]).toBe(true);
+        await waitFor(() => expect(screen.queryByRole("note", { name: "What the Vault may ask you" })).toBeNull());
+    });
+
+    it("warns on macOS before the first save, which creates the key", async () => {
+        setPlatform("darwin");
+        entries = [];
+        const { container } = renderVault();
+        await waitFor(() => expect(screen.getAllByText(/Nothing here yet/).length).toBeGreaterThan(0));
+        const personal = container.querySelector(".bundle-manager-pane:not(.is-hidden)") as HTMLElement;
+        fireEvent.click(within(personal).getByRole("button", { name: /Add/ }));
+        const dialog = await screen.findByRole("dialog");
+        expect(within(dialog).getByText(/macOS asks whether AgentMux may use the keychain/)).toBeInTheDocument();
+    });
+
+    it("doesn't warn before a save once the Vault has entries", async () => {
+        setPlatform("darwin");
+        const { container } = renderVault();
+        await screen.findByText("Alex");
+        const personal = container.querySelector(".bundle-manager-pane:not(.is-hidden)") as HTMLElement;
+        fireEvent.click(within(personal).getByRole("button", { name: /Add/ }));
+        const dialog = await screen.findByRole("dialog");
+        expect(within(dialog).queryByText(/macOS asks whether AgentMux may use the keychain/)).toBeNull();
     });
 
     it("dismisses an agent's request through the host", async () => {
