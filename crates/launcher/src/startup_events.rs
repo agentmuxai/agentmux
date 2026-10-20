@@ -10,7 +10,7 @@
 //!
 //! On non-Windows platforms (or when the splash is disabled), the receiver is
 //! dropped immediately and subsequent sends silently return `Err` — callers
-//! use `let _ = self.tx.send(...)` so nothing blows up.
+//! ignore the result of every send so nothing blows up.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StartupStatus {
@@ -51,9 +51,14 @@ pub enum StartupEvent {
 }
 
 /// Clone-able sender half — one per startup stage, cloned as needed.
+///
+/// Every clone shares one sender, so [`StartupEventSink::reconnect`] moves
+/// them all to a new receiver at once: the restart splash takes over the
+/// events the launcher IPC server (which holds a clone) forwards from the
+/// restarted host.
 #[derive(Clone, Debug)]
 pub struct StartupEventSink {
-    tx: std::sync::mpsc::Sender<StartupEvent>,
+    tx: std::sync::Arc<std::sync::Mutex<std::sync::mpsc::Sender<StartupEvent>>>,
 }
 
 impl StartupEventSink {
@@ -61,11 +66,27 @@ impl StartupEventSink {
     /// `splash::spawn_splash`; keep the sink in the launcher startup path.
     pub fn new() -> (Self, std::sync::mpsc::Receiver<StartupEvent>) {
         let (tx, rx) = std::sync::mpsc::channel();
-        (Self { tx }, rx)
+        (Self { tx: std::sync::Arc::new(std::sync::Mutex::new(tx)) }, rx)
+    }
+
+    /// Point this sink and every clone of it at a new receiver, for a splash
+    /// opened after the first one closed. The old receiver gets nothing more.
+    pub fn reconnect(&self) -> std::sync::mpsc::Receiver<StartupEvent> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        if let Ok(mut current) = self.tx.lock() {
+            *current = tx;
+        }
+        rx
+    }
+
+    fn send(&self, event: StartupEvent) {
+        if let Ok(tx) = self.tx.lock() {
+            let _ = tx.send(event);
+        }
     }
 
     pub fn stage_begin(&self, stage: &'static str, label: &'static str) {
-        let _ = self.tx.send(StartupEvent::StageBegin { stage, label });
+        self.send(StartupEvent::StageBegin { stage, label });
     }
 
     pub fn stage_end(
@@ -75,7 +96,7 @@ impl StartupEventSink {
         status: StartupStatus,
         detail: Option<String>,
     ) {
-        let _ = self.tx.send(StartupEvent::StageEnd {
+        self.send(StartupEvent::StageEnd {
             stage,
             duration_ms,
             status,
@@ -89,7 +110,7 @@ impl StartupEventSink {
         id: impl Into<String>,
         label: impl Into<String>,
     ) {
-        let _ = self.tx.send(StartupEvent::SubBegin {
+        self.send(StartupEvent::SubBegin {
             stage,
             id: id.into(),
             label: label.into(),
@@ -104,12 +125,30 @@ impl StartupEventSink {
         status: StartupStatus,
         detail: Option<String>,
     ) {
-        let _ = self.tx.send(StartupEvent::SubEnd {
+        self.send(StartupEvent::SubEnd {
             stage,
             id: id.into(),
             duration_ms,
             status,
             detail,
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reconnect_moves_every_clone_to_the_new_receiver() {
+        let (sink, first) = StartupEventSink::new();
+        let ipc_clone = sink.clone();
+        ipc_clone.stage_begin("host", "Host startup");
+        assert!(matches!(first.try_recv(), Ok(StartupEvent::StageBegin { stage: "host", .. })));
+
+        let second = sink.reconnect();
+        ipc_clone.stage_begin("cef_init", "CEF initialize");
+        assert!(matches!(second.try_recv(), Ok(StartupEvent::StageBegin { stage: "cef_init", .. })));
+        assert!(first.try_recv().is_err(), "the old receiver gets nothing after a reconnect");
     }
 }
