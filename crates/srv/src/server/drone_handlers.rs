@@ -168,10 +168,13 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .drone_delete(&cmd.id)
                     .map_err(|e| format!("deletedrone: {e}"))?;
                 // The runs are in this version's store, the definition in the
-                // shared one, so nothing cascades (m0038). Other versions keep
-                // their own runs of it.
+                // shared one, so nothing cascades (m0038). Definition first,
+                // then runs: a run starting meanwhile either has its row
+                // removed here or finds the definition gone and removes it
+                // itself (rundrone). Other versions keep their own runs.
                 if let Err(e) = mstore.drone_runs_delete_for(&cmd.id) {
-                    tracing::warn!(drone_id = %cmd.id, "deletedrone: removing its runs failed: {e}");
+                    broker.publish_event::<crate::backend::mps_events::DronesChanged>(&(), vec![], 0);
+                    return Err(format!("deletedrone: the drone was deleted, but removing its run history failed: {e}"));
                 }
                 if deleted {
                     broker.publish_event::<crate::backend::mps_events::DronesChanged>(&(), vec![], 0);
@@ -234,6 +237,13 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 mstore
                     .drone_run_insert(&placeholder)
                     .map_err(|e| format!("rundrone placeholder: {e}"))?;
+                // No FK ties the run to its definition (m0038): if the drone
+                // was deleted while this run started, take the row back out
+                // rather than leave history for a drone that no longer exists.
+                if id_store.drone_get(&drone_id).ok().flatten().is_none() {
+                    let _ = mstore.drone_runs_delete_for(&drone_id);
+                    return Err(format!("rundrone: drone {drone_id} was deleted while the run started"));
+                }
 
                 // Drain on a background task; on completion, UPDATE
                 // the placeholder row in place.

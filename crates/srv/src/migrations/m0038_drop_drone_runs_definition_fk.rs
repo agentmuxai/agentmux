@@ -48,16 +48,25 @@ const DRONE_RUNS_INDEXES: &str = "
     CREATE INDEX IF NOT EXISTS idx_drone_runs_drone_started ON db_drone_runs(drone_id, started_at DESC);
     CREATE INDEX IF NOT EXISTS idx_drone_runs_status ON db_drone_runs(status);";
 
-/// Rebuilds `db_drone_runs` without the definition FK if it still has it.
-/// Returns whether a rebuild happened.
+/// Rebuilds `db_drone_runs` without the definition FK if it still has it,
+/// and makes sure both indexes exist either way: a run interrupted after the
+/// rebuild committed but before the indexes were created finds the FK gone
+/// on its next pass, and must still create them. Returns whether a rebuild
+/// happened.
 pub(super) fn drop_drone_runs_fk(conn: &Connection) -> Result<bool, String> {
-    if already_dropped(conn, &DRONE_RUNS)? {
-        return Ok(false);
+    let rebuilt = if already_dropped(conn, &DRONE_RUNS)? {
+        false
+    } else {
+        rebuild_table(conn, &DRONE_RUNS)?;
+        true
+    };
+    let table_exists: bool = conn
+        .query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'db_drone_runs')", [], |r| r.get(0))
+        .map_err(|e| format!("db_drone_runs: probe: {e}"))?;
+    if table_exists {
+        conn.execute_batch(DRONE_RUNS_INDEXES).map_err(|e| format!("db_drone_runs: recreate indexes: {e}"))?;
     }
-    rebuild_table(conn, &DRONE_RUNS)?;
-    conn.execute_batch(DRONE_RUNS_INDEXES)
-        .map_err(|e| format!("db_drone_runs: recreate indexes: {e}"))?;
-    Ok(true)
+    Ok(rebuilt)
 }
 
 impl Migration for M0038DropDroneRunsDefinitionFk {

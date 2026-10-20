@@ -115,6 +115,17 @@ fn a_fresh_store_needs_no_rebuild_and_a_second_pass_does_nothing() {
 }
 
 #[test]
+fn a_rebuild_interrupted_before_its_indexes_gets_them_on_the_next_pass() {
+    let (_dir, path) = legacy_store();
+    let conn = Connection::open(&path).unwrap();
+    // The rebuild committed, then the process died before the indexes.
+    rebuild_table(&conn, &DRONE_RUNS).unwrap();
+    assert!(index_names(&conn).is_empty());
+    assert!(!drop_drone_runs_fk(&conn).unwrap(), "the FK is already gone");
+    assert_eq!(index_names(&conn), vec!["idx_drone_runs_drone_started", "idx_drone_runs_status"]);
+}
+
+#[test]
 fn a_missing_channel_store_is_a_no_op() {
     let dir = tempfile::tempdir().unwrap();
     let ctx = MigrationContext {
