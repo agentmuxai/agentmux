@@ -1,7 +1,7 @@
 # SPEC: Stay in control of every agent when the internet drops, and recover by itself
 
 **Date:** 2026-10-20
-**Status:** active — §8 PRs shipped: A in #5213 (MuxBus: offline is not signed out), B in #5221 (notes ride with the next turn), C in #5215 (the pane shows an API retry), D in #5236 (offer the layout another build saved); E's first half (§4.1 connectivity state, the status bar's Offline indicator) in #5241. E's second half (§4.3, §4.4), F and G remain.
+**Status:** active — §8 PRs shipped: A in #5213 (MuxBus: offline is not signed out), B in #5221 (notes ride with the next turn), C in #5215 (the pane shows an API retry), D in #5236 (offer the layout another build saved); E's first half (§4.1 connectivity state, the status bar's Offline indicator) in #5241, its second half (§4.3 retry of a network-failed turn, §4.4 held input) in #5246. F and G remain.
 **Related:** [`SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md`](SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md) (the per-class recovery banner),
 [`SPEC_PERSISTENT_CONTROLLER_FAILURE_CLASSIFICATION_2026_08_04.md`](SPEC_PERSISTENT_CONTROLLER_FAILURE_CLASSIFICATION_2026_08_04.md),
 [`SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md`](SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md).
@@ -163,6 +163,6 @@ Ordered by how much control each returns; A, B and C are independent and can go 
 
 ## 9. Open questions
 
-1. Automatic retry of a network-failed turn (§4.3): on by default? Proposed: on, only for turns that failed before any tool ran.
-2. Where held messages are stored: with the pane's persisted state (proposed) or the agent's history store.
+1. Automatic retry of a network-failed turn (§4.3): on by default? Proposed: on, only for turns that failed before any tool ran. **Decided (#5246):** as proposed; `agent:retryonreconnect` turns it off.
+2. Where held messages are stored: with the pane's persisted state (proposed) or the agent's history store. **Decided (#5246):** the block's meta (`agent:held_input`), sent by the pane once it is open and the API answers.
 3. Whether the first launch of a new channel should copy the previous channel's layout automatically or ask (proposed: ask once).
