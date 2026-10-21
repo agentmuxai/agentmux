@@ -247,8 +247,11 @@ export function computeMoveNode(layoutState: LayoutTreeState, computeInsertActio
             throw new Error(`Invalid direction: ${direction}`);
     }
 
-    // No indicator for a drop the move would refuse.
-    if (newMoveOperation && moveIsLockedByMinimize(nodeToMove, findNode(rootNode, newMoveOperation.parentId))) return;
+    // No indicator for a drop the move would refuse. A pane from another tab is placed by srv's
+    // redock, which splits the target pane and can't split a chip (it minimizes the pane after
+    // placing it instead), so it is offered the targets an expanded pane gets.
+    const movedAs = isForeignNode ? { ...nodeToMove, minimized: undefined } : nodeToMove;
+    if (newMoveOperation && moveIsLockedByMinimize(movedAs, findNode(rootNode, newMoveOperation.parentId))) return;
     if (
         newMoveOperation?.parentId !== nodeToMoveParent()?.id ||
         (newMoveOperation.index !== nodeToMoveIndexInParent() &&

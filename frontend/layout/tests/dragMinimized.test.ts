@@ -63,6 +63,29 @@ describe("moving and swapping a minimized pane", () => {
         expect(computed).toBeUndefined();
     });
 
+    it("a chip from another tab is offered no chip target (srv's redock can't place it there), but an expanded one is", () => {
+        const col = branch("col", FlexDirection.Column, [pane("m1", true), pane("m2", true)]);
+        const root = branch("r", FlexDirection.Row, [pane("a"), col]);
+        const state = newLayoutTreeState(root);
+        const foreignChip = pane("from-other-tab", true);
+        const ontoChip = computeMoveNode(state, {
+            type: LayoutTreeActionType.ComputeMove,
+            nodeId: "m2",
+            nodeToMoveId: foreignChip.id,
+            nodeToMove: foreignChip,
+            direction: DropDirection.Bottom,
+        });
+        expect(ontoChip).toBeUndefined();
+        const ontoExpanded = computeMoveNode(state, {
+            type: LayoutTreeActionType.ComputeMove,
+            nodeId: "a",
+            nodeToMoveId: foreignChip.id,
+            nodeToMove: foreignChip,
+            direction: DropDirection.Bottom,
+        });
+        expect(ontoExpanded).toBeDefined();
+    });
+
     it("a chip swaps with an expanded pane, and each keeps its state", () => {
         const root = branch("r", FlexDirection.Row, [pane("a"), pane("m", true), pane("c")]);
         const state = newLayoutTreeState(root);
