@@ -839,6 +839,14 @@ th[aria-sort="descending"] .tower-sort {
     color: var(--secondary-text-color);
 }
 
+.tower-panes-proc .tower-name {
+    padding-left: 32px;
+}
+
+.tower-panes-proc--deep .tower-name {
+    padding-left: 64px;
+}
+
 .tower-panes-shared .tower-name {
     padding-left: 56px;
 }

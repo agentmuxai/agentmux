@@ -14,8 +14,8 @@ import clsx from "clsx";
 import { createMemo, For, type JSX, Show } from "solid-js";
 import { LoadCells } from "./tower-kind-ui";
 import type { TowerViewModel } from "./tower-model";
-import { formatMem } from "./tower-util";
-import { ProcessRow } from "./tower-view";
+import { ProcessName } from "./tower-process-name";
+import { formatMem, processDetail } from "./tower-util";
 
 type Cpu = (f: number | undefined) => string;
 
@@ -103,6 +103,31 @@ export function PanesView(props: { model: TowerViewModel; cpu: Cpu }): JSX.Eleme
     );
 }
 
+/** One process under a window, a pane or the pre-warmed windows: its name
+ *  and PID, then its CPU and memory in this table's columns. */
+function PaneProcessRow(props: { model: TowerViewModel; process: TowerProcess; cpu: Cpu; depth: 1 | 2 }) {
+    return (
+        <tr
+            class={clsx(
+                "tower-process-row",
+                props.depth === 2 ? "tower-panes-proc--deep" : "tower-panes-proc",
+                props.process.kind && `tower-kind--${props.process.kind}`
+            )}
+            title={processDetail(props.process, props.model.snapshot()?.memory_metric ?? "")}
+        >
+            <td class="tower-name">
+                <div class="tower-name-line">
+                    <ProcessName process={props.process}>
+                        <span class="tower-muted">{props.process.pid}</span>
+                    </ProcessName>
+                </div>
+            </td>
+            <td />
+            <LoadCells model={props.model} cpu={props.cpu} cpuValue={props.process.cpu} mem={props.process.mem} />
+        </tr>
+    );
+}
+
 function WindowRows(props: { model: TowerViewModel; window: TowerPaneWindow; cpu: Cpu }) {
     const m = props.model;
     const key = () => `pwin:${props.window.window_id}`;
@@ -126,7 +151,9 @@ function WindowRows(props: { model: TowerViewModel; window: TowerPaneWindow; cpu
                         <span class="tower-label">Window {name()}</span>
                     </div>
                 </td>
-                <td class="tower-muted">its renderer</td>
+                <td class="tower-muted" title="The window's renderer: it draws every pane in the window except browser pages.">
+                    renderer
+                </td>
                 <LoadCells
                     model={m}
                     cpu={props.cpu}
@@ -139,7 +166,7 @@ function WindowRows(props: { model: TowerViewModel; window: TowerPaneWindow; cpu
             <Show when={open()}>
                 <For each={props.window.tabs}>{(t) => <TabRows model={m} tab={t} cpu={props.cpu} />}</For>
                 <For each={props.window.renderers}>
-                    {(p) => <ProcessRow model={m} process={p} cpu={props.cpu} nested />}
+                    {(p) => <PaneProcessRow model={m} process={p} cpu={props.cpu} depth={1} />}
                 </For>
             </Show>
         </>
@@ -194,7 +221,9 @@ function PaneRows(props: { model: TowerViewModel; pane: TowerPane; cpu: Cpu }) {
                             />
                         </Show>
                         <span class="tower-label tower-panes-name">{paneName(props.pane)}</span>
-                        <span class="tower-muted">{viewName(props.pane.view)}</span>
+                        <Show when={props.pane.title.trim()}>
+                            <span class="tower-muted">{viewName(props.pane.view)}</span>
+                        </Show>
                         <IconButton
                             icon="arrow-up-right-from-square"
                             label="Show this pane"
@@ -233,9 +262,9 @@ function PaneRows(props: { model: TowerViewModel; pane: TowerPane; cpu: Cpu }) {
                 </tr>
             </Show>
             <Show when={open()}>
-                <For each={processes()}>{(p) => <ProcessRow model={m} process={p} cpu={props.cpu} nested deep />}</For>
+                <For each={processes()}>{(p) => <PaneProcessRow model={m} process={p} cpu={props.cpu} depth={2} />}</For>
                 <For each={props.pane.shared}>
-                    {(p) => <ProcessRow model={m} process={p} cpu={props.cpu} nested deep />}
+                    {(p) => <PaneProcessRow model={m} process={p} cpu={props.cpu} depth={2} />}
                 </For>
             </Show>
         </>
@@ -264,15 +293,16 @@ function PoolRows(props: { model: TowerViewModel; pool: TowerProcess[]; cpu: Cpu
                             aria-expanded={open()}
                             onClick={() => m.toggleExpanded(key)}
                         />
-                        <span class="tower-label">Pre-warmed windows</span>
-                        <span class="tower-muted">waiting to be the next window or tear-off</span>
+                        <span class="tower-label" title="Hidden windows kept loaded, so a new window or a tear-off opens at once">
+                            Pre-warmed windows
+                        </span>
                     </div>
                 </td>
                 <td class="tower-muted">hidden</td>
                 <LoadCells model={m} cpu={props.cpu} cpuValue={cpu()} mem={mem()} scope="item" />
             </tr>
             <Show when={open()}>
-                <For each={props.pool}>{(p) => <ProcessRow model={m} process={p} cpu={props.cpu} nested />}</For>
+                <For each={props.pool}>{(p) => <PaneProcessRow model={m} process={p} cpu={props.cpu} depth={1} />}</For>
             </Show>
         </>
     );

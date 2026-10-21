@@ -277,7 +277,7 @@ function ownerColorOf(m: TowerViewModel, p: TowerProcess): string | undefined {
     return t?.kind === "agent" ? agentColor(t.id, t.label, m.snapshot()?.remote ?? false) : undefined;
 }
 
-export function ProcessRow(props: {
+function ProcessRow(props: {
     model: TowerViewModel;
     process: TowerProcess;
     cpu: (f: number | undefined) => string;
