@@ -940,15 +940,16 @@ async fn run_with_secrets(arguments: &Value, command: &str, cx: &ToolCtx<'_>) ->
     let started = Instant::now();
     let deadline = started + Duration::from_millis(timeout_ms);
     let base = cx.local_url.trim_end_matches('/').to_string();
-    // Proves which agent is asking: the output is the pane's own.
-    let auth = sign_ui_automation_auth().map_err(|e| anyhow::anyhow!("the job started, but reading its output needs this agent's signed identity: {e}"))?;
+    // Proves which agent is asking: the output is the pane's own. Signed afresh for each poll, since srv
+    // refuses a signature older than five minutes and a wait can be longer.
+    sign_ui_automation_auth().map_err(|e| anyhow::anyhow!("the job started, but reading its output needs this agent's signed identity: {e}"))?;
     // srv registers a job's output only once its process has started, so the first polls
     // can find nothing, and a poll can fail for a moment: retry, and never lose the job.
     let mut seen = false;
     let mut last_error = String::new();
     let mut last: Option<agentmux_common::api_types::ShellOutputResponse> = None;
     loop {
-        let body = serde_json::to_value(agentmux_common::api_types::ShellOutputRequest { shell_id: id.clone(), auth: auth.clone() })?;
+        let body = serde_json::to_value(agentmux_common::api_types::ShellOutputRequest { shell_id: id.clone(), auth: sign_ui_automation_auth()? })?;
         let polled = srv_post_json(cx.client, &format!("{base}/api/v1/shell/output"), cx.auth_key, &body, "Terminal output").await;
         match polled.and_then(|v| Ok(serde_json::from_value::<agentmux_common::api_types::ShellOutputResponse>(v)?)) {
             Ok(r) => {
