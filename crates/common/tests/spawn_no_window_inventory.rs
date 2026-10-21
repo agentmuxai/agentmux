@@ -90,8 +90,6 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "not-windows: macOS/Linux/unix-only code path"),
     ("crates/cef/src/commands/autostart.rs", "exe", 1,
      "no-window: calls no_window()/creation_flags in this file"),
-    ("crates/cef/src/commands/backend.rs", "&srv_path", 1,
-     "no-window: calls no_window()/creation_flags in this file"),
     ("crates/cef/src/commands/cli_login.rs", "cli_path", 1,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/cef/src/commands/cli_login.rs", "&spawn_program", 1,
