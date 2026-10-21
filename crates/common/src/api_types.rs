@@ -135,11 +135,13 @@ pub struct ShellStatusResponse {
 
 /// `POST /api/v1/shell/output` - the cleaned output of a job that was given Vault
 /// secrets (`ShellCreateRequest.secrets`). Only such a job keeps its output, and
-/// only the agent whose pane started it may read it.
+/// only the agent whose pane started it may read it: the request carries the
+/// agent's signed identity, and srv derives the pane from that, never from a
+/// field the caller fills in (every agent holds the instance auth key).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShellOutputRequest {
     pub shell_id: String,
-    pub agent_block_id: String,
+    pub auth: UiAutomationAuth,
 }
 
 /// Response from `POST /api/v1/shell/output`
@@ -150,7 +152,7 @@ pub struct ShellOutputResponse {
     pub exit_code: Option<i32>,
     /// The last lines the job wrote, with every Vault value taken out.
     pub output: String,
-    /// Older lines were left out.
+    /// Older lines were left out, or a line was cut short.
     pub truncated: bool,
 }
 
