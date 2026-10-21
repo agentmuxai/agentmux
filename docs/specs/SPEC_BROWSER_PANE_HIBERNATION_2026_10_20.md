@@ -6,7 +6,7 @@
 **Trigger:** Operator, 2026-10-20: *"We need smart Hibernation, especially for browser panes, which we should start first."* and *"during restore, can you add a note to the user saying restoring, with est eta, and also the reason, explain that to save memory agentmux hibernates browser panes."*
 **Builds on:**
 - Camper's draft `SPEC_HIDDEN_PANE_MEMORY_AND_BROWSER_DISCARD_2026_10_18.md` (in Camper's clone, not on `main`): Chrome's discard rules (§4), the fork API for an in-place discard (§5), and the browser-pane lab (§7), whose numbers are quoted here.
-- `docs/reports/REPORT_RENDERERS_WINDOWS_TABS_AND_PANES_2026_10_19.md`: which renderer runs what, and what hiding frees today (nothing).
+- The renderer report of 2026-10-19 (korp, not yet on `main`): which renderer runs what, and what hiding frees today (nothing).
 - `docs/specs/SPEC_RENDERER_RECYCLE_WHEN_IDLE_2026_10_13.md`: the host-decides, page-may-decline pattern reused in §5.
 **Supersedes, for browser panes only:** the 2026-10-19 decision to park hibernation (P4.4 of Camper's `PLAN_PERFORMANCE_AND_MEMORY_TRACKING_2026_10_19.md`) and P4.5's "discard only as an opt-in". Agent and terminal panes stay parked.
 
@@ -183,7 +183,7 @@ Half a day, in my own `task dev` build with its own data folder, never in the op
 | **3** | Fork: in-place `Discard` / `IsDiscarded` / `LoadIfNecessary` with `WebContentsDiscard` on (Camper's §5). A hibernated pane then keeps its history, scroll and form input, and the card loses its "isn't kept" line. Phase 1's close-and-recreate stays as the fallback when a discard fails | a CEF rebuild; a ceftest for scroll, form and history |
 | **4** | Freeze: a hidden pane awake for 5 minutes is frozen over CDP (`Page.setWebLifecycleState`), CPU to zero, with §5.3's exceptions | Phase 2, so freezing a page Chromium thinks is visible isn't fighting it |
 
-Agent and terminal panes are a separate spec once this one has shipped Phase 1: they need srv to own their timers and live status first (`docs/reports/REPORT_WINDOW_TAB_SWITCH_PANES_APPEAR_AT_DIFFERENT_TIMES_RCA_2026_10_19.md` and the hibernation discussion of 2026-10-19).
+Agent and terminal panes are a separate spec once this one has shipped Phase 1: they need srv to own their timers and live status first (the agent pane's failure retry, question timeout and working indicator live in the pane today; discussed with the operator on 2026-10-19).
 
 ## 11. Tests
 
