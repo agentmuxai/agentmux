@@ -7,7 +7,7 @@
 **Builds on:**
 - `docs/specs/SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md`: Tower, its sampler, its metric definitions (§4).
 - `docs/specs/SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md`: today's Agents and Processes views.
-- `docs/specs/SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md`: sleeping browser panes, which this view shows.
+- Browser-pane hibernation (#5290): sleeping browser panes, which this view shows.
 - `crates/cef/src/renderer_map.rs`: which renderer process serves which browser.
 
 ---
