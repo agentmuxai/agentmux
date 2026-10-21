@@ -31,6 +31,10 @@ fn database(kdf: KdfConfig) -> Database {
             e.set_unprotected("Notes", "only a note");
         });
         work.add_entry().edit(|e| e.set_unprotected("Title", "Empty"));
+        work.add_entry().edit(|e| {
+            e.set_unprotected("Title", "Authenticator only");
+            e.set("otp", Value::protected("otpauth://totp/Only?secret=KRSXG5CTMVRXEZLU"));
+        });
     }
     db
 }
@@ -67,6 +71,10 @@ fn a_keepass_database_comes_in_as_logins_notes_and_kind_named_fields() {
     // A group below the root is a tag; an entry that is only a note is a note.
     let only = by("Server note");
     assert_eq!((only.kind.as_str(), only.tags.clone()), ("note", vec!["Work".to_string()]));
+    // A seed with no password isn't dropped: it is kept in a sealed note.
+    let seed = by("Authenticator only");
+    assert_eq!(seed.kind, "note");
+    assert!(seed.parts["text"].contains("secret=KRSXG5CTMVRXEZLU"), "{:?}", seed.parts);
     assert!(i.skipped.iter().any(|(l, why)| l == "Empty" && why.contains("no password")), "{:?}", i.skipped);
 }
 

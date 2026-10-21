@@ -256,6 +256,16 @@ fn entry_into(e: &keepass::db::Entry, tag: &str, entries: &mut Vec<Incoming>, sk
             }
         }
     }
+    // A one-time-code seed with no password to go with it (a 2FA-only entry) has no
+    // login to ride on, so it is kept in the sealed note rather than dropped.
+    if password.is_empty() {
+        if let Some(t) = e.get_raw_otp_value().map(str::trim).filter(|v| !v.is_empty()) {
+            if !extra.is_empty() {
+                extra.push('\n');
+            }
+            extra.push_str(&format!("otp: {t}"));
+        }
+    }
     // Notes and the remaining custom fields, kept together and sealed.
     let notes = get("Notes");
     let text = match (notes.is_empty(), extra.is_empty()) {
