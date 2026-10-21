@@ -444,6 +444,11 @@ fn view_from_block(store: &Store, meta: &MetaMapType, ctx: &ExportContext, warni
         view_type = "connectors".to_string();
         config.insert("section".into(), Value::String("remotes".to_string()));
     }
+    // The Vault was a pane of its own until it became a section of Warden.
+    if view_type == "vault" {
+        view_type = "warden".to_string();
+        config.insert("section".into(), Value::String("vault".to_string()));
+    }
     match view_type.as_str() {
         "agent" => {
             // The definition's portable identity, never its local row id.
@@ -533,7 +538,7 @@ fn view_from_block(store: &Store, meta: &MetaMapType, ctx: &ExportContext, warni
                 config.insert("show_controls".into(), Value::Bool(shown));
             }
         }
-        "connectors" | "memory" => {
+        "connectors" | "memory" | "warden" | "settings" => {
             if let Some(section) = meta_str(meta, &format!("{view_type}:section")) {
                 config.insert("section".into(), Value::String(section.to_string()));
             }
@@ -609,8 +614,7 @@ const MAX_TREE_DEPTH: usize = 32;
 
 /// Views that need no config to open, beyond their type.
 const PLAIN_VIEWS: &[&str] = &[
-    "swarm", "settings", "help", "drone", "workflows", "warden", "toolchain", "launcher", "identity",
-    "tower", "vault",
+    "swarm", "help", "drone", "workflows", "toolchain", "launcher", "identity", "tower",
 ];
 
 /// How to turn a file into panes.
@@ -996,6 +1000,18 @@ impl PlanBuilder<'_> {
                     meta.insert(format!("{pane}:section"), Value::String(s.to_string()));
                 }
                 self.summary.push(if pane == "connectors" { "Connectors" } else { "Memory" }.to_string());
+            }
+            // Files saved before the Vault became a section of Warden say "vault".
+            "warden" | "settings" | "vault" => {
+                let (pane, section) = match kind {
+                    "vault" => ("warden", Some("vault")),
+                    pane => (pane, cfg_str(view, "section")),
+                };
+                meta.insert("view".into(), pane.into());
+                if let Some(s) = section {
+                    meta.insert(format!("{pane}:section"), Value::String(s.to_string()));
+                }
+                self.summary.push(pane.to_string());
             }
             k if PLAIN_VIEWS.contains(&k) => {
                 meta.insert("view".into(), Value::String(k.to_string()));
