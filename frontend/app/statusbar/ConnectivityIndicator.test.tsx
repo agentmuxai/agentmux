@@ -81,6 +81,13 @@ describe("ConnectivityIndicator", () => {
         expect(item.getAttribute("data-tip")).toContain("Some requests to MuxBus since");
     });
 
+    it("takes an API srv hasn't checked yet, and says nothing about it", () => {
+        send(online(Date.now()), svc("model_api:anthropic", "Anthropic API", "unknown", Date.now()));
+        expect(connectivity()?.services[1].state).toBe("unknown");
+        render(() => <ConnectivityIndicator />);
+        expect(screen.queryByText("Offline")).toBeNull();
+    });
+
     it("ignores an older status that arrives late", () => {
         send(online(Date.now()), svc("muxbus", "MuxBus", "online", Date.now()));
         const current = connectivity()!.revision;

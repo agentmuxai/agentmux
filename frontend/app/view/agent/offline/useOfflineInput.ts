@@ -30,7 +30,6 @@ import {
     confirmedSend,
     createOfflineInput,
     type HeldInput,
-    isTrackedService,
     keyedLock,
     modelApiService,
     type OfflineInput,
@@ -112,8 +111,6 @@ export function useOfflineInput(opts: {
     const offline = createOfflineInput({
         retrying: () => apiRetry() !== null,
         api: () => serviceReachability(connectivity()?.services, service()),
-        tracked: () => isTrackedService(service(), connectivity()?.services),
-        statusKnown: () => connectivity() !== null,
         ready: () => state.initPhase.kind !== "InitPending",
         working: () => workingFromPhase(state.turnPhase),
         document: () => opts.paneModel.document(),

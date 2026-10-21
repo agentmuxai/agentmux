@@ -18,6 +18,7 @@ import {
     modelApiService,
     type OfflineInput,
     type PaneMessageEvent,
+    UNKNOWN_HOLD_MS,
     sentInTranscript,
     serviceReachability,
 } from "./offline-input";
@@ -33,11 +34,15 @@ describe("pure rules", () => {
         expect(modelApiService([])).toBeNull();
     });
 
-    it("reads a tracked service's state, and null for one srv doesn't track", () => {
+    it("reads a tracked service's state, unknown before srv has word on it, and null for one srv doesn't track", () => {
         const services = [{ service: "model_api:anthropic", label: "Anthropic API", state: "offline" as const, since_ms: 1, last_error: null }];
         expect(serviceReachability(services, "model_api:anthropic")).toBe("offline");
         expect(serviceReachability(services, "model_api:openai")).toBeNull();
-        expect(serviceReachability(undefined, "model_api:anthropic")).toBeNull();
+        // No status yet, or one srv sent before it checked the API.
+        expect(serviceReachability(undefined, "model_api:anthropic")).toBe("unknown");
+        expect(serviceReachability([], "model_api:anthropic")).toBe("unknown");
+        expect(serviceReachability(undefined, "model_api:openai")).toBeNull();
+        expect(serviceReachability(services, null)).toBeNull();
     });
 
     it("knows srv tracks Claude's API before any status arrives, and others once they report", () => {
@@ -62,6 +67,7 @@ describe("pure rules", () => {
         expect(holdsInput(false, "online")).toBe(false);
         expect(holdsInput(false, "degraded")).toBe(false);
         expect(holdsInput(false, null)).toBe(false);
+        expect(holdsInput(false, "unknown")).toBe(true);
     });
 
     it("never holds a command that runs in the pane", () => {
@@ -171,12 +177,10 @@ describe("confirmedSend", () => {
 
 /** A pane: plain signals for what the controller reads, a recording send. */
 function makePane(
-    opts: { api?: Reachability | null; tracked?: boolean; statusKnown?: boolean; held?: HeldInput[] } = {}
+    opts: { api?: Reachability | null; held?: HeldInput[] } = {}
 ) {
     const [retrying, setRetrying] = createSignal(false);
     const [api, setApi] = createSignal<Reachability | null>(opts.api === undefined ? "online" : opts.api);
-    const [tracked, setTracked] = createSignal(opts.tracked ?? opts.api !== null);
-    const [statusKnown, setStatusKnown] = createSignal(opts.statusKnown ?? true);
     const [ready, setReady] = createSignal(true);
     const [working, setWorking] = createSignal(false);
     let doc: DocumentNode[] = [];
@@ -206,8 +210,6 @@ function makePane(
         ui = createOfflineInput({
             retrying,
             api,
-            tracked,
-            statusKnown,
             ready,
             working,
             document: () => doc,
@@ -232,8 +234,6 @@ function makePane(
         dispose,
         setRetrying,
         setApi,
-        setTracked,
-        setStatusKnown,
         setReady,
         setWorking,
         setDoc: (d: DocumentNode[]) => {
@@ -411,6 +411,30 @@ describe("held input", () => {
         p.dispose();
     });
 
+    it("ignores a late answer to an earlier send of a message sent again since", async () => {
+        const p = makePane({ api: "offline" });
+        await p.ui.submit("one");
+        p.accepts.push("unknown", "unknown");
+        p.setApi("online");
+        await flush();
+        await p.ui.sendNow();
+        await flush();
+        expect(p.deliver).toHaveBeenCalledTimes(2);
+        // The first send's rejection arrives late: the second may have gone.
+        p.late[0](false);
+        await flush();
+        expect(p.store.held).toEqual([expect.objectContaining({ text: "one", unconfirmed: true })]);
+        p.setWorking(true);
+        p.setWorking(false);
+        await flush();
+        expect(p.deliver).toHaveBeenCalledTimes(2);
+        // The second send's own answer settles it.
+        p.late[1](true);
+        await flush();
+        expect(p.store.held).toEqual([]);
+        p.dispose();
+    });
+
     it("holds again, as not sent, a message whose late answer is a rejection", async () => {
         const p = makePane({ api: "offline" });
         await p.ui.submit("one");
@@ -519,6 +543,24 @@ describe("held input", () => {
         p.dispose();
     });
 
+    it("Cancelling every message Send now was for doesn't carry it over to the next one typed", async () => {
+        const p = makePane({ api: "offline" });
+        p.setWorking(true);
+        p.setRetrying(true);
+        await p.ui.submit("one");
+        const done = p.ui.sendNow();
+        p.ui.cancel(p.ui.held()[0].id);
+        p.setWorking(false);
+        p.setRetrying(false);
+        await vi.advanceTimersByTimeAsync(500);
+        await done;
+        await p.ui.submit("two");
+        await vi.advanceTimersByTimeAsync(500);
+        expect(p.sent).toEqual([]);
+        expect(p.ui.held().map((m) => m.text)).toEqual(["two"]);
+        p.dispose();
+    });
+
     it("Send now with no turn running sends without stopping anything", async () => {
         const p = makePane({ api: "offline" });
         await p.ui.submit("one");
@@ -565,13 +607,22 @@ describe("held input", () => {
         p.dispose();
     });
 
-    it("doesn't release into a tracked API whose state isn't known yet, as on reopening", async () => {
-        const p = makePane({ api: null, tracked: true, statusKnown: false, held: [{ id: "a", text: "one", heldAt: 1 }] });
+    it("holds what is typed while the API isn't checked yet, and sends it once it answers", async () => {
+        const p = makePane({ api: "unknown" });
+        await p.ui.submit("u there?");
+        expect(p.sent).toEqual([]);
+        expect(p.ui.held().map((m) => m.text)).toEqual(["u there?"]);
+        p.setApi("online");
+        await flush();
+        expect(p.sent).toEqual(["u there?"]);
+        p.dispose();
+    });
+
+    it("keeps restored input held after a restart until the API reports, and while it reports offline", async () => {
+        const p = makePane({ api: "unknown", held: [{ id: "a", text: "one", heldAt: 1 }] });
         await vi.advanceTimersByTimeAsync(10_000);
         expect(p.deliver).not.toHaveBeenCalled();
-        // The first status says the API is still offline: still held.
         p.setApi("offline");
-        p.setStatusKnown(true);
         await flush();
         expect(p.deliver).not.toHaveBeenCalled();
         p.setApi("online");
@@ -580,10 +631,19 @@ describe("held input", () => {
         p.dispose();
     });
 
-    it("releases for an untracked provider without waiting for a status", async () => {
-        const p = makePane({ api: null, tracked: false, statusKnown: false, held: [{ id: "a", text: "one", heldAt: 1 }] });
-        await flush();
+    it("stops waiting on an API that stays unchecked, so a missing status can't hold everything", async () => {
+        const p = makePane({ api: "unknown", held: [{ id: "a", text: "one", heldAt: 1 }] });
+        await vi.advanceTimersByTimeAsync(UNKNOWN_HOLD_MS - 1);
+        expect(p.deliver).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
         expect(p.sent).toEqual(["one"]);
+        await p.ui.submit("two");
+        expect(p.sent).toEqual(["one", "two"]);
+        // A fresh unknown spell holds again.
+        p.setApi("online");
+        p.setApi("unknown");
+        await p.ui.submit("three");
+        expect(p.sent).toEqual(["one", "two"]);
         p.dispose();
     });
 

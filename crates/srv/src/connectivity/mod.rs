@@ -45,6 +45,9 @@ pub enum Reachability {
     Degraded,
     /// Every recent request failed before any answer came back.
     Offline,
+    /// Not checked yet: a model API srv tracks, between startup and its
+    /// first probe or request. Not offline, and not known to answer.
+    Unknown,
 }
 
 /// One service's reachability.
@@ -93,6 +96,11 @@ pub static ANTHROPIC: ModelApi = ModelApi {
     default_base_url: "https://api.anthropic.com",
     base_url_env: Some("ANTHROPIC_BASE_URL"),
 };
+
+/// The model APIs whose state srv tracks from startup: each is listed as
+/// [`Reachability::Unknown`] and probed at once, so a window can tell "not
+/// checked yet" from "answers" before any agent has made a request.
+pub static TRACKED_MODEL_APIS: [&ModelApi; 1] = [&ANTHROPIC];
 
 /// A service AgentMux depends on.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -160,6 +168,15 @@ impl Shared {
         self.tracker.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// Lists every tracked model API as not checked yet, due for a probe.
+    fn seed_at(&self, now_ms: i64) {
+        let mut changed = None;
+        for api in TRACKED_MODEL_APIS {
+            changed = self.tracker().seed(Service::ModelApi(api), now_ms).or(changed);
+        }
+        self.publish(changed);
+    }
+
     fn report_at(&self, service: Service, outcome: Outcome, now_ms: i64) {
         let changed = self.tracker().report(service, outcome, now_ms);
         self.publish(changed);
@@ -190,6 +207,7 @@ pub fn install(event_bus: Arc<EventBus>) {
     if SHARED.sink.set(event_bus).is_err() || tokio::runtime::Handle::try_current().is_err() {
         return;
     }
+    SHARED.seed_at(agentmux_common::time::now_ms());
     let clock: probe::Clock = Arc::new(agentmux_common::time::now_ms);
     tokio::spawn(probe::drive(SHARED.clone(), Arc::new(probe::NetProber::new()), clock));
 }

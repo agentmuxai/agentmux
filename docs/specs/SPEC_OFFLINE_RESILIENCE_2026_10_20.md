@@ -53,7 +53,7 @@ These are the acceptance criteria. Each one is tested by the scenarios in §7.
 A `connectivity` module in srv holds the reachability of each service AgentMux depends on: each provider's model API host, MuxBus (relay and auth), and "internet" as a fallback.
 
 - **Inputs:** outcomes reported by the subsystems that already make requests (cloud subscriber, broker, discovery, ambient calls), the CLI's `api_retry` frames and failure classes, OS network-change notifications, and a light active probe (TCP connect, then a HEAD) run only while a service is believed down, with capped backoff (5 s doubling to 60 s), and immediately on an OS network change.
-- **States per service:** `Online`, `Degraded` (some requests fail), `Offline` (every recent request fails at the transport level: DNS, connect, reset, TLS handshake, timeout). An HTTP response of any status means the service is reachable.
+- **States per service:** `Online`, `Degraded` (some requests fail), `Offline` (every recent request fails at the transport level: DNS, connect, reset, TLS handshake, timeout). An HTTP response of any status means the service is reachable. A model API srv tracks is listed from startup as `Unknown` and probed at once, so a window can tell "not checked yet" from "answers" (#5246); held input waits on `Unknown` for at most 20 s.
 - **Outputs:** an event `connectivity:changed` with the per-service states and `since`, an RPC to read it, and a MuxAPI field so agents can ask.
 
 ### 4.2 Pane: show the retry, offer Stop and Retry now
