@@ -27,6 +27,7 @@ const card: VaultEntryInfo = {
     fields: {},
     tags: [],
     parts_set: ["number", "cvc"],
+    grants: [],
     tail: "1111",
     created_at: 1,
     updated_at: 1,

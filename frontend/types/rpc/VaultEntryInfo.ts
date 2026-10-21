@@ -9,4 +9,8 @@ export type VaultEntryInfo = { id: string, kind: string, section: VaultSection, 
 /**
  * The parts that hold a value.
  */
-parts_set: Array<string>, tail: string, created_at: number, updated_at: number, last_used_at: number, };
+parts_set: Array<string>, 
+/**
+ * The sites an agent may fill this entry into without asking again.
+ */
+grants: Array<string>, tail: string, created_at: number, updated_at: number, last_used_at: number, };

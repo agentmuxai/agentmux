@@ -6,6 +6,7 @@ import { newLayoutNode, balanceNode } from "../lib/layoutNode";
 import {
     minimizeNodeToggle,
     collapseMaximizedNode,
+    restoreMaximizedNode,
     rebuildMinimizedSet,
     countExpandedLeaves,
     isNodeLocked,
@@ -931,7 +932,8 @@ describe("minimizing a maximized pane", () => {
 
 // A minimized chip that was maximized is both. The header then reads "Restore"
 // (maximize button) and "Minimize" (minimize button), never "Restore" twice.
-// The header's Minimize is `collapseMaximizedNode`; `minimizeNodeToggle` keeps
+// The header's Minimize is `collapseMaximizedNode` (back to a chip), its Restore
+// `restoreMaximizedNode` (back to the tile, expanded); `minimizeNodeToggle` keeps
 // restoring a minimized pane for programmatic callers (showBlockInPane).
 describe("a pane that is both minimized and maximized", () => {
     it("the header's Minimize puts it back as a chip: the maximize ends and the flag stays", () => {
@@ -959,6 +961,54 @@ describe("a pane that is both minimized and maximized", () => {
         expect(model.treeState.magnifiedNodeId).toBe(paneA1.id);
         expect(paneA1.minimized).toBe(true);
         expect(model.calls).toEqual([]);
+    });
+
+    it("the header's Restore shows it expanded in its tile: the chip is restored, then the maximize ends", () => {
+        const { root, paneA1 } = buildTwoColumnLayout();
+        paneA1.minimized = true;
+        const model = makeMagnifyMock(root, paneA1.id);
+
+        restoreMaximizedNode(model, paneA1.id);
+
+        expect(paneA1.minimized).toBeUndefined();
+        expect(model.treeState.magnifiedNodeId).toBeUndefined();
+        // Restore first, so the state in between is a plain maximized pane.
+        expect(model.calls).toEqual(["updateTree", "intent:restore", "updateTree"]);
+        expect(model.magnifyCalls).toEqual([{ nodeId: paneA1.id, setState: true, focused: true, minimizedAtCall: undefined }]);
+    });
+
+    it("the header's Restore on a maximized pane that was never a chip just ends the maximize", () => {
+        const { root, paneA1 } = buildTwoColumnLayout();
+        const model = makeMagnifyMock(root, paneA1.id);
+
+        restoreMaximizedNode(model, paneA1.id);
+
+        expect(paneA1.minimized).toBeUndefined();
+        expect(model.treeState.magnifiedNodeId).toBeUndefined();
+        expect(model.calls).toEqual(["updateTree"]);
+    });
+
+    it("the header's Restore on a maximized pane that is not in the tree (an ephemeral pane) still ends the maximize", () => {
+        const { root } = buildTwoColumnLayout();
+        const model = makeMagnifyMock(root, "ephemeral-node");
+
+        restoreMaximizedNode(model, "ephemeral-node");
+
+        expect(model.treeState.magnifiedNodeId).toBeUndefined();
+        expect(model.calls).toEqual(["updateTree"]);
+        expect(model.magnifyCalls.map((c: { nodeId: string }) => c.nodeId)).toEqual(["ephemeral-node"]);
+    });
+
+    it("the header's Restore does nothing for a pane that is not maximized", () => {
+        const { root, paneA1 } = buildTwoColumnLayout();
+        paneA1.minimized = true;
+        const model = makeMagnifyMock(root, undefined);
+
+        restoreMaximizedNode(model, paneA1.id);
+
+        expect(paneA1.minimized).toBe(true);
+        expect(model.calls).toEqual([]);
+        expect(model.magnifyCalls).toEqual([]);
     });
 
     it("does nothing for a pane that is not maximized", () => {

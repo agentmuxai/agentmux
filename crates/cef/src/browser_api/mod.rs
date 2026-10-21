@@ -39,6 +39,8 @@ pub mod secret;
 pub mod shortcuts;
 pub mod snapshot;
 pub mod types;
+pub mod vault_fill;
+pub mod vault_slots;
 pub mod wait;
 
 /// Register `/agentmux/browser/*` routes on the given axum Router.
@@ -59,6 +61,8 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
             post(act::set_files_route).layer(act::set_files_body_limit()),
         )
         .route("/agentmux/browser/wait_for", post(wait::wait_for_route))
+        .route("/agentmux/browser/field_info", post(vault_fill::field_info_route))
+        .route("/agentmux/browser/vault_fill", post(vault_fill::vault_fill_route))
         .route("/agentmux/browser/screenshot", post(routes::screenshot))
         .route("/agentmux/browser/click_element", post(routes::click_element))
         .route("/agentmux/browser/focus_element", post(routes::focus_element))

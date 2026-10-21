@@ -345,6 +345,33 @@ describe("LayoutModel", () => {
         expect(model.magnifiedNodeId).toBe(second.id);
     });
 
+    // The maximize button's Restore on a chip that was maximized: back to the tile, expanded, not to a chip.
+    it("restoreMaximizedNode shows a minimized-and-maximized pane expanded in its tile", () => {
+        const model = createLayoutModel();
+        const first = newLayoutNode(undefined, undefined, undefined, { blockId: "left" });
+        model.treeReducer({ type: LayoutTreeActionType.InsertNode, node: first, magnified: false, focused: true } as LayoutTreeInsertNodeAction);
+        const second = newLayoutNode(undefined, undefined, undefined, { blockId: "right" });
+        model.treeReducer(
+            {
+                type: LayoutTreeActionType.SplitHorizontal,
+                targetNodeId: model.treeState.rootNode!.id,
+                newNode: second,
+                position: "after",
+                focused: false,
+            } as LayoutTreeSplitHorizontalAction,
+            false
+        );
+        model.updateTree();
+        model.minimizeNodeToggle(second.id);
+        model.magnifyNodeToggle(second.id);
+        expect(model.minimizedNodeIds().has(second.id)).toBe(true);
+        expect(model.magnifiedNodeId).toBe(second.id);
+
+        model.restoreMaximizedNode(second.id);
+        expect(model.magnifiedNodeId).toBeUndefined();
+        expect(model.minimizedNodeIds().has(second.id)).toBe(false);
+    });
+
     // SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md R1: closing the selected pane
     // moves the selection to a neighbour without any FocusNode action, so no
     // requestNodeFocus(); the model's own selection observer hands the caret on.

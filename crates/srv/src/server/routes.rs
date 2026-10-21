@@ -249,6 +249,8 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/vault", get(super::vault_handlers::handle_vault_list))
         .route("/api/v1/vault/request", post(super::vault_handlers::handle_vault_request))
         .route("/api/v1/vault/on_screen", get(super::vault_handlers::handle_vault_on_screen))
+        // An agent's `Browser` `fill` with `vault`: the person says where it may go.
+        .route("/api/v1/ui/browser/vault_fill", post(super::browser_vault_fill::handle_vault_fill))
         // Open (launch) an agent into a pane from an agent tool call —
         // agentmux-mcp's OpenAgent tool POSTs `{agent_id, tab_id?, …}` here.
         // Shares the exact agent.open logic (incl. its AGENT_OPEN_LOCKS

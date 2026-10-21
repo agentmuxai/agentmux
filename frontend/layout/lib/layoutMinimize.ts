@@ -136,6 +136,22 @@ export function collapseMaximizedNode(model: LayoutModel, nodeId: string) {
     commitToggle(model, LayoutTreeActionType.Minimize, nodeId);
 }
 
+/**
+ * The maximize button's Restore while the pane is maximized: end the maximize and show the pane
+ * expanded in its tile, also when it was a chip before it was maximized (a chip that was
+ * maximized is both). Its Minimize is `collapseMaximizedNode`, which keeps it a chip. The chip is
+ * restored first and the maximize ended second, so the state in between is a plain maximized
+ * pane, which the layout allows.
+ */
+export function restoreMaximizedNode(model: LayoutModel, nodeId: string) {
+    if (model.treeState.magnifiedNodeId !== nodeId) return;
+    // Only a chip in the tree has a flag to clear; anything else maximized (an ephemeral pane,
+    // which is not in the tree) just ends its maximize.
+    const node = findNode(model.treeState.rootNode, nodeId);
+    if (node && !node.children?.length && node.minimized) commitToggle(model, LayoutTreeActionType.Restore, nodeId);
+    model.magnifyNodeToggle(nodeId);
+}
+
 /** One commit: the intent (local prediction, sent to srv), then the layout
  *  doctor's check with the toggle's attribution (issue #2179). */
 function commitToggle(model: LayoutModel, type: LayoutTreeActionType.Minimize | LayoutTreeActionType.Restore, nodeId: string) {

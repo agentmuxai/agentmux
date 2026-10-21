@@ -23,6 +23,7 @@ import { useTick } from "@/app/hook/useTick";
 import { longRunningToolRows, type LongRunningToolRow } from "./swarm-longrunning";
 import { formatCompactNumber } from "@/util/format-count";
 import { formatElapsedClock, formatTimeLeft } from "@/util/format-time";
+import { HeldTaskChip } from "@/app/view/warden-kanban/kanban-held";
 import { revealBlock } from "@/app/util/reveal-block";
 import { sameList, selectTrace } from "@/app/util/select-trace";
 import { BackgroundTaskBucket, SubagentBackgroundTasks, visibleBackgroundTasks } from "./swarm-background-tasks";
@@ -592,6 +593,8 @@ export function AgentRow({
                 >
                     {node().line.text}
                 </div>
+                {/* The Kanban task this agent is on, which opens it there (SPEC_WARDEN_KANBAN_2026_10_20.md §6.14). */}
+                <Show when={node().blockId}>{(blockId) => <HeldTaskChip blockId={blockId()} />}</Show>
                 {/* The literal call in flight, next to the Haiku paraphrase
                     above it. Deliberately OUTSIDE the collapsed() guard: it is
                     one line, it is the most perishable thing on the card, and

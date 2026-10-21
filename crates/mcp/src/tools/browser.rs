@@ -148,10 +148,17 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 _ => "check",
             };
             let text = arguments.get("text").and_then(|v| v.as_str()).map(str::to_string);
+            let vault = arguments.get("vault").and_then(|v| v.as_str()).map(str::trim).filter(|v| !v.is_empty()).map(str::to_string);
+            if let Some(vault) = vault {
+                if action != "fill" || text.is_some() {
+                    anyhow::bail!("vault is for fill, and instead of text: give one or the other");
+                }
+                return vault_fill(cx, auth, pane_arg(arguments), &r, &vault).await;
+            }
             let option = arguments.get("option").and_then(|v| v.as_str()).map(str::to_string);
             let checked = arguments.get("checked").and_then(|v| v.as_bool());
             match action {
-                "fill" if text.is_none() => anyhow::bail!("missing required parameter: text"),
+                "fill" if text.is_none() => anyhow::bail!("missing required parameter: text (or vault, to fill from a Vault entry)"),
                 "select" if option.is_none() => anyhow::bail!("missing required parameter: option"),
                 "check" if checked.is_none() => anyhow::bail!("missing required parameter: checked"),
                 _ => {}
@@ -788,6 +795,54 @@ fn act_result_text(name: &str, r: &str, body: &serde_json::Value) -> String {
     format!("{name} {r}: done. The element now: {after}")
 }
 
+/// `fill` with `vault`: srv asks the person where the entry may go, then the host
+/// types it. Waits as long as a committing click does for the person's answer.
+/// What comes back says the field was filled, never what it holds.
+async fn vault_fill(
+    cx: &ToolCtx<'_>,
+    auth: agentmux_common::api_types::UiAutomationAuth,
+    pane: Option<String>,
+    r: &str,
+    vault: &str,
+) -> Result<String> {
+    let url = format!("{}/api/v1/ui/browser/vault_fill", cx.local_url.trim_end_matches('/'));
+    let resp = cx
+        .client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(&json!({ "auth": auth, "pane": pane, "ref": r, "vault": vault }))
+        .timeout(std::time::Duration::from_secs(11 * 60))
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        let why = serde_json::from_str::<Value>(&text).ok().and_then(|v| v.get("error").and_then(Value::as_str).map(str::to_string)).unwrap_or(text);
+        anyhow::bail!("BrowserFill {r} from the Vault: {why}");
+    }
+    let body: Value = serde_json::from_str(&text).map_err(|e| anyhow::anyhow!("BrowserFill: bad response: {e}"))?;
+    Ok(vault_fill_text(r, &body))
+}
+
+/// The agent's answer to a Vault fill: where it went, and anything the page said.
+fn vault_fill_text(r: &str, body: &Value) -> String {
+    let d = |k: &str| body.pointer(&format!("/data/{k}")).and_then(Value::as_str).unwrap_or("");
+    let mut out = format!(
+        "BrowserFill {r}: filled from the Vault entry {} (the value stays hidden: it is not shown to you, in snapshots or in read-backs) on {}, field {:?}.",
+        d("filled_from_vault"),
+        d("site"),
+        d("field")
+    );
+    if !d("validation").is_empty() {
+        out.push_str(&format!(" The page says: {}", d("validation")));
+    }
+    if !d("note").is_empty() {
+        out.push_str(&format!(" Note: {}.", d("note")));
+    }
+    out
+}
+
 /// What `wait` tells the agent, naming the iframe the text was found in.
 fn wait_result_text(body: &serde_json::Value) -> String {
     let waited = body.pointer("/data/waited_ms").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -801,6 +856,28 @@ fn wait_result_text(body: &serde_json::Value) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    // `fill` with `vault`: what the agent is told never carries the value.
+    #[test]
+    fn a_vault_fill_answer_says_where_it_went_and_not_what_was_typed() {
+        let body = serde_json::json!({ "ok": true, "data": {
+            "filled_from_vault": "ssn-alex", "part": "value", "value": "[secret: hidden]",
+            "site": "https://irs.gov", "field": "Social Security Number",
+            "validation": "Enter 9 digits", "note": "the page shortened or reformatted the value",
+        } });
+        let said = vault_fill_text("e7", &body);
+        assert!(said.contains("ssn-alex") && said.contains("https://irs.gov") && said.contains("Social Security Number"), "{said}");
+        assert!(said.contains("Enter 9 digits") && said.contains("shortened or reformatted"), "{said}");
+        assert!(!said.contains("123-45"), "{said}");
+    }
+
+    #[test]
+    fn the_browser_tool_offers_vault_beside_text() {
+        let schema: Value = serde_json::from_str(crate::tool_schemas::BROWSER_TOOL).unwrap();
+        let vault = &schema["inputSchema"]["properties"]["vault"]["description"];
+        assert!(vault.as_str().unwrap().contains("never reaches you"));
+    }
     use super::{dialogs_text, find_report, log_text, popups_note, scope_arg};
     use agentmux_common::api_types::UiBrowserElementMatch;
     use serde_json::json;

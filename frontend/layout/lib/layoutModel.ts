@@ -73,6 +73,7 @@ import {
 import {
     minimizeNodeToggle as minimizeNodeToggleImpl,
     collapseMaximizedNode as collapseMaximizedNodeImpl,
+    restoreMaximizedNode as restoreMaximizedNodeImpl,
     rebuildMinimizedSet as rebuildMinimizedSetImpl,
 } from "./layoutMinimize";
 import {
@@ -864,6 +865,10 @@ export class LayoutModel {
 
     collapseMaximizedNode(nodeId: string) {
         collapseMaximizedNodeImpl(this, nodeId);
+    }
+
+    restoreMaximizedNode(nodeId: string) {
+        restoreMaximizedNodeImpl(this, nodeId);
     }
 
     minimizeNodeToggle(nodeId: string) {

@@ -92,6 +92,10 @@ const REPUBLISH_EVERY_TICKS: u64 = 5;
 /// tool_result payloads, which is its own change.
 const TODO_TOOL_NAMES: &[&str] = &["TodoWrite", "TaskCreate", "TaskUpdate"];
 
+#[path = "progress_codex_plan.rs"]
+mod codex_plan;
+use codex_plan::codex_plan;
+
 fn is_todo_tool(name: &str) -> bool {
     TODO_TOOL_NAMES.contains(&name) || name.contains("Todo")
 }
@@ -374,6 +378,15 @@ fn apply_lines(state: &mut BlockState, lines: &[&str], live_now_ms: Option<u64>)
             }
         }
 
+        // Codex's plan: a whole list each time (`todo_list` items in `codex exec`
+        // events, `plan_update`, or an `update_plan` call), so it replaces the
+        // checklist like TodoWrite does (Kanban §6.12).
+        if let Some(items) = codex_plan(&v) {
+            state.list = Some(items);
+            state.tasks.clear();
+            continue;
+        }
+
         for frame in tool_frames(&v) {
             if frame.get("type").and_then(|t| t.as_str()) != Some("tool_use") {
                 continue;
@@ -517,7 +530,7 @@ fn parse_todo_array(input: &serde_json::Value) -> Option<Vec<TodoItem>> {
 }
 
 fn parse_todo_entry(entry: &serde_json::Value) -> Option<TodoItem> {
-    let text = first_string(entry, &["content", "title", "text", "activeForm", "description"])?;
+    let text = first_string(entry, &["content", "title", "text", "step", "activeForm", "description"])?;
     let status = first_string(entry, &["status", "state"]).unwrap_or_else(|| "pending".to_string());
     Some(TodoItem { text, status })
 }

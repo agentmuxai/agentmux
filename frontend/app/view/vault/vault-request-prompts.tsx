@@ -14,6 +14,7 @@ import { modalsModel, type ModalCloseProps } from "@/app/store/modalmodel";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
 import { vaultKind } from "./vault-kinds";
 import { openVault } from "./open-vault";
+import { startVaultUsePrompts } from "./vault-use-prompts";
 import { followVault, refreshVaultRequests, vaultAvailable, vaultRequests } from "./vault-store";
 
 function RequestPrompt(props: { request: VaultRequest } & ModalCloseProps): JSX.Element {
@@ -47,10 +48,12 @@ function RequestPrompt(props: { request: VaultRequest } & ModalCloseProps): JSX.
 
 let started = false;
 
-/** Follow srv's Vault requests and prompt for each new one. Call once. */
+/** Follow srv's Vault requests and prompt for each new one; the same for agents'
+ *  uses of an entry. Call once. */
 export function startVaultRequestPrompts(): void {
     if (started || !vaultAvailable()) return;
     started = true;
+    startVaultUsePrompts();
     followVault();
     const shown = new Set<string>();
     createRoot(() =>

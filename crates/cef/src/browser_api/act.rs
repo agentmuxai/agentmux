@@ -216,7 +216,7 @@ const CLICK_POINT: &str = r#"function () {
 }"#;
 
 /// Focus and select the current contents, so inserted text replaces them.
-const PREPARE_FILL: &str = r#"function () {
+pub(super) const PREPARE_FILL: &str = r#"function () {
   if (this.disabled || (this.matches && this.matches(":disabled"))) return { error: "the field is disabled" };
   if (this.readOnly) return { error: "the field is read-only" };
   this.scrollIntoView({ block: "center", inline: "center" });
@@ -239,7 +239,7 @@ const PREPARE_FILL: &str = r#"function () {
 /// (the HTMLInputElement setter throws on a textarea) and fire input/change,
 /// for widgets that ignore inserted text. React's value tracker sees the
 /// change because the setter isn't its wrapped one.
-const SET_VALUE: &str = r#"function (v) {
+pub(super) const SET_VALUE: &str = r#"function (v) {
   const proto = Object.getPrototypeOf(this);
   const d = Object.getOwnPropertyDescriptor(proto, "value");
   if (d && d.set) { d.set.call(this, v); } else if (this.isContentEditable) { this.textContent = v; } else { this.value = v; }
@@ -339,7 +339,7 @@ const COMMIT_INFO: &str = concat!(
     const tokens = ac.split(/\s+/).filter(Boolean);
     const calledPassword = words.some(w => /password|passwd|passphrase|passcode/.test(w) || w === "pin" || w === "pw" || w === "pwd");
     const passwordToken = tokens.includes("current-password") || tokens.includes("new-password");
-    return taxId || ty === "password" || tokens.includes("one-time-code") || tokens.some(t => t.startsWith("cc-")) ||
+    return el.hasAttribute("data-agentmux-vault") || taxId || ty === "password" || tokens.includes("one-time-code") || tokens.some(t => t.startsWith("cc-")) ||
       (passwordToken && calledPassword) || /pass(word|code)?|otp|one.?time|cvc|cvv|card.?num|security.?code/.test(nm);
   };
   // A form's own properties can be shadowed by controls named after them
@@ -451,6 +451,11 @@ async fn call(cdp: &mut CdpSession, method: &str, params: Value) -> Result<Value
     cdp.call(method, params).await.map_err(|e| format!("CDP {method}: {e}"))
 }
 
+/// Types `text` where the focus is (trusted input, as `fill` does).
+pub(super) async fn insert_text(cdp: &mut CdpSession, text: &str) -> Result<(), String> {
+    call(cdp, "Input.insertText", json!({ "text": text })).await.map(|_| ())
+}
+
 /// A fresh isolated world in `frame_id`, or in the pane's main frame.
 pub(super) async fn isolated_context(cdp: &mut CdpSession, frame_id: Option<&str>) -> Result<i64, String> {
     let frame_id = match frame_id {
@@ -475,7 +480,7 @@ pub(super) async fn isolated_context(cdp: &mut CdpSession, frame_id: Option<&str
         .ok_or_else(|| "CDP Page.createIsolatedWorld: no context id".to_string())
 }
 
-async fn resolve(cdp: &mut CdpSession, backend: i64, ctx: i64, r: &str) -> Result<String, String> {
+pub(super) async fn resolve(cdp: &mut CdpSession, backend: i64, ctx: i64, r: &str) -> Result<String, String> {
     let v = cdp
         .call("DOM.resolveNode", json!({ "backendNodeId": backend, "executionContextId": ctx }))
         .await
@@ -486,7 +491,7 @@ async fn resolve(cdp: &mut CdpSession, backend: i64, ctx: i64, r: &str) -> Resul
         .ok_or_else(|| format!("the element for {r} is gone from the page; take a new snapshot"))
 }
 
-async fn call_on(cdp: &mut CdpSession, object_id: &str, func: &str, args: Vec<Value>) -> Result<Value, String> {
+pub(super) async fn call_on(cdp: &mut CdpSession, object_id: &str, func: &str, args: Vec<Value>) -> Result<Value, String> {
     let v = call(
         cdp,
         "Runtime.callFunctionOn",
@@ -523,7 +528,7 @@ pub(super) async fn describe_markup(cdp: &mut CdpSession, backend: i64) -> Optio
 
 /// The element's facts including its accessible name, for acting on one
 /// element: one more round trip than `describe_markup`.
-async fn describe(cdp: &mut CdpSession, backend: i64) -> Option<DomFacts> {
+pub(super) async fn describe(cdp: &mut CdpSession, backend: i64) -> Option<DomFacts> {
     let facts = describe_markup(cdp, backend).await?;
     // The accessible name is what a person reads next to the field ("Taxpayer's
     // TIN"), which the markup may not repeat. A failed lookup leaves it empty.
