@@ -70,7 +70,7 @@ export function WardenView(props: { model: WardenViewModel }): JSX.Element {
                         <WardenInternetStub />
                     </div>
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "audit" }}>
-                        <WardenAuditManager />
+                        <WardenAuditManager visible={section() === "audit"} />
                     </div>
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "history" }}>
                         <WardenHistoryManager wardenBlockId={model.blockId} visible={section() === "history"} />

@@ -16,7 +16,7 @@ import { fetchWardenAudit, WARDEN_AUDIT_LIMIT, type AuditEntry } from "./warden-
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./warden-audit-manager.scss";
 
-export const WardenAuditManager = (): JSX.Element => {
+export const WardenAuditManager = (props: { visible?: boolean }): JSX.Element => {
     const [audit, setAudit] = createSignal<AuditEntry[]>([]);
     const [error, setError] = createSignal<string | null>(null);
     const [loading, setLoading] = createSignal(true);
@@ -93,7 +93,7 @@ export const WardenAuditManager = (): JSX.Element => {
                     </For>
                 </ul>
             </Show>
-            <WardenSecrets />
+            <WardenSecrets visible={props.visible} />
             <div class="warden-manager-footnote">
                 Refreshes every {WARDEN_REFRESH_MS / 1000}s · last {WARDEN_AUDIT_LIMIT} entries.
             </div>

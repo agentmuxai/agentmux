@@ -6,6 +6,7 @@
  *  (docs/specs/SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §5.6). */
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { VaultActivity } from "@/types/rpc/VaultActivity";
@@ -48,7 +49,12 @@ beforeEach(() => {
     vault.mockClear();
     openOrFocus.mockClear();
     entries = [entry(), entry({ id: "ssn-alex", label: "Alex", grants: [] })];
-    activity = [row({}), row({ actor: "you", action: "revealed", target: "value" }), row({ actor: "Agent2", action: "filled a web form", target: "https://irs.gov (SSN)", outcome: "denied" })];
+    activity = [
+        row({}),
+        row({ actor: "you", action: "revealed", target: "value" }),
+        row({ actor: "Agent2", action: "filled a web form", target: "https://irs.gov (SSN)", outcome: "denied" }),
+        row({ actor: "Agent3", action: "requested an entry", target: "Stripe test key", outcome: "pending" }),
+    ];
 });
 afterEach(cleanup);
 
@@ -61,6 +67,18 @@ describe("Secrets in Warden's Audit section", () => {
         expect(table.textContent).toContain("Agent2");
         expect(table.textContent).toContain("denied");
         expect(table.textContent).not.toContain("revealed");
+        // A request for an entry isn't a use of one.
+        expect(table.textContent).not.toContain("Agent3");
+    });
+
+    it("loads nothing from the Vault until it is shown", async () => {
+        const [shown, setShown] = createSignal(false);
+        render(() => <WardenSecrets visible={shown()} />);
+        await new Promise((r) => setTimeout(r, 20));
+        expect(vault).not.toHaveBeenCalled();
+        setShown(true);
+        await waitFor(() => expect(vault.mock.calls.some((c) => c[0] === "list")).toBe(true));
+        expect(await screen.findByRole("table", { name: "Agents' use of secrets" })).toBeInTheDocument();
     });
 
     it("lists the standing permissions, sites and commands apart, and stops one", async () => {

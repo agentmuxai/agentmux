@@ -7,7 +7,7 @@
 // with a way to stop each. The entries themselves stay in the Vault pane, which this
 // links to, and which links back.
 
-import { createEffect, createSignal, For, on, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, For, on, Show, type JSX } from "solid-js";
 
 import { Button, IconButton } from "@/app/element/ui";
 import type { VaultActivity } from "@/types/rpc/VaultActivity";
@@ -19,26 +19,39 @@ import { followVault, loadActivity, refreshVault, revokeGrant, vaultAvailable, v
 /** How many of an agent's recent uses to list. */
 const RECENT = 50;
 
-/** The person's own doings (saving, revealing, copying) are the Vault's to show; this is what agents did. */
-export const isAgentActor = (a: VaultActivity): boolean => a.actor !== "you";
+/** What an agent does with an entry. A request for a new entry (`requested an entry`) isn't a use, and
+ *  the person's own doings (saving, revealing, copying) are the Vault's to show. */
+export const USE_ACTIONS = ["filled a web form", "ran a command"];
+export const isAgentUse = (a: VaultActivity): boolean => a.actor !== "you" && USE_ACTIONS.includes(a.action);
 
-export function WardenSecrets(): JSX.Element {
+/** `visible`: this is the Audit section's shown. Opening the Vault's list opens its key and can ask the
+ *  person (a keychain, a locked keyring), so nothing is loaded until the section is looked at. */
+export function WardenSecrets(props: { visible?: boolean }): JSX.Element {
     if (!vaultAvailable()) return <></>;
+    const visible = () => props.visible ?? true;
     const [rows, setRows] = createSignal<VaultActivity[] | null>(null);
     const [error, setError] = createSignal<string | null>(null);
     const load = () =>
         loadActivity(500)
             .then((r) => {
-                setRows(r.filter(isAgentActor).slice(0, RECENT));
+                setRows(r.filter(isAgentUse).slice(0, RECENT));
                 setError(null);
             })
             .catch((e) => setError(String(e)));
-    onMount(() => {
+    let started = false;
+    createEffect(() => {
+        if (!visible() || started) return;
+        started = true;
         followVault();
         void refreshVault();
     });
-    // Again whenever the Vault changes (a use is recorded, a grant is made or revoked).
-    createEffect(on(vaultChangedMs, () => void load()));
+    // When first shown, and again whenever the Vault changes while shown (a use is recorded,
+    // a grant is made or revoked).
+    createEffect(
+        on([visible, vaultChangedMs], ([shown]) => {
+            if (shown) void load();
+        })
+    );
 
     const granted = () => (vaultEntries() ?? []).filter((e) => e.grants.length > 0);
     const revoke = async (entryId: string, origin: string) => {
