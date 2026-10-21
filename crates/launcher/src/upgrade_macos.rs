@@ -12,9 +12,11 @@
 //! the launcher exits ([`apply_command`]). It works on a private copy of the
 //! `.dmg`, checks it again against the release's SHA-256, mounts it read-only,
 //! checks the new app's code signature (and, when this app passes Gatekeeper,
-//! that the new one does too, from the same team), copies it beside the
-//! running one and swaps the two. This version goes to the Trash, so it can
-//! still be put back. Whatever fails, the script opens an AgentMux again: the
+//! that the new one does too, from the same team), copies it into a private
+//! folder it creates beside the running one and swaps the two, holding a
+//! lock on the app so two launchers (two channels can run one `.app`) never
+//! swap it at once. This version goes to the Trash, so it can still be put
+//! back. Whatever fails, the script opens an AgentMux again: the
 //! new one, or this one, still in place.
 //!
 //! The pure parts (paths, checks, the dialog's answer, the script's
@@ -49,6 +51,12 @@ pub fn not_replaceable(app: &Path) -> Option<String> {
     let Some(parent) = app.parent() else {
         return Some(format!("{} has no folder", app.display()));
     };
+    if world_writable(parent) {
+        return Some(format!(
+            "{} can be changed by every account on this Mac; move AgentMux to Applications to upgrade it in place",
+            parent.display()
+        ));
+    }
     if !can_write_in(parent) {
         return Some(format!(
             "{} can't be written (a mounted .dmg, or a folder this user can't change); move AgentMux to Applications to upgrade it in place",
@@ -56,6 +64,19 @@ pub fn not_replaceable(app: &Path) -> Option<String> {
         ));
     }
     None
+}
+
+/// Whether every account can create files in `dir` (`/Users/Shared`, `/tmp`):
+/// another account could then plant links where the swap writes.
+#[cfg(unix)]
+fn world_writable(dir: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(dir).is_ok_and(|m| m.permissions().mode() & 0o002 != 0)
+}
+
+#[cfg(not(unix))]
+fn world_writable(_dir: &Path) -> bool {
+    false
 }
 
 /// Whether this user can create a file in `dir` (a read-only volume can't).
@@ -205,15 +226,28 @@ cleanup() {
   [ -n "$mnt" ] && { /usr/bin/hdiutil detach -quiet "$mnt" || /usr/bin/hdiutil detach -quiet -force "$mnt"; }
   [ -n "$staging" ] && /bin/rm -rf "$staging"
   [ -n "$work" ] && /bin/rm -rf "$work"
+  [ -n "$locked" ] && /bin/rm -rf "$lock"
 }
 fail() { say "failed: $*; opening the AgentMux that is in place"; cleanup; /usr/bin/open "$app"; exit 1; }
 team_of() { /usr/bin/codesign -dv "$1" 2>&1 | /usr/bin/sed -n 's/^TeamIdentifier=//p'; }
+parent=$(/usr/bin/dirname "$app"); base=$(/usr/bin/basename "$app")
+lock="$parent/.$base.upgrade-lock"; locked=""
 say "upgrade to $ver: waiting for the launcher ($pid) to exit"
 i=0
 while /bin/kill -0 "$pid" 2>/dev/null; do
   i=$((i+1)); [ "$i" -gt 600 ] && { say "the launcher is still running after 60 s; nothing changed"; exit 1; }
   /bin/sleep 0.1
 done
+# One swap of this app at a time: two launchers on different channels can
+# run the same .app. A lock left by a script that is gone is taken over.
+if ! /bin/mkdir "$lock" 2>/dev/null; then
+  other=$(/bin/cat "$lock/pid" 2>/dev/null)
+  if [ -n "$other" ] && /bin/kill -0 "$other" 2>/dev/null; then
+    say "another upgrade of $app is running ($other); nothing changed"; exit 1
+  fi
+  /bin/rm -rf "$lock"; /bin/mkdir "$lock" 2>/dev/null || { say "couldn't take the upgrade lock; nothing changed"; exit 1; }
+fi
+locked=1; echo "$$" > "$lock/pid"
 work=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/agentmux-upgrade.XXXXXX") || fail "no temporary folder"
 /bin/cp "$dmg" "$work/u.dmg" || fail "couldn't copy the disk image"
 got=$(/usr/bin/shasum -a 256 "$work/u.dmg" | /usr/bin/awk '{print $1}')
@@ -233,22 +267,25 @@ fi
 if /usr/sbin/spctl -a -t exec "$app" 2>/dev/null; then
   /usr/sbin/spctl -a -t exec "$new" || fail "Gatekeeper doesn't accept the new app"
 fi
-parent=$(/usr/bin/dirname "$app"); base=$(/usr/bin/basename "$app")
-staging="$parent/.$base.upgrading"; /bin/rm -rf "$staging"
-/usr/bin/ditto "$new" "$staging" || fail "couldn't copy the new app beside this one"
-/usr/bin/codesign --verify --deep --strict "$staging" || fail "the copied app's code signature doesn't verify"
+# A folder of our own beside the app (created new, unpredictable name), so
+# nothing another account placed there is followed or overwritten.
+staging=$(/usr/bin/mktemp -d "$parent/.$base.upgrading.XXXXXX") || fail "couldn't make a folder beside the app"
+/usr/bin/ditto "$new" "$staging/$base" || fail "couldn't copy the new app beside this one"
+/usr/bin/codesign --verify --deep --strict "$staging/$base" || fail "the copied app's code signature doesn't verify"
 /usr/bin/hdiutil detach -quiet "$mnt" || /usr/bin/hdiutil detach -quiet -force "$mnt"; mnt=""
 old_ver=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$app/Contents/Info.plist" 2>/dev/null)
 trash="$HOME/.Trash/${base%.app} $old_ver $(/bin/date +%Y%m%d-%H%M%S).app"
 /bin/mv "$app" "$trash" || fail "couldn't move this version to the Trash"
-if ! /bin/mv "$staging" "$app"; then
+if ! /bin/mv "$staging/$base" "$app"; then
   /bin/mv "$trash" "$app"
   fail "couldn't put the new app in place; this version is back"
 fi
-staging=""
 if [ -n "$channel" ]; then
+  # Written to a new file of our own, then renamed over the record: a rename
+  # replaces whatever is at that name and never follows it.
   record="$parent/.$base.agentmux-channel"
-  { printf '%s\n' "$channel" > "$record.tmp" && /bin/mv "$record.tmp" "$record"; } || say "couldn't record the channel beside the app"
+  tmp=$(/usr/bin/mktemp "$parent/.$base.agentmux-channel.XXXXXX") &&
+    printf '%s\n' "$channel" > "$tmp" && /bin/mv "$tmp" "$record" || { [ -n "$tmp" ] && /bin/rm -f "$tmp"; say "couldn't record the channel beside the app"; }
 fi
 cleanup
 say "replaced $app with $ver; this version is in the Trash as $trash"
@@ -292,6 +329,15 @@ mod tests {
         assert!(not_replaceable(Path::new("/no/such/folder/AgentMux.app")).unwrap().contains("can't be written"));
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(not_replaceable(&dir.path().join("AgentMux.app")), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_app_in_a_folder_every_account_can_write_is_not_replaced() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o1777)).unwrap();
+        assert!(not_replaceable(&dir.path().join("AgentMux.app")).unwrap().contains("every account"));
     }
 
     fn layout(root: &Path, version: &str) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
@@ -352,6 +398,7 @@ mod tests {
         let record = agentmux_common::runtime_mode::mac_app_channel_file(&up.app);
         assert_eq!(record, Path::new("/Users/u/My Apps/.AgentMux.app.agentmux-channel"));
         assert!(args[1].contains(r#"record="$parent/.$base.agentmux-channel""#));
+        assert!(args[1].contains("mkdir \"$lock\""), "the swap holds a lock on the app");
         assert_eq!(
             &args[2..],
             &[
