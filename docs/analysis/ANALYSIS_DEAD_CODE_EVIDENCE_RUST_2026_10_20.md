@@ -5,7 +5,7 @@
 **Note:** where this file mentions `scratch/...` helper scripts or listings (`deps.py`, `allows.py`, `allowed.txt`), those were throwaway analysis files and are not kept; the lists are reproducible with ripgrep and `knip` as the text describes.
 
 
-Snapshot: a read-only extract of origin/main (origin/main, 2026-10-20). 8 crates, 1283 `.rs` files, ~263k lines (incl. ~100k lines of tests). No cargo run of any kind; every claim below is from ripgrep / small python token-index scripts (kept in `scratch/tools/`, outside a read-only extract of origin/main).
+Snapshot: a read-only extract of origin/main (2026-10-20). 8 crates, 1283 `.rs` files, ~263k lines (incl. ~100k lines of tests). No cargo run of any kind; every claim below is from ripgrep / small python token-index scripts (throwaway, not kept; see the note above).
 
 Confidence tags: CONFIRMED = the identifier appears nowhere outside its own definition (and, where stated, its own tests) in crates/, frontend/, scripts/, schema/, sdk/, .github/, Taskfile, packaging. LIKELY = needs a human glance (name collisions, planned/unwired code, platform cfg).
 

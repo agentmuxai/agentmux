@@ -74,7 +74,7 @@ Static analysis only. Every item was re-grepped with `rg -w` over the repo (excl
   - Caveat: `CommandMessageData` is used at `frontend/app/store/rpc-client.ts:151`. `CommandDeleteBlockData` has a generated TS file and a re-export at `rpc-api/block.ts:43`. Check those two before removing.
   - Risk: low except those two.
 - **R-4 Allow-hidden dead items (CONFIRMED).**
-  - About 97 items, ~570 lines. Full list with line numbers is in the Rust evidence file section 2a.
+  - About 97 items, ~570 lines. Full list with line numbers is in section 2a of `ANALYSIS_DEAD_CODE_EVIDENCE_RUST_2026_10_20.md`.
   - Largest groups:
     - `wcore/event.rs:13` (the whole 46-line file).
     - `base.rs` and `shellexec.rs`: about 25 consts and fns.
@@ -91,7 +91,7 @@ Static analysis only. Every item was re-grepped with `rg -w` over the repo (excl
     - `reactive/handler.rs try_register_agent_with_nonce` (77).
     - `shellexec.rs MockConn`, a test double in production code.
   - Leave the 12 `app_server_protocol` methods (305 lines). They are annotated "Unwired until SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER Slice 6".
-  - The 13 crate-wide `#![allow(dead_code)]` files are listed in the Rust evidence file 2c.
+  - The 13 crate-wide `#![allow(dead_code)]` files are listed in section 2c of `ANALYSIS_DEAD_CODE_EVIDENCE_RUST_2026_10_20.md`.
   - `srv/src/registry/mod.rs:18` looks removable (LIKELY).
   - 63 srv and 13 cef allows may be stale, but only a compile settles that.
   - Risk: low, but needs one `cargo check`. Warn before triggering it, since rebuilds are slow (the debug cache was cleared on 2026-10-18).
@@ -233,7 +233,7 @@ Largest JS chunks: `index` 4.51 MB, `pdf.worker.min.mjs` 1.26 MB, mermaid `cynef
 
 ## 6. Scripts and workflows
 
-Full detail is in the scripts evidence file.
+Full detail is in `ANALYSIS_DEAD_CODE_EVIDENCE_SCRIPTS_2026_10_20.md`.
 
 - **S-1 Broken entries (CONFIRMED).**
   - `Taskfile.yml:98-110` `storybook` and `storybook:build` run npm scripts that do not exist. `CONTRIBUTING.md:52-55` still documents `task storybook`.
