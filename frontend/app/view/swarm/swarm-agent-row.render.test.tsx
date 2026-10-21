@@ -27,6 +27,8 @@ import { createSignal } from "solid-js";
 import type { AgentTreeNode, SwarmViewModel } from "./swarm-model";
 import type { DocumentNode } from "@/app/view/agent/types";
 import { NO_BACKGROUND_TASKS } from "./swarm-background";
+import { MOS } from "@/app/store/global";
+import type { MuxObjUpdate } from "@/types/rpc/MuxObjUpdate";
 
 afterEach(() => {
     cleanup();
@@ -361,5 +363,43 @@ describe("AgentRowHost — a rebuilt tree updates the row in place", () => {
         ));
         setRows(new Map());
         expect(container.querySelector(".swarm-agent-label")?.textContent).toBe("AgentX");
+    });
+});
+
+
+/** "3m ago" beside the agent's name: when its pane last produced output. */
+describe("AgentRow — last active", () => {
+    let version = 0;
+    // A newer version each time: the store ignores an update that isn't.
+    function seedBlockMeta(blockId: string, meta: Record<string, unknown>): void {
+        MOS.updateMuxObject({
+            updatetype: "update",
+            otype: "block",
+            oid: blockId,
+            obj: { otype: "block", oid: blockId, version: ++version, meta } as unknown as Block,
+        } as MuxObjUpdate);
+    }
+
+    it("shows how long ago the agent last produced output, with the exact time on hover", () => {
+        registerPane(BLOCK);
+        seedBlockMeta(BLOCK, { "session:last_activity_ms": Date.now() - 7 * 60_000 - 5_000 });
+        const { container } = renderRow(false);
+        const el = container.querySelector(".swarm-last-active");
+        expect(el?.textContent?.trim()).toBe("7m ago");
+        expect(el?.getAttribute("title")).toMatch(/^Last active \d{1,2}:\d{2}:\d{2} (AM|PM)$/);
+    });
+
+    it("says just now for output from the last minute", () => {
+        registerPane(BLOCK);
+        seedBlockMeta(BLOCK, { "session:last_activity_ms": Date.now() - 10_000 });
+        const { container } = renderRow(false);
+        expect(container.querySelector(".swarm-last-active")?.textContent?.trim()).toBe("just now");
+    });
+
+    it("shows nothing for an agent that has produced no output", () => {
+        registerPane(BLOCK);
+        seedBlockMeta(BLOCK, {});
+        const { container } = renderRow(false);
+        expect(container.querySelector(".swarm-last-active")).toBeNull();
     });
 });

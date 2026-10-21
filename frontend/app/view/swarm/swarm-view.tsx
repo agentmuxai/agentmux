@@ -29,6 +29,7 @@ import { sameList, selectTrace } from "@/app/util/select-trace";
 import { BackgroundTaskBucket, SubagentBackgroundTasks, visibleBackgroundTasks } from "./swarm-background-tasks";
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 import { swarmRowColors } from "./swarm-row-colors";
+import { lastActiveLabel, lastActiveMs, lastActiveTitle } from "./swarm-last-active";
 import { isAwaitingUser, swarmLineTooltip } from "@/app/store/swarm-line";
 import { setSupervisorMode, SupervisorBucket, SupervisorChip, supervisorRows } from "./swarm-supervisor";
 import { isActiveStatus, rankAgentStatus, subagentStatus } from "@/app/store/agent-status";
@@ -387,6 +388,13 @@ export function AgentRow({
     // Ticks in the view rather than the model because promotion is time-based:
     // the list changes with the clock, not only with backend events.
     const tick = useTick(1000);
+    // When the agent last produced output: "3m ago" beside its name. The text
+    // changes about once a minute, so the 1 s tick re-renders nothing most ticks.
+    const lastActive = createMemo(() => lastActiveMs(blockMeta()));
+    const lastActiveText = createMemo(() => {
+        tick();
+        return lastActiveLabel(lastActive(), Date.now());
+    });
     // Background launches never reach this bucket (`longRunningToolRows`
     // excludes them); the Background bucket and the subagent rows show them
     // from the registry, with their real status.
@@ -565,6 +573,11 @@ export function AgentRow({
                     </Show>
                     <Show when={node().contextTokens != null}>
                         <span class="swarm-ctx-size">{fmtCtx(node().contextTokens!)}</span>
+                    </Show>
+                    <Show when={lastActiveText()}>
+                        <span class="swarm-last-active" title={lastActiveTitle(lastActive())}>
+                            {lastActiveText()}
+                        </span>
                     </Show>
                     <AgentStatusChip
                         status={displayStatus()}
