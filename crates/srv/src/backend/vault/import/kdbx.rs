@@ -191,9 +191,6 @@ pub fn read(bytes: &[u8], passphrase: &str) -> Result<Imported, ReadError> {
             E::Format(_) => ReadError::from(
                 "this KeePass database couldn't be read: it is damaged, or was written by a tool that lays its entries out differently from KeePass (files from KeePass and KeePassXC read fine)",
             ),
-            // A KDBX 3 file has no check of the key before it decrypts: a wrong password comes out as
-            // garbage that fails to unpad, the same as a damaged file does.
-            E::Cryptography(_) => ReadError::from("that password didn't open the database, or the file is damaged"),
             _ => ReadError::from(DAMAGED),
         }
     })?;
