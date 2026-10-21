@@ -110,11 +110,6 @@
     font-weight: 600;
 }
 
-.kanban-column__count--over {
-    color: var(--warning-color);
-    font-weight: 600;
-}
-
 .kanban-column {
     display: flex;
     flex-direction: column;
@@ -143,6 +138,11 @@
 .kanban-column__count {
     font-size: var(--text-xs);
     color: var(--secondary-text-color);
+}
+
+.kanban-column__count--over {
+    color: var(--warning-color);
+    font-weight: 600;
 }
 
 .kanban-column__list {

@@ -99,8 +99,8 @@ export const WardenKanbanManager = (props: {
         (board()?.tasks ?? []).find((t) => (t.state === "claimed" || t.state === "blocked") && t.claimed_by === agent);
     const untracked = createMemo(() => (showUntracked() ? untrackedAgents(agents(), board()?.tasks ?? []) : []));
     const laneList = createMemo(() => repoLanes(tasks()));
-    // The soft limit is on the board's whole Review column, every lane's included.
-    const reviewTotal = createMemo(() => tasks().filter((t) => t.state === "review").length);
+    // The soft limit is on the board's whole Review column: every lane's, and those a filter hides.
+    const reviewTotal = createMemo(() => (board()?.tasks ?? []).filter((t) => t.state === "review").length);
     const open = (t: KanbanTask) => setOpenId(t.id);
     const openAgent = (blockId: string) => void revealBlock(blockId, { source: "kanban" });
 
