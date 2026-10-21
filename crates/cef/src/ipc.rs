@@ -61,10 +61,30 @@ async fn bind_frontend_listener(cache_dir: &std::path::Path) -> tokio::net::TcpL
     listener
 }
 
-async fn revalidate(mut response: axum::response::Response) -> axum::response::Response {
+/// `assets/` holds only Vite's content-hashed files, which never change under
+/// their name: Chromium uses them without asking. That matters for the code
+/// cache: V8 reuses a script's compiled code only while its cached response is
+/// the one it compiled, and a revalidation (304) replaces that response.
+/// Everything else (`index.html`, fonts, icon styles) is `no-cache`: Chromium
+/// asks on every load and gets a 304 while it is unchanged, so a rebuild in
+/// place (`task dev`) is never hidden behind a stale `index.html`.
+async fn static_cache_policy(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let hashed = request.uri().path().starts_with("/assets/");
+    let mut response = next.run(request).await;
+    // A 304 too: its headers replace the cached copy's, so a `no-cache` there
+    // would keep an asset Chromium cached before this policy revalidating.
+    let found = response.status().is_success() || response.status() == axum::http::StatusCode::NOT_MODIFIED;
+    let policy = if hashed && found {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
+    };
     response
         .headers_mut()
-        .insert(axum::http::header::CACHE_CONTROL, axum::http::HeaderValue::from_static("no-cache"));
+        .insert(axum::http::header::CACHE_CONTROL, axum::http::HeaderValue::from_static(policy));
     response
 }
 
@@ -134,14 +154,12 @@ pub async fn start_ipc_server(state: Arc<AppState>, cache_dir: &std::path::Path)
         .layer(CorsLayer::permissive())
         .with_state(state);
 
-    // Serve built frontend as static files (for portable/production builds).
-    // `no-cache`: Chromium asks again on every load and gets a 304 while the
-    // file is unchanged, so it keeps its caches but never shows a frontend a
-    // rebuild in place (`task dev`) has replaced.
+    // Serve built frontend as static files (for portable/production builds),
+    // with the cache policy of `static_cache_policy`.
     if has_frontend {
         let static_files = Router::new()
             .fallback_service(ServeDir::new(&frontend_dir))
-            .layer(axum::middleware::map_response(revalidate));
+            .layer(axum::middleware::from_fn(static_cache_policy));
         app = app.fallback_service(static_files);
     }
 
