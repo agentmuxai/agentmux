@@ -631,15 +631,14 @@ fn prepare_in_process(mux_data_dir: &std::path::Path, db_dir: &std::path::Path, 
     // the pre-DDL state. count_pending_migrations emits AGENTMUXSRV-MIGRATING
     // first so the launcher/sidecar extend their ESTART deadline before the
     // (potentially slow) migration work begins.
-    // Strict check, lenient reaction: this line only sizes the supervisors'
-    // ESTART deadline, and the migration batch runs unconditionally right
-    // below, so an unreadable store costs nothing here beyond a less precise
-    // hint — `readable_pending()` reproduces exactly the number this call
-    // site used before. It is logged rather than swallowed because the same
-    // question becomes a real decision point once the boot gate lands:
-    // `SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md`
-    // invariant S1b requires that gate to fail closed, and a store that
-    // cannot be read here is precisely the case it must catch.
+    // Strict check, lenient reaction: this runs only when no supervisor
+    // prepares data (headless srv, `task dev:standalone`), where the line
+    // only sizes the ESTART deadline and the migration batch runs right below
+    // anyway, so an unreadable store costs nothing here beyond a less precise
+    // hint — `readable_pending()` reproduces exactly the number this call site
+    // used before. Under the launcher the same question is the fail-closed
+    // boot gate instead (`migrations/gate.rs`, invariant S1b of
+    // `SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md`).
     let pre_migration_count = match migrations::try_count_pending_migrations(&mux_data_dir) {
         Ok(n) => n,
         Err(e) => {

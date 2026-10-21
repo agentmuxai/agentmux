@@ -13,8 +13,9 @@
 //! one plain `migrate` prints.
 //!
 //! The upgrade step of `docs/specs/SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md`
-//! §10 (S1a). Nothing calls it yet: the update route (S1b) and srv's boot gate
-//! (S1c) will.
+//! §10. The launcher runs it (`srv_spawner::spawn_srv`) after srv exits with
+//! `AGENTMUXSRV-NEEDS-PREPARE`, its boot gate having found data that needs
+//! preparing (`migrations/gate.rs`).
 
 use std::path::Path;
 
