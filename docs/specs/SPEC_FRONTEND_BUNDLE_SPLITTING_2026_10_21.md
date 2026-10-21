@@ -69,12 +69,11 @@ No change to the pane contract. Each library moves behind a dynamic `import()` a
 - **`css-tree`:**
   - A background without `url(` needs no rewriting, and passes through as before.
   - A background with one loads `css-tree` and computes the style once it arrives; until then the pane shows no background image.
-- **`highlight.js`:**
-  - The markdown processor builds without `rehype-highlight` until it has loaded, then rebuilds with it.
-  - The app starts loading it right after the first paint, so restored conversations get colour as soon as it arrives.
-  - A plain-to-highlighted re-render of code blocks happens at most once per markdown view.
+- **`highlight.js`: left in.** Every markdown view would render once without colour and again with it. At startup that re-renders a whole restored conversation, which costs more than its share of the bundle (about 3%) saves. Replacing it with shiki (§8) removes it properly.
 
-Expected: about 1.1 MB of source out of the startup chunk (about 8%).
+**Result:** the startup chunk went from 4,641,173 to 4,336,511 bytes (−305 KB, −6.6%). The libraries now come in their own chunks: `css-tree` (194 KB), `sysinfo-plot` with uPlot (57 KB), `qrcode` (26 KB), `source-map-js` (30 KB).
+
+At the §2 split, that is roughly 10–15 ms of reading and compiling per window start. That is within the noise of a single cold start, so it is not measured on its own. Step 2 is where the larger share is.
 
 ## 6. Step 2: rarely open pane types as lazy chunks
 
@@ -90,6 +89,6 @@ CodeMirror and xterm move into their panes' chunks, if step 2 shows those panes 
 
 ## 8. Not doing
 
-- **Replacing highlight.js with shiki in markdown.** It would remove one of two highlighters, but it changes how every code block looks. That is a separate decision.
+- **Replacing highlight.js with shiki in markdown.** It would remove one of two highlighters (and the last startup cost of code colouring), but it changes how every code block looks. That is a separate decision.
 - **Dropping the source maps from releases** (§3).
 - **A stable frontend port** for the code cache (§2): no startup gain measured.

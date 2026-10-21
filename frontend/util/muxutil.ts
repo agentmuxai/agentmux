@@ -4,7 +4,25 @@
 
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { boundNumber, isBlank } from "@/util/util";
-import { generate as generateCSS, parse as parseCSS, walk as walkCSS } from "css-tree";
+import { createSignal } from "solid-js";
+
+// The CSS parser for a background with `url(...)`, loaded with the first such
+// background rather than at startup (SPEC_FRONTEND_BUNDLE_SPLITTING_2026_10_21.md §5).
+// The signal lets a caller's memo compute the style again once it arrives.
+let cssTree: typeof import("css-tree") | null = null;
+let cssTreeLoading = false;
+const [cssTreeLoaded, setCssTreeLoaded] = createSignal(false);
+
+function loadCssTree(): void {
+    if (cssTreeLoading) return;
+    cssTreeLoading = true;
+    import("css-tree")
+        .then((m) => {
+            cssTree = m;
+            setCssTreeLoaded(true);
+        })
+        .catch((e) => console.error("error loading the background parser", e));
+}
 
 function encodeFileURL(file: string) {
     const webEndpoint = getWebServerEndpoint();
@@ -23,6 +41,18 @@ function processBackgroundUrls(cssText: string): string {
     }
     const attrRe = /^background(-image)?\s*:\s*/i;
     cssText = cssText.replace(attrRe, "");
+    // Only a value that can load something (`url()`, `src()`, `image()`,
+    // `image-set()`) needs the parser to vet and rewrite it; anything else (a
+    // colour, a gradient) is used as written.
+    if (!/(url|src|image(-set)?)\s*\(/i.test(cssText)) {
+        return cssText;
+    }
+    if (!cssTreeLoaded() || cssTree == null) {
+        // No background until the parser arrives; the caller's memo runs again then.
+        loadCssTree();
+        return null;
+    }
+    const { generate: generateCSS, parse: parseCSS, walk: walkCSS } = cssTree;
     const ast = parseCSS("background: " + cssText, {
         context: "declaration",
     });

@@ -16,7 +16,8 @@ import type { SysinfoViewModel } from "./sysinfo-model";
 import { MeasureTable, Overview } from "./sysinfo-overview";
 import { type AreaChoice, FOCUS_CHOICES } from "./sysinfo-overview-data";
 import { createAxisColumns, inTopRow, sharesPercentRange, showsTimeAxis, showsYLabels } from "./sysinfo-layout";
-import { SingleLinePlot, SysinfoZoomContext } from "./sysinfo-plot";
+import { SingleLinePlot } from "./sysinfo-plot-lazy";
+import { SysinfoZoomContext } from "./sysinfo-zoom";
 import { AreaPlotType, SIMPLE_VIEWS } from "./sysinfo-types";
 import { convertTimeSeriesToDataItem } from "./sysinfo-util";
 

@@ -20,7 +20,9 @@
  * Spec: docs/specs/SPEC_FE_SOURCE_MAP_RESOLVER_2026_05_27.md.
  */
 
-import { SourceMapConsumer, type RawSourceMap } from "source-map-js";
+// Types only: the library loads with the first map it parses, not at startup
+// (SPEC_FRONTEND_BUNDLE_SPLITTING_2026_10_21.md §5).
+import type { RawSourceMap, SourceMapConsumer } from "source-map-js";
 
 /** A chunk's parsed map, an in-flight fetch promise, or a failure sentinel. */
 type CacheEntry =
@@ -72,6 +74,7 @@ function loadMap(jsUrl: string): Promise<SourceMapConsumer | "failed"> {
             const res = await fetch(mapUrlOf(jsUrl));
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const json = (await res.json()) as RawSourceMap;
+            const { SourceMapConsumer } = await import("source-map-js");
             const consumer = new SourceMapConsumer(json);
             cache.set(chunk, { kind: "ready", consumer });
             return consumer;
