@@ -410,7 +410,7 @@ pub(crate) fn capture_window_impl(
     // Without it the log cannot tell "no such window" apart from "blocked
     // cross-user attempt", which is the entry a reviewer most wants to find.
     resolved: &mut Option<(CaptureTier, String)>,
-    // An AgentMux on this computer shows a Vault pane (srv's
+    // An AgentMux on this computer shows the Vault (srv's
     // `/api/v1/vault/on_screen`): no AgentMux window is captured meanwhile
     // (docs/specs/SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §5.3).
     vault_on_screen: bool,
@@ -582,7 +582,7 @@ pub(crate) fn capture_window_impl(
 
     if vault_on_screen && target.is_agentmux {
         anyhow::bail!(
-            "a Vault pane is open in AgentMux, so AgentMux windows can't be captured until the person closes or hides it; UI screenshot of your own pane still works"
+            "the Vault is on screen in AgentMux, so AgentMux windows can't be captured until the person leaves its Warden section or hides it; UI screenshot of your own pane still works"
         );
     }
 

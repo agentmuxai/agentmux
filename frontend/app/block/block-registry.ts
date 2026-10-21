@@ -22,7 +22,6 @@ import { swarmPaneTab } from "@/app/view/swarm/swarm";
 import { sysinfoPaneTab } from "@/app/view/sysinfo/sysinfo";
 import { toolchainPaneTab } from "@/app/view/toolchain/toolchain";
 import { towerPaneTab } from "@/app/view/tower/tower";
-import { vaultPaneTab } from "@/app/view/vault/vault";
 import { wardenPaneTab } from "@/app/view/warden/warden";
 import { helpPaneTab } from "@/view/helpview/helpview";
 import { terminalPaneTab } from "@/view/term/term";
@@ -51,8 +50,7 @@ const builtins = [
     swarmPaneTab, // native — Phase 2c
     identityPaneTab, // native — Phase 2c
     dronePaneTab, // native — Phase 2c (keeps the "workflows" alias)
-    wardenPaneTab, // native — Phase 2c
-    vaultPaneTab, // native: the person's secrets
+    wardenPaneTab, // native — Phase 2c; the Vault is its Vault section (alias "vault")
     toolchainPaneTab, // native — Phase 2c
     towerPaneTab, // native: the read-only task manager
     connectorsPaneTab, // native: Accounts, MCP servers, Remotes

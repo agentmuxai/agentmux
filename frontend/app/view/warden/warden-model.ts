@@ -3,6 +3,8 @@
 
 import { sectionOf } from "@/app/block/pane-sections";
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import { vaultHostIn } from "@/app/view/vault/vault-in-warden";
+import { VaultViewModel } from "@/app/view/vault/vault-model";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { readZoom } from "@/app/store/zoom-factor";
 
@@ -33,6 +35,8 @@ export class WardenViewModel {
     kanbanOpenAtom: Accessor<string | null>;
     /** The Kanban in one lane per repository (`kanban:lanes` meta). */
     kanbanLanesAtom: Accessor<boolean>;
+    /** The Vault section's own model, on this block (vault-in-warden.ts). */
+    vault: VaultViewModel;
 
     // A native pane tab (Pane Tab contract Phase 2c): built by `create(ctx)`;
     // its memos live in the instance's own root (host rule 8), so they no
@@ -42,7 +46,12 @@ export class WardenViewModel {
         this.setMeta = (patch) => void ctx.setMeta(patch);
         const meta = ctx.meta;
         this.zoomAtom = createMemo<number>(() => readZoom(meta()));
-        this.sectionAtom = createMemo<WardenSection>(() => sectionOf(WARDEN_SECTIONS, "warden", meta()));
+        this.sectionAtom = createMemo<WardenSection>(() => {
+            const m = meta();
+            // A block saved as the Vault pane (the `vault` alias) opens on the Vault section.
+            if (m?.view === "vault" && m["warden:section"] === undefined) return "vault";
+            return sectionOf(WARDEN_SECTIONS, "warden", m);
+        });
         this.kanbanOpenAtom = createMemo<string | null>(() => {
             const id = meta()?.["kanban:open"];
             return typeof id === "string" && id ? id : null;
@@ -51,9 +60,11 @@ export class WardenViewModel {
         const [kanbanNeeds, setKanbanNeeds] = createSignal(0);
         this.kanbanNeeds = kanbanNeeds;
         this.setKanbanNeeds = setKanbanNeeds;
+        this.vault = new VaultViewModel(vaultHostIn(ctx, () => this.sectionAtom() === "vault"));
         this.viewName = createMemo<string>(() => {
             const section = this.sectionAtom();
             const n = kanbanNeeds();
+            if (section === "vault") return `Vault · ${this.vault.viewName()}`;
             return section === "kanban" && n > 0 ? `Kanban · ${n} need${n === 1 ? "s" : ""} you` : WARDEN_SECTION_LABELS[section];
         });
     }

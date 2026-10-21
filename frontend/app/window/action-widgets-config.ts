@@ -18,6 +18,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { createBlock, openOrFocusPaneByView } from "@/store/global";
 import { fireAndForget } from "@/util/util";
 import { isLightThemeActive, widgetRoleColor } from "@/app/block/pane-identity";
+import { sectionKeysIn } from "@/app/block/pane-sections";
 import { paneRoleColor, type PaneColorRole } from "@/app/block/pane-color-scheme";
 import type { JSX } from "solid-js";
 
@@ -324,13 +325,14 @@ export function buildPaneWidgetMenuItems(
 // ── Widget actions ────────────────────────────────────────────────────────────
 
 /** Views whose widget focuses the pane already open in this tab instead of
- *  opening another: there's one Connectors, one Memory and one Vault to manage. */
-const FOCUS_EXISTING_VIEWS = new Set(["connectors", "memory", "vault"]);
+ *  opening another: there's one Connectors, one Memory and one Warden (with the
+ *  Vault) to manage. An entry for a section (Kanban, Vault) switches it there. */
+const FOCUS_EXISTING_VIEWS = new Set(["connectors", "memory", "warden"]);
 
 export async function handleWidgetSelect(widget: WidgetConfigType) {
     const view = widget.blockdef?.meta?.["view"] as string | undefined;
     if (view && FOCUS_EXISTING_VIEWS.has(view) && !widget.magnified) {
-        await openOrFocusPaneByView(view, widget.blockdef);
+        await openOrFocusPaneByView(view, widget.blockdef, sectionKeysIn(widget.blockdef?.meta) as MetaType | undefined);
         return;
     }
     createBlock(widget.blockdef, widget.magnified);

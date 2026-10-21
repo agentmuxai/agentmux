@@ -4,8 +4,8 @@
 // The oversight half of the Vault, in Warden's Audit section
 // (docs/specs/SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §5.6): what
 // agents did with the person's secrets, and where they may use them without asking,
-// with a way to stop each. The entries themselves stay in the Vault pane, which this
-// links to, and which links back.
+// with a way to stop each. The entries themselves are in Warden's Vault section, which
+// this links to, and which links back.
 
 import { createEffect, createSignal, For, on, Show, type JSX } from "solid-js";
 
@@ -33,7 +33,7 @@ export function WardenSecrets(props: { visible?: boolean }): JSX.Element {
     const [granted, setGranted] = createSignal<GrantedEntry[]>([]);
     const [error, setError] = createSignal<string | null>(null);
     // Neither read opens the Vault key, so showing this never makes the OS ask for it (the
-    // entries' list, which decrypts, is the Vault pane's alone).
+    // entries' list, which decrypts, is the Vault section's alone).
     const load = () =>
         Promise.all([loadActivity(500), loadGrants()])
             .then(([activity, grants]) => {

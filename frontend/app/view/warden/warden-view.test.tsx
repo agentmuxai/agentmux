@@ -8,7 +8,7 @@
  */
 
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
-import { createSignal } from "solid-js";
+import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setPlatform } from "@/util/platformutil";
 
@@ -29,6 +29,11 @@ vi.mock("@/app/view/warden-kanban/warden-kanban-manager", () => ({
         props.onNeedsCount?.(2);
         return <div data-testid="kanban-manager" data-visible={String(props.visible)} />;
     },
+}));
+vi.mock("@/app/view/vault/vault-view", () => ({
+    VaultView: (props: { model: { shown: () => boolean; zoomAtom: () => number } }) => (
+        <div data-testid="vault-view" data-shown={String(props.model.shown())} data-zoom={String(props.model.zoomAtom())} />
+    ),
 }));
 vi.mock("@/app/view/warden-history/warden-history-manager", () => ({
     WardenHistoryManager: (props: { wardenBlockId: string; visible: boolean }) => (
@@ -51,6 +56,7 @@ const setMetaMock = vi.fn((patch: Record<string, unknown>) => {
     return Promise.resolve();
 });
 
+import { create as createWarden } from "./warden-instance";
 import { WardenViewModel } from "./warden-model";
 import { WardenView } from "./warden-view";
 
@@ -69,11 +75,52 @@ describe("WardenView rail", () => {
         ));
     }
 
-    it("orders the rail as Kanban, Host, LAN, Internet, Audit, History", () => {
+    it("orders the rail as Kanban, Vault, Host, LAN, Internet, Audit, History", () => {
         renderWarden();
         const rail = screen.getByRole("tablist", { name: "Warden section" });
         const labels = Array.from(rail.querySelectorAll('[role="tab"]')).map((el) => el.textContent);
-        expect(labels).toEqual(["Kanban", "Host", "LAN", "Internet", "Audit", "History"]);
+        expect(labels).toEqual(["Kanban", "Vault", "Host", "LAN", "Internet", "Audit", "History"]);
+    });
+
+    // The Vault became a section of Warden (vault-in-warden.ts): its protections follow the
+    // section, not the pane, because Warden keeps its sections mounted.
+    it("mounts the Vault only once its section is shown, and shows it only while selected", () => {
+        renderWarden();
+        expect(screen.queryByTestId("vault-view")).toBeNull();
+        fireEvent.click(screen.getByRole("tab", { name: "Vault" }));
+        expect(screen.getByTestId("vault-view").dataset.shown).toBe("true");
+        fireEvent.click(screen.getByRole("tab", { name: "Host" }));
+        // Still mounted (no second decrypt), but not shown: no on-screen note, Reveal closed.
+        expect(screen.getByTestId("vault-view").dataset.shown).toBe("false");
+    });
+
+    it("gives the Vault no zoom of its own: Warden zooms the whole pane", () => {
+        setBlockMeta({ "warden:section": "vault", "term:zoom": 1.5 });
+        renderWarden();
+        expect(screen.getByTestId("vault-view").dataset.zoom).toBe("1");
+    });
+
+    it("opens a block saved as the Vault pane on the Vault section, titled with the Vault's own", () => {
+        setBlockMeta({ view: "vault", "vault:section": "cards" });
+        const model = new WardenViewModel({ blockId: "b", meta: blockMeta as any, setMeta: setMetaMock, isFocused: () => false, visibility: () => "active" });
+        expect(model.sectionAtom()).toBe("vault");
+        expect(model.viewName()).toBe("Vault · Cards and banks");
+        setBlockMeta({ view: "vault", "warden:section": "host" });
+        expect(model.sectionAtom()).toBe("host");
+    });
+
+    it("shows the Vault's import, export and note actions only on the Vault section", () => {
+        setBlockMeta({ "warden:section": "host" });
+        const instance = createRoot(() =>
+            createWarden({ blockId: "b", meta: blockMeta as any, setMeta: setMetaMock, isFocused: () => false, visibility: () => "active" })
+        );
+        expect(instance.headerActions?.()).toEqual([]);
+        setBlockMeta({ "warden:section": "vault" });
+        expect(instance.headerActions?.().map((a) => (a as { title?: string }).title)).toEqual([
+            "Import into the Vault",
+            "Export the Vault",
+            "What the Vault may ask you",
+        ]);
     });
 
     it("defaults to the Host section active and visible", () => {

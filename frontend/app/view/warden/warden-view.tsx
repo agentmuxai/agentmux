@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { type JSX } from "solid-js";
+import { createEffect, createSignal, Show, type JSX } from "solid-js";
 
 import { TabbedPane, type TabItem } from "@/app/element/ui";
 import { WardenHostManager } from "@/app/view/warden-host/warden-host-manager";
@@ -10,6 +10,7 @@ import { WardenInternetStub } from "@/app/view/warden-internet/warden-internet-s
 import { WardenAuditManager } from "@/app/view/warden-audit/warden-audit-manager";
 import { WardenHistoryManager } from "@/app/view/warden-history/warden-history-manager";
 import { WardenKanbanManager } from "@/app/view/warden-kanban/warden-kanban-manager";
+import { VaultView } from "@/app/view/vault/vault-view";
 import { WARDEN_SECTIONS, type WardenSection, type WardenViewModel } from "./warden-model";
 import "./warden-view.scss";
 
@@ -24,6 +25,10 @@ export function WardenView(props: { model: WardenViewModel }): JSX.Element {
     const setSection = (id: WardenSection) =>
         model.setMeta({ "warden:section": id });
     let viewRef: HTMLDivElement | undefined;
+    const [vaultSeen, setVaultSeen] = createSignal(false);
+    createEffect(() => {
+        if (section() === "vault") setVaultSeen(true);
+    });
 
     // Ctrl+scroll and Ctrl/Cmd +/-/0 zoom this pane through the shared handlers
     // (app.tsx, keymodel.ts): the `paneZoom` capability is all it needs.
@@ -52,6 +57,14 @@ export function WardenView(props: { model: WardenViewModel }): JSX.Element {
                             lanes={model.kanbanLanesAtom()}
                             onLanes={(on) => model.setMeta({ "kanban:lanes": on })}
                         />
+                    </div>
+                    {/* Mounted the first time it is shown: listing the Vault decrypts its entries, which
+                        can make the OS ask for the Vault key, so a Warden opened on another section
+                        never does. Shown, for its protections, only while selected (vault-in-warden.ts). */}
+                    <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "vault" }}>
+                        <Show when={vaultSeen()}>
+                            <VaultView model={model.vault} />
+                        </Show>
                     </div>
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "host" }}>
                         <WardenHostManager />

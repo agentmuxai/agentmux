@@ -98,8 +98,9 @@ describe("Secrets in Warden's Audit section", () => {
         fireEvent.click(await screen.findByRole("button", { name: "Open the Vault" }));
         await waitFor(() => expect(openOrFocus).toHaveBeenCalled());
         const args = openOrFocus.mock.calls[0] as unknown as [string, { meta: Record<string, string> }, Record<string, string>];
-        expect(args[0]).toBe("vault");
-        expect(args[2]).toEqual({ "vault:section": "activity" });
+        // The Vault is Warden's Vault section: the same Warden switches there.
+        expect(args[0]).toBe("warden");
+        expect(args[2]).toEqual({ "warden:section": "vault", "vault:section": "activity" });
     });
 
     it("says so when no agent has used a secret", async () => {
