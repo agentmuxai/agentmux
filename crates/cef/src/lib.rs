@@ -720,7 +720,7 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     }
 
     // Start the IPC HTTP server and get the assigned port.
-    let ipc_port = runtime.block_on(ipc::start_ipc_server(app_state.clone()));
+    let ipc_port = runtime.block_on(ipc::start_ipc_server(app_state.clone(), &data_dir));
     *app_state.ipc_port.lock() = ipc_port;
 
     tracing::info!("IPC server started on port {}", ipc_port);

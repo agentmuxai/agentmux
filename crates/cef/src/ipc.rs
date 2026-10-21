@@ -3,7 +3,8 @@
 //
 // IPC bridge between frontend JavaScript and Rust backend.
 //
-// Phase 2: Embedded HTTP server (axum) on localhost with a random port.
+// Phase 2: Embedded HTTP server (axum) on localhost, on the port it had last run
+// (`bind_frontend_listener`).
 //
 // Architecture:
 //   JS -> Rust:  fetch("http://127.0.0.1:{port}/ipc", { method: "POST", body: JSON.stringify({cmd, args}) })
@@ -30,6 +31,42 @@ use tower_http::services::ServeDir;
 
 use crate::commands;
 use crate::state::AppState;
+
+/// Bind the frontend's server on the port it had last run, else on a new one,
+/// which it then remembers in `cache_dir`. The frontend's origin
+/// (`http://127.0.0.1:<port>`) keys Chromium's HTTP and code caches: on a new
+/// port every run, each start fetched and compiled the 4.5 MB bundle afresh
+/// (about 200 ms before the first paint) and stored one more copy of its
+/// compiled code. Each version has its own cache folder, so its own port.
+async fn bind_frontend_listener(cache_dir: &std::path::Path) -> tokio::net::TcpListener {
+    let file = cache_dir.join(FRONTEND_PORT_FILE);
+    let last = std::fs::read_to_string(&file)
+        .ok()
+        .and_then(|s| s.trim().parse::<u16>().ok())
+        .filter(|p| *p != 0);
+    if let Some(port) = last {
+        match tokio::net::TcpListener::bind(("127.0.0.1", port)).await {
+            Ok(listener) => return listener,
+            Err(e) => tracing::info!(port, error = %e, "frontend port from the last run is taken; using a new one"),
+        }
+    }
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("Failed to bind IPC server");
+    if let Ok(addr) = listener.local_addr() {
+        if let Err(e) = std::fs::write(&file, addr.port().to_string()) {
+            tracing::warn!(path = %file.display(), error = %e, "frontend port not saved; the next run uses a new one");
+        }
+    }
+    listener
+}
+
+async fn revalidate(mut response: axum::response::Response) -> axum::response::Response {
+    response
+        .headers_mut()
+        .insert(axum::http::header::CACHE_CONTROL, axum::http::HeaderValue::from_static("no-cache"));
+    response
+}
 
 /// IPC command request from the frontend.
 #[derive(Debug, serde::Deserialize)]
@@ -61,9 +98,12 @@ struct HealthResponse {
     version: String,
 }
 
-/// Start the IPC HTTP server on a random localhost port.
-/// Returns the port number.
-pub async fn start_ipc_server(state: Arc<AppState>) -> u16 {
+/// The file in the CEF cache folder that keeps the frontend's port between runs.
+const FRONTEND_PORT_FILE: &str = "frontend-port";
+
+/// Start the IPC HTTP server on localhost, on the port it had last run when
+/// that is free (`bind_frontend_listener`). Returns the port number.
+pub async fn start_ipc_server(state: Arc<AppState>, cache_dir: &std::path::Path) -> u16 {
     // Determine frontend static files directory (next to the executable)
     let exe_dir = std::env::current_exe()
         .ok()
@@ -94,14 +134,18 @@ pub async fn start_ipc_server(state: Arc<AppState>) -> u16 {
         .layer(CorsLayer::permissive())
         .with_state(state);
 
-    // Serve built frontend as static files (for portable/production builds)
+    // Serve built frontend as static files (for portable/production builds).
+    // `no-cache`: Chromium asks again on every load and gets a 304 while the
+    // file is unchanged, so it keeps its caches but never shows a frontend a
+    // rebuild in place (`task dev`) has replaced.
     if has_frontend {
-        app = app.fallback_service(ServeDir::new(&frontend_dir));
+        let static_files = Router::new()
+            .fallback_service(ServeDir::new(&frontend_dir))
+            .layer(axum::middleware::map_response(revalidate));
+        app = app.fallback_service(static_files);
     }
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("Failed to bind IPC server");
+    let listener = bind_frontend_listener(cache_dir).await;
     let port = listener
         .local_addr()
         .expect("Failed to get local address")
@@ -1248,4 +1292,35 @@ fn focus_app(state: &Arc<AppState>, window_label: &str) {
     crate::input_owner::windows::select_app(state, &label);
     #[cfg(not(target_os = "windows"))]
     crate::input_owner::views::select_app(state, &label);
+}
+
+#[cfg(test)]
+mod frontend_port_tests {
+    use super::{bind_frontend_listener, FRONTEND_PORT_FILE};
+
+    fn saved(dir: &std::path::Path) -> u16 {
+        std::fs::read_to_string(dir.join(FRONTEND_PORT_FILE)).unwrap().trim().parse().unwrap()
+    }
+
+    /// A first run picks a port and remembers it; the next run gets it back.
+    #[tokio::test]
+    async fn the_next_run_reuses_the_port() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = bind_frontend_listener(dir.path()).await.local_addr().unwrap().port();
+        assert_eq!(saved(dir.path()), first);
+        let again = bind_frontend_listener(dir.path()).await.local_addr().unwrap().port();
+        assert_eq!(again, first);
+    }
+
+    /// A port something else holds now: a new one, remembered instead.
+    #[tokio::test]
+    async fn a_taken_port_is_replaced_and_remembered() {
+        let dir = tempfile::tempdir().unwrap();
+        let holder = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let taken = holder.local_addr().unwrap().port();
+        std::fs::write(dir.path().join(FRONTEND_PORT_FILE), taken.to_string()).unwrap();
+        let port = bind_frontend_listener(dir.path()).await.local_addr().unwrap().port();
+        assert_ne!(port, taken);
+        assert_eq!(saved(dir.path()), port);
+    }
 }
