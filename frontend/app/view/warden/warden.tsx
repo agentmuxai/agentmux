@@ -14,9 +14,11 @@ export const wardenPaneTab = lazyPaneTab({
     label: "Warden",
     icon: "shield-halved",
     defaultHue: 270,
+    // Blocks saved when the Vault was a pane of its own open on its section.
+    aliases: ["vault"],
     // Applies `term:zoom` as CSS zoom.
     capabilities: { paneZoom: {} },
     sections: WARDEN_SECTIONS,
-    members: ["liveTitle"],
+    members: ["liveTitle", "headerActions"],
     load: () => import("./warden-instance"),
 });

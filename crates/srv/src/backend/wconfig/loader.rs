@@ -346,11 +346,17 @@ mod tests {
         assert_eq!(kanban.get("view").and_then(|v| v.as_str()), Some("warden"));
         assert_eq!(kanban.get("warden:section").and_then(|v| v.as_str()), Some("kanban"));
 
+        let vault = &config.widgets["defwidget@vault"].block_def.meta;
+        assert_eq!(vault.get("view").and_then(|v| v.as_str()), Some("warden"));
+        assert_eq!(vault.get("warden:section").and_then(|v| v.as_str()), Some("vault"));
+
+        // A section of a section: Warden on its Vault section, on the Vault's Cards.
         let mut cards: WidgetConfigType = serde_json::from_str(
-            r#"{"label":"Cards","section":"cards","blockdef":{"meta":{"view":"vault"}}}"#,
+            r#"{"label":"Cards","section":"vault/cards","blockdef":{"meta":{"view":"warden"}}}"#,
         )
         .unwrap();
         cards.resolve_section();
+        assert_eq!(cards.block_def.meta.get("warden:section").and_then(|v| v.as_str()), Some("vault"));
         assert_eq!(cards.block_def.meta.get("vault:section").and_then(|v| v.as_str()), Some("cards"));
 
         // No view: nothing to key it by, so the meta is left alone.

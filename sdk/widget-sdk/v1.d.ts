@@ -35,9 +35,11 @@ export declare class AgentMuxError extends Error {
 export type Visibility = "active" | "dormant" | "windowHidden";
 
 /** The sections of AgentMux's own sectioned panes, by view. A pane opens on one when its meta
- *  holds `<view>:section` (see `panes.open`); any other id opens its first section. */
+ *  holds `<view>:section` (see `panes.open`); any other id opens its default section. `vault` is
+ *  not a view: it lists the sections of Warden's Vault section, set with `vault:section` beside
+ *  `"warden:section": "vault"`. */
 export interface PaneSections {
-    warden: "kanban" | "host" | "lan" | "internet" | "audit" | "history";
+    warden: "kanban" | "vault" | "host" | "lan" | "internet" | "audit" | "history";
     vault: "personal" | "cards" | "api-keys" | "logins" | "notes" | "kept" | "activity";
     connectors: "accounts" | "mcp" | "remotes";
     memory: "global" | "personal" | "skills" | "bundles";
@@ -178,10 +180,11 @@ export interface AgentMux {
     theme: { get(): Promise<Theme> };
     panes: {
         /** Opens one of AgentMux's sectioned panes on a section (needs `panes`):
-         *  `am.panes.open("warden", { "warden:section": "kanban" })`. */
-        open<V extends keyof PaneSections>(
+         *  `am.panes.open("warden", { "warden:section": "kanban" })`, or the Vault's Cards with
+         *  `am.panes.open("warden", { "warden:section": "vault", "vault:section": "cards" })`. */
+        open<V extends Exclude<keyof PaneSections, "vault">>(
             view: V,
-            meta?: { [K in `${V}:section`]?: PaneSections[V] },
+            meta?: { [K in `${V}:section`]?: PaneSections[V] } & (V extends "warden" ? { "vault:section"?: PaneSections["vault"] } : {}),
             split?: "right" | "down" | "tab"
         ): Promise<{ pane: string }>;
         /** The package's own views need no permission; any other view needs `panes`.

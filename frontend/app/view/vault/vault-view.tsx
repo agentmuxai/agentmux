@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// The Vault pane: the person's secrets, which agents use by name without
+// The Vault, Warden's Vault section (vault-in-warden.ts): the person's secrets, which agents use by name without
 // seeing them (docs/specs/SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §5).
 // A rail of sections like Warden's; agents' requests for new entries on top.
 
@@ -13,6 +13,7 @@ import type { VaultActivity } from "@/types/rpc/VaultActivity";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
 import type { VaultSection } from "@/types/rpc/VaultSection";
 import { VaultEntries } from "./vault-entries";
+import { VaultShown } from "./vault-reveal";
 import { VaultExportDialog } from "./vault-export";
 import { VaultImportDialog } from "./vault-import";
 import { VaultEntryForm, type VaultFormTarget } from "./vault-entry-form";
@@ -255,7 +256,9 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
     );
 
     return (
-        // data-agent-hidden: agents' UI captures and queries leave the Vault out.
+        // data-agent-hidden: agents' UI captures and queries leave the Vault out. VaultShown
+        // lets an open Reveal close when the Vault stops being shown.
+        <VaultShown.Provider value={model.shown}>
         <ModalLayer scope="pane">
             <div class="vault-container" data-agent-hidden="vault">
                 <div class="vault-view" style={{ zoom: model.zoomAtom() }}>
@@ -298,6 +301,7 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
                 </div>
             </div>
         </ModalLayer>
+        </VaultShown.Provider>
     );
 }
 

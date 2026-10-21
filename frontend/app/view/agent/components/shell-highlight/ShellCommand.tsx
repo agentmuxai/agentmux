@@ -21,6 +21,7 @@ import { For, Match, Show, Switch, createMemo, createSignal, onCleanup, type JSX
 import { HighlightedCode } from "../HighlightedCode";
 import { SHELL_LANG, embeddedBodies } from "./embedded";
 import { cachedRuns, highlightBody } from "./embedded-highlight";
+import "@/app/element/shiki-themed.scss";
 import { detectShellFlavor } from "./flavor";
 import { MAX_TOKENIZE_CHARS, tokenizeShell, type Token } from "./tokenize";
 

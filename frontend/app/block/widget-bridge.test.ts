@@ -22,7 +22,14 @@ beforeAll(() => {
                 ...(view === "memory" ? { aliases: ["old-memory"] } : {}),
                 label: view,
                 icon: "x",
-                sections: { default: ids[0], items: ids.map((id) => ({ id, label: id, icon: "x" })) },
+                sections: {
+                    default: ids[0],
+                    items: [
+                        ...ids.map((id) => ({ id, label: id, icon: "x" })),
+                        // A section with sections of its own, like Warden's Vault.
+                        ...(view === "warden" ? [{ id: "vault", label: "Vault", icon: "x", sections: { default: "cards", items: [{ id: "cards", label: "Cards", icon: "x" }] } }] : []),
+                    ],
+                },
                 create: () => ({ component: () => null }),
             })
         );
@@ -223,6 +230,10 @@ describe("permissions", () => {
         const state = await ready(h);
         await handleBridgeRequest(h, state, "panes.open", { view: "warden", meta: { "warden:section": "kanban", cmd: "x" } });
         expect(h.openPane).toHaveBeenLastCalledWith("warden", { "warden:section": "kanban" }, "right");
+        await handleBridgeRequest(h, state, "panes.open", { view: "warden", meta: { "warden:section": "vault", "vault:section": "cards" } });
+        expect(h.openPane).toHaveBeenLastCalledWith("warden", { "warden:section": "vault", "vault:section": "cards" }, "right");
+        await handleBridgeRequest(h, state, "panes.open", { view: "warden", meta: { "vault:section": "nope", "vault:request": "r1" } });
+        expect(h.openPane).toHaveBeenLastCalledWith("warden", {}, "right");
         // Through an old view name, the section would land under a key the pane doesn't read: dropped.
         await handleBridgeRequest(h, state, "panes.open", { view: "old-memory", meta: { "old-memory:section": "skills", "memory:section": "skills" } });
         expect(h.openPane).toHaveBeenLastCalledWith("old-memory", {}, "right");

@@ -1,22 +1,31 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Vault module barrel: its native pane tab manifest. Its code loads with the
-// first Vault pane (vault-instance.tsx).
+// Vault module barrel. The Vault is Warden's Vault section (vault-in-warden.ts); this is what
+// Warden's header shows while that section is selected.
 
-import { lazyPaneTab } from "@/app/block/lazy-pane-tab";
-import { VAULT_SECTIONS } from "./vault-kinds";
+import type { VaultViewModel } from "./vault-model";
 
-/** The Vault as a native pane tab
- *  (docs/specs/SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §5). */
-export const vaultPaneTab = lazyPaneTab({
-    apiVersion: 1,
-    view: "vault",
-    label: "Vault",
-    icon: "lock",
-    defaultHue: 60,
-    capabilities: { paneZoom: {} },
-    sections: VAULT_SECTIONS,
-    members: ["liveTitle", "headerActions"],
-    load: () => import("./vault-instance"),
-});
+/** Import, export and the note on what may ask the person, in Warden's header on the Vault section. */
+export function vaultHeaderActions(model: VaultViewModel): IconButtonDecl[] {
+    return [
+        {
+            elemtype: "iconbutton",
+            icon: "file-import",
+            title: "Import into the Vault",
+            click: () => model.openTransfer("import"),
+        },
+        {
+            elemtype: "iconbutton",
+            icon: "file-export",
+            title: "Export the Vault",
+            click: () => model.openTransfer("export"),
+        },
+        {
+            elemtype: "iconbutton",
+            icon: "circle-info",
+            title: "What the Vault may ask you",
+            click: () => model.setMeta({ "vault:prompts-read": null }),
+        },
+    ];
+}

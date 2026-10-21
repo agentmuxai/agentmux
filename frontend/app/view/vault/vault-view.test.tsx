@@ -151,6 +151,15 @@ describe("the Vault pane", () => {
         expect(blockMeta()["vault:section"]).toBe("api-keys");
     });
 
+    it("closes an open Show or copy dialog when the Vault stops being shown (another Warden section)", async () => {
+        renderVault();
+        fireEvent.click(await screen.findByRole("button", { name: "Show or copy" }));
+        expect(await screen.findByRole("dialog")).toBeTruthy();
+        // In Warden, leaving the Vault section makes the Vault's host dormant (vault-in-warden.ts).
+        setVisibility("dormant");
+        await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    });
+
     it("tells srv when it is no longer shown", async () => {
         const { unmount } = renderVault();
         const on = { pane: "vault-block", on: true };

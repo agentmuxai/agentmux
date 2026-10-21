@@ -444,6 +444,15 @@ fn view_from_block(store: &Store, meta: &MetaMapType, ctx: &ExportContext, warni
         view_type = "connectors".to_string();
         config.insert("section".into(), Value::String("remotes".to_string()));
     }
+    // The Vault was a pane of its own until it became a section of Warden.
+    if view_type == "vault" {
+        view_type = "warden".to_string();
+        let path = match meta_str(meta, "vault:section") {
+            Some(sub) => format!("vault/{sub}"),
+            None => "vault".to_string(),
+        };
+        config.insert("section".into(), Value::String(path));
+    }
     match view_type.as_str() {
         "agent" => {
             // The definition's portable identity, never its local row id.
@@ -533,9 +542,15 @@ fn view_from_block(store: &Store, meta: &MetaMapType, ctx: &ExportContext, warni
                 config.insert("show_controls".into(), Value::Bool(shown));
             }
         }
-        "connectors" | "memory" => {
+        "connectors" | "memory" | "warden" | "settings" => {
             if let Some(section) = meta_str(meta, &format!("{view_type}:section")) {
-                config.insert("section".into(), Value::String(section.to_string()));
+                // A section with sections of its own (Warden's Vault) is written as a path,
+                // `vault/cards`, as widgets.json's "section" is.
+                let path = match meta_str(meta, &format!("{section}:section")) {
+                    Some(sub) if view_type == "warden" => format!("{section}/{sub}"),
+                    _ => section.to_string(),
+                };
+                config.insert("section".into(), Value::String(path));
             }
         }
         // Singleton views and anything this build doesn't know: the type
@@ -609,8 +624,7 @@ const MAX_TREE_DEPTH: usize = 32;
 
 /// Views that need no config to open, beyond their type.
 const PLAIN_VIEWS: &[&str] = &[
-    "swarm", "settings", "help", "drone", "workflows", "warden", "toolchain", "launcher", "identity",
-    "tower", "vault",
+    "swarm", "help", "drone", "workflows", "toolchain", "launcher", "identity", "tower",
 ];
 
 /// How to turn a file into panes.
@@ -996,6 +1010,27 @@ impl PlanBuilder<'_> {
                     meta.insert(format!("{pane}:section"), Value::String(s.to_string()));
                 }
                 self.summary.push(if pane == "connectors" { "Connectors" } else { "Memory" }.to_string());
+            }
+            // Files saved before the Vault became a section of Warden say "vault".
+            "warden" | "settings" | "vault" => {
+                // A Vault pane's file names its own section; Warden's names `vault/<that>`.
+                let vault_sub = |s: Option<&str>| s.map(|s| format!("vault/{s}")).unwrap_or_else(|| "vault".to_string());
+                let (pane, section) = match kind {
+                    "vault" => ("warden", Some(vault_sub(cfg_str(view, "section")))),
+                    pane => (pane, cfg_str(view, "section").map(str::to_string)),
+                };
+                meta.insert("view".into(), pane.into());
+                if let Some(s) = section {
+                    let (id, sub) = match s.split_once('/') {
+                        Some((id, sub)) if pane == "warden" => (id.to_string(), Some(sub.to_string())),
+                        _ => (s, None),
+                    };
+                    if let Some(sub) = sub {
+                        meta.insert(format!("{id}:section"), Value::String(sub));
+                    }
+                    meta.insert(format!("{pane}:section"), Value::String(id));
+                }
+                self.summary.push(pane.to_string());
             }
             k if PLAIN_VIEWS.contains(&k) => {
                 meta.insert("view".into(), Value::String(k.to_string()));

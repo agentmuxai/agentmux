@@ -3,11 +3,52 @@
 
 import { CopyButton } from "@/app/element/copybutton";
 import { ErrorBoundary } from "@/app/element/errorboundary";
+import {
+    cachedRuns,
+    highlightBody,
+    type ColoredRun,
+} from "@/app/view/agent/components/shell-highlight/embedded-highlight";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
+import { createSignal, For, Show, type JSX } from "solid-js";
 import { IconButton } from "./iconbutton";
 import { Mermaid, MermaidErrorFallback } from "./markdown-mermaid";
+import "./shiki-themed.scss";
 
-const Code = ({ className = "", children }: { className?: string; children: any }) => {
+/** The text of a code element's children (strings, or DOM nodes this renderer builds eagerly). */
+function childText(children: unknown): string {
+    if (children == null) return "";
+    if (Array.isArray(children)) return children.map(childText).join("");
+    if (typeof children === "string") return children;
+    if (children instanceof Node) return children.textContent ?? "";
+    return String(children);
+}
+
+/**
+ * A fenced block coloured by shiki (rehype-mark-code-lang.ts marked it with its
+ * language). Plain text at once, the coloured runs when they arrive: only this
+ * block re-renders, never the message. Both themes' colours ride along as CSS
+ * variables (shiki-themed.scss), so a theme switch needs no re-highlight.
+ * SPEC_MARKDOWN_CODE_ON_SHIKI_AND_REDUNDANT_LIBRARIES_2026_10_21.md §4.
+ */
+function ShikiCode(props: { className: string; lang: string; text: string; children: any }): JSX.Element {
+    const [runs, setRuns] = createSignal<ColoredRun[] | null>(cachedRuns(props.text, props.lang) ?? null);
+    if (!runs()) {
+        void highlightBody(props.text, props.lang).then((r) => {
+            if (r) setRuns(r);
+        });
+    }
+    return (
+        <code class={`${props.className} sh-shiki`}>
+            <Show when={runs()} fallback={props.children}>
+                {(list) => <For each={list()}>{(run) => (run.style ? <span style={run.style}>{run.text}</span> : run.text)}</For>}
+            </Show>
+        </code>
+    );
+}
+
+const Code = (props: { className?: string; children: any; "data-highlight"?: string }) => {
+    const className = props.className ?? "";
+    const children = props.children;
     if (/\blanguage-mermaid\b/.test(className)) {
         const text = Array.isArray(children) ? children.join("") : String(children ?? "");
         // Mermaid renders an SVG diagram in place of the source text, so
@@ -22,6 +63,10 @@ const Code = ({ className = "", children }: { className?: string; children: any 
                 </ErrorBoundary>
             </div>
         );
+    }
+    const lang = props["data-highlight"];
+    if (lang) {
+        return <ShikiCode className={className} lang={lang} text={childText(children)} children={children} />;
     }
     return <code class={className}>{children}</code>;
 };

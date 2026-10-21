@@ -7,7 +7,7 @@
 // it 30 seconds later. Reveal shows the value for a few seconds, and hides it
 // when the dialog closes or the window loses focus.
 
-import { createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createContext, createEffect, createSignal, For, on, onCleanup, onMount, Show, useContext, type Accessor, type JSX } from "solid-js";
 import { createStore } from "solid-js/store";
 
 import { Modal } from "@/app/element/modal";
@@ -27,6 +27,9 @@ export function canConfirmPerson(platform: string = getPlatform()): boolean {
 }
 
 export const CONFIRM_UNAVAILABLE = "Reveal and Copy need Windows Hello for now: Touch ID and the desktop's prompt aren't built yet.";
+
+/** Whether the Vault is on screen: its pane, or Warden on its Vault section (vault-in-warden.ts). */
+export const VaultShown = createContext<Accessor<boolean>>(() => true);
 
 export function VaultRevealDialog(props: { entry: VaultEntryInfo; onClose: () => void }): JSX.Element {
     const entry = props.entry;
@@ -53,6 +56,10 @@ export function VaultRevealDialog(props: { entry: VaultEntryInfo; onClose: () =>
     // an earlier value on screen. The pending Reveal still shows its own result.
     const onBlur = hideAll;
     onMount(() => window.addEventListener("blur", onBlur));
+    // Switching away (another Warden section, another tab) closes it, which hides every value:
+    // the section stays mounted, so a value would otherwise wait in a hidden dialog.
+    const shownNow = useContext(VaultShown);
+    createEffect(on(shownNow, (on) => !on && props.onClose(), { defer: true }));
     onCleanup(() => {
         window.removeEventListener("blur", onBlur);
         closed++;
