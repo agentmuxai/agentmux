@@ -142,6 +142,12 @@ export function checklistProgress(t: KanbanTask): string | null {
     return `${list.filter((i) => i.status === "completed").length}/${list.length}`;
 }
 
+/** A PR link's label: "#12" for a GitHub PR address, else "PR". */
+export function prLabel(url: string): string {
+    const m = /\/pull\/(\d+)/.exec(url);
+    return m ? `#${m[1]}` : "PR";
+}
+
 /** Whether a task matches the search box: title, number, agent, repository. */
 export function matchesQuery(t: KanbanTask, q: string): boolean {
     const s = q.trim().toLowerCase();

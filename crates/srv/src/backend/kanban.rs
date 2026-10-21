@@ -9,9 +9,14 @@
 //!   done without the operator coming back. Off with `kanban:reminders`
 //!   false, or for one agent with its block's `kanban:continue` false.
 //! - **The PR link** (§6.8): an agent opening a PR while it holds exactly one
-//!   task gets that task's branch set.
+//!   task gets that task's branch set, and the PR itself once GitHub lists it
+//!   ([`prs`]).
+//! - **Closing on merge** (D5, [`prs`]): a task in Review whose PR merged is
+//!   accepted.
 //!
 //! The history line and the board event come with each.
+
+pub mod prs;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock};
@@ -44,14 +49,15 @@ struct Context {
     identity: Arc<Store>,
     config: Arc<ConfigState>,
     broker: Arc<Broker>,
+    http: reqwest::Client,
 }
 
 static CONTEXT: OnceLock<Context> = OnceLock::new();
 
 /// Turn the Kanban's background work on for this srv. Until this is called
 /// (and in tests) nothing here acts.
-pub fn install(mstore: Arc<Store>, identity: Arc<Store>, config: Arc<ConfigState>, broker: Arc<Broker>) {
-    let _ = CONTEXT.set(Context { mstore, identity, config, broker });
+pub fn install(mstore: Arc<Store>, identity: Arc<Store>, config: Arc<ConfigState>, broker: Arc<Broker>, http: reqwest::Client) {
+    let _ = CONTEXT.set(Context { mstore, identity, config, broker, http });
 }
 
 fn publish_changed(broker: &Broker) {
@@ -236,6 +242,8 @@ pub fn on_new_prs(prs: &[NewPr]) {
         if ctx.identity.work_card_update(&task.id, &CardUpdate { branch: Some(head.clone()), ..Default::default() }, now).is_ok() {
             record(&ctx.identity, &task.id, &pr.agent_id, "linked", &format!("opened a PR from {head}"));
             changed = true;
+            let repo = ctx.identity.work_board_get(&task.id).ok().flatten().map(|t| t.card.repo).unwrap_or_default();
+            prs::find_opened(task.id.clone(), repo, head);
         }
     }
     if changed {
