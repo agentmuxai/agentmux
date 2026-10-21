@@ -26,16 +26,35 @@
 // this is 2 flashes over 800ms (2.5 Hz), under the limit, so the strobe runs
 // in both tiers. Its pulse-only treatment, which drops straight to the steady
 // pulse, is declared below and dormant under `feedback`.
-@mixin drop-target-hover {
+//
+// `$hold: true` is the variant that lands inverted: the flash is one blink
+// (negative, normal) and then the target STAYS negative until the hover ends,
+// instead of settling back to its normal colours. The Pane Tab strip uses it,
+// so the pane that will take the tab stays unmistakable for the whole drag
+// (docs/specs/SPEC_DROP_TARGET_LANDS_INVERTED_2026_10_21.md). Reduced
+// treatment: no blink, the negative is simply on for the whole hover.
+@mixin drop-target-hover($hold: false) {
     outline: 2px solid var(--drop-target-border);
     outline-offset: -2px;
-    animation:
-        tab-drop-invert-strobe 400ms steps(1, end) 2,
-        tab-drop-pulse 0.8s var(--ease-in-out) infinite alternate;
 
-    // Reduced treatment (feedback), dormant under the motion policy.
-    @include mixins.when-motion-reduced(feedback) {
-        animation: tab-drop-pulse 0.8s ease-in-out infinite alternate;
+    @if $hold {
+        animation:
+            tab-drop-invert-hold 400ms steps(1, end) forwards,
+            tab-drop-pulse 0.8s var(--ease-in-out) infinite alternate;
+
+        @include mixins.when-motion-reduced(feedback) {
+            filter: invert(1);
+            animation: tab-drop-pulse 0.8s ease-in-out infinite alternate;
+        }
+    } @else {
+        animation:
+            tab-drop-invert-strobe 400ms steps(1, end) 2,
+            tab-drop-pulse 0.8s var(--ease-in-out) infinite alternate;
+
+        // Reduced treatment (feedback), dormant under the motion policy.
+        @include mixins.when-motion-reduced(feedback) {
+            animation: tab-drop-pulse 0.8s ease-in-out infinite alternate;
+        }
     }
 }
 
@@ -46,11 +65,26 @@
 // (one class toggle on the parent) and use steps(1, end), so they flip on the
 // same frame. Mirrors `drop-target-hover`'s pulse-only treatment (dormant
 // under `feedback`): no parent strobe there, so nothing to cancel.
-@mixin drop-target-strobe-exempt {
-    animation: tab-drop-invert-strobe 400ms steps(1, end) 2;
+//
+// `$hold: true` pairs with `drop-target-hover($hold: true)`: the descendant
+// runs the same blink and then stays inverted too, so the pair cancels for as
+// long as the hover lasts, not only during the flash. Under the reduced
+// treatment the parent holds the negative with no animation, so the
+// descendant holds it the same way.
+@mixin drop-target-strobe-exempt($hold: false) {
+    @if $hold {
+        animation: tab-drop-invert-hold 400ms steps(1, end) forwards;
 
-    @include mixins.when-motion-reduced(feedback) {
-        animation: none;
+        @include mixins.when-motion-reduced(feedback) {
+            animation: none;
+            filter: invert(1);
+        }
+    } @else {
+        animation: tab-drop-invert-strobe 400ms steps(1, end) 2;
+
+        @include mixins.when-motion-reduced(feedback) {
+            animation: none;
+        }
     }
 }
 

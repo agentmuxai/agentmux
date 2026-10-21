@@ -149,7 +149,7 @@
     // whole header instead; see `.pane-header--foreign-hover` below. Same
     // Window Tab treatment either way (drop-feedback.scss).
     &--foreign-hover {
-        @include drop.drop-target-hover;
+        @include drop.drop-target-hover($hold: true);
     }
 }
 
@@ -159,8 +159,10 @@
 // which is why this rule is a bare class rather than nested under
 // `.pane-tab-strip`.
 //
-// The exact treatment a Window Tab gets when a pane is dragged over it
-// (drop-feedback.scss): two invert flashes, then a pulsing 2px outline.
+// The treatment a Window Tab gets when a pane is dragged over it
+// (drop-feedback.scss), in its `$hold` form: one invert flash that then LANDS
+// inverted and stays so until the pointer leaves or the drop happens, with a
+// pulsing 2px outline on top (SPEC_DROP_TARGET_LANDS_INVERTED_2026_10_21.md).
 // `outline` composes with the header's own box-shadow (has-summary case,
 // block.scss) instead of replacing it, and the negative offset keeps it
 // inside the row, so the pane's rounded corners can't clip it and it can't
@@ -174,10 +176,10 @@
 // color was picked for contrast against the un-inverted background.
 // SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §3.2.
 .pane-header--foreign-hover {
-    @include drop.drop-target-hover;
+    @include drop.drop-target-hover($hold: true);
 
     .block-frame-default-header-tabstrip {
-        @include drop.drop-target-strobe-exempt;
+        @include drop.drop-target-strobe-exempt($hold: true);
     }
 }
 
