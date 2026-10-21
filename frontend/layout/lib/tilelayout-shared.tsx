@@ -22,6 +22,7 @@ import { Dynamic } from "solid-js/web";
 import { Key } from "@/util/keyed";
 import { debounce, throttle } from "throttle-debounce";
 import { LayoutModel } from "./layoutModel";
+import { computeMoveNode } from "./layoutTree";
 import { useNodeModel } from "./layoutModelHooks";
 import { activeKeyFor } from "./layoutNodeModels";
 import {
@@ -40,6 +41,14 @@ import {
 import { dragState, isCrossTabDrag } from "./tilelayout-drag-state";
 import { tileItemType } from "@/app/drag/drag-types";
 
+/**
+ * Whether a cross-tab drop at `compute` is offered (has an indicator). A target the move would
+ * refuse (a chip, for a pane from another tab: SPEC_DRAG_MINIMIZED_PANES_2026_10_20.md §3 C) shows
+ * none, and must not be noted either, or the release would still redock the pane somewhere else.
+ */
+function crossTabDropOffered(model: LayoutModel, compute: LayoutTreeComputeMoveNodeAction): boolean {
+    return computeMoveNode(model.treeState, compute) !== undefined;
+}
 
 export function NodeBackdrops(props: { layoutModel: LayoutModel }) {
     const blockBlurAtom = getSettingsKeyAtom("window:magnifiedblockblursecondarypx");
@@ -290,14 +299,15 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
         const rawDirection = determineDropDirection(bestRect, clampedOffset);
         // Cross-tab Outer* clamp — see clampCrossTabDirection.
         const direction = crossTab ? clampCrossTabDirection(rawDirection) : rawDirection;
-        props.layoutModel.treeReducer({
+        const compute = {
             type: LayoutTreeActionType.ComputeMove,
             nodeId: bestLeafId,
             nodeToMoveId: dragNodeId,
             direction,
             // Cross-tab: see OverlayNode.computeDropDirection — preview only.
             nodeToMove: crossTab ? dragState.node : undefined,
-        } as LayoutTreeComputeMoveNodeAction);
+        } as LayoutTreeComputeMoveNodeAction;
+        props.layoutModel.treeReducer(compute);
         if (crossTab) {
             const blockId = dragState.node?.data?.blockId;
             const sourceTabId = dragState.layoutModel?.tabAtom()?.oid;
@@ -305,7 +315,8 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
             const bestLeaf = props.layoutModel.leafs().find((l) => l.id === bestLeafId);
             const targetBlockId = bestLeaf?.data?.blockId;
             if (blockId && sourceTabId && targetTabId && targetBlockId
-                && direction !== undefined && direction !== DropDirection.Center) {
+                && direction !== undefined && direction !== DropDirection.Center
+                && crossTabDropOffered(props.layoutModel, compute)) {
                 noteCrossTabDrop({ blockId, sourceTabId, targetTabId, targetBlockId, direction });
             } else {
                 noteCrossTabDrop(null);
@@ -398,7 +409,7 @@ const OverlayNode = (props: OverlayNodeProps) => {
             // equivalents so the ghost matches the committed split — see
             // clampCrossTabDirection in crossTabDrag.ts.
             const direction = crossTab ? clampCrossTabDirection(rawDirection) : rawDirection;
-            props.layoutModel.treeReducer({
+            const compute = {
                 type: LayoutTreeActionType.ComputeMove,
                 nodeId: props.node.id,
                 nodeToMoveId: dragNodeId,
@@ -407,7 +418,8 @@ const OverlayNode = (props: OverlayNodeProps) => {
                 // the ghost placeholder can still be computed (preview only —
                 // the drop below routes to redockDraggedPane, never a local commit).
                 nodeToMove: crossTab ? dragState.node : undefined,
-            } as LayoutTreeComputeMoveNodeAction);
+            } as LayoutTreeComputeMoveNodeAction;
+            props.layoutModel.treeReducer(compute);
             // Capture the cross-tab drop record NOW (globals are alive during
             // onDrag) — drop handlers must not read the drag globals, since
             // the source draggable's own onDrop may null them first.
@@ -417,7 +429,8 @@ const OverlayNode = (props: OverlayNodeProps) => {
                 const targetTabId = props.layoutModel.tabAtom()?.oid;
                 const targetBlockId = props.node.data?.blockId;
                 if (blockId && sourceTabId && targetTabId && targetBlockId
-                    && direction !== undefined && direction !== DropDirection.Center) {
+                    && direction !== undefined && direction !== DropDirection.Center
+                    && crossTabDropOffered(props.layoutModel, compute)) {
                     noteCrossTabDrop({ blockId, sourceTabId, targetTabId, targetBlockId, direction });
                 } else {
                     noteCrossTabDrop(null);
