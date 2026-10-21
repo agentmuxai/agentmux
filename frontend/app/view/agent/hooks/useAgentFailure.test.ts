@@ -724,6 +724,7 @@ describe("useAgentFailure — a network failure that waits for its API", () => {
             const { ui } = mkUI(onRetry, {
                 waitsForReconnect: (code) => code === "network",
                 reconnectHint: () => "retries by itself when the API is back",
+                failureDismissed: () => {},
             });
             await Promise.resolve();
             fire("agentfailure", network());
@@ -741,11 +742,14 @@ describe("useAgentFailure — a network failure that waits for its API", () => {
     it("dismissing a network failure clears the stored one, so a reload doesn't offer it again", async () => {
         await createRoot(async (dispose) => {
             setBlockMetaMock.mockClear();
-            const { ui } = mkUI(vi.fn(), { waitsForReconnect: () => true, reconnectHint: () => null });
+            const failureDismissed = vi.fn();
+            const { ui } = mkUI(vi.fn(), { waitsForReconnect: () => true, reconnectHint: () => null, failureDismissed });
             await Promise.resolve();
             fire("agentfailure", network());
             ui.row()!.actions.find((a) => a.title === "Dismiss")!.onClick();
             expect(setBlockMetaMock).toHaveBeenCalledWith(BLOCK_ID, { "agent:last_failure": null });
+            // The pane's offline recovery drops the turn too.
+            expect(failureDismissed).toHaveBeenCalledTimes(1);
             expect(ui.row()).toBeNull();
             // Other classes stay stored: srv routes work by them.
             setBlockMetaMock.mockClear();
@@ -759,7 +763,7 @@ describe("useAgentFailure — a network failure that waits for its API", () => {
     it("keeps the timed retry for a network failure nothing waits on", async () => {
         await createRoot(async (dispose) => {
             const onRetry = vi.fn();
-            const { ui } = mkUI(onRetry, { waitsForReconnect: () => false, reconnectHint: () => null });
+            const { ui } = mkUI(onRetry, { waitsForReconnect: () => false, reconnectHint: () => null, failureDismissed: () => {} });
             await Promise.resolve();
             fire("agentfailure", network());
             expect(counting(ui)).toBe(true);

@@ -17,10 +17,12 @@ import {
     heldForText,
     holdsInput,
     isLocalCommand,
+    isTrackedService,
     keyedLock,
     modelApiService,
     type OfflineInput,
     type PaneMessageEvent,
+    sentInTranscript,
     serviceReachability,
 } from "./offline-input";
 
@@ -46,6 +48,22 @@ describe("pure rules", () => {
         expect(serviceReachability(services, "model_api:anthropic")).toBe("offline");
         expect(serviceReachability(services, "model_api:openai")).toBeNull();
         expect(serviceReachability(undefined, "model_api:anthropic")).toBeNull();
+    });
+
+    it("knows srv tracks Claude's API before any status arrives, and others once they report", () => {
+        expect(isTrackedService("model_api:anthropic", undefined)).toBe(true);
+        expect(isTrackedService("model_api:openai", undefined)).toBe(false);
+        const services = [{ service: "model_api:openai", label: "OpenAI API", state: "online" as const, since_ms: 1, last_error: null }];
+        expect(isTrackedService("model_api:openai", services)).toBe(true);
+        expect(isTrackedService(null, services)).toBe(false);
+    });
+
+    it("finds a held message in the transcript only when sent after it was held", () => {
+        const item = { id: "h", text: "build it", heldAt: 1_000 };
+        expect(sentInTranscript([user("build it", 1_500)], item)).toBe(true);
+        expect(sentInTranscript([user("build it", 500)], item)).toBe(false);
+        expect(sentInTranscript([user("build it")], item)).toBe(false);
+        expect(sentInTranscript([user("other", 1_500)], item)).toBe(false);
     });
 
     it("holds while the turn retries or the API is offline, never while it is online or degraded", () => {
@@ -133,7 +151,27 @@ describe("confirmedSend", () => {
 
     it("is false when the send path rejected it or lost it", async () => {
         await expect(harness("rejected").deliver("hi")).resolves.toBe("rejected");
-        await expect(harness("expired").deliver("hi")).resolves.toBe("rejected");
+    });
+
+    it("is unknown when the send path gives up waiting, and still hears srv's late acceptance", async () => {
+        const sinks = new Set<(e: PaneMessageEvent) => void>();
+        const emit = (e: PaneMessageEvent) => sinks.forEach((cb) => cb(e));
+        const deliver = confirmedSend(
+            async () => {
+                emit({ type: "pending-queued", id: "m1" });
+                emit({ type: "pending-expired", id: "m1" });
+            },
+            (cb) => {
+                sinks.add(cb);
+                return () => sinks.delete(cb);
+            },
+            () => false,
+            120_000
+        );
+        const late = vi.fn();
+        await expect(deliver("hi", undefined, late)).resolves.toBe("unknown");
+        emit({ type: "pending-accepted", id: "m1" });
+        expect(late).toHaveBeenCalledWith(true);
     });
 
     it("is false when nothing was queued for srv", async () => {
@@ -177,9 +215,12 @@ function failLive(p: ReturnType<typeof makePane>, at: number) {
 }
 
 /** A pane: plain signals for what the controller reads, a recording send. */
-function makePane(opts: { api?: Reachability | null; held?: HeldInput[]; marker?: AutoRetryMarker | null } = {}) {
+function makePane(
+    opts: { api?: Reachability | null; tracked?: boolean; held?: HeldInput[]; marker?: AutoRetryMarker | null } = {}
+) {
     const [retrying, setRetrying] = createSignal(false);
     const [api, setApi] = createSignal<Reachability | null>(opts.api === undefined ? "online" : opts.api);
+    const [tracked, setTracked] = createSignal(opts.tracked ?? opts.api !== null);
     const [ready, setReady] = createSignal(true);
     const [working, setWorking] = createSignal(false);
     const [failure, setFailure] = createSignal<PaneFailure | null>(null);
@@ -217,6 +258,7 @@ function makePane(opts: { api?: Reachability | null; held?: HeldInput[]; marker?
         ui = createOfflineInput({
             retrying,
             api,
+            tracked,
             ready,
             working,
             failure,
@@ -255,6 +297,7 @@ function makePane(opts: { api?: Reachability | null; held?: HeldInput[]; marker?
         dispose,
         setRetrying,
         setApi,
+        setTracked,
         setReady,
         setWorking,
         setFailure,
@@ -464,6 +507,53 @@ describe("held input", () => {
         p.dispose();
     });
 
+    it("stores a held message as possibly gone before it goes, so a reload doesn't send it again", async () => {
+        const p = makePane({ api: "offline" });
+        await p.ui.submit("one");
+        let answer!: (outcome: DeliveryOutcome) => void;
+        p.deliver.mockImplementationOnce(() => new Promise<DeliveryOutcome>((r) => (answer = r)));
+        p.setApi("online");
+        await flush();
+        expect(p.store.held).toEqual([expect.objectContaining({ text: "one", unconfirmed: true })]);
+        answer("rejected");
+        await flush();
+        // A definite rejection: it didn't go, so it is held as unsent.
+        expect(p.store.held).toEqual([expect.objectContaining({ text: "one", unconfirmed: false })]);
+        p.dispose();
+    });
+
+    it("after a reload, shows one stored mid-send as possibly gone and doesn't send it, nor what follows", async () => {
+        const p = makePane({
+            held: [
+                { id: "a", text: "one", heldAt: 1_000, unconfirmed: true },
+                { id: "b", text: "two", heldAt: 1_000 },
+            ],
+        });
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(p.deliver).not.toHaveBeenCalled();
+        expect(p.ui.held().map((m) => [m.text, !!m.unconfirmed])).toEqual([
+            ["one", true],
+            ["two", false],
+        ]);
+        p.dispose();
+    });
+
+    it("drops one stored mid-send once it shows up in the transcript, then sends the rest", async () => {
+        const p = makePane({
+            held: [
+                { id: "a", text: "one", heldAt: 1_000, unconfirmed: true },
+                { id: "b", text: "two", heldAt: 1_000 },
+            ],
+        });
+        p.setReady(false);
+        p.setDoc([user("one", 2_000)]);
+        p.setReady(true);
+        await flush();
+        expect(p.deliver.mock.calls.map((c) => c[0])).toEqual(["two"]);
+        expect(p.store.held).toEqual([]);
+        p.dispose();
+    });
+
     it("Cancel drops a held message and saves the list", async () => {
         const p = makePane({ api: "offline" });
         await p.ui.submit("one");
@@ -538,6 +628,14 @@ describe("held input", () => {
         expect(p.ui.notices()).toHaveLength(1);
         await p.ui.submit("two");
         expect(p.ui.notices()).toEqual([]);
+        p.dispose();
+    });
+
+    it("waits for a tracked provider's API even before its status arrives", () => {
+        const p = makePane({ api: null, tracked: true });
+        expect(p.ui.waitsForReconnect("network")).toBe(true);
+        p.setTracked(false);
+        expect(p.ui.waitsForReconnect("network")).toBe(false);
         p.dispose();
     });
 
@@ -696,6 +794,18 @@ describe("a turn that failed on the network", () => {
         p.setApi("online");
         await vi.advanceTimersByTimeAsync(5_000);
         expect(p.sent).toEqual([]);
+        p.dispose();
+    });
+
+    it("offers nothing for a failure the operator dismissed after typing", async () => {
+        const p = failedOffline();
+        await p.ui.submit("actually, wait");
+        p.ui.failureDismissed();
+        p.setFailure(null);
+        p.setApi("online");
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(p.sent).toEqual(["actually, wait"]);
+        expect(p.ui.notices().some((n) => n.retry)).toBe(false);
         p.dispose();
     });
 

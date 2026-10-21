@@ -89,12 +89,13 @@ const LATE_ANSWER_MS = 30 * 60_000;
 
 /**
  * `send`, resolved `accepted` only once srv accepted the message (the pane's
- * `pending-accepted` for it). The send path resolves either way: it turns
- * a failed `AgentInputCommand` or a login guard into `pending-rejected`, a
- * lost delivery into `pending-expired`, and a command it handles itself
- * into no pending entry at all; all are `rejected`. A message sent while a
- * turn runs would only join the pane's own queue, which a reload drops, so
- * it isn't sent. With no answer by `timeoutMs` it is `unknown`, and an
+ * `pending-accepted` for it, or srv's own `agent-message-accepted`). The
+ * send path resolves either way: it turns a failed `AgentInputCommand` or a
+ * login guard into `pending-rejected`, and a command it handles itself into
+ * no pending entry at all; both are `rejected`. A message sent while a turn
+ * runs would only join the pane's own queue, which a reload drops, so it
+ * isn't sent. With no answer by `timeoutMs`, or the send path giving up on
+ * one (`pending-expired`), it is `unknown`: srv may still have it, and an
  * answer that comes later still reaches `onLate`.
  */
 export function confirmedSend(
@@ -109,6 +110,7 @@ export function confirmedSend(
             let id: string | null = null;
             let timedOut = false;
             let done = false;
+            let timer: ReturnType<typeof setTimeout>;
             const settle = (accepted: boolean) => {
                 if (done) return;
                 done = true;
@@ -117,22 +119,26 @@ export function confirmedSend(
                 if (timedOut) onLate?.(accepted);
                 else resolve(accepted ? "accepted" : "rejected");
             };
-            // The send path queues its entry synchronously, before any await.
-            const unsub = listen((e) => {
-                if (e.type === "pending-queued" && id === null) id = e.id ?? null;
-                else if (id !== null && e.id === id) {
-                    if (e.type === "pending-accepted") settle(true);
-                    else if (e.type === "pending-rejected" || e.type === "pending-expired") settle(false);
-                }
-            });
-            let timer = setTimeout(() => {
+            const giveUp = () => {
+                if (timedOut || done) return;
                 timedOut = true;
+                clearTimeout(timer);
                 resolve("unknown");
                 timer = setTimeout(() => {
                     done = true;
                     unsub();
                 }, LATE_ANSWER_MS);
-            }, timeoutMs);
+            };
+            // The send path queues its entry synchronously, before any await.
+            const unsub = listen((e) => {
+                if (e.type === "pending-queued" && id === null) id = e.id ?? null;
+                else if (id !== null && e.id === id) {
+                    if (e.type === "pending-accepted") settle(true);
+                    else if (e.type === "pending-rejected") settle(false);
+                    else if (e.type === "pending-expired") giveUp();
+                }
+            });
+            timer = setTimeout(giveUp, timeoutMs);
             send(text, attachments).then(
                 () => {
                     if (id === null) settle(false);
@@ -141,6 +147,17 @@ export function confirmedSend(
             );
         });
     };
+}
+
+/**
+ * Model APIs srv reports on from the CLI's own frames before any status
+ * reaches the pane (`connectivity::ANTHROPIC` in crates/srv/src/connectivity/mod.rs).
+ */
+const TRACKED_MODEL_APIS = new Set(["model_api:anthropic"]);
+
+/** Whether srv tracks a service, even before the pane has its status. */
+export function isTrackedService(service: string | null, services: readonly ServiceStatus[] | undefined): boolean {
+    return !!service && (TRACKED_MODEL_APIS.has(service) || !!services?.some((s) => s.service === service));
 }
 
 /** srv's connectivity id for a provider's model API, from its first vendor. */
@@ -198,6 +215,13 @@ export function failedTurnSnapshot(doc: readonly DocumentNode[]): FailedTurnSnap
     return { text: null, toolRan };
 }
 
+/** A message with the held one's text, sent after it was held. */
+export function sentInTranscript(doc: readonly DocumentNode[], item: HeldInput): boolean {
+    return doc.some(
+        (n) => n.type === "user_message" && n.message === item.text && typeof n.timestamp === "number" && n.timestamp >= item.heldAt
+    );
+}
+
 export type ReconnectDecision =
     | { kind: "retry" }
     | { kind: "offer"; reason: "typed" | "read_back" | "tool_ran" | "setting_off" | "retried_once" | "nothing_to_resend" };
@@ -237,8 +261,12 @@ export interface OfflineNotice {
 export interface OfflineInputDeps {
     /** The pane's turn is retrying an API request. */
     retrying: Accessor<boolean>;
-    /** The provider's API as srv sees it; null when srv doesn't track it. */
+    /** The provider's API as srv sees it; null when srv doesn't track it,
+     *  or the pane doesn't have its status yet. */
     api: Accessor<Reachability | null>;
+    /** srv tracks the provider's API ({@link isTrackedService}): its
+     *  network failures wait for it, even before its status arrives. */
+    tracked: Accessor<boolean>;
     /** The pane can send (its history has loaded). */
     ready: Accessor<boolean>;
     /** A turn is running. */
@@ -299,6 +327,9 @@ export interface OfflineInput {
     waitsForReconnect: (code: string) => boolean;
     /** For the failure row, while the failed turn waits for the API. */
     reconnectHint: Accessor<string | null>;
+    /** The operator dismissed the failure row: nothing is retried or
+     *  offered for that turn, typed since or not. */
+    failureDismissed: () => void;
 }
 
 const DEFAULT_STOP_WAIT_MS = 5_000;
@@ -370,22 +401,27 @@ export function createOfflineInput(deps: OfflineInputDeps): OfflineInput {
             // does everything after it.
             const blocked = !isForced && (untrack(holding) || !!item?.unconfirmed);
             if (disposed || !item || blocked || untrack(paused) || untrack(deps.working) || !untrack(deps.ready)) return;
+            const wasUnconfirmed = !!item.unconfirmed;
             setInFlight(item.id);
+            // Stored as possibly gone before it goes: a reload before srv's
+            // answer must not send it again.
+            markHeld(item.id, { unconfirmed: true });
             const outcome = await deps.deliver(item.text, item.attachments, (accepted) => settleLate(item.id, accepted));
             setInFlight(null);
             if (outcome === "unknown") {
-                markHeld(item.id, { unconfirmed: true });
                 setForced(false);
                 notice("No answer yet for your held message, so it may have gone. It stays here and isn't sent again by itself.");
                 return;
             }
             if (outcome === "rejected") {
+                // This send didn't go; an earlier one may have.
+                markHeld(item.id, { unconfirmed: wasUnconfirmed });
                 setPaused(true);
                 setForced(false);
                 notice("Couldn't send your held message, so it is still held. Send now tries again.");
                 return;
             }
-            if (item.unconfirmed) notice("Sent your held message again. It may have gone once already.");
+            if (wasUnconfirmed) notice("Sent your held message again. It may have gone once already.");
             accepted(item);
         });
 
@@ -393,6 +429,7 @@ export function createOfflineInput(deps: OfflineInputDeps): OfflineInput {
         deps.storage.saveHeld(untrack(held).map((m) => (m.id === id ? { ...m, ...patch } : m)));
 
     const accepted = (item: HeldInput) => {
+        if (!untrack(held).some((m) => m.id === item.id)) return;
         const rest = untrack(held).filter((m) => m.id !== item.id);
         deps.storage.saveHeld(rest);
         noteSent(item);
@@ -405,7 +442,6 @@ export function createOfflineInput(deps: OfflineInputDeps): OfflineInput {
     /** srv's answer for a message that timed out: drop it once accepted, or
      *  hold it as before once rejected. */
     const settleLate = (id: string, ok: boolean) => {
-        if (disposed) return;
         const item = untrack(held).find((m) => m.id === id);
         if (!item?.unconfirmed) return;
         if (ok) {
@@ -415,6 +451,14 @@ export function createOfflineInput(deps: OfflineInputDeps): OfflineInput {
         markHeld(id, { unconfirmed: false });
         setPaused(true);
     };
+
+    // One that may have gone and is in the transcript did go: drop it.
+    createEffect(() => {
+        const unsure = held().filter((m) => m.unconfirmed && m.id !== inFlight());
+        if (unsure.length === 0 || !deps.ready()) return;
+        const doc = deps.document();
+        for (const item of unsure) if (sentInTranscript(doc, item)) untrack(() => accepted(item));
+    });
 
     // Release once nothing holds (the API is reachable and the turn isn't
     // retrying) and the pane is idle; the next goes when that turn ends.
@@ -481,7 +525,7 @@ export function createOfflineInput(deps: OfflineInputDeps): OfflineInput {
     // their own send cleared it, and the turn is still to be offered).
     createEffect(() => {
         const f = deps.failure();
-        const tracked = deps.api() !== null;
+        const tracked = deps.tracked();
         untrack(() => {
             const turn = failed();
             if (!f) {
@@ -581,7 +625,8 @@ export function createOfflineInput(deps: OfflineInputDeps): OfflineInput {
         sendNow,
         cancel,
         dismissNotice,
-        waitsForReconnect: (code) => code === "network" && untrack(deps.api) !== null,
+        waitsForReconnect: (code) => code === "network" && untrack(deps.tracked),
+        failureDismissed: () => setFailed(null),
         reconnectHint,
     };
 }

@@ -157,6 +157,8 @@ export interface UseAgentFailureOptions {
     reconnect?: {
         waitsForReconnect: (code: AgentFailure["code"]) => boolean;
         reconnectHint: Accessor<string | null>;
+        /** The operator dismissed the row: drop the turn it waits on. */
+        failureDismissed: () => void;
     };
 }
 
@@ -451,6 +453,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                     if (f.code === "network") {
                         setBlockMeta(opts.blockId, { "agent:last_failure": null }).catch(() => {});
                     }
+                    opts.reconnect?.failureDismissed();
                     endEpisode();
                 },
                 takeOver: opts.onTakeOver ? () => takeOver(pf.turnAttempted ?? true) : undefined,

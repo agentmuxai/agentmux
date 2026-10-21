@@ -20,6 +20,8 @@ import { addEventListener as addPaneEventListener } from "@/app/store/agent-pane
 import { workingFromPhase } from "@/app/store/agent-pane-state/types";
 import { setBlockMeta } from "@/app/store/block-meta";
 import { connectivity, loadConnectivity } from "@/app/store/connectivity";
+import { onMuxEvent } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
 import { getBlockMetaKeyAtom, getSettingsKeyAtom } from "@/app/store/global";
 import { clockTime } from "@/store/muxbus-delivery";
 import { Logger } from "@/util/logger";
@@ -31,6 +33,7 @@ import {
     confirmedSend,
     createOfflineInput,
     type HeldInput,
+    isTrackedService,
     keyedLock,
     modelApiService,
     type OfflineInput,
@@ -102,20 +105,32 @@ export function useOfflineInput(opts: {
     if (connectivity() === null) void loadConnectivity();
     const storage = blockMetaStorage(opts.blockId, opts.agentId);
     const state = opts.paneModel.state;
+    const service = () => modelApiService(opts.provider()?.supportedVendors);
+    // The pane's own events, and srv's acceptance, which still comes after
+    // the pane has given up on a message (its entry expired).
+    const listen = (cb: (e: PaneMessageEvent) => void) => {
+        const offPane = addPaneEventListener((blockId, event) => blockId === opts.blockId && cb(event as PaneMessageEvent));
+        const offSrv = onMuxEvent(
+            WpsEvent.AgentMessageAccepted,
+            (d) => cb({ type: "pending-accepted", id: d.message_id }),
+            `block:${opts.blockId}`
+        );
+        return () => {
+            offPane();
+            offSrv();
+        };
+    };
     const offline = createOfflineInput({
         retrying: () => apiRetry() !== null,
-        api: () => serviceReachability(connectivity()?.services, modelApiService(opts.provider()?.supportedVendors)),
+        api: () => serviceReachability(connectivity()?.services, service()),
+        tracked: () => isTrackedService(service(), connectivity()?.services),
         ready: () => state.initPhase.kind !== "InitPending",
         working: () => workingFromPhase(state.turnPhase),
         failure: () => state.failure,
         document: () => opts.paneModel.document(),
         autoRetryOn: () => getSettingsKeyAtom(AUTO_RETRY_SETTING)() !== false,
         send: opts.send,
-        deliver: confirmedSend(
-            opts.send,
-            (cb) => addPaneEventListener((blockId, event) => blockId === opts.blockId && cb(event as PaneMessageEvent)),
-            () => workingFromPhase(state.turnPhase)
-        ),
+        deliver: confirmedSend(opts.send, listen, () => workingFromPhase(state.turnPhase)),
         restoreFailure: (f) =>
             opts.paneModel.dispatchPane({ type: "FailureObserved", failure: f.data, at: f.at, turnAttempted: f.turnAttempted }, "system"),
         stop: opts.stop,
