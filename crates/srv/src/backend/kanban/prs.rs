@@ -6,7 +6,9 @@
 //! - **Finding the PR.** When an agent holding one task opens a PR, the card
 //!   gets the PR's address once GitHub lists it, so the card links to it
 //!   without the agent naming it. A result that names one PR ("PR #12") does
-//!   the same at hand-in.
+//!   the same at hand-in, when that PR is from the branch the agent is on: a
+//!   result that only mentions someone else's PR links nothing, so that PR's
+//!   merge can't close the task.
 //! - **Closing on merge.** A task in Review whose PR has merged is accepted:
 //!   the merge was the review. Off with the setting `kanban:closeonmerge`.
 //!
@@ -129,6 +131,8 @@ pub enum PrState {
     Open,
     Merged,
     Closed,
+    /// No such PR in a repository GitHub shows (a mistyped link).
+    Missing,
 }
 
 /// The state in GitHub's answer for one PR.
@@ -275,7 +279,10 @@ fn due(tasks: &[BoardTask], checked: &Checked, now_ms: i64) -> Vec<(String, PrRe
             let last = match checked.at.get(&id) {
                 None => i64::MIN,
                 Some((at, state)) => {
-                    let every = if *state == Some(PrState::Closed) { CLOSED_CHECK_EVERY_MS } else { CHECK_EVERY_MS };
+                    let every = match state {
+                        Some(PrState::Closed | PrState::Missing) => CLOSED_CHECK_EVERY_MS,
+                        _ => CHECK_EVERY_MS,
+                    };
                     if now_ms - at < every {
                         return None;
                     }
@@ -318,9 +325,20 @@ pub async fn run_merge_loop() {
                         changed |= tokio::task::spawn_blocking(move || close_merged(&identity, &id, &pr, now)).await.unwrap_or(false);
                     }
                 }
-                Err(Miss::NotFound) => {
-                    checked.private_repos.insert(pr.repo.clone(), now);
-                }
+                // A missing PR, or a repository GitHub doesn't show without a
+                // login: only the second sets the whole repository aside.
+                Err(Miss::NotFound) => match get(&ctx.http, &format!("/repos/{}", pr.repo), now).await {
+                    Ok(_) => {
+                        checked.at.insert(id, (now, Some(PrState::Missing)));
+                    }
+                    Err(Miss::NotFound) => {
+                        checked.private_repos.insert(pr.repo.clone(), now);
+                    }
+                    Err(Miss::Limited) => break,
+                    Err(Miss::Other(_)) => {
+                        checked.at.insert(id, (now, None));
+                    }
+                },
                 Err(Miss::Limited) => break,
                 Err(Miss::Other(e)) => {
                     checked.at.insert(id, (now, None));
@@ -364,6 +382,33 @@ pub fn find_opened(work_id: String, repo: String, branch: String) {
             }
         }
     });
+}
+
+
+/// A hand-in named `pr` while its agent was on `branch`: link it if that PR is
+/// from that branch, so a PR the result only mentions (someone else's, one it
+/// built on) isn't taken for the task's own.
+pub fn link_if_from(work_id: String, pr: PrRef, branch: String) {
+    let Some(ctx) = CONTEXT.get() else { return };
+    if branch.is_empty() {
+        return;
+    }
+    tokio::spawn(async move {
+        let now = agentmux_common::time::now_ms();
+        let Ok(v) = get(&ctx.http, &format!("/repos/{}/pulls/{}", pr.repo, pr.number), now).await else { return };
+        if !is_from_branch(&v, &branch) {
+            return;
+        }
+        let identity = ctx.identity.clone();
+        if tokio::task::spawn_blocking(move || link(&identity, &work_id, &pr, now)).await.unwrap_or(false) {
+            publish_changed(&ctx.broker);
+        }
+    });
+}
+
+/// Whether GitHub's answer for a PR says it is from `branch`.
+pub fn is_from_branch(pr: &Value, branch: &str) -> bool {
+    pr.pointer("/head/ref").and_then(Value::as_str).is_some_and(|r| !branch.is_empty() && r == branch)
 }
 
 #[cfg(test)]

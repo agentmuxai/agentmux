@@ -70,6 +70,18 @@ fn only_tasks_in_review_with_a_pr_are_checked_and_not_too_often() {
     checked.at.insert("e".into(), (1000, Some(PrState::Closed)));
     assert_eq!(ids(due(&tasks, &checked, 1000 + CHECK_EVERY_MS)), ["a"], "a closed PR is looked at less often");
     assert_eq!(ids(due(&tasks, &checked, PRIVATE_FOR_MS)), ["a", "d", "e"]);
+    checked.at.insert("e".into(), (1000, Some(PrState::Missing)));
+    assert_eq!(ids(due(&tasks, &checked, 1000 + CHECK_EVERY_MS)), ["a"], "a mistyped PR is looked at hourly, its repository still checked");
+}
+
+#[test]
+fn a_named_pr_is_the_tasks_only_when_it_is_from_the_agents_branch() {
+    use serde_json::json;
+    let pr = json!({"number": 5200, "head": {"ref": "loap-3/kanban-pr-merge"}});
+    assert!(is_from_branch(&pr, "loap-3/kanban-pr-merge"));
+    assert!(!is_from_branch(&pr, "loap-3/other-work"), "a PR the result only mentions");
+    assert!(!is_from_branch(&pr, ""), "no branch known: nothing linked");
+    assert!(!is_from_branch(&json!({"number": 1}), "x"));
 }
 
 #[test]

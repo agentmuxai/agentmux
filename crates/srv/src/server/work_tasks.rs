@@ -21,7 +21,7 @@ use serde_json::{json, Value};
 
 use agentmux_common::time::now_ms;
 
-use crate::backend::kanban::prs::{link as prs_link, pr_in_text};
+use crate::backend::kanban::prs::{link_if_from, pr_in_text};
 use crate::backend::reactive::types::AgentRegistration;
 use crate::backend::storage::work_board::{requested, BoardTask, CardUpdate, ChecklistItem, NewCard, WorkEvent};
 use crate::backend::storage::work_queue::{work_state, WorkItem};
@@ -124,15 +124,20 @@ fn provenance(state: &AppState, reg: Option<&AgentRegistration>) -> (String, Str
     (String::new(), requested::OTHER.into(), String::new())
 }
 
-/// The repository the agent works in, from its work facts.
-async fn repo_of(state: &AppState, reg: Option<&AgentRegistration>) -> String {
-    let Some(reg) = reg.cloned() else { return String::new() };
+/// The repository the agent works in and the branch it is on, from its work
+/// facts.
+async fn repo_of(state: &AppState, reg: Option<&AgentRegistration>) -> (String, String) {
+    let Some(reg) = reg.cloned() else { return Default::default() };
     let store = state.mstore.clone();
     let channel = crate::backend::work_facts::cross_channel::own_channel();
     let facts = tokio::task::spawn_blocking(move || crate::backend::work_facts::collect_local(&store, &[reg], &channel))
         .await
         .unwrap_or_default();
-    facts.into_iter().next().and_then(|f| f.repo_key()).unwrap_or_default()
+    facts
+        .into_iter()
+        .next()
+        .map(|f| (f.repo_key().unwrap_or_default(), f.branch.unwrap_or_default()))
+        .unwrap_or_default()
 }
 
 /// What an enqueue adds for the board: who asked, the repository.
@@ -151,7 +156,7 @@ pub(super) async fn prepare_card(state: &AppState, caller: Option<&Caller>, crea
     // task's. The task's branch comes from the PR it opens (kanban::on_new_prs).
     let repo = match f.repo.filter(|r| !r.trim().is_empty()) {
         Some(r) => r.trim().to_string(),
-        None => repo_of(state, reg.as_ref()).await,
+        None => repo_of(state, reg.as_ref()).await.0,
     };
     let filer = reg.as_ref().map(|r| r.agent_id.clone()).unwrap_or_else(|| created_by.to_string());
     NewCard {
@@ -422,10 +427,12 @@ pub(super) async fn finish(
                 let _ = state.identity_store.work_card_update(id, &u, now);
             }
             // A result naming one PR links it, so the card shows it and its
-            // merge can close the task (kanban::prs).
+            // merge can close the task, once GitHub says it is from the
+            // branch the agent is on (kanban::prs).
             if let Ok(Some(t)) = state.identity_store.work_board_get(id) {
                 if let Some(pr) = t.card.pr_url.is_empty().then(|| pr_in_text(result, &t.card.repo)).flatten() {
-                    prs_link(&state.identity_store, id, &pr, now);
+                    let (_, branch) = repo_of(state, caller_reg(state, caller).as_ref()).await;
+                    link_if_from(id.to_string(), pr, branch);
                 }
             }
             let _ = state.identity_store.work_card_set_question(id, "", now);
