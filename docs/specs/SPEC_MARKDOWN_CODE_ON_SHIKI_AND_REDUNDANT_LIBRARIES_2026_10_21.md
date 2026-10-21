@@ -1,6 +1,6 @@
 # Spec: code in markdown on shiki, and the frontend libraries we can drop
 
-**Status:** active — §4 (markdown code on shiki) in #5289; the removals in §6.2 in #5291; `overlayscrollbars` (§6.4) in the follow-up PR to #5291.
+**Status:** active — §4 (markdown code on shiki) in #5289; the removals in §6.2 in #5291; `overlayscrollbars` (§6.4) in #5295.
 **Date:** 2026-10-21
 **Author:** AgentA@Area54, at the operator's request
 **Verified against:** `agentmux` `main` @ `61479f0a2` (2026-10-21), by reading code.
