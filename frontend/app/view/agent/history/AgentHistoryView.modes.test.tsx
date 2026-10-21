@@ -15,6 +15,9 @@ import type { DocumentNode } from "../types";
 import type { HistoryNavigatorProps } from "./HistoryNavigator";
 
 const STREAM = "g:agent:a1:current";
+/** 2023-11-14 22:13:20 UTC. */
+const T0 = 1_700_000_000_000;
+let stamped = false;
 const ARCHIVE = "agent:a1:archive:1000";
 const ev = (event: object): string => JSON.stringify(event);
 const text = (content: string) => ev({ type: "text", content });
@@ -42,7 +45,10 @@ vi.mock("@/app/store/rpc-api", () => ({
         BlockfileReadRangeCommand: vi.fn(async (_c: unknown, req: { offset: number; limit: number; archive_zone?: string }) => {
             reads.push({ offset: req.offset, limit: req.limit, archive_zone: req.archive_zone });
             const lines = req.archive_zone ? archived : current;
-            return { lines: lines.slice(req.offset, req.offset + req.limit), total: lines.length, stream: STREAM, gen: "g1" };
+            const page = lines.slice(req.offset, req.offset + req.limit);
+            // With receive times (a second apart, from a fixed time), for the tests that look at them.
+            const stamps = stamped ? page.map((_, i) => T0 + (req.offset + i) * 1000) : undefined;
+            return { lines: page, stamps, total: lines.length, stream: STREAM, gen: "g1" };
         }),
     },
 }));
@@ -68,7 +74,9 @@ vi.mock("../components/AgentDocumentView", () => ({
 }));
 
 let nav: HistoryNavigatorProps | null = null;
-vi.mock("./HistoryNavigator", () => ({
+vi.mock("./HistoryNavigator", async (importOriginal) => ({
+    // The real helpers (`shortWhen`); only the component is stood in for.
+    ...(await importOriginal<typeof import("./HistoryNavigator")>()),
     HistoryNavigator: (p: HistoryNavigatorProps) => {
         nav = p;
         return null;
@@ -88,6 +96,7 @@ describe("AgentHistoryView modes", () => {
     beforeEach(async () => {
         vi.useFakeTimers();
         reads.length = 0;
+        stamped = false;
         nav = null;
         render(() => <AgentHistoryView blockId="hist-1" sourceBlockId="live-1" agentId="a1" outputFormat={() => "claude-stream-json"} />);
         await settle();
@@ -153,5 +162,16 @@ describe("AgentHistoryView modes", () => {
         await settle();
         expect(nav!.mode()).toBe("live");
         expect(shownText().endsWith(`current ${TOTAL - 1}`)).toBe(true);
+    });
+
+    it("the header says when the rows on screen were received, not only which lines", async () => {
+        stamped = true;
+        // Lines 3,201 to 6,200: both user messages are in it (nodes of their own,
+        // received 48 minutes apart; the text records between them are one node).
+        nav!.onJump(TOTAL - 100);
+        await settle();
+        const meta = document.querySelector(".agent-history-meta")?.textContent ?? "";
+        expect(meta).toMatch(/^.+ – .+ · lines 3201–6200 of \d+$/);
+        expect(meta).not.toMatch(/undefined|NaN|unknown/);
     });
 });
