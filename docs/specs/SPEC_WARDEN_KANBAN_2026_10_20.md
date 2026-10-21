@@ -1,6 +1,6 @@
 # Spec: a Kanban section in Warden, where agents keep their work current and the operator follows it
 
-**Status:** active. srv and MCP (the task model, the agents' `Tasks` actions, the reminder, the operator's RPCs) in #5231; the Warden Kanban section, its palette command and widget-bar button in #5235. The Swarm's task chip (§6.14) and Codex plans as checklists (§6.12) in #5248. Remaining: Phase 4 (§9).
+**Status:** active. srv and MCP (the task model, the agents' `Tasks` actions, the reminder, the operator's RPCs) in #5231; the Warden Kanban section, its palette command and widget-bar button in #5235. The Swarm's task chip (§6.14) and Codex plans as checklists (§6.12) in #5248. Phase 4 (§9): a `tasks:read` permission for sandboxed widgets in #PRNUM; the rest remains.
 **Date:** 2026-10-20
 **Author:** Loap-3@narko, at the operator's request
 **Verified against:** `agentmux` `main` @ `30daa7c28` (2026-10-20), by reading code. The survey of other products in §3 is from public sources read the same day (§12).
@@ -346,7 +346,7 @@ Three websocket commands (`crates/srv/src/server/app_api/kanban.rs`), the operat
 1. **A Kanban over what exists, and requests filed for later.** No schema change. `work.list`; the Warden section with Backlog (grouped by agent), In progress, Needs you and Done derived from today's states and the holders' live state; untracked cards; `open:kanban` and the pinned widget; the Needs-you count in the title. With it, the part of §6.5 that today's queue already supports: `enqueue` `for: "me"` (today's `target_agent`), own-tasks-first claiming, the idle reminder, and the operator-config guidance. From this phase on, the operator's "do this when you're done" requests land on the board and get done.
 2. **The operator's hands, and who asked.** Who asked and the operator's words on the card (§6.5); the three new states, `db_work_cards`, `db_work_events`; New task, drag, Start on…, Answer, Accept, Send back, Cancel, Retry, Track; the drawer and history; the cancel guard; Swarm's link.
 3. **The agents' words.** `update`, `ask`, `submit`; activity as heartbeat; PR link; Codex plans; the operator-config guidance.
-4. **Later, each its own decision:** close a reviewed task when its PR merges (D5); dependencies between tasks (Cline's and Claude Code's "blocked by"); swimlanes by repository; the Review limit (D6); other computers through Warden's LAN layer; a `tasks:read` permission for sandboxed widgets.
+4. **Later, each its own decision:** close a reviewed task when its PR merges (D5); dependencies between tasks (Cline's and Claude Code's "blocked by"); swimlanes by repository; the Review limit (D6); other computers through Warden's LAN layer; a `tasks:read` permission for sandboxed widgets (built in #PRNUM: `am.tasks.list()` gives each task's number, title, state, agent, repository, PR and checklist progress, never its prompt, the operator's words or its result, which can hold anything the operator typed).
 
 ## 10. Risks
 

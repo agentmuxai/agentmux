@@ -26,6 +26,8 @@ export function describePermission(permission: string): PermissionText {
             return { text: "Open other kinds of panes" };
         case "agents:read":
             return { text: "See your agents' names and whether they're working" };
+        case "tasks:read":
+            return { text: "See the Kanban's tasks: their titles, who is on them and where they stand" };
         case "agents:send":
             return {
                 text: "Send messages to your agents. An agent acts on what it's told, so only allow this for a widget you trust.",

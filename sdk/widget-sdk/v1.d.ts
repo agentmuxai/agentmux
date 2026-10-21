@@ -110,6 +110,23 @@ export interface AgentInfo {
     state: "working" | "idle" | "stopped";
 }
 
+/** A Kanban task, as `tasks:read` shows it: not its prompt, the user's words or its result. */
+export interface TaskInfo {
+    /** The task's number, `#12`. */
+    num: number;
+    title: string;
+    state: "open" | "held" | "claimed" | "blocked" | "review" | "done" | "failed" | "cancelled";
+    /** The agent on it, else the one it waits for; `""` for anyone. */
+    agent: string;
+    /** `owner/repo`, when known. */
+    repo: string;
+    /** The PR's address, once linked. */
+    pr: string;
+    checklist: { done: number; total: number };
+    createdAt: number;
+    updatedAt: number;
+}
+
 export interface EventMap {
     visibility: { state: Visibility };
     focus: { focused: boolean };
@@ -174,6 +191,10 @@ export interface AgentMux {
         list(): Promise<AgentInfo[]>;
         /** Needs `agents:send`. Returns the message id. */
         send(agent: string, text: string): Promise<string>;
+    };
+    tasks: {
+        /** Needs `tasks:read`. The Kanban's unfinished tasks and those finished in the last 7 days. */
+        list(): Promise<TaskInfo[]>;
     };
 }
 
