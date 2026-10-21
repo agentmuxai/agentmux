@@ -632,6 +632,16 @@ describe("deleteNode restores the nearest pane when only minimized ones are left
         expect(find(root, "m2").minimized).toBeUndefined();
     });
 
+    it("closing a container restores the pane after it, not the first one", () => {
+        const group = newLayoutNode(FlexDirection.Column, 10, [pane("a"), pane("x", true)]);
+        group.id = "g";
+        const root = newLayoutNode(FlexDirection.Row, 10, [pane("m1", true), group, pane("m2", true)]);
+        const state = newLayoutTreeState(root);
+        deleteNode(state, { type: LayoutTreeActionType.DeleteNode, nodeId: "g" });
+        expect(find(root, "m1").minimized).toBe(true);
+        expect(find(root, "m2").minimized).toBeUndefined();
+    });
+
     it("restores nothing while another pane shows content", () => {
         const root = newLayoutNode(FlexDirection.Row, 10, [pane("a"), pane("b"), pane("m", true)]);
         const state = newLayoutTreeState(root);

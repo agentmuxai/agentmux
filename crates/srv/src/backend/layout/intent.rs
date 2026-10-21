@@ -98,9 +98,10 @@ fn apply_unbalanced(
         }
         LayoutIntent::Delete { node_id } => {
             let before = root.as_ref().map(leaf_ids).unwrap_or_default();
+            let removed = root.as_ref().and_then(|t| find_node_by_id(t, &node_id)).map(leaf_ids).unwrap_or_default();
             delete_node(root, &node_id)?;
             if let Some(tree) = root.as_mut() {
-                restore_nearest_if_all_minimized(tree, &before, &node_id);
+                restore_nearest_if_all_minimized(tree, &before, &removed);
             }
             effect.unfocus = Some(node_id);
         }
@@ -318,10 +319,11 @@ pub fn delete_and_balance(root: &mut LayoutNode, node_id: &str) -> Result<(), La
         return Err(LayoutError::RootCannotBeTarget);
     }
     let before = leaf_ids(root);
+    let removed = find_node_by_id(root, node_id).map(leaf_ids).unwrap_or_default();
     let parent_id = find_parent_id(root, node_id).ok_or_else(|| not_found(node_id))?;
     let parent = find_node_by_id_mut(root, &parent_id).ok_or_else(|| not_found(&parent_id))?;
     remove_child(parent, node_id, 0);
-    restore_nearest_if_all_minimized(root, &before, node_id);
+    restore_nearest_if_all_minimized(root, &before, &removed);
     balance_node(root)
 }
 
@@ -341,16 +343,17 @@ fn leaf_ids(node: &LayoutNode) -> Vec<String> {
     out
 }
 
-/// After `removed` left the tree: if every pane left is minimized, restore the nearest one, the
-/// pane that followed it in reading order or else the one before it, so a tab always shows one.
-/// `before` is the reading order with `removed` still in it. `deleteNode` (layoutTree.ts) does the same.
-fn restore_nearest_if_all_minimized(tree: &mut LayoutNode, before: &[String], removed: &str) {
+/// After a pane or a container left the tree (`removed`: its panes, in reading order): if every
+/// pane left is minimized, restore the nearest one, the pane that followed it in reading order or
+/// else the one before it, so a tab always shows one. `before` is the reading order with the
+/// removed panes still in it. `deleteNode` (layoutTree.ts) does the same.
+fn restore_nearest_if_all_minimized(tree: &mut LayoutNode, before: &[String], removed: &[String]) {
     if expanded_leaves(tree) > 0 {
         return;
     }
-    let at = before.iter().position(|id| id == removed).unwrap_or(0);
+    let at = removed.first().and_then(|first| before.iter().position(|id| id == first)).unwrap_or(0);
     let (prior, rest) = before.split_at(at);
-    let after = rest.iter().skip(usize::from(rest.first().is_some_and(|id| id == removed)));
+    let after = rest.iter().filter(|id| !removed.contains(id));
     for id in after.chain(prior.iter().rev()) {
         if let Some(node) = find_node_by_id_mut(tree, id) {
             if node.children.is_empty() && node.data.is_some() {

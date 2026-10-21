@@ -215,6 +215,22 @@ fn closing_the_last_expanded_pane_at_the_end_restores_the_one_before_it() {
 }
 
 #[test]
+fn closing_a_container_restores_the_pane_after_it_not_the_first() {
+    // m1 group(a) m2: the group holds the only expanded pane; m2 follows it, so m2 is restored.
+    let mut tree = Some(branch(
+        "r",
+        FlexDirection::Row,
+        vec![
+            minimized(leaf("m1", "b1")),
+            branch("g", FlexDirection::Column, vec![leaf("a", "ba"), minimized(leaf("x", "bx"))]),
+            minimized(leaf("m2", "b2")),
+        ],
+    ));
+    apply(&mut tree, LayoutIntent::Delete { node_id: "g".into() }).unwrap();
+    assert_eq!((is_min(&tree, "m1"), is_min(&tree, "m2")), (true, false));
+}
+
+#[test]
 fn closing_a_pane_while_another_shows_content_restores_nothing() {
     let mut tree = Some(branch(
         "r",
