@@ -28,7 +28,9 @@ import type { RawSourceMap, SourceMapConsumer } from "source-map-js";
 type CacheEntry =
     | { kind: "ready"; consumer: SourceMapConsumer }
     | { kind: "pending"; promise: Promise<SourceMapConsumer | "failed"> }
-    | { kind: "failed" };
+    // `retry`: the parser's own chunk failed to load, not this map. Frames
+    // read as failed now (the status contract), but the next load tries again.
+    | { kind: "failed"; retry?: boolean };
 
 const cache = new Map<string, CacheEntry>();
 
@@ -66,7 +68,7 @@ function loadMap(jsUrl: string): Promise<SourceMapConsumer | "failed"> {
     const chunk = chunkOf(jsUrl);
     const entry = cache.get(chunk);
     if (entry?.kind === "ready") return Promise.resolve(entry.consumer);
-    if (entry?.kind === "failed") return Promise.resolve("failed");
+    if (entry?.kind === "failed" && !entry.retry) return Promise.resolve("failed");
     if (entry?.kind === "pending") return entry.promise;
 
     const promise = (async (): Promise<SourceMapConsumer | "failed"> => {
@@ -78,9 +80,9 @@ function loadMap(jsUrl: string): Promise<SourceMapConsumer | "failed"> {
             try {
                 parser = await import("source-map-js");
             } catch (importErr) {
-                // The parser's own chunk failed to load, not this map: forget the
-                // attempt so the next error in this chunk loads it again.
-                cache.delete(chunk);
+                // The parser's own chunk failed to load, not this map: failed
+                // for now, loaded again with the next error in this chunk.
+                cache.set(chunk, { kind: "failed", retry: true });
                 console.warn(`[source-map] the source-map parser failed to load: ${(importErr as Error).message}`);
                 return "failed";
             }
