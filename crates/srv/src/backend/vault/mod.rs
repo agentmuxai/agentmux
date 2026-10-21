@@ -300,7 +300,14 @@ pub fn record_copy(store: &Store, id: &str, part: &str, done: bool) -> Result<()
 /// What a web form fill needs to know about an entry, before anything is asked:
 /// the entry, the part, and the kind of field that part belongs in.
 pub struct FillTarget {
+    /// Empty for a value the person will type, with no entry yet.
     pub id: String,
+    /// The kind's name.
+    pub kind: &'static str,
+    /// There is no entry: the person types the value (spec section 6.5).
+    pub typed: bool,
+    /// The kind, for keeping what they typed.
+    pub kind_info: &'static kinds::Kind,
     pub label: String,
     pub part: &'static str,
     pub slot: Option<&'static str>,
@@ -319,7 +326,18 @@ pub fn fill_target(store: &Store, vault: &str) -> Result<FillTarget, String> {
     let part = slots::fillable_part(kind, part)?;
     let slot = slots::slot(kind, part);
     let what = slots::what(kind, part);
-    Ok(FillTarget { id: row.id, label: row.label, part, slot, what, created_at: row.created_at })
+    Ok(FillTarget { id: row.id, kind: kind.name, typed: false, kind_info: kind, label: row.label, part, slot, what, created_at: row.created_at })
+}
+
+/// For a value no entry holds yet: the kind's main part, to be typed by the person.
+pub fn request_target(kind: &str, label: &str) -> Result<FillTarget, String> {
+    let kind = kinds::kind(kind).ok_or_else(|| format!("unknown kind {kind:?}"))?;
+    let label = label.trim();
+    if label.is_empty() || label.chars().count() > MAX_LABEL {
+        return Err("request_value needs a label saying what the value is, e.g. \"Alex's SSN\"".into());
+    }
+    let part = slots::fillable_part(kind, None)?;
+    Ok(FillTarget { id: String::new(), kind: kind.name, typed: true, kind_info: kind, label: label.to_string(), part, slot: slots::slot(kind, part), what: slots::what(kind, part), created_at: 0 })
 }
 
 /// A part's value for the host to type; never returned to an agent. The use is

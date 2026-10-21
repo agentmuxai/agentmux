@@ -159,7 +159,19 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                 if decision == vault::uses::Decision::Always && !request.offer_always {
                     return Err("Always isn't offered here: the field doesn't look like what the entry is".into());
                 }
-                if !vault::uses::uses().answer(&id, decision) {
+                // A value the person typed because no entry exists: required to allow, and
+                // never kept unless they ticked the box.
+                let value = body.get("value").and_then(Value::as_str).map(|v| zeroize::Zeroizing::new(v.to_string())).filter(|v| !v.is_empty());
+                if request.needs_value && decision != vault::uses::Decision::Deny {
+                    match &value {
+                        None => return Err("type the value to fill, or deny".into()),
+                        Some(v) if v.len() > 1024 * 1024 => return Err("that value is too long".into()),
+                        _ => {}
+                    }
+                }
+                let save = request.needs_value && body.get("save").and_then(Value::as_bool).unwrap_or(false);
+                let answer = vault::uses::UseAnswer { decision, value: if request.needs_value { value } else { None }, save };
+                if !vault::uses::uses().answer(&id, answer) {
                     return Err("that request is no longer waiting".into());
                 }
                 Ok((json!({}), true))

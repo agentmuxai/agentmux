@@ -147,7 +147,8 @@ export async function copyVaultPart(id: string, part: string, label: string): Pr
 export type UseDecision = "once" | "always" | "deny";
 
 /** The person's answer to an agent's use of an entry; srv takes it only from the host. */
-export const answerUse = (id: string, decision: UseDecision) => call<unknown>("answer_use", { id, decision });
+export const answerUse = (id: string, decision: UseDecision, typed?: { value: string; save: boolean }) =>
+    call<unknown>("answer_use", { id, decision, ...(typed ? { value: typed.value, save: typed.save } : {}) });
 /** Stops an agent filling an entry on a site without asking. */
 export const revokeGrant = (entryId: string, origin: string) => call<unknown>("revoke_grant", { entry_id: entryId, origin });
 

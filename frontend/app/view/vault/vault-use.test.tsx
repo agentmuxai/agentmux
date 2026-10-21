@@ -23,6 +23,8 @@ const use = (over: Partial<UseRequest> = {}): UseRequest => ({
     field: "Social Security Number",
     offer_always: true,
     reason: "the first time this entry is used on this site",
+    needs_value: false,
+    kind: "ssn",
     requested_ms: 1,
     ...over,
 });
@@ -111,6 +113,38 @@ describe("the prompt for an agent's use of an entry", () => {
         fireEvent.click(within(dialog).getByRole("button", { name: "Deny" }));
         await waitFor(() => expect(close).toHaveBeenCalled());
         expect(screen.queryByRole("alert")).toBeNull();
+    });
+
+    it("asks the person to type a value no entry holds yet, and keeps it only if they say so", async () => {
+        uses = [use({ needs_value: true, offer_always: false, entry_label: "Sam's SSN", reason: "there is no Vault entry for this yet, so you type it here" })];
+        await refreshVault();
+        const close = vi.fn();
+        render(() => <UsePrompt use={uses[0]} close={close} />);
+        const dialog = await screen.findByRole("dialog");
+        expect(dialog.textContent).toContain("Agent1 needs your Social Security number");
+        expect(dialog.textContent).toContain("there is no Vault entry for this yet");
+        expect(within(dialog).queryByRole("button", { name: /Always/ })).toBeNull();
+        // Nothing to fill until something is typed.
+        expect(within(dialog).getByRole("button", { name: "Fill it in" })).toBeDisabled();
+        const field = dialog.querySelector('input[type="password"]') as HTMLInputElement;
+        fireEvent.input(field, { target: { value: "987-65-4321" } });
+        fireEvent.click(within(dialog).getByLabelText(/Save to the Vault as "Sam's SSN"/));
+        fireEvent.click(within(dialog).getByRole("button", { name: "Fill it in" }));
+        await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "once", value: "987-65-4321", save: true }]));
+        await waitFor(() => expect(close).toHaveBeenCalled());
+        expect(document.body.innerHTML).not.toContain("987-65-4321");
+    });
+
+    it("sends a typed value as not kept by default, and none when denied", async () => {
+        uses = [use({ needs_value: true, offer_always: false })];
+        await refreshVault();
+        render(() => <UsePrompt use={uses[0]} close={vi.fn()} />);
+        const dialog = await screen.findByRole("dialog");
+        const field = dialog.querySelector('input[type="password"]') as HTMLInputElement;
+        fireEvent.input(field, { target: { value: "987-65-4321" } });
+        fireEvent.click(within(dialog).getByRole("button", { name: "Deny" }));
+        await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "deny" }]));
+        expect(JSON.stringify(vault.mock.calls)).not.toContain("987-65");
     });
 
     it("shows a site by its host", () => {

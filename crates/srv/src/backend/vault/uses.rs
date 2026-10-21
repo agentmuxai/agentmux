@@ -33,6 +33,11 @@ pub struct UseRequest {
     /// Why the person is being asked: it is a new site, or the field doesn't look
     /// like what the entry is.
     pub reason: String,
+    /// There is no entry yet: the person types the value in the prompt, and may
+    /// keep it in the Vault (spec section 6.5).
+    pub needs_value: bool,
+    /// The kind of entry that would be kept, when `needs_value`.
+    pub kind: String,
     #[ts(type = "number")]
     pub requested_ms: u64,
 }
@@ -55,9 +60,24 @@ impl Decision {
     }
 }
 
+/// What the person answered. `value` is what they typed when the entry didn't
+/// exist; it lives only as long as the fill does.
+pub struct UseAnswer {
+    pub decision: Decision,
+    pub value: Option<zeroize::Zeroizing<String>>,
+    /// Keep the typed value in the Vault.
+    pub save: bool,
+}
+
+impl UseAnswer {
+    pub fn of(decision: Decision) -> Self {
+        Self { decision, value: None, save: false }
+    }
+}
+
 #[derive(Default)]
 pub struct Uses {
-    pending: Mutex<Vec<(UseRequest, oneshot::Sender<Decision>)>>,
+    pending: Mutex<Vec<(UseRequest, oneshot::Sender<UseAnswer>)>>,
 }
 
 pub fn uses() -> &'static Uses {
@@ -69,12 +89,12 @@ pub fn uses() -> &'static Uses {
 const MAX_PENDING: usize = 16;
 
 impl Uses {
-    pub fn ask(&self, req: UseRequest) -> oneshot::Receiver<Decision> {
+    pub fn ask(&self, req: UseRequest) -> oneshot::Receiver<UseAnswer> {
         let (tx, rx) = oneshot::channel();
         let mut pending = self.pending.lock().unwrap_or_else(|p| p.into_inner());
         if pending.len() >= MAX_PENDING {
             let (_, oldest) = pending.remove(0);
-            let _ = oldest.send(Decision::Deny);
+            let _ = oldest.send(UseAnswer::of(Decision::Deny));
         }
         pending.push((req, tx));
         rx
@@ -88,11 +108,11 @@ impl Uses {
 
     /// The person's answer; false if nothing waits under `id` (answered, or the
     /// agent stopped waiting).
-    pub fn answer(&self, id: &str, decision: Decision) -> bool {
+    pub fn answer(&self, id: &str, answer: UseAnswer) -> bool {
         let mut pending = self.pending.lock().unwrap_or_else(|p| p.into_inner());
         let Some(i) = pending.iter().position(|(r, _)| r.id == id) else { return false };
         let (_, tx) = pending.remove(i);
-        tx.send(decision).is_ok()
+        tx.send(answer).is_ok()
     }
 
     /// The requests still waiting; one whose agent stopped waiting goes.
@@ -123,6 +143,8 @@ mod tests {
             field: "SSN".into(),
             offer_always: true,
             reason: "a new site".into(),
+            needs_value: false,
+            kind: "ssn".into(),
             requested_ms: 0,
         }
     }
@@ -132,9 +154,10 @@ mod tests {
         let u = Uses::default();
         let rx = u.ask(req("u1"));
         assert_eq!(u.list().len(), 1);
-        assert!(u.answer("u1", Decision::Always));
-        assert!(!u.answer("u1", Decision::Deny), "answered already");
-        assert_eq!(rx.await.unwrap(), Decision::Always);
+        assert!(u.answer("u1", UseAnswer { decision: Decision::Once, value: Some("typed".to_string().into()), save: true }));
+        assert!(!u.answer("u1", UseAnswer::of(Decision::Deny)), "answered already");
+        let got = rx.await.unwrap();
+        assert_eq!((got.decision, got.value.as_deref().map(String::as_str), got.save), (Decision::Once, Some("typed"), true));
         assert!(u.list().is_empty());
     }
 
@@ -143,7 +166,7 @@ mod tests {
         let u = Uses::default();
         drop(u.ask(req("u1")));
         assert!(u.list().is_empty());
-        assert!(!u.answer("u1", Decision::Once));
+        assert!(!u.answer("u1", UseAnswer::of(Decision::Once)));
     }
 
     #[test]
