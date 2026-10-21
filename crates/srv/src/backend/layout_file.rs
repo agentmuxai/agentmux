@@ -447,7 +447,11 @@ fn view_from_block(store: &Store, meta: &MetaMapType, ctx: &ExportContext, warni
     // The Vault was a pane of its own until it became a section of Warden.
     if view_type == "vault" {
         view_type = "warden".to_string();
-        config.insert("section".into(), Value::String("vault".to_string()));
+        let path = match meta_str(meta, "vault:section") {
+            Some(sub) => format!("vault/{sub}"),
+            None => "vault".to_string(),
+        };
+        config.insert("section".into(), Value::String(path));
     }
     match view_type.as_str() {
         "agent" => {
@@ -540,7 +544,13 @@ fn view_from_block(store: &Store, meta: &MetaMapType, ctx: &ExportContext, warni
         }
         "connectors" | "memory" | "warden" | "settings" => {
             if let Some(section) = meta_str(meta, &format!("{view_type}:section")) {
-                config.insert("section".into(), Value::String(section.to_string()));
+                // A section with sections of its own (Warden's Vault) is written as a path,
+                // `vault/cards`, as widgets.json's "section" is.
+                let path = match meta_str(meta, &format!("{section}:section")) {
+                    Some(sub) if view_type == "warden" => format!("{section}/{sub}"),
+                    _ => section.to_string(),
+                };
+                config.insert("section".into(), Value::String(path));
             }
         }
         // Singleton views and anything this build doesn't know: the type
@@ -1003,13 +1013,22 @@ impl PlanBuilder<'_> {
             }
             // Files saved before the Vault became a section of Warden say "vault".
             "warden" | "settings" | "vault" => {
+                // A Vault pane's file names its own section; Warden's names `vault/<that>`.
+                let vault_sub = |s: Option<&str>| s.map(|s| format!("vault/{s}")).unwrap_or_else(|| "vault".to_string());
                 let (pane, section) = match kind {
-                    "vault" => ("warden", Some("vault")),
-                    pane => (pane, cfg_str(view, "section")),
+                    "vault" => ("warden", Some(vault_sub(cfg_str(view, "section")))),
+                    pane => (pane, cfg_str(view, "section").map(str::to_string)),
                 };
                 meta.insert("view".into(), pane.into());
                 if let Some(s) = section {
-                    meta.insert(format!("{pane}:section"), Value::String(s.to_string()));
+                    let (id, sub) = match s.split_once('/') {
+                        Some((id, sub)) if pane == "warden" => (id.to_string(), Some(sub.to_string())),
+                        _ => (s, None),
+                    };
+                    if let Some(sub) = sub {
+                        meta.insert(format!("{id}:section"), Value::String(sub));
+                    }
+                    meta.insert(format!("{pane}:section"), Value::String(id));
                 }
                 self.summary.push(pane.to_string());
             }
