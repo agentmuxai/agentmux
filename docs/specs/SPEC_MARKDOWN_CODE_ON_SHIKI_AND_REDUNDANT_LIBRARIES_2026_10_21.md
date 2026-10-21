@@ -1,6 +1,6 @@
 # Spec: code in markdown on shiki, and the frontend libraries we can drop
 
-**Status:** active — §4 (markdown code on shiki) in PR 1 (§7); the removals in §6.2 follow in PR 2.
+**Status:** active — §4 (markdown code on shiki) in #5289; the removals in §6.2 follow in a second PR.
 **Date:** 2026-10-21
 **Author:** AgentA@Area54, at the operator's request
 **Verified against:** `agentmux` `main` @ `61479f0a2` (2026-10-21), by reading code.
