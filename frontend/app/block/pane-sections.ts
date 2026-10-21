@@ -63,8 +63,10 @@ export function sectionProblem(view: string | null | undefined, section: string)
     if (!view) return `"section": "${section}" needs a "view" in its blockdef`;
     const sections = paneSectionsOf(view);
     if (!sections) return `the ${view} pane has no sections`;
-    const [id, sub, ...rest] = section.split("/");
+    // srv keys the section by the view as written; an old name's pane reads its own name's key.
     const name = resolvePaneTabView(view);
+    if (name !== view) return `"${view}" is now the ${name} pane: use "view": "${name}"`;
+    const [id, sub, ...rest] = section.split("/");
     if (!hasSection(sections, id)) {
         return `the ${name} pane has no "${id}" section (it has ${sections.items.map((s) => s.id).join(", ")})`;
     }
