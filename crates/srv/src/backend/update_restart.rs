@@ -19,11 +19,11 @@
 //! Every change of state happens under [`RUN`], checked against the run it
 //! belongs to, so a Cancel can never be overtaken by a run it stopped.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use agentmux_common::srv_stderr::UpgradeTarget;
+use agentmux_common::srv_stderr::{UpgradeTarget, UPGRADE_DECLINED_FILE};
 
 use crate::backend::update_check::{self, AppUpdateStatus, DownloadStatus};
 
@@ -152,6 +152,25 @@ pub fn cancel() -> Result<AppUpdateStatus, String> {
     }
 }
 
+/// Where the launcher leaves a No (`updates/` of this version's data folder).
+fn declined_file() -> Option<PathBuf> {
+    std::env::var_os("AGENTMUX_DATA_DIR")
+        .filter(|d| !d.is_empty())
+        .map(|d| PathBuf::from(d).join("updates").join(UPGRADE_DECLINED_FILE))
+}
+
+/// Whether the launcher answered No (or the question lapsed) for `version`:
+/// `file` names it. Each request clears the file before it asks and each answer
+/// is taken out as it is read, so one left by an earlier attempt can't answer a
+/// new question, however soon the user tries again.
+fn take_declined(file: &Path, version: &str) -> bool {
+    if std::fs::read_to_string(file).map(|v| v.trim() == version).unwrap_or(false) {
+        let _ = std::fs::remove_file(file);
+        return true;
+    }
+    false
+}
+
 async fn run(run_id: u64, d: DownloadStatus, target: UpgradeTarget, now: bool) {
     let deadline = tokio::time::Instant::now() + WAIT_FOR_AGENTS;
     loop {
@@ -173,7 +192,14 @@ async fn run(run_id: u64, d: DownloadStatus, target: UpgradeTarget, now: bool) {
         tokio::time::sleep(POLL).await;
     }
     let listed = stopping_now().await;
+    let declined = declined_file();
     let asked = if_current(run_id, || {
+        // In the same guarded step that asks, so a run that was superseded while it
+        // listed what it stops can't remove a newer run's answer. Before the
+        // launcher is asked: an answer from an earlier attempt isn't this one's.
+        if let Some(file) = declined.as_deref() {
+            let _ = std::fs::remove_file(file);
+        }
         set(&d, "restarting", 0, None, listed);
         tracing::info!(version = %d.version, target = ?target, "upgrade: asking the launcher to restart");
         eprintln!("{}", agentmux_common::srv_stderr::upgrade_line(&d.version, &target));
@@ -181,7 +207,21 @@ async fn run(run_id: u64, d: DownloadStatus, target: UpgradeTarget, now: bool) {
     if !asked {
         return;
     }
-    tokio::time::sleep(RESTART_GRACE).await;
+    // The launcher is asking the user. A No (or a question that lapsed) comes
+    // back as a file, so the panel stops saying "Restarting" at once; with no
+    // answer at all the grace runs out.
+    let grace_ends = tokio::time::Instant::now() + RESTART_GRACE;
+    while tokio::time::Instant::now() < grace_ends {
+        tokio::time::sleep(POLL).await;
+        if !if_current(run_id, || {}) {
+            return;
+        }
+        if declined.as_deref().is_some_and(|f| take_declined(f, &d.version)) {
+            tracing::info!(version = %d.version, "upgrade: the restart was declined");
+            if_current(run_id, || set(&d, "ready", 0, None, Vec::new()));
+            return;
+        }
+    }
     if_current(run_id, || {
         set(
             &d,
@@ -226,6 +266,22 @@ mod tests {
             waiting_for: 0,
             stopping: Vec::new(),
         }
+    }
+
+    #[test]
+    fn a_no_is_taken_once_and_only_for_the_version_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(UPGRADE_DECLINED_FILE);
+        assert!(!take_declined(&file, "0.59.37"), "no answer yet");
+        std::fs::write(&file, "0.59.36
+").unwrap();
+        assert!(!take_declined(&file, "0.59.37"), "an answer about another version");
+        assert!(file.exists(), "...is left alone");
+        std::fs::write(&file, "0.59.37
+").unwrap();
+        assert!(take_declined(&file, "0.59.37"));
+        assert!(!file.exists(), "taken out as it is read");
+        assert!(!take_declined(&file, "0.59.37"), "so it can't answer a second question");
     }
 
     #[test]
