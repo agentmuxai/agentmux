@@ -421,13 +421,25 @@ pub fn appimage_channel_file(appimage: &Path) -> PathBuf {
     appimage.with_file_name(format!("{name}.{RECORDED_CHANNEL_FILE}"))
 }
 
-/// The outermost `.app` bundle holding `path` (macOS: the launcher runs in
-/// `AgentMux.app/Contents/MacOS/`, srv in a helper app nested inside it).
-pub fn outermost_app_bundle(path: &Path) -> Option<PathBuf> {
-    path.ancestors()
-        .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("app")))
-        .last()
-        .map(Path::to_path_buf)
+/// The `.app` bundle the binary at `path` (or its `Contents/MacOS` folder)
+/// belongs to, by the bundle layout rather than by name: the innermost
+/// `*.app` whose `Contents/MacOS` holds `path`, and, for a helper app nested in
+/// another app's `Contents/Helpers` or `Contents/Frameworks` (srv, the CEF
+/// helpers), the app above it. A folder that merely ends in `.app` around the
+/// install is never taken for it.
+pub fn app_bundle_of(path: &Path) -> Option<PathBuf> {
+    let is_app = |p: &Path| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("app"));
+    let mut bundle = path.ancestors().find(|a| is_app(a) && path.starts_with(a.join("Contents").join("MacOS")))?;
+    let nested_in = bundle.parent().filter(|p| p.file_name().is_some_and(|n| n == "Helpers" || n == "Frameworks"));
+    if let Some(outer) = nested_in
+        .and_then(Path::parent)
+        .filter(|c| c.file_name().is_some_and(|n| n == "Contents"))
+        .and_then(Path::parent)
+        .filter(|o| is_app(o))
+    {
+        bundle = outer;
+    }
+    Some(bundle.to_path_buf())
 }
 
 /// Why an account other than this user, root or the `admin` group (whose
@@ -559,7 +571,7 @@ pub fn recorded_channel() -> Option<String> {
     }
     // macOS: beside the `.app` an upgrade replaced.
     if cfg!(target_os = "macos") {
-        if let Some(channel) = outermost_app_bundle(&exe).and_then(|app| read_channel_file(&mac_app_channel_file(&app))) {
+        if let Some(channel) = app_bundle_of(&exe).and_then(|app| read_channel_file(&mac_app_channel_file(&app))) {
             return Some(channel);
         }
     }
@@ -1144,8 +1156,17 @@ mod tests {
         let app = Path::new("/Applications/AgentMux.app");
         assert_eq!(mac_app_channel_file(app), Path::new("/Applications/.AgentMux.app.agentmux-channel"));
         let srv = Path::new("/Applications/AgentMux.app/Contents/Helpers/AgentMux Server.app/Contents/MacOS/srv");
-        assert_eq!(outermost_app_bundle(srv).as_deref(), Some(app));
-        assert_eq!(outermost_app_bundle(Path::new("/usr/bin/agentmux-srv")), None);
+        assert_eq!(app_bundle_of(srv).as_deref(), Some(app));
+        assert_eq!(app_bundle_of(Path::new("/Applications/AgentMux.app/Contents/MacOS")).as_deref(), Some(app));
+        let gpu = Path::new("/Applications/AgentMux.app/Contents/Frameworks/AgentMux Helper (GPU).app/Contents/MacOS/AgentMux Helper (GPU)");
+        assert_eq!(app_bundle_of(gpu).as_deref(), Some(app));
+        // A folder that only ends in .app around the install is not the app.
+        let archived = Path::new("/Users/u/Archive.app/AgentMux.app/Contents/MacOS/agentmux-launcher");
+        assert_eq!(app_bundle_of(archived).as_deref(), Some(Path::new("/Users/u/Archive.app/AgentMux.app")));
+        let in_resources = Path::new("/Users/u/Foo.app/Resources/AgentMux.app/Contents/Helpers/AgentMux Server.app/Contents/MacOS/srv");
+        assert_eq!(app_bundle_of(in_resources).as_deref(), Some(Path::new("/Users/u/Foo.app/Resources/AgentMux.app")));
+        assert_eq!(app_bundle_of(Path::new("/usr/bin/agentmux-srv")), None);
+        assert_eq!(app_bundle_of(Path::new("/Users/u/Foo.app/srv")), None, "not in a bundle's Contents/MacOS");
     }
 
     #[test]

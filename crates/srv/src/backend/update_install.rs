@@ -134,18 +134,11 @@ fn detect_at(exe: &Path, os: &str, appimage: bool, debian: bool) -> InstallKind 
     }
 }
 
-/// The outermost `.app` above `exe`: srv runs nested
-/// (`AgentMux.app/Contents/Helpers/AgentMux Server.app/Contents/MacOS/srv`),
-/// and it is the outer one the upgrade replaces.
+/// The `.app` srv at `exe` belongs to, by the bundle layout: srv runs in a
+/// helper app nested in `AgentMux.app/Contents/Helpers/`
+/// (`runtime_mode::app_bundle_of`).
 pub fn outermost_app(exe: &Path) -> Option<PathBuf> {
-    let mut path = PathBuf::new();
-    for part in exe.components() {
-        path.push(part);
-        if part.as_os_str().to_string_lossy().ends_with(".app") {
-            return Some(path);
-        }
-    }
-    None
+    agentmux_common::runtime_mode::app_bundle_of(exe)
 }
 
 /// Why `app` can't be replaced in place, if it can't. `read_only` is whether
@@ -314,7 +307,8 @@ mod tests {
         let dmg = Path::new("/Volumes/AgentMux 3").join(NESTED);
         assert_eq!(outermost_app(&dmg), Some(PathBuf::from("/Volumes/AgentMux 3/AgentMux.app")));
         let nested_in_app = Path::new("/Users/u/Foo.app/Resources").join(NESTED);
-        assert_eq!(outermost_app(&nested_in_app), Some(PathBuf::from("/Users/u/Foo.app")));
+        // A folder around the install that only ends in .app is never replaced.
+        assert_eq!(outermost_app(&nested_in_app), Some(PathBuf::from("/Users/u/Foo.app/Resources/AgentMux.app")));
         assert_eq!(outermost_app(Path::new("/usr/local/bin/srv")), None);
         // `.app` only counts at the end of a name.
         assert_eq!(outermost_app(Path::new("/x/my.application/srv")), None);

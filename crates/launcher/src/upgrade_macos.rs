@@ -32,10 +32,10 @@ pub fn dmg_name(version: &str) -> String {
     format!("AgentMux_{version}_arm64.dmg")
 }
 
-/// The outermost `.app` bundle holding `path`: the launcher runs in
-/// `AgentMux.app/Contents/MacOS/`, and srv in a helper app nested inside it.
-pub fn outermost_app(path: &Path) -> Option<PathBuf> {
-    agentmux_common::runtime_mode::outermost_app_bundle(path)
+/// The `.app` this launcher (in `AgentMux.app/Contents/MacOS/`) belongs to,
+/// by the bundle layout (`runtime_mode::app_bundle_of`).
+pub fn app_of(path: &Path) -> Option<PathBuf> {
+    agentmux_common::runtime_mode::app_bundle_of(path)
 }
 
 /// Why `app` can't be replaced where it is, or `None` when it can: macOS runs
@@ -117,7 +117,7 @@ pub fn check_dmg(
     if !dmg.is_absolute() || !named_right || !in_updates || !dmg.is_file() {
         return Err(format!("{} isn't the AgentMux {version} disk image AgentMux downloaded", dmg.display()));
     }
-    let app = outermost_app(own_dir).ok_or("this AgentMux isn't running from an .app")?;
+    let app = app_of(own_dir).ok_or("this AgentMux isn't running from an .app")?;
     if let Some(why) = not_replaceable(&app) {
         return Err(why);
     }
@@ -305,12 +305,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_outermost_app_is_the_one_replaced() {
+    fn the_app_the_launcher_is_in_is_the_one_replaced() {
         let srv = Path::new("/Applications/AgentMux.app/Contents/Helpers/AgentMux Server.app/Contents/MacOS/srv");
-        assert_eq!(outermost_app(srv).as_deref(), Some(Path::new("/Applications/AgentMux.app")));
+        assert_eq!(app_of(srv).as_deref(), Some(Path::new("/Applications/AgentMux.app")));
         let launcher = Path::new("/Users/u/Apps/AgentMux 2.app/Contents/MacOS");
-        assert_eq!(outermost_app(launcher).as_deref(), Some(Path::new("/Users/u/Apps/AgentMux 2.app")));
-        assert_eq!(outermost_app(Path::new("/opt/agentmux/bin")), None);
+        assert_eq!(app_of(launcher).as_deref(), Some(Path::new("/Users/u/Apps/AgentMux 2.app")));
+        // Never a folder around the install that only ends in .app.
+        let archived = Path::new("/Users/u/Old.app/AgentMux.app/Contents/MacOS");
+        assert_eq!(app_of(archived).as_deref(), Some(Path::new("/Users/u/Old.app/AgentMux.app")));
+        assert_eq!(app_of(Path::new("/opt/agentmux/bin")), None);
     }
 
     #[test]
