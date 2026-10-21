@@ -184,6 +184,13 @@ pub fn read(bytes: &[u8], passphrase: &str) -> Result<Imported, ReadError> {
         match e {
             E::Key(keepass::error::DatabaseKeyError::IncorrectKey) => ReadError::from("that password didn't open the database (a database that also needs a key file can't be opened here yet)"),
             E::Key(_) => ReadError::from("that password didn't open the database"),
+            // A KDBX 3 file has no check of the key before it decrypts: a wrong password comes out as
+            // garbage that fails to unpad, the same as a damaged file does.
+            E::Cryptography(_) => ReadError::from("that password didn't open the database, or the file is damaged"),
+            // The XML inside didn't parse. The crate's detail can quote the file, so it is not passed on.
+            E::Format(_) => ReadError::from(
+                "this KeePass database couldn't be read: it is damaged, or was written by a tool that lays its entries out differently from KeePass (files from KeePass and KeePassXC read fine)",
+            ),
             _ => ReadError::from(DAMAGED),
         }
     })?;
