@@ -493,7 +493,7 @@ pub(crate) async fn run_unix(
                         log(&format!("upgrade: srv asks to restart into {staged}; asking the user"));
                         let tx = upgrade_yes_tx.clone();
                         let stopping = crate::upgrade_restart::stopping_note(&paths.data_dir);
-                        crate::upgrade_restart::ask_then(req.version, staged, stopping, move |s| {
+                        crate::upgrade_restart::ask_then(req.version, staged, stopping, paths.data_dir.clone(), move |s| {
                             let _ = tx.send(s);
                         });
                     }

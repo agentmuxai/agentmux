@@ -19,11 +19,11 @@
 //! Every change of state happens under [`RUN`], checked against the run it
 //! belongs to, so a Cancel can never be overtaken by a run it stopped.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
-use agentmux_common::srv_stderr::UpgradeTarget;
+use agentmux_common::srv_stderr::{UpgradeTarget, UPGRADE_DECLINED_FILE};
 
 use crate::backend::update_check::{self, AppUpdateStatus, DownloadStatus};
 
@@ -152,6 +152,22 @@ pub fn cancel() -> Result<AppUpdateStatus, String> {
     }
 }
 
+/// Where the launcher leaves a No (`updates/` of this version's data folder).
+fn declined_file() -> Option<PathBuf> {
+    std::env::var_os("AGENTMUX_DATA_DIR")
+        .filter(|d| !d.is_empty())
+        .map(|d| PathBuf::from(d).join("updates").join(UPGRADE_DECLINED_FILE))
+}
+
+/// Whether the launcher answered No (or the question lapsed) since `asked`:
+/// `file` exists and was written then or later. An older one is from an earlier
+/// attempt. The second of slack covers a coarse file clock.
+fn declined_since(file: &Path, asked: SystemTime) -> bool {
+    std::fs::metadata(file)
+        .and_then(|m| m.modified())
+        .is_ok_and(|written| written + Duration::from_secs(1) >= asked)
+}
+
 async fn run(run_id: u64, d: DownloadStatus, target: UpgradeTarget, now: bool) {
     let deadline = tokio::time::Instant::now() + WAIT_FOR_AGENTS;
     loop {
@@ -173,6 +189,7 @@ async fn run(run_id: u64, d: DownloadStatus, target: UpgradeTarget, now: bool) {
         tokio::time::sleep(POLL).await;
     }
     let listed = stopping_now().await;
+    let asked_at = SystemTime::now();
     let asked = if_current(run_id, || {
         set(&d, "restarting", 0, None, listed);
         tracing::info!(version = %d.version, target = ?target, "upgrade: asking the launcher to restart");
@@ -181,7 +198,22 @@ async fn run(run_id: u64, d: DownloadStatus, target: UpgradeTarget, now: bool) {
     if !asked {
         return;
     }
-    tokio::time::sleep(RESTART_GRACE).await;
+    // The launcher is asking the user. A No (or a question that lapsed) comes
+    // back as a file, so the panel stops saying "Restarting" at once; with no
+    // answer at all the grace runs out.
+    let grace_ends = tokio::time::Instant::now() + RESTART_GRACE;
+    let declined = declined_file();
+    while tokio::time::Instant::now() < grace_ends {
+        tokio::time::sleep(POLL).await;
+        if !if_current(run_id, || {}) {
+            return;
+        }
+        if declined.as_deref().is_some_and(|f| declined_since(f, asked_at)) {
+            tracing::info!(version = %d.version, "upgrade: the restart was declined");
+            if_current(run_id, || set(&d, "ready", 0, None, Vec::new()));
+            return;
+        }
+    }
     if_current(run_id, || {
         set(
             &d,
@@ -226,6 +258,18 @@ mod tests {
             waiting_for: 0,
             stopping: Vec::new(),
         }
+    }
+
+    #[test]
+    fn a_no_from_the_launcher_is_one_written_since_the_question() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(UPGRADE_DECLINED_FILE);
+        let asked = SystemTime::now();
+        assert!(!declined_since(&file, asked), "no answer yet");
+        std::fs::write(&file, "0.59.37\n").unwrap();
+        assert!(declined_since(&file, asked), "answered No after the question");
+        // Left by an earlier attempt, long before this question.
+        assert!(!declined_since(&file, asked + Duration::from_secs(60)));
     }
 
     #[test]

@@ -247,6 +247,12 @@ pub fn parse_migration_end_line(line: &str) -> Option<MigrationEnd> {
 /// Prefix of the line srv writes when the user chose "Upgrade & restart".
 pub const UPGRADE_PREFIX: &str = "AGENTMUXSRV-UPGRADE";
 
+/// What the launcher leaves in `updates/` of the data folder when the user
+/// answered No to the restart question, or the question lapsed: the version it
+/// asked about. srv reads it to stop saying "Restarting" (the launcher has no
+/// other way to tell it), so the user can start the upgrade again at once.
+pub const UPGRADE_DECLINED_FILE: &str = "declined.txt";
+
 /// What an upgrade restarts into.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UpgradeTarget {
