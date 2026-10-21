@@ -211,3 +211,22 @@ fn a_username_only_login_is_kept_and_an_id_item_without_its_number_is_not_guesse
     }
     assert!(get("Half passport").parts["text"].contains("full name: Alex Doe"));
 }
+
+#[test]
+fn an_attached_file_is_listed_as_skipped_and_the_items_own_tags_are_kept() {
+    let items = json!([
+        { "categoryUuid": "006", "overview": { "title": "Lease" }, "details": { "documentAttributes": { "fileName": "lease.pdf", "documentId": "d1" } } },
+        {
+            "categoryUuid": "003",
+            "overview": { "title": "Contract notes", "tags": ["legal", "2026"] },
+            "details": { "notesPlain": "signed", "documentAttributes": { "fileName": "contract.pdf" } }
+        }
+    ]);
+    let i = read(&export(items)).ok().expect("reads");
+    let why: std::collections::HashMap<_, _> = i.skipped.iter().cloned().collect();
+    assert!(why["Lease (attached file)"].contains("not files") && why["Contract notes (attached file)"].contains("not files"), "{why:?}");
+    // The document with no text is only listed; the note that has text is imported, with its tags.
+    assert!(i.entries.iter().all(|e| e.label != "Lease"));
+    let note = i.entries.iter().find(|e| e.label == "Contract notes").expect("kept");
+    assert_eq!(note.tags, vec!["Personal".to_string(), "legal".to_string(), "2026".to_string()]);
+}

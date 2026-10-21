@@ -109,6 +109,19 @@ fn fields_of(details: &Value) -> Vec<Field> {
     out
 }
 
+/// Whether the item carries a file (a document, or a file field): the Vault keeps
+/// text, not files, so it is listed as skipped.
+fn has_attachment(details: &Value) -> bool {
+    details.get("documentAttributes").is_some_and(|d| !d.is_null())
+        || details
+            .get("sections")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .flat_map(|s| s.get("fields").and_then(Value::as_array).into_iter().flatten())
+            .any(|f| f.pointer("/value/file").is_some())
+}
+
 fn find<'a>(fields: &'a [Field], ids: &[&str]) -> Option<&'a Field> {
     fields.iter().find(|f| ids.iter().any(|i| f.id.eq_ignore_ascii_case(i)))
 }
@@ -281,12 +294,20 @@ fn item_into(item: &Value, tag: &str, entries: &mut Vec<Incoming>, skipped: &mut
         let name = if made.is_empty() { title.clone() } else { format!("{title} (notes)") };
         made.push(Incoming::new("note", &name).part("text", &rest));
     }
+    if has_attachment(&details) {
+        skipped.push((format!("{title} (attached file)"), "the Vault keeps text, not files: the file isn't imported".to_string()));
+        if made.is_empty() {
+            return;
+        }
+    }
     if made.is_empty() {
         let why = if matches!(item.get("categoryUuid").and_then(Value::as_str), Some("001" | "005")) { "it has no password" } else { "it holds nothing the Vault can keep" };
         skipped.push((title, why.to_string()));
         return;
     }
-    entries.extend(made.into_iter().map(|m| m.tag(tag)));
+    // The vault's name, and the item's own tags.
+    let own: Vec<&str> = overview.get("tags").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect();
+    entries.extend(made.into_iter().map(|m| own.iter().fold(m.tag(tag), |m, t| m.tag(t))));
 }
 
 #[cfg(test)]
