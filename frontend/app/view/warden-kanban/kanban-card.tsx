@@ -12,7 +12,7 @@ import { Button, Pill, StatusDot, type StatusTone } from "@/app/element/ui";
 import { MOS } from "@/app/store/global";
 import { formatAge } from "@/app/view/warden-shared/warden-shared";
 
-import { checklistProgress, columnOf, needsReason, requestedBy } from "./kanban-columns";
+import { checklistProgress, columnOf, needsReason, requestedBy, waitingOn } from "./kanban-columns";
 import type { KanbanAgent, KanbanAgentState, KanbanTask } from "./kanban-types";
 
 export function agentTone(state: KanbanAgentState | undefined): StatusTone {
@@ -47,13 +47,21 @@ export function agentStateWords(state: KanbanAgentState | undefined): string {
 export function AgentChip(props: { name: string; agent?: KanbanAgent | null }): JSX.Element {
     return (
         <span class="kanban-agent-chip">
-            <StatusDot tone={agentTone(props.agent?.state)} label={`${props.name}: ${agentStateWords(props.agent?.state)}`} />
+            <StatusDot
+                tone={agentTone(props.agent?.state)}
+                label={`${props.name}: ${agentStateWords(props.agent?.state)}`}
+            />
             <span class="kanban-agent-chip__name">{props.name}</span>
         </span>
     );
 }
 
-export function KanbanCard(props: { task: KanbanTask; now: number; agents: KanbanAgent[]; onOpen: (t: KanbanTask) => void }): JSX.Element {
+export function KanbanCard(props: {
+    task: KanbanTask;
+    now: number;
+    agents: KanbanAgent[];
+    onOpen: (t: KanbanTask) => void;
+}): JSX.Element {
     let el: HTMLDivElement | undefined;
     const t = () => props.task;
     const column = createMemo(() => columnOf(t()));
@@ -61,7 +69,8 @@ export function KanbanCard(props: { task: KanbanTask; now: number; agents: Kanba
     const who = createMemo(() => {
         const task = t();
         if (task.claimed_by) return { name: task.claimed_by, agent: task.holder };
-        if (task.target_agent) return { name: task.target_agent, agent: props.agents.find((a) => a.name === task.target_agent) ?? null };
+        if (task.target_agent)
+            return { name: task.target_agent, agent: props.agents.find((a) => a.name === task.target_agent) ?? null };
         return null;
     });
     onMount(() => {
@@ -106,6 +115,18 @@ export function KanbanCard(props: { task: KanbanTask; now: number; agents: Kanba
                 <Show when={t().state === "held"}>
                     <Pill icon="pause">on hold</Pill>
                 </Show>
+                <Show when={column() === "backlog" && waitingOn(t()).length > 0}>
+                    <Pill
+                        icon="hourglass-half"
+                        title={`Starts after ${waitingOn(t())
+                            .map((a) => `#${a.num} ${a.title}`)
+                            .join(", ")}: nobody takes it until then`}
+                    >
+                        {`after #${waitingOn(t())
+                            .map((a) => a.num)
+                            .join(", #")}`}
+                    </Pill>
+                </Show>
                 <Show when={checklistProgress(t())}>{(p) => <Pill icon="list-check">{p()}</Pill>}</Show>
                 <Show when={t().card.pr_url}>
                     <Pill icon="code-pull-request" tone="accent" title={t().card.pr_url}>
@@ -128,7 +149,11 @@ export function KanbanCard(props: { task: KanbanTask; now: number; agents: Kanba
 }
 
 /** An agent at work with no task (§6.6): its summary, and Track to make it one. */
-export function UntrackedCard(props: { agent: KanbanAgent; onTrack: (a: KanbanAgent) => void; onOpenAgent: (a: KanbanAgent) => void }): JSX.Element {
+export function UntrackedCard(props: {
+    agent: KanbanAgent;
+    onTrack: (a: KanbanAgent) => void;
+    onOpenAgent: (a: KanbanAgent) => void;
+}): JSX.Element {
     const meta = createMemo(() => MOS.getMuxObjectAtom<Block>(`block:${props.agent.block_id}`)()?.meta ?? {});
     const summary = createMemo(() => {
         const m = meta() as Record<string, unknown>;
@@ -148,7 +173,12 @@ export function UntrackedCard(props: { agent: KanbanAgent; onTrack: (a: KanbanAg
                 <Button density="compact" icon="thumbtack" onClick={() => props.onTrack(props.agent)}>
                     Track
                 </Button>
-                <Button density="compact" tone="quiet" icon="arrow-up-right-from-square" onClick={() => props.onOpenAgent(props.agent)}>
+                <Button
+                    density="compact"
+                    tone="quiet"
+                    icon="arrow-up-right-from-square"
+                    onClick={() => props.onOpenAgent(props.agent)}
+                >
                     Open
                 </Button>
             </div>

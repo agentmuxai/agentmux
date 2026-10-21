@@ -31,7 +31,7 @@ use crate::backend::rpc_types::*;
 use crate::backend::storage::work_board::{requested, BoardTask, NewCard};
 use crate::backend::storage::work_queue::{work_state, WorkItem};
 use crate::server::agent_handlers::AgentTurnDeps;
-use crate::server::work_tasks::{clean, record, resolve_id};
+use crate::server::work_tasks::{clean, record, resolve_after, resolve_id};
 
 use super::AppState;
 
@@ -158,6 +158,22 @@ struct ActRequest {
     /// track: the agent pane whose work becomes a task.
     #[serde(default)]
     block_id: Option<String>,
+    /// create, edit: the tasks it starts after (ids or numbers); edit
+    /// replaces the list, `[]` clears it.
+    #[serde(default)]
+    after: Option<Vec<Value>>,
+}
+
+/// "#12, #15" for the history.
+fn after_words(store: &crate::backend::storage::store::Store, ids: &[String]) -> String {
+    if ids.is_empty() {
+        return "starts whenever it's taken".into();
+    }
+    let nums: Vec<String> = ids
+        .iter()
+        .map(|id| store.work_board_get(id).ok().flatten().map(|t| format!("#{}", t.card.num)).unwrap_or_else(|| id.clone()))
+        .collect();
+    format!("starts after {}", nums.join(", "))
 }
 
 const OPERATOR: &str = "operator";
@@ -267,6 +283,11 @@ async fn act(state: &AppState, data: Value) -> Result<Value, String> {
                 not_before: None,
                 result: String::new(),
             };
+            // Before the row exists, so no claim can take it in between.
+            let after = resolve_after(state, &item.id, req.after.as_deref().unwrap_or_default())?;
+            if !after.is_empty() {
+                store.work_deps_set(&item.id, &after).map_err(|e| e.to_string())?;
+            }
             store.work_queue_enqueue(&item).map_err(|e| e.to_string())?;
             let card = NewCard {
                 repo: req.repo.clone().unwrap_or_default(),
@@ -279,12 +300,15 @@ async fn act(state: &AppState, data: Value) -> Result<Value, String> {
             };
             let num = store.work_card_create(&item.id, &card, now).map_err(|e| e.to_string())?;
             let first = if req.hold == Some(true) { work_state::HELD } else { work_state::OPEN };
-            record(state, &item.id, OPERATOR, OPERATOR, "created", "", first, "");
+            let body = if after.is_empty() { String::new() } else { after_words(store, &after) };
+            record(state, &item.id, OPERATOR, OPERATOR, "created", "", first, &body);
             json!({ "ok": true, "id": item.id, "num": num })
         }
         "edit" => {
             let t = get(&req.id)?;
             let id = &t.item.id;
+            // Checked first: a refused list changes nothing.
+            let after = req.after.as_ref().map(|given| resolve_after(state, id, given)).transpose()?;
             store
                 .work_task_edit(
                     id,
@@ -296,7 +320,12 @@ async fn act(state: &AppState, data: Value) -> Result<Value, String> {
                 )
                 .map_err(|e| e.to_string())?;
             store.work_card_edit(id, None, req.review, req.repo.as_deref(), now).map_err(|e| e.to_string())?;
-            record(state, id, OPERATOR, OPERATOR, "edited", &t.item.state, &t.item.state, "");
+            let mut body = String::new();
+            if let Some(after) = after {
+                store.work_deps_set(id, &after).map_err(|e| e.to_string())?;
+                body = after_words(store, &after);
+            }
+            record(state, id, OPERATOR, OPERATOR, "edited", &t.item.state, &t.item.state, &body);
             json!({ "ok": true })
         }
         "move" => {

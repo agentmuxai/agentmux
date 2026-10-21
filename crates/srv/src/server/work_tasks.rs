@@ -48,6 +48,29 @@ pub(super) fn resolve_id(state: &AppState, id: &str) -> String {
     trimmed.to_string()
 }
 
+/// The tasks a task starts after (§6.15), as given: ids or numbers (`12`,
+/// `"#12"`). Resolved to ids, checked: each exists, none is `work_id`
+/// itself, and none already waits on it.
+pub(super) fn resolve_after(state: &AppState, work_id: &str, given: &[Value]) -> Result<Vec<String>, String> {
+    let mut ids: Vec<String> = Vec::new();
+    for v in given {
+        let raw = match v {
+            Value::String(s) => s.clone(),
+            Value::Number(n) => n.to_string(),
+            _ => return Err(format!("after: {v} is not a task id or number")),
+        };
+        let id = resolve_id(state, &raw);
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    match state.identity_store.work_deps_refusal(work_id, &ids) {
+        Ok(None) => Ok(ids),
+        Ok(Some(why)) => Err(why),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 /// Text kept on a card or in the history: sanitized, at most [`MAX_TEXT`]
 /// characters.
 pub(super) fn clean(text: &str) -> String {

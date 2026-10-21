@@ -86,6 +86,9 @@ pub(super) struct EnqueueRequest {
     /// Kanban: whether a person must accept it; default from who asked.
     #[serde(default)]
     pub review: Option<bool>,
+    /// Kanban: the tasks it starts after (ids or numbers).
+    #[serde(default)]
+    pub after: Vec<Value>,
 }
 
 pub(super) async fn handle_work_enqueue(
@@ -156,6 +159,16 @@ pub(super) async fn handle_work_enqueue(
         result: String::new(),
     };
 
+    // Before the row exists, so no claim can take it in between.
+    let after = match super::work_tasks::resolve_after(&state, &item.id, &req.after) {
+        Ok(a) => a,
+        Err(why) => return err(StatusCode::BAD_REQUEST, format!("after: {why}")),
+    };
+    if !after.is_empty() {
+        if let Err(e) = state.identity_store.work_deps_set(&item.id, &after) {
+            return err(StatusCode::INTERNAL_SERVER_ERROR, format!("enqueue failed: {e}"));
+        }
+    }
     let filing = super::work_tasks::Filing { repo: req.repo, review: req.review };
     let card = super::work_tasks::prepare_card(&state, caller.as_deref(), &item.created_by, filing).await;
     match state.identity_store.work_queue_enqueue(&item) {

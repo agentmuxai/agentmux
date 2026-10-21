@@ -303,6 +303,9 @@ impl Store {
                                 AND (target_agent = '' OR target_agent = ?1)))
                        AND (target_group = ''{groups})
                        AND (?4 = '' OR kind = ?4)
+                       -- Kanban §6.15: not while a task it starts after
+                       -- is unfinished.
+                       AND NOT {waits}
                      -- Kanban §6.5: an agent's own tasks (the requests it
                      -- filed for later, or the operator gave it) before
                      -- anyone's; then priority; then the operator's order in
@@ -316,6 +319,7 @@ impl Store {
             claimed = work_state::CLAIMED,
             open = work_state::OPEN,
             groups = group_placeholders,
+            waits = super::work_deps::WAITS_ON_UNFINISHED,
             cols = COLS,
         );
 

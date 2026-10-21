@@ -4,7 +4,7 @@
 // Where each task sits on the Kanban, and in what order (docs/specs/SPEC_WARDEN_KANBAN_2026_10_20.md
 // §6.3, §6.5). Pure: the section and its tests share it.
 
-import type { KanbanAgent, KanbanTask } from "./kanban-types";
+import type { KanbanAfter, KanbanAgent, KanbanTask } from "./kanban-types";
 
 export type ColumnId = "backlog" | "progress" | "needs" | "review" | "done";
 
@@ -140,6 +140,19 @@ export function checklistProgress(t: KanbanTask): string | null {
     const list = t.card.checklist ?? [];
     if (!list.length) return null;
     return `${list.filter((i) => i.status === "completed").length}/${list.length}`;
+}
+
+/** The tasks this one starts after that aren't finished yet: while any is, nobody takes it. */
+export function waitingOn(t: KanbanTask): KanbanAfter[] {
+    return (t.card.after ?? []).filter((a) => a.state !== "done" && a.state !== "cancelled");
+}
+
+/** "#12, 15" → ["12", "15"]: the numbers typed for "starts after". */
+export function parseAfter(text: string): string[] {
+    return text
+        .split(/[\s,;]+/)
+        .map((s) => s.replace(/^#/, ""))
+        .filter(Boolean);
 }
 
 /** Whether a task matches the search box: title, number, agent, repository. */

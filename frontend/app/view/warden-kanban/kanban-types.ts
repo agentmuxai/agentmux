@@ -15,6 +15,14 @@ export interface ChecklistItem {
     status: string;
 }
 
+/** A task another starts after (`AfterTask` in crates/srv/src/backend/storage/work_deps.rs). */
+export interface KanbanAfter {
+    id: string;
+    num: number;
+    title: string;
+    state: TaskState;
+}
+
 export interface KanbanCardFields {
     num: number;
     repo: string;
@@ -32,6 +40,8 @@ export interface KanbanCardFields {
     filed_by: string;
     last_reminded_at?: number | null;
     updated_at: number;
+    /** The tasks it starts after, finished or not (absent from an older srv). */
+    after?: KanbanAfter[];
 }
 
 export interface KanbanAgent {
@@ -104,6 +114,8 @@ export interface KanbanActRequest {
     rank?: number;
     text?: string;
     block_id?: string;
+    /** create, edit: the tasks it starts after, by id or number; edit replaces the list. */
+    after?: string[];
 }
 
 export interface KanbanActResult {
