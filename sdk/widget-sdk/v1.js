@@ -250,6 +250,9 @@ export async function connect(options = {}) {
             list: async () => (await call("agents.list")).agents,
             send: async (agent, text) => (await call("agents.send", { agent, text })).id,
         },
+        tasks: {
+            list: async () => (await call("tasks.list")).tasks,
+        },
     };
 }
 

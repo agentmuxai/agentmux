@@ -135,6 +135,18 @@ async fn call(st: &AppState, packages: &[WidgetPackageInfo], req: WidgetCallReq)
             widget_access::require(&pkg, "agents:read")?;
             Ok(json!({ "agents": agent_rows(st) }))
         }
+        "tasks.list" => {
+            widget_access::require(&pkg, "tasks:read")?;
+            let identity = st.identity_store.clone();
+            let tasks = tokio::task::spawn_blocking(move || {
+                let now = agentmux_common::time::now_ms();
+                identity.work_board_list(now - TASKS_FINISHED_WINDOW_MS, TASKS_LIMIT, now)
+            })
+            .await
+            .map_err(|e| AccessError::internal(e.to_string()))?
+            .map_err(store_err)?;
+            Ok(json!({ "tasks": tasks.iter().map(task_row).collect::<Vec<_>>() }))
+        }
         "agents.send" => {
             widget_access::require(&pkg, "agents:send")?;
             let agent = param(p, "agent").unwrap_or_default();
@@ -176,6 +188,30 @@ async fn call(st: &AppState, packages: &[WidgetPackageInfo], req: WidgetCallReq)
 fn storage_changed(st: &AppState, widget_id: &str, key: &str) {
     let event = crate::backend::mps_events::WidgetStorageEvent { id: widget_id.to_string(), keys: vec![key.to_string()] };
     st.broker.publish_event::<crate::backend::mps_events::WidgetStorage>(&event, vec![], 0);
+}
+
+/// Finished tasks a widget sees, as the Kanban shows them: the last 7 days.
+const TASKS_FINISHED_WINDOW_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+const TASKS_LIMIT: usize = 500;
+
+/// One Kanban task as `tasks:read` shows it (SPEC_WARDEN_KANBAN_2026_10_20.md
+/// §9): what it is, who is on it and where it stands. Not the prompt, the
+/// operator's own words or the result, which can carry anything the operator
+/// typed; a widget that needs those asks the user to open the Kanban.
+pub(crate) fn task_row(t: &crate::backend::storage::work_board::BoardTask) -> Value {
+    let agent = if t.item.claimed_by.is_empty() { &t.item.target_agent } else { &t.item.claimed_by };
+    let done = t.card.checklist.iter().filter(|i| i.status == "completed").count();
+    json!({
+        "num": t.card.num,
+        "title": t.item.title,
+        "state": t.item.state,
+        "agent": agent,
+        "repo": t.card.repo,
+        "pr": t.card.pr_url,
+        "checklist": { "done": done, "total": t.card.checklist.len() },
+        "createdAt": t.item.created_at,
+        "updatedAt": t.item.updated_at,
+    })
 }
 
 /// The user's running agents on this machine, with whether each is busy.
@@ -232,6 +268,55 @@ mod tests {
         call(st, packages, WidgetCallReq { token: token.into(), method: method.into(), params }).await
     }
 
+    #[test]
+    fn a_task_row_shows_where_it_stands_but_not_what_anyone_typed() {
+        use crate::backend::storage::work_board::{BoardTask, ChecklistItem, WorkCard};
+        let mut t = BoardTask {
+            item: crate::backend::storage::work_queue::WorkItem {
+                id: "w1".into(),
+                title: "Write the spec".into(),
+                payload: "secret instructions".into(),
+                kind: String::new(),
+                target_agent: "Loap-3".into(),
+                target_group: String::new(),
+                priority: 0,
+                state: "claimed".into(),
+                claimed_by: "Naki".into(),
+                target_agent_uid: String::new(),
+                claimed_by_uid: String::new(),
+                claim_expires: None,
+                attempts: 1,
+                max_attempts: 3,
+                created_by: "operator".into(),
+                created_by_uid: String::new(),
+                created_at: 1,
+                updated_at: 2,
+                not_before: None,
+                result: "a result".into(),
+            },
+            card: WorkCard {
+                num: 12,
+                repo: "o/r".into(),
+                request_text: "what I said".into(),
+                checklist: vec![
+                    ChecklistItem { text: "a".into(), status: "completed".into() },
+                    ChecklistItem { text: "b".into(), status: "pending".into() },
+                ],
+                ..Default::default()
+            },
+        };
+        let row = task_row(&t);
+        assert_eq!(row["num"], 12);
+        assert_eq!(row["agent"], "Naki", "the holder, before the agent it was for");
+        assert_eq!(row["checklist"], json!({ "done": 1, "total": 2 }));
+        let text = row.to_string();
+        for private in ["secret instructions", "what I said", "a result"] {
+            assert!(!text.contains(private), "{private} in {text}");
+        }
+        t.item.claimed_by.clear();
+        assert_eq!(task_row(&t)["agent"], "Loap-3");
+    }
+
     // SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §11: srv refuses each
     // call whose permission wasn't granted, whatever the frontend checked.
     #[tokio::test]
@@ -246,6 +331,7 @@ mod tests {
             ("storage.list", json!({}), "storage"),
             ("agents.list", json!({}), "agents:read"),
             ("agents.send", json!({ "agent": "a", "text": "t" }), "agents:send"),
+            ("tasks.list", json!({}), "tasks:read"),
             ("net.fetch", json!({ "url": "https://api.github.com/user" }), "net:https://api.github.com"),
         ];
         for (method, params, permission) in cases {

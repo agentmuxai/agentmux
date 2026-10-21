@@ -189,6 +189,7 @@ describe("permissions", () => {
             ["clipboard.writeText", "clipboard:write"],
             ["agents.list", "agents:read"],
             ["agents.send", "agents:send"],
+            ["tasks.list", "tasks:read"],
         ];
         for (const [method, permission] of cases) {
             const e = errorOf(await handleBridgeRequest(h, state, method, { key: "k", text: "t", agent: "a" }));

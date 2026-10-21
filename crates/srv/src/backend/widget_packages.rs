@@ -36,7 +36,7 @@ const PUBLISHERS_FILE: &str = "widget-publishers.json";
 
 /// Every permission a manifest may ask for (spec §6.4). `net:<origin>` is
 /// checked separately.
-pub const PERMISSIONS: &[&str] = &["storage", "files", "clipboard:write", "panes", "agents:read", "agents:send"];
+pub const PERMISSIONS: &[&str] = &["storage", "files", "clipboard:write", "panes", "agents:read", "agents:send", "tasks:read"];
 
 // ── The manifest (spec §5.3) ────────────────────────────────────────────────
 

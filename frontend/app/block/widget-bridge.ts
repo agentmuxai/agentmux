@@ -148,6 +148,7 @@ export function permissionFor(method: string, params: Record<string, unknown>, p
     if (method === "clipboard.writeText") return "clipboard:write";
     if (method === "agents.list") return "agents:read";
     if (method === "agents.send") return "agents:send";
+    if (method === "tasks.list") return "tasks:read";
     if (method === "panes.open") {
         const own = pkg.panes.some((p) => p.view === params.view);
         return own ? null : "panes";
@@ -343,6 +344,7 @@ async function answer(host: BridgeHost, state: BridgeState, method: string, para
         case "storage.list":
         case "agents.list":
         case "agents.send":
+        case "tasks.list":
         case "net.fetch": {
             if (method.startsWith("storage.") && method !== "storage.list" && !str(p.key, 256)) {
                 return fail(ERR.INVALID_PARAMS, `${method} needs { key } (at most 256 characters)`);
