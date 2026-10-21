@@ -14,7 +14,7 @@ import { VaultEntryForm, type VaultFormTarget } from "./vault-entry-form";
 import { VaultRevealDialog } from "./vault-reveal";
 import { formatWhen } from "./vault-format";
 import { SECTION_LABELS, vaultKind } from "./vault-kinds";
-import { siteOf } from "./vault-use-prompts";
+import { COMMAND_GRANT, siteOf } from "./vault-use-prompts";
 import { deleteEntry, revokeGrant, vaultEntries, vaultLoading } from "./vault-store";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
@@ -109,14 +109,32 @@ export function VaultEntries(props: { section: VaultSection }): JSX.Element {
                                     <td>
                                         <span>{e.label}</span>
                                         <span class="warden-manager-mono warden-manager-dim vault-id">{e.id}</span>
-                                        <Show when={e.grants.length > 0}>
+                                        <Show when={e.grants.some((g) => !g.startsWith(COMMAND_GRANT))}>
                                             <div class="vault-grants" aria-label={`Sites ${e.label} may be filled into without asking`}>
                                                 <span class="warden-manager-dim">Agents may fill it on </span>
-                                                <For each={e.grants}>
+                                                <For each={e.grants.filter((g) => !g.startsWith(COMMAND_GRANT))}>
                                                     {(origin) => (
                                                         <span class="vault-grant" data-origin={origin}>
                                                             {siteOf(origin)}
                                                             <IconButton icon="xmark" label={`Stop filling ${e.label} on ${siteOf(origin)} without asking`} density="compact" onClick={() => void revoke(e.id, origin)} />
+                                                        </span>
+                                                    )}
+                                                </For>
+                                            </div>
+                                        </Show>
+                                        <Show when={e.grants.some((g) => g.startsWith(COMMAND_GRANT))}>
+                                            <div class="vault-grants" aria-label={`Agents that may run commands with ${e.label} without asking`}>
+                                                <span class="warden-manager-dim">Agents may run commands with it: </span>
+                                                <For each={e.grants.filter((g) => g.startsWith(COMMAND_GRANT))}>
+                                                    {(grant) => (
+                                                        <span class="vault-grant" data-origin={grant}>
+                                                            {grant.slice(COMMAND_GRANT.length)}
+                                                            <IconButton
+                                                                icon="xmark"
+                                                                label={`Stop ${grant.slice(COMMAND_GRANT.length)} running commands with ${e.label} without asking`}
+                                                                density="compact"
+                                                                onClick={() => void revoke(e.id, grant)}
+                                                            />
                                                         </span>
                                                     )}
                                                 </For>

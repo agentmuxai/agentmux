@@ -12,6 +12,7 @@
 pub mod import;
 pub mod kinds;
 pub mod requests;
+pub mod scrub;
 pub mod seal;
 pub mod slots;
 pub mod transfer;
@@ -338,6 +339,21 @@ pub fn request_target(kind: &str, label: &str) -> Result<FillTarget, String> {
     }
     let part = slots::fillable_part(kind, None)?;
     Ok(FillTarget { id: String::new(), kind: kind.name, typed: true, kind_info: kind, label: label.to_string(), part, slot: slots::slot(kind, part), what: slots::what(kind, part), created_at: 0 })
+}
+
+/// What a command's `secrets` entry names (`"id"` or `"id.part"`): the entry and
+/// the part handed to the process, the kind's main part unless another is named.
+/// Unlike a web form, a command may be given any kind of entry; the person is
+/// asked first (spec section 7.3).
+pub fn command_target(store: &Store, vault: &str) -> Result<FillTarget, String> {
+    let (id, part) = slots::split(vault);
+    let row = store.vault_get(id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no Vault entry {id:?}: Vault's list action shows the entries"))?;
+    let kind = kinds::kind(&row.kind).ok_or_else(|| format!("entry {id} has an unknown kind"))?;
+    let part = match part {
+        None => kind.parts[0],
+        Some(p) => *kind.parts.iter().find(|x| **x == p).ok_or_else(|| format!("{} has no part {p:?}; its parts are {}", row.label, kind.parts.join(", ")))?,
+    };
+    Ok(FillTarget { id: row.id, kind: kind.name, typed: false, kind_info: kind, label: row.label, part, slot: None, what: slots::what(kind, part), created_at: row.created_at })
 }
 
 /// A part's value for the host to type; never returned to an agent. The use is

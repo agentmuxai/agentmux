@@ -57,6 +57,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 // Proves which agent is asking; srv requires it for SSH. An
                 // agent without a key still runs locally and in WSL.
                 auth: sign_ui_automation_auth().ok(),
+                secrets: arguments.get("secrets").and_then(|v| serde_json::from_value(v.clone()).ok()),
             };
 
             let resp = client

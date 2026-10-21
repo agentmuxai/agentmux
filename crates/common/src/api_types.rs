@@ -58,6 +58,12 @@ pub struct ShellCreateRequest {
     /// borrow another's SSH consent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth: Option<UiAutomationAuth>,
+    /// Vault entries to put in the command's environment: `{ENV_NAME: entry id}`
+    /// (`id.part` for a part other than the kind's main one). srv asks the person
+    /// first and scrubs the values from the output; the agent never holds one.
+    /// Needs `auth`, and a local `connection`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secrets: Option<HashMap<String, String>>,
 }
 
 /// Response from `POST /api/v1/shell/create`
@@ -1130,6 +1136,7 @@ mod app_api_manifest_contract_tests {
             capture_stdin: Some(true),
             connection: Some("wsl://Ubuntu".to_string()),
             auth: Some(UiAutomationAuth { agent_id: "a".into(), ts_secs: 1, sig: "s".into() }),
+            secrets: Some(Default::default()),
         };
         let value = serde_json::to_value(&instance).expect("must serialize");
         let struct_fields: HashSet<String> =

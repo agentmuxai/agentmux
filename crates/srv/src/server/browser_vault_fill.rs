@@ -119,9 +119,15 @@ fn record(state: &AppState, block_id: &str, target: &FillTarget, agent: &str, wh
 /// Takes a use request down, and tells every window, however the wait ends: the
 /// agent's call can be dropped (it disconnected, or was stopped) while the person
 /// still has the prompt open, and the prompt must go then too.
-struct Waiting {
+pub(super) struct Waiting {
     id: String,
     state: AppState,
+}
+
+impl Waiting {
+    pub(super) fn new(id: String, state: AppState) -> Self {
+        Self { id, state }
+    }
 }
 
 impl Drop for Waiting {
@@ -199,10 +205,12 @@ pub(crate) async fn handle_vault_fill(
                 reason: reason.to_string(),
                 needs_value: target.typed,
                 kind: target.kind.to_string(),
+                command: String::new(),
+                cwd: String::new(),
                 requested_ms: agentmux_common::time::now_ms_u64(),
             };
             let answer = uses::uses().ask(request);
-            let _waiting = Waiting { id: use_id.clone(), state: state.clone() };
+            let _waiting = Waiting::new(use_id.clone(), state.clone());
             super::vault_handlers::publish(&state);
             let _asking = crate::backend::user_attention::Asking::start(
                 &state.broker,

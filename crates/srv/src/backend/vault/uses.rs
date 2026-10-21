@@ -38,6 +38,11 @@ pub struct UseRequest {
     pub needs_value: bool,
     /// The kind of entry that would be kept, when `needs_value`.
     pub kind: String,
+    /// A command the agent runs with the value in its environment (spec section 7.3);
+    /// empty for a web form. `origin` and `field` are then empty too.
+    pub command: String,
+    /// The command's working directory, when `command` is set.
+    pub cwd: String,
     #[ts(type = "number")]
     pub requested_ms: u64,
 }
@@ -145,6 +150,8 @@ mod tests {
             reason: "a new site".into(),
             needs_value: false,
             kind: "ssn".into(),
+            command: String::new(),
+            cwd: String::new(),
             requested_ms: 0,
         }
     }

@@ -25,6 +25,8 @@ const use = (over: Partial<UseRequest> = {}): UseRequest => ({
     reason: "the first time this entry is used on this site",
     needs_value: false,
     kind: "ssn",
+    command: "",
+    cwd: "",
     requested_ms: 1,
     ...over,
 });
@@ -79,6 +81,22 @@ describe("the prompt for an agent's use of an entry", () => {
             await waitFor(() => expect(close).toHaveBeenCalled());
             unmount();
         }
+    });
+
+    it("shows the command and where it runs, and offers Always for the agent, when the entry goes to a command", async () => {
+        uses = [use({ origin: "", field: "STRIPE_API_KEY", what: "API key", entry_label: "Stripe", command: "stripe balance retrieve", cwd: "C:/work", reason: "it is the first time Agent1 runs a command with this entry" })];
+        await refreshVault();
+        const close = vi.fn();
+        render(() => <UsePrompt use={uses[0]} close={close} />);
+        const dialog = await screen.findByRole("dialog");
+        expect(dialog.textContent).toContain("Agent1 wants to run a command with your API key");
+        expect(dialog.textContent).toContain("stripe balance retrieve");
+        expect(dialog.textContent).toContain("STRIPE_API_KEY");
+        expect(dialog.textContent).toContain("C:/work");
+        expect(dialog.textContent).toContain("cleaned of it");
+        expect(dialog.textContent).not.toContain("Into");
+        fireEvent.click(within(dialog).getByRole("button", { name: "Always for Agent1" }));
+        await waitFor(() => expect(calls("answer_use")).toEqual([{ id: "use-1", decision: "always" }]));
     });
 
     it("offers no Always when the field doesn't look like what the entry is", async () => {
@@ -185,5 +203,16 @@ describe("the sites an entry may be filled into", () => {
         expect(row.textContent).toContain("ssa.gov");
         fireEvent.click(within(row).getByRole("button", { name: "Stop filling Alex on www.irs.gov without asking" }));
         await waitFor(() => expect(calls("revoke_grant")).toEqual([{ entry_id: "ssn-alex", origin: "https://www.irs.gov" }]));
+    });
+
+    it("lists the agents that may run commands with it apart from the sites, and revokes one", async () => {
+        entries = [{ ...entries[0], grants: ["https://www.irs.gov", "command:Agent1"] }];
+        await refreshVault();
+        render(() => <VaultEntries section="personal" />);
+        const row = (await screen.findByText("Alex")).closest("tr") as HTMLElement;
+        expect(row.textContent).toContain("Agents may run commands with it");
+        expect(within(row).queryByRole("button", { name: /Stop filling Alex on command/ })).toBeNull();
+        fireEvent.click(within(row).getByRole("button", { name: "Stop Agent1 running commands with Alex without asking" }));
+        await waitFor(() => expect(calls("revoke_grant")).toEqual([{ entry_id: "ssn-alex", origin: "command:Agent1" }]));
     });
 });
