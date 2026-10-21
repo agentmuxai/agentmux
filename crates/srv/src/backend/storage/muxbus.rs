@@ -1035,7 +1035,7 @@ impl Store {
                 Err(e) if secret_store::is_needs_consent(&e) => {
                     tracing::warn!(
                         namespace = %ns,
-                        "muxbus: the stored sign-in was saved by an AgentMux build this one may not read                          without a keychain prompt — treating it as signed out; signing in again replaces it"
+                        "muxbus: the stored sign-in was saved by an AgentMux build this one may not read without a keychain prompt — treating it as signed out; signing in again replaces it"
                     );
                 }
                 Err(e) => {
