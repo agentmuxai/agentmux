@@ -430,6 +430,102 @@ pub fn outermost_app_bundle(path: &Path) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
+/// Why an account other than this user, root or the `admin` group (whose
+/// members can become root anyway) could change the entries of the folder
+/// that holds an app, or `None` when none can. An in-place upgrade creates,
+/// checks and renames entries there, so anyone else who can rename them
+/// could swap a checked bundle for another. macOS also checks every folder
+/// above it, since renaming one of those moves the whole path.
+pub fn folder_others_can_change(dir: &Path) -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        dir.ancestors().find_map(one_folder_others_can_change)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        one_folder_others_can_change(dir)
+    }
+}
+
+#[cfg(unix)]
+fn one_folder_others_can_change(dir: &Path) -> Option<String> {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(meta) = std::fs::metadata(dir) else {
+        return Some(format!("{} can't be read", dir.display()));
+    };
+    // SAFETY: geteuid has no preconditions.
+    let me = unsafe { libc::geteuid() };
+    let mode = meta.mode();
+    if meta.uid() != me && meta.uid() != 0 {
+        return Some(format!("{} belongs to another account", dir.display()));
+    }
+    if mode & 0o002 != 0 {
+        return Some(format!("every account can change {}", dir.display()));
+    }
+    if mode & 0o020 != 0 && Some(meta.gid()) != admin_gid() {
+        return Some(format!("the accounts in its group can change {}", dir.display()));
+    }
+    acl_allows_changes(dir).then(|| format!("an access list lets other accounts change {}", dir.display()))
+}
+
+#[cfg(not(unix))]
+fn one_folder_others_can_change(_dir: &Path) -> Option<String> {
+    None
+}
+
+/// The `admin` group's id, if there is one.
+#[cfg(unix)]
+fn admin_gid() -> Option<u32> {
+    // SAFETY: a NUL-terminated name; the entry is read before any other call.
+    let group = unsafe { libc::getgrnam(c"admin".as_ptr()) };
+    (!group.is_null()).then(|| unsafe { (*group).gr_gid })
+}
+
+/// Whether `dir` has an extended ACL with an `allow` entry that lets someone
+/// add, remove or rename its entries (macOS: `chmod +a`).
+#[cfg(target_os = "macos")]
+fn acl_allows_changes(dir: &Path) -> bool {
+    use std::os::raw::{c_char, c_int, c_void};
+    use std::os::unix::ffi::OsStrExt;
+    extern "C" {
+        fn acl_get_file(path: *const c_char, ty: c_int) -> *mut c_void;
+        fn acl_to_text(acl: *mut c_void, len: *mut isize) -> *mut c_char;
+        fn acl_free(obj: *mut c_void) -> c_int;
+    }
+    const ACL_TYPE_EXTENDED: c_int = 0x0000_0100;
+    let Ok(path) = std::ffi::CString::new(dir.as_os_str().as_bytes()) else { return true };
+    // SAFETY: a NUL-terminated path; every object acl_* returns is freed once.
+    unsafe {
+        let acl = acl_get_file(path.as_ptr(), ACL_TYPE_EXTENDED);
+        if acl.is_null() {
+            return false; // no ACL
+        }
+        let text = acl_to_text(acl, std::ptr::null_mut());
+        let changes = !text.is_null() && acl_text_allows_changes(&std::ffi::CStr::from_ptr(text).to_string_lossy());
+        if !text.is_null() {
+            acl_free(text.cast());
+        }
+        acl_free(acl);
+        changes
+    }
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn acl_allows_changes(_dir: &Path) -> bool {
+    false
+}
+
+/// [`acl_allows_changes`] on `acl_to_text`'s text: one entry a line,
+/// `<who>:…:allow|deny:<perm>,<perm>`.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn acl_text_allows_changes(text: &str) -> bool {
+    const CHANGES: &[&str] = &["add_file", "add_subdirectory", "delete_child", "write", "delete", "writesecurity", "chown"];
+    text.lines().any(|line| {
+        let mut parts = line.split(':');
+        parts.any(|p| p == "allow") && line.rsplit(':').next().is_some_and(|perms| perms.split(',').any(|p| CHANGES.contains(&p.trim())))
+    })
+}
+
 /// Where a macOS upgrade records the data channel of an `.app`: beside it,
 /// hidden, as `.<name>.app.agentmux-channel`, since writing inside the bundle
 /// would break its code signature.
@@ -1040,6 +1136,35 @@ mod tests {
         let srv = Path::new("/Applications/AgentMux.app/Contents/Helpers/AgentMux Server.app/Contents/MacOS/srv");
         assert_eq!(outermost_app_bundle(srv).as_deref(), Some(app));
         assert_eq!(outermost_app_bundle(Path::new("/usr/bin/agentmux-srv")), None);
+    }
+
+    #[test]
+    fn an_access_list_that_lets_others_change_a_folder_is_seen() {
+        assert!(acl_text_allows_changes("!#acl 1\ngroup:ABC:staff:20:allow:add_file,search\n"));
+        assert!(acl_text_allows_changes("user:XYZ:bob:501:allow:list,delete_child\n"));
+        // The usual /Applications-style entry only denies.
+        assert!(!acl_text_allows_changes("!#acl 1\ngroup:ABCDEFAB-CDEF-ABCD-EFAB-CDEF0000000C:everyone:12:deny:delete\n"));
+        assert!(!acl_text_allows_changes("group:ABC:staff:20:allow:list,search,readattr\n"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_only_this_user_can_change_passes_and_a_shared_one_does_not() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("Apps");
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(one_folder_others_can_change(&folder), None);
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o1777)).unwrap();
+        assert!(one_folder_others_can_change(&folder).unwrap().contains("every account"));
+        // This user's own group isn't admin (a test never runs as an admin group member's group).
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o775)).unwrap();
+        let group_ok = {
+            use std::os::unix::fs::MetadataExt;
+            Some(std::fs::metadata(&folder).unwrap().gid()) == admin_gid()
+        };
+        assert_eq!(one_folder_others_can_change(&folder).is_none(), group_ok);
         let extracted = std::ffi::OsString::from("/home/u/.local/share/agentmux/extracted/0.59.30");
         let inside = Path::new("/home/u/.local/share/agentmux/extracted/0.59.30/usr/bin/agentmux-launcher");
         let elsewhere = Path::new("/home/u/AgentMux/usr/bin/agentmux-launcher");

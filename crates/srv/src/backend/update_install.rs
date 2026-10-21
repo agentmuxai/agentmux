@@ -199,28 +199,14 @@ fn writable_dir(_: &Path) -> bool {
     true
 }
 
-/// Whether every account can create files in `dir` (`/Users/Shared`): another
-/// account could then plant links where the launcher's swap writes, so such a
-/// folder isn't upgraded in place (the launcher refuses it too).
-#[cfg(unix)]
-fn world_writable(dir: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(dir).is_ok_and(|m| m.permissions().mode() & 0o002 != 0)
-}
-
-#[cfg(not(unix))]
-fn world_writable(_: &Path) -> bool {
-    false
-}
-
 /// The macOS app srv at `exe` runs in, and whether it can be replaced in place.
 fn mac_app(exe: &Path) -> InstallKind {
     let app = outermost_app(exe).unwrap_or_else(|| exe.to_path_buf());
     let parent = app.parent().unwrap_or(&app);
+    // Whoever else can rename entries beside the app could swap a checked
+    // bundle during the launcher's swap; the launcher refuses the same.
     let blocked = replace_blocker(&app, on_read_only_volume(&app), writable_dir(parent)).or_else(|| {
-        world_writable(parent).then(|| {
-            format!("the folder holding {} can be changed by every account on this Mac; drag AgentMux to Applications first", app.display())
-        })
+        agentmux_common::runtime_mode::folder_others_can_change(parent).map(|who| format!("{who}; drag AgentMux to Applications first"))
     });
     if let Some(reason) = &blocked {
         tracing::info!(app = %app.display(), "update: this AgentMux can't upgrade itself in place: {reason}");
@@ -346,14 +332,6 @@ mod tests {
         assert!(replace_blocker(app, false, false).unwrap().contains("isn't writable"));
         // Each reason alone is enough, and the read-only one is reported first.
         assert!(replace_blocker(translocated, true, false).unwrap().contains("read-only"));
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let shared = tempfile::tempdir().unwrap();
-            assert!(!world_writable(shared.path()));
-            std::fs::set_permissions(shared.path(), std::fs::Permissions::from_mode(0o1777)).unwrap();
-            assert!(world_writable(shared.path()), "a /Users/Shared-like folder isn't upgraded in place");
-        }
     }
 
     #[test]

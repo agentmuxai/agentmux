@@ -13,7 +13,8 @@
 //! `.dmg`, checks it again against the release's SHA-256, mounts it read-only,
 //! checks the new app's code signature (and, when this app passes Gatekeeper,
 //! that the new one does too, from the same team), copies it into a private
-//! folder it creates beside the running one and swaps the two, holding a
+//! folder it creates beside the running one (a folder only this user, root or
+//! `admin` can change, all the way up) and swaps the two, holding a
 //! lock on the app so two launchers (two channels can run one `.app`) never
 //! swap it at once. This version goes to the Trash, so it can still be put
 //! back. Whatever fails, the script opens an AgentMux again: the
@@ -51,11 +52,8 @@ pub fn not_replaceable(app: &Path) -> Option<String> {
     let Some(parent) = app.parent() else {
         return Some(format!("{} has no folder", app.display()));
     };
-    if world_writable(parent) {
-        return Some(format!(
-            "{} can be changed by every account on this Mac; move AgentMux to Applications to upgrade it in place",
-            parent.display()
-        ));
+    if let Some(who) = agentmux_common::runtime_mode::folder_others_can_change(parent) {
+        return Some(format!("{who}, so AgentMux isn't replaced there; move it to Applications to upgrade it in place"));
     }
     if !can_write_in(parent) {
         return Some(format!(
@@ -64,19 +62,6 @@ pub fn not_replaceable(app: &Path) -> Option<String> {
         ));
     }
     None
-}
-
-/// Whether every account can create files in `dir` (`/Users/Shared`, `/tmp`):
-/// another account could then plant links where the swap writes.
-#[cfg(unix)]
-fn world_writable(dir: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(dir).is_ok_and(|m| m.permissions().mode() & 0o002 != 0)
-}
-
-#[cfg(not(unix))]
-fn world_writable(_dir: &Path) -> bool {
-    false
 }
 
 /// Whether this user can create and remove entries in `dir`, asked without
@@ -331,7 +316,8 @@ mod tests {
     fn a_translocated_or_unwritable_app_is_not_replaced() {
         let translocated = Path::new("/private/var/folders/x/T/AppTranslocation/ABC/d/AgentMux.app");
         assert!(not_replaceable(translocated).unwrap().contains("App Translocation"));
-        assert!(not_replaceable(Path::new("/no/such/folder/AgentMux.app")).unwrap().contains("can't be written"));
+        let missing = not_replaceable(Path::new("/no/such/folder/AgentMux.app")).unwrap();
+        assert!(missing.contains("can't be read") || missing.contains("can't be written"), "{missing}");
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(not_replaceable(&dir.path().join("AgentMux.app")), None);
     }
@@ -343,6 +329,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o1777)).unwrap();
         assert!(not_replaceable(&dir.path().join("AgentMux.app")).unwrap().contains("every account"));
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(not_replaceable(&dir.path().join("AgentMux.app")), None);
     }
 
     fn layout(root: &Path, version: &str) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
