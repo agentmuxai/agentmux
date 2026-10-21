@@ -1188,7 +1188,11 @@ mod tests {
         assert_eq!(claude, None, "an npm provider's copy on PATH is not the one a launch runs");
         let kimi = kimi.expect("a PATH-only provider is found on PATH");
         assert_eq!(kimi.source, super::CliSource::SystemPath);
-        assert!(kimi.path.starts_with(&bin.path().to_string_lossy().to_string()), "{}", kimi.path);
+        // The same folder, whichever way each side spells it. `where` returns the long form of a
+        // path even when PATH holds the 8.3 short one (GitHub's Windows runners put TEMP under
+        // `C:\Users\RUNNER~1`), so comparing the strings fails the nightly while both name one file.
+        let found = std::fs::canonicalize(std::path::Path::new(&kimi.path).parent().unwrap()).unwrap();
+        assert_eq!(found, std::fs::canonicalize(bin.path()).unwrap(), "{}", kimi.path);
         assert_eq!(unknown, None);
     }
 
