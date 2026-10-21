@@ -506,3 +506,13 @@ async fn denying_a_request_for_a_value_types_nothing() {
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert!(typed(&s).is_none());
 }
+
+// A fill the person typed is a success in the pane's Log, not a refusal.
+#[test]
+fn every_kind_of_success_reads_as_allowed_in_the_pane_log() {
+    assert_eq!(how_of("done"), How::Allowed);
+    assert_eq!(how_of("done (typed by the person)"), How::Allowed);
+    assert_eq!(how_of("denied"), How::Declined);
+    assert_eq!(how_of("timed out"), How::TimedOut);
+    assert_eq!(how_of("failed"), How::Refused("failed".into()));
+}

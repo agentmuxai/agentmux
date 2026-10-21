@@ -100,16 +100,20 @@ pub(crate) fn plan(origin_known: bool, password_like: bool, fillable: bool, gran
     }
 }
 
-fn record(state: &AppState, block_id: &str, target: &FillTarget, agent: &str, where_: &str, outcome: &str) {
-    crate::backend::vault::record(&state.identity_store, &target.id, &target.label, agent, "filled a web form", where_, outcome);
-    // The pane's own Log shows it too, with what was filled and never its value.
-    let how = match outcome {
-        "done" => How::Allowed,
+/// How an outcome reads in the pane's Log.
+fn how_of(outcome: &str) -> How {
+    match outcome {
+        o if o.starts_with("done") => How::Allowed,
         "denied" => How::Declined,
         "timed out" => How::TimedOut,
         other => How::Refused(other.to_string()),
-    };
-    note(block_id, agent, Kind::Fill).detail(&format!("{} from the Vault", target.what)).how(how).record(state);
+    }
+}
+
+fn record(state: &AppState, block_id: &str, target: &FillTarget, agent: &str, where_: &str, outcome: &str) {
+    crate::backend::vault::record(&state.identity_store, &target.id, &target.label, agent, "filled a web form", where_, outcome);
+    // The pane's own Log shows it too, with what was filled and never its value.
+    note(block_id, agent, Kind::Fill).detail(&format!("{} from the Vault", target.what)).how(how_of(outcome)).record(state);
 }
 
 /// Takes a use request down, and tells every window, however the wait ends: the
