@@ -1,6 +1,6 @@
 # Spec: code in markdown on shiki, and the frontend libraries we can drop
 
-**Status:** active — §4 (markdown code on shiki) in #5289; the removals in §6.2 in #5291. Remaining: §6.3's `overlayscrollbars`, a separate decision.
+**Status:** active — §4 (markdown code on shiki) in #5289; the removals in §6.2 in #5291; `overlayscrollbars` (§6.4) in #5295.
 **Date:** 2026-10-21
 **Author:** AgentA@Area54, at the operator's request
 **Verified against:** `agentmux` `main` @ `61479f0a2` (2026-10-21), by reading code.
@@ -107,10 +107,20 @@ Their `@types/*` packages go with them. Measured: the startup chunk went from 3,
 
 | Package | Why it stays |
 |---|---|
-| `overlayscrollbars` (~43 KB with its CSS) | Native scrollbars could replace it, but they don't auto-hide, so markdown would visibly change. Not part of this plan; a separate decision |
 | `css-tree` (lazy) | It vets `url()` in user backgrounds, a security check; replacing it is riskier than its lazy chunk costs |
 | `rehype-raw` and `parse5` | Raw HTML in agent replies (`span`, `waveblock`, `mermaidblock`) needs a real HTML parser |
 | `@xterm/*`, CodeMirror, Mermaid, pdf.js, uPlot, `qrcode`, `source-map-js`, `fuse.js`, `linkify-it`, `@floating-ui/dom`, `@atlaskit/pragmatic-drag-and-drop`, `clsx`, `throttle-debounce`, `solid-transition-group`, `@lobehub/icons-static-svg` | Each is the only library for its job, used widely, or already lazy. CodeMirror edits and shiki displays, so they are not duplicates |
+
+### 6.4 `overlayscrollbars`
+
+First kept back because native scrollbars don't auto-hide. A closer look showed it was hardly in use. Every `<Markdown>` but one passes `scrollable={false}` (agent replies, tool output, previews) or `nativeScrollbar` (Editor preview, Global Memory, the memory editor). The one that kept it was the user-input modal (`userinputmodal.tsx`), only when its question text overflowed.
+
+So the operator chose to remove it (2026-10-21):
+- the package, its two CSS imports and its `.os-*` theming in `app.scss`;
+- the code in `markdown.tsx`, including the never-created `tocOs`;
+- the `nativeScrollbar` option, since every scrollable markdown is native now.
+
+`.content` in `markdown.scss` becomes `overflow: auto`, a scrollbar only when content overflows: what the three native callers already set through their own overrides, which go. Measured: the startup JS chunk drops by about 42 KB, and the stylesheet's OverlayScrollbars rules are gone.
 
 ## 7. Plan
 

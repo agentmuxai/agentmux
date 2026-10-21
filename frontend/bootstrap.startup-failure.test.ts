@@ -26,7 +26,6 @@ vi.mock("./app-init", () => ({ initApp: () => h.initApp() }));
 vi.mock("@/util/startup-bench", () => ({ benchMark: () => {} }));
 vi.mock("@/perf", () => ({ initPerf: () => {} }));
 vi.mock("@/app/platform/ipc", () => ({ invokeCommand: async () => {} }));
-vi.mock("overlayscrollbars/overlayscrollbars.css", () => ({}));
 vi.mock("./app/app.scss", () => ({}));
 vi.mock("./tailwindsetup.css", () => ({}));
 vi.mock("./app/init/error-display", async (orig) => {

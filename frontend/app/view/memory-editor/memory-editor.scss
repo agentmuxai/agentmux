@@ -171,11 +171,6 @@
     --markdown-fixed-font-size: var(--text-sm);
 }
 
-// Compound selector needed to beat the base `.content { overflow: scroll }`
-// rule in markdown.scss — same fix as .native-memory-content-markdown-content.
-.content.memory-content-markdown-content {
-    overflow: auto;
-}
 
 .memory-content-pre {
     flex: 1 1 auto;

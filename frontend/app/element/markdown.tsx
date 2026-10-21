@@ -136,8 +136,7 @@ import { boundNumber, useAtomValueSafe, cn } from "@/util/util";
 import { markEnd, markStart } from "@/perf";
 import clsx from "clsx";
 import { toJsxRuntime } from "hast-util-to-jsx-runtime";
-import { OverlayScrollbars } from "overlayscrollbars";
-import { createEffect, createMemo, createRoot, createSignal, onCleanup, onMount, Show, untrack } from "solid-js";
+import { createEffect, createMemo, createRoot, createSignal, onCleanup, Show, untrack } from "solid-js";
 import type { JSX } from "solid-js";
 import { Fragment, jsx, jsxs } from "solid-js/h/jsx-runtime";
 import { unified } from "unified";
@@ -240,14 +239,9 @@ type MarkdownProps = {
      *  agent's own messages pass this (SPEC_AGENT_PANE_RICH_OUTPUT §4.1);
      *  without it, a markdown image never makes the pane fetch anything. */
     media?: MarkdownMediaOpts;
+    /** `.content` scrolls with a native scrollbar, styled by the universal
+     *  `*::-webkit-scrollbar` rule (app.scss) like every other scroll surface. */
     scrollable?: boolean;
-    /** When true, skip OverlayScrollbars entirely and let `.content` use its
-     *  plain CSS `overflow` — a real native/webkit scrollbar, styled by the
-     *  same universal `*::-webkit-scrollbar` rule (app.scss) every other
-     *  native scroll surface (CodeMirror, etc.) already uses, instead of
-     *  OverlayScrollbars' JS-rendered auto-hide overlay track. No effect
-     *  when `scrollable` is false. */
-    nativeScrollbar?: boolean;
     rehype?: boolean;
     /** When false, skip the (expensive) syntax-highlighting rehype plugin
      *  while keeping every other plugin (sanitize, etc.). */
@@ -293,7 +287,6 @@ const Markdown = (props: MarkdownProps) => {
         fontSizeOverride,
         fixedFontSizeOverride,
         scrollable = true,
-        nativeScrollbar = false,
         rehype = true,
         onClickExecute,
     } = props;
@@ -301,8 +294,6 @@ const Markdown = (props: MarkdownProps) => {
 
     let contentsEl!: HTMLDivElement;
     let tocEl!: HTMLDivElement;
-    let contentsOs: OverlayScrollbars | null = null;
-    let tocOs: OverlayScrollbars | null = null;
 
     const [idPrefix] = createSignal<string>(crypto.randomUUID());
 
@@ -327,11 +318,7 @@ const Markdown = (props: MarkdownProps) => {
     createEffect(() => {
         const heading = focusedHeading();
         if (!heading) return;
-        // In OverlayScrollbars mode the real scrolling element is its
-        // generated viewport, not contentsEl itself; in nativeScrollbar mode
-        // contentsEl IS the scrolling element (plain CSS overflow, no
-        // OverlayScrollbars restructuring ever happened).
-        const viewport = contentsOs ? contentsOs.elements().viewport : contentsEl;
+        const viewport = contentsEl;
         if (!viewport) return;
         const el = document.getElementById(idPrefix() + heading.slice(1));
         if (el) {
@@ -820,13 +807,6 @@ const Markdown = (props: MarkdownProps) => {
     // non-reactive array that stayed stuck on the first heading set.
     const tocItems = createMemo<TocItem[]>(() => renderedMarkdown().toc);
 
-    onMount(() => {
-        if (scrollable && !nativeScrollbar && contentsEl) {
-            contentsOs = OverlayScrollbars(contentsEl, { scrollbars: { autoHide: "leave" } });
-            onCleanup(() => contentsOs?.destroy());
-        }
-    });
-
     const mergedStyle = createMemo((): JSX.CSSProperties => {
         const s: Record<string, any> = { ...(style ?? {}) };
         if (fontSizeOverride != null) {
@@ -849,18 +829,6 @@ const Markdown = (props: MarkdownProps) => {
                 }
             >
                 <div class={cn("content", contentClassName)} ref={contentsEl}>
-                    {/* OverlayScrollbars (below, onMount) restructures contentsEl's
-                        DOM once, moving whatever children exist AT INIT TIME into
-                        its generated .os-viewport. On first open, liveDoc/textAtom
-                        is often still "" when this initial move happens (the real
-                        content lands a beat later via a reactive update), which
-                        orphaned Solid's insertion anchor for {renderedMarkdown().element}
-                        outside the new viewport — a permanently blank preview until
-                        something (e.g. a Source/Preview toggle) fully remounted this
-                        component. A single, never-replaced wrapper div is the node
-                        OverlayScrollbars moves; Solid's reactive updates always target
-                        children of THIS stable node, so they keep landing correctly
-                        regardless of OverlayScrollbars' init timing. */}
                     <div class="markdown-content-inner">
                         {renderedMarkdown().element}
                     </div>
