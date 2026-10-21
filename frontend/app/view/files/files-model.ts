@@ -35,7 +35,9 @@ import { EMPTY_SELECTION, pruneSelection, type Selection } from "./files-selecti
 import { clipboard, FilesOps, opFinishedText, sameVolume, setClipboard } from "./files-ops";
 import { sortEntries, type SortDir, type SortKey } from "./files-sort";
 
-export const META_PATH = "files:path";
+// In files-path.ts, so the pane's manifest (files.tsx) needn't load the model.
+import { META_PATH } from "./files-path";
+export { META_PATH };
 const META_SELECT = "files:select";
 const META_SORT = "files:sort";
 const META_SORTDIR = "files:sortdir";

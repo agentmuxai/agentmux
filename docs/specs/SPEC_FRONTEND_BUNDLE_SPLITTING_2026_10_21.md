@@ -1,6 +1,6 @@
 # Spec: a smaller startup bundle, so each window starts sooner
 
-**Status:** active — step 1 (§5) in #5269; steps 2 and 3 (§6, §7) not started.
+**Status:** active — step 1 (§5) in #5269; steps 2 and 3 (§6, §7) in #5281, measured in §7. Remaining: §8 (not planned).
 **Date:** 2026-10-21
 **Author:** AgentA@Area54, at the operator's request
 **Verified against:** `agentmux` `main` @ `afd0387db` (2026-10-21), by reading code and measuring a portable build (`task package -- --fresh`) on Windows 10.
@@ -75,17 +75,81 @@ No change to the pane contract. Each library moves behind a dynamic `import()` a
 
 At the §2 split, that is roughly 10–15 ms of reading and compiling per window start. That is within the noise of a single cold start, so it is not measured on its own. Step 2 is where the larger share is.
 
-## 6. Step 2: rarely open pane types as lazy chunks
+## 6. Step 2: pane types load with their first pane
 
-`block-registry.ts` registers pane types that few layouts have open at startup as lazy entries (settings, vault, identity, tower, toolchain, warden, help, connectors and similar). Their module loads when such a pane is created.
+### 6.1 The contract stays as it is
 
-This needs the pane contract to allow an async `create`: the pane shows its label and icon from the static part of the manifest, and a placeholder body until the module arrives. Agent and terminal panes stay in the main chunk: almost every layout has them.
+The host calls a manifest's `create(ctx)` synchronously, in the pane's own reactive root (host rule 8). It then maps the instance's members onto the pane once (`adaptPaneTabInstance`). Some members matter just by being there:
+- a `rename` makes the title editable;
+- a `selection` replaces the window's own selection for Copy;
+- `manageConnection` decides the connection button.
 
-A follow-up spec section settles the contract change before code.
+So `create` stays synchronous, and nothing in the host changes.
+
+`frontend/app/block/lazy-pane-tab.tsx` builds a manifest from two parts:
+
+- **The static part:** view, aliases, label, icon, hue, capabilities, `tab` and `chrome`, as today, plus `members`, the exact list of members its instance has. This is what the registry, the tab bar, menus and widget lists read, so it stays in the startup chunk and must not import the pane's model or view.
+- **`load`:** `() => import("./<view>-instance")`, a module exporting the real `create(ctx)`.
+
+### 6.2 The stand-in
+
+`create(ctx)` returns a stand-in at once and starts the load.
+
+- **Members.** It has exactly the declared members, plus `component` and `dispose`. Each forwards to the real instance once it exists. Until then each returns what an empty pane would:
+  - the title is the label, marked as a placeholder;
+  - no actions or menu items;
+  - `focus()` returns false.
+- **Building the real instance.** When the module arrives, the stand-in builds it in the stand-in's own reactive root (`runWithOwner`), so the instance's cleanups run when the pane closes. A pane closed before its code arrived never builds one.
+- **Focus.** The host's `focus()` for a tab shown in a focused pane reached the stand-in. When the real instance arrives in an active pane, the stand-in claims focus for it the way a pane that just mounted does (`focusManager.claimFocusOnMount`): only if the pane is still the selection, with no modal or menu over it and no caret the user placed. A progress slot handed over early is passed on too.
+- **A failed load** shows "*Label* failed to load: *reason*" in the pane, with **Try again**, which loads again (§4).
+- **Drift.** If the real instance's members differ from `members`, that is logged as an error naming the difference. Tests for a lazy pane compare the stand-in's members with a real instance's (`membersMatch` in its test).
+
+### 6.3 What loads lazily
+
+These pane types load with their first pane:
+- Settings, Vault, Warden, Toolchain, Tower, Drone, Connectors and Memory;
+- the Editor, which takes CodeMirror with it (§7);
+- Hangar (Files), Browser and Swarm.
+
+Their instance modules are `<view>-instance.tsx`. Hangar's `META_PATH` moved to `files-path.ts`, so its `chrome` doesn't load the model.
+
+These stay in the startup chunk:
+
+| Pane type | Why |
+|---|---|
+| Agent, Terminal | Nearly every layout has one at startup; xterm is also used inside the agent pane |
+| Sysinfo | Its `tab` reads its model; its chart library is already lazy (§5) |
+| Launcher, Help | Small (16 KB, 3 KB of source); the launcher is the new-pane picker |
+| Identity | Its model is imported by `app-init.ts` and the agent pane, so splitting it moves almost nothing |
+
+Code shared with the startup chunk stays there whatever the pane does. For example, Swarm's model is used by the agent pane, so only Swarm's view moves.
 
 ## 7. Step 3: editor and terminal libraries
 
-CodeMirror and xterm move into their panes' chunks, if step 2 shows those panes are often closed at startup. Decided on step 2's measurements.
+**CodeMirror** moved with the Editor in step 2. Memory, the other user of CodeMirror, is lazy too, so it left the startup chunk with them.
+
+**xterm** stays: the terminal pane and the agent pane's shell blocks use it, and one of them is open in nearly every layout.
+
+### Result of steps 1 and 2
+
+The startup chunk went from 4,641,173 to 3,183,510 bytes (−1.46 MB, −31.4%).
+
+**Cold starts.** Two portable builds on Windows 10, started alternately, five times each, with the main window timed over CDP. One is main with the full bundle; the other has steps 1 and 2.
+
+| | `domInteractive` → `DOMContentLoaded` (median, range) | navigation → `DOMContentLoaded` (median, range) |
+|---|---|---|
+| Full bundle | 329 ms (311–544) | 490 ms (459–765) |
+| Split | 187 ms (167–256) | 444 ms (369–596) |
+
+The first column is the part of a load that runs the bundle: parsing, compiling and evaluating it. It dropped by about 140 ms (−43%). The second column also includes the renderer's start and the request for `index.html`, which vary from run to run by more than the gain.
+
+**Checked by hand in that build.** Each lazy pane type was opened from the widget bar and its menu, and showed its own content and title: Settings, Vault (with its header actions), Warden, Toolchain, Tower, Drone, Connectors, Memory, Editor, Hangar, Browser (page loaded) and Swarm (in the default layout at startup). The host log had no `[pane-tab]` member mismatch and no load failure.
+
+What remains in the startup chunk is mostly code every start needs:
+- the agent pane, 3.3 MB of source;
+- the stores, elements and layout;
+- xterm;
+- `highlight.js` and `parse5`, through markdown.
 
 ## 8. Not doing
 

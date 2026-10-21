@@ -16,6 +16,20 @@ vi.mock("./drone-model", () => ({
 vi.mock("./drone-view", () => ({ DroneView: () => null }));
 
 import { dronePaneTab } from "./drone";
+import { create } from "./drone-instance";
+import { createRoot } from "solid-js";
+import { memberMismatch, type PaneTabMember } from "@/app/block/lazy-pane-tab";
+import type { PaneTabHostContext, PaneTabInstance, PaneTabManifest } from "@/app/block/pane-tab-registry";
+
+/** The lazy manifest's stand-in has exactly the members the real instance has. */
+function membersMatch(manifest: PaneTabManifest, real: PaneTabInstance, ctx: PaneTabHostContext): string[] {
+    return createRoot((dispose) => {
+        const standIn = manifest.create(ctx);
+        const declared = Object.keys(standIn).filter((k) => k !== "component" && k !== "dispose") as PaneTabMember[];
+        dispose();
+        return memberMismatch(declared, real);
+    });
+}
 
 describe("dronePaneTab", () => {
     it("is native, full-bleed, and keeps the workflows alias", () => {
@@ -26,7 +40,9 @@ describe("dronePaneTab", () => {
     });
 
     it("titles the pane from its model and disposes the model with the instance", () => {
-        const inst = dronePaneTab.create!({ blockId: "d1", meta: () => ({ "frame:title": "Nightly" }) } as any);
+        const ctx = { blockId: "d1", meta: () => ({ "frame:title": "Nightly" }) } as any;
+        const inst = create(ctx);
+        expect(membersMatch(dronePaneTab, inst, ctx)).toEqual([]);
         expect(inst.liveTitle!().text).toBe("Nightly");
         inst.dispose!();
         expect(dispose).toHaveBeenCalledOnce();

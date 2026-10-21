@@ -19,6 +19,20 @@ vi.mock("./editor-model", () => ({
 vi.mock("./editor-view", () => ({ EditorViewComponent: () => null }));
 
 import { editorPaneTab } from "./editor";
+import { create } from "./editor-instance";
+import { createRoot } from "solid-js";
+import { memberMismatch, type PaneTabMember } from "@/app/block/lazy-pane-tab";
+import type { PaneTabHostContext, PaneTabInstance, PaneTabManifest } from "@/app/block/pane-tab-registry";
+
+/** The lazy manifest's stand-in has exactly the members the real instance has. */
+function membersMatch(manifest: PaneTabManifest, real: PaneTabInstance, ctx: PaneTabHostContext): string[] {
+    return createRoot((dispose) => {
+        const standIn = manifest.create(ctx);
+        const declared = Object.keys(standIn).filter((k) => k !== "component" && k !== "dispose") as PaneTabMember[];
+        dispose();
+        return memberMismatch(declared, real);
+    });
+}
 import { editorSplitBlockDef } from "./editor-split";
 
 describe("editorPaneTab", () => {
@@ -38,7 +52,9 @@ describe("editorPaneTab", () => {
     });
 
     it("hands the host its title, header text, menu, focus and dispose", () => {
-        const inst = editorPaneTab.create!({ blockId: "e1" } as any);
+        const ctx = { blockId: "e1" } as any;
+        const inst = create(ctx);
+        expect(membersMatch(editorPaneTab, inst, ctx)).toEqual([]);
         expect(inst.liveTitle!().text).toBe("notes.md");
         expect(inst.headerText!()).toBe("~/notes");
         // The header shows the manifest's plain icon; the file tree's toggle

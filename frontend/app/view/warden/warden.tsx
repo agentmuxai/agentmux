@@ -1,14 +1,13 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Warden module barrel — its native pane tab manifest (and the model).
+// Warden module barrel — its native pane tab manifest. Its code loads with
+// the first Warden pane (warden-instance.tsx).
 
-import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
-import { WardenViewModel } from "./warden-model";
-import { WardenView } from "./warden-view";
+import { lazyPaneTab } from "@/app/block/lazy-pane-tab";
 
 /** Warden as a native pane tab (Pane Tab contract Phase 2c). */
-export const wardenPaneTab: PaneTabManifest = {
+export const wardenPaneTab = lazyPaneTab({
     apiVersion: 1,
     view: "warden",
     label: "Warden",
@@ -16,12 +15,6 @@ export const wardenPaneTab: PaneTabManifest = {
     defaultHue: 270,
     // Applies `term:zoom` as CSS zoom.
     capabilities: { paneZoom: {} },
-    create: (ctx) => {
-        const model = new WardenViewModel(ctx);
-        return {
-            component: () => <WardenView model={model} />,
-            // The selected section ("Host", "LAN", …) names the pane.
-            liveTitle: () => ({ text: model.viewName() }),
-        };
-    },
-};
+    members: ["liveTitle"],
+    load: () => import("./warden-instance"),
+});

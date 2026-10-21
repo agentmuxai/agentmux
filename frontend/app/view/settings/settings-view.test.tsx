@@ -59,7 +59,7 @@ vi.mock("./sections/advanced-section", async (importOriginal) => ({
 }));
 
 import { createRoot } from "solid-js";
-import { settingsPaneTab } from "./settings";
+import { create as createSettings } from "./settings-instance";
 import { SettingsView } from "./settings-view";
 import { SettingsViewModel } from "./settings-model";
 
@@ -231,7 +231,7 @@ describe("Settings pane: the section to open at", () => {
     // profiles… asks for Browser).
     function openWith(meta: Record<string, unknown>): string {
         return createRoot((dispose) => {
-            const inst = settingsPaneTab.create({
+            const inst = createSettings({
                 blockId: "b1",
                 meta: () => meta as MetaType,
                 setMeta: async () => {},
