@@ -191,3 +191,23 @@ fn a_login_with_no_password_keeps_its_username_and_addresses_in_the_note() {
     assert_eq!(text("Box"), "rack 4
 url: ssh://box.example.com");
 }
+
+#[test]
+fn a_username_only_login_is_kept_and_an_id_item_without_its_number_is_not_guessed() {
+    let items = json!([
+        { "categoryUuid": "001", "overview": { "title": "Old forum", "url": "https://old.example.com" }, "details": { "loginFields": [{ "designation": "username", "value": "alex" }] } },
+        { "categoryUuid": "106", "overview": { "title": "Half passport" }, "details": { "sections": [{ "fields": [field("fullname", "full name", json!({ "string": "Alex Doe" }))] }] } },
+        { "categoryUuid": "112", "overview": { "title": "Typed only" }, "details": { "sections": [{ "fields": [field("type", "type", json!({ "string": "jwt" }))] }] } }
+    ]);
+    let i = read(&export(items)).ok().expect("reads");
+    let get = |label: &str| i.entries.iter().find(|e| e.label == label).unwrap_or_else(|| panic!("no {label}"));
+    let forum = get("Old forum");
+    assert_eq!(forum.kind, "note");
+    assert!(forum.parts["text"].contains("username: alex") && forum.parts["text"].contains("url: https://old.example.com"), "{:?}", forum.parts);
+    // Nothing that isn't the number becomes the number.
+    for label in ["Half passport", "Typed only"] {
+        let e = get(label);
+        assert_eq!(e.kind, "note", "{label}");
+    }
+    assert!(get("Half passport").parts["text"].contains("full name: Alex Doe"));
+}

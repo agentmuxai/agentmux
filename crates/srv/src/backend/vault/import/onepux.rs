@@ -113,12 +113,10 @@ fn find<'a>(fields: &'a [Field], ids: &[&str]) -> Option<&'a Field> {
     fields.iter().find(|f| ids.iter().any(|i| f.id.eq_ignore_ascii_case(i)))
 }
 
-/// The first field that looks like the item's one secret.
+/// The item's one secret, by its field id. Never guessed from another field: a
+/// passport with only an owner's name would otherwise get that name as its number.
 fn main_secret(fields: &[Field], ids: &[&str]) -> Option<String> {
-    find(fields, ids)
-        .or_else(|| fields.iter().find(|f| f.kind == "concealed"))
-        .or_else(|| fields.iter().find(|f| f.kind == "string"))
-        .map(|f| f.value.clone())
+    find(fields, ids).map(|f| f.value.clone())
 }
 
 fn item_into(item: &Value, tag: &str, entries: &mut Vec<Incoming>, skipped: &mut Vec<(String, String)>) {
@@ -170,12 +168,8 @@ fn item_into(item: &Value, tag: &str, entries: &mut Vec<Incoming>, skipped: &mut
                     }
                     made.push(e);
                 }
-                None => {
-                    if notes.is_empty() && fields.is_empty() {
-                        skipped.push((title, "it has no password".to_string()));
-                        return;
-                    }
-                }
+                // No password: the username, addresses and anything else go to the note below.
+                None => {}
             }
         }
         "002" => match fields.iter().find(|f| f.kind == "creditCardNumber").or_else(|| find(&fields, &["ccnum"])) {
@@ -288,7 +282,8 @@ fn item_into(item: &Value, tag: &str, entries: &mut Vec<Incoming>, skipped: &mut
         made.push(Incoming::new("note", &name).part("text", &rest));
     }
     if made.is_empty() {
-        skipped.push((title, "it holds nothing the Vault can keep".to_string()));
+        let why = if matches!(item.get("categoryUuid").and_then(Value::as_str), Some("001" | "005")) { "it has no password" } else { "it holds nothing the Vault can keep" };
+        skipped.push((title, why.to_string()));
         return;
     }
     entries.extend(made.into_iter().map(|m| m.tag(tag)));
