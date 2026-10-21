@@ -398,6 +398,8 @@ mod spawn_site_coverage {
          "sanitized: MCP server probe, sanitize_process_command"),
         ("src/backend/process_tracker/windows.rs", "\"cmd\"", 1,
          "test: a short-lived child placed in a Job Object to check the below-normal priority limit applies to it"),
+        ("src/identity/secret_store.rs", "\"/usr/bin/security\"", 1,
+         "test: adds a keychain entry that trusts no app, for the macOS needs-consent test (ignored; real keychain)"),
         ("src/server/app_api/blockstats.rs", "\"ping\"", 1,
          "test: a disposable child (Windows) registered as a pane's shell, so the stats tooltip test has a Tower task to read"),
         ("src/server/app_api/blockstats.rs", "\"sleep\"", 1,
