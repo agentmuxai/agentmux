@@ -246,6 +246,54 @@ fn forward_progress_line(line: &str, stage: &'static str, sink: &crate::startup_
     true
 }
 
+/// Spawn `cmd` (an srv process: the daemon, or `migrate --prepare`) so it
+/// lives and dies with the launcher, before any of its code runs. Returns the
+/// child and its pid.
+///
+/// - Windows: started suspended, assigned to the launcher's Job Object J0,
+///   then resumed (PR #570's race pattern): srv opens files and sockets only
+///   once it is in the job, so nothing it holds survives the launcher. With
+///   no J0 (the degraded mode `main.rs` logs) it is only resumed. A failure
+///   kills the suspended child, which `kill_on_drop(false)` would otherwise
+///   leave as a zombie holding the data dir's lockfile (#571).
+/// - Linux: `PR_SET_PDEATHSIG` → SIGKILL, so it is reaped even if the
+///   launcher dies abnormally (A0); async-signal-safe only, as for the host.
+/// - Unix: its own process group, for the teardown backstop's
+///   `kill_process_group_forcefully` (SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11).
+fn spawn_in_launcher_tree(
+    cmd: &mut Command,
+    #[cfg(target_os = "windows")] job_handle: windows_sys::Win32::Foundation::HANDLE,
+) -> Result<(Child, u32), SrvSpawnError> {
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(agentmux_common::win32::CREATE_SUSPENDED | agentmux_common::win32::CREATE_NO_WINDOW);
+    #[cfg(target_os = "linux")]
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL, 0, 0, 0);
+            Ok(())
+        });
+    }
+    #[cfg(not(target_os = "windows"))]
+    cmd.process_group(0);
+
+    let mut child = cmd.spawn().map_err(|e| SrvSpawnError::SpawnFailed(e.to_string()))?;
+    let pid = child.id().ok_or_else(|| SrvSpawnError::SpawnFailed("child has no PID".to_string()))?;
+    #[cfg(target_os = "windows")]
+    {
+        if !job_handle.is_null() {
+            if let Err(e) = assign_pid_to_job(pid, job_handle) {
+                let _ = child.start_kill();
+                return Err(SrvSpawnError::JobAssignFailed(e));
+            }
+        }
+        if let Err(e) = agentmux_common::win32::resume_main_thread(pid) {
+            let _ = child.start_kill();
+            return Err(SrvSpawnError::ResumeFailed(e));
+        }
+    }
+    Ok((child, pid))
+}
+
 /// Run `agentmux-srv migrate --prepare` while srv is stopped, as the splash's
 /// "Updating data" stage: copy the previous version's data forward,
 /// back up, run the pending migrations, each a sub-row. The upgrade step of
@@ -254,6 +302,7 @@ fn forward_progress_line(line: &str, stage: &'static str, sink: &crate::startup_
 async fn run_prepare(
     launcher_exe_dir: &Path,
     paths: &DataPaths,
+    #[cfg(target_os = "windows")] job_handle: windows_sys::Win32::Foundation::HANDLE,
     sink: &crate::startup_events::StartupEventSink,
 ) -> Result<(), SrvSpawnError> {
     sink.stage_begin("prepare", "Updating data");
@@ -268,9 +317,14 @@ async fn run_prepare(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    #[cfg(target_os = "windows")]
-    cmd.no_window();
-    let mut child = cmd.spawn().map_err(|e| SrvSpawnError::SpawnFailed(format!("migrate --prepare: {e}")))?;
+    // In the launcher's process tree like srv itself: a launcher that dies
+    // mid-update must not leave a migration writing the stores unsupervised.
+    let (mut child, _pid) = spawn_in_launcher_tree(
+        &mut cmd,
+        #[cfg(target_os = "windows")]
+        job_handle,
+    )
+    .map_err(|e| SrvSpawnError::SpawnFailed(format!("migrate --prepare: {e}")))?;
 
     // stdout carries only the NDJSON summary: logged.
     if let Some(stdout) = child.stdout.take() {
@@ -326,6 +380,9 @@ pub async fn spawn_srv(
     match attempt().await {
         Err(SrvSpawnError::NeedsPrepare(reason)) => {
             crate::log(&format!("srv: data needs preparing ({reason}); running migrate --prepare"));
+            #[cfg(target_os = "windows")]
+            run_prepare(launcher_exe_dir, paths, job_handle, sink).await?;
+            #[cfg(not(target_os = "windows"))]
             run_prepare(launcher_exe_dir, paths, sink).await?;
             match attempt().await {
                 Err(SrvSpawnError::NeedsPrepare(reason)) => Err(SrvSpawnError::MigrationFailed(format!(
@@ -419,76 +476,11 @@ async fn spawn_srv_once(
         cmd.env(agentmux_common::incidents::RESTART_ID_ENV, id);
     }
 
-    // Windows: spawn suspended so we can assign-to-job before any
-    // child code runs (PR #570 race pattern, now applied to srv).
-    // Without this, srv could open files / sockets before joining
-    // the job — those resources would survive launcher death.
-    #[cfg(target_os = "windows")]
-    {
-        use agentmux_common::win32::CREATE_SUSPENDED;
-        use agentmux_common::win32::CREATE_NO_WINDOW;
-        cmd.creation_flags(CREATE_SUSPENDED | CREATE_NO_WINDOW);
-    }
-
-    // Linux process-tree reap (A0): PR_SET_PDEATHSIG → SIGKILL on
-    // launcher death so srv is reaped even if the launcher exits
-    // abnormally (panic/OOM/external SIGKILL). Linux analogue of the
-    // Windows Job Object cleanup the launcher already does. Same
-    // safety contract as the host pre_exec — async-signal-safe call
-    // only. macOS lacks prctl; the macOS launcher reap path is
-    // handled by tokio's child supervision in `run_unix`.
-    #[cfg(target_os = "linux")]
-    {
-        unsafe {
-            cmd.pre_exec(|| {
-                libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL, 0, 0, 0);
-                Ok(())
-            });
-        }
-    }
-
-    // SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11 unix parity — srv becomes
-    // its own process-group leader too, same rationale as
-    // `spawn_host_unix`'s `.process_group(0)`: the teardown backstop's
-    // `kill_process_group_forcefully` needs an explicit, launcher-scoped
-    // group for srv independent of host's (they spawn concurrently via
-    // `tokio::join!` in `run_unix`, so srv can't join a group host hasn't
-    // been assigned yet — each gets its own rather than coupling the two
-    // spawn call sites).
-    #[cfg(not(target_os = "windows"))]
-    cmd.process_group(0);
-
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| SrvSpawnError::SpawnFailed(e.to_string()))?;
-    let pid = child
-        .id()
-        .ok_or_else(|| SrvSpawnError::SpawnFailed("child has no PID".to_string()))?;
-
-    // Windows: assign srv to launcher's job, then resume.
-    // Skip job assignment if launcher's job creation failed (J0 is
-    // null) — that's the degraded mode logged by main.rs. Srv still
-    // runs but won't be reaped on launcher death.
-    //
-    // Both error paths must explicitly start_kill the suspended
-    // child before returning. We set kill_on_drop(false) (J0 normally
-    // handles cleanup), so dropping the Child wouldn't terminate the
-    // suspended srv — it would orphan as a permanent zombie holding
-    // resources and the data dir lockfile, blocking subsequent
-    // launches (#571).
-    #[cfg(target_os = "windows")]
-    {
-        if !job_handle.is_null() {
-            if let Err(e) = assign_pid_to_job(pid, job_handle) {
-                let _ = child.start_kill();
-                return Err(SrvSpawnError::JobAssignFailed(e));
-            }
-        }
-        if let Err(e) = agentmux_common::win32::resume_main_thread(pid) {
-            let _ = child.start_kill();
-            return Err(SrvSpawnError::ResumeFailed(e));
-        }
-    }
+    let (mut child, pid) = spawn_in_launcher_tree(
+        &mut cmd,
+        #[cfg(target_os = "windows")]
+        job_handle,
+    )?;
 
     let started_at = chrono::Utc::now().to_rfc3339();
 

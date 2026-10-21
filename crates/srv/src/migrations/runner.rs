@@ -403,9 +403,15 @@ pub(super) fn apply_pending(
             Ok::<_, String>((shared, channel))
         })?;
 
+    // Back up BEFORE the stores are opened: opening runs schema setup, which
+    // changes the files. The decision is the boot gate's read-only check.
+    let channel_store_path = channel_db_dir.join("objects.db");
+    if super::gate::pending_reason(regs, shared_store_path, &channel_store_path).is_some() {
+        super::backup::backup_stores(home, shared_store_path, data_dir)
+            .map_err(|e| format!("run_pending_migrations: backup failed: {}", e))?;
+    }
     let (shared_store, channel_store) = open_stores_for_preview(shared_store_path, data_dir)
         .map_err(|e| format!("run_pending_migrations: {}", e))?;
-    let channel_store_path = channel_db_dir.join("objects.db");
 
     let pending = pending_of(regs, &shared_store, channel_store.as_ref());
     if pending.is_empty() {
@@ -419,10 +425,6 @@ pub(super) fn apply_pending(
         shared_store_path: shared_store_path.to_path_buf(),
         channel_store_path: channel_store_path.clone(),
     };
-
-    if let Err(e) = super::backup::backup_stores(home, shared_store_path, data_dir) {
-        return Err(format!("run_pending_migrations: backup failed: {}", e));
-    }
 
     let mut applied = 0;
     for m in &pending {
