@@ -334,7 +334,7 @@ async function answer(host: BridgeHost, state: BridgeState, method: string, para
         case "panes.open": {
             if (!str(p.view, 200)) return fail(ERR.INVALID_PARAMS, "panes.open needs { view }");
             const split = p.split === "down" || p.split === "tab" ? p.split : "right";
-            if (isObj(p.meta) && JSON.stringify(p.meta).length > META_LIMIT_BYTES) {
+            if (isObj(p.meta) && new TextEncoder().encode(JSON.stringify(p.meta)).length > META_LIMIT_BYTES) {
                 return fail(ERR.LIMIT_EXCEEDED, "a pane's meta is at most 64 KB");
             }
             const meta = paneMetaForWidget(pkg, p.view, isObj(p.meta) ? p.meta : {});

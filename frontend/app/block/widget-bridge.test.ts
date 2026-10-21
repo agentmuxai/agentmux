@@ -221,6 +221,9 @@ describe("permissions", () => {
         expect(h.openPane).toHaveBeenLastCalledWith("ext:acme.notes/list", { "widget:acme.notes:filter": "open", "widget:acme.notes:controller": "cmd" }, "down");
         const big = errorOf(await handleBridgeRequest(h, state, "panes.open", { view: "ext:acme.notes/list", meta: { text: "x".repeat(70 * 1024) } }));
         expect(big.code).toBe(ERR.LIMIT_EXCEEDED);
+        // Bytes, as meta.set counts them: 30,000 three-byte characters are 90 KB.
+        const wide = errorOf(await handleBridgeRequest(h, state, "panes.open", { view: "ext:acme.notes/list", meta: { text: "€".repeat(30_000) } }));
+        expect(wide.code).toBe(ERR.LIMIT_EXCEEDED);
     });
 
     it("refuses a method whose permission wasn't granted, naming it", async () => {
