@@ -1,18 +1,17 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Migration runner — invoked by `agentmux-srv migrate` (a CLI subcommand,
-//! and the now-dead `agentmux-launcher::srv_spawner::run_migrate` subprocess
-//! path) and, separately, in-process at every srv boot via
-//! `run_pending_migrations`.
+//! Migration runner — invoked by `agentmux-srv migrate` (a CLI subcommand;
+//! the launcher runs `migrate --prepare` through `srv_spawner::run_prepare`
+//! when srv's boot gate asks for it) and, separately, in-process at boot via
+//! `run_pending_migrations`, only when no supervisor prepares data (headless
+//! srv, `task dev:standalone`).
 //!
-//! Both paths report the SAME per-migration begin/done progress
-//! (`ApplyProgress`) but over different channels: the CLI path emits
-//! newline-delimited JSON to stdout (read by the dead subprocess path, kept
-//! for that reason); `run_pending_migrations` emits `agentmux_common::
-//! srv_stderr`'s `AGENTMUXSRV-MIGRATION-BEGIN`/`-END` lines to stderr — the
-//! real, in-process boot path's own protocol, so the launcher's splash
-//! screen can show live per-migration sub-rows instead of a silent clock.
+//! `--prepare` and the in-process path report per-migration progress as
+//! `agentmux_common::srv_stderr`'s `AGENTMUXSRV-MIGRATION-BEGIN`/`-END` lines
+//! on stderr (`STDERR_PROGRESS`), which the launcher's splash shows as
+//! sub-rows. Plain `migrate` (no flags) prints newline-delimited JSON on
+//! stdout instead, for scripts and operators running it by hand.
 //! Failures are written to `<home>/logs/migration-error.log`; the
 //! process exits non-zero so the launcher can surface the error rather than
 //! booting with a half-migrated data dir.
@@ -146,8 +145,8 @@ pub fn run_migrate_command(data_dir: &Path, dry_run: bool, list: bool, verify: b
     // stores are opened, so a daemon holding a write transaction longer than
     // `Store::open*`'s own 5 s busy timeout waits on the lock instead of
     // failing with a spurious "database is locked" (reagent P1 on #3062).
-    // The only CLI-specific parts are the NDJSON progress lines the
-    // launcher's `run_migrate` reader expects and the error log file.
+    // The only CLI-specific parts are the NDJSON progress lines on stdout
+    // (for a person or script running `migrate`) and the error log file.
     let progress = ApplyProgress {
         on_start: &|id, description| {
             emit("migration_start", id, &format!("\"description\":\"{}\"", description));
