@@ -1131,6 +1131,16 @@ mod tests {
     fn an_appimage_records_its_channel_beside_it_and_only_its_own_binaries_read_it() {
         let file = Path::new("/home/u/Apps/AgentMux_0.59.30_amd64.AppImage");
         assert_eq!(appimage_channel_file(file), Path::new("/home/u/Apps/AgentMux_0.59.30_amd64.AppImage.agentmux-channel"));
+        let extracted = std::ffi::OsString::from("/home/u/.local/share/agentmux/extracted/0.59.30");
+        let inside = Path::new("/home/u/.local/share/agentmux/extracted/0.59.30/usr/bin/agentmux-launcher");
+        let elsewhere = Path::new("/home/u/AgentMux/usr/bin/agentmux-launcher");
+        assert!(inside_appimage(inside, &[extracted.clone()]));
+        assert!(!inside_appimage(elsewhere, &[extracted]), "another build that only inherited APPIMAGE");
+        assert!(!inside_appimage(inside, &[std::ffi::OsString::new()]));
+    }
+
+    #[test]
+    fn a_macos_app_records_its_channel_beside_it() {
         let app = Path::new("/Applications/AgentMux.app");
         assert_eq!(mac_app_channel_file(app), Path::new("/Applications/.AgentMux.app.agentmux-channel"));
         let srv = Path::new("/Applications/AgentMux.app/Contents/Helpers/AgentMux Server.app/Contents/MacOS/srv");
@@ -1158,18 +1168,12 @@ mod tests {
         assert_eq!(one_folder_others_can_change(&folder), None);
         std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o1777)).unwrap();
         assert!(one_folder_others_can_change(&folder).unwrap().contains("every account"));
-        // This user's own group isn't admin (a test never runs as an admin group member's group).
+        // Group-writable passes only when the folder's group is admin.
         std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o775)).unwrap();
         let group_ok = {
             use std::os::unix::fs::MetadataExt;
             Some(std::fs::metadata(&folder).unwrap().gid()) == admin_gid()
         };
         assert_eq!(one_folder_others_can_change(&folder).is_none(), group_ok);
-        let extracted = std::ffi::OsString::from("/home/u/.local/share/agentmux/extracted/0.59.30");
-        let inside = Path::new("/home/u/.local/share/agentmux/extracted/0.59.30/usr/bin/agentmux-launcher");
-        let elsewhere = Path::new("/home/u/AgentMux/usr/bin/agentmux-launcher");
-        assert!(inside_appimage(inside, &[extracted.clone()]));
-        assert!(!inside_appimage(elsewhere, &[extracted]), "another build that only inherited APPIMAGE");
-        assert!(!inside_appimage(inside, &[std::ffi::OsString::new()]));
     }
 }

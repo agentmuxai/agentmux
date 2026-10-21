@@ -225,7 +225,7 @@ lock="$parent/.$base.upgrade-lock"; locked=""
 say "upgrade to $ver: waiting for the launcher ($pid) to exit"
 i=0
 while /bin/kill -0 "$pid" 2>/dev/null; do
-  i=$((i+1)); [ "$i" -gt 600 ] && { say "the launcher is still running after 60 s; nothing changed"; exit 1; }
+  i=$((i+1)); [ "$i" -gt 600 ] && { say "the launcher is still running after 60 s; nothing changed"; /usr/bin/open "$app"; exit 1; }
   /bin/sleep 0.1
 done
 # One swap of this app at a time: two launchers on different channels can
@@ -233,9 +233,10 @@ done
 if ! /bin/mkdir "$lock" 2>/dev/null; then
   other=$(/bin/cat "$lock/pid" 2>/dev/null)
   if [ -n "$other" ] && /bin/kill -0 "$other" 2>/dev/null; then
+    # That swap opens the app when it is done.
     say "another upgrade of $app is running ($other); nothing changed"; exit 1
   fi
-  /bin/rm -rf "$lock"; /bin/mkdir "$lock" 2>/dev/null || { say "couldn't take the upgrade lock; nothing changed"; exit 1; }
+  /bin/rm -rf "$lock"; /bin/mkdir "$lock" 2>/dev/null || { say "couldn't take the upgrade lock; nothing changed"; /usr/bin/open "$app"; exit 1; }
 fi
 locked=1; echo "$$" > "$lock/pid"
 work=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/agentmux-upgrade.XXXXXX") || fail "no temporary folder"
