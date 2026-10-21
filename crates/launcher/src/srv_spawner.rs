@@ -27,8 +27,6 @@
 //   * Auth key generated here, not consumed from a shared AppState
 //   * stderr ESTART parsing returns the result via tokio mpsc
 
-#[cfg(windows)]
-use agentmux_common::win32::NoWindow;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
