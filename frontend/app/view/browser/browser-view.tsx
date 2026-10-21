@@ -314,9 +314,13 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             void model.endSleep(wakeLoadedMs()).catch(() => {});
         }
     });
-    createEffect(() => {
-        if (sleeping() && tabId != null && prewakeTabId() === tabId) wake("intent");
-    });
+    // Only a new hover or press wakes: a wake abandoned after 10 s with the
+    // pointer still on the pill must not start again (and again).
+    createEffect(
+        on(prewakeTabId, (t) => {
+            if (t != null && t === tabId && sleeping()) wake("intent");
+        }),
+    );
     // srv asks for a wake when an agent's Browser call reaches the pane (spec §8).
     createEffect(
         on(
