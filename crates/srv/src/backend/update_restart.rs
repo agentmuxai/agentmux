@@ -21,7 +21,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use agentmux_common::srv_stderr::{UpgradeTarget, UPGRADE_DECLINED_FILE};
 
@@ -159,13 +159,16 @@ fn declined_file() -> Option<PathBuf> {
         .map(|d| PathBuf::from(d).join("updates").join(UPGRADE_DECLINED_FILE))
 }
 
-/// Whether the launcher answered No (or the question lapsed) since `asked`:
-/// `file` exists and was written then or later. An older one is from an earlier
-/// attempt. The second of slack covers a coarse file clock.
-fn declined_since(file: &Path, asked: SystemTime) -> bool {
-    std::fs::metadata(file)
-        .and_then(|m| m.modified())
-        .is_ok_and(|written| written + Duration::from_secs(1) >= asked)
+/// Whether the launcher answered No (or the question lapsed) for `version`:
+/// `file` names it. Each request clears the file before it asks and each answer
+/// is taken out as it is read, so one left by an earlier attempt can't answer a
+/// new question, however soon the user tries again.
+fn take_declined(file: &Path, version: &str) -> bool {
+    if std::fs::read_to_string(file).map(|v| v.trim() == version).unwrap_or(false) {
+        let _ = std::fs::remove_file(file);
+        return true;
+    }
+    false
 }
 
 async fn run(run_id: u64, d: DownloadStatus, target: UpgradeTarget, now: bool) {
@@ -189,7 +192,11 @@ async fn run(run_id: u64, d: DownloadStatus, target: UpgradeTarget, now: bool) {
         tokio::time::sleep(POLL).await;
     }
     let listed = stopping_now().await;
-    let asked_at = SystemTime::now();
+    let declined = declined_file();
+    if let Some(file) = declined.as_deref() {
+        // Before the launcher is asked: an answer from an earlier attempt isn't this one's.
+        let _ = std::fs::remove_file(file);
+    }
     let asked = if_current(run_id, || {
         set(&d, "restarting", 0, None, listed);
         tracing::info!(version = %d.version, target = ?target, "upgrade: asking the launcher to restart");
@@ -202,13 +209,12 @@ async fn run(run_id: u64, d: DownloadStatus, target: UpgradeTarget, now: bool) {
     // back as a file, so the panel stops saying "Restarting" at once; with no
     // answer at all the grace runs out.
     let grace_ends = tokio::time::Instant::now() + RESTART_GRACE;
-    let declined = declined_file();
     while tokio::time::Instant::now() < grace_ends {
         tokio::time::sleep(POLL).await;
         if !if_current(run_id, || {}) {
             return;
         }
-        if declined.as_deref().is_some_and(|f| declined_since(f, asked_at)) {
+        if declined.as_deref().is_some_and(|f| take_declined(f, &d.version)) {
             tracing::info!(version = %d.version, "upgrade: the restart was declined");
             if_current(run_id, || set(&d, "ready", 0, None, Vec::new()));
             return;
@@ -261,15 +267,19 @@ mod tests {
     }
 
     #[test]
-    fn a_no_from_the_launcher_is_one_written_since_the_question() {
+    fn a_no_is_taken_once_and_only_for_the_version_asked() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join(UPGRADE_DECLINED_FILE);
-        let asked = SystemTime::now();
-        assert!(!declined_since(&file, asked), "no answer yet");
-        std::fs::write(&file, "0.59.37\n").unwrap();
-        assert!(declined_since(&file, asked), "answered No after the question");
-        // Left by an earlier attempt, long before this question.
-        assert!(!declined_since(&file, asked + Duration::from_secs(60)));
+        assert!(!take_declined(&file, "0.59.37"), "no answer yet");
+        std::fs::write(&file, "0.59.36
+").unwrap();
+        assert!(!take_declined(&file, "0.59.37"), "an answer about another version");
+        assert!(file.exists(), "...is left alone");
+        std::fs::write(&file, "0.59.37
+").unwrap();
+        assert!(take_declined(&file, "0.59.37"));
+        assert!(!file.exists(), "taken out as it is read");
+        assert!(!take_declined(&file, "0.59.37"), "so it can't answer a second question");
     }
 
     #[test]
