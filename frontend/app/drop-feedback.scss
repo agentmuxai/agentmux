@@ -13,6 +13,12 @@
 // `tab-drop-invert-strobe`) live in drag/drop-indicators.scss, which is
 // loaded once, so they're emitted once however many files `@use` this.
 
+// The animations the mixins below combine, each written once.
+$drop-strobe: tab-drop-invert-strobe 400ms steps(1, end) 2;
+$drop-hold: tab-drop-invert-hold 400ms steps(1, end) forwards;
+$drop-pulse: tab-drop-pulse 0.8s var(--ease-in-out) infinite alternate;
+$drop-pulse-reduced: tab-drop-pulse 0.8s ease-in-out infinite alternate;
+
 // --- Mixins ---
 
 // Something is being dragged over a valid drop target: the instant the hover
@@ -38,22 +44,18 @@
     outline-offset: -2px;
 
     @if $hold {
-        animation:
-            tab-drop-invert-hold 400ms steps(1, end) forwards,
-            tab-drop-pulse 0.8s var(--ease-in-out) infinite alternate;
+        animation: $drop-hold, $drop-pulse;
 
         @include mixins.when-motion-reduced(feedback) {
             filter: invert(1);
-            animation: tab-drop-pulse 0.8s ease-in-out infinite alternate;
+            animation: $drop-pulse-reduced;
         }
     } @else {
-        animation:
-            tab-drop-invert-strobe 400ms steps(1, end) 2,
-            tab-drop-pulse 0.8s var(--ease-in-out) infinite alternate;
+        animation: $drop-strobe, $drop-pulse;
 
         // Reduced treatment (feedback), dormant under the motion policy.
         @include mixins.when-motion-reduced(feedback) {
-            animation: tab-drop-pulse 0.8s ease-in-out infinite alternate;
+            animation: $drop-pulse-reduced;
         }
     }
 }
@@ -73,14 +75,14 @@
 // descendant holds it the same way.
 @mixin drop-target-strobe-exempt($hold: false) {
     @if $hold {
-        animation: tab-drop-invert-hold 400ms steps(1, end) forwards;
+        animation: $drop-hold;
 
         @include mixins.when-motion-reduced(feedback) {
             animation: none;
             filter: invert(1);
         }
     } @else {
-        animation: tab-drop-invert-strobe 400ms steps(1, end) 2;
+        animation: $drop-strobe;
 
         @include mixins.when-motion-reduced(feedback) {
             animation: none;
