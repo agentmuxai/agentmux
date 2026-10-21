@@ -153,3 +153,23 @@ fn closing_on_merge_is_on_unless_turned_off() {
     let off = HashMap::from([(SETTING_CLOSE_ON_MERGE.to_string(), serde_json::json!(false))]);
     assert!(!close_on_merge_enabled(&off));
 }
+
+#[test]
+fn a_just_opened_pr_is_the_one_created_since_the_command_not_an_older_one() {
+    use serde_json::json;
+    let seen = chrono::DateTime::parse_from_rfc3339("2026-10-21T05:00:00Z").unwrap().timestamp_millis();
+    let list = json!([
+        {"number": 90, "created_at": "2026-09-01T10:00:00Z", "head": {"ref": "x"}},
+        {"number": 120, "created_at": "2026-10-21T05:00:20Z", "head": {"ref": "x"}},
+    ]);
+    assert_eq!(pick_opened(&list, None, seen), Some(120), "the merged PR of last month isn't this command's");
+    assert_eq!(pick_opened(&json!([list[0]]), None, seen), None);
+    let skewed = json!([{"number": 7, "created_at": "2026-10-21T04:58:00Z", "head": {"ref": "x"}}]);
+    assert_eq!(pick_opened(&skewed, None, seen), Some(7), "a clock a little behind is allowed for");
+    let newest = json!([
+        {"number": 130, "created_at": "2026-10-21T05:01:00Z", "head": {"ref": "someone-else"}},
+        {"number": 129, "created_at": "2026-10-21T05:00:30Z", "head": {"ref": "x"}},
+    ]);
+    assert_eq!(pick_opened(&newest, Some("x"), seen), Some(129), "a fork's PR found by its branch among the newest");
+    assert_eq!(pick_opened(&json!({"message": "x"}), None, seen), None);
+}

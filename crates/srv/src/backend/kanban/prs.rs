@@ -352,27 +352,62 @@ pub async fn run_merge_loop() {
     }
 }
 
-/// An agent holding `work_id` just opened a PR from `branch` in `repo` (from
-/// `owner`'s fork when `--head` named one): look for it on GitHub a few times
-/// as it appears, and link the first found.
-pub fn find_opened(work_id: String, repo: String, owner: Option<String>, branch: String) {
+/// How much earlier than the `gh pr create` srv saw a PR may say it was
+/// created and still be taken for that command's: clocks differ.
+const CREATED_SLACK_MS: i64 = 5 * 60 * 1000;
+
+/// The PR a just-seen `gh pr create` opened, from a list GitHub gave: the
+/// first created since `since_ms` (less [`CREATED_SLACK_MS`]), from `branch`
+/// when one is given. An older PR from the same branch (merged long ago, or
+/// open before this command) is not this command's.
+pub fn pick_opened(list: &Value, branch: Option<&str>, since_ms: i64) -> Option<u64> {
+    list.as_array()?.iter().find_map(|p| {
+        let created = p.get("created_at")?.as_str()?;
+        let created_ms = chrono::DateTime::parse_from_rfc3339(created).ok()?.timestamp_millis();
+        if created_ms < since_ms - CREATED_SLACK_MS {
+            return None;
+        }
+        if let Some(b) = branch {
+            if p.pointer("/head/ref").and_then(Value::as_str) != Some(b) {
+                return None;
+            }
+        }
+        p.get("number")?.as_u64()
+    })
+}
+
+/// An agent holding `work_id` was seen at `seen_ms` opening a PR from `branch`
+/// in `repo` (from `owner`'s fork when `--head` named one): look for it on
+/// GitHub a few times as it appears, and link the first found that was
+/// created by then. Without `--head`, `gh` may have pushed to a fork of the
+/// user's, whose owner srv doesn't know: the last look takes the newest open
+/// PRs and matches the branch instead.
+pub fn find_opened(work_id: String, repo: String, owner: Option<String>, branch: String, seen_ms: i64) {
     let Some(ctx) = CONTEXT.get() else { return };
     let Some(repo) = github_repo(&repo) else { return };
     let Some((repo_owner, _)) = repo.split_once('/') else { return };
+    let implicit_owner = owner.is_none();
     let owner = owner.unwrap_or_else(|| repo_owner.to_string());
     let head: String = url::form_urlencoded::byte_serialize(format!("{owner}:{branch}").as_bytes()).collect();
-    let path = format!("/repos/{repo}/pulls?head={head}&state=all&per_page=1");
+    let by_head = format!("/repos/{repo}/pulls?head={head}&state=all&per_page=10");
+    let newest = format!("/repos/{repo}/pulls?state=open&sort=created&direction=desc&per_page=30");
     tokio::spawn(async move {
         let mut waited = 0;
-        for after in FIND_AFTER_S {
+        for (i, after) in FIND_AFTER_S.iter().enumerate() {
             tokio::time::sleep(std::time::Duration::from_secs(after - waited)).await;
-            waited = after;
+            waited = *after;
             let now = agentmux_common::time::now_ms();
-            let number = match get(&ctx.http, &path, now).await {
-                Ok(v) => v.as_array().and_then(|a| a.first()).and_then(|p| p.get("number")).and_then(Value::as_u64),
+            let mut number = match get(&ctx.http, &by_head, now).await {
+                Ok(v) => pick_opened(&v, None, seen_ms),
                 Err(Miss::NotFound) => return,
                 Err(_) => None,
             };
+            if number.is_none() && implicit_owner && i + 1 == FIND_AFTER_S.len() {
+                number = match get(&ctx.http, &newest, now).await {
+                    Ok(v) => pick_opened(&v, Some(&branch), seen_ms),
+                    Err(_) => None,
+                };
+            }
             if let Some(number) = number {
                 let pr = PrRef { repo: repo.clone(), number };
                 let identity = ctx.identity.clone();
@@ -385,7 +420,6 @@ pub fn find_opened(work_id: String, repo: String, owner: Option<String>, branch:
         }
     });
 }
-
 
 /// A hand-in named `pr` while its agent was on `branch` of `repo` (its
 /// `origin`): link it if that PR is from that branch of that repository, so a

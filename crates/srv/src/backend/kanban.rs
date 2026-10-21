@@ -261,7 +261,7 @@ pub fn on_new_prs(prs: &[NewPr]) {
             record(&ctx.identity, &task.id, &pr.agent_id, "linked", &format!("opened a PR from {head}"));
             changed = true;
             let repo = ctx.identity.work_board_get(&task.id).ok().flatten().map(|t| t.card.repo).unwrap_or_default();
-            prs::find_opened(task.id.clone(), repo, owner, head);
+            prs::find_opened(task.id.clone(), repo, owner, head, now);
         }
     }
     if changed {
