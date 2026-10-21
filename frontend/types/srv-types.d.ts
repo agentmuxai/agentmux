@@ -826,6 +826,19 @@ declare global {
         "agent:historySourceBlockId"?: string;
         /** Last classified agent failure; set on error exit, cleared on clean exit. */
         "agent:last_failure"?: import("@/types/rpc/AgentFailure").AgentFailure;
+        /** Messages typed while the agent's model API was unreachable, not yet
+         *  sent, and the agent they were typed to. Frontend-only
+         *  (view/agent/offline/useOfflineInput.ts). */
+        "agent:held_input"?: {
+            agentId: string;
+            messages: {
+                id: string;
+                text: string;
+                heldAt: number;
+                attachments?: import("@/types/rpc/AttachmentRef").AttachmentRef[];
+                unconfirmed?: boolean;
+            }[];
+        } | null;
         "agent:runtime"?: {
             permissionMode?: string;
             model?: string | null;

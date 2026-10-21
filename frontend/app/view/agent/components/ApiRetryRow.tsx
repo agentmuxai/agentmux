@@ -3,7 +3,7 @@
 
 import { Button } from "@/app/element/ui";
 import { Show, createSignal, onCleanup, type JSX } from "solid-js";
-import { useApiRetryState, type ApiRetryView } from "../hooks/useApiRetryState";
+import type { ApiRetryView } from "../hooks/useApiRetryState";
 
 function retryReason(status: number | null): string {
     if (status == null) return "Can't reach the API";
@@ -46,10 +46,4 @@ export function ApiRetryRow(props: { retry: ApiRetryView | null; onStop: () => v
             }}
         </Show>
     );
-}
-
-/** {@link ApiRetryRow} for a pane, fed by srv's `agent-api-retry` event. */
-export function PaneApiRetryRow(props: { blockId: string; onStop: () => void }): JSX.Element {
-    const retry = useApiRetryState(props.blockId);
-    return <ApiRetryRow retry={retry()} onStop={props.onStop} />;
 }
