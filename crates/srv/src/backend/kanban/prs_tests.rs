@@ -77,11 +77,12 @@ fn only_tasks_in_review_with_a_pr_are_checked_and_not_too_often() {
 #[test]
 fn a_named_pr_is_the_tasks_only_when_it_is_from_the_agents_branch() {
     use serde_json::json;
-    let pr = json!({"number": 5200, "head": {"ref": "loap-3/kanban-pr-merge"}});
-    assert!(is_from_branch(&pr, "loap-3/kanban-pr-merge"));
-    assert!(!is_from_branch(&pr, "loap-3/other-work"), "a PR the result only mentions");
-    assert!(!is_from_branch(&pr, ""), "no branch known: nothing linked");
-    assert!(!is_from_branch(&json!({"number": 1}), "x"));
+    let pr = json!({"number": 5200, "head": {"ref": "loap-3/x", "repo": {"full_name": "AgentMuxAI/agentmux"}}});
+    assert!(is_from_branch(&pr, "agentmuxai/agentmux", "loap-3/x"));
+    assert!(!is_from_branch(&pr, "agentmuxai/agentmux", "loap-3/other-work"), "a PR the result only mentions");
+    assert!(!is_from_branch(&pr, "bob/agentmux", "loap-3/x"), "a fork's same-named branch");
+    assert!(!is_from_branch(&pr, "agentmuxai/agentmux", ""), "no branch known: nothing linked");
+    assert!(!is_from_branch(&json!({"number": 1, "head": {"ref": "x"}}), "o/r", "x"), "no head repository: nothing linked");
 }
 
 #[test]

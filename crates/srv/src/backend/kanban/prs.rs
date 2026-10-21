@@ -352,12 +352,14 @@ pub async fn run_merge_loop() {
     }
 }
 
-/// An agent holding `work_id` just opened a PR from `branch` in `repo`: look
-/// for it on GitHub a few times as it appears, and link the first found.
-pub fn find_opened(work_id: String, repo: String, branch: String) {
+/// An agent holding `work_id` just opened a PR from `branch` in `repo` (from
+/// `owner`'s fork when `--head` named one): look for it on GitHub a few times
+/// as it appears, and link the first found.
+pub fn find_opened(work_id: String, repo: String, owner: Option<String>, branch: String) {
     let Some(ctx) = CONTEXT.get() else { return };
     let Some(repo) = github_repo(&repo) else { return };
-    let Some((owner, _)) = repo.split_once('/') else { return };
+    let Some((repo_owner, _)) = repo.split_once('/') else { return };
+    let owner = owner.unwrap_or_else(|| repo_owner.to_string());
     let head: String = url::form_urlencoded::byte_serialize(format!("{owner}:{branch}").as_bytes()).collect();
     let path = format!("/repos/{repo}/pulls?head={head}&state=all&per_page=1");
     tokio::spawn(async move {
@@ -385,10 +387,11 @@ pub fn find_opened(work_id: String, repo: String, branch: String) {
 }
 
 
-/// A hand-in named `pr` while its agent was on `branch`: link it if that PR is
-/// from that branch, so a PR the result only mentions (someone else's, one it
-/// built on) isn't taken for the task's own.
-pub fn link_if_from(work_id: String, pr: PrRef, branch: String) {
+/// A hand-in named `pr` while its agent was on `branch` of `repo` (its
+/// `origin`): link it if that PR is from that branch of that repository, so a
+/// PR the result only mentions (someone else's, one it built on, a fork's
+/// same-named branch) isn't taken for the task's own.
+pub fn link_if_from(work_id: String, pr: PrRef, repo: String, branch: String) {
     let Some(ctx) = CONTEXT.get() else { return };
     if branch.is_empty() {
         return;
@@ -396,7 +399,7 @@ pub fn link_if_from(work_id: String, pr: PrRef, branch: String) {
     tokio::spawn(async move {
         let now = agentmux_common::time::now_ms();
         let Ok(v) = get(&ctx.http, &format!("/repos/{}/pulls/{}", pr.repo, pr.number), now).await else { return };
-        if !is_from_branch(&v, &branch) {
+        if !is_from_branch(&v, &repo, &branch) {
             return;
         }
         let identity = ctx.identity.clone();
@@ -406,9 +409,15 @@ pub fn link_if_from(work_id: String, pr: PrRef, branch: String) {
     });
 }
 
-/// Whether GitHub's answer for a PR says it is from `branch`.
-pub fn is_from_branch(pr: &Value, branch: &str) -> bool {
-    pr.pointer("/head/ref").and_then(Value::as_str).is_some_and(|r| !branch.is_empty() && r == branch)
+/// Whether GitHub's answer for a PR says it is from `branch` of `repo`
+/// (`owner/repo`).
+pub fn is_from_branch(pr: &Value, repo: &str, branch: &str) -> bool {
+    let same_ref = pr.pointer("/head/ref").and_then(Value::as_str).is_some_and(|r| !branch.is_empty() && r == branch);
+    let same_repo = pr
+        .pointer("/head/repo/full_name")
+        .and_then(Value::as_str)
+        .is_some_and(|r| !repo.is_empty() && r.eq_ignore_ascii_case(repo));
+    same_ref && same_repo
 }
 
 #[cfg(test)]

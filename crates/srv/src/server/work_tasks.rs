@@ -431,8 +431,8 @@ pub(super) async fn finish(
             // branch the agent is on (kanban::prs).
             if let Ok(Some(t)) = state.identity_store.work_board_get(id) {
                 if let Some(pr) = t.card.pr_url.is_empty().then(|| pr_in_text(result, &t.card.repo)).flatten() {
-                    let (_, branch) = repo_of(state, caller_reg(state, caller).as_ref()).await;
-                    link_if_from(id.to_string(), pr, branch);
+                    let (repo, branch) = repo_of(state, caller_reg(state, caller).as_ref()).await;
+                    link_if_from(id.to_string(), pr, repo, branch);
                 }
             }
             let _ = state.identity_store.work_card_set_question(id, "", now);
