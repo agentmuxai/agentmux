@@ -162,3 +162,32 @@ fn a_huge_export_data_is_refused_without_reading_it_all() {
     assert!(out.len() < 1024 * 1024, "the bomb is small on disk: {}", out.len());
     assert!(matches!(read(&out), Err(ReadError::Other(e)) if e.contains("larger than")));
 }
+
+#[test]
+fn a_login_with_no_password_keeps_its_username_and_addresses_in_the_note() {
+    let items = json!([
+        {
+            "categoryUuid": "001",
+            "overview": { "title": "Forum", "url": "https://forum.example.com", "urls": [{ "url": "https://forum.example.com" }, { "url": "https://forum.example.com/alt" }] },
+            "details": { "loginFields": [{ "designation": "username", "value": "alex" }, { "designation": "", "name": "account no", "value": "A-77" }], "notesPlain": "joined 2019" }
+        },
+        {
+            "categoryUuid": "001",
+            "overview": { "title": "Bank site", "url": "https://bank.example.com", "urls": [{ "url": "https://bank.example.com/en" }] },
+            "details": { "loginFields": [{ "designation": "username", "value": "alex2" }, { "designation": "password", "value": "pw-1234" }, { "designation": "", "name": "memorable word", "value": "tulip" }] }
+        },
+        { "categoryUuid": "110", "overview": { "title": "Box", "url": "ssh://box.example.com" }, "details": { "notesPlain": "rack 4" } }
+    ]);
+    let i = read(&export(items)).ok().expect("reads");
+    let text = |label: &str| i.entries.iter().find(|e| e.label == label).unwrap_or_else(|| panic!("no {label}")).parts["text"].clone();
+    let forum = text("Forum");
+    assert!(forum.contains("joined 2019") && forum.contains("username: alex") && forum.contains("account no: A-77"), "{forum}");
+    assert!(forum.contains("url: https://forum.example.com") && forum.contains("url: https://forum.example.com/alt"), "{forum}");
+    // A login keeps its first address and username; its other addresses and fields are kept in the note.
+    assert_eq!(i.entries.iter().find(|e| e.label == "Bank site").unwrap().fields["site"], "https://bank.example.com");
+    let bank = text("Bank site (notes)");
+    assert!(bank.contains("url: https://bank.example.com/en") && bank.contains("memorable word: tulip"), "{bank}");
+    assert!(!bank.contains("pw-1234") && !bank.contains("alex2"), "{bank}");
+    assert_eq!(text("Box"), "rack 4
+url: ssh://box.example.com");
+}

@@ -239,8 +239,39 @@ fn item_into(item: &Value, tag: &str, entries: &mut Vec<Incoming>, skipped: &mut
     // What is left (a note's text, other fields, an item of a category the Vault has no
     // kind for) is kept whole, so nothing in the item is lost without being listed.
     let mut rest = String::new();
+    let mut line = |rest: &mut String, text: String| {
+        if !rest.is_empty() {
+            rest.push('\n');
+        }
+        rest.push_str(&text);
+    };
     if !notes.is_empty() {
-        rest.push_str(&notes);
+        line(&mut rest, notes.clone());
+    }
+    // The sign-in fields and the addresses, unless a login or an API key took them.
+    let login_made = made.iter().any(|m| m.kind == "login");
+    for f in details.get("loginFields").and_then(Value::as_array).into_iter().flatten() {
+        let value = f.get("value").and_then(Value::as_str).map(str::trim).unwrap_or("");
+        let designation = f.get("designation").and_then(Value::as_str).unwrap_or("");
+        if value.is_empty() || (login_made && (designation == "username" || designation == "password")) {
+            continue;
+        }
+        let name = [f.get("name"), f.get("id")].into_iter().flatten().filter_map(Value::as_str).find(|n| !n.is_empty()).unwrap_or(designation);
+        line(&mut rest, format!("{name}: {value}"));
+    }
+    let site_taken = made.iter().any(|m| m.kind == "login" || m.kind == "api-key");
+    let mut urls: Vec<String> = overview.get("urls").and_then(Value::as_array).into_iter().flatten().filter_map(|u| u.get("url").and_then(Value::as_str)).map(str::to_string).collect();
+    urls.insert(0, site.clone());
+    urls.retain(|u| !u.is_empty());
+    urls.dedup();
+    for (i, u) in urls.iter().enumerate() {
+        if i == 0 && site_taken {
+            continue;
+        }
+        if urls[..i].contains(u) {
+            continue;
+        }
+        line(&mut rest, format!("url: {u}"));
     }
     for (i, f) in fields.iter().enumerate() {
         if used.contains(&i) {
