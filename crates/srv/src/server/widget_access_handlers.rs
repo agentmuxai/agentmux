@@ -190,7 +190,6 @@ fn storage_changed(st: &AppState, widget_id: &str, key: &str) {
     st.broker.publish_event::<crate::backend::mps_events::WidgetStorage>(&event, vec![], 0);
 }
 
-/// The user's running agents on this machine, with whether each is busy.
 /// Finished tasks a widget sees, as the Kanban shows them: the last 7 days.
 const TASKS_FINISHED_WINDOW_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 const TASKS_LIMIT: usize = 500;
@@ -215,6 +214,7 @@ pub(crate) fn task_row(t: &crate::backend::storage::work_board::BoardTask) -> Va
     })
 }
 
+/// The user's running agents on this machine, with whether each is busy.
 fn agent_rows(st: &AppState) -> Vec<Value> {
     let mut rows: Vec<Value> = st
         .reactive_handler
@@ -268,8 +268,6 @@ mod tests {
         call(st, packages, WidgetCallReq { token: token.into(), method: method.into(), params }).await
     }
 
-    // SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §11: srv refuses each
-    // call whose permission wasn't granted, whatever the frontend checked.
     #[test]
     fn a_task_row_shows_where_it_stands_but_not_what_anyone_typed() {
         use crate::backend::storage::work_board::{BoardTask, ChecklistItem, WorkCard};
@@ -319,6 +317,8 @@ mod tests {
         assert_eq!(task_row(&t)["agent"], "Loap-3");
     }
 
+    // SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §11: srv refuses each
+    // call whose permission wasn't granted, whatever the frontend checked.
     #[tokio::test]
     async fn srv_refuses_each_call_without_its_grant() {
         let st = crate::server::tests::test_state();
