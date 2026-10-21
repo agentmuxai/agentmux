@@ -46,9 +46,13 @@ describe("am-* span classes survive the sanitizer", () => {
         expect(el.getAttribute("onclick")).toBeNull();
     });
 
-    it("still keeps the syntax highlighter's own classes", () => {
+    it("hands a fenced block with a language to shiki, and lets no hljs- class through", () => {
         const c = mount("```js\nconst a = 'x';\n```");
-        expect(c.querySelector("[class*='hljs-']")).not.toBeNull();
+        expect(c.querySelector("pre code.language-js.sh-shiki")).not.toBeNull();
+        // Code colour comes from shiki after the sanitizer, so raw HTML can't
+        // borrow the old highlighter's classes any more.
+        const raw = mount('<span class="hljs-keyword">x</span>');
+        expect(raw.querySelector("[class*='hljs-']")).toBeNull();
     });
 });
 

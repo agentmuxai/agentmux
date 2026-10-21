@@ -91,19 +91,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     .sh-heredoc-body {
         color: var(--main-text-color);
     }
-    // Shiki-highlighted bodies (embedded-highlight.ts): each run
-    // carries both themes' colours; pick by the theme's polarity.
-    .sh-shiki span {
-        color: var(--shiki-dark);
-        font-style: var(--shiki-dark-font-style);
-        font-weight: var(--shiki-dark-font-weight);
-
-        [data-theme-polarity="light"] & {
-            color: var(--shiki-light);
-            font-style: var(--shiki-light-font-style);
-            font-weight: var(--shiki-light-font-weight);
-        }
-    }
+    // Shiki-highlighted bodies: frontend/app/element/shiki-themed.scss.
     .sh-variable,
     .sh-env-assign,
     .sh-number {

@@ -25,6 +25,13 @@ import { cleanup, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// Shiki colours a block asynchronously; kept plain here so the streamed and
+// from-scratch renders compare as they are, not as far as colour got.
+vi.mock("@/app/view/agent/components/shell-highlight/embedded-highlight", () => ({
+    cachedRuns: () => undefined,
+    highlightBody: async () => null,
+}));
+
 import { MarkdownBlock } from "./MarkdownBlock";
 import { Markdown, __markdownRenderStats, __resetMarkdownRenderStats } from "@/app/element/markdown";
 import type { MarkdownNode } from "../types";
@@ -106,7 +113,7 @@ describe("MarkdownBlock — pauses mid-stream", () => {
             return content.innerHTML.replace(/id="[^"]*"/g, 'id=""');
         };
         const got = blocksHtml(container);
-        expect(got).toContain("hljs"); // highlighted, not the plain streaming render
+        expect(got).toContain("sh-shiki"); // marked for colour, not the plain streaming render
         expect(got).toBe(blocksHtml(reference.container));
     });
 });
