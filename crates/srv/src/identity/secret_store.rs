@@ -231,7 +231,7 @@ fn shared_reads() -> &'static SharedReads {
 }
 
 fn entry(account_id: &str) -> Result<Entry, String> {
-    keychain_without_dialogs();
+    keychain_without_dialogs()?;
     Entry::new(SERVICE, &account_key(account_id))
         .map_err(|e| format!("keychain entry init failed: {e}"))
 }
@@ -248,21 +248,25 @@ pub fn is_needs_consent(err: &str) -> bool {
     err.contains(NEEDS_CONSENT)
 }
 
-/// Turn off the keychain's consent and unlock dialogs for this process, once.
+/// Turn off the keychain's consent and unlock dialogs for this process.
 /// macOS only (`SecKeychainSetUserInteractionAllowed`, process-wide): a call
 /// that would show one fails at once instead, with `errSecAuthFailed` for an
 /// item that doesn't trust this build, or `errSecInteractionNotAllowed` when
-/// the keychain is locked.
-fn keychain_without_dialogs() {
+/// the keychain is locked. Until it has worked, every keychain call tries
+/// again first and is refused if it still can't: never a call with dialogs on.
+fn keychain_without_dialogs() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        static ONCE: std::sync::Once = std::sync::Once::new();
-        ONCE.call_once(|| match security_framework::os::macos::keychain::SecKeychain::disable_user_interaction() {
+        static OFF: OnceLock<()> = OnceLock::new();
+        if OFF.get().is_none() {
+            let lock = security_framework::os::macos::keychain::SecKeychain::disable_user_interaction()
+                .map_err(|e| format!("keychain unavailable: couldn't turn off its dialogs: {e}"))?;
             // The lock turns the dialogs back on when dropped; keep them off.
-            Ok(lock) => std::mem::forget(lock),
-            Err(e) => tracing::warn!("secret store: couldn't turn off the keychain's dialogs: {e}"),
-        });
+            std::mem::forget(lock);
+            let _ = OFF.set(());
+        }
     }
+    Ok(())
 }
 
 /// How a keychain error is reported: [`NEEDS_CONSENT`] for an item this build
