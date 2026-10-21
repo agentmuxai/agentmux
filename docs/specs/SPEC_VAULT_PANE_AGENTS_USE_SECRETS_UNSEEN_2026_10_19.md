@@ -225,7 +225,7 @@ Before output is published, srv replaces each injected value with `[vault:<id>]`
 
 ### 7.3 Approval
 
-The first use of an entry by an agent asks in AgentMux's own prompt, in every window: the entry, the agent, the command line and its working directory, **[Allow once] [Always for <agent>] [Deny]**, and says that a command can send the value anywhere its line says. "Always" is a grant per entry and agent, stored with the entry's site grants as `command:<agent>`, listed apart in the Vault ("Agents may run commands with it") and revocable there. Answers come through the host, as in §6.4. The Vault's Activity records each use ("ran a command", the command's start, and the outcome); the value is never in it.
+The first use of an entry by an agent asks in AgentMux's own prompt, in every window: the entry, the agent, the command line and its working directory, **[Allow once] [Always for <agent>] [Deny]**, naming every part the command asks for that isn't already allowed, and says that a command can send the value anywhere its line says. "Always" is a grant per entry, agent and part (a card's expiry is not its number), stored with the entry's site grants as `command:<agent>:<part>`, listed apart in the Vault ("Agents may run commands with it") and revocable there. Answers come through the host, as in §6.4. The Vault's Activity records each use ("ran a command", the command's start, and the outcome); the value is never in it.
 
 ### 7.4 Where commands can run
 

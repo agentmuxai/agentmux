@@ -24,7 +24,7 @@ export function siteOf(origin: string): string {
     }
 }
 
-/** A grant for commands is stored as `command:<agent>`; a site's is its origin. */
+/** A grant for commands is stored as `command:<agent>:<part>`; a site's is its origin. */
 export const COMMAND_GRANT = "command:";
 
 /** `command:<agent>:<part>` as a person reads it: `Agent1 (value)`. */
