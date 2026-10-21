@@ -206,13 +206,13 @@ describe("the sites an entry may be filled into", () => {
     });
 
     it("lists the agents that may run commands with it apart from the sites, and revokes one", async () => {
-        entries = [{ ...entries[0], grants: ["https://www.irs.gov", "command:Agent1"] }];
+        entries = [{ ...entries[0], grants: ["https://www.irs.gov", "command:Agent1:value"] }];
         await refreshVault();
         render(() => <VaultEntries section="personal" />);
         const row = (await screen.findByText("Alex")).closest("tr") as HTMLElement;
         expect(row.textContent).toContain("Agents may run commands with it");
         expect(within(row).queryByRole("button", { name: /Stop filling Alex on command/ })).toBeNull();
-        fireEvent.click(within(row).getByRole("button", { name: "Stop Agent1 running commands with Alex without asking" }));
-        await waitFor(() => expect(calls("revoke_grant")).toEqual([{ entry_id: "ssn-alex", origin: "command:Agent1" }]));
+        fireEvent.click(within(row).getByRole("button", { name: "Stop Agent1 (value) running commands with Alex without asking" }));
+        await waitFor(() => expect(calls("revoke_grant")).toEqual([{ entry_id: "ssn-alex", origin: "command:Agent1:value" }]));
     });
 });

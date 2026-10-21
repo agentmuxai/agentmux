@@ -74,7 +74,7 @@ async fn a_first_use_asks_with_the_command_and_then_gives_the_value_to_that_proc
     let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Once));
     let injected = run(&s, &wanted(&s), false).await.ok().flatten().expect("allowed");
     let shown = ask.await.unwrap();
-    assert_eq!((shown.command.as_str(), shown.cwd.as_str(), shown.field.as_str()), ("stripe balance retrieve", "C:/work", "STRIPE_API_KEY"));
+    assert_eq!((shown.command.as_str(), shown.cwd.as_str(), shown.field.as_str()), ("stripe balance retrieve", "C:/work", "STRIPE_API_KEY (value)"));
     assert!(shown.origin.is_empty() && shown.offer_always && !shown.needs_value);
     assert_eq!(injected.env, vec![("STRIPE_API_KEY".to_string(), VALUE.to_string())]);
     // The output is cleaned of it, and the log says a command used it.
@@ -93,8 +93,8 @@ async fn always_is_a_grant_for_this_agent_and_the_entry_and_asks_nothing_again()
     let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Always));
     assert!(run(&s, &wanted(&s), false).await.is_ok());
     ask.await.unwrap();
-    assert!(s.state.identity_store.vault_grant_check(&s.entry, &grant_key(&s.auth.agent_id)).unwrap());
-    assert!(!s.state.identity_store.vault_grant_check(&s.entry, &grant_key("someone-else")).unwrap(), "a grant is one agent's");
+    assert!(s.state.identity_store.vault_grant_check(&s.entry, &grant_key(&s.auth.agent_id, "value")).unwrap());
+    assert!(!s.state.identity_store.vault_grant_check(&s.entry, &grant_key("someone-else", "value")).unwrap(), "a grant is one agent's");
     // No one answers now, and it still runs.
     let again = tokio::time::timeout(Duration::from_secs(5), run(&s, &wanted(&s), false)).await.expect("didn't wait for an answer");
     assert!(again.ok().flatten().is_some());
@@ -157,4 +157,35 @@ async fn nothing_given_is_nothing_injected() {
     let s = setup().await;
     assert!(inject(&s.state, &s.block, None, None, false, "x", "").await.ok().flatten().is_none());
     assert!(inject(&s.state, &s.block, None, Some(&HashMap::new()), false, "x", "").await.ok().flatten().is_none());
+}
+
+// A card's expiry is not its number: an Always for one part covers only that part, and
+// one question names every part the command asks for.
+#[tokio::test]
+async fn a_grant_is_for_one_part_and_the_question_names_every_part_asked_for() {
+    let s = setup().await;
+    let card = create(
+        &s.state.identity_store,
+        NewEntry {
+            kind: "card".into(),
+            label: format!("Visa {}", uuid::Uuid::new_v4().simple()),
+            fields: Default::default(),
+            tags: vec![],
+            parts: seal::Parts([("number".to_string(), "4111111111111111".to_string()), ("expiry".to_string(), "12/2030".to_string()), ("cvc".to_string(), "123456".to_string())].into()),
+        },
+    )
+    .unwrap();
+    let expiry_only = HashMap::from([("CARD_EXPIRY".to_string(), format!("{card}.expiry"))]);
+    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Always));
+    assert!(run(&s, &expiry_only, false).await.is_ok());
+    ask.await.unwrap();
+    assert!(s.state.identity_store.vault_grant_check(&card, &grant_key(&s.auth.agent_id, "expiry")).unwrap());
+    assert!(!s.state.identity_store.vault_grant_check(&card, &grant_key(&s.auth.agent_id, "number")).unwrap());
+
+    // Asking for the number as well asks again, naming what isn't yet allowed: the number, not the expiry.
+    let both = HashMap::from([("CARD_EXPIRY".to_string(), format!("{card}.expiry")), ("CARD_NUMBER".to_string(), format!("{card}.number"))]);
+    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Deny));
+    assert!(run(&s, &both, false).await.is_err());
+    let shown = ask.await.unwrap();
+    assert!(shown.field.contains("CARD_NUMBER (number)") && !shown.field.contains("CARD_EXPIRY"), "{}", shown.field);
 }

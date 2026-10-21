@@ -27,6 +27,13 @@ export function siteOf(origin: string): string {
 /** A grant for commands is stored as `command:<agent>`; a site's is its origin. */
 export const COMMAND_GRANT = "command:";
 
+/** `command:<agent>:<part>` as a person reads it: `Agent1 (value)`. */
+export function commandGrantLabel(grant: string): string {
+    const rest = grant.slice(COMMAND_GRANT.length);
+    const cut = rest.lastIndexOf(":");
+    return cut < 0 ? rest : `${rest.slice(0, cut)} (${rest.slice(cut + 1)})`;
+}
+
 export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Element {
     const u = props.use;
     const [error, setError] = createSignal<string | null>(null);

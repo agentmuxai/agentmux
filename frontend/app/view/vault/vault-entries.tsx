@@ -14,7 +14,7 @@ import { VaultEntryForm, type VaultFormTarget } from "./vault-entry-form";
 import { VaultRevealDialog } from "./vault-reveal";
 import { formatWhen } from "./vault-format";
 import { SECTION_LABELS, vaultKind } from "./vault-kinds";
-import { COMMAND_GRANT, siteOf } from "./vault-use-prompts";
+import { COMMAND_GRANT, commandGrantLabel, siteOf } from "./vault-use-prompts";
 import { deleteEntry, revokeGrant, vaultEntries, vaultLoading } from "./vault-store";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
@@ -128,10 +128,10 @@ export function VaultEntries(props: { section: VaultSection }): JSX.Element {
                                                 <For each={e.grants.filter((g) => g.startsWith(COMMAND_GRANT))}>
                                                     {(grant) => (
                                                         <span class="vault-grant" data-origin={grant}>
-                                                            {grant.slice(COMMAND_GRANT.length)}
+                                                            {commandGrantLabel(grant)}
                                                             <IconButton
                                                                 icon="xmark"
-                                                                label={`Stop ${grant.slice(COMMAND_GRANT.length)} running commands with ${e.label} without asking`}
+                                                                label={`Stop ${commandGrantLabel(grant)} running commands with ${e.label} without asking`}
                                                                 density="compact"
                                                                 onClick={() => void revoke(e.id, grant)}
                                                             />

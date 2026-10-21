@@ -28,9 +28,10 @@ const ANSWER_WAIT: Duration = Duration::from_secs(120);
 const MOST: usize = 16;
 
 /// The key a command grant is stored under, in the grants table that web forms
-/// use for sites: `command:<agent>` can't be a site's origin.
-pub(crate) fn grant_key(agent: &str) -> String {
-    format!("command:{agent}")
+/// use for sites: `command:<agent>:<part>` can't be a site's origin. It is for one
+/// part of an entry: a card's expiry is not its number.
+pub(crate) fn grant_key(agent: &str, part: &str) -> String {
+    format!("command:{agent}:{part}")
 }
 
 /// What the command is given and what to take out of its output.
@@ -106,33 +107,41 @@ pub(super) async fn inject(
         vault::record(&state.identity_store, &t.id, &t.label, &agent, "ran a command", &clip(cmd, 160), outcome);
     };
 
-    // One question per entry the agent hasn't been allowed to use in commands.
-    let key = grant_key(&agent);
+    // One question per entry, covering the parts of it the agent hasn't been allowed
+    // to use in commands: a grant is for one part (a card's expiry is not its number).
     let mut asked: Vec<&str> = Vec::new();
-    for (_, target) in &targets {
-        if asked.contains(&target.id.as_str()) {
+    for (_, first) in &targets {
+        if asked.contains(&first.id.as_str()) {
             continue;
         }
-        asked.push(&target.id);
-        let (store, id, key2) = (state.identity_store.clone(), target.id.clone(), key.clone());
-        let granted = tokio::task::spawn_blocking(move || store.vault_grant_check(&id, &key2).unwrap_or(false)).await.unwrap_or(false);
-        if granted {
+        asked.push(&first.id);
+        let mut waiting_on: Vec<(&str, &FillTarget)> = Vec::new();
+        for (name, t) in targets.iter().filter(|(_, t)| t.id == first.id) {
+            let (store, id, key) = (state.identity_store.clone(), t.id.clone(), grant_key(&agent, t.part));
+            let granted = tokio::task::spawn_blocking(move || store.vault_grant_check(&id, &key).unwrap_or(false)).await.unwrap_or(false);
+            if !granted {
+                waiting_on.push((name.as_str(), t));
+            }
+        }
+        if waiting_on.is_empty() {
             continue;
         }
         let use_id = uuid::Uuid::new_v4().to_string();
-        let given: Vec<&str> = targets.iter().filter(|(_, t)| t.id == target.id).map(|(n, _)| n.as_str()).collect();
+        let mut whats: Vec<&str> = waiting_on.iter().map(|(_, t)| t.what.as_str()).collect();
+        whats.dedup();
+        let what = whats.join(" and ");
         let request = UseRequest {
             id: use_id.clone(),
             agent: agent.clone(),
-            entry_id: target.id.clone(),
-            entry_label: target.label.clone(),
-            what: target.what.clone(),
+            entry_id: first.id.clone(),
+            entry_label: first.label.clone(),
+            what: what.clone(),
             origin: String::new(),
-            field: given.join(", "),
+            field: waiting_on.iter().map(|(n, t)| format!("{n} ({})", t.part)).collect::<Vec<_>>().join(", "),
             offer_always: true,
             reason: format!("it is the first time {agent} runs a command with this entry"),
             needs_value: false,
-            kind: target.kind.to_string(),
+            kind: first.kind.to_string(),
             command: clip(cmd, 500),
             cwd: clip(cwd, 300),
             requested_ms: agentmux_common::time::now_ms_u64(),
@@ -145,20 +154,22 @@ pub(super) async fn inject(
             &state.mstore,
             agent_block_id,
             "vault",
-            &format!("{agent} wants to run a command with your {}", target.what),
+            &format!("{agent} wants to run a command with your {what}"),
         );
         match tokio::time::timeout(ANSWER_WAIT, answer).await {
             Ok(Ok(a)) if a.decision == Decision::Once => {}
             Ok(Ok(a)) if a.decision == Decision::Always => {
-                let (store, id, key2, created) = (state.identity_store.clone(), target.id.clone(), key.clone(), target.created_at);
-                let _ = tokio::task::spawn_blocking(move || store.vault_grant_add(&id, &key2, agentmux_common::time::now_ms(), created)).await;
+                for (_, t) in &waiting_on {
+                    let (store, id, key, created) = (state.identity_store.clone(), t.id.clone(), grant_key(&agent, t.part), t.created_at);
+                    let _ = tokio::task::spawn_blocking(move || store.vault_grant_add(&id, &key, agentmux_common::time::now_ms(), created)).await;
+                }
             }
             Ok(_) => {
-                record(target, "denied");
+                record(first, "denied");
                 return Err(refuse(StatusCode::FORBIDDEN, "the person said no: the command did not run"));
             }
             Err(_) => {
-                record(target, "timed out");
+                record(first, "timed out");
                 return Err(refuse(StatusCode::REQUEST_TIMEOUT, "the person didn't answer in time: the command did not run; ask again when they are there"));
             }
         }
