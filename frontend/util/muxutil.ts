@@ -4,7 +4,37 @@
 
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { boundNumber, isBlank } from "@/util/util";
-import { generate as generateCSS, parse as parseCSS, walk as walkCSS } from "css-tree";
+import { createSignal } from "solid-js";
+
+// The CSS parser for a background with `url(...)`, loaded with the first such
+// background rather than at startup (SPEC_FRONTEND_BUNDLE_SPLITTING_2026_10_21.md §5).
+// The signals let a caller's memo compute the style again once it arrives, or
+// once a failed load may be tried again (after 2, 4, 8… seconds, at most 60
+// apart, for as long as a background waits for it).
+let cssTree: typeof import("css-tree") | null = null;
+let cssTreeLoading = false;
+let cssTreeFailures = 0;
+const CSS_TREE_RETRY_MAX_MS = 60_000;
+const [cssTreeLoaded, setCssTreeLoaded] = createSignal(false);
+const [cssTreeRetry, setCssTreeRetry] = createSignal(0);
+
+function loadCssTree(): void {
+    if (cssTreeLoading) return;
+    cssTreeLoading = true;
+    import("css-tree")
+        .then((m) => {
+            cssTree = m;
+            setCssTreeLoaded(true);
+        })
+        .catch((e) => {
+            cssTreeLoading = false;
+            console.error("error loading the background parser", e);
+            cssTreeFailures++;
+            // Waiting backgrounds read `cssTreeRetry`: their memos run again and load again.
+            const delay = Math.min(1000 * 2 ** cssTreeFailures, CSS_TREE_RETRY_MAX_MS);
+            setTimeout(() => setCssTreeRetry((n) => n + 1), delay);
+        });
+}
 
 function encodeFileURL(file: string) {
     const webEndpoint = getWebServerEndpoint();
@@ -23,10 +53,38 @@ function processBackgroundUrls(cssText: string): string {
     }
     const attrRe = /^background(-image)?\s*:\s*/i;
     cssText = cssText.replace(attrRe, "");
+    // Only a value that can load something (`url()`, `src()`, `image()`,
+    // `image-set()`) needs the parser to vet and rewrite it; anything else (a
+    // colour, a gradient) is used as written. A backslash always goes to the
+    // parser: CSS escapes can spell a function name (`\75rl(` is `url(`).
+    if (!cssText.includes("\\") && !/(url|src|image(-set)?)\s*\(/i.test(cssText)) {
+        return cssText;
+    }
+    if (!cssTreeLoaded() || cssTree == null) {
+        // No background until the parser arrives; the caller's memo runs again then.
+        cssTreeRetry();
+        loadCssTree();
+        return null;
+    }
+    const { generate: generateCSS, parse: parseCSS, walk: walkCSS } = cssTree;
     const ast = parseCSS("background: " + cssText, {
         context: "declaration",
     });
     let hasUnsafeUrl = false;
+    // What the parser couldn't read, or a name spelled with escapes, may be a
+    // function it didn't recognise as one: a browser decodes `\75rl(a.png)`
+    // to `url(a.png)`, which the parser leaves as raw text. Refuse those. A
+    // backslash inside a URL itself (a Windows path) is fine.
+    walkCSS(ast, (node) => {
+        const name = (node as { name?: string }).name;
+        if (node.type === "Raw" || (typeof name === "string" && name.includes("\\"))) {
+            hasUnsafeUrl = true;
+        }
+    });
+    if (hasUnsafeUrl) {
+        console.log("Invalid background, contains CSS the parser could not read or an escaped name");
+        return null;
+    }
     walkCSS(ast, {
         visit: "Url",
         enter(node) {

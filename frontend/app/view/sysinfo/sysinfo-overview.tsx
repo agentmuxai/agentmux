@@ -37,7 +37,7 @@ import {
     windowStats,
     type WindowStats,
 } from "./sysinfo-overview-data";
-import { TimeChart } from "./sysinfo-plot";
+import { TimeChart } from "./sysinfo-plot-lazy";
 import { type DataItem, DefaultPlotMeta } from "./sysinfo-types";
 
 const CPU = "var(--sysinfo-cpu-color)";

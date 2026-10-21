@@ -32,6 +32,8 @@ vi.mock("uplot", () => {
     return { default: FakeUPlot };
 });
 vi.mock("uplot/dist/uPlot.min.css", () => ({}));
+// The real charts, without the lazy load: these tests draw synchronously.
+vi.mock("./sysinfo-plot-lazy", () => import("./sysinfo-plot"));
 
 import { MeasureTable, Overview } from "./sysinfo-overview";
 import type { AreaChoice } from "./sysinfo-overview-data";

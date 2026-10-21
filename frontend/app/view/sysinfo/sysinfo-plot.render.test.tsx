@@ -48,7 +48,8 @@ vi.mock("uplot/dist/uPlot.min.css", () => ({}));
 
 import { markWindowThemeApplied } from "@/app/store/window-appearance";
 import { sampleReducer } from "./sysinfo-model";
-import { SingleLinePlot, SysinfoZoomContext } from "./sysinfo-plot";
+import { SingleLinePlot } from "./sysinfo-plot";
+import { SysinfoZoomContext } from "./sysinfo-zoom";
 import type { DataItem } from "./sysinfo-types";
 
 /** The size every chart is laid out at; a test can make it smaller. */

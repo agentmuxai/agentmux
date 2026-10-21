@@ -13,7 +13,6 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { viewerPairedAtom } from "@/store/global";
 import { writeText } from "@/util/clipboard";
-import QRCode from "qrcode";
 import { createEffect, createMemo, createSignal, on, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 
 type Pairing = { url: string; expiresMs: number };
@@ -35,6 +34,10 @@ export function PairDevicePanel(props: { lanDiscoveryEnabled: Accessor<boolean> 
     const [paired, setPaired] = createSignal<string | null>(null);
     const [now, setNow] = createSignal(Date.now());
     let canvas: HTMLCanvasElement | undefined;
+    // The QR library loads with the first code; if it can't, the panel says so
+    // and offers to try again (bumping `qrAttempt` re-runs the draw).
+    const [qrFailed, setQrFailed] = createSignal(false);
+    const [qrAttempt, setQrAttempt] = createSignal(0);
 
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     onCleanup(() => window.clearInterval(timer));
@@ -82,11 +85,25 @@ export function PairDevicePanel(props: { lanDiscoveryEnabled: Accessor<boolean> 
 
     createEffect(() => {
         const p = pairing();
+        qrAttempt();
         if (!p || !live() || !canvas) return;
-        QRCode.toCanvas(canvas, p.url, { width: 176, margin: 1 }, (err) => {
-            // Never log the URL: it carries the pairing code.
-            if (err) console.error("[PairDevicePanel] failed to render the pairing QR code:", err.message);
-        });
+        const target = canvas;
+        // Loaded when a code is first drawn, not at startup
+        // (SPEC_FRONTEND_BUNDLE_SPLITTING_2026_10_21.md §5).
+        import("qrcode")
+            .then(({ default: QRCode }) => {
+                // Pairing may have ended, or a new code replaced this one, meanwhile.
+                if (pairing() !== p || !live()) return;
+                setQrFailed(false);
+                QRCode.toCanvas(target, p.url, { width: 176, margin: 1 }, (err) => {
+                    // Never log the URL: it carries the pairing code.
+                    if (err) console.error("[PairDevicePanel] failed to render the pairing QR code:", err.message);
+                });
+            })
+            .catch((err) => {
+                console.error("[PairDevicePanel] failed to load the QR code library:", err?.message ?? err);
+                setQrFailed(true);
+            });
     });
 
     return (
@@ -154,6 +171,14 @@ export function PairDevicePanel(props: { lanDiscoveryEnabled: Accessor<boolean> 
                 >
                     <div class="status-bar-qr-panel">
                         <canvas ref={canvas} class="status-bar-qr-canvas" aria-label="Pairing QR code" />
+                        <Show when={qrFailed()}>
+                            <div class="status-bar-pair-note status-bar-pair-note--warn" role="alert">
+                                ⚠ The QR code couldn't be drawn. Copy link still works.{" "}
+                                <Button density="compact" onClick={() => setQrAttempt((n) => n + 1)}>
+                                    Try again
+                                </Button>
+                            </div>
+                        </Show>
                         <div class="status-bar-qr-note" data-testid="pair-countdown">
                             Scan with AgentMux Mobile. Works once, for {left()}.
                         </div>

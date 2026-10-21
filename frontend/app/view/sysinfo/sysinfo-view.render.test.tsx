@@ -20,10 +20,7 @@ vi.mock("@/app/store/mps", () => ({
 }));
 vi.mock("@/app/store/pane-content-holds", () => ({ holdPaneContent: () => () => {}, trackPaneContent: () => () => {} }));
 vi.mock("@/app/platform/window-resize", () => ({ windowResizing: () => false }));
-vi.mock("./sysinfo-plot", async () => {
-    const { createContext } = await import("solid-js");
-    return { SingleLinePlot: () => null, SysinfoZoomContext: createContext<() => number>(() => 1) };
-});
+vi.mock("./sysinfo-plot-lazy", () => ({ SingleLinePlot: () => null }));
 vi.mock("./sysinfo-overview", () => ({
     Overview: (props: any) => {
         seen.overview.push(props);

@@ -29,7 +29,7 @@ import {
     withBusiestCore,
 } from "./sysinfo-overview-data";
 import { createAxisColumns } from "./sysinfo-layout";
-import { TimeChart } from "./sysinfo-plot";
+import { TimeChart } from "./sysinfo-plot-lazy";
 import { type DataItem, DefaultPlotMeta } from "./sysinfo-types";
 
 const CPU = "var(--sysinfo-cpu-color)";
