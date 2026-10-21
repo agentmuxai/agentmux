@@ -334,13 +334,14 @@ async function answer(host: BridgeHost, state: BridgeState, method: string, para
         case "panes.open": {
             if (!str(p.view, 200)) return fail(ERR.INVALID_PARAMS, "panes.open needs { view }");
             const split = p.split === "down" || p.split === "tab" ? p.split : "right";
-            if (isObj(p.meta) && new TextEncoder().encode(JSON.stringify(p.meta)).length > META_LIMIT_BYTES) {
-                return fail(ERR.LIMIT_EXCEEDED, "a pane's widget meta is limited to 64 KB", { limit: "meta" });
-            }
             if (isObj(p.meta) && pkg.panes.some((pane) => pane.view === p.view) && Object.keys(p.meta).some((k) => !k || k.length > 200)) {
                 return fail(ERR.INVALID_PARAMS, "meta keys are non-empty strings");
             }
+            // Measured after filtering: a key another view drops doesn't count.
             const meta = paneMetaForWidget(pkg, p.view, isObj(p.meta) ? p.meta : {});
+            if (new TextEncoder().encode(JSON.stringify(meta)).length > META_LIMIT_BYTES) {
+                return fail(ERR.LIMIT_EXCEEDED, "a pane's widget meta is limited to 64 KB", { limit: "meta" });
+            }
             if (!host.openPane) return fail(ERR.UNAVAILABLE, "this AgentMux can't open panes from widgets");
             return ok({ pane: await host.openPane(p.view, meta, split) });
         }

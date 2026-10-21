@@ -208,6 +208,9 @@ describe("permissions", () => {
         expect(h.openPane).toHaveBeenLastCalledWith("memory", {}, "right");
         await handleBridgeRequest(h, state, "panes.open", { view: "browser", meta: { url: "https://example.com/a" } });
         expect(h.openPane).toHaveBeenLastCalledWith("browser", { url: "https://example.com/a" }, "right");
+        // A large key that is dropped doesn't count against the 64 KB.
+        await handleBridgeRequest(h, state, "panes.open", { view: "browser", meta: { url: "https://example.com/b", state: "x".repeat(70 * 1024) } });
+        expect(h.openPane).toHaveBeenLastCalledWith("browser", { url: "https://example.com/b" }, "right");
         for (const url of ["file:///C:/Windows/win.ini", "javascript:alert(1)", "agentmux://x", 7]) {
             await handleBridgeRequest(h, state, "panes.open", { view: "browser", meta: { url } });
             expect(h.openPane).toHaveBeenLastCalledWith("browser", {}, "right");
