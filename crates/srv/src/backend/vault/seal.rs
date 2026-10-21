@@ -86,7 +86,7 @@ pub fn key(create: bool) -> Result<Key, String> {
 /// Vault: a new key would not open the entries the old one sealed.
 fn explain_key_error(err: &str) -> String {
     if secret_store::is_needs_consent(err) {
-        "the Vault key was saved by another AgentMux build (a development or unsigned one), which macOS won't let this build read without          asking: open the Vault from the build that created it, normally the installed, signed AgentMux. Nothing was changed, and the          entries are safe."
+        "the Vault key was saved by another AgentMux build (a development or unsigned one), which macOS won't let this build read without asking: open the Vault from the build that created it, normally the installed, signed AgentMux. Nothing was changed, and the entries are safe."
             .to_string()
     } else {
         err.to_string()
@@ -171,6 +171,7 @@ mod tests {
     fn a_keychain_that_wont_let_this_build_read_the_key_says_so_in_the_vaults_terms() {
         let said = explain_key_error(secret_store::NEEDS_CONSENT);
         assert!(said.contains("another AgentMux build") && said.contains("entries are safe"), "{said}");
+        assert!(!said.contains("  "), "single spaces only: {said}");
         // Not the generic advice to save it again: a new key would not open the old entries.
         assert!(!said.contains("save it again") && !said.contains("re-enter"), "{said}");
         assert_eq!(explain_key_error("keychain: locked"), "keychain: locked");
