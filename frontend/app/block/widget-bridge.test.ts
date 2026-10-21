@@ -221,6 +221,12 @@ describe("permissions", () => {
         expect(h.openPane).toHaveBeenLastCalledWith("ext:acme.notes/list", { "widget:acme.notes:filter": "open", "widget:acme.notes:controller": "cmd" }, "down");
         const big = errorOf(await handleBridgeRequest(h, state, "panes.open", { view: "ext:acme.notes/list", meta: { text: "x".repeat(70 * 1024) } }));
         expect(big.code).toBe(ERR.LIMIT_EXCEEDED);
+        expect(big.data).toEqual({ limit: "meta" });
+        // The keys meta.set accepts, so the pane can change or delete each one later.
+        for (const key of ["", "k".repeat(201)]) {
+            const bad = errorOf(await handleBridgeRequest(h, state, "panes.open", { view: "ext:acme.notes/list", meta: { [key]: 1 } }));
+            expect(bad.code).toBe(ERR.INVALID_PARAMS);
+        }
         // Bytes, as meta.set counts them: 30,000 three-byte characters are 90 KB.
         const wide = errorOf(await handleBridgeRequest(h, state, "panes.open", { view: "ext:acme.notes/list", meta: { text: "€".repeat(30_000) } }));
         expect(wide.code).toBe(ERR.LIMIT_EXCEEDED);
