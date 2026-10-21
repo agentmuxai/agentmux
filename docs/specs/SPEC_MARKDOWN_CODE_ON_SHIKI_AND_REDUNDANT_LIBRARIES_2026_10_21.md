@@ -1,6 +1,6 @@
 # Spec: code in markdown on shiki, and the frontend libraries we can drop
 
-**Status:** active — §4 (markdown code on shiki) in #5289; the removals in §6.2 follow in a second PR.
+**Status:** active — §4 (markdown code on shiki) in #5289; the removals in §6.2 in #5291. Remaining: §6.3's `overlayscrollbars`, a separate decision.
 **Date:** 2026-10-21
 **Author:** AgentA@Area54, at the operator's request
 **Verified against:** `agentmux` `main` @ `61479f0a2` (2026-10-21), by reading code.
@@ -94,14 +94,14 @@ Every runtime dependency in `package.json` was traced to its import sites under 
 | `tailwind-merge` | Only `cn = twMerge(clsx(…))` in `util/util.ts`, 8 calls; two of them rely on its merging | `cn` becomes `clsx`; the two conflicts (a table cell's alignment, the table copy button's copied state) become explicit conditionals | 26.9 KB |
 | `html-to-image` | One use: the drag preview in `TileLayout.core.tsx`, already async | Stays a dependency, loaded with `import()` on first drag | 12.9 KB off startup |
 | `rxjs` | One `Subject` (`store/mps.ts`) with `next`, `subscribe`/`unsubscribe` and `complete` | A 20-line emitter with the same four methods | 8.1 KB (9 MB installed) |
-| `debug` | About 18 calls in 4 files (`app.tsx`, `rpc-router.ts`, `ws.ts`, `termwrap.ts`), next to our own `Logger` | `Logger.debug` | 6 KB |
-| `colord` | One call: `colord(hex).alpha(a).toHex()` in `termutil.ts` | A small function that applies alpha to every colour form a terminal theme can use (checked against the themes) | 5.8 KB |
+| `debug` | About 18 calls in 4 files (`app.tsx`, `rpc-router.ts`, `ws.ts`, `termwrap.ts`) | `debugLog` (`util/debuglog.ts`): off unless `localStorage.debug` names the namespace, the same switch. Not `Logger.debug`, which always prints and sends every line to the host log, and these come once per RPC message or focus change | 6 KB |
+| `colord` | One call: `colord(c).alpha(a).toHex()` in `termutil.ts` | `applyTransparencyToColor` reads hex and `rgb()` itself and anything else through a canvas, then sets the alpha as colord did. Tested against colord's own outputs. One difference: a colour it can't read is returned as it is, where colord gave semi-transparent black | 5.8 KB |
 | `sprintf-js` | One call: `sprintf("sleeping %ds", timeout)` | A template literal | 3.3 KB |
 | `base64-js` | One call, `fromByteArray`, in `stringToBase64` | `btoa` over the bytes (the neighbouring decode already uses `atob`) | 1.4 KB |
 
 Also: `frontend/util/wsutil.ts` imports the Node `ws` package in a branch that never runs in the app (`typeof window === "undefined"`). The branch goes; `ws` stays a dev dependency for scripts.
 
-Together that is about 65 KB minified off the startup chunk and six fewer packages to keep current. Their `@types/*` packages go with them.
+Their `@types/*` packages go with them. Measured: the startup chunk went from 3,183,510 to 3,131,513 bytes before #5289 (−52 KB); with #5289, about 2.97 MB.
 
 ### 6.3 What stays, and why
 

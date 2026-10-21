@@ -19,7 +19,7 @@ import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { WebglAddon } from "@xterm/addon-webgl";
 import * as TermTypes from "@xterm/xterm";
 import { Terminal } from "@xterm/xterm";
-import debug from "debug";
+import { debugLog } from "@/util/debuglog";
 import { debounce, throttle } from "throttle-debounce";
 import { LARGE_BUFFER_COLS_THROTTLE_MS, liveRefit, liveRefits, PTY_RESIZE_DEBOUNCE_MS } from "./term-resize-policy";
 import { FilePathLinkProvider, makeFilePathHandler } from "./filelinkprovider";
@@ -34,7 +34,7 @@ import { paintRows, resizeAndPaint } from "./term-paint";
 import { claimTermRenderer, forgetTermRenderer, setTermRendererOf } from "@/app/store/term-renderer";
 import type { WSFileEventData } from "@/types/rpc/WSFileEventData";
 
-const dlog = debug("wave:termwrap");
+const dlog = debugLog("wave:termwrap");
 
 const TermFileName = "term";
 const TermCacheFileName = "cache:term:full";

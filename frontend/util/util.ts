@@ -2,10 +2,8 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0s
 
-import base64 from "base64-js";
 import clsx, { type ClassValue } from "clsx";
 import { createSignal } from "solid-js";
-import { twMerge } from "tailwind-merge";
 import { throttle } from "throttle-debounce";
 const prevValueCache = new WeakMap<any, any>(); // stores a previous value for a deep equal comparison (used with the deepCompareReturnPrev function)
 
@@ -14,8 +12,14 @@ function isBlank(str: string): boolean {
 }
 
 function stringToBase64(input: string): string {
-    const stringBytes = new TextEncoder().encode(input);
-    return base64.fromByteArray(stringBytes);
+    const bytes = new TextEncoder().encode(input);
+    // btoa takes a "binary string": one char per byte. In chunks, so a large
+    // input doesn't exceed the argument limit of String.fromCharCode.
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(binary);
 }
 
 function base64ToArray(b64: string): Uint8Array<ArrayBuffer> {
@@ -188,8 +192,10 @@ function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Joins class names (clsx). It no longer resolves conflicting Tailwind classes:
+ *  a caller that switches between them says so with a conditional. */
 function cn(...inputs: ClassValue[]) {
-    return twMerge(clsx(inputs));
+    return clsx(inputs);
 }
 
 export {

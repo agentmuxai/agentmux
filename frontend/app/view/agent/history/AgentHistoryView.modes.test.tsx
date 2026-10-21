@@ -9,7 +9,7 @@
  */
 
 import { cleanup, render, screen } from "@solidjs/testing-library";
-import { Subject } from "rxjs";
+import { Emitter } from "@/util/emitter";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DocumentNode } from "../types";
 import type { HistoryNavigatorProps } from "./HistoryNavigator";
@@ -47,7 +47,7 @@ vi.mock("@/app/store/rpc-api", () => ({
     },
 }));
 
-const subject = new Subject<unknown>();
+const subject = new Emitter<unknown>();
 vi.mock("@/app/store/mps", () => ({
     getFileSubject: () => Object.assign(subject, { release: () => {} }),
 }));

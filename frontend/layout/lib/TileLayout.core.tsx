@@ -27,7 +27,6 @@ import { DURATION_BASE_MS, DURATION_QUICK_MS, EASE_OUT } from "@/app/motion/toke
 import { gatingNodeIds } from "@/app/store/tab-reveal";
 import { draggable } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import clsx from "clsx";
-import { toPng } from "html-to-image";
 import { createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 import { onWindowDrag } from "@/app/drag/window-drag-events";
@@ -383,7 +382,8 @@ export function createTileLayout(platform: TileLayoutPlatform) {
             } else if (previewRef) {
                 setPreviewImageGeneration(prevElGen);
                 const seq = ++previewRequestSeq;
-                toPng(previewRef).then((url) => {
+                // Loaded with the first drag preview, not at startup.
+                import("html-to-image").then(({ toPng }) => toPng(previewRef)).then((url) => {
                     // A newer rasterisation was requested while this one was in
                     // flight — it measured the pane more recently, so drop this
                     // result rather than clobbering it.

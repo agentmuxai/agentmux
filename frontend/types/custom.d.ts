@@ -9,7 +9,6 @@ import type { HealthPayload } from "@/app/store/health-signals";
 import type { NodeModel } from "@/layout/index";
 import type { SignalAtom } from "@/util/util";
 import type { Placement } from "@floating-ui/dom";
-import type * as rxjs from "rxjs";
 import type { Accessor, JSX } from "solid-js";
 
 declare global {
@@ -683,7 +682,7 @@ declare global {
         keyType: string;
     };
 
-    type SubjectWithRef<T> = rxjs.Subject<T> & { refCount: number; release: () => void };
+    type SubjectWithRef<T> = import("@/util/emitter").Emitter<T> & { refCount: number; release: () => void };
 
     type HeaderElem =
         | IconButtonDecl
