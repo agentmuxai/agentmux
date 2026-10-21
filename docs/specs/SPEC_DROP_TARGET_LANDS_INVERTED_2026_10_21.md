@@ -1,6 +1,6 @@
 # Spec: The drop target lands inverted — a pane tab dragged over another pane's tab bar flashes once and then stays in the negative until the drag ends
 
-**Status:** active. Written together with its implementation (PR to follow). Left: the operator's check in `task dev` (§7), and the decision whether the Window Tab bar and the document tabs get the same treatment (§6).
+**Status:** active. Shipped in #5270 (the change and its test). Left: the operator's check in `task dev` (§7), and the decision whether the Window Tab bar and the document tabs get the same treatment (§6).
 **Date:** 2026-10-21
 **Author:** Lazo
 **Verified against:** `agentmux` `main` @ `afd0387db` (2026-10-21), by reading the stylesheets and the code that applies the class.
