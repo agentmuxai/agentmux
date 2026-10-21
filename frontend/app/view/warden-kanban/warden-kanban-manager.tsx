@@ -263,6 +263,7 @@ export const WardenKanbanManager = (props: {
                         now={now()}
                         onClose={() => setOpenId(null)}
                         onOpenAgent={openAgent}
+                        onOpenTask={(id) => setOpenId(id)}
                     />
                 )}
             </Show>

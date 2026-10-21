@@ -133,6 +133,18 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let body: Value = resp.json().await.map_err(|e| anyhow::anyhow!("find: bad response: {e}"))?;
             Ok(find_report(&query, body.get("data").unwrap_or(&Value::Null)))
         }
+        // `request_value`: no Vault entry holds it yet, so the person types it in a
+        // prompt and may keep it in the Vault.
+        "BrowserRequestValue" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let auth = sign_ui_automation_auth()?;
+            let get = |k: &str| arguments.get(k).and_then(|v| v.as_str()).map(str::trim).unwrap_or("").to_string();
+            let (r, kind, label) = (get("ref"), get("kind"), get("label"));
+            if r.is_empty() || kind.is_empty() || label.is_empty() {
+                anyhow::bail!("request_value needs ref, kind (e.g. ssn) and label (what the value is, e.g. \"Alex's SSN\")");
+            }
+            vault_fill(cx, auth, pane_arg(arguments), &r, VaultSource::Typed { kind: &kind, label: &label }).await
+        }
         "BrowserClick" | "BrowserFill" | "BrowserSelect" | "BrowserCheck" => {
             require_agent_env(local_url, auth_key, block_id)?;
             let auth = sign_ui_automation_auth()?;
@@ -153,7 +165,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 if action != "fill" || text.is_some() {
                     anyhow::bail!("vault is for fill, and instead of text: give one or the other");
                 }
-                return vault_fill(cx, auth, pane_arg(arguments), &r, &vault).await;
+                return vault_fill(cx, auth, pane_arg(arguments), &r, VaultSource::Entry(&vault)).await;
             }
             let option = arguments.get("option").and_then(|v| v.as_str()).map(str::to_string);
             let checked = arguments.get("checked").and_then(|v| v.as_bool());
@@ -798,19 +810,35 @@ fn act_result_text(name: &str, r: &str, body: &serde_json::Value) -> String {
 /// `fill` with `vault`: srv asks the person where the entry may go, then the host
 /// types it. Waits as long as a committing click does for the person's answer.
 /// What comes back says the field was filled, never what it holds.
+/// Where a Vault fill's value comes from.
+enum VaultSource<'a> {
+    /// An entry, by id (or `id.part`).
+    Entry(&'a str),
+    /// Nothing stored: the person types it.
+    Typed { kind: &'a str, label: &'a str },
+}
+
 async fn vault_fill(
     cx: &ToolCtx<'_>,
     auth: agentmux_common::api_types::UiAutomationAuth,
     pane: Option<String>,
     r: &str,
-    vault: &str,
+    source: VaultSource<'_>,
 ) -> Result<String> {
+    let what = match &source {
+        VaultSource::Entry(_) => "from the Vault",
+        VaultSource::Typed { .. } => "with a value the person types",
+    };
+    let body = match source {
+        VaultSource::Entry(v) => json!({ "auth": auth, "pane": pane, "ref": r, "vault": v }),
+        VaultSource::Typed { kind, label } => json!({ "auth": auth, "pane": pane, "ref": r, "request_kind": kind, "request_label": label }),
+    };
     let url = format!("{}/api/v1/ui/browser/vault_fill", cx.local_url.trim_end_matches('/'));
     let resp = cx
         .client
         .post(&url)
         .header(AUTH_KEY_HEADER, cx.auth_key)
-        .json(&json!({ "auth": auth, "pane": pane, "ref": r, "vault": vault }))
+        .json(&body)
         .timeout(std::time::Duration::from_secs(11 * 60))
         .send()
         .await
@@ -819,7 +847,7 @@ async fn vault_fill(
     let text = resp.text().await.unwrap_or_default();
     if !status.is_success() {
         let why = serde_json::from_str::<Value>(&text).ok().and_then(|v| v.get("error").and_then(Value::as_str).map(str::to_string)).unwrap_or(text);
-        anyhow::bail!("BrowserFill {r} from the Vault: {why}");
+        anyhow::bail!("BrowserFill {r} {what}: {why}");
     }
     let body: Value = serde_json::from_str(&text).map_err(|e| anyhow::anyhow!("BrowserFill: bad response: {e}"))?;
     Ok(vault_fill_text(r, &body))
@@ -828,12 +856,25 @@ async fn vault_fill(
 /// The agent's answer to a Vault fill: where it went, and anything the page said.
 fn vault_fill_text(r: &str, body: &Value) -> String {
     let d = |k: &str| body.pointer(&format!("/data/{k}")).and_then(Value::as_str).unwrap_or("");
-    let mut out = format!(
-        "BrowserFill {r}: filled from the Vault entry {} (the value stays hidden: it is not shown to you, in snapshots or in read-backs) on {}, field {:?}.",
-        d("filled_from_vault"),
-        d("site"),
-        d("field")
-    );
+    let flag = |k: &str| body.pointer(&format!("/data/{k}")).and_then(Value::as_bool).unwrap_or(false);
+    let mut out = if flag("typed_by_the_person") {
+        let kept = if flag("kept_in_vault") { format!("they kept it in the Vault as {}", d("filled_from_vault")) } else { "they didn't keep it".to_string() };
+        format!(
+            "BrowserRequestValue {r}: the person typed the value and it was filled (it is not shown to you, in snapshots or in read-backs) on {}, field {:?}; {kept}.",
+            d("site"),
+            d("field")
+        )
+    } else {
+        format!(
+            "BrowserFill {r}: filled from the Vault entry {} (the value stays hidden: it is not shown to you, in snapshots or in read-backs) on {}, field {:?}.",
+            d("filled_from_vault"),
+            d("site"),
+            d("field")
+        )
+    };
+    if !d("kept_note").is_empty() {
+        out.push_str(&format!(" Note: {}.", d("kept_note")));
+    }
     if !d("validation").is_empty() {
         out.push_str(&format!(" The page says: {}", d("validation")));
     }
@@ -870,6 +911,24 @@ mod tests {
         assert!(said.contains("ssn-alex") && said.contains("https://irs.gov") && said.contains("Social Security Number"), "{said}");
         assert!(said.contains("Enter 9 digits") && said.contains("shortened or reformatted"), "{said}");
         assert!(!said.contains("123-45"), "{said}");
+    }
+
+    #[test]
+    fn a_typed_value_answer_says_who_typed_it_and_whether_it_was_kept() {
+        let kept = serde_json::json!({ "ok": true, "data": { "filled_from_vault": "ssn-sam-s-ssn", "typed_by_the_person": true, "kept_in_vault": true, "site": "https://irs.gov", "field": "SSN", "value": "[secret: hidden]" } });
+        let said = vault_fill_text("e7", &kept);
+        assert!(said.contains("the person typed the value") && said.contains("kept it in the Vault as ssn-sam-s-ssn"), "{said}");
+        let dropped = serde_json::json!({ "ok": true, "data": { "typed_by_the_person": true, "kept_in_vault": false, "site": "https://irs.gov", "field": "SSN" } });
+        assert!(vault_fill_text("e7", &dropped).contains("they didn't keep it"));
+    }
+
+    #[test]
+    fn the_browser_tool_offers_request_value_with_its_kind_and_label() {
+        let schema: Value = serde_json::from_str(crate::tool_schemas::BROWSER_TOOL).unwrap();
+        let actions = schema["inputSchema"]["properties"]["action"]["enum"].as_array().unwrap();
+        assert!(actions.iter().any(|a| a == "request_value"));
+        assert!(schema["inputSchema"]["properties"]["kind"]["description"].as_str().unwrap().contains("request_value"));
+        assert!(schema["inputSchema"]["properties"]["label"]["description"].as_str().unwrap().contains("request_value"));
     }
 
     #[test]

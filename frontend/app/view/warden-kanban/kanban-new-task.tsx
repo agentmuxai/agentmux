@@ -8,6 +8,7 @@ import { createSignal, type JSX } from "solid-js";
 
 import { Button, Select, Switch, TextInput } from "@/app/element/ui";
 
+import { parseAfter } from "./kanban-columns";
 import type { KanbanModel } from "./kanban-model";
 import type { KanbanAgent } from "./kanban-types";
 
@@ -16,6 +17,7 @@ export function KanbanNewTask(props: { model: KanbanModel; agents: KanbanAgent[]
     const [payload, setPayload] = createSignal("");
     const [agent, setAgent] = createSignal("");
     const [hold, setHold] = createSignal(false);
+    const [after, setAfter] = createSignal("");
     const [busy, setBusy] = createSignal(false);
 
     const submit = async (e?: Event) => {
@@ -28,6 +30,7 @@ export function KanbanNewTask(props: { model: KanbanModel; agents: KanbanAgent[]
             payload: payload().trim() || undefined,
             agent: agent() || undefined,
             hold: hold() || undefined,
+            after: parseAfter(after()).length ? parseAfter(after()) : undefined,
         });
         setBusy(false);
         if (res) props.onDone();
@@ -52,18 +55,35 @@ export function KanbanNewTask(props: { model: KanbanModel; agents: KanbanAgent[]
                 onInput={(e) => setPayload(e.currentTarget.value)}
             />
             <div class="kanban-drawer__row">
+                <TextInput
+                    density="compact"
+                    placeholder="Starts after (#12)"
+                    aria-label="Task numbers it starts after"
+                    value={after()}
+                    onInput={(e) => setAfter(e.currentTarget.value)}
+                />
                 <Select
                     density="compact"
                     ariaLabel="Who it is for"
                     value={agent()}
                     onChange={setAgent}
-                    options={[{ value: "", label: "For anyone" }, ...props.agents.map((a) => ({ value: a.name, label: `For ${a.name}` }))]}
+                    options={[
+                        { value: "", label: "For anyone" },
+                        ...props.agents.map((a) => ({ value: a.name, label: `For ${a.name}` })),
+                    ]}
                 />
                 <label class="kanban-new__hold">
                     <Switch checked={hold()} onChange={setHold} density="compact" ariaLabel="On hold" />
                     On hold
                 </label>
-                <Button type="submit" density="compact" tone="accent" icon="plus" busy={busy()} disabled={!title().trim()}>
+                <Button
+                    type="submit"
+                    density="compact"
+                    tone="accent"
+                    icon="plus"
+                    busy={busy()}
+                    disabled={!title().trim()}
+                >
                     Add task
                 </Button>
                 <Button density="compact" tone="quiet" onClick={props.onDone}>

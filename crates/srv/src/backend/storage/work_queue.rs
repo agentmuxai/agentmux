@@ -220,23 +220,7 @@ impl Store {
     /// (re-enqueueing the same id is a conflict, not a duplicate).
     pub fn work_queue_enqueue(&self, item: &WorkItem) -> Result<(), StoreError> {
         let conn = self.conn().lock().unwrap();
-        conn.execute(
-            "INSERT INTO db_work_queue
-                (id, title, payload, kind, target_agent, target_group, priority, state,
-                 claimed_by, claim_expires, attempts, max_attempts, created_by,
-                 created_at, updated_at, not_before, result,
-                 target_agent_uid, claimed_by_uid, created_by_uid)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,'',?19)",
-            params![
-                item.id, item.title, item.payload, item.kind, item.target_agent,
-                item.target_group, item.priority,
-                if item.state == work_state::HELD { work_state::HELD } else { work_state::OPEN }, "",
-                None::<i64>, 0i64, if item.max_attempts > 0 { item.max_attempts } else { 3 },
-                item.created_by, item.created_at, item.updated_at, item.not_before, "",
-                item.target_agent_uid, item.created_by_uid,
-            ],
-        )?;
-        Ok(())
+        insert_item(&conn, item)
     }
 
     /// Atomically claim the highest-priority eligible item, or `None` when
@@ -303,6 +287,9 @@ impl Store {
                                 AND (target_agent = '' OR target_agent = ?1)))
                        AND (target_group = ''{groups})
                        AND (?4 = '' OR kind = ?4)
+                       -- Kanban §6.15: not while a task it starts after
+                       -- is unfinished.
+                       AND NOT {waits}
                      -- Kanban §6.5: an agent's own tasks (the requests it
                      -- filed for later, or the operator gave it) before
                      -- anyone's; then priority; then the operator's order in
@@ -316,6 +303,7 @@ impl Store {
             claimed = work_state::CLAIMED,
             open = work_state::OPEN,
             groups = group_placeholders,
+            waits = super::work_deps::WAITS_ON_UNFINISHED,
             cols = COLS,
         );
 
@@ -554,6 +542,28 @@ impl Store {
         }
         Ok(out)
     }
+}
+
+/// Insert a new task's row: `open`, or `held` when filed on hold. Also used
+/// inside the dependency transaction (`work_deps::work_queue_enqueue_after`).
+pub(crate) fn insert_item(conn: &rusqlite::Connection, item: &WorkItem) -> Result<(), StoreError> {
+    conn.execute(
+        "INSERT INTO db_work_queue
+            (id, title, payload, kind, target_agent, target_group, priority, state,
+             claimed_by, claim_expires, attempts, max_attempts, created_by,
+             created_at, updated_at, not_before, result,
+             target_agent_uid, claimed_by_uid, created_by_uid)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,'',?19)",
+        params![
+            item.id, item.title, item.payload, item.kind, item.target_agent,
+            item.target_group, item.priority,
+            if item.state == work_state::HELD { work_state::HELD } else { work_state::OPEN }, "",
+            None::<i64>, 0i64, if item.max_attempts > 0 { item.max_attempts } else { 3 },
+            item.created_by, item.created_at, item.updated_at, item.not_before, "",
+            item.target_agent_uid, item.created_by_uid,
+        ],
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]

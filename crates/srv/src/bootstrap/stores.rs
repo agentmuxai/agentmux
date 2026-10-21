@@ -125,105 +125,28 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // Open databases
     let db_dir = base::get_mux_db_dir();
 
-    // Pre-migration snapshot (Increment B.2 lean cut from
-    // SPEC_DATA_CHANNELS §3.4). Run BEFORE Store::open AND before
-    // count_pending_migrations/run_pending_migrations — both open
-    // objects.db via Store::open which runs DDL/schema setup, mutating
-    // the file. The snapshot must capture the pre-DDL state so it is a
-    // valid rollback aid for a buggy forward migration.
-    //
-    // Failures are logged and ignored — refusing to boot when the
-    // snapshot can't be written would be worse than booting without a
-    // backup (the safety lock still prevents downgrade corruption).
-    let channel = std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string());
     let code_version = std::env::var("AGENTMUX_VERSION")
         .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string());
-    // Snapshots live in this version's own data directory, `<data>/snapshots/`:
-    // `get_mux_data_dir()` answers with the data directory once
-    // AGENTMUX_DATA_HOME is set above (#3372). They sit beside the databases
-    // they copy, and pruning keeps 5 there. AGENTMUX_HOME_OVERRIDE wins in
-    // tests. (Before #3372 they went to `~/.agentmux/snapshots/`; older
-    // snapshots stay there.)
-    let snapshots_dir = std::env::var_os("AGENTMUX_HOME_OVERRIDE")
-        .filter(|s| !s.is_empty())
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(base::get_mux_data_dir)
-        .join("snapshots");
-    // A new version's first start begins from the previous version's data,
-    // then migrates it like any upgrade (carry_forward.rs). No snapshot after
-    // a copy-forward: the previous version's folder is that data, untouched.
-    let carried = super::carry_forward::from_previous_version(&db_dir, &code_version).is_some();
-    let snapshot = if carried {
-        Ok(None)
+    // Under a supervisor that prepares data (the launcher sets
+    // AGENTMUX_SUPERVISOR_PREPARES=1), srv never copies, snapshots or migrates
+    // at boot (SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15
+    // §10, S1c). A read-only check runs before anything writes the stores; if
+    // the data needs preparing, srv says why and exits, and the launcher runs
+    // `migrate --prepare` and starts it again. Elsewhere (headless srv,
+    // `task dev:standalone`) srv still prepares in-process.
+    let supervised =
+        std::env::var(agentmux_common::srv_stderr::SUPERVISOR_PREPARES_ENV).as_deref() == Ok("1");
+    if supervised {
+        if let Some(reason) = crate::boot_timing::time("data_gate", || migrations::data_needs_preparing(&mux_data_dir, &code_version)) {
+            tracing::info!("startup: data needs preparing, exiting for the launcher: {reason}");
+            eprintln!("{}", agentmux_common::srv_stderr::needs_prepare_line(&reason));
+            std::process::exit(agentmux_common::srv_stderr::NEEDS_PREPARE_EXIT);
+        }
     } else {
-        maybe_snapshot_pre_migration(&db_dir, &snapshots_dir, &channel, &code_version, OBJECT_SCHEMA_VERSION)
-    };
-    match snapshot {
-        Ok(Some(path)) => tracing::info!(snapshot = %path.display(), "pre-migration snapshot written"),
-        Ok(None) => {}
-        Err(e) => tracing::warn!("pre-migration snapshot failed (continuing without backup): {}", e),
+        prepare_in_process(&mux_data_dir, &db_dir, &code_version);
     }
 
-    // Run in-process migrations AFTER snapshot so the rollback aid captures
-    // the pre-DDL state. count_pending_migrations emits AGENTMUXSRV-MIGRATING
-    // first so the launcher/sidecar extend their ESTART deadline before the
-    // (potentially slow) migration work begins.
-    // Strict check, lenient reaction: this line only sizes the supervisors'
-    // ESTART deadline, and the migration batch runs unconditionally right
-    // below, so an unreadable store costs nothing here beyond a less precise
-    // hint — `readable_pending()` reproduces exactly the number this call
-    // site used before. It is logged rather than swallowed because the same
-    // question becomes a real decision point once the boot gate lands:
-    // `SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md`
-    // invariant S1b requires that gate to fail closed, and a store that
-    // cannot be read here is precisely the case it must catch.
-    let pre_migration_count = match migrations::try_count_pending_migrations(&mux_data_dir) {
-        Ok(n) => n,
-        Err(e) => {
-            let fallback = e.readable_pending();
-            // Distinguished because they mean different things to whoever
-            // reads the log: one store was readable and the count is
-            // partial, versus nothing was readable and the count is a
-            // placeholder.
-            match &e {
-                migrations::PendingCountError::ChannelStoreUnreadable { .. } => tracing::warn!(
-                    "startup: channel-scoped migrations could not be counted: {} — sizing the ESTART deadline with {} global",
-                    e,
-                    fallback
-                ),
-                _ => tracing::warn!(
-                    "startup: no pending-migration count available: {} — sizing the ESTART deadline as if none were pending",
-                    e
-                ),
-            }
-            fallback
-        }
-    };
-    if pre_migration_count > 0 {
-        eprintln!("{}", agentmux_common::srv_stderr::migrating_line("migrations", pre_migration_count));
-    }
-    match migrations::run_pending_migrations(&mux_data_dir) {
-        Ok(0) => {}
-        Ok(n) => tracing::info!(applied = n, "startup: applied pending migrations"),
-        Err(e) => {
-            // SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03 Phase 1 (F4): a failed
-            // migration is fatal. This used to be a `warn!` and the server
-            // booted anyway against a store in an unknown state, which turned
-            // any migration bug into a silent one. Note the asymmetry it left:
-            // failing to OPEN the store (just below) always exited 1; failing
-            // to MIGRATE it did not.
-            //
-            // The tagged stderr line lets the launcher / CEF host fail fast
-            // with the real reason instead of timing out on ESTART 30s later
-            // (crates/common/src/srv_stderr.rs). Exit code 1 is what
-            // docs/exe-return-codes.md already documented for this case.
-            tracing::error!("startup: migration failed — refusing to start: {}", e);
-            eprintln!("{}", agentmux_common::srv_stderr::migration_failed_line(&e));
-            std::process::exit(1);
-        }
-    }
-
-    let mstore_raw = Store::open(&db_dir.join("objects.db")).unwrap_or_else(|e| {
+    let mstore_raw = crate::boot_timing::time("open_objects_db", || Store::open(&db_dir.join("objects.db"))).unwrap_or_else(|e| {
         tracing::error!("Failed to open object store: {}", e);
         std::process::exit(1);
     });
@@ -232,7 +155,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // unusual envs); mutations still hit SQLite, just don't mirror.
     // See docs/specs/SPEC_SHARED_AGENT_REGISTRY_2026_05_12.md.
     if let Some(root) = registry::resolve_shared_registry_dir() {
-        match registry::Registry::open(root.clone()) {
+        match crate::boot_timing::time("open_agent_registry", || registry::Registry::open(root.clone())) {
             Ok(reg) => {
                 tracing::info!(root = %root.display(), "registry: shared agent registry attached");
                 // Best-effort catch-up pass, run every startup (not just the
@@ -278,7 +201,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // store opens): the user-agent definition ids to seed conversations for.
     let mut backfill_def_ids: Vec<String> = Vec::new();
     if let Some(def_dir) = registry::resolve_shared_definitions_dir() {
-        match registry::DefinitionStore::open(def_dir.clone()) {
+        match crate::boot_timing::time("open_definition_store", || registry::DefinitionStore::open(def_dir.clone())) {
             Ok(def_store) => {
                 // Capture user-agent ids for the transcript backfill (below).
                 backfill_def_ids = crate::boot_timing::time("def_store_list_active", || {
@@ -317,7 +240,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     }
     // Identity M4a: token → UID for request attribution, on this channel's
     // object store only (spec §6.5.3).
-    match mstore_raw.attach_token_index() {
+    match crate::boot_timing::time("attach_token_index", || mstore_raw.attach_token_index()) {
         Ok(_) => tracing::info!("identity: agent token index attached"),
         Err(e) => tracing::warn!(error = %e, "identity: agent token index unavailable — requests stay unattributed"),
     }
@@ -328,7 +251,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // is simply off for this process (agents get no WAN key), which degrades
     // every WAN jekt to today's unsigned `TRUST=network-claimed`.
     match backend::storage::wan_identity::resolve_wan_identity_path() {
-        Some(path) => match backend::storage::wan_identity::WanIdentityStore::open(&path).and_then(|store| {
+        Some(path) => match crate::boot_timing::time("open_wan_db", || backend::storage::wan_identity::WanIdentityStore::open(&path)).and_then(|store| {
             let instance = store.instance_ensure(&crate::backend::reactive::registry::local_host_label())?;
             Ok((store, instance))
         }) {
@@ -355,7 +278,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // Identity M4a: lets spawn sites tell a row-backed block from a row-less
     // one when the environment carries no UID.
     backend::identity_spawn::attach_row_store(mstore.clone());
-    let filestore = Arc::new(FileStore::open(&db_dir.join("filestore.db")).unwrap_or_else(|e| {
+    let filestore = Arc::new(crate::boot_timing::time("open_filestore_db", || FileStore::open(&db_dir.join("filestore.db"))).unwrap_or_else(|e| {
         tracing::error!("Failed to open file store: {}", e);
         std::process::exit(1);
     }));
@@ -374,7 +297,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                     tracing::warn!(dir = %dir.display(), error = %e, "global transcripts: failed to create dir — disabled, falling back to per-channel store");
                     None
                 } else {
-                    match FileStore::open_global_transcripts(&dir.join("filestore.db")) {
+                    match crate::boot_timing::time("open_transcripts_db", || FileStore::open_global_transcripts(&dir.join("filestore.db"))) {
                         Ok(fs) => {
                             tracing::info!(dir = %dir.display(), "global transcripts: store attached");
                             Some(Arc::new(fs))
@@ -403,7 +326,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                 tracing::warn!(path = %path.display(), error = %e, "shared store: failed to create dir — disabled");
                 None
             } else {
-                match Store::open_shared(&path) {
+                match crate::boot_timing::time("open_shared_store", || Store::open_shared(&path)) {
                     Ok(s) => {
                         let reason = agentmux_common::isolated_auth_reason();
                         if reason.is_isolated() {
@@ -447,7 +370,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     if !agentmux_common::isolated_auth_enabled() {
         if let (Some(ss), Some(path)) = (shared_store.as_ref(), registry::resolve_shared_store_path()) {
             if Arc::ptr_eq(ss, &id_store) {
-                crate::adoption::run_at_boot(ss, &path);
+                crate::boot_timing::time("adoption_scan", || crate::adoption::run_at_boot(ss, &path));
             }
         }
     }
@@ -468,7 +391,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                 tracing::warn!(path = %path.display(), error = %e, "identity store: failed to create dir — falling back to per-channel store");
                 mstore.clone()
             } else {
-                match Store::open_identity_store(&path) {
+                match crate::boot_timing::time("open_identity_store", || Store::open_identity_store(&path)) {
                     Ok(s) => {
                         tracing::info!(path = %path.display(), "identity store: attached (always global)");
                         Arc::new(s)
@@ -519,7 +442,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // is fatal: without the log, a srv crash mid-saga leaves
     // unrecoverable state divergence.
     let saga_log = Arc::new(
-        crate::sagas::log::SagaLog::open(&db_dir.join("sagas.db")).unwrap_or_else(|e| {
+        crate::boot_timing::time("open_sagas_db", || crate::sagas::log::SagaLog::open(&db_dir.join("sagas.db"))).unwrap_or_else(|e| {
             tracing::error!("Failed to open saga log: {}", e);
             std::process::exit(1);
         }),
@@ -660,5 +583,105 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         identity_store,
         saga_log,
         saga_id_seed,
+    }
+}
+
+/// What an unsupervised srv does before opening its stores: copy a previous
+/// version's data forward, snapshot, and run pending migrations (the same
+/// work `agentmux-srv migrate --prepare` does for the launcher).
+fn prepare_in_process(mux_data_dir: &std::path::Path, db_dir: &std::path::Path, code_version: &str) {
+    // Pre-migration snapshot (Increment B.2 lean cut from
+    // SPEC_DATA_CHANNELS §3.4). Run BEFORE Store::open AND before
+    // count_pending_migrations/run_pending_migrations — both open
+    // objects.db via Store::open which runs DDL/schema setup, mutating
+    // the file. The snapshot must capture the pre-DDL state so it is a
+    // valid rollback aid for a buggy forward migration.
+    //
+    // Failures are logged and ignored — refusing to boot when the
+    // snapshot can't be written would be worse than booting without a
+    // backup (the safety lock still prevents downgrade corruption).
+    let channel = std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string());
+    // Snapshots live in this version's own data directory, `<data>/snapshots/`:
+    // `get_mux_data_dir()` answers with the data directory once
+    // AGENTMUX_DATA_HOME is set above (#3372). They sit beside the databases
+    // they copy, and pruning keeps 5 there. AGENTMUX_HOME_OVERRIDE wins in
+    // tests. (Before #3372 they went to `~/.agentmux/snapshots/`; older
+    // snapshots stay there.)
+    let snapshots_dir = std::env::var_os("AGENTMUX_HOME_OVERRIDE")
+        .filter(|s| !s.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(base::get_mux_data_dir)
+        .join("snapshots");
+    // A new version's first start begins from the previous version's data,
+    // then migrates it like any upgrade (carry_forward.rs). No snapshot after
+    // a copy-forward: the previous version's folder is that data, untouched.
+    let carried = super::carry_forward::from_previous_version(&db_dir, &code_version).is_some();
+    let snapshot = if carried {
+        Ok(None)
+    } else {
+        maybe_snapshot_pre_migration(&db_dir, &snapshots_dir, &channel, &code_version, OBJECT_SCHEMA_VERSION)
+    };
+    match snapshot {
+        Ok(Some(path)) => tracing::info!(snapshot = %path.display(), "pre-migration snapshot written"),
+        Ok(None) => {}
+        Err(e) => tracing::warn!("pre-migration snapshot failed (continuing without backup): {}", e),
+    }
+
+    // Run in-process migrations AFTER snapshot so the rollback aid captures
+    // the pre-DDL state. count_pending_migrations emits AGENTMUXSRV-MIGRATING
+    // first so the launcher/sidecar extend their ESTART deadline before the
+    // (potentially slow) migration work begins.
+    // Strict check, lenient reaction: this runs only when no supervisor
+    // prepares data (headless srv, `task dev:standalone`), where the line
+    // only sizes the ESTART deadline and the migration batch runs right below
+    // anyway, so an unreadable store costs nothing here beyond a less precise
+    // hint — `readable_pending()` reproduces exactly the number this call site
+    // used before. Under the launcher the same question is the fail-closed
+    // boot gate instead (`migrations/gate.rs`, invariant S1b of
+    // `SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md`).
+    let pre_migration_count = match migrations::try_count_pending_migrations(&mux_data_dir) {
+        Ok(n) => n,
+        Err(e) => {
+            let fallback = e.readable_pending();
+            // Distinguished because they mean different things to whoever
+            // reads the log: one store was readable and the count is
+            // partial, versus nothing was readable and the count is a
+            // placeholder.
+            match &e {
+                migrations::PendingCountError::ChannelStoreUnreadable { .. } => tracing::warn!(
+                    "startup: channel-scoped migrations could not be counted: {} — sizing the ESTART deadline with {} global",
+                    e,
+                    fallback
+                ),
+                _ => tracing::warn!(
+                    "startup: no pending-migration count available: {} — sizing the ESTART deadline as if none were pending",
+                    e
+                ),
+            }
+            fallback
+        }
+    };
+    if pre_migration_count > 0 {
+        eprintln!("{}", agentmux_common::srv_stderr::migrating_line("migrations", pre_migration_count));
+    }
+    match migrations::run_pending_migrations(&mux_data_dir) {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(applied = n, "startup: applied pending migrations"),
+        Err(e) => {
+            // SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03 Phase 1 (F4): a failed
+            // migration is fatal. This used to be a `warn!` and the server
+            // booted anyway against a store in an unknown state, which turned
+            // any migration bug into a silent one. Note the asymmetry it left:
+            // failing to OPEN the store (just below) always exited 1; failing
+            // to MIGRATE it did not.
+            //
+            // The tagged stderr line lets the launcher / CEF host fail fast
+            // with the real reason instead of timing out on ESTART 30s later
+            // (crates/common/src/srv_stderr.rs). Exit code 1 is what
+            // docs/exe-return-codes.md already documented for this case.
+            tracing::error!("startup: migration failed — refusing to start: {}", e);
+            eprintln!("{}", agentmux_common::srv_stderr::migration_failed_line(&e));
+            std::process::exit(1);
+        }
     }
 }

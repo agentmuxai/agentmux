@@ -402,6 +402,24 @@
     }
 }
 
+.kanban-after {
+    margin: 0 0 var(--space-1);
+    padding: 0;
+    list-style: none;
+    font-size: var(--text-sm);
+
+    li {
+        display: flex;
+        gap: var(--space-1);
+        align-items: center;
+    }
+}
+
+.kanban-after--finished {
+    color: var(--secondary-text-color);
+    text-decoration: line-through;
+}
+
 .kanban-checklist__done {
     color: var(--secondary-text-color);
     text-decoration: line-through;

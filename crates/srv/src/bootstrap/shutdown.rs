@@ -10,7 +10,16 @@ use super::*;
 /// run above. Non-zero causes the status-bar to show a "Migration failed —
 /// restart to retry" message. Zero is the expected steady-state.
 pub fn emit_estart(ws_port: u16, web_port: u16, version: &str, build_time: &str, instance_id: &str) {
-    let pending_migrations = migrations::count_pending_migrations(&base::get_mux_data_dir());
+    // Under the launcher srv got here only because the boot gate found
+    // nothing pending (it exits for `migrate --prepare` otherwise), so don't
+    // reopen every store read-write just to count to zero.
+    let supervised =
+        std::env::var(agentmux_common::srv_stderr::SUPERVISOR_PREPARES_ENV).as_deref() == Ok("1");
+    let pending_migrations = if supervised {
+        0
+    } else {
+        crate::boot_timing::time("estart_pending_count", || migrations::count_pending_migrations(&base::get_mux_data_dir()))
+    };
     eprintln!(
         "{}",
         agentmux_common::srv_stderr::estart_line(&agentmux_common::srv_stderr::Estart {

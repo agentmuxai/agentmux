@@ -183,6 +183,72 @@ fn delete_leaves_tidying_to_the_balance_pass() {
     assert_eq!(root.children[1].flex_direction, FlexDirection::Column);
 }
 
+fn is_min(tree: &Option<LayoutNode>, id: &str) -> bool {
+    find_node_by_id(tree.as_ref().unwrap(), id).unwrap().minimized
+}
+
+#[test]
+fn closing_the_last_expanded_pane_restores_the_one_after_it() {
+    // m1 [a] m2 m3: closing a, the only expanded pane, restores m2 (next in reading order).
+    let mut tree = Some(branch(
+        "r",
+        FlexDirection::Row,
+        vec![minimized(leaf("m1", "b1")), leaf("a", "ba"), minimized(leaf("m2", "b2")), minimized(leaf("m3", "b3"))],
+    ));
+    apply(&mut tree, LayoutIntent::Delete { node_id: "a".into() }).unwrap();
+    assert_eq!((is_min(&tree, "m1"), is_min(&tree, "m2"), is_min(&tree, "m3")), (true, false, true));
+}
+
+#[test]
+fn closing_the_last_expanded_pane_at_the_end_restores_the_one_before_it() {
+    let mut tree = Some(branch(
+        "r",
+        FlexDirection::Row,
+        vec![
+            minimized(leaf("m1", "b1")),
+            branch("col", FlexDirection::Column, vec![minimized(leaf("m2", "b2")), leaf("a", "ba")]),
+        ],
+    ));
+    apply(&mut tree, LayoutIntent::Delete { node_id: "a".into() }).unwrap();
+    assert!(is_min(&tree, "m1"));
+    assert!(!is_min(&tree, "m2"));
+}
+
+#[test]
+fn closing_a_container_restores_the_pane_after_it_not_the_first() {
+    // m1 group(a) m2: the group holds the only expanded pane; m2 follows it, so m2 is restored.
+    let mut tree = Some(branch(
+        "r",
+        FlexDirection::Row,
+        vec![
+            minimized(leaf("m1", "b1")),
+            branch("g", FlexDirection::Column, vec![leaf("a", "ba"), minimized(leaf("x", "bx"))]),
+            minimized(leaf("m2", "b2")),
+        ],
+    ));
+    apply(&mut tree, LayoutIntent::Delete { node_id: "g".into() }).unwrap();
+    assert_eq!((is_min(&tree, "m1"), is_min(&tree, "m2")), (true, false));
+}
+
+#[test]
+fn closing_a_pane_while_another_shows_content_restores_nothing() {
+    let mut tree = Some(branch(
+        "r",
+        FlexDirection::Row,
+        vec![leaf("a", "ba"), leaf("b", "bb"), minimized(leaf("m", "bm"))],
+    ));
+    apply(&mut tree, LayoutIntent::Delete { node_id: "a".into() }).unwrap();
+    assert!(is_min(&tree, "m"));
+}
+
+#[test]
+fn a_pane_emptied_by_a_move_restores_the_nearest_too() {
+    let mut root = branch("r", FlexDirection::Row, vec![leaf("a", "ba"), minimized(leaf("m1", "b1")), minimized(leaf("m2", "b2"))]);
+    super::super::intent::delete_and_balance(&mut root, "a").unwrap();
+    let tree = Some(root);
+    assert_eq!((is_min(&tree, "m1"), is_min(&tree, "m2")), (false, true));
+}
+
 #[test]
 fn delete_of_the_root_empties_the_tree() {
     let mut tree = Some(leaf("a", "ba"));
@@ -362,6 +428,53 @@ fn a_fully_minimized_branch_is_as_locked_as_a_minimized_leaf() {
     assert!(matches!(apply(&mut base(), into), Err(LayoutError::NodeLocked { .. })));
     let out = LayoutIntent::Move { node_id: "col".into(), parent_id: Some("r".into()), index: 0, insert_at_root: false };
     assert!(matches!(apply(&mut base(), out), Err(LayoutError::NodeLocked { .. })));
+}
+
+// SPEC_DRAG_MINIMIZED_PANES_2026_10_20.md §3 B: a chip moves and swaps like any pane and stays a chip.
+fn min_of(tree: &Option<LayoutNode>, id: &str) -> bool {
+    find_node_by_id(tree.as_ref().unwrap(), id).unwrap().minimized
+}
+
+#[test]
+fn a_chip_moves_to_another_parent_and_stays_a_chip() {
+    let mut tree = Some(branch(
+        "r",
+        FlexDirection::Row,
+        vec![leaf("a", "ba"), minimized(leaf("m", "bm")), branch("col", FlexDirection::Column, vec![leaf("b", "bb"), leaf("c", "bc")])],
+    ));
+    apply(&mut tree, LayoutIntent::Move { node_id: "m".into(), parent_id: Some("col".into()), index: 1, insert_at_root: false }).unwrap();
+    assert_eq!(kids(&tree, "col"), ["b", "m", "c"]);
+    assert!(min_of(&tree, "m"));
+    assert_eq!(root_kids(&tree), ["a", "col"]);
+}
+
+#[test]
+fn only_a_chip_may_go_into_a_strip_of_chips() {
+    let chips = || branch("col", FlexDirection::Column, vec![minimized(leaf("m1", "b1")), minimized(leaf("m2", "b2"))]);
+    let base = || Some(branch("r", FlexDirection::Row, vec![leaf("a", "ba"), chips(), leaf("c", "bc"), minimized(leaf("m3", "b3"))]));
+    let expanded_in = LayoutIntent::Move { node_id: "a".into(), parent_id: Some("col".into()), index: 0, insert_at_root: false };
+    assert!(matches!(apply(&mut base(), expanded_in), Err(LayoutError::NodeLocked { .. })));
+    let mut tree = base();
+    apply(&mut tree, LayoutIntent::Move { node_id: "m3".into(), parent_id: Some("col".into()), index: 2, insert_at_root: false }).unwrap();
+    assert_eq!(kids(&tree, "col"), ["m1", "m2", "m3"]);
+    assert!(min_of(&tree, "m3"));
+}
+
+#[test]
+fn a_chip_swaps_with_an_expanded_pane_and_each_keeps_its_state() {
+    let mut tree = Some(branch("r", FlexDirection::Row, vec![leaf("a", "ba"), minimized(leaf("m", "bm")), leaf("c", "bc")]));
+    apply(&mut tree, LayoutIntent::Swap { node1_id: "m".into(), node2_id: "c".into() }).unwrap();
+    assert_eq!(root_kids(&tree), ["a", "c", "m"]);
+    assert!(min_of(&tree, "m"));
+    assert!(!min_of(&tree, "c"));
+}
+
+#[test]
+fn a_strip_of_chips_neither_moves_nor_swaps() {
+    let chips = || branch("col", FlexDirection::Column, vec![minimized(leaf("m1", "b1")), minimized(leaf("m2", "b2"))]);
+    let base = || Some(branch("r", FlexDirection::Row, vec![leaf("a", "ba"), chips(), leaf("c", "bc")]));
+    let swap = LayoutIntent::Swap { node1_id: "col".into(), node2_id: "c".into() };
+    assert!(matches!(apply(&mut base(), swap), Err(LayoutError::NodeLocked { .. })));
 }
 
 #[test]

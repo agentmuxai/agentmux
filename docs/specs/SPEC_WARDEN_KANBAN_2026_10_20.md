@@ -1,6 +1,6 @@
 # Spec: a Kanban section in Warden, where agents keep their work current and the operator follows it
 
-**Status:** active. srv and MCP (the task model, the agents' `Tasks` actions, the reminder, the operator's RPCs) in #5231; the Warden Kanban section, its palette command and widget-bar button in #5235. The Swarm's task chip (§6.14) and Codex plans as checklists (§6.12) in #5248. Phase 4 (§9): lanes by repository (§6.11) and Review's soft limit (D6) in #5260; the rest remains.
+**Status:** active. srv and MCP (the task model, the agents' `Tasks` actions, the reminder, the operator's RPCs) in #5231; the Warden Kanban section, its palette command and widget-bar button in #5235. The Swarm's task chip (§6.14) and Codex plans as checklists (§6.12) in #5248. Phase 4 (§9): a merged PR closes its task and the PR is found without the agent naming it (§6.9, D5) in #5256; tasks that start after others (§6.15) in #5259; lanes by repository (§6.11) and Review's soft limit (D6) in #5260; the rest remains.
 **Date:** 2026-10-20
 **Author:** Loap-3@narko, at the operator's request
 **Verified against:** `agentmux` `main` @ `30daa7c28` (2026-10-20), by reading code. The survey of other products in §3 is from public sources read the same day (§12).
@@ -247,7 +247,8 @@ A toggle "Show untracked" (on by default) hides them for operators who want only
 - **Activity is the heartbeat.** Before expiring a claim, the reaper asks whether the holder is alive: registered with this srv and its process running. If so, the lease is extended, not expired (`work_tasks::extend_live_leases`, run before every reap). An agent never has to call `heartbeat` during a long tool call (Hermes's failure), and a dead holder is still reclaimed (by teardown at once, or by the reaper after the lease). A fresh claim starts its own lease; it never inherits the previous attempt's activity time.
 - **A question pauses nothing.** While the holder waits on a question, the claim is held (the agent is alive), and the card shows in Needs you.
 - **A closed holder** releases its claims (today's teardown), which puts the task back in the Backlog with "agent closed" in the history (under the same agent if it filed the task for itself, §6.5; under Anyone otherwise).
-- **PR link.** When the progress watcher sees the holder run `gh pr create` and the holder has exactly one claimed task, the task gets the branch and, once the PR appears in the open-PR list, its number and URL. The history records it. With several tasks held, nothing is guessed; the agent's `submit` names the PR.
+- **PR link.** When the progress watcher sees the holder run `gh pr create` and the holder has exactly one claimed task, the task gets the branch (`--head`, with its fork's owner when it names one, else the branch checked out, as `gh` itself does) and, once GitHub lists a PR from it created since the command was seen (an older PR from the same branch, merged or not, isn't that command's; without `--head`, where `gh` may have pushed to the user's fork, the last look matches the branch among the repository's newest open PRs), the PR's address (`backend/kanban/prs.rs`, looked for 20 s, 1, 3 and 10 minutes after). The history records it. With several tasks held, nothing is guessed; the agent's `submit` names the PR, in its links, or in its result when the result names exactly one ("PR #12", a PR address) and GitHub says that PR is from the branch the agent is on at hand-in, in the agent's own repository. A result that only mentions another PR (one it built on, someone else's) links nothing, so that PR's merge can't close the task. A task's branch is only ever its PR's: the branch the filer happened to be on when filing belongs to its other work and isn't recorded.
+- **A merged PR closes its task** (D5). Every minute srv looks at the PRs of tasks in Review that are due a look (each every 10 minutes; one closed without merging, hourly) and accepts the task whose PR merged, with "PR #12 merged" by GitHub in the history. srv holds no GitHub credential, so both this and the PR link read GitHub's public API without one: they work for public repositories; a repository GitHub doesn't show without a login (its own address answers 404 too, not just the PR's) is left alone for 6 hours, and a PR number that doesn't exist is looked at hourly, and its tasks wait for the operator's Accept as before. The unauthenticated API allows 60 calls an hour per address, shared by everything on the computer: srv spends at most 30, and none until GitHub's reset once told it is over. Off with the setting `kanban:closeonmerge: false`.
 - **Every move** (by agent, operator or srv) writes one history row and publishes `WorkQueueChanged`.
 
 ### 6.10 Attention
@@ -296,6 +297,15 @@ Swarm answers "what is each agent doing right now" (agents, subagents, shells, c
 - A card's agent chip opens the agent's pane; its drawer has "Show in Swarm".
 - Swarm's subagents, shells and crons stay out of Kanban.
 
+### 6.15 Tasks that start after others
+
+"#14 starts after #12": the operator's way to queue a sequence (write the spec, then build it) and an agent's way to file the second half of something it can't start yet.
+
+- **The rule.** A task waiting on a task that isn't finished stays in the Backlog: no `claim` takes it, no reminder or finished-task answer names it as next. Done or cancelled finishes a task for this; a failed one still holds its followers, since what happens to it is the operator's call. The operator can still **Start** a waiting task on an agent (an explicit click overrides the wait).
+- **Setting it.** `Tasks` `enqueue` takes `after` (numbers or ids); the operator's New task has a "Starts after" box, and a task's drawer lists what it starts after, each removable, with a box to add more by number. A task can wait on at most 10 others, never on itself, and never on a task that already waits on it, however indirectly (refused with a reason).
+- **On the board.** A waiting card shows "after #12" in the Backlog; the drawer shows each with its state, finished ones struck through. When the last one finishes, the follower is free: its agent's next claim, reminder or finished-task answer takes it as usual.
+- **Storage.** `db_work_deps (work_id, after_id)` beside the board's tables. A new task's row and its list are written in one transaction, so no claim or prune sees one without the other; an edit checks the list and writes it in one immediate transaction, so two edits at once (from any srv on the computer) can't each pass the check and together make tasks wait on each other. Pruned with the history; the board reads only the listed tasks' rows. An older build's claim doesn't know the rule and may take a waiting task (§10).
+
 ## 7. Data
 
 ### 7.1 Storage (identity store, no schema version bump, per its rule)
@@ -303,7 +313,8 @@ Swarm answers "what is each agent doing right now" (agents, subagents, shells, c
 - `db_work_queue.state` takes the three new values; no column changes.
 - New `db_work_cards (num INTEGER PRIMARY KEY AUTOINCREMENT, work_id UNIQUE → db_work_queue.id, repo, branch, pr_url, rank, review_required, checklist JSON, question, note, requested_by, requested_by_kind [operator|agent|other|unknown], request_text, filed_by, last_reminded_at, updated_at)`; `num` is the task's `#12`. A task enqueued by an older build gets its card (and number) the first time the board lists it: the board's own fields, kept apart so older builds' queries never see them.
 - New `db_work_events (id, work_id, at, actor, actor_kind, kind, from_state, to_state, body)`: the history. `kind` is one of `created, filed_for_later, reminded, moved, assigned, held, unheld, claimed, released, expired, asked, answered, updated, submitted, accepted, sent_back, cancelled, retried, linked`. Kept as long as the task is, plus 30 days after Done.
-- Indexes on `db_work_events(work_id, at)` and `db_work_cards(repo)`.
+- New `db_work_deps (work_id, after_id)`: the tasks a task starts after (§6.15).
+- Indexes on `db_work_events(work_id, at)`, `db_work_cards(repo)` and `db_work_deps(after_id)`.
 
 ### 7.2 RPCs (typed, generated stubs)
 
@@ -313,7 +324,7 @@ Three websocket commands (`crates/srv/src/server/app_api/kanban.rs`), the operat
 |---|---|
 | `kanban.list` → `{tasks: [task + card + holder], agents, stamp, now}` | the board: every unfinished task and those finished in the last 7 days (cap 500), each holder's live state, this instance's agents |
 | `kanban.task` `{id}` → `{task, events}` | the drawer |
-| `kanban.act` `{action, id?, …}` | the operator's moves: `create` (title, payload, agent, hold, review, repo, kind, priority), `edit`, `move` (agent: `""` for anyone, hold, rank), `start` (agent), `answer` (text), `accept`, `send_back` (text), `cancel` (text), `retry`, `track` (block_id, title) |
+| `kanban.act` `{action, id?, …}` | the operator's moves: `create` (title, payload, agent, hold, review, repo, kind, priority, after), `edit` (the same fields; `after` replaces the list), `move` (agent: `""` for anyone, hold, rank), `start` (agent), `answer` (text), `accept`, `send_back` (text), `cancel` (text), `retry`, `track` (block_id, title) |
 
 `id` is a task's id or its number. The agents' side is HTTP, beside the queue's routes: `POST /agentmux/work/:id/update`, `/ask`, `/submit` (`crates/srv/src/server/work_tasks.rs`).
 
@@ -347,7 +358,7 @@ Three websocket commands (`crates/srv/src/server/app_api/kanban.rs`), the operat
 1. **A Kanban over what exists, and requests filed for later.** No schema change. `work.list`; the Warden section with Backlog (grouped by agent), In progress, Needs you and Done derived from today's states and the holders' live state; untracked cards; `open:kanban` and the pinned widget; the Needs-you count in the title. With it, the part of §6.5 that today's queue already supports: `enqueue` `for: "me"` (today's `target_agent`), own-tasks-first claiming, the idle reminder, and the operator-config guidance. From this phase on, the operator's "do this when you're done" requests land on the board and get done.
 2. **The operator's hands, and who asked.** Who asked and the operator's words on the card (§6.5); the three new states, `db_work_cards`, `db_work_events`; New task, drag, Start on…, Answer, Accept, Send back, Cancel, Retry, Track; the drawer and history; the cancel guard; Swarm's link.
 3. **The agents' words.** `update`, `ask`, `submit`; activity as heartbeat; PR link; Codex plans; the operator-config guidance.
-4. **Later, each its own decision:** close a reviewed task when its PR merges (D5); dependencies between tasks (Cline's and Claude Code's "blocked by"); swimlanes by repository and the Review limit (D6), both built in #5260; other computers through Warden's LAN layer; a `tasks:read` permission for sandboxed widgets.
+4. **Later, each its own decision:** close a reviewed task when its PR merges (D5, built in #5256); dependencies between tasks (Cline's and Claude Code's "blocked by"; built in #5259, §6.15); swimlanes by repository and the Review limit (D6), both built in #5260; other computers through Warden's LAN layer; a `tasks:read` permission for sandboxed widgets.
 
 ## 10. Risks
 
@@ -365,7 +376,7 @@ Three websocket commands (`crates/srv/src/server/app_api/kanban.rs`), the operat
 - **D2.** A task the operator asked for needs review by default, whether the operator created it or an agent filed it on the operator's behalf; one an agent enqueues on its own initiative doesn't. *Recommended.*
 - **D3.** "Start on…" delivers the task's prompt to the chosen agent at once, as the operator's message (quoted when an agent wrote it). *Recommended.* The alternative, only setting the target and waiting for the agent to claim it, leaves idle agents idle.
 - **D4.** Untracked work shows as cards by default. *Recommended.*
-- **D5.** A merged PR closes its task from Review without a click. *Not now*: until the review flow is used, Accept stays a person's.
+- **D5.** A merged PR closes its task from Review without a click. *Decided* (the operator, 2026-10-20, "keep building" on this as the next item): on by default, off with `kanban:closeonmerge`. A merge is a review already; where the operator merges by hand, the merge is their Accept.
 - **D6.** A soft limit on Review, default off. *Built, off by default* (#5260): `kanban:reviewlimit` in settings turns it on.
 - **D7.** *Decided* (the operator, 2026-10-20: "if it finishes, it proceeds through the backlog"): an agent that finishes a task goes on to the next in its backlog, and one that goes idle with tasks waiting is reminded once, after 2 minutes idle, and takes the next itself. On by default, with a per-agent switch. The alternative, waiting for the operator to say "go", is what the backlog is meant to save.
 
