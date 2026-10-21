@@ -8,16 +8,29 @@ import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SETTINGS_SECTIONS } from "@/app/view/settings/settings-model";
 import { CONNECTORS_SECTION_IDS, MEMORY_SECTION_IDS } from "@/app/view/section-pane/panes";
-import { VAULT_SECTIONS } from "@/app/view/vault/vault-kinds";
 import { WARDEN_SECTIONS } from "@/app/view/warden/warden-model";
-import { sectionKeyOf, sectionLabelOf, sectionOf, sectionProblem, type PaneSections } from "./pane-sections";
+import {
+    isSectionMeta,
+    sectionKeyOf,
+    sectionKeysIn,
+    sectionLabelOf,
+    sectionMetaOf,
+    sectionOf,
+    sectionProblem,
+    type PaneSections,
+} from "./pane-sections";
 import { registerPaneTab } from "./pane-tab-registry";
 
 const BOARD: PaneSections<"todo" | "done"> = {
     default: "todo",
     items: [
         { id: "todo", label: "To do", icon: "list" },
-        { id: "done", label: "Done", icon: "check" },
+        {
+            id: "done",
+            label: "Done",
+            icon: "check",
+            sections: { default: "week", items: [{ id: "week", label: "This week", icon: "x" }, { id: "all", label: "All", icon: "x" }] },
+        },
     ],
 };
 
@@ -53,6 +66,24 @@ describe("pane sections", () => {
         expect(sectionLabelOf("test-board", "done")).toBe("Done");
     });
 
+    it("reaches a section's own sections with <id>/<sub id> and <id>:section", () => {
+        expect(sectionProblem("test-board", "done/all")).toBeNull();
+        expect(sectionProblem("test-board", "done/nope")).toBe(`the test-board pane's "done" section has no "nope" (it has week, all)`);
+        expect(sectionProblem("test-board", "todo/all")).toBe(`the test-board pane's "todo" section has no sections of its own`);
+        expect(sectionMetaOf("test-board", "done/all")).toEqual({ "test-board:section": "done", "done:section": "all" });
+        expect(sectionMetaOf("test-board", "todo")).toEqual({ "test-board:section": "todo" });
+        expect(isSectionMeta("test-board", "test-board:section", "done")).toBe(true);
+        expect(isSectionMeta("test-board", "done:section", "all")).toBe(true);
+        expect(isSectionMeta("test-board", "done:section", "nope")).toBe(false);
+        expect(isSectionMeta("test-board", "todo:section", "all")).toBe(false);
+        expect(isSectionMeta("term", "term:section", "x")).toBe(false);
+        expect(sectionKeysIn({ view: "warden", "warden:section": "vault", "vault:section": "cards", url: "x" })).toEqual({
+            "warden:section": "vault",
+            "vault:section": "cards",
+        });
+        expect(sectionKeysIn({ view: "warden" })).toBeUndefined();
+    });
+
     it("lists the same sections in the widget SDK as the panes declare", () => {
         const dts = readFileSync("sdk/widget-sdk/v1.d.ts", "utf-8");
         const block = dts.slice(dts.indexOf("export interface PaneSections {"));
@@ -62,7 +93,8 @@ describe("pane sections", () => {
         const ids = (s: PaneSections) => s.items.map((i) => i.id);
         expect(sdk).toEqual({
             warden: ids(WARDEN_SECTIONS),
-            vault: ids(VAULT_SECTIONS),
+            // Not a view: Warden's Vault section's own sections.
+            vault: ids(WARDEN_SECTIONS.items.find((s) => s.id === "vault")!.sections!),
             connectors: [...CONNECTORS_SECTION_IDS],
             memory: [...MEMORY_SECTION_IDS],
             settings: ids(SETTINGS_SECTIONS),

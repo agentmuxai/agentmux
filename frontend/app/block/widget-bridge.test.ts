@@ -21,7 +21,14 @@ beforeAll(() => {
                 view,
                 label: view,
                 icon: "x",
-                sections: { default: ids[0], items: ids.map((id) => ({ id, label: id, icon: "x" })) },
+                sections: {
+                    default: ids[0],
+                    items: [
+                        ...ids.map((id) => ({ id, label: id, icon: "x" })),
+                        // A section with sections of its own, like Warden's Vault.
+                        ...(view === "warden" ? [{ id: "vault", label: "Vault", icon: "x", sections: { default: "cards", items: [{ id: "cards", label: "Cards", icon: "x" }] } }] : []),
+                    ],
+                },
                 create: () => ({ component: () => null }),
             })
         );
@@ -222,6 +229,10 @@ describe("permissions", () => {
         const state = await ready(h);
         await handleBridgeRequest(h, state, "panes.open", { view: "warden", meta: { "warden:section": "kanban", cmd: "x" } });
         expect(h.openPane).toHaveBeenLastCalledWith("warden", { "warden:section": "kanban" }, "right");
+        await handleBridgeRequest(h, state, "panes.open", { view: "warden", meta: { "warden:section": "vault", "vault:section": "cards" } });
+        expect(h.openPane).toHaveBeenLastCalledWith("warden", { "warden:section": "vault", "vault:section": "cards" }, "right");
+        await handleBridgeRequest(h, state, "panes.open", { view: "warden", meta: { "vault:section": "nope", "vault:request": "r1" } });
+        expect(h.openPane).toHaveBeenLastCalledWith("warden", {}, "right");
         // A section the pane doesn't declare is dropped.
         await handleBridgeRequest(h, state, "panes.open", { view: "warden", meta: { "warden:section": "nope" } });
         expect(h.openPane).toHaveBeenLastCalledWith("warden", {}, "right");

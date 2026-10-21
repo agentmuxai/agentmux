@@ -155,10 +155,11 @@
         "display:pinned": false,
         "icon": "lock",
         "label": "Vault",
-        "description": "Your secrets: ID numbers, cards and bank accounts, API keys, logins and notes. Agents use them by name without seeing them",
+        "description": "Your secrets: ID numbers, cards and bank accounts, API keys, logins and notes. Agents use them by name without seeing them (Warden's Vault section)",
+        "section": "vault",
         "blockdef": {
             "meta": {
-                "view": "vault"
+                "view": "warden"
             }
         }
     },

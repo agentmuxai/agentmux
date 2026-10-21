@@ -9,7 +9,7 @@
  */
 
 import type { WidgetPackageInfo, WidgetPaneInfo } from "@/app/store/rpc-api/widgets";
-import { hasSection, paneSectionsOf, sectionKeyOf } from "./pane-sections";
+import { isSectionMeta } from "./pane-sections";
 import type { PaneTabHostContext } from "./pane-tab-registry";
 import type { StatusLook, StatusTone } from "./widget-panes";
 
@@ -415,8 +415,7 @@ const isWebUrl = (v: unknown): boolean => {
  *  (one its manifest declares, pane-sections.ts), and a browser's http(s) address. */
 function otherViewAllows(view: string, key: string, value: unknown): boolean {
     if (view === "browser") return key === "url" && isWebUrl(value);
-    const sections = paneSectionsOf(view);
-    return !!sections && key === sectionKeyOf(view) && hasSection(sections, value);
+    return isSectionMeta(view, key, value);
 }
 
 /**
