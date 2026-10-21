@@ -36,7 +36,7 @@ vi.mock("@/store/global", async (importOriginal) => {
     const [version] = createSignal<string | null>(null);
     return {
         atoms: { updaterStatusAtom: status, updaterVersionAtom: version },
-        getApi: () => ({ installAppUpdate, revealInFileExplorer, getBackendInfo: () => Promise.resolve({ pending_migrations: 0 }), listen: () => Promise.resolve(() => {}) }),
+        getApi: () => ({ installAppUpdate, revealInFileExplorer, listen: () => Promise.resolve(() => {}) }),
         openLink: (u: string) => openLink(u),
     };
 });

@@ -418,7 +418,6 @@ declare global {
             started_at?: string;
             web_endpoint?: string;
             version: string;
-            pending_migrations?: number;
         }>;
         restartBackend: () => Promise<void>;
         /** The performance health signals active right now (`health-signal` payloads). */
@@ -641,9 +640,6 @@ declare global {
          *  ":minimize,maximize,close"; null when the desktop has none to read. */
         getWindowButtonLayout?: () => Promise<string | null>;
         setJsDragActive: (active: boolean) => Promise<void>;
-        /** Trigger on-demand migration run (maintenance panel retry).
-         *  Returns immediately; progress arrives via `upgrade:migration-event` CEF events. */
-        runMigrations: () => Promise<{ started: boolean }>;
     };
 
     type NativeContextMenuItem = {

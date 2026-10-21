@@ -14,39 +14,12 @@ import {
     upgradeUnderWay,
 } from "@/store/app-update";
 import { atoms, getApi, openLink } from "@/store/global";
-import { WpsEvent } from "@/store/mps-events";
-import { createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createSignal, For, onMount, Show, type JSX } from "solid-js";
 import "./_maintenance-section.scss";
 import { Button } from "@/app/element/ui";
 
 // The host opens exactly this link (`external_url_allowed` in the CEF host).
 const MS_STORE_PAGE_URL = "ms-windows-store://pdp/?productid=9P9QCXNNCRK3";
-
-// ── Types ────────────────────────────────────────────────────────────────────
-
-type MigStep = {
-    id: string;
-    label: string;
-    status: "running" | "done";
-    durationMs: number | null;
-    startedAtMs: number;
-};
-
-type MigState =
-    | { kind: "idle"; pendingCount: number }
-    | { kind: "running"; steps: MigStep[] }
-    | { kind: "complete"; steps: MigStep[]; applied: number }
-    | { kind: "failed"; steps: MigStep[]; error: string; failedId: string | null };
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function elapsedSecs(startedAtMs: number, nowMs: number): string {
-    return `${((nowMs - startedAtMs) / 1000).toFixed(1)}s`;
-}
-
-function fmtDuration(ms: number): string {
-    return `${(ms / 1000).toFixed(1)}s`;
-}
 
 // ── Component ────────────────────────────────────────────────────────────────
 
@@ -90,103 +63,6 @@ export const MaintenanceSection = (): JSX.Element => {
     };
     const updaterVersion = () => release()?.version ?? atoms.updaterVersionAtom();
     const [showNotes, setShowNotes] = createSignal(false);
-
-    const [migState, setMigState] = createSignal<MigState>({ kind: "idle", pendingCount: 0 });
-    const [nowMs, setNowMs] = createSignal(Date.now());
-
-    // Fetch pending_migrations count from backend info on mount
-    onMount(() => {
-        getApi().getBackendInfo().then((info) => {
-            const pending = info?.pending_migrations ?? 0;
-            setMigState({ kind: "idle", pendingCount: pending });
-        }).catch(() => {});
-    });
-
-    // Timer — ticks every 500ms only while a migration is running to drive elapsed timers.
-    onMount(() => {
-        const id = setInterval(() => {
-            if (migState().kind === "running") {
-                setNowMs(Date.now());
-            }
-        }, 500);
-        onCleanup(() => clearInterval(id));
-    });
-
-    // Subscribe to migration progress events (from CEF, not MPS WebSocket)
-    onMount(() => {
-        let unlisten: (() => void) | null = null;
-        getApi().listen(WpsEvent.UpgradeMigrationEvent, (payload: any) => {
-            const kind: string = payload?.kind ?? "";
-            if (kind === "start") {
-                const id: string = payload.id ?? "";
-                const label: string = payload.label ?? id;
-                setMigState((prev) => {
-                    const steps: MigStep[] = prev.kind === "running" ? [...prev.steps] : [];
-                    steps.push({ id, label, status: "running", durationMs: null, startedAtMs: Date.now() });
-                    return { kind: "running", steps };
-                });
-            } else if (kind === "done") {
-                const id: string = payload.id ?? "";
-                const durationMs: number | null = payload.duration_ms ?? null;
-                setMigState((prev) => {
-                    if (prev.kind !== "running") return prev;
-                    const steps = prev.steps.map((s) =>
-                        s.id === id ? { ...s, status: "done" as const, durationMs } : s
-                    );
-                    return { ...prev, steps };
-                });
-            } else if (kind === "complete") {
-                const applied: number = payload.applied ?? 0;
-                setMigState((prev) => {
-                    const steps = prev.kind === "running" ? prev.steps : [];
-                    return { kind: "complete", steps, applied };
-                });
-            }
-        }).then((fn) => { unlisten = fn; });
-
-        onCleanup(() => unlisten?.());
-    });
-
-    onMount(() => {
-        let unlisten: (() => void) | null = null;
-        getApi().listen(WpsEvent.UpgradeMigrationsComplete, (payload: any) => {
-            const applied: number = payload?.applied ?? 0;
-            setMigState((prev) => {
-                // migration-event kind:"complete" may have already transitioned state;
-                // preserve it — don't reset steps/applied with this fallback event.
-                if (prev.kind !== "running") return prev;
-                return { kind: "complete", steps: prev.steps, applied };
-            });
-        }).then((fn) => { unlisten = fn; });
-
-        onCleanup(() => unlisten?.());
-    });
-
-    onMount(() => {
-        let unlisten: (() => void) | null = null;
-        getApi().listen(WpsEvent.UpgradeMigrationsFailed, (payload: any) => {
-            const error: string = payload?.error ?? "Migration failed";
-            const failedId: string | null = payload?.failedId ?? null;
-            setMigState((prev) => {
-                const steps = prev.kind === "running" ? prev.steps : [];
-                return { kind: "failed", steps, error, failedId };
-            });
-        }).then((fn) => { unlisten = fn; });
-
-        onCleanup(() => unlisten?.());
-    });
-
-    // ── Actions ───────────────────────────────────────────────────────────────
-
-    const handleRunMigrations = async () => {
-        if (migState().kind === "running") return;
-        setMigState({ kind: "running", steps: [] });
-        try {
-            await getApi().runMigrations();
-        } catch (e: any) {
-            setMigState({ kind: "failed", steps: [], error: String(e?.message ?? e), failedId: null });
-        }
-    };
 
     // Opens a folder, or shows a file in its folder; a failure is shown, like the other actions here.
     const reveal = async (path: string) => {
@@ -239,10 +115,6 @@ export const MaintenanceSection = (): JSX.Element => {
     // ── Derived ───────────────────────────────────────────────────────────────
 
     const badge = (): string | null => {
-        const mig = migState();
-        if (mig.kind === "failed") return `✗ failed`;
-        if (mig.kind === "idle" && mig.pendingCount > 0) return `⚠ ${mig.pendingCount} pending`;
-        if (mig.kind === "running") return "·running";
         const upd = updaterStatus();
         if (upd === "available") {
             const ver = updaterVersion();
@@ -260,7 +132,7 @@ export const MaintenanceSection = (): JSX.Element => {
             <div class="instance-panel-section-title">
                 Maintenance
                 <Show when={badge() != null}>
-                    <span class={`maintenance-badge${migState().kind === "failed" ? " maintenance-badge--error" : ""}`}>{badge()}</span>
+                    <span class="maintenance-badge">{badge()}</span>
                 </Show>
             </div>
 
@@ -443,106 +315,6 @@ export const MaintenanceSection = (): JSX.Element => {
             </div>
             <Show when={checkError()}>
                 <div class="maintenance-row-text maintenance-row-text--error">{checkError()}</div>
-            </Show>
-
-            {/* ── Migration rows ─────────────────────────────────────────── */}
-            <Show when={migState().kind === "idle" && (migState() as Extract<MigState, {kind: "idle"}>).pendingCount > 0}>
-                <div class="maintenance-alert-row">
-                    <span class="maintenance-icon maintenance-icon--warn">⚠</span>
-                    <span class="maintenance-row-text maintenance-row-text--warn">
-                        {(migState() as Extract<MigState, {kind: "idle"}>).pendingCount} migration{
-                            (migState() as Extract<MigState, {kind: "idle"}>).pendingCount !== 1 ? "s" : ""
-                        } pending
-                    </span>
-                    <Button
-                        density="compact"
-                        tone="accent"
-                        class="maintenance-btn maintenance-btn--primary"
-                        onClick={handleRunMigrations}
-                    >
-                        Run
-                    </Button>
-                </div>
-            </Show>
-
-            <Show when={migState().kind === "running" || migState().kind === "complete" || migState().kind === "failed"}>
-                <div class="maintenance-migration-block">
-                    <Show when={migState().kind === "running"}>
-                        <div class="maintenance-stage-header">
-                            <span class="maintenance-icon maintenance-icon--working maintenance-pulse">●</span>
-                            <span>Migrations running…</span>
-                        </div>
-                    </Show>
-                    <Show when={migState().kind === "complete"}>
-                        <div class="maintenance-stage-header">
-                            <span class="maintenance-icon maintenance-icon--ok">✓</span>
-                            <span>
-                                Migrations complete
-                                {" — "}
-                                {(migState() as Extract<MigState, {kind: "complete"}>).applied} applied
-                            </span>
-                        </div>
-                    </Show>
-                    <Show when={migState().kind === "failed"}>
-                        <div class="maintenance-stage-header">
-                            <span class="maintenance-icon maintenance-icon--error">✗</span>
-                            <span class="maintenance-row-text--error">
-                                Migration failed
-                            </span>
-                        </div>
-                        <div class="maintenance-error-detail">
-                            {(migState() as Extract<MigState, {kind: "failed"}>).error}
-                        </div>
-                    </Show>
-                    <For each={(migState() as Extract<MigState, {kind: "running" | "complete" | "failed"}>).steps ?? []}>
-                        {(step) => (
-                            <div class="maintenance-sub-row">
-                                <span class={`maintenance-icon ${step.status === "done" ? "maintenance-icon--ok" : "maintenance-icon--working maintenance-pulse"}`}>
-                                    {step.status === "done" ? "✓" : "·"}
-                                </span>
-                                <span class="maintenance-sub-id">{step.id}</span>
-                                <span class="maintenance-sub-label">{step.label}</span>
-                                <span class="maintenance-timer">
-                                    {step.durationMs != null
-                                        ? fmtDuration(step.durationMs)
-                                        : elapsedSecs(step.startedAtMs, nowMs())}
-                                </span>
-                            </div>
-                        )}
-                    </For>
-                    <Show when={migState().kind === "failed"}>
-                        <Button
-                            density="compact"
-                            tone="accent"
-                            class="maintenance-btn maintenance-btn--primary maintenance-retry-btn"
-                            onClick={handleRunMigrations}
-                        >
-                            Retry
-                        </Button>
-                    </Show>
-                </div>
-            </Show>
-
-            {/* ── Summary rows (shown when idle / after-complete) ─────────── */}
-            <Show when={migState().kind === "idle"}>
-                <div class="maintenance-summary-row">
-                    <Show
-                        when={(migState() as Extract<MigState, {kind: "idle"}>).pendingCount === 0}
-                        fallback={
-                            <>
-                                <span class="maintenance-icon maintenance-icon--warn">⚠</span>
-                                <span class="maintenance-row-label">Migrations</span>
-                                <span class="maintenance-row-text--warn">
-                                    {(migState() as Extract<MigState, {kind: "idle"}>).pendingCount} pending
-                                </span>
-                            </>
-                        }
-                    >
-                        <span class="maintenance-icon maintenance-icon--ok">✓</span>
-                        <span class="maintenance-row-label">Migrations</span>
-                        <span class="maintenance-row-text--dim">up to date</span>
-                    </Show>
-                </div>
             </Show>
         </>
     );
