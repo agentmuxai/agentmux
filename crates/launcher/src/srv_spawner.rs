@@ -334,17 +334,43 @@ async fn run_prepare(
         });
     }
     let mut failure = None;
-    if let Some(stderr) = child.stderr.take() {
-        let mut lines = BufReader::new(stderr).lines();
-        while let Ok(Some(line)) = lines.next_line().await {
-            if let Some(reason) = agentmux_common::srv_stderr::parse_migration_failed_line(&line) {
-                failure = Some(reason);
-            } else if !forward_progress_line(&line, "prepare", sink) {
-                crate::log(&format!("[prepare stderr] {line}"));
-            }
+    let mut handle_line = |line: String| {
+        if let Some(reason) = agentmux_common::srv_stderr::parse_migration_failed_line(&line) {
+            failure = Some(reason);
+        } else if !forward_progress_line(&line, "prepare", sink) {
+            crate::log(&format!("[prepare stderr] {line}"));
+        }
+    };
+    // Wait for the process, not for stderr's EOF: a grandchild that inherited
+    // stderr would hold it open after migrate exits and leave the splash on
+    // "Updating data" forever (docs/analysis/ANALYSIS_MIGRATE_STDOUT_HANG_2026_06_26.md).
+    // The process itself gets no deadline: it may wait up to 30 minutes for
+    // another instance's migration lock, and the splash shows that wait.
+    let mut stderr = child.stderr.take().map(|s| BufReader::new(s).lines());
+    let status = loop {
+        tokio::select! {
+            status = child.wait() => break status,
+            line = async {
+                match stderr.as_mut() {
+                    Some(lines) => lines.next_line().await,
+                    None => std::future::pending().await,
+                }
+            } => match line {
+                Ok(Some(line)) => handle_line(line),
+                _ => stderr = None,
+            },
         }
     }
-    let status = child.wait().await.map_err(|e| SrvSpawnError::SpawnFailed(format!("migrate --prepare wait: {e}")))?;
+    .map_err(|e| SrvSpawnError::SpawnFailed(format!("migrate --prepare wait: {e}")))?;
+    // What it wrote just before exiting, without waiting on a held-open pipe.
+    if let Some(mut lines) = stderr {
+        let drain = async {
+            while let Ok(Some(line)) = lines.next_line().await {
+                handle_line(line);
+            }
+        };
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(2), drain).await;
+    }
     let ms = t.elapsed().as_millis() as u64;
     if status.success() {
         sink.stage_end("prepare", ms, crate::startup_events::StartupStatus::Ok, None);

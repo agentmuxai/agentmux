@@ -232,14 +232,12 @@ pub fn run_pending_migrations(data_dir: &Path) -> Result<usize, String> {
     // (MIGRATION_LOCK_WAIT) — with no indication anything unusual is
     // happening inside it. See
     // docs/reports/REPORT_SPLASH_SCREEN_ARCHITECTURE_RETHINK_2026_09_14.md
-    // §2.1. Unlike `run_migrate_command`'s stdout JSON (read by the
-    // now-dead subprocess path), this goes to STDERR — the channel every
-    // real daemon-boot marker (ESTART, MIGRATING, MIGRATION-FAILED) already
-    // uses — via `agentmux_common::srv_stderr`, which both real consumers
-    // (the launcher and, in `task dev:standalone`, the CEF host sidecar)
-    // already parse the rest of this protocol from. The launcher parses
-    // these two lines (`srv_spawner.rs`); a supervisor that doesn't (the
-    // CEF host sidecar today) just logs them like any other stderr line.
+    // §2.1. Unlike `run_migrate_command`'s stdout JSON (only logged), this
+    // goes to STDERR — the channel every daemon-boot marker (ESTART,
+    // MIGRATING, MIGRATION-FAILED) uses — via `agentmux_common::srv_stderr`.
+    // The launcher's `run_prepare` (`srv_spawner.rs`) reads these lines from
+    // `migrate --prepare` and shows them as splash rows; a supervisor that
+    // doesn't parse them (the CEF host sidecar today) just logs them.
     apply_pending(REGISTRY, &home, &shared_store_path, data_dir, Some(&STDERR_PROGRESS)).map(|o| o.applied)
 }
 
