@@ -25,27 +25,39 @@ pub fn data_needs_preparing(data_dir: &Path, version: &str) -> Option<String> {
     // No shared root (CI, a bare cargo run): nothing to migrate, as for
     // `run_pending_migrations`.
     let shared = crate::registry::resolve_shared_store_path()?;
-    pending_reason(REGISTRY, &shared, &db_dir.join("objects.db"))
+    let identity = crate::registry::resolve_identity_store_path()?;
+    pending_reason(REGISTRY, &shared, &db_dir.join("objects.db"), &identity)
 }
 
-/// Why the two stores `migrate --prepare` opens need work: a schema older
-/// than this build's (its schema setup would change the file), a migration of
+/// Why the stores `migrate --prepare` opens need work: a schema older than
+/// this build's (its schema setup would change the file), a migration of
 /// `regs` not yet applied, or a store that can't be read. `None` when they need
 /// nothing. Read-only; `apply_pending` asks it too, to take its backup before
 /// anything opens the stores.
+///
+/// `identity-store.db` only counts when it is readable and behind: srv starts
+/// without it when it can't open it, and preparing couldn't repair it.
 pub(super) fn pending_reason(
     regs: &[&(dyn super::Migration + Sync)],
     shared_store: &Path,
     objects_db: &Path,
+    identity_store: &Path,
 ) -> Option<String> {
-    use crate::backend::storage::migrations::{OBJECT_SCHEMA_VERSION, SHARED_STORE_SCHEMA_VERSION};
-    for (path, current) in [(shared_store, SHARED_STORE_SCHEMA_VERSION), (objects_db, OBJECT_SCHEMA_VERSION)] {
+    use crate::backend::storage::migrations::{
+        IDENTITY_STORE_SCHEMA_VERSION, OBJECT_SCHEMA_VERSION, SHARED_STORE_SCHEMA_VERSION,
+    };
+    let stores = [
+        (shared_store, SHARED_STORE_SCHEMA_VERSION, true),
+        (objects_db, OBJECT_SCHEMA_VERSION, true),
+        (identity_store, IDENTITY_STORE_SCHEMA_VERSION, false),
+    ];
+    for (path, current, required) in stores {
         match schema_version(path) {
             Ok(Some(found)) if found < current => {
                 return Some(format!("{} is at schema {found}, this build uses {current}", path.display()))
             }
-            Ok(_) => {}
-            Err(e) => return Some(format!("{}'s schema version can't be read: {e}", path.display())),
+            Err(e) if required => return Some(format!("{}'s schema version can't be read: {e}", path.display())),
+            _ => {}
         }
     }
     let shared_applied = match read_applied_ids(shared_store) {
@@ -83,6 +95,11 @@ mod tests {
     use super::*;
     use crate::backend::storage::store::Store;
 
+    /// An identity store that doesn't exist: nothing to prepare for it.
+    fn no_identity(dir: &Path) -> std::path::PathBuf {
+        dir.join("identity-store.db")
+    }
+
     /// Stores with every registered migration recorded as applied.
     fn migrated(dir: &Path) -> (std::path::PathBuf, std::path::PathBuf) {
         let shared = dir.join("store.db");
@@ -103,7 +120,7 @@ mod tests {
     fn fully_migrated_stores_need_nothing() {
         let dir = tempfile::tempdir().unwrap();
         let (shared, objects) = migrated(dir.path());
-        assert_eq!(pending_reason(REGISTRY, &shared, &objects), None);
+        assert_eq!(pending_reason(REGISTRY, &shared, &objects, &no_identity(dir.path())), None);
     }
 
     #[test]
@@ -116,7 +133,7 @@ mod tests {
             MigrationScope::Channel => &objects,
         };
         rusqlite::Connection::open(path).unwrap().execute("DELETE FROM db_migrations WHERE id = ?1", [last.id()]).unwrap();
-        let reason = pending_reason(REGISTRY, &shared, &objects).expect("one migration is pending");
+        let reason = pending_reason(REGISTRY, &shared, &objects, &no_identity(dir.path())).expect("one migration is pending");
         assert!(reason.contains(last.id()), "{reason}");
     }
 
@@ -124,7 +141,7 @@ mod tests {
     fn a_fresh_install_needs_preparing_and_the_check_creates_nothing() {
         let dir = tempfile::tempdir().unwrap();
         let (shared, objects) = (dir.path().join("store.db"), dir.path().join("objects.db"));
-        assert!(pending_reason(REGISTRY, &shared, &objects).is_some());
+        assert!(pending_reason(REGISTRY, &shared, &objects, &no_identity(dir.path())).is_some());
         assert!(!shared.exists() && !objects.exists(), "the gate is read-only");
     }
 
@@ -134,7 +151,7 @@ mod tests {
         let (shared, objects) = migrated(dir.path());
         std::fs::write(&objects, b"not a database").unwrap();
         let _ = std::fs::remove_file(objects.with_extension("db-wal"));
-        assert!(pending_reason(REGISTRY, &shared, &objects).unwrap().contains("can't be read"));
+        assert!(pending_reason(REGISTRY, &shared, &objects, &no_identity(dir.path())).unwrap().contains("can't be read"));
     }
 
     /// A build that only raises the schema version (no new migration) still
@@ -144,8 +161,25 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (shared, objects) = migrated(dir.path());
         rusqlite::Connection::open(&objects).unwrap().pragma_update(None, "user_version", 3).unwrap();
-        let reason = pending_reason(REGISTRY, &shared, &objects).expect("schema 3 is behind");
+        let reason = pending_reason(REGISTRY, &shared, &objects, &no_identity(dir.path())).expect("schema 3 is behind");
         assert!(reason.contains("schema 3"), "{reason}");
+    }
+
+    /// The identity store has its own schema version; behind, it needs
+    /// preparing like the other two. Unreadable, it doesn't stop srv.
+    #[test]
+    fn an_older_identity_store_needs_preparing_and_an_unreadable_one_does_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let (shared, objects) = migrated(dir.path());
+        let identity = dir.path().join("identity-store.db");
+        drop(Store::open_identity_store(&identity).unwrap());
+        assert_eq!(pending_reason(REGISTRY, &shared, &objects, &identity), None);
+        rusqlite::Connection::open(&identity).unwrap().pragma_update(None, "user_version", 2).unwrap();
+        let reason = pending_reason(REGISTRY, &shared, &objects, &identity).expect("schema 2 is behind");
+        assert!(reason.contains("identity-store.db"), "{reason}");
+        std::fs::write(&identity, b"not a database").unwrap();
+        let _ = std::fs::remove_file(identity.with_extension("db-wal"));
+        assert_eq!(pending_reason(REGISTRY, &shared, &objects, &identity), None);
     }
 
     #[test]

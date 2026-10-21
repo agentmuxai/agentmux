@@ -404,12 +404,19 @@ pub(super) fn apply_pending(
     // Back up BEFORE the stores are opened: opening runs schema setup, which
     // changes the files. The decision is the boot gate's read-only check.
     let channel_store_path = channel_db_dir.join("objects.db");
-    if super::gate::pending_reason(regs, shared_store_path, &channel_store_path).is_some() {
+    let identity_store_path = home.join("shared").join("identity-store.db");
+    if super::gate::pending_reason(regs, shared_store_path, &channel_store_path, &identity_store_path).is_some() {
         super::backup::backup_stores(home, shared_store_path, data_dir)
             .map_err(|e| format!("run_pending_migrations: backup failed: {}", e))?;
     }
     let (shared_store, channel_store) = open_stores_for_preview(shared_store_path, data_dir)
         .map_err(|e| format!("run_pending_migrations: {}", e))?;
+    // Its schema setup too, here under the backup rather than in srv's startup.
+    if identity_store_path.exists() {
+        if let Err(e) = Store::open_identity_store(&identity_store_path) {
+            tracing::warn!(error = %e, "run_pending_migrations: identity store not opened");
+        }
+    }
 
     let pending = pending_of(regs, &shared_store, channel_store.as_ref());
     if pending.is_empty() {
