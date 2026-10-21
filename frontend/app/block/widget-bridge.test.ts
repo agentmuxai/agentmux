@@ -180,6 +180,49 @@ describe("permissions", () => {
         expect("result" in (await handleBridgeRequest(granted, s2, "panes.open", { view: "term" }))).toBe(true);
     });
 
+    it("never passes a command, a controller or a connection to a pane it opens", async () => {
+        const h = host(pkg({ granted: ["panes"] }));
+        const state = await ready(h);
+        const hostile = {
+            controller: "cmd",
+            cmd: "whoami",
+            "cmd:args": ["/c", "calc"],
+            "cmd:runonstart": true,
+            "cmd:interactive": true,
+            connection: "ssh://attacker",
+            "cmd:cwd": "C:\\",
+        };
+        for (const view of ["term", "agent", "browser", "warden", "ext:other.widget/main"]) {
+            expect("result" in (await handleBridgeRequest(h, state, "panes.open", { view, meta: hostile }))).toBe(true);
+            expect(h.openPane).toHaveBeenLastCalledWith(view, {}, "right");
+        }
+    });
+
+    it("opens another pane on a section, and a browser on a web address only", async () => {
+        const h = host(pkg({ granted: ["panes"] }));
+        const state = await ready(h);
+        await handleBridgeRequest(h, state, "panes.open", { view: "warden", meta: { "warden:section": "kanban", cmd: "x" } });
+        expect(h.openPane).toHaveBeenLastCalledWith("warden", { "warden:section": "kanban" }, "right");
+        // Another pane's section key does nothing on this one.
+        await handleBridgeRequest(h, state, "panes.open", { view: "memory", meta: { "warden:section": "kanban" } });
+        expect(h.openPane).toHaveBeenLastCalledWith("memory", {}, "right");
+        await handleBridgeRequest(h, state, "panes.open", { view: "browser", meta: { url: "https://example.com/a" } });
+        expect(h.openPane).toHaveBeenLastCalledWith("browser", { url: "https://example.com/a" }, "right");
+        for (const url of ["file:///C:/Windows/win.ini", "javascript:alert(1)", "agentmux://x", 7]) {
+            await handleBridgeRequest(h, state, "panes.open", { view: "browser", meta: { url } });
+            expect(h.openPane).toHaveBeenLastCalledWith("browser", {}, "right");
+        }
+    });
+
+    it("keeps meta for the widget's own pane under its namespace, where meta.get finds it", async () => {
+        const h = host();
+        const state = await ready(h);
+        await handleBridgeRequest(h, state, "panes.open", { view: "ext:acme.notes/list", meta: { filter: "open", controller: "cmd" }, split: "down" });
+        expect(h.openPane).toHaveBeenLastCalledWith("ext:acme.notes/list", { "widget:acme.notes:filter": "open", "widget:acme.notes:controller": "cmd" }, "down");
+        const big = errorOf(await handleBridgeRequest(h, state, "panes.open", { view: "ext:acme.notes/list", meta: { text: "x".repeat(70 * 1024) } }));
+        expect(big.code).toBe(ERR.LIMIT_EXCEEDED);
+    });
+
     it("refuses a method whose permission wasn't granted, naming it", async () => {
         const h = host();
         const state = await ready(h);
