@@ -1,6 +1,6 @@
 # Spec: a Kanban section in Warden, where agents keep their work current and the operator follows it
 
-**Status:** active. srv and MCP (the task model, the agents' `Tasks` actions, the reminder, the operator's RPCs) in #5231; the Warden Kanban section, its palette command and widget-bar button in #5235. The Swarm's task chip (§6.14) and Codex plans as checklists (§6.12) in #5248. Phase 4 (§9): a merged PR closes its task and the PR is found without the agent naming it (§6.9, D5) in #5256; tasks that start after others (§6.15) in #5259; the rest remains.
+**Status:** active. srv and MCP (the task model, the agents' `Tasks` actions, the reminder, the operator's RPCs) in #5231; the Warden Kanban section, its palette command and widget-bar button in #5235. The Swarm's task chip (§6.14) and Codex plans as checklists (§6.12) in #5248. Phase 4 (§9): a merged PR closes its task and the PR is found without the agent naming it (§6.9, D5) in #5256; tasks that start after others (§6.15) in #5259; lanes by repository (§6.11) and Review's soft limit (D6) in #5260; the rest remains.
 **Date:** 2026-10-20
 **Author:** Loap-3@narko, at the operator's request
 **Verified against:** `agentmux` `main` @ `30daa7c28` (2026-10-20), by reading code. The survey of other products in §3 is from public sources read the same day (§12).
@@ -256,13 +256,14 @@ A toggle "Show untracked" (on by default) hides them for operators who want only
 - **Needs you is the only interruption.** Its count goes in the Warden tab title and on the widget-bar Kanban button as a badge.
 - A card that enters Needs you because its agent asked a question doesn't add a second flash: the agent pane already flashes for its question.
 - An `ask`, a failure and a crashed holder show in the count; ordinary moves don't notify.
-- **Review load:** the Review column header shows how many and the oldest wait ("4 · oldest 2 h"). An optional soft limit (D6) turns the header amber past it; nothing is blocked.
+- **Review load:** the Review column header shows how many and the oldest wait ("4 · oldest 2 h"). An optional soft limit (D6, the setting `kanban:reviewlimit`, a whole number; unset or 0 is none) turns the count amber past it; nothing is blocked.
 
 ### 6.11 Layout and scope
 
 - **Top bar:** filters by repository (default: all), agent and kind; a search box; "Show untracked"; "New task".
 - **Agent strip** under it: this instance's agents as chips with their state, a drop target for Start (§6.8).
 - **Five columns**, each scrolling on its own (the Backlog grouped by agent, each group collapsible); narrow panes (Warden's container queries) stack the columns into a list grouped by column, Needs you first.
+- **Lanes by repository**, a toolbar switch kept on the pane (`kanban:lanes` meta): one row of the five columns per repository, those with unfinished work first, then by name, tasks with no repository last; each lane folds by its header, which counts its open tasks and those that need the operator. Untracked work belongs to no task, so to no repository: it gets its own row above the lanes. The lanes scroll together; within a lane a column is as tall as its cards. Dragging between lanes changes the agent a task waits for, never its repository. Review's soft limit (D6) compares the whole board's Review count, so every lane's Review header turns amber together.
 - **Scope:** the queue is shared by every AgentMux on this computer. The section shows all tasks, with the instance's own agents in the strip; a task held by an agent of another instance shows its name with the instance's channel. Other computers (Warden's LAN layer) are Phase 4.
 
 ### 6.12 How agents write
@@ -357,7 +358,7 @@ Three websocket commands (`crates/srv/src/server/app_api/kanban.rs`), the operat
 1. **A Kanban over what exists, and requests filed for later.** No schema change. `work.list`; the Warden section with Backlog (grouped by agent), In progress, Needs you and Done derived from today's states and the holders' live state; untracked cards; `open:kanban` and the pinned widget; the Needs-you count in the title. With it, the part of §6.5 that today's queue already supports: `enqueue` `for: "me"` (today's `target_agent`), own-tasks-first claiming, the idle reminder, and the operator-config guidance. From this phase on, the operator's "do this when you're done" requests land on the board and get done.
 2. **The operator's hands, and who asked.** Who asked and the operator's words on the card (§6.5); the three new states, `db_work_cards`, `db_work_events`; New task, drag, Start on…, Answer, Accept, Send back, Cancel, Retry, Track; the drawer and history; the cancel guard; Swarm's link.
 3. **The agents' words.** `update`, `ask`, `submit`; activity as heartbeat; PR link; Codex plans; the operator-config guidance.
-4. **Later, each its own decision:** close a reviewed task when its PR merges (D5, built in #5256); dependencies between tasks (Cline's and Claude Code's "blocked by"; built in #5259, §6.15); swimlanes by repository; the Review limit (D6); other computers through Warden's LAN layer; a `tasks:read` permission for sandboxed widgets.
+4. **Later, each its own decision:** close a reviewed task when its PR merges (D5, built in #5256); dependencies between tasks (Cline's and Claude Code's "blocked by"; built in #5259, §6.15); swimlanes by repository and the Review limit (D6), both built in #5260; other computers through Warden's LAN layer; a `tasks:read` permission for sandboxed widgets.
 
 ## 10. Risks
 
@@ -376,7 +377,7 @@ Three websocket commands (`crates/srv/src/server/app_api/kanban.rs`), the operat
 - **D3.** "Start on…" delivers the task's prompt to the chosen agent at once, as the operator's message (quoted when an agent wrote it). *Recommended.* The alternative, only setting the target and waiting for the agent to claim it, leaves idle agents idle.
 - **D4.** Untracked work shows as cards by default. *Recommended.*
 - **D5.** A merged PR closes its task from Review without a click. *Decided* (the operator, 2026-10-20, "keep building" on this as the next item): on by default, off with `kanban:closeonmerge`. A merge is a review already; where the operator merges by hand, the merge is their Accept.
-- **D6.** A soft limit on Review, default off. *Recommended* off until the board has been used for a while.
+- **D6.** A soft limit on Review, default off. *Built, off by default* (#5260): `kanban:reviewlimit` in settings turns it on.
 - **D7.** *Decided* (the operator, 2026-10-20: "if it finishes, it proceeds through the backlog"): an agent that finishes a task goes on to the next in its backlog, and one that goes idle with tasks waiting is reminded once, after 2 minutes idle, and takes the next itself. On by default, with a per-agent switch. The alternative, waiting for the operator to say "go", is what the backlog is meant to save.
 
 ## 12. Sources

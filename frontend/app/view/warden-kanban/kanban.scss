@@ -75,6 +75,41 @@
     }
 }
 
+.kanban-lanes {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+
+    // In a lane the columns are as tall as their cards; the lanes scroll together.
+    .kanban-board {
+        flex: none;
+    }
+
+    .kanban-column__list {
+        overflow-y: visible;
+    }
+}
+
+.kanban-lane {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+
+.kanban-lane__head {
+    display: flex;
+    align-items: baseline;
+    align-self: flex-start;
+    gap: var(--space-2);
+}
+
+.kanban-lane__name {
+    font-weight: 600;
+}
+
 .kanban-column {
     display: flex;
     flex-direction: column;
@@ -103,6 +138,11 @@
 .kanban-column__count {
     font-size: var(--text-xs);
     color: var(--secondary-text-color);
+}
+
+.kanban-column__count--over {
+    color: var(--warning-color);
+    font-weight: 600;
 }
 
 .kanban-column__list {
