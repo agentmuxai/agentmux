@@ -4,6 +4,16 @@
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { createRoot, onCleanup } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+const claims = vi.hoisted(() => [] as string[]);
+vi.mock("@/app/store/focusManager", () => ({
+    focusManager: {
+        claimFocusOnMount: (blockId: string, giveFocus: () => boolean) => {
+            claims.push(blockId);
+            giveFocus();
+        },
+    },
+}));
 import { lazyPaneTab, memberMismatch } from "./lazy-pane-tab";
 import type { PaneTabHostContext, PaneTabInstance } from "./pane-tab-registry";
 
@@ -119,6 +129,29 @@ describe("lazyPaneTab", () => {
         await flush();
         expect(error.mock.calls[0][0]).toContain("demo: its lazy manifest's members differ");
         expect(error.mock.calls[0][0]).toContain("+focus, -liveTitle");
+    });
+
+    it("hands focus to the real instance through the focus manager, and only in a visible pane", async () => {
+        const focus = vi.fn(() => true);
+        const manifest = lazyPaneTab({
+            apiVersion: 1,
+            view: "demo",
+            label: "Demo",
+            icon: "star",
+            members: ["focus"],
+            load: async () => ({ create: () => ({ component: () => null, focus }) }),
+        });
+        claims.length = 0;
+        const visible = { ...ctx, visibility: () => "active" } as PaneTabHostContext;
+        createRoot(() => manifest.create(visible));
+        await flush();
+        expect(claims).toEqual(["b1"]);
+        expect(focus).toHaveBeenCalledOnce();
+
+        const hidden = { ...ctx, visibility: () => "dormant" } as PaneTabHostContext;
+        createRoot(() => manifest.create(hidden));
+        await flush();
+        expect(claims).toEqual(["b1"]);
     });
 
     it("memberMismatch ignores component, dispose and members left undefined", () => {

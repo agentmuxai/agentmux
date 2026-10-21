@@ -100,7 +100,7 @@ So `create` stays synchronous, and nothing in the host changes.
   - no actions or menu items;
   - `focus()` returns false.
 - **Building the real instance.** When the module arrives, the stand-in builds it in the stand-in's own reactive root (`runWithOwner`), so the instance's cleanups run when the pane closes. A pane closed before its code arrived never builds one.
-- **Focus.** The host's `focus()` for a tab shown in a focused pane reached the stand-in, so the stand-in hands focus to the real instance when it arrives in an active, focused pane. A progress slot handed over early is passed on too.
+- **Focus.** The host's `focus()` for a tab shown in a focused pane reached the stand-in. When the real instance arrives in an active pane, the stand-in claims focus for it the way a pane that just mounted does (`focusManager.claimFocusOnMount`): only if the pane is still the selection, with no modal or menu over it and no caret the user placed. A progress slot handed over early is passed on too.
 - **A failed load** shows "*Label* failed to load: *reason*" in the pane, with **Try again**, which loads again (§4).
 - **Drift.** If the real instance's members differ from `members`, that is logged as an error naming the difference. Tests for a lazy pane compare the stand-in's members with a real instance's (`membersMatch` in its test).
 

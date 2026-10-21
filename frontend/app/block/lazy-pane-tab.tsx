@@ -21,6 +21,7 @@
  */
 
 import { Button } from "@/app/element/ui";
+import { focusManager } from "@/app/store/focusManager";
 import { CenteredDiv } from "@/element/quickelems";
 import { createSignal, getOwner, onCleanup, runWithOwner, Show, untrack } from "solid-js";
 import type { PaneTabHostContext, PaneTabInstance, PaneTabManifest } from "./pane-tab-registry";
@@ -84,10 +85,13 @@ function createStandIn(
                 setReal(() => instance);
                 if (progressEl) instance.progressMount?.(progressEl);
                 // The host's `focus()` for a tab that showed in a focused pane
-                // reached the stand-in, which had nothing to focus yet.
-                if (untrack(() => ctx.visibility?.() === "active" && ctx.isFocused?.())) {
+                // reached the stand-in, which had nothing to focus yet. Claimed
+                // as a pane that just mounted does: only if it is still the
+                // selection, with no modal or menu over it and the caret not
+                // already placed by the user (focusManager.claimFocusOnMount).
+                if (instance.focus && untrack(() => ctx.visibility?.() === "active")) {
                     queueMicrotask(() => {
-                        if (!disposed) instance.focus?.();
+                        if (!disposed) focusManager.claimFocusOnMount(ctx.blockId, () => instance.focus!());
                     });
                 }
             })
