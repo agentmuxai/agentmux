@@ -152,13 +152,22 @@
     padding: var(--space-2);
     overflow-y: auto;
     min-height: 60px;
+
+    // The list scrolls; what it holds never shrinks to fit it. Without this, an item with its
+    // own min-height (a Backlog group's) is squeezed to it and its cards spill over the next
+    // (docs/retro/RETRO_KANBAN_BACKLOG_CARDS_OVERLAP_2026_10_21.md).
+    > * {
+        flex-shrink: 0;
+    }
 }
 
 .kanban-group {
     display: flex;
+    flex: none;
     flex-direction: column;
     gap: var(--space-1);
     padding-bottom: var(--space-1);
+    // A floor, so an empty group stays a drop target; `flex: none` keeps it from being a shrink limit.
     min-height: 32px;
 }
 
