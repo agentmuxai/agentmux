@@ -57,6 +57,10 @@ mod upgrade;
 mod upgrade_restart;
 // Linux's "Upgrade & restart": its targets, its dialog (upgrade_restart.rs).
 mod upgrade_linux;
+// macOS's "Upgrade & restart": the .dmg, its dialog and the swap
+// (upgrade_restart.rs); the pure parts build and are tested everywhere.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod upgrade_macos;
 #[cfg(target_os = "windows")]
 mod splash;
 #[cfg(target_os = "macos")]
