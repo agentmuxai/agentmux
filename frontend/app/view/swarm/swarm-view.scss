@@ -200,6 +200,14 @@
         opacity: 0.6;
         white-space: nowrap;
     }
+
+    .swarm-last-active {
+        flex-shrink: 0;
+        font-size: var(--text-2xs);
+        color: var(--secondary-text-color);
+        opacity: 0.6;
+        white-space: nowrap;
+    }
 }
 
 // ── Children area ────────────────────────────────────────────────────────
