@@ -22,16 +22,26 @@ import { minutesLabel, siteLabel } from "./bypass";
 import { attentionLook, dialogMessage } from "./attention-kinds";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { useWindowTabId } from "@/app/workspace/window-tab-visibility";
+import { getSettingsKeyAtom } from "@/store/global";
+import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
 import {
+    awakeReason,
     etaLabel,
+    hibernationEnabled,
     HOVER_WAKE_GIVE_UP_MS,
+    isCapturing,
+    isLaunchMount,
     isOverdue,
     NOT_KEPT_TEXT,
+    pageAwakeReason,
     prewakeTabId,
     registerHibernatablePane,
     sleepName,
     sleepReasonText,
+    WAKE_META_KEY,
     type BrowserSleep,
+    type PaneFacts,
+    type SleepReason,
 } from "./hibernation";
 import "./browser-view.scss";
 
@@ -172,6 +182,9 @@ function BrowserSleepCard(props: { sleep: BrowserSleep; startedAt: () => number;
                     <Button density="compact" onClick={props.onKeepAwake}>
                         Keep this pane awake
                     </Button>
+                    <Button density="compact" onClick={() => void openOrFocusPaneByView("settings")}>
+                        Settings
+                    </Button>
                 </div>
             </div>
         </div>
@@ -209,7 +222,40 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
     const tabId = useWindowTabId();
     const visibility = usePaneTabVisibility(model.blockId);
     const visible = () => visibility() === "active";
-    const sleeping = () => model.sleepAtom() != null;
+    // What the window knows that keeps the pane awake (spec §5.3).
+    const facts = (): PaneFacts => {
+        const entries = model.actionsAtom().entries;
+        return {
+            url: model.urlAtom() || ((model.meta()?.["url"] as string | undefined) ?? ""),
+            keepAwake: model.keepAwakeAtom(),
+            driverAgent: model.driverAgentAtom() != null,
+            bypass: model.bypassAtom() != null,
+            attention: model.attentionAtom() != null,
+            popupWindows: model.popupWindowsAtom().length > 0,
+            lastAgentActionAt: entries.length ? entries[entries.length - 1].ts : undefined,
+            capturing: isCapturing(model.blockId),
+            activeWhileHidden,
+        };
+    };
+    let activeWhileHidden = false;
+    // A pane that mounts hidden as the window first loads starts asleep, before
+    // its page is ever created (spec §5.4). Its sleep record is written at
+    // once; `launchAsleep` covers the moment until it arrives.
+    const [launchAsleep, setLaunchAsleep] = createSignal(
+        !visible() &&
+            model.sleepAtom() == null &&
+            hibernationEnabled() &&
+            isLaunchMount() &&
+            awakeReason(facts(), Date.now(), getSettingsKeyAtom("browser:keepawakesites")()) == null,
+    );
+    if (launchAsleep()) {
+        diag(`[hibernate] launch-asleep`);
+        void model.hibernate("launch").catch(() => setLaunchAsleep(false));
+    }
+    const sleeping = () => model.sleepAtom() != null || launchAsleep();
+    createEffect(() => {
+        if (model.sleepAtom() != null && launchAsleep()) setLaunchAsleep(false);
+    });
     const [wakeRequested, setWakeRequested] = createSignal(false);
     const [wakeStartedAt, setWakeStartedAt] = createSignal(0);
     // A wake on intent (a hover or press on the tab's pill) that has loaded
@@ -260,15 +306,55 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
     createEffect(() => {
         if (sleeping() && tabId != null && prewakeTabId() === tabId) wake("intent");
     });
+    // srv asks for a wake when an agent's Browser call reaches the pane (spec §8).
+    createEffect(
+        on(
+            () => model.meta()?.[WAKE_META_KEY],
+            (asked) => {
+                if (asked != null && sleeping()) wake("agent");
+            },
+        ),
+    );
+    // How long the pane has been out of sight, and whether its page did
+    // something meanwhile (a new title or icon: a chat, an inbox).
+    let hiddenSince: number | null = visible() ? null : Date.now();
+    createEffect(
+        on(visible, (v) => {
+            hiddenSince = v ? null : Date.now();
+            if (v) activeWhileHidden = false;
+        }),
+    );
+    createEffect(
+        on(
+            [model.titleAtom, model.faviconUrlAtom],
+            () => {
+                if (!visible() && !sleeping()) activeWhileHidden = true;
+            },
+            { defer: true },
+        ),
+    );
+    const tryHibernate = async (reason: SleepReason): Promise<string | null> => {
+        if (sleeping()) return "already asleep";
+        if (visible()) return "visible";
+        const declined =
+            awakeReason(facts(), Date.now(), getSettingsKeyAtom("browser:keepawakesites")()) ??
+            pageAwakeReason(await getApi().browserPanes.hibernationCheck?.(model.blockId).catch(() => null));
+        if (declined != null) {
+            diag(`[hibernate] stays awake reason=${JSON.stringify(declined)} asked=${reason}`);
+            return declined;
+        }
+        // The check is async: the pane may have been shown meanwhile.
+        if (visible() || sleeping()) return visible() ? "visible" : "already asleep";
+        await model.hibernate(reason);
+        return null;
+    };
     onCleanup(
         registerHibernatablePane({
             blockId: model.blockId,
             isVisible: visible,
             isAsleep: sleeping,
-            hibernate: (reason) => {
-                if (model.keepAwakeAtom()) return;
-                void model.hibernate(reason).catch(() => {});
-            },
+            hiddenSince: () => hiddenSince,
+            tryHibernate,
             wake,
         }),
     );
@@ -382,7 +468,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             loadClockFrom = 0;
             if (sleeping()) {
                 diag(`[hibernate] wake-loaded ms=${Math.round(ms)} why=${wakeWhy} visible=${visible()}`);
-                if (visible() || wakeWhy === "command") void model.endSleep(ms).catch(() => {});
+                if (visible() || wakeWhy === "command" || wakeWhy === "agent") void model.endSleep(ms).catch(() => {});
                 else setWakeLoadedMs(ms);
             } else {
                 void model.recordLoadMs(ms).catch(() => {});

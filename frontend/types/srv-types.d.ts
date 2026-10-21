@@ -674,6 +674,8 @@ declare global {
             favicon: string;
             loadMs?: number;
         } | null;
+        /** srv asks the pane's view to wake it, for an agent's Browser call (ms timestamp). */
+        "browser:wake"?: number | null;
         /** How long the pane's page took to load the last time, in ms. */
         "browser:loadms"?: number | null;
         /** The person asked to keep this pane awake. */
@@ -1017,6 +1019,12 @@ declare global {
         "term:allowbracketedpaste"?: boolean;
         "term:shiftenternewline"?: boolean;
         "browser:searchsuggestions"?: boolean;
+        /** Hidden browser panes hibernate (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md). On unless false. */
+        "browser:hibernate"?: boolean;
+        /** Minutes a browser pane is hidden before it hibernates (default 30). */
+        "browser:hibernateafter"?: number;
+        /** Sites whose browser panes never hibernate, by origin or host. */
+        "browser:keepawakesites"?: string[];
         /** User shortcut overrides (frontend/app/keybindings/registry.ts `setUserKeybindings`). */
         "keybindings"?: { key?: string; command: string; when?: string; platform?: "mac" | "other" }[];
         "term:predictiveecho"?: boolean;

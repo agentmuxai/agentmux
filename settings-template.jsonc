@@ -141,6 +141,16 @@
     // addresses). Incognito tabs never ask, as in Chrome.
     // "browser:searchsuggestions": true,
 
+    // A browser pane out of sight for a while hibernates: its page closes to
+    // free its memory and loads again when you're about to look at it. Never
+    // a pane an agent is using, one playing or capturing media, one with
+    // something typed into it, or a local dev server.
+    // "browser:hibernate": true,
+    // Minutes hidden before it does; sooner when memory is low (5, then 1).
+    // "browser:hibernateafter": 30,
+    // Sites whose panes never hibernate, by host or origin.
+    // "browser:keepawakesites": [],
+
     // -- Network --
     // Discover other AgentMux instances on your local network (mDNS/Bonjour)
     // so agents on different machines can message each other directly,

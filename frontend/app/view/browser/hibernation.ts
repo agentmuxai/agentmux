@@ -8,16 +8,23 @@
  * restoring, about how long that takes, and why it slept
  * (docs/specs/SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md).
  *
- * Phase 0 (the spike): panes sleep only on the Hibernate command; they wake on
- * show and on a hover over their window tab's pill.
+ * A hidden pane sleeps after `browser:hibernateafter` minutes (sooner under
+ * memory pressure), a pane in a tab that isn't shown at launch starts asleep,
+ * and the person can put hidden panes to sleep by command. A pane wakes on
+ * show, on a hover or press on its window tab's pill, or when an agent's
+ * Browser call reaches it.
  */
 
+import { getApi } from "@/app/store/app-api";
+import { getSettingsKeyAtom } from "@/store/global";
 import { createSignal } from "solid-js";
 
 /** Block meta: present while the pane is asleep or waking (spec §4). */
 export const SLEEP_META_KEY = "browser:sleep";
 /** Block meta: how long the pane's page took to load the last time (ms). */
 export const LOADMS_META_KEY = "browser:loadms";
+/** Block meta srv writes to ask the pane's view to wake it, for an agent's Browser call (spec §8). */
+export const WAKE_META_KEY = "browser:wake";
 /** Block meta: the person asked to keep this pane awake. */
 export const KEEPAWAKE_META_KEY = "browser:keepawake";
 
@@ -68,9 +75,12 @@ export function isOverdue(ms: number | undefined, elapsed: number): boolean {
 
 /** Why it slept, in one sentence (spec §7.1). */
 export function sleepReasonText(reason: SleepReason): string {
-    return reason === "pressure"
-        ? "Your computer was low on memory, so AgentMux put this browser pane to sleep. A sleeping pane frees its page's memory, usually 100 to 200 MB, and reloads when you come back to it."
-        : "AgentMux put this browser pane to sleep to save memory. A sleeping pane frees its page's memory, usually 100 to 200 MB, and reloads when you come back to it.";
+    const why = "A sleeping pane frees its page's memory, usually 100 to 200 MB, and reloads when you come back to it.";
+    if (reason === "pressure")
+        return `Your computer was low on memory, so AgentMux put this browser pane to sleep. ${why}`;
+    if (reason === "launch")
+        return `AgentMux started this browser pane asleep, since it wasn't on screen, to save memory. ${why}`;
+    return `AgentMux put this browser pane to sleep to save memory. ${why}`;
 }
 
 /** What a wake doesn't bring back yet (until the in-place discard, spec §10 Phase 3). */
@@ -120,31 +130,228 @@ export function leaveTabPill(tabId: string): void {
     if (prewakeTab() === tabId) setPrewakeTab(null);
 }
 
-// ── The window's browser panes, for the commands ───────────────────────────
+// ── When a hidden pane sleeps (spec §5) ────────────────────────────────────
+
+export type Pressure = "normal" | "warn" | "critical";
+
+/** Minutes hidden before a pane sleeps, unless `browser:hibernateafter` says otherwise. */
+export const HIBERNATE_AFTER_MIN = 30;
+/** Minutes hidden before a pane sleeps when memory is short (spec §5.2). */
+export const PRESSURE_AFTER_MIN = { warn: 5, critical: 1 } as const;
+/** How many panes go to sleep per policy tick, oldest-hidden first (spec §5.2). */
+export const PER_TICK: Record<Pressure, number> = { normal: 1, warn: 3, critical: Number.POSITIVE_INFINITY };
+/** How often the window looks for panes due to sleep. */
+export const POLICY_TICK_MS = 30_000;
+/** An agent's Browser call this recent keeps its pane awake (spec §5.3). */
+export const AGENT_RECENT_MS = 10 * 60_000;
+/** A pane that mounts hidden this soon after the window's first load starts asleep (spec §5.4). */
+export const LAUNCH_WINDOW_MS = 20_000;
+
+/** `browser:hibernate`: on unless false. */
+export function hibernationEnabled(): boolean {
+    return getSettingsKeyAtom("browser:hibernate")() !== false;
+}
+
+/** How long a pane must have been hidden to sleep, at this pressure. */
+export function hibernateAfterMs(pressure: Pressure, settingMin?: unknown): number {
+    const normal = typeof settingMin === "number" && settingMin >= 1 ? settingMin : HIBERNATE_AFTER_MIN;
+    const min = pressure === "normal" ? normal : Math.min(normal, PRESSURE_AFTER_MIN[pressure]);
+    return min * 60_000;
+}
+
+/** A local dev server's page: reloading it can rerun the developer's app state. */
+export function isLocalAddress(url: string): boolean {
+    try {
+        const host = new URL(url).hostname.replace(/^\[|\]$/g, "");
+        return (
+            host === "localhost" ||
+            host.endsWith(".localhost") ||
+            host === "::1" ||
+            host === "0.0.0.0" ||
+            /^127\.\d+\.\d+\.\d+$/.test(host)
+        );
+    } catch {
+        return false;
+    }
+}
+
+/** `url`'s site is in `browser:keepawakesites` (a host, its subdomains, or an origin). */
+export function siteKeptAwake(url: string, sites: unknown): boolean {
+    if (!Array.isArray(sites) || sites.length === 0) return false;
+    let u: URL;
+    try {
+        u = new URL(url);
+    } catch {
+        return false;
+    }
+    return sites.some((raw) => {
+        if (typeof raw !== "string" || !raw.trim()) return false;
+        const site = raw.trim().toLowerCase();
+        if (site.includes("://")) return u.origin.toLowerCase() === site.replace(/\/+$/, "");
+        return u.hostname === site || u.hostname.endsWith(`.${site}`);
+    });
+}
+
+/** What the window knows about a pane that can keep it awake (spec §5.3). */
+export interface PaneFacts {
+    url: string;
+    keepAwake: boolean;
+    /** An agent drives it (`browser:owner_agent`). */
+    driverAgent: boolean;
+    /** Auto-approve is on for its agent. */
+    bypass: boolean;
+    /** A banner is waiting on the person (a hand-off, an approval, a page dialog). */
+    attention: boolean;
+    /** Its page has popup windows open. */
+    popupWindows: boolean;
+    /** When an agent last acted on it (ms), if ever. */
+    lastAgentActionAt?: number;
+    /** Its page is capturing camera, microphone or screen. */
+    capturing: boolean;
+    /** Its title or icon changed while it was hidden: the page is doing something. */
+    activeWhileHidden: boolean;
+}
+
+/** Why the window keeps this pane awake, or null when nothing does. */
+export function awakeReason(f: PaneFacts, now: number, keepAwakeSites?: unknown): string | null {
+    if (f.keepAwake) return "kept awake";
+    if (!f.url || f.url === "about:blank") return "no page";
+    if (isLocalAddress(f.url)) return "local address";
+    if (siteKeptAwake(f.url, keepAwakeSites)) return "site kept awake";
+    if (f.driverAgent) return "an agent drives it";
+    if (f.bypass) return "auto-approve is on";
+    if (f.attention) return "waiting on the person";
+    if (f.popupWindows) return "popup windows open";
+    if (f.lastAgentActionAt != null && now - f.lastAgentActionAt < AGENT_RECENT_MS) return "an agent used it recently";
+    if (f.capturing) return "capturing media";
+    if (f.activeWhileHidden) return "active while hidden";
+    return null;
+}
+
+/** Why the page keeps the pane awake, from the host's check; a check that
+ *  couldn't run keeps it awake too. */
+export function pageAwakeReason(c: BrowserHibernationCheck | null | undefined): string | null {
+    if (!c) return "page not checked";
+    if (!c.live) return "no live page";
+    if (c.media) return "playing media";
+    if (c.edited) return "something typed into it";
+    if (c.beforeunload) return "the page asks before leaving";
+    if (c.devtools) return "DevTools open";
+    return null;
+}
+
+/** This window's page loaded (not reloaded) less than LAUNCH_WINDOW_MS ago. */
+export function isLaunchMount(): boolean {
+    try {
+        const nav = performance.getEntriesByType?.("navigation")?.[0] as PerformanceNavigationTiming | undefined;
+        if (nav?.type === "reload") return false;
+        return performance.now() < LAUNCH_WINDOW_MS;
+    } catch {
+        return false;
+    }
+}
+
+// ── Media capture, from the host's events ──────────────────────────────────
+
+const capturingPanes = new Set<string>();
+let captureListening = false;
+
+function listenCapture(): void {
+    if (captureListening) return;
+    captureListening = true;
+    try {
+        void getApi()
+            ?.listen<{ blockId?: string; hasVideo?: boolean; hasAudio?: boolean }>(
+                "pane-media-capture-changed",
+                (p) => {
+                    if (!p || typeof p.blockId !== "string") return;
+                    if (p.hasVideo || p.hasAudio) capturingPanes.add(p.blockId);
+                    else capturingPanes.delete(p.blockId);
+                }
+            )
+            ?.catch(() => {});
+    } catch {
+        // No host API (a test): nothing captures.
+    }
+}
+
+/** The pane's page is capturing camera, microphone or screen. */
+export function isCapturing(blockId: string): boolean {
+    listenCapture();
+    return capturingPanes.has(blockId);
+}
+
+// ── The window's browser panes ─────────────────────────────────────────────
 
 export interface HibernatablePane {
     blockId: string;
     /** The pane can be seen now (its window tab shown, its pane tab active). */
     isVisible(): boolean;
     isAsleep(): boolean;
-    hibernate(reason: SleepReason): void;
+    /** When it was last hidden (ms), or null while visible. */
+    hiddenSince(): number | null;
+    /** Put it to sleep unless something keeps it awake; resolves to that reason, or null when it slept. */
+    tryHibernate(reason: SleepReason): Promise<string | null>;
     wake(why: string): void;
 }
 
 const panes = new Set<HibernatablePane>();
+let policyTimer: ReturnType<typeof setInterval> | undefined;
 
 export function registerHibernatablePane(p: HibernatablePane): () => void {
     panes.add(p);
-    return () => panes.delete(p);
+    if (!policyTimer && typeof setInterval === "function") {
+        policyTimer = setInterval(() => void policyTick().catch(() => {}), POLICY_TICK_MS);
+    }
+    return () => {
+        panes.delete(p);
+        if (panes.size === 0 && policyTimer) {
+            clearInterval(policyTimer);
+            policyTimer = undefined;
+        }
+    };
+}
+
+async function hostPressure(): Promise<Pressure> {
+    try {
+        return (await getApi()?.browserPanes?.memoryPressure?.()) ?? "normal";
+    } catch {
+        return "normal";
+    }
+}
+
+/**
+ * One pass of the policy: the hidden panes due to sleep at the host's memory
+ * pressure, oldest-hidden first, at most PER_TICK of them. Each still checks
+ * what keeps it awake (`tryHibernate`). Resolves to the panes that slept.
+ */
+export async function policyTick(
+    now = Date.now(),
+    pressureOf: () => Promise<Pressure> = hostPressure
+): Promise<string[]> {
+    if (!hibernationEnabled()) return [];
+    const candidates = [...panes].filter((p) => !p.isAsleep() && !p.isVisible() && p.hiddenSince() != null);
+    if (candidates.length === 0) return [];
+    const pressure = await pressureOf();
+    const after = hibernateAfterMs(pressure, getSettingsKeyAtom("browser:hibernateafter")());
+    const due = candidates
+        .filter((p) => now - (p.hiddenSince() ?? now) >= after)
+        .sort((a, b) => (a.hiddenSince() ?? 0) - (b.hiddenSince() ?? 0));
+    const slept: string[] = [];
+    for (const p of due) {
+        if (slept.length >= PER_TICK[pressure]) break;
+        const declined = await p.tryHibernate(pressure === "normal" ? "hidden" : "pressure");
+        if (declined == null) slept.push(p.blockId);
+    }
+    return slept;
 }
 
 /** Hibernate every browser pane in this window that can't be seen. */
-export function hibernateHiddenBrowserPanes(): number {
+export async function hibernateHiddenBrowserPanes(): Promise<number> {
     let n = 0;
     for (const p of panes) {
         if (p.isVisible() || p.isAsleep()) continue;
-        p.hibernate("manual");
-        n++;
+        if ((await p.tryHibernate("manual")) == null) n++;
     }
     console.log(`[hibernate] command hibernate-hidden count=${n}`);
     return n;

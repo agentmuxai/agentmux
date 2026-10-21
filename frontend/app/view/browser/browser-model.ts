@@ -34,6 +34,7 @@ import {
     LOADMS_META_KEY,
     readSleep,
     SLEEP_META_KEY,
+    WAKE_META_KEY,
     type BrowserSleep,
     type SleepReason,
 } from "./hibernation";
@@ -1050,6 +1051,7 @@ export class BrowserViewModel {
     endSleep(loadMs: number | undefined): Promise<void> {
         return this.ctx.setMeta({
             [SLEEP_META_KEY]: null,
+            [WAKE_META_KEY]: null,
             ...(loadMs != null && loadMs > 0 ? { [LOADMS_META_KEY]: Math.round(loadMs) } : {}),
         });
     }

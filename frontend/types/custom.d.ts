@@ -224,6 +224,15 @@ declare global {
         n: number;
     };
 
+    /** A page's state for the hibernation check: `live: false` when it has no page. */
+    type BrowserHibernationCheck = {
+        live: boolean;
+        media?: boolean;
+        edited?: boolean;
+        beforeunload?: boolean;
+        devtools?: boolean;
+    };
+
     type BrowserPaneHostApi = {
         /** `opts.allowedOrigins`: the pane's site list (`browser:allowed_origins`), so the
          *  host has it before the first load (SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md §6).
@@ -246,6 +255,11 @@ declare global {
          *  `supported: false` on a libcef without the API. `searchSuggestions`:
          *  also ask the default search engine (`browser:searchsuggestions`). */
         autocomplete?(blockId: string, text: string, searchSuggestions: boolean): Promise<BrowserAutocompleteResult>;
+        /** What the pane's page is doing that a hibernation would lose
+         *  (browser_api/hibernation.rs). Absent on hosts without it. */
+        hibernationCheck?(blockId: string): Promise<BrowserHibernationCheck>;
+        /** The host's memory pressure level (memory_pressure.rs). */
+        memoryPressure?(): Promise<"normal" | "warn" | "critical">;
         /** Bring a popup window a pane's page opened (`popup-…`) to the front. */
         showPopup(popupId: string): Promise<void>;
         /** Close a popup window a pane's page opened. */

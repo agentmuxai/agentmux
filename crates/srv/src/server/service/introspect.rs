@@ -51,11 +51,21 @@ pub(crate) fn agent_layout(store: &Store) -> serde_json::Value {
             .iter()
             .filter_map(|bid| blocks.iter().find(|b| &b.oid == bid))
             .map(|b| {
-                json!({
+                let mut pane = json!({
                     "block_id": b.oid,
                     "view": meta_get_string(&b.meta, "view", ""),
                     "title": meta_get_string(&b.meta, "frame:title", ""),
-                })
+                });
+                // A hibernated browser pane: its page reloads on the next
+                // Browser call (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md).
+                if b
+                    .meta
+                    .get(crate::server::browser_hibernation::SLEEP_META_KEY)
+                    .is_some_and(|v| v.is_object())
+                {
+                    pane["hibernated"] = json!(true);
+                }
+                pane
             })
             .collect()
     };
