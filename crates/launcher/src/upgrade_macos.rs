@@ -317,8 +317,12 @@ mod tests {
     fn a_translocated_or_unwritable_app_is_not_replaced() {
         let translocated = Path::new("/private/var/folders/x/T/AppTranslocation/ABC/d/AgentMux.app");
         assert!(not_replaceable(translocated).unwrap().contains("App Translocation"));
-        let missing = not_replaceable(Path::new("/no/such/folder/AgentMux.app")).unwrap();
-        assert!(missing.contains("can't be read") || missing.contains("can't be written"), "{missing}");
+        // The folder checks are Unix's (the module only runs on macOS).
+        #[cfg(unix)]
+        {
+            let missing = not_replaceable(Path::new("/no/such/folder/AgentMux.app")).unwrap();
+            assert!(missing.contains("can't be read") || missing.contains("can't be written"), "{missing}");
+        }
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(not_replaceable(&dir.path().join("AgentMux.app")), None);
     }
