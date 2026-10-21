@@ -7,7 +7,7 @@
 import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SETTINGS_SECTIONS } from "@/app/view/settings/settings-model";
-import { CONNECTORS_SECTION_IDS, MEMORY_SECTION_IDS } from "@/app/view/section-pane/panes";
+import { CONNECTORS_SECTIONS, MEMORY_SECTIONS } from "@/app/view/section-pane/panes";
 import { WARDEN_SECTIONS } from "@/app/view/warden/warden-model";
 import {
     isSectionMeta,
@@ -95,8 +95,8 @@ describe("pane sections", () => {
             warden: ids(WARDEN_SECTIONS),
             // Not a view: Warden's Vault section's own sections.
             vault: ids(WARDEN_SECTIONS.items.find((s) => s.id === "vault")!.sections!),
-            connectors: [...CONNECTORS_SECTION_IDS],
-            memory: [...MEMORY_SECTION_IDS],
+            connectors: ids(CONNECTORS_SECTIONS),
+            memory: ids(MEMORY_SECTIONS),
             settings: ids(SETTINGS_SECTIONS),
         });
     });

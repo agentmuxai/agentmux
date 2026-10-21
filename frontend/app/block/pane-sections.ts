@@ -21,6 +21,8 @@ export interface PaneSectionInfo<Id extends string = string> {
     /** Font Awesome name. */
     icon: string;
     tooltip?: string;
+    /** A standing accent on the section's icon (Memory's Bundles, for ABF). */
+    highlight?: boolean;
     /** A section that is itself a row of sections (Warden's Vault): the selected one is in meta
      *  under `<section id>:section`. */
     sections?: PaneSections;

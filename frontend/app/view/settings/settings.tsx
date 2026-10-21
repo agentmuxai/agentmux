@@ -1,26 +1,21 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Settings module barrel: the pane's native pane tab manifest.
+// Settings module barrel: the pane's native pane tab manifest. Its code loads
+// with the first Settings pane (settings-instance.tsx).
 
-import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
-import { SETTINGS_SECTION_LABELS, SETTINGS_SECTIONS, SettingsViewModel } from "./settings-model";
-import { SettingsView } from "./settings-view";
+import { lazyPaneTab } from "@/app/block/lazy-pane-tab";
+import { SETTINGS_SECTIONS } from "./settings-model";
 
 /** The settings pane as a native pane tab (Pane Tab contract Phase 2c),
  *  titled with its open section. */
-export const settingsPaneTab: PaneTabManifest = {
+export const settingsPaneTab = lazyPaneTab({
     apiVersion: 1,
     view: "settings",
     label: "Settings",
     icon: "cog",
     defaultHue: 0,
     sections: SETTINGS_SECTIONS,
-    create: (ctx) => {
-        const model = new SettingsViewModel(ctx);
-        return {
-            component: () => <SettingsView model={model} />,
-            liveTitle: () => ({ text: SETTINGS_SECTION_LABELS[model.activeSection()] }),
-        };
-    },
-};
+    members: ["liveTitle"],
+    load: () => import("./settings-instance"),
+});

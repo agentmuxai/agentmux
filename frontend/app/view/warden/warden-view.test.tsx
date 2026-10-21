@@ -56,7 +56,7 @@ const setMetaMock = vi.fn((patch: Record<string, unknown>) => {
     return Promise.resolve();
 });
 
-import { wardenPaneTab } from "./warden";
+import { create as createWarden } from "./warden-instance";
 import { WardenViewModel } from "./warden-model";
 import { WardenView } from "./warden-view";
 
@@ -112,7 +112,7 @@ describe("WardenView rail", () => {
     it("shows the Vault's import, export and note actions only on the Vault section", () => {
         setBlockMeta({ "warden:section": "host" });
         const instance = createRoot(() =>
-            wardenPaneTab.create({ blockId: "b", meta: blockMeta as any, setMeta: setMetaMock, isFocused: () => false, visibility: () => "active" })
+            createWarden({ blockId: "b", meta: blockMeta as any, setMeta: setMetaMock, isFocused: () => false, visibility: () => "active" })
         );
         expect(instance.headerActions?.()).toEqual([]);
         setBlockMeta({ "warden:section": "vault" });
