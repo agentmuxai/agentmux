@@ -10,7 +10,7 @@
  */
 
 import { cleanup, render } from "@solidjs/testing-library";
-import { Subject } from "rxjs";
+import { Emitter } from "@/util/emitter";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DocumentNode } from "../types";
@@ -46,11 +46,11 @@ vi.mock("@/app/store/rpc-api", () => ({
     },
 }));
 
-let subject = new Subject<unknown>();
+let subject = new Emitter<unknown>();
 let released = 0;
 vi.mock("@/app/store/mps", () => ({
     getFileSubject: () => {
-        const s = subject as Subject<unknown> & { release?: () => void };
+        const s = subject as Emitter<unknown> & { release?: () => void };
         s.release = () => void released++;
         return s;
     },
@@ -119,7 +119,7 @@ beforeEach(() => {
     reads.length = 0;
     counts.n = 0;
     released = 0;
-    subject = new Subject<unknown>();
+    subject = new Emitter<unknown>();
     setDormant(false);
     setFollowing(true);
     shown = [];

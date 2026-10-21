@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { isBlank } from "@/util/util";
-import { Subject } from "rxjs";
+import { Emitter } from "@/util/emitter";
 import { sendRawRpcMessage } from "./ws";
 import type { SubscriptionRequest } from "@/app/store/rpc-api";
 import type { MuxEvent } from "@/types/rpc/MuxEvent";
@@ -161,7 +161,7 @@ function getFileSubject(zoneId: string, fileName: string): SubjectWithRef<WSFile
     const subjectKey = zoneId + "|" + fileName;
     let subject = fileSubjects.get(subjectKey);
     if (subject == null) {
-        subject = new Subject<any>() as any;
+        subject = new Emitter<any>() as any;
         subject.refCount = 0;
         subject.release = () => {
             subject.refCount--;

@@ -158,6 +158,9 @@ import { rehypeLocalImageSrc } from "./rehype-local-image-src";
 import { Mermaid, MermaidErrorFallback } from "./markdown-mermaid";
 import "./markdown.scss";
 
+/** Any alignment class in a class string (ALIGN_CLASS_REGEX matches one class). */
+const ALIGN_CLASS_REGEX_ANY = /(^|\s)text-(left|center|right)(\s|$)/;
+
 /**
  * `solid-js/h` returns each element as a thunk that builds it on first call
  * and returns the same element on every later call (it is marked with a
@@ -365,7 +368,10 @@ const Markdown = (props: MarkdownProps) => {
                 <th
                     {...rest}
                     class={cn(
-                        "px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-primary",
+                        "px-3 py-2 text-xs font-semibold uppercase tracking-wide text-primary",
+                        // Left unless the column is aligned (rehype-align-to-class):
+                        // cn no longer drops one of two clashing classes.
+                        !ALIGN_CLASS_REGEX_ANY.test(className ?? "") && "text-left",
                         className,
                     )}
                 >

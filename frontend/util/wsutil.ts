@@ -2,36 +2,20 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { WebSocket as NodeWebSocketType } from "ws";
 import { AUTH_KEY_HEADER } from "./sharedconst";
 
-let NodeWebSocket: typeof NodeWebSocketType = null;
+type ComboWebSocket = WebSocket;
 
-if (typeof window === "undefined") {
-    // Necessary to avoid issues with Rollup: https://github.com/websockets/ws/issues/2057
-    import("ws")
-        .then((ws) => (NodeWebSocket = ws.default))
-        .catch((e) => {
-            console.log("Error importing 'ws':", e);
-        });
-}
-
-type ComboWebSocket = NodeWebSocketType | WebSocket;
-
+/** A browser WebSocket for `url`. It can't send headers, so the auth key goes
+ *  in the query string. (A Node `ws` branch for running outside a window was
+ *  never reached in the app and is gone.) */
 function newWebSocket(url: string, headers: { [key: string]: string }): ComboWebSocket {
-    if (NodeWebSocket) {
-        // Node.js WebSocket (backend): supports headers
-        return new NodeWebSocket(url, { headers });
-    } else {
-        // Browser WebSocket: does not support headers
-        // Append auth key as query parameter instead
-        let finalUrl = url;
-        if (headers && headers[AUTH_KEY_HEADER]) {
-            const separator = url.includes("?") ? "&" : "?";
-            finalUrl = `${url}${separator}authkey=${encodeURIComponent(headers[AUTH_KEY_HEADER])}`;
-        }
-        return new WebSocket(finalUrl);
+    let finalUrl = url;
+    if (headers && headers[AUTH_KEY_HEADER]) {
+        const separator = url.includes("?") ? "&" : "?";
+        finalUrl = `${url}${separator}authkey=${encodeURIComponent(headers[AUTH_KEY_HEADER])}`;
     }
+    return new WebSocket(finalUrl);
 }
 
 export { newWebSocket };

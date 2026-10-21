@@ -32,7 +32,7 @@ import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { PLATFORM } from "@/util/platformutil";
 import * as util from "@/util/util";
 import clsx from "clsx";
-import debug from "debug";
+import { debugLog } from "@/util/debuglog";
 import "overlayscrollbars/overlayscrollbars.css";
 import { createEffect, createSignal, For, onCleanup, onMount, Show, untrack } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
@@ -70,8 +70,8 @@ if (import.meta.env.DEV) checkSeparatorParity();
 // tailwindsetup.css should come *after* app.scss (don't remove the newline above otherwise prettier will reorder these imports)
 import "../tailwindsetup.css";
 
-const dlog = debug("wave:app");
-const focusLog = debug("wave:focus");
+const dlog = debugLog("wave:app");
+const focusLog = debugLog("wave:focus");
 
 const App = () => {
     return <AppInner />;

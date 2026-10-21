@@ -44,9 +44,8 @@ export function TableBlock(props: TableBlockProps): JSX.Element {
                 type="button"
                 class={cn(
                     "absolute right-2 top-2 z-10 rounded border border-border px-2 py-0.5",
-                    "text-xs text-muted opacity-0 transition-opacity group-hover:opacity-100",
-                    "bg-panel hover:bg-hover",
-                    copied() && "text-success opacity-100"
+                    "text-xs transition-opacity bg-panel hover:bg-hover",
+                    copied() ? "text-success opacity-100" : "text-muted opacity-0 group-hover:opacity-100"
                 )}
                 onClick={handleCopy}
                 title="Copy as CSV"

@@ -4,7 +4,6 @@
 
 export const DefaultTermTheme = "default-dark";
 import { detectAgentFromEnv } from "@/app/block/autotitle";
-import { colord } from "colord";
 
 // Last-resort palette for when `document`/CSS custom properties aren't
 // available at all (e.g. a non-browser test environment) — see
@@ -45,9 +44,45 @@ const FALLBACK_TERM_THEME: TermThemeType = {
     brightWhite: "#ffffff",
 } as unknown as TermThemeType;
 
-function applyTransparencyToColor(hexColor: string, transparency: number): string {
-    const alpha = 1 - transparency; // transparency is already 0-1
-    return colord(hexColor).alpha(alpha).toHex();
+/** `[r, g, b, a]` (0-255, alpha 0-1) of a CSS colour: hex (3, 4, 6 or 8
+ *  digits) and `rgb()`/`rgba()` directly, anything else (`hsl()`, a name)
+ *  through a canvas, which normalises every valid CSS colour. Null if it isn't
+ *  one. */
+function parseColor(color: string): [number, number, number, number] | null {
+    const c = color.trim();
+    const hex = /^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.exec(c);
+    if (hex) {
+        let h = hex[1];
+        if (h.length <= 4) h = [...h].map((d) => d + d).join("");
+        const n = (i: number) => parseInt(h.slice(i, i + 2), 16);
+        return [n(0), n(2), n(4), h.length === 8 ? n(6) / 255 : 1];
+    }
+    const rgb = /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)(?:[\s,/]+([\d.]+%?))?\s*\)$/i.exec(c);
+    if (rgb) {
+        const a = rgb[4] == null ? 1 : rgb[4].endsWith("%") ? parseFloat(rgb[4]) / 100 : parseFloat(rgb[4]);
+        return [Number(rgb[1]), Number(rgb[2]), Number(rgb[3]), a];
+    }
+    if (typeof document === "undefined") return null;
+    const ctx = document.createElement("canvas").getContext("2d");
+    if (!ctx) return null;
+    // An invalid colour leaves fillStyle unchanged: tell it apart with a sentinel.
+    ctx.fillStyle = "#010203";
+    ctx.fillStyle = c;
+    const normalized = String(ctx.fillStyle);
+    if (normalized === "#010203" && !/^#010203$/i.test(c)) return null;
+    return normalized.startsWith("#") || normalized.startsWith("rgb") ? parseColor(normalized) : null;
+}
+
+/** `color` with its alpha set to `1 - transparency`, as `#rrggbb[aa]`: what
+ *  colord's `alpha(x).toHex()` gave, which replaced the colour's own alpha. A
+ *  colour it can't read is returned as it is. */
+function applyTransparencyToColor(color: string, transparency: number): string {
+    const parsed = parseColor(color);
+    if (!parsed) return color;
+    const [r, g, b] = parsed;
+    const alpha = Math.max(0, Math.min(1, 1 - transparency)); // transparency is already 0-1
+    const hex = (v: number) => Math.round(v).toString(16).padStart(2, "0");
+    return `#${hex(r)}${hex(g)}${hex(b)}${alpha === 1 ? "" : hex(alpha * 255)}`;
 }
 
 // Builds a TermThemeType from the currently-active app theme's --term-*
@@ -127,7 +162,7 @@ function computeTheme(
     return [themeCopy, bgcolor];
 }
 
-export { computeTheme, tryDeriveTermThemeFromCss };
+export { applyTransparencyToColor, computeTheme, tryDeriveTermThemeFromCss };
 
 /**
  * A terminal pane's header name: the agent it runs (from `cmd:env`), else
