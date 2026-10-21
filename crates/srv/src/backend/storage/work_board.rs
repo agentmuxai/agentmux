@@ -23,6 +23,7 @@ use rusqlite::{params, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 
 use super::store::Store;
+use super::work_deps::{attach_after, AfterTask, WAITS_ON_UNFINISHED};
 use super::work_queue::{holder_update, row_to_item, work_state, HolderMatch, WorkItem, COLS};
 use super::StoreError;
 
@@ -112,6 +113,9 @@ pub struct WorkCard {
     pub filed_by: String,
     pub last_reminded_at: Option<i64>,
     pub updated_at: i64,
+    /// The tasks this one starts after (`work_deps.rs`), finished or not.
+    #[serde(default)]
+    pub after: Vec<AfterTask>,
 }
 
 /// A task as the board shows it: the queue row and its card.
@@ -186,6 +190,7 @@ fn row_to_card(row: &Row) -> rusqlite::Result<WorkCard> {
         filed_by: row.get("filed_by")?,
         last_reminded_at: row.get("last_reminded_at")?,
         updated_at: row.get("updated_at")?,
+        after: Vec::new(),
     })
 }
 
@@ -264,11 +269,18 @@ impl Store {
               WHERE q.id = ?1 OR c.num = ?2",
             q = q_cols()
         );
-        Ok(conn
+        let Some(t) = conn
             .query_row(&sql, params![id_or_num.trim(), num.unwrap_or(-1)], |r| {
                 Ok(BoardTask { item: row_to_item(r)?, card: row_to_card(r)? })
             })
-            .optional()?)
+            .optional()?
+        else {
+            return Ok(None);
+        };
+        let mut one = [t];
+        attach_after(&conn, &mut one)?;
+        let [t] = one;
+        Ok(Some(t))
     }
 
     /// The tasks the board shows: every one not finished, and the finished
@@ -299,6 +311,7 @@ impl Store {
         for r in rows {
             out.push(r?);
         }
+        attach_after(&conn, &mut out)?;
         Ok(out)
     }
 
@@ -320,6 +333,7 @@ impl Store {
             "SELECT {q}, {CARD_COLS} FROM db_work_queue q JOIN db_work_cards c ON c.work_id = q.id
               WHERE q.state = '{open}' AND q.attempts < q.max_attempts
                 AND (q.not_before IS NULL OR q.not_before <= ?4)
+                AND NOT {WAITS_ON_UNFINISHED}
                 AND ((q.target_agent_uid <> '' AND q.target_agent_uid = ?2)
                      OR (q.target_agent_uid = '' AND q.target_agent <> '' AND q.target_agent = ?1))
               ORDER BY q.priority DESC, COALESCE(c.rank, q.created_at) ASC

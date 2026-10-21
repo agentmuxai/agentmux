@@ -158,7 +158,7 @@ export function buildCefApi(): AppApi {
             return cachedValues!.aboutDetails;
         },
         getBackendInfo: async () => {
-            return await invokeCommand<{ pid?: number; started_at?: string; web_endpoint?: string; version: string; pending_migrations?: number }>(
+            return await invokeCommand<{ pid?: number; started_at?: string; web_endpoint?: string; version: string }>(
                 "get_backend_info"
             );
         },
@@ -457,11 +457,6 @@ export function buildCefApi(): AppApi {
         },
 
         listen: <T = any>(event: string, callback: (payload: T) => void) => listenEvent<T>(event, callback),
-
-        // --- Maintenance panel ---
-        runMigrations: async () => {
-            return await invokeCommand<{ started: boolean }>("run_migrations");
-        },
 
         // --- Cross-window drag ---
         startCrossDrag: async (

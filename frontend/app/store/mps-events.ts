@@ -91,9 +91,6 @@ export const WpsEvent = {
     // `canceled` are final. Scoped `block:<id>`. See
     // docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md §7.1.
     FilesOp: "files:op",
-    UpgradeMigrationEvent:     "upgrade:migration-event",
-    UpgradeMigrationsComplete: "upgrade:migrations-complete",
-    UpgradeMigrationsFailed:   "upgrade:migrations-failed",
     // Published by `handle_muxspect_dock_clear` in response to a
     // `muxspect dock clear` request. Scoped `block:<id>` — only a
     // renderer currently displaying that block receives it. Payload:

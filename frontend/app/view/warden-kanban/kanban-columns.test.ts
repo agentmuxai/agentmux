@@ -10,11 +10,16 @@ import {
     columnTasks,
     matchesQuery,
     needsReason,
+    parseAfter,
     prLabel,
     rankBetween,
+    repoLabel,
+    repoLanes,
     requestedBy,
+    reviewLimitOf,
     reviewLoad,
     untrackedAgents,
+    waitingOn,
 } from "./kanban-columns";
 import type { KanbanAgent, KanbanAgentState, KanbanTask, TaskState } from "./kanban-types";
 
@@ -163,6 +168,46 @@ describe("what a card says", () => {
         });
         expect(["#12", "12", "spec", "loap", "agentmux", ""].every((q) => matchesQuery(t, q))).toBe(true);
         expect(matchesQuery(t, "naki")).toBe(false);
+    });
+
+    it("splits the board into lanes by repository, busy ones first, no repository last", () => {
+        const at = (num: number, state: TaskState, repo: string) =>
+            task(num, state, { card: { repo } as KanbanTask["card"] });
+        const lanes = repoLanes([
+            at(1, "done", "a/old"),
+            at(2, "open", "z/busy"),
+            at(3, "open", ""),
+            at(4, "claimed", "b/busy"),
+            at(5, "review", "z/busy"),
+        ]);
+        expect(lanes.map((l) => [l.label, l.tasks.length])).toEqual([
+            ["b/busy", 1],
+            ["z/busy", 2],
+            ["a/old", 1],
+            ["No repository", 1],
+        ]);
+        expect(repoLabel("local:C:/work/my-tool")).toBe("my-tool");
+    });
+
+    it("reads Review's soft limit, off unless a positive number", () => {
+        expect(reviewLimitOf({ "kanban:reviewlimit": 4 })).toBe(4);
+        expect(reviewLimitOf({ "kanban:reviewlimit": 0 })).toBe(0);
+        expect(reviewLimitOf({ "kanban:reviewlimit": "4" })).toBe(0);
+        expect(reviewLimitOf(undefined)).toBe(0);
+    });
+
+    it("says what a task still waits for, and reads the numbers typed for it", () => {
+        const after = [
+            { id: "a", num: 3, title: "a", state: "claimed" as const },
+            { id: "b", num: 4, title: "b", state: "done" as const },
+            { id: "c", num: 5, title: "c", state: "cancelled" as const },
+            { id: "d", num: 6, title: "d", state: "failed" as const },
+        ];
+        const t = task(7, "open", { card: { after } as unknown as KanbanTask["card"] });
+        expect(waitingOn(t).map((a) => a.num)).toEqual([3, 6]);
+        expect(waitingOn(task(8, "open"))).toEqual([]);
+        expect(parseAfter(" #12, 15;#3 ")).toEqual(["12", "15", "3"]);
+        expect(parseAfter("")).toEqual([]);
     });
 
     it("labels a PR link with its number", () => {

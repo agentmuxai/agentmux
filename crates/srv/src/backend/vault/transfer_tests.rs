@@ -469,3 +469,31 @@ fn hostile_files_are_refused_and_never_panic() {
     }
     assert_eq!(s.vault_count().unwrap(), 0);
 }
+
+#[test]
+fn a_keepass_database_asks_for_its_password_then_previews_and_is_not_called_a_plaintext_file() {
+    use keepass::config::{DatabaseConfig, KdfConfig};
+    let mut config = DatabaseConfig::default();
+    config.kdf_config = KdfConfig::Aes { rounds: 100 };
+    let mut db = keepass::Database::with_config(config);
+    db.root_mut().add_entry().edit(|e| {
+        e.set_unprotected("Title", "Example");
+        e.set_unprotected("UserName", "alex");
+        e.set_protected("Password", "hunter2");
+    });
+    let mut bytes = Vec::new();
+    db.save(&mut bytes, keepass::DatabaseKey::new().with_password("master-pw")).unwrap();
+    let s = store();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("Passwords.kdbx");
+    std::fs::write(&path, &bytes).unwrap();
+
+    assert!(matches!(inspect(&s, &path, None).unwrap_err(), InspectError::NeedsPassphrase));
+    let wrong = inspect(&s, &path, Some("nope")).unwrap_err();
+    assert!(matches!(&wrong, InspectError::Other(m) if m.contains("didn't open")));
+    let preview = inspect(&s, &path, Some("master-pw")).unwrap();
+    assert_eq!((preview.source, preview.total, preview.plaintext_file), (Source::KeePass, 1, false));
+    assert!(preview.source_label.contains("KeePass"));
+    let result = commit(&s, &preview.token, Duplicates::Skip).unwrap();
+    assert_eq!(result.added, 1);
+}

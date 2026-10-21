@@ -157,6 +157,7 @@ pub(crate) const TASKS_TOOL: &str = r#"{
       "repo":         { "type": "string", "description": "enqueue: the repository it is about, owner/repo (default: the one you work in)" },
       "hold":         { "type": "boolean", "description": "enqueue: on hold until the operator releases it" },
       "review":       { "type": "boolean", "description": "enqueue: whether the operator must accept it when it is handed in (default: yes when the operator asked for it)" },
+      "after":        { "type": "array", "items": { "type": "string" }, "description": "enqueue: the tasks it starts after, by number (\"12\") or id; nobody takes it until they are done" },
       "priority":     { "type": "integer", "description": "enqueue: higher claims first (default 0); use sparingly" },
       "max_attempts": { "type": "integer", "description": "enqueue: claims an item gets before it is parked as failed (default 3)" },
       "not_before":   { "type": "integer", "description": "enqueue: a Unix ms time before which it can't be claimed" },

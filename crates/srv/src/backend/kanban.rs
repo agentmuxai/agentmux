@@ -185,7 +185,11 @@ pub async fn run_reminder_loop() {
         if now - last_prune >= PRUNE_EVERY_MS {
             last_prune = now;
             let identity = ctx.identity.clone();
-            let pruned = tokio::task::spawn_blocking(move || identity.work_events_prune(now)).await;
+            let pruned = tokio::task::spawn_blocking(move || {
+                let _ = identity.work_deps_prune();
+                identity.work_events_prune(now)
+            })
+            .await;
             if let Ok(Ok(n)) = pruned.as_ref() {
                 if *n > 0 {
                     tracing::info!(lines = n, "kanban: pruned the history of long-finished tasks");

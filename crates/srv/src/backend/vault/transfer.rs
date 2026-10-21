@@ -270,9 +270,10 @@ pub fn inspect_with(store: &Store, path: &Path, passphrase: Option<&str>, mappin
         }
         (Source::Vault, file.entries, Vec::new(), false)
     } else {
-        match import::read(&head, &file_name, mapping) {
-            Ok(i) => (i.source, i.entries, i.skipped.into_iter().map(|(label, reason)| Skipped { label, reason }).collect(), true),
+        match import::read_with(&head, &file_name, mapping, passphrase) {
+            Ok(i) => (i.source, i.entries, i.skipped.into_iter().map(|(label, reason)| Skipped { label, reason }).collect(), i.plaintext),
             Err(ReadError::NeedsMapping(m)) => return Err(InspectError::NeedsMapping(m)),
+            Err(ReadError::NeedsPassphrase) => return Err(InspectError::NeedsPassphrase),
             Err(ReadError::Other(e)) => return Err(e.into()),
         }
     };

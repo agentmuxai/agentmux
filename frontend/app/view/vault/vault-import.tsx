@@ -162,7 +162,7 @@ export function VaultImportDialog(props: { onClose: () => void }): JSX.Element {
                                 void unlock();
                             }}
                         >
-                            <Field label="Passphrase" layout="stacked" description="This file is encrypted. Type the passphrase it was exported with.">
+                            <Field label="Passphrase" layout="stacked" description="This file is encrypted. Type the passphrase it was exported with, or a KeePass database's master password.">
                                 <TextInput type="password" autocomplete="new-password" spellcheck={false} autofocus value={pass()} onInput={(e) => setPass(e.currentTarget.value)} />
                             </Field>
                             <input type="submit" hidden />

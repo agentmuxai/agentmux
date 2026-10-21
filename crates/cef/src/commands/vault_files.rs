@@ -76,7 +76,7 @@ pub async fn import(state: &Arc<AppState>, args: &Value) -> Result<Value, String
             // Every export AgentMux reads: its own, other managers' CSV and JSON, .env.
             rfd::FileDialog::new()
                 .set_title("Import into the Vault")
-                .add_filter("Vault and password exports", &["vault", "csv", "json", "env", "txt"])
+                .add_filter("Vault and password exports", &["vault", "kdbx", "csv", "json", "env", "txt"])
                 .add_filter("AgentMux Vault", &["vault"])
                 .add_filter("All files", &["*"])
                 .pick_file()

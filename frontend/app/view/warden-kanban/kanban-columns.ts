@@ -4,7 +4,7 @@
 // Where each task sits on the Kanban, and in what order (docs/specs/SPEC_WARDEN_KANBAN_2026_10_20.md
 // §6.3, §6.5). Pure: the section and its tests share it.
 
-import type { KanbanAgent, KanbanTask } from "./kanban-types";
+import type { KanbanAfter, KanbanAgent, KanbanTask } from "./kanban-types";
 
 export type ColumnId = "backlog" | "progress" | "needs" | "review" | "done";
 
@@ -140,6 +140,57 @@ export function checklistProgress(t: KanbanTask): string | null {
     const list = t.card.checklist ?? [];
     if (!list.length) return null;
     return `${list.filter((i) => i.status === "completed").length}/${list.length}`;
+}
+
+export interface RepoLane {
+    /** The repository, `""` for tasks with none. */
+    repo: string;
+    label: string;
+    tasks: KanbanTask[];
+}
+
+/** A repository's name as a lane or card shows it: `owner/repo`, or a local folder's last part. */
+export function repoLabel(repo: string): string {
+    if (!repo) return "No repository";
+    return repo.startsWith("local:") ? repo.replace(/^local:.*[\\/]/, "") : repo;
+}
+
+/** The board split into one lane per repository (§6.11), those with unfinished work first, each by name;
+ *  tasks with no repository last. */
+export function repoLanes(tasks: KanbanTask[]): RepoLane[] {
+    const byRepo = new Map<string, KanbanTask[]>();
+    for (const t of tasks) {
+        const list = byRepo.get(t.card.repo) ?? [];
+        list.push(t);
+        byRepo.set(t.card.repo, list);
+    }
+    const active = (l: KanbanTask[]) => l.some((t) => columnOf(t) !== "done");
+    return [...byRepo.entries()]
+        .map(([repo, list]) => ({ repo, label: repoLabel(repo), tasks: list }))
+        .sort((a, b) => {
+            if (!a.repo !== !b.repo) return a.repo ? -1 : 1;
+            if (active(a.tasks) !== active(b.tasks)) return active(a.tasks) ? -1 : 1;
+            return a.label.localeCompare(b.label);
+        });
+}
+
+/** Review's soft limit from the settings (`kanban:reviewlimit`, D6): a positive whole number, else none (0). */
+export function reviewLimitOf(settings: Record<string, unknown> | undefined): number {
+    const v = settings?.["kanban:reviewlimit"];
+    return typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0;
+}
+
+/** The tasks this one starts after that aren't finished yet: while any is, nobody takes it. */
+export function waitingOn(t: KanbanTask): KanbanAfter[] {
+    return (t.card.after ?? []).filter((a) => a.state !== "done" && a.state !== "cancelled");
+}
+
+/** "#12, 15" → ["12", "15"]: the numbers typed for "starts after". */
+export function parseAfter(text: string): string[] {
+    return text
+        .split(/[\s,;]+/)
+        .map((s) => s.replace(/^#/, ""))
+        .filter(Boolean);
 }
 
 /** A PR link's label: "#12" for a GitHub PR address, else "PR". */

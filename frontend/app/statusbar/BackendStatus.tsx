@@ -36,7 +36,6 @@ type BackendInfo = {
     started_at?: string;
     web_endpoint?: string;
     version: string;
-    pending_migrations?: number;
 };
 
 interface BackendStatusPanelProps {
@@ -104,30 +103,6 @@ const BackendStatusPanel = (props: BackendStatusPanelProps): JSX.Element => {
                 matches the app version already shown in the Instance panel
                 (v{about().version} in the status bar's bottom-right chip),
                 since both ship from the same workspace release. */}
-            <Show when={(backendInfo()?.pending_migrations ?? 0) > 0}>
-                <div class="status-bar-popover-divider" />
-                <div class="status-bar-popover-row">
-                    <span class="status-bar-popover-label" style={{ color: "var(--warning-color)" }}>
-                        Migrations
-                    </span>
-                    <span style={{ color: "var(--warning-color)" }}>
-                        {backendInfo()!.pending_migrations} pending
-                    </span>
-                </div>
-                <div class="status-bar-popover-row">
-                    <Button
-                        density="compact"
-                        tone="danger"
-                        class="status-bar-restart-btn"
-                        onClick={() => {
-                            props.onClose();
-                            window.dispatchEvent(new CustomEvent("agentmux:open-version-panel"));
-                        }}
-                    >
-                        Open Maintenance ↗
-                    </Button>
-                </div>
-            </Show>
             {/* GPU / WebGL rendering — enabled/disabled + driver info.
                 Surfaces the silent DOM-renderer fallback when the GPU
                 process is unavailable. */}

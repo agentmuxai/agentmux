@@ -132,7 +132,7 @@ pub fn read(text: &str, mapping: Option<&Mapping>) -> Result<Imported, ReadError
             entries.push(Incoming::new("note", &format!("{label} (notes)")).part("text", notes).tag(folder));
         }
     }
-    Ok(Imported { source, entries, skipped })
+    Ok(Imported { source, entries, skipped, plaintext: true })
 }
 
 /// Rows read with the person's own column choices.
@@ -163,7 +163,7 @@ fn mapped(rows: &[csv::StringRecord], headers: &[String], m: &Mapping) -> Result
         }
         entries.push(e);
     }
-    Ok(Imported { source: Source::Csv, entries, skipped })
+    Ok(Imported { source: Source::Csv, entries, skipped, plaintext: true })
 }
 
 // ── LastPass secure notes ───────────────────────────────────────────────────

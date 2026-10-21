@@ -94,15 +94,12 @@ pub struct AppState {
 
     /// Number of data migrations still pending after the in-process startup run,
     /// as reported in ESTART (forwarded via AGENTMUX_PENDING_MIGRATIONS on the
-    /// launcher path). Non-zero means run_pending_migrations failed at startup;
-    /// the status-bar shows "Migration failed — restart to retry."
+    /// launcher path). Diagnostic only, in `get_backend_info`: under the
+    /// launcher srv starts only once nothing is pending, so it reads 0.
     pub pending_migrations: Mutex<usize>,
     /// Each performance health signal that is not normal right now, by kind
     /// (`health_signals.rs`), so a window opened mid-episode can catch up.
     pub health_signals: Mutex<std::collections::BTreeMap<String, serde_json::Value>>,
-
-    /// Guard against concurrent `run_migrations` invocations from the maintenance panel.
-    pub migration_running: Mutex<bool>,
 
     /// Current zoom factor
     pub zoom_factor: Mutex<f64>,
@@ -730,7 +727,6 @@ impl Default for AppState {
                     .unwrap_or(0)
             ),
             health_signals: Mutex::new(Default::default()),
-            migration_running: Mutex::new(false),
             zoom_factor: Mutex::new(1.0),
             client_id: Mutex::new(None),
             window_id: Mutex::new(None),

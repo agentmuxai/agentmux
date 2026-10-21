@@ -55,6 +55,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "repo": arguments.get("repo").and_then(|v| v.as_str()),
                 "hold": arguments.get("hold").and_then(|v| v.as_bool()).unwrap_or(false),
                 "review": arguments.get("review").and_then(|v| v.as_bool()),
+                "after": arguments.get("after").filter(|a| a.is_array()).cloned().unwrap_or(Value::Array(vec![])),
             });
             let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
                 .map_err(|e| anyhow::anyhow!("work enqueue request failed: {e}"))?;

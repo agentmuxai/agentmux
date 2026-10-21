@@ -16,6 +16,7 @@
 
 mod bitwarden;
 mod env;
+mod kdbx;
 mod logins;
 
 use std::collections::BTreeMap;
@@ -34,6 +35,7 @@ pub enum Source {
     Chrome,
     Firefox,
     Safari,
+    KeePass,
     Env,
     Csv,
 }
@@ -48,6 +50,7 @@ impl Source {
             Source::Chrome => "a browser's password export (Chrome, Edge, Brave)",
             Source::Firefox => "Firefox",
             Source::Safari => "Safari or Apple Passwords",
+            Source::KeePass => "a KeePass database",
             Source::Env => "a .env file",
             Source::Csv => "a CSV file",
         }
@@ -106,6 +109,9 @@ pub struct Imported {
     pub entries: Vec<Incoming>,
     /// (label, why) for what couldn't come in.
     pub skipped: Vec<(String, String)>,
+    /// The file held every secret unencrypted (a CSV or JSON export): the person is
+    /// offered to delete it. A KeePass database is encrypted, so it isn't one.
+    pub plaintext: bool,
 }
 
 /// Which column of a CSV is what, chosen by the person for a file no reader knows.
@@ -132,6 +138,8 @@ pub struct MappingNeeded {
 
 pub enum ReadError {
     NeedsMapping(MappingNeeded),
+    /// An encrypted database: its master password is needed.
+    NeedsPassphrase,
     Other(String),
 }
 
@@ -150,12 +158,15 @@ impl From<&str> for ReadError {
 /// The most rows or items one file may hold (§8.7).
 pub const MAX_ITEMS: usize = 100_000;
 
-const KDBX_MAGIC: [u8; 4] = [0x03, 0xD9, 0xA2, 0x9A];
-
-/// Reads a plaintext export, finding out what it is from its contents.
+/// Reads an export that needs no password, finding out what it is from its contents.
 pub fn read(bytes: &[u8], file_name: &str, mapping: Option<&Mapping>) -> Result<Imported, ReadError> {
-    if bytes.starts_with(&KDBX_MAGIC) {
-        return Err("this is a KeePass database, which AgentMux can't import yet".into());
+    read_with(bytes, file_name, mapping, None)
+}
+
+/// [`read`], with the password an encrypted database (KeePass) needs.
+pub fn read_with(bytes: &[u8], file_name: &str, mapping: Option<&Mapping>, passphrase: Option<&str>) -> Result<Imported, ReadError> {
+    if bytes.starts_with(&kdbx::MAGIC) {
+        return kdbx::read(bytes, passphrase.unwrap_or(""));
     }
     if bytes.starts_with(b"PK\x03\x04") {
         return Err("this is a zip file (a 1Password .1pux or Proton Pass export), which AgentMux can't import yet; export a CSV or JSON from that app instead".into());
