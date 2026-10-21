@@ -167,7 +167,8 @@ fn replace_blocker(app: &Path, read_only: bool, parent_writable: bool) -> Option
 }
 
 /// Whether the volume holding `path` is mounted read-only.
-#[cfg(unix)]
+// `MNT_RDONLY` is BSD's (macOS included), not Linux's; only macOS asks.
+#[cfg(target_os = "macos")]
 fn on_read_only_volume(path: &Path) -> bool {
     use std::os::unix::ffi::OsStrExt;
     let Ok(c) = std::ffi::CString::new(path.as_os_str().as_bytes()) else { return true };
@@ -179,7 +180,7 @@ fn on_read_only_volume(path: &Path) -> bool {
     (st.f_flags as u64) & (libc::MNT_RDONLY as u64) != 0
 }
 
-#[cfg(not(unix))]
+#[cfg(not(target_os = "macos"))]
 fn on_read_only_volume(_: &Path) -> bool {
     false
 }
