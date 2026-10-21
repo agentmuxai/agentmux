@@ -56,9 +56,7 @@ fn a_task_waits_for_the_tasks_it_starts_after_to_finish() {
     assert_eq!(claim(&s, "Naki", 2000).as_deref(), Some("first"), "second is older but waits");
     assert_eq!(claim(&s, "Naki", 2100), None, "nothing else to take while first is unfinished");
     let attempt = s.work_queue_get("first").unwrap().unwrap().attempts;
-    assert!(s.work_deps_freed_by("first").unwrap().is_empty(), "first isn't finished yet");
     s.work_queue_complete("first", "Naki", "", attempt, "done", 3000).unwrap().unwrap();
-    assert_eq!(s.work_deps_freed_by("first").unwrap(), ["second"]);
     assert_eq!(claim(&s, "Naki", 3100).as_deref(), Some("second"));
 }
 

@@ -150,21 +150,6 @@ impl Store {
         Ok(all_after(&conn)?.remove(work_id).unwrap_or_default())
     }
 
-    /// The tasks waiting on `work_id` that it was the last unfinished one
-    /// for: they can start now that it finished.
-    pub fn work_deps_freed_by(&self, work_id: &str) -> Result<Vec<String>, StoreError> {
-        let conn = self.conn().lock().unwrap();
-        let sql = format!(
-            "SELECT q.id FROM db_work_deps w JOIN db_work_queue q ON q.id = w.work_id
-              WHERE w.after_id = ?1 AND q.state IN ('{open}', '{held}') AND NOT {WAITS_ON_UNFINISHED}",
-            open = work_state::OPEN,
-            held = work_state::HELD,
-        );
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(params![work_id], |r| r.get::<_, String>(0))?;
-        Ok(rows.collect::<Result<_, _>>()?)
-    }
-
     /// Drop the dependencies of tasks no longer in the queue, and on them.
     pub fn work_deps_prune(&self) -> Result<usize, StoreError> {
         let conn = self.conn().lock().unwrap();
