@@ -9,11 +9,12 @@ import { createSignal } from "solid-js";
 // The CSS parser for a background with `url(...)`, loaded with the first such
 // background rather than at startup (SPEC_FRONTEND_BUNDLE_SPLITTING_2026_10_21.md §5).
 // The signals let a caller's memo compute the style again once it arrives, or
-// once a failed load may be tried again (after 2, 4, then 8 seconds).
+// once a failed load may be tried again (after 2, 4, 8… seconds, at most 60
+// apart, for as long as a background waits for it).
 let cssTree: typeof import("css-tree") | null = null;
 let cssTreeLoading = false;
 let cssTreeFailures = 0;
-const CSS_TREE_RETRIES = 3;
+const CSS_TREE_RETRY_MAX_MS = 60_000;
 const [cssTreeLoaded, setCssTreeLoaded] = createSignal(false);
 const [cssTreeRetry, setCssTreeRetry] = createSignal(0);
 
@@ -29,10 +30,9 @@ function loadCssTree(): void {
             cssTreeLoading = false;
             console.error("error loading the background parser", e);
             cssTreeFailures++;
-            if (cssTreeFailures <= CSS_TREE_RETRIES) {
-                // Waiting backgrounds read `cssTreeRetry`: their memos run again and load again.
-                setTimeout(() => setCssTreeRetry((n) => n + 1), 1000 * 2 ** cssTreeFailures);
-            }
+            // Waiting backgrounds read `cssTreeRetry`: their memos run again and load again.
+            const delay = Math.min(1000 * 2 ** cssTreeFailures, CSS_TREE_RETRY_MAX_MS);
+            setTimeout(() => setCssTreeRetry((n) => n + 1), delay);
         });
 }
 
