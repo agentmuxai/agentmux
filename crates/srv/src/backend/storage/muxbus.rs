@@ -1082,8 +1082,7 @@ impl Store {
             }
         } else {
             match read_split_settled(&ns) {
-                // Pre-blob split entries left torn: the same repair as on
-                // Windows; the refresh's save writes a whole blob.
+                // Pre-blob split entries left torn: as on Windows, the refresh's save writes a whole blob.
                 Ok(SplitRead::Torn { refresh: Some(refresh_token) }) => {
                     tracing::warn!(
                         "muxbus: legacy split keychain entries are torn — keeping the refresh token \
@@ -1118,6 +1117,7 @@ impl Store {
                     return Ok(tokens);
                 }
                 Ok(SplitRead::Absent) => {}
+                Err(e) if secret_store::is_needs_consent(&e.to_string()) => {} // saved by an untrusted older build: signed out
                 Err(e) => {
                     if !legacy_access.is_empty() {
                         tracing::warn!(
