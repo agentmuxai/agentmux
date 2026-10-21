@@ -10,6 +10,7 @@ import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } fro
 import { useTick } from "@/app/hook/useTick";
 
 import { ageMs, formatAge, WARDEN_REFRESH_MS } from "@/app/view/warden-shared/warden-shared";
+import { WardenSecrets } from "@/app/view/vault/vault-warden";
 import { fetchWardenAudit, WARDEN_AUDIT_LIMIT, type AuditEntry } from "./warden-audit-shared";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
@@ -92,6 +93,7 @@ export const WardenAuditManager = (): JSX.Element => {
                     </For>
                 </ul>
             </Show>
+            <WardenSecrets />
             <div class="warden-manager-footnote">
                 Refreshes every {WARDEN_REFRESH_MS / 1000}s · last {WARDEN_AUDIT_LIMIT} entries.
             </div>

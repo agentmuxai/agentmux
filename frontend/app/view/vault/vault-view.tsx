@@ -19,6 +19,7 @@ import { VaultEntryForm, type VaultFormTarget } from "./vault-entry-form";
 import { formatWhen } from "./vault-format";
 import { SECTION_LABELS, vaultKind, type VaultPaneSection } from "./vault-kinds";
 import { vaultPromptNotes } from "./vault-prompts";
+import { openWarden } from "@/app/view/warden/open-warden";
 import { getPlatform } from "@/util/platformutil";
 import type { VaultViewModel } from "./vault-model";
 import {
@@ -174,7 +175,12 @@ function VaultActivityLog(props: { visible: boolean }): JSX.Element {
     }));
     return (
         <div class="warden-manager-body">
-            <p class="warden-manager-summary">Every change to the Vault and every use of an entry: who, what, where. Never a value.</p>
+            <p class="warden-manager-summary">
+                Every change to the Vault and every use of an entry: who, what, where. Never a value.{" "}
+                <Button density="compact" onClick={() => void openWarden("audit")}>
+                    See agents' use in Warden
+                </Button>
+            </p>
             <Show when={error()}>
                 <div class="warden-manager-error">⚠ {error()}</div>
             </Show>
