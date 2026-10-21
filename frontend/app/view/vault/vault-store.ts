@@ -107,8 +107,12 @@ export async function refreshVaultRequests(): Promise<void> {
 }
 
 let following = false;
+/** How many Vault views are on screen. The list opens the Vault key and decrypts every entry, which can
+ *  make the OS ask the person for it, so it is read again only while one is looking. */
+let holders = 0;
 
-/** Follow srv's `vault` event: the list is read again on any change. */
+/** Follow srv's `vault` event: the agents' requests and uses at once, and the list again on any change
+ *  while a Vault view is on screen (what changed meanwhile is read when one next is). */
 export function followVault(): void {
     if (following) return;
     following = true;
@@ -116,8 +120,20 @@ export function followVault(): void {
         store.setRequests(data.requests);
         store.setUses(data.uses);
         store.setChangedMs(data.changed_ms);
-        if (store.entries() !== null) void refreshVault();
+        if (holders > 0) void refreshVault();
     });
+}
+
+/** A Vault view is on screen until the returned function is called: the list is read when the first one
+ *  appears, and kept current while any is. Opening the Vault's key happens only through this. */
+export function holdVaultShown(): () => void {
+    if (holders++ === 0) void refreshVault();
+    let released = false;
+    return () => {
+        if (released) return;
+        released = true;
+        holders--;
+    };
 }
 
 /** Tells srv the Vault pane `pane` is showing, or no longer is: agents'
