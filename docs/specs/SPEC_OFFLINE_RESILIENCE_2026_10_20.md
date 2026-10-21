@@ -1,7 +1,7 @@
 # SPEC: Stay in control of every agent when the internet drops, and recover by itself
 
 **Date:** 2026-10-20
-**Status:** active — §8 PRs shipped: A in #5213 (MuxBus: offline is not signed out), B in #5221 (notes ride with the next turn), C in #5215 (the pane shows an API retry), D in #5236 (offer the layout another build saved); E's first half (§4.1 connectivity state, the status bar's Offline indicator) in #5241, its second half (§4.3 retry of a network-failed turn, §4.4 held input) in #5246. F and G remain.
+**Status:** active — §8 PRs shipped: A in #5213 (MuxBus: offline is not signed out), B in #5221 (notes ride with the next turn), C in #5215 (the pane shows an API retry), D in #5236 (offer the layout another build saved); E's first part (§4.1 connectivity state, the status bar's Offline indicator) in #5241, its second (§4.4 held input) in #5246. E3 (§4.3 recovery of failed turns), F and G remain.
 **Related:** [`SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md`](SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md) (the per-class recovery banner),
 [`SPEC_PERSISTENT_CONTROLLER_FAILURE_CLASSIFICATION_2026_08_04.md`](SPEC_PERSISTENT_CONTROLLER_FAILURE_CLASSIFICATION_2026_08_04.md),
 [`SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md`](SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md).
@@ -157,12 +157,24 @@ Ordered by how much control each returns; A, B and C are independent and can go 
 | B | Notes never start turns; queue, coalesce, deliver with the next turn; hold scheduled prompts while offline | G4 |
 | C | `api_retry` → `agent:retrying` and the retry row with Stop / Retry now; Network classification; Network turn-end banner | G1, G2 (pane) |
 | D | Close keeps the workspace, restores on launch; close warning; persistence docs | G8, G5 (layout) |
-| E | `connectivity` module; status-bar Offline per service; held input (§4.4); automatic retry on reconnect (§4.3) | G2, G3, G6 |
+| E | `connectivity` module; status-bar Offline per service (#5241); held input (§4.4, #5246) | G2, G3 |
+| E3 | Recovery of failed turns (§4.3): automatic retry on reconnect, the offer when the operator typed since. See the notes below | G6 |
 | F | MuxBus resubscribe and provision every live agent and alias after reconnect; uid-keyed subscriptions; fork slug migration | G6, §4.8 |
 | G | Fault proxy and the §7.2 scenarios as a scripted run | all |
 
+### 8.1 Notes for E3
+
+#5246 first carried §4.3 too, and review found these; E3 starts from them.
+
+- **Carry the attachments.** The retry re-sends the failed turn's message, and must send its images with it, not just its text.
+- **At most once, single-flight.** An offered Retry, and the automatic one, must not go twice: a second click, or a click while the automatic retry is in flight, sends nothing.
+- **An unknown outcome keeps a way to recover.** When srv's answer to the retry never comes (or the pane's send gives up waiting), keep the turn marked as possibly sent and leave the operator a Retry; don't mark it retried, and don't lose the failure row.
+- **A failure read back is only offered.** One read back on mount (`agent:last_failure`, or the broker's replay after a reload) may have been dismissed before: never retry it automatically. Only a failure seen live in the pane is.
+- **Dismiss means done.** Dismissing the failure row drops the turn, including one the operator typed after.
+- **Network failures and the timed retry.** Skipping the failure row's timed retry for a tracked provider only makes sense together with the retry on reconnect; ship them together, and decide tracking before the pane has a status.
+
 ## 9. Open questions
 
-1. Automatic retry of a network-failed turn (§4.3): on by default? Proposed: on, only for turns that failed before any tool ran. **Decided (#5246):** as proposed; `agent:retryonreconnect` turns it off.
+1. Automatic retry of a network-failed turn (§4.3): on by default? Proposed: on, only for turns that failed before any tool ran. **Proposed answer kept, pending E3:** as proposed, with a setting to turn it off.
 2. Where held messages are stored: with the pane's persisted state (proposed) or the agent's history store. **Decided (#5246):** the block's meta (`agent:held_input`), sent by the pane once it is open and the API answers.
 3. Whether the first launch of a new channel should copy the previous channel's layout automatically or ask (proposed: ask once).

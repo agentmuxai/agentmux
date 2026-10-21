@@ -831,11 +831,14 @@ declare global {
          *  (view/agent/offline/useOfflineInput.ts). */
         "agent:held_input"?: {
             agentId: string;
-            messages: { id: string; text: string; heldAt: number; attachments?: import("@/types/rpc/AttachmentRef").AttachmentRef[] }[];
+            messages: {
+                id: string;
+                text: string;
+                heldAt: number;
+                attachments?: import("@/types/rpc/AttachmentRef").AttachmentRef[];
+                unconfirmed?: boolean;
+            }[];
         } | null;
-        /** The turn AgentMux last retried by itself after the API came back, so
-         *  it isn't retried twice. Frontend-only, as above. */
-        "agent:auto_retried_turn"?: { text: string; at: number } | null;
         "agent:runtime"?: {
             permissionMode?: string;
             model?: string | null;
@@ -1107,7 +1110,6 @@ declare global {
         "attachments:retentiondays"?: number;
         "agent:askquestiontimeoutms"?: number;
         "agent:overlapnotes"?: boolean;
-        "agent:retryonreconnect"?: boolean;
         "agent:mcpselfheal"?: boolean;
         "agent:transcriptsinglecopy"?: boolean;
         "agent:turnscopedtail"?: boolean;

@@ -56,27 +56,20 @@ describe("HeldInputPanel", () => {
         expect(screen.queryByText("Held: will send when the API is reachable")).toBeNull();
     });
 
-    it("shows what the pane did, with Retry when it offers one, and Dismiss", () => {
-        const retry = vi.fn();
+    it("shows what became of held input, with Dismiss", () => {
         const onDismissNotice = vi.fn();
         render(() => (
             <HeldInputPanel
                 held={[]}
-                notices={[
-                    { id: 1, text: "Back online: retried the turn that failed at 14:32." },
-                    { id: 2, text: "Back online. The turn that failed at 14:32 wasn't retried.", retry },
-                ]}
+                notices={[{ id: 1, text: "Sent your held message (held 4 min)." }]}
                 onSendNow={() => {}}
                 onCancel={() => {}}
                 onDismissNotice={onDismissNotice}
                 clockTime={String}
             />
         ));
-        expect(screen.getByText("Back online: retried the turn that failed at 14:32.")).toBeTruthy();
-        expect(screen.getAllByText("Retry")).toHaveLength(1);
-        fireEvent.click(screen.getByText("Retry"));
-        expect(retry).toHaveBeenCalledTimes(1);
-        fireEvent.click(screen.getAllByLabelText("Dismiss")[0]);
+        expect(screen.getByText("Sent your held message (held 4 min).")).toBeTruthy();
+        fireEvent.click(screen.getByLabelText("Dismiss"));
         expect(onDismissNotice).toHaveBeenCalledWith(1);
     });
 });

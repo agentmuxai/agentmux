@@ -1020,7 +1020,7 @@ export const AgentPresentationView = ({
             void status.startLaunchFlow();
         }
     };
-    // Input held while the model API is unreachable; a network-failed turn retried when it's back.
+    // Input held while the model API is unreachable, sent once it is back (offline/useOfflineInput.ts).
     const offline = useOfflineInput({
         blockId: model.blockId, paneModel, provider, agentId: () => agentId, send: handleSendMessage, stop: commands.stopAgent,
     });
@@ -1051,7 +1051,6 @@ export const AgentPresentationView = ({
         model: paneModel,
         failure: (() => paneModel.state.failure),
         onRetry: retryLastTurn,
-        reconnect: offline,
         // live_elsewhere — take the agent over from the other AgentMux
         // instance running it, then re-run the refused turn if there was one
         // (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md §4.6).

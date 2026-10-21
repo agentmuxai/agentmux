@@ -22,7 +22,7 @@ vi.mock("@/app/store/agent-pane-state-store", () => ({ addEventListener: () => (
 vi.mock("../hooks/useApiRetryState", () => ({ useApiRetryState: () => () => null }));
 vi.mock("@/store/muxbus-delivery", () => ({ clockTime: String }));
 
-import { AUTO_RETRY_META_KEY, blockMetaStorage, HELD_INPUT_META_KEY } from "./useOfflineInput";
+import { blockMetaStorage, HELD_INPUT_META_KEY } from "./useOfflineInput";
 
 const msg = (id: string) => ({ id, text: id, heldAt: 1 });
 
@@ -53,13 +53,5 @@ describe("blockMetaStorage", () => {
         // A stale meta copy must not bring a sent message back.
         hub.meta["b3"] = { [HELD_INPUT_META_KEY]: { agentId: "agent-a", messages: [msg("one")] } };
         expect(blockMetaStorage("b3", () => "agent-a").held()).toEqual([]);
-    });
-
-    it("keeps the automatic-retry marker in the block's meta", () => {
-        const storage = blockMetaStorage("b4", () => "agent-a");
-        storage.saveMarker({ text: "go", at: 5 });
-        expect(hub.writes.at(-1)?.meta).toEqual({ [AUTO_RETRY_META_KEY]: { text: "go", at: 5 } });
-        hub.meta["b4"] = { [AUTO_RETRY_META_KEY]: { text: "go", at: 5 } };
-        expect(storage.loadMarker()).toEqual({ text: "go", at: 5 });
     });
 });

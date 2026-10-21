@@ -7,9 +7,8 @@ import type { HeldInput, OfflineNotice } from "./offline-input";
 
 /**
  * Messages typed while the model API was unreachable, with Send now and
- * Cancel, and what the pane did by itself once it was back (the held
- * messages it sent, the failed turn it retried or offers to).
- * docs/specs/SPEC_OFFLINE_RESILIENCE_2026_10_20.md §4.3, §4.4.
+ * Cancel, and what became of them once it was back.
+ * docs/specs/SPEC_OFFLINE_RESILIENCE_2026_10_20.md §4.4.
  */
 export function HeldInputPanel(props: {
     held: HeldInput[];
@@ -49,13 +48,6 @@ export function HeldInputPanel(props: {
                 {(n) => (
                     <div class="agent-offline-notice" role="status">
                         <span class="agent-offline-notice-text">{n.text}</span>
-                        <Show when={n.retry}>
-                            {(retry) => (
-                                <Button density="compact" icon="rotate-right" onClick={() => retry()()}>
-                                    Retry
-                                </Button>
-                            )}
-                        </Show>
                         <IconButton density="compact" icon="xmark" label="Dismiss" onClick={() => props.onDismissNotice(n.id)} />
                     </div>
                 )}
