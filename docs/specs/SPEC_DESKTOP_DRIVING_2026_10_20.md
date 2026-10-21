@@ -103,6 +103,7 @@ This is the main defence against a stale or hallucinated coordinate hitting the 
 - The question is answered only through the host UI. No MCP call can answer it, so a prompt-injected agent cannot approve its own request.
 - A denial is remembered for the session, so the agent cannot nag.
 - The agent is told what the user decided, and never sees the prompt or a clock (same rule as the browser flow).
+- **The call never waits for the user.** With no grant, srv opens the prompt and answers `pending` at once, so the agent stays free to take the user's messages (an agent is always available). The user's answer reaches the agent as an `[AgentMux]` note, and it calls `Desktop` again. A call while the prompt is open answers `pending` again, without a second prompt.
 
 ### 5.5 The blocklist
 
@@ -153,7 +154,7 @@ agent (MCP client)
 crates/mcp  tools/desktop.rs
    │  1. validate arguments, resolve the window (window_capture.rs: tiers, own instance)
    │  2. POST /api/v1/agent/desktop/authorize { action, window: { id, app, title } }
-   │        ← allow | refused | denied | stopped | no_answer (waits while the user is asked, up to 10 min)
+   │        ← allow | refused | denied | stopped | pending (asks the user and answers at once; their answer comes as an [AgentMux] note)
    │  3. perform the action: xcap capture, or SendInput (Windows)
    │  4. POST /api/v1/agent/desktop/record { grant, action, details, result }   → audit line
    ▼
@@ -176,7 +177,7 @@ New settings keys, in `schema/settings.json`: `desktop:enabled` (bool, false), `
 | The window closed or the app crashed between `look` and `click` | refuse: "window gone"; the grant stays |
 | The window moved or resized | refuse: "look again" |
 | Another window covers the target | refuse, naming the covering window |
-| The user does not answer the prompt | after 10 minutes: "the user didn't answer"; nothing was done |
+| The user does not answer the prompt | after 10 minutes the prompt closes and an `[AgentMux]` note says "the user didn't answer"; nothing was done |
 | The user denies | "denied"; no repeat prompt this session |
 | srv restarts | all grants are gone; the next action asks again |
 | The target is elevated | refuse: "the OS does not allow input into an elevated window" |

@@ -105,11 +105,13 @@ async fn post(cx: &ToolCtx<'_>, path: &str, body: &impl serde::Serialize, secs: 
     Ok(json)
 }
 
-/// Ask srv whether `action` on `w` may go ahead. Waits while the user is asked
-/// (up to ten minutes). Returns the grant's id, or the reason as an error.
+/// Ask srv whether `action` on `w` may go ahead. Returns the grant's id, or
+/// srv's reason as an error. It never waits for the user: with no grant srv
+/// asks them and answers `pending` at once, and their answer reaches the agent
+/// as an [AgentMux] note.
 async fn authorize(cx: &ToolCtx<'_>, action: &str, w: &AgentMuxWindowInfo, id: u32) -> Result<String> {
     let body = DesktopAuthorizeRequest { auth: sign_ui_automation_auth()?, action: action.to_string(), window: window_ref(w, id) };
-    let answer = post(cx, "/api/v1/agent/desktop/authorize", &body, 11 * 60).await?;
+    let answer = post(cx, "/api/v1/agent/desktop/authorize", &body, 30).await?;
     match answer["status"].as_str() {
         Some("allow") => Ok(answer["grant_id"].as_str().unwrap_or("").to_string()),
         _ => anyhow::bail!("{}", answer["message"].as_str().unwrap_or("Desktop refused this")),

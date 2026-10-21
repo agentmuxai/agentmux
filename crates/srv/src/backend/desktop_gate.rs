@@ -183,6 +183,14 @@ impl Gate {
         Check::Allow { grant_id: g.id.clone() }
     }
 
+    /// Whether the user is already being asked about `app` for this agent and
+    /// pane: a call that finds so answers `pending` without a second prompt.
+    pub fn asking(&self, agent: &str, block_id: &str, app: &str) -> bool {
+        self.pending
+            .iter()
+            .any(|p| p.request.agent == agent && p.request.app == app && p.request.block_id == block_id)
+    }
+
     /// Queue a prompt for `request`; the answer arrives on the receiver. The
     /// same agent asking again about the same app joins the prompt it has.
     pub fn ask(&mut self, request: DesktopRequest) -> oneshot::Receiver<Choice> {
@@ -425,6 +433,20 @@ mod tests {
     fn with_no_grant_the_user_is_asked() {
         let mut g = Gate::default();
         assert_eq!(g.check("naki", "b1", "notepad", 1_000), Check::Ask);
+    }
+
+    /// A second call while the prompt is open answers `pending` instead of
+    /// asking twice; the answer ends it.
+    #[test]
+    fn asking_lasts_until_the_user_answers() {
+        let mut g = Gate::default();
+        assert!(!g.asking("naki", "b1", "notepad"));
+        let _rx = g.ask(req("r1", "naki", "notepad", "b1"));
+        assert!(g.asking("naki", "b1", "notepad"));
+        assert!(!g.asking("naki", "b1", "calc"), "another app is its own prompt");
+        assert!(!g.asking("naki", "b2", "notepad"), "another pane is its own prompt");
+        g.answer("r1", Choice::Deny, 1_000, 30).unwrap();
+        assert!(!g.asking("naki", "b1", "notepad"));
     }
 
     #[test]

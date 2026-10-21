@@ -185,7 +185,9 @@ pub(crate) async fn handle_authorize(
         return reply("refused", &format!("{} can't be controlled: {why}.", gate::app_key(&w.app)));
     }
     let app = gate::app_key(&w.app);
-    // At most a few spins: Ask waits for the user, TooFast waits half a second.
+    // At most a few spins, while TooFast waits half a second. Ask never waits
+    // for the user here: the call answers `pending` at once, so the agent stays
+    // free for the user's messages, and the answer comes as an [AgentMux] note.
     for _ in 0..8 {
         match gate::with_gate(|g| g.check(&agent, &block_id, &app, now_ms_u64())) {
             Check::Allow { grant_id } => {
@@ -201,6 +203,9 @@ pub(crate) async fn handle_authorize(
             }
             Check::TooFast { wait_ms } => tokio::time::sleep(std::time::Duration::from_millis(wait_ms)).await,
             Check::Ask => {
+                if gate::with_gate(|g| g.asking(&agent, &block_id, &app)) {
+                    return reply("pending", &pending_message(&app));
+                }
                 let id = uuid::Uuid::new_v4().to_string();
                 let request = DesktopRequest {
                     id: id.clone(),
@@ -213,34 +218,47 @@ pub(crate) async fn handle_authorize(
                 };
                 let rx = gate::with_gate(|g| g.ask(request));
                 publish(&state);
-                let answer = tokio::time::timeout(gate::ANSWER_WAIT, rx).await;
-                match answer {
-                    Ok(Ok(Choice::Deny)) => {
-                        audit_line(&agent, w, &req.action, "denied", json!({ "by": "user" }));
-                        publish(&state);
-                        return reply("denied", &format!("The user said no to controlling {app}. Don't ask again this session."));
-                    }
-                    Ok(Ok(choice)) => {
-                        audit_line(&agent, w, &req.action, "granted", json!({ "choice": choice }));
-                        publish(&state);
-                        // The grant exists now; the next spin takes it.
-                    }
-                    Ok(Err(_)) => {
+                let message = pending_message(&app);
+                let (state, w, action) = (state.clone(), w.clone(), req.action.clone());
+                tokio::spawn(async move {
+                    let note = match tokio::time::timeout(gate::ANSWER_WAIT, rx).await {
+                        Ok(Ok(Choice::Deny)) => {
+                            audit_line(&agent, &w, &action, "denied", json!({ "by": "user" }));
+                            format!("[AgentMux] The user said no to you controlling {app}. Don't ask again this session.")
+                        }
+                        Ok(Ok(choice)) => {
+                            audit_line(&agent, &w, &action, "granted", json!({ "choice": choice }));
+                            let how_long = if choice == Choice::Timed {
+                                format!("for {} minutes", p.grant_minutes)
+                            } else {
+                                "for this session".to_string()
+                            };
+                            format!("[AgentMux] The user allowed you to control {app} {how_long}. Call Desktop again to carry on: look first, since the window may have changed.")
+                        }
                         // The prompt was dropped without an answer: Stop.
-                        publish(&state);
-                        return reply("stopped", "The user pressed Stop. Don't carry on with this app; ask them what they want.");
-                    }
-                    Err(_) => {
-                        gate::with_gate(|g| g.abandon(&id));
-                        audit_line(&agent, w, &req.action, "no_answer", Value::Null);
-                        publish(&state);
-                        return reply("no_answer", "The user didn't answer in 10 minutes, so nothing was done. Ask them in chat before asking again.");
-                    }
-                }
+                        Ok(Err(_)) => format!("[AgentMux] The user pressed Stop on {app}. Don't carry on with it; ask them what they want."),
+                        Err(_) => {
+                            gate::with_gate(|g| g.abandon(&id));
+                            audit_line(&agent, &w, &action, "no_answer", Value::Null);
+                            format!("[AgentMux] The user didn't answer your request to control {app} in 10 minutes, so nothing was done. Ask them in chat before asking again.")
+                        }
+                    };
+                    publish(&state);
+                    tell(&block_id, &note);
+                });
+                return reply("pending", &message);
             }
         }
     }
     reply("refused", "Couldn't get a slot to act; try again.")
+}
+
+/// What a call that asked the user (or found them already asked) answers.
+fn pending_message(app: &str) -> String {
+    format!(
+        "Asked the user to let you control {app}; nothing was done yet. Don't wait for it: carry on with \
+         other work or end your turn. An [AgentMux] note brings their answer, then call Desktop again."
+    )
 }
 
 /// `POST /api/v1/agent/desktop/record`: what an authorized action did.
