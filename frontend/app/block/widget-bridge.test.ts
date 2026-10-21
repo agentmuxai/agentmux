@@ -19,6 +19,7 @@ beforeAll(() => {
             registerPaneTab({
                 apiVersion: 1,
                 view,
+                ...(view === "memory" ? { aliases: ["old-memory"] } : {}),
                 label: view,
                 icon: "x",
                 sections: { default: ids[0], items: ids.map((id) => ({ id, label: id, icon: "x" })) },
@@ -222,6 +223,9 @@ describe("permissions", () => {
         const state = await ready(h);
         await handleBridgeRequest(h, state, "panes.open", { view: "warden", meta: { "warden:section": "kanban", cmd: "x" } });
         expect(h.openPane).toHaveBeenLastCalledWith("warden", { "warden:section": "kanban" }, "right");
+        // Through an old view name, the section would land under a key the pane doesn't read: dropped.
+        await handleBridgeRequest(h, state, "panes.open", { view: "old-memory", meta: { "old-memory:section": "skills", "memory:section": "skills" } });
+        expect(h.openPane).toHaveBeenLastCalledWith("old-memory", {}, "right");
         // A section the pane doesn't declare is dropped.
         await handleBridgeRequest(h, state, "panes.open", { view: "warden", meta: { "warden:section": "nope" } });
         expect(h.openPane).toHaveBeenLastCalledWith("warden", {}, "right");

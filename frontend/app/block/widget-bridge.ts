@@ -10,7 +10,7 @@
 
 import type { WidgetPackageInfo, WidgetPaneInfo } from "@/app/store/rpc-api/widgets";
 import { hasSection, paneSectionsOf, sectionKeyOf } from "./pane-sections";
-import type { PaneTabHostContext } from "./pane-tab-registry";
+import { resolvePaneTabView, type PaneTabHostContext } from "./pane-tab-registry";
 import type { StatusLook, StatusTone } from "./widget-panes";
 
 export const ERR = {
@@ -415,6 +415,8 @@ const isWebUrl = (v: unknown): boolean => {
  *  (one its manifest declares, pane-sections.ts), and a browser's http(s) address. */
 function otherViewAllows(view: string, key: string, value: unknown): boolean {
     if (view === "browser") return key === "url" && isWebUrl(value);
+    // An old view name opens its pane, which reads its own name's key: no section through an alias.
+    if (resolvePaneTabView(view) !== view) return false;
     const sections = paneSectionsOf(view);
     return !!sections && key === sectionKeyOf(view) && hasSection(sections, value);
 }
