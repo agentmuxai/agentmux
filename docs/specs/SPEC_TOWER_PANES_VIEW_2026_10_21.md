@@ -1,7 +1,7 @@
 # Spec: Tower's Panes view: CPU and memory for every pane, measured where it can be and labeled where it can't
 
 **Date:** 2026-10-21
-**Status:** draft. Nothing is built.
+**Status:** active. Phase 1 (measured numbers) is #5298; phases 2 and 3 are not built.
 **Author:** korp
 **Trigger:** Operator, 2026-10-21: *"how can I see memory use reliably inside of tower? we need to know the CPU/memory use of each pane inside of tower."*
 **Builds on:**
