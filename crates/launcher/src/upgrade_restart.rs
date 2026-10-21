@@ -190,7 +190,13 @@ pub fn staged(req: &UpgradeRequest, own_dir: &Path, data_dir: &Path, channel_dir
 /// time is up. A Yes that slips past either is told it expired.
 /// `stopping` lists what agents left running that the restart stops
 /// ([`stopping_note`]); the dialog names it.
-pub fn ask_then(version: String, staged: Staged, stopping: Vec<String>, on_yes: impl FnOnce(Staged) + Send + 'static) {
+pub fn ask_then(
+    version: String,
+    staged: Staged,
+    stopping: Vec<String>,
+    data_dir: PathBuf,
+    on_yes: impl FnOnce(Staged) + Send + 'static,
+) {
     let ask = LATEST_ASK.fetch_add(1, Ordering::SeqCst) + 1;
     dismiss(DIALOG_THREAD.load(Ordering::SeqCst));
     std::thread::spawn(move || {
@@ -205,12 +211,21 @@ pub fn ask_then(version: String, staged: Staged, stopping: Vec<String>, on_yes: 
         });
         let yes = confirm(&version, &staged, &stopping);
         let _ = DIALOG_THREAD.compare_exchange(thread, 0, Ordering::SeqCst, Ordering::SeqCst);
+        let latest = LATEST_ASK.load(Ordering::SeqCst);
         if !yes {
+            // A No, or the dialog closing itself. Not when a newer request closed
+            // this one: that request's own answer is still to come.
+            if ask == latest {
+                write_declined(&data_dir, &version);
+            }
             return;
         }
-        if answer_counts(ask, LATEST_ASK.load(Ordering::SeqCst), opened.elapsed()) {
+        if answer_counts(ask, latest, opened.elapsed()) {
             on_yes(staged);
         } else {
+            if ask == latest {
+                write_declined(&data_dir, &version);
+            }
             crate::log(&format!("upgrade: a Yes {}s after asking, or to an older request, was ignored", opened.elapsed().as_secs()));
             crate::show_fatal_dialog(
                 "AgentMux upgrade",
@@ -218,6 +233,18 @@ pub fn ask_then(version: String, staged: Staged, stopping: Vec<String>, on_yes: 
             );
         }
     });
+}
+
+/// Tell srv the restart it asked for won't happen
+/// ([`agentmux_common::srv_stderr::UPGRADE_DECLINED_FILE`]): it is waiting on
+/// this launcher and would otherwise say "Restarting" for minutes after a No.
+fn write_declined(data_dir: &Path, version: &str) {
+    let dir = data_dir.join("updates");
+    let _ = std::fs::create_dir_all(&dir);
+    let file = dir.join(agentmux_common::srv_stderr::UPGRADE_DECLINED_FILE);
+    if let Err(e) = std::fs::write(&file, format!("{version}\n")) {
+        crate::log(&format!("upgrade: couldn't leave {} for srv: {e}", file.display()));
+    }
 }
 
 /// Whether a Yes to request `ask`, given `waited` after its dialog opened,
@@ -640,5 +667,14 @@ Naki-2: `node server.js`
         assert!(question.contains("also stops what agents left running"), "{question}");
         assert!(question.ends_with("- Naki-2: `node server.js`"), "{question}");
         assert!(!restart_question("0.59.33", Path::new("C:/x"), &[]).contains("also stops"));
+    }
+
+    #[test]
+    fn a_no_is_left_for_srv_under_the_name_it_reads() {
+        let data = tempfile::tempdir().unwrap();
+        // The updates folder may not exist yet.
+        write_declined(data.path(), "0.59.37");
+        let file = data.path().join("updates").join(agentmux_common::srv_stderr::UPGRADE_DECLINED_FILE);
+        assert_eq!(std::fs::read_to_string(file).unwrap().trim(), "0.59.37");
     }
 }
