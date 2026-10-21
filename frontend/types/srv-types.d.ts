@@ -863,6 +863,8 @@ declare global {
         "warden:section"?: "kanban" | "host" | "lan" | "internet" | "audit" | "history";
         /** A Kanban task to open in the drawer, set by a link from elsewhere (the Swarm) and cleared once opened. */
         "kanban:open"?: string | null;
+        /** The Kanban section shows one lane per repository. */
+        "kanban:lanes"?: boolean;
         "vault:section"?: "personal" | "cards" | "api-keys" | "logins" | "notes" | "kept" | "activity";
         // An agent's Vault request to open the form for (vault-model.ts); cleared once shown.
         "vault:request"?: string | null;

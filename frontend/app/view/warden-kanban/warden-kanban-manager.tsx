@@ -7,28 +7,16 @@
 // tool; srv moves them on what it knows (an agent asks, errors, closes); the operator starts, answers,
 // accepts and sends back here.
 
-import { dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
-import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 
-import { kanbanCardItemType } from "@/app/drag/drag-types";
-import { useTick } from "@/app/hook/useTick";
 import { Button, FilterInput, IconButton, Select, Switch } from "@/app/element/ui";
+import { useTick } from "@/app/hook/useTick";
+import { settingsAtom } from "@/app/store/config-signals";
 import { revealBlock } from "@/app/util/reveal-block";
-import { formatAge } from "@/app/view/warden-shared/warden-shared";
 
-import { AgentChip, agentStateWords, KanbanCard, UntrackedCard } from "./kanban-card";
-import {
-    backlogGroups,
-    columnTasks,
-    COLUMNS,
-    matchesQuery,
-    rankBetween,
-    rankOf,
-    reviewLoad,
-    untrackedAgents,
-    type BacklogGroup,
-    type ColumnId,
-} from "./kanban-columns";
+import { KanbanBoard, useCardDrop } from "./kanban-board";
+import { AgentChip, agentStateWords } from "./kanban-card";
+import { columnOf, matchesQuery, repoLabel, repoLanes, reviewLimitOf, untrackedAgents } from "./kanban-columns";
 import { KanbanDrawer } from "./kanban-drawer";
 import { KanbanModel } from "./kanban-model";
 import { KanbanNewTask } from "./kanban-new-task";
@@ -37,69 +25,13 @@ import type { KanbanAgent, KanbanTask } from "./kanban-types";
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./kanban.scss";
 
-/** A drop target for Kanban cards; `hover` shows it will take the card. */
-function useCardDrop(el: () => HTMLElement | undefined, onDrop: (id: string) => void): () => boolean {
-    const [hover, setHover] = createSignal(false);
-    onMount(() => {
-        const element = el();
-        if (!element) return;
-        onCleanup(
-            dropTargetForElements({
-                element,
-                canDrop: ({ source }) => source.data.type === kanbanCardItemType,
-                onDragEnter: () => setHover(true),
-                onDragLeave: () => setHover(false),
-                onDrop: ({ source }) => {
-                    setHover(false);
-                    const id = source.data.id;
-                    // After pragmatic-dnd finishes dispatching: the move re-renders the dragged card.
-                    if (typeof id === "string") setTimeout(() => onDrop(id), 0);
-                },
-            })
-        );
-    });
-    return hover;
-}
-
-function BacklogGroupView(props: {
-    group: BacklogGroup;
-    model: KanbanModel;
-    now: number;
-    agents: KanbanAgent[];
-    holding: (agent: string) => KanbanTask | undefined;
-    onOpen: (t: KanbanTask) => void;
-}): JSX.Element {
-    let el: HTMLDivElement | undefined;
-    // Dropped here: the task waits for this group's agent (or anyone), at the end of its backlog.
-    const hover = useCardDrop(
-        () => el,
-        (id) => {
-            const last = props.group.tasks[props.group.tasks.length - 1];
-            void props.model.act({ action: "move", id, agent: props.group.key, rank: rankBetween(last ? rankOf(last) : undefined, undefined) });
-        }
-    );
-    const busyOn = () => (props.group.key ? props.holding(props.group.key) : undefined);
-    return (
-        <div ref={el} class="kanban-group" classList={{ "kanban-drop--hover": hover() }}>
-            <div class="kanban-group__head">
-                <Show when={props.group.key} fallback={<span class="kanban-group__anyone">Anyone</span>}>
-                    <AgentChip name={props.group.label} agent={props.group.agent} />
-                </Show>
-                <span class="warden-manager-dim">
-                    {props.group.tasks.length} waiting
-                    <Show when={busyOn()}>{(b) => <>, busy on #{b().card.num}</>}</Show>
-                    <Show when={!busyOn() && props.group.agent}>{(a) => <>, {agentStateWords(a().state)}</>}</Show>
-                </span>
-            </div>
-            <For each={props.group.tasks}>{(t) => <KanbanCard task={t} now={props.now} agents={props.agents} onOpen={props.onOpen} />}</For>
-        </div>
-    );
-}
-
 function AgentStripChip(props: { agent: KanbanAgent; model: KanbanModel }): JSX.Element {
     let el: HTMLButtonElement | undefined;
     // A waiting task dropped on an agent starts there now.
-    const hover = useCardDrop(() => el, (id) => void props.model.act({ action: "start", id, agent: props.agent.name }));
+    const hover = useCardDrop(
+        () => el,
+        (id) => void props.model.act({ action: "start", id, agent: props.agent.name })
+    );
     return (
         <Button
             ref={el}
@@ -120,6 +52,9 @@ export const WardenKanbanManager = (props: {
     /** A task to open, asked for from elsewhere (the Swarm's task chip); cleared with onOpenHandled. */
     openRequest?: string | null;
     onOpenHandled?: () => void;
+    /** One lane per repository (the pane's `kanban:lanes` meta), and its setter. */
+    lanes?: boolean;
+    onLanes?: (on: boolean) => void;
 }): JSX.Element => {
     const model = new KanbanModel();
     onCleanup(() => model.dispose());
@@ -133,6 +68,17 @@ export const WardenKanbanManager = (props: {
     const [showUntracked, setShowUntracked] = createSignal(true);
     const [adding, setAdding] = createSignal(false);
     const [openId, setOpenId] = createSignal<string | null>(null);
+    const [ownLanes, setOwnLanes] = createSignal(false);
+    const lanes = () => props.lanes ?? ownLanes();
+    const setLanes = (on: boolean) => (props.onLanes ? props.onLanes(on) : setOwnLanes(on));
+    const [folded, setFolded] = createSignal<ReadonlySet<string>>(new Set());
+    const fold = (repo: string) =>
+        setFolded((f) => {
+            const next = new Set(f);
+            if (!next.delete(repo)) next.add(repo);
+            return next;
+        });
+    const reviewLimit = () => reviewLimitOf(settingsAtom() as unknown as Record<string, unknown>);
 
     // Opened from elsewhere: show the task once the board has it, then clear the request.
     createEffect(() => {
@@ -152,36 +98,47 @@ export const WardenKanbanManager = (props: {
     const holding = (agent: string) =>
         (board()?.tasks ?? []).find((t) => (t.state === "claimed" || t.state === "blocked") && t.claimed_by === agent);
     const untracked = createMemo(() => (showUntracked() ? untrackedAgents(agents(), board()?.tasks ?? []) : []));
-    const groups = createMemo(() => backlogGroups(tasks(), agents()));
-    const review = createMemo(() => reviewLoad(tasks(), now()));
+    const laneList = createMemo(() => repoLanes(tasks()));
+    // The soft limit is on the board's whole Review column: every lane's, and those a filter hides.
+    const reviewTotal = createMemo(() => (board()?.tasks ?? []).filter((t) => t.state === "review").length);
     const open = (t: KanbanTask) => setOpenId(t.id);
     const openAgent = (blockId: string) => void revealBlock(blockId, { source: "kanban" });
-
-    const columnHead = (id: ColumnId, label: string, count: number) => (
-        <div class="kanban-column__head">
-            <span class="kanban-column__label">{label}</span>
-            <span class="kanban-column__count">
-                {count}
-                <Show when={id === "review" && review().count > 0}> · oldest {formatAge(review().oldestMs)}</Show>
-            </span>
-        </div>
-    );
 
     return (
         <div class="warden-manager-body kanban">
             <div class="kanban-toolbar">
-                <FilterInput value={query()} onInput={setQuery} placeholder="Find a task, #number, agent or repository" ariaLabel="Find a task" />
+                <FilterInput
+                    value={query()}
+                    onInput={setQuery}
+                    placeholder="Find a task, #number, agent or repository"
+                    ariaLabel="Find a task"
+                />
                 <Show when={repos().length > 1}>
                     <Select
                         density="compact"
                         ariaLabel="Repository"
                         value={repo()}
                         onChange={setRepo}
-                        options={[{ value: "", label: "All repositories" }, ...repos().map((r) => ({ value: r, label: r }))]}
+                        options={[
+                            { value: "", label: "All repositories" },
+                            ...repos().map((r) => ({ value: r, label: r })),
+                        ]}
                     />
                 </Show>
-                <label class="kanban-toolbar__switch" title="Agents working without a task show as dashed cards in In progress">
-                    <Switch checked={showUntracked()} onChange={setShowUntracked} density="compact" ariaLabel="Show untracked work" />
+                <label class="kanban-toolbar__switch" title="One row of columns per repository">
+                    <Switch checked={lanes()} onChange={setLanes} density="compact" ariaLabel="Lanes by repository" />
+                    Lanes
+                </label>
+                <label
+                    class="kanban-toolbar__switch"
+                    title="Agents working without a task show as dashed cards in In progress"
+                >
+                    <Switch
+                        checked={showUntracked()}
+                        onChange={setShowUntracked}
+                        density="compact"
+                        ariaLabel="Show untracked work"
+                    />
                     Untracked
                 </label>
                 <Button density="compact" tone="accent" icon="plus" onClick={() => setAdding(true)}>
@@ -209,67 +166,105 @@ export const WardenKanbanManager = (props: {
                 </div>
             </Show>
 
-            <Show when={board()} fallback={<p class="warden-manager-dim">{model.error() ? "" : "Loading the Kanban…"}</p>}>
-                <div class="kanban-board">
-                    <For each={COLUMNS}>
-                        {(col) => (
-                            <section class="kanban-column" classList={{ [`kanban-column--${col.id}`]: true }} aria-label={col.label}>
-                                <Show
-                                    when={col.id === "backlog"}
-                                    fallback={
-                                        <>
-                                            {columnHead(col.id, col.label, columnTasks(tasks(), col.id).length + (col.id === "progress" ? untracked().length : 0))}
-                                            <div class="kanban-column__list">
-                                                <Show when={col.id === "progress"}>
-                                                    <For each={untracked()}>
-                                                        {(a) => (
-                                                            <UntrackedCard
-                                                                agent={a}
-                                                                onTrack={(ag) => void model.act({ action: "track", block_id: ag.block_id })}
-                                                                onOpenAgent={(ag) => openAgent(ag.block_id)}
-                                                            />
-                                                        )}
-                                                    </For>
-                                                </Show>
-                                                <For each={columnTasks(tasks(), col.id)}>
-                                                    {(t) => <KanbanCard task={t} now={now()} agents={agents()} onOpen={open} />}
-                                                </For>
-                                            </div>
-                                        </>
-                                    }
-                                >
-                                    {columnHead(col.id, col.label, columnTasks(tasks(), "backlog").length)}
-                                    <div class="kanban-column__list">
-                                        {/* Keyed by the group's agent name (a string), so a group, and its drop
-                                            target, stays mounted when the board refreshes. */}
-                                        <For each={groups().map((g) => g.key)}>
-                                            {(key) => (
-                                                <Show when={groups().find((g) => g.key === key)}>
-                                                    {(g) => <BacklogGroupView group={g()} model={model} now={now()} agents={agents()} holding={holding} onOpen={open} />}
-                                                </Show>
-                                            )}
-                                        </For>
-                                        <Show when={!groups().some((g) => g.key === "")}>
-                                            <BacklogGroupView
-                                                group={{ key: "", label: "Anyone", agent: undefined, tasks: [] }}
-                                                model={model}
-                                                now={now()}
-                                                agents={agents()}
-                                                holding={holding}
-                                                onOpen={open}
-                                            />
-                                        </Show>
-                                    </div>
-                                </Show>
+            <Show
+                when={board()}
+                fallback={<p class="warden-manager-dim">{model.error() ? "" : "Loading the Kanban…"}</p>}
+            >
+                <Show
+                    when={lanes()}
+                    fallback={
+                        <KanbanBoard
+                            tasks={tasks()}
+                            untracked={untracked()}
+                            agents={agents()}
+                            model={model}
+                            now={now()}
+                            holding={holding}
+                            onOpen={open}
+                            onOpenAgent={openAgent}
+                            reviewLimit={reviewLimit()}
+                            reviewTotal={reviewTotal()}
+                        />
+                    }
+                >
+                    <div class="kanban-lanes">
+                        {/* Untracked work belongs to no task, so to no lane: its own row, In progress only. */}
+                        <Show when={untracked().length > 0}>
+                            <section class="kanban-lane" aria-label="Agents working without a task">
+                                <div class="kanban-lane__head">
+                                    <span class="kanban-lane__name">Working without a task</span>
+                                    <span class="warden-manager-dim">{untracked().length}</span>
+                                </div>
+                                <KanbanBoard
+                                    tasks={[]}
+                                    untracked={untracked()}
+                                    agents={agents()}
+                                    model={model}
+                                    now={now()}
+                                    holding={holding}
+                                    onOpen={open}
+                                    onOpenAgent={openAgent}
+                                    reviewLimit={reviewLimit()}
+                                    reviewTotal={reviewTotal()}
+                                />
                             </section>
-                        )}
-                    </For>
-                </div>
+                        </Show>
+                        {/* Keyed by repository (a string), so a lane stays mounted when the board refreshes. */}
+                        <For each={laneList().map((l) => l.repo)}>
+                            {(repo) => (
+                                <Show when={laneList().find((l) => l.repo === repo)}>
+                                    {(lane) => (
+                                        <section class="kanban-lane" aria-label={repoLabel(repo)}>
+                                            <Button
+                                                density="compact"
+                                                tone="quiet"
+                                                icon={folded().has(repo) ? "chevron-right" : "chevron-down"}
+                                                class="kanban-lane__head"
+                                                aria-expanded={!folded().has(repo)}
+                                                onClick={() => fold(repo)}
+                                            >
+                                                <span class="kanban-lane__name">{lane().label}</span>
+                                                <span class="warden-manager-dim">
+                                                    {lane().tasks.filter((t) => columnOf(t) !== "done").length} open
+                                                    {" · "}
+                                                    {lane().tasks.filter((t) => columnOf(t) === "needs").length} need
+                                                    you
+                                                </span>
+                                            </Button>
+                                            <Show when={!folded().has(repo)}>
+                                                <KanbanBoard
+                                                    tasks={lane().tasks}
+                                                    untracked={[]}
+                                                    agents={agents()}
+                                                    model={model}
+                                                    now={now()}
+                                                    holding={holding}
+                                                    onOpen={open}
+                                                    onOpenAgent={openAgent}
+                                                    reviewLimit={reviewLimit()}
+                                                    reviewTotal={reviewTotal()}
+                                                />
+                                            </Show>
+                                        </section>
+                                    )}
+                                </Show>
+                            )}
+                        </For>
+                    </div>
+                </Show>
             </Show>
 
             <Show when={openTask()}>
                 {(t) => (
-                    <KanbanDrawer model={model} task={t()} agents={agents()} now={now()} onClose={() => setOpenId(null)} onOpenAgent={openAgent} />
+                    <KanbanDrawer
+                        model={model}
+                        task={t()}
+                        agents={agents()}
+                        now={now()}
+                        onClose={() => setOpenId(null)}
+                        onOpenAgent={openAgent}
+                        onOpenTask={(id) => setOpenId(id)}
+                    />
                 )}
             </Show>
         </div>

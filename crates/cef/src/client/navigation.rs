@@ -126,6 +126,14 @@ fn try_show_resolved_window(state: &Arc<AppState>, label: &str) -> bool {
     let Some(mut browser) = state.get_browser(label) else { return false };
     let Some(bv) = browser_view_get_for_browser(Some(&mut browser)) else { return false };
     let Some(window) = bv.window() else { return false };
+    // Shown cloaked when the gate armed: now it can be seen.
+    #[cfg(target_os = "windows")]
+    if let Some(hwnd) = take_cloaked_for_paint(label) {
+        crate::floating_pane::reveal::set_cloak(hwnd, false);
+        if let Some(host) = browser.host() {
+            host.set_focus(1);
+        }
+    }
     // Same native-vs-Views check as `on_load_end`'s arming site (issue #3028):
     // trusting Views alone here would resolve the gate as "done" while the
     // native HWND stays hidden — the reveal's very last step silently
@@ -181,6 +189,10 @@ fn finish_gated_reveal(
             "[startup-paint] browser_view/window still not resolvable after gate fired — \
              dismissing splash anyway to avoid hanging it; window will stay hidden"
         );
+        #[cfg(target_os = "windows")]
+        if let Some(hwnd) = take_cloaked_for_paint(label) {
+            crate::floating_pane::reveal::set_cloak(hwnd, false);
+        }
         signal_gated_reveal_complete(elapsed_ms, reason, "error");
         return;
     }
@@ -426,6 +438,11 @@ fn takes_pane_path(kind: Option<&crate::state::BrowserKind>, client_is_browser_p
 #[cfg(target_os = "windows")]
 fn native_window_visible(state: &std::sync::Arc<crate::state::AppState>, label: Option<&str>) -> Option<bool> {
     let label = label?;
+    // A window shown cloaked for its first paint is visible to Win32 but not
+    // yet on screen: the reveal still has to run for it.
+    if CLOAKED_FOR_PAINT.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|m| m.contains_key(label)) {
+        return Some(false);
+    }
     let hwnd = state.window_hwnd(label)?;
     // SAFETY: IsWindowVisible tolerates stale/invalid handles (returns FALSE).
     let vis = unsafe {
@@ -434,6 +451,41 @@ fn native_window_visible(state: &std::sync::Arc<crate::state::AppState>, label: 
         )
     };
     Some(vis != 0)
+}
+
+/// Top-level windows shown cloaked while their startup paint gate is armed:
+/// label → HWND. A window kept hidden until its first paint waits about
+/// 1.5 s longer for that paint than a shown one (Chromium holds back frames
+/// for a window that was never shown; the same reason floating panes are
+/// shown cloaked, `floating_pane/reveal.rs`). Cloaked, Win32 and Chromium see
+/// a visible window, so the page paints at once, while DWM keeps it off the
+/// screen until the gate fires.
+#[cfg(target_os = "windows")]
+static CLOAKED_FOR_PAINT: std::sync::Mutex<Option<std::collections::HashMap<String, isize>>> =
+    std::sync::Mutex::new(None);
+
+/// Show `window` cloaked while its paint gate is armed; the gate's reveal
+/// uncloaks it. Without its HWND, or if cloaking fails, the window stays
+/// hidden until the reveal, as before.
+#[cfg(target_os = "windows")]
+fn show_cloaked_until_painted(state: &std::sync::Arc<crate::state::AppState>, label: &str, window: &cef::Window) {
+    let Some(hwnd) = state.window_hwnd(label) else { return };
+    if !crate::floating_pane::reveal::set_cloak(hwnd, true) {
+        return;
+    }
+    CLOAKED_FOR_PAINT
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get_or_insert_with(Default::default)
+        .insert(label.to_string(), hwnd);
+    window.show();
+    tracing::info!(target: "startup-paint", label = %label, "[startup-paint] shown cloaked until its first paint");
+}
+
+/// The HWND `label` was cloaked under, removing the record.
+#[cfg(target_os = "windows")]
+fn take_cloaked_for_paint(label: &str) -> Option<isize> {
+    CLOAKED_FOR_PAINT.lock().unwrap_or_else(|e| e.into_inner()).as_mut()?.remove(label)
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -497,6 +549,8 @@ fn reveal_top_level_window(
         if already_painted {
             reveal_gated_window(state, label, "signal-early", None);
         } else {
+            #[cfg(target_os = "windows")]
+            show_cloaked_until_painted(state, label, window);
             let mut timeout_task = PaintGateRevealTask::new(
                 state.clone(),
                 label.to_string(),

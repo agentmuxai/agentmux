@@ -97,7 +97,12 @@ fn apply_unbalanced(
             set_insert_effect(&mut effect, node_id, was_empty, magnified, focused);
         }
         LayoutIntent::Delete { node_id } => {
+            let before = root.as_ref().map(leaf_ids).unwrap_or_default();
+            let removed = root.as_ref().and_then(|t| find_node_by_id(t, &node_id)).map(leaf_ids).unwrap_or_default();
             delete_node(root, &node_id)?;
+            if let Some(tree) = root.as_mut() {
+                restore_nearest_if_all_minimized(tree, &before, &removed);
+            }
             effect.unfocus = Some(node_id);
         }
         LayoutIntent::Move { node_id, parent_id, index, insert_at_root } => {
@@ -313,10 +318,50 @@ pub fn delete_and_balance(root: &mut LayoutNode, node_id: &str) -> Result<(), La
     if root.id == node_id {
         return Err(LayoutError::RootCannotBeTarget);
     }
+    let before = leaf_ids(root);
+    let removed = find_node_by_id(root, node_id).map(leaf_ids).unwrap_or_default();
     let parent_id = find_parent_id(root, node_id).ok_or_else(|| not_found(node_id))?;
     let parent = find_node_by_id_mut(root, &parent_id).ok_or_else(|| not_found(&parent_id))?;
     remove_child(parent, node_id, 0);
+    restore_nearest_if_all_minimized(root, &before, &removed);
     balance_node(root)
+}
+
+/// The panes in reading order (depth first), to find "the nearest pane".
+pub(crate) fn leaf_ids(node: &LayoutNode) -> Vec<String> {
+    fn walk(node: &LayoutNode, out: &mut Vec<String>) {
+        if node.children.is_empty() {
+            if node.data.is_some() {
+                out.push(node.id.clone());
+            }
+        } else {
+            node.children.iter().for_each(|c| walk(c, out));
+        }
+    }
+    let mut out = Vec::new();
+    walk(node, &mut out);
+    out
+}
+
+/// After a pane or a container left the tree (`removed`: its panes, in reading order): if every
+/// pane left is minimized, restore the nearest one, the pane that followed it in reading order or
+/// else the one before it, so a tab always shows one. `before` is the reading order with the
+/// removed panes still in it. `deleteNode` (layoutTree.ts) does the same.
+pub(crate) fn restore_nearest_if_all_minimized(tree: &mut LayoutNode, before: &[String], removed: &[String]) {
+    if expanded_leaves(tree) > 0 {
+        return;
+    }
+    let at = removed.first().and_then(|first| before.iter().position(|id| id == first)).unwrap_or(0);
+    let (prior, rest) = before.split_at(at);
+    let after = rest.iter().filter(|id| !removed.contains(id));
+    for id in after.chain(prior.iter().rev()) {
+        if let Some(node) = find_node_by_id_mut(tree, id) {
+            if node.children.is_empty() && node.data.is_some() {
+                node.minimized = false;
+                return;
+            }
+        }
+    }
 }
 
 /// `moveNode`: insert the node at its new place, then remove it from the old
@@ -327,10 +372,12 @@ fn move_node(tree: &mut LayoutNode, node_id: &str, parent_id: &str, index: i64, 
     }
     let mut node = find_node_by_id(tree, node_id).ok_or_else(|| not_found(node_id))?.clone();
     let parent = find_node_by_id(tree, parent_id).ok_or_else(|| not_found(parent_id))?;
-    if is_effectively_minimized(&node) {
+    // A chip moves like any pane and stays a chip; a strip of chips does not move; only a chip
+    // may go into a chip or a strip of them (`moveIsLockedByMinimize`, layoutTree.ts).
+    if !node.children.is_empty() && is_effectively_minimized(&node) {
         return Err(LayoutError::NodeLocked { id: node_id.to_string() });
     }
-    if is_effectively_minimized(parent) {
+    if is_effectively_minimized(parent) && !super::is_node_locked(&node) {
         return Err(LayoutError::NodeLocked { id: parent_id.to_string() });
     }
     if find_node_by_id(&node, parent_id).is_some() {
@@ -366,8 +413,9 @@ fn swap_nodes(tree: &mut LayoutNode, node1_id: &str, node2_id: &str) -> Result<(
     }
     let node1 = find_node_by_id(tree, node1_id).ok_or_else(|| not_found(node1_id))?.clone();
     let node2 = find_node_by_id(tree, node2_id).ok_or_else(|| not_found(node2_id))?.clone();
+    // A chip swaps like any pane and keeps its state; a strip of chips does not swap.
     for (id, node) in [(node1_id, &node1), (node2_id, &node2)] {
-        if is_effectively_minimized(node) {
+        if !node.children.is_empty() && is_effectively_minimized(node) {
             return Err(LayoutError::NodeLocked { id: id.to_string() });
         }
     }

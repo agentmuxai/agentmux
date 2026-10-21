@@ -15,6 +15,7 @@ import {
     LayoutTreeClearTreeAction,
     LayoutTreeInsertNodeAction,
     LayoutTreeInsertNodeAtIndexAction,
+    LayoutTreeMinimizeNodeAction,
     LayoutTreeReplaceNodeAction,
     LayoutTreeSplitHorizontalAction,
     LayoutTreeSplitVerticalAction,
@@ -279,6 +280,16 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
                 newNode: mirroredLeaf(action),
             };
             model.treeReducer(replaceAction, false, { actionId: action.actionid });
+            break;
+        }
+        // srv minimized a pane it placed (a chip dragged in from another tab,
+        // SPEC_DRAG_MINIMIZED_PANES_2026_10_20.md §3 C).
+        case LayoutTreeActionType.Minimize: {
+            // From the tree itself: a pane placed earlier in this batch is not in the leaf list yet.
+            const node = model.treeState.rootNode && findNodeByBlockId(model.treeState.rootNode, action.blockid);
+            if (!node || node.minimized) break;
+            const minimize: LayoutTreeMinimizeNodeAction = { type: LayoutTreeActionType.Minimize, nodeId: node.id };
+            model.treeReducer(minimize, false, { actionId: action.actionid });
             break;
         }
         case LayoutTreeActionType.SplitHorizontal: {

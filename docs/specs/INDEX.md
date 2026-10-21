@@ -337,6 +337,7 @@ partial list.
 | [`SPEC_DEV_WINDOW_TITLE_ARG_2026_06_25`](SPEC_DEV_WINDOW_TITLE_ARG_2026_06_25.md) | Spec: `task dev TITLE="..."` — per-session window title for dev builds |
 | [`SPEC_DIVIDER_PILL_RULE_MISALIGNMENT_2026_08_12`](SPEC_DIVIDER_PILL_RULE_MISALIGNMENT_2026_08_12.md) | SPEC: Divider-Pill Rule Misalignment Fix |
 | [`SPEC_DOCS_INDEX_GENERATOR_NODE_PORT_2026_09_23`](SPEC_DOCS_INDEX_GENERATOR_NODE_PORT_2026_09_23.md) | SPEC: Port the specs-index generator to Node |
+| [`SPEC_DRAG_MINIMIZED_PANES_2026_10_20`](SPEC_DRAG_MINIMIZED_PANES_2026_10_20.md) | Spec — Drag and drop a minimized pane, with a ghost the size of its chip |
 | [`SPEC_DYNAMIC_TOOL_SUMMARY_TRUNCATION`](SPEC_DYNAMIC_TOOL_SUMMARY_TRUNCATION.md) | Dynamic ellipsis truncation for tool summaries |
 | [`SPEC_EDITOR_FILE_TREE_2026-05-26`](SPEC_EDITOR_FILE_TREE_2026-05-26.md) | Spec: Editor Pane — File Tree Explorer + Extensions |
 | [`SPEC_EDITOR_FIRST_KEYSTROKE_NOT_RENDERED_2026_09_15`](SPEC_EDITOR_FIRST_KEYSTROKE_NOT_RENDERED_2026_09_15.md) | Editor: the first keystroke after focusing is accepted but not rendered |
@@ -806,7 +807,6 @@ partial list.
 | [`SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27`](SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md) | SPEC — A repeatable process for Claude model catalog + CLI version upgrades |
 | [`SPEC_DOCS_CLEANUP_AUDIT_2026_08_22`](SPEC_DOCS_CLEANUP_AUDIT_2026_08_22.md) | SPEC — Docs cleanup audit: what's stale, duplicated, or mis-shelved |
 | [`SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27`](SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md) | SPEC: Drag and drop: audit, one facility, one drop indicator |
-| [`SPEC_DRAG_MINIMIZED_PANES_2026_10_20`](SPEC_DRAG_MINIMIZED_PANES_2026_10_20.md) | Spec — Drag and drop a minimized pane, with a ghost the size of its chip |
 | [`SPEC_EARLY_ALPHA_WARNING_2026_06_05`](SPEC_EARLY_ALPHA_WARNING_2026_06_05.md) | SPEC: Early Alpha Warning — README & Microsoft Store Partner Center |
 | [`SPEC_EDITOR_MD_PREVIEW_PANEL_2026_06_21`](SPEC_EDITOR_MD_PREVIEW_PANEL_2026_06_21.md) | SPEC — Editor Markdown Live Preview Panel |
 | [`SPEC_ERROR_COPY_EVERYWHERE_2026_09_24`](SPEC_ERROR_COPY_EVERYWHERE_2026_09_24.md) | SPEC: every error surface can be copied, errors and traces in one click |

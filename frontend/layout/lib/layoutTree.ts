@@ -34,7 +34,7 @@ import {
 } from "./types";
 
 import { newLayoutNode } from "./layoutNode";
-import { countExpandedLeaves, isEffectivelyMinimized } from "./layoutMinimize";
+import { countExpandedLeaves, isEffectivelyMinimized, isNodeLocked } from "./layoutMinimize";
 import { LayoutTreeReplaceNodeAction, LayoutTreeSplitHorizontalAction, LayoutTreeSplitVerticalAction } from "./types";
 
 export const DEFAULT_MAX_CHILDREN = 5;
@@ -45,6 +45,24 @@ export const DEFAULT_MAX_CHILDREN = 5;
  * @param layoutState The state of the tree.
  * @param computeInsertAction The operation to compute.
  */
+/**
+ * Whether a move of `node` under `parent` is refused because of minimize. A minimized pane (a
+ * chip) moves like any pane and stays a chip where it lands; a fully-minimized branch does not
+ * move; and only a chip may go into a chip or a strip of chips, where an expanded pane would be
+ * laid out inside a header strip. SPEC_DRAG_MINIMIZED_PANES_2026_10_20.md §3 B. srv applies the
+ * same rule (`move_node`, crates/srv/src/backend/layout/intent.rs).
+ */
+export function moveIsLockedByMinimize(node: LayoutNode | undefined, parent: LayoutNode | undefined): boolean {
+    if (!node) return false;
+    if (node.children?.length) return isEffectivelyMinimized(node);
+    return isEffectivelyMinimized(parent) && !isNodeLocked(node);
+}
+
+/** A fully-minimized branch (a strip of chips) can't be swapped; a chip can. */
+function isMinimizedBranch(node: LayoutNode | undefined): boolean {
+    return !!node?.children?.length && isEffectivelyMinimized(node);
+}
+
 export function computeMoveNode(layoutState: LayoutTreeState, computeInsertAction: LayoutTreeComputeMoveNodeAction) {
     const rootNode = layoutState.rootNode;
     const { nodeId, nodeToMoveId, direction } = computeInsertAction;
@@ -213,6 +231,7 @@ export function computeMoveNode(layoutState: LayoutTreeState, computeInsertActio
             }
             break;
         case DropDirection.Center:
+            if (isMinimizedBranch(node) || isMinimizedBranch(nodeToMove)) return;
             if (nodeId !== rootNode.id && nodeToMoveId !== rootNode.id) {
                 const swapAction: LayoutTreeSwapNodeAction = {
                     type: LayoutTreeActionType.Swap,
@@ -228,6 +247,11 @@ export function computeMoveNode(layoutState: LayoutTreeState, computeInsertActio
             throw new Error(`Invalid direction: ${direction}`);
     }
 
+    // No indicator for a drop the move would refuse. A pane from another tab is placed by srv's
+    // redock, which splits the target pane and can't split a chip (it minimizes the pane after
+    // placing it instead), so it is offered the targets an expanded pane gets.
+    const movedAs = isForeignNode ? { ...nodeToMove, minimized: undefined } : nodeToMove;
+    if (newMoveOperation && moveIsLockedByMinimize(movedAs, findNode(rootNode, newMoveOperation.parentId))) return;
     if (
         newMoveOperation?.parentId !== nodeToMoveParent()?.id ||
         (newMoveOperation.index !== nodeToMoveIndexInParent() &&
@@ -255,10 +279,8 @@ export function moveNode(layoutState: LayoutTreeState, action: LayoutTreeMoveNod
     const parent = findNode(rootNode, action.parentId);
     const oldParent = findParent(rootNode, action.node.id);
 
-    // Minimized is a locked state: a locked node can't be moved (restore it first),
-    // and nothing may be inserted into a dissolved column.
-    if (isEffectivelyMinimized(node) || isEffectivelyMinimized(parent)) {
-        console.warn("moveNode rejected: source or destination is minimize-locked");
+    if (moveIsLockedByMinimize(node, parent)) {
+        console.warn("moveNode rejected: a strip of chips can't move, and only a chip may go into one");
         return;
     }
 
@@ -377,12 +399,12 @@ export function swapNode(layoutState: LayoutTreeState, action: LayoutTreeSwapNod
         return;
     }
 
-    // Minimized is a locked state: locked nodes don't swap.
+    // A chip swaps like any pane and keeps its state; a strip of chips doesn't swap.
     if (
-        isEffectivelyMinimized(findNode(layoutState.rootNode, action.node1Id)) ||
-        isEffectivelyMinimized(findNode(layoutState.rootNode, action.node2Id))
+        isMinimizedBranch(findNode(layoutState.rootNode, action.node1Id)) ||
+        isMinimizedBranch(findNode(layoutState.rootNode, action.node2Id))
     ) {
-        console.warn("swapNode rejected: a swap endpoint is minimize-locked");
+        console.warn("swapNode rejected: a swap endpoint is a strip of chips");
         return;
     }
 
@@ -417,17 +439,48 @@ export function deleteNode(layoutState: LayoutTreeState, action: LayoutTreeDelet
     } else {
         const parent = findParent(layoutState.rootNode, action.nodeId);
         if (parent) {
+            const before = leafIds(layoutState.rootNode);
             const node = parent.children.find((child) => child.id === action.nodeId);
+            const removed = leafIds(node);
             removeChild(parent, node);
             if (layoutState.focusedNodeId === node.id) {
                 layoutState.focusedNodeId = undefined;
             }
+            restoreNearestIfAllMinimized(layoutState.rootNode, before, removed);
         } else {
             console.error("unable to delete node, not found in tree");
         }
     }
 
     
+}
+
+/** The panes in reading order (depth first), to find "the nearest pane". */
+function leafIds(node: LayoutNode | undefined, out: string[] = []): string[] {
+    if (!node) return out;
+    if (node.children?.length) node.children.forEach((c) => leafIds(c, out));
+    else if (node.data !== undefined) out.push(node.id);
+    return out;
+}
+
+/**
+ * After a pane or a container left the tree (`removed`: its panes, in reading order): if every
+ * pane left is minimized, restore the nearest one, the pane that followed it in reading order or
+ * else the one before it, so a tab always shows one. `before` is the reading order with the
+ * removed panes still in it. srv does the same (`restore_nearest_if_all_minimized`,
+ * crates/srv/src/backend/layout/intent.rs).
+ */
+function restoreNearestIfAllMinimized(root: LayoutNode | undefined, before: string[], removed: string[]) {
+    if (!root || countExpandedLeaves(root) > 0) return;
+    const at = Math.max(0, before.indexOf(removed[0]));
+    const order = [...before.slice(at).filter((id) => !removed.includes(id)), ...before.slice(0, at).reverse()];
+    for (const id of order) {
+        const node = findNode(root, id);
+        if (node && !node.children?.length && node.data !== undefined) {
+            node.minimized = undefined;
+            return;
+        }
+    }
 }
 
 export function resizeNode(layoutState: LayoutTreeState, action: LayoutTreeResizeNodeAction) {

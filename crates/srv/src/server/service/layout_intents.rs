@@ -195,6 +195,43 @@ pub(crate) async fn place_block(state: &AppState, tab_id: &str, block_id: &str, 
     super::reducer_helpers::queue_layout_actions_via_reducer(state, tab_id, vec![action]).await
 }
 
+/// Whether `block_id`'s pane in `tab_id` is minimized (a chip). False when it is in no pane.
+pub(crate) async fn block_is_minimized(state: &AppState, tab_id: &str, block_id: &str) -> bool {
+    let s = state.srv_state.lock().await;
+    s.tabs
+        .get(tab_id)
+        .and_then(|t| t.rootnode.as_ref())
+        .and_then(|root| crate::backend::layout::find_leaf_containing_block(root, block_id))
+        .is_some_and(|leaf| leaf.minimized)
+}
+
+/// Show `block_id`'s pane in `tab_id` as a chip, in srv's tree and the window's mirror (the
+/// `minimize` action). Not applied, and `Ok(false)`, when it is the only pane there showing content:
+/// a tab always shows one. SPEC_DRAG_MINIMIZED_PANES_2026_10_20.md §3 C.
+pub(crate) async fn minimize_block_in_layout(state: &AppState, tab_id: &str, block_id: &str) -> Result<bool, String> {
+    let node_id = {
+        let s = state.srv_state.lock().await;
+        s.tabs
+            .get(tab_id)
+            .and_then(|t| t.rootnode.as_ref())
+            .and_then(|root| crate::backend::layout::find_leaf_containing_block(root, block_id))
+            .map(|leaf| leaf.id.clone())
+    };
+    let Some(node_id) = node_id else { return Ok(false) };
+    let action_id = uuid::Uuid::new_v4().to_string();
+    if !apply_layout_intent(state, tab_id, LayoutIntent::Minimize { node_id }, &action_id, None).await?.applied {
+        return Ok(false);
+    }
+    let action = LayoutActionData {
+        actiontype: "minimize".to_string(),
+        actionid: action_id,
+        blockid: block_id.to_string(),
+        ..Default::default()
+    };
+    super::reducer_helpers::queue_layout_actions_via_reducer(state, tab_id, vec![action]).await?;
+    Ok(true)
+}
+
 /// Take `block_id` out of its tab's layout in srv (one member of a stack, or
 /// its pane): `LayoutDeleteNodeByBlock`, stored and published. A block in no
 /// pane is a no-op.

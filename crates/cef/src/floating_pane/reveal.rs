@@ -29,7 +29,9 @@ const REVEAL_BACKSTOP_MS: i64 = 2000;
 /// Cloaked floaters waiting for their first paint: label → (HWND, cloaked at).
 static PENDING: Mutex<Option<HashMap<String, (isize, Instant)>>> = Mutex::new(None);
 
-fn set_cloak(hwnd: isize, on: bool) -> bool {
+/// Cloak or uncloak a top-level window. Shared with the main window's
+/// startup reveal (`client/navigation.rs`).
+pub(crate) fn set_cloak(hwnd: isize, on: bool) -> bool {
     use windows_sys::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_CLOAK};
     let value: i32 = on as i32;
     let hr = unsafe {

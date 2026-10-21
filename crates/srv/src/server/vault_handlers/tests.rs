@@ -216,6 +216,43 @@ async fn only_the_host_can_fetch_a_value() {
     assert!(act.to_string().contains("copied") && !act.to_string().contains("123-45"), "{act}");
 }
 
+// A use that needs a typed value takes it with the answer, requires it to allow, and an answer
+// without one can still deny.
+#[tokio::test]
+async fn an_answer_to_a_request_for_a_value_carries_what_the_person_typed() {
+    use crate::backend::vault::uses::{self, Decision, UseRequest};
+    let app = app().await;
+    let host = |body: Value| post("/api/v1/host/vault", &[HOST], body);
+    let request = |id: &str| UseRequest {
+        id: id.into(),
+        agent: "Agent1".into(),
+        entry_id: String::new(),
+        entry_label: "Sam's SSN".into(),
+        what: "Social Security number".into(),
+        origin: "https://irs.gov".into(),
+        field: "SSN".into(),
+        offer_always: false,
+        reason: "no entry yet".into(),
+        needs_value: true,
+        kind: "ssn".into(),
+        requested_ms: agentmux_common::time::now_ms_u64(),
+    };
+    let rx = uses::uses().ask(request("typed-1"));
+    let (s, body) = send(&app, host(json!({ "op": "answer_use", "id": "typed-1", "decision": "once" }))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "no value: {body}");
+    assert!(body.to_string().contains("type the value"));
+    let (s, body) = send(&app, host(json!({ "op": "answer_use", "id": "typed-1", "decision": "once", "value": "987-65-4321", "save": true }))).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert!(!body.to_string().contains("987-65"));
+    let got = rx.await.unwrap();
+    assert_eq!((got.decision, got.value.as_deref().map(String::as_str), got.save), (Decision::Once, Some("987-65-4321"), true));
+
+    let rx = uses::uses().ask(request("typed-2"));
+    let (s, _) = send(&app, host(json!({ "op": "answer_use", "id": "typed-2", "decision": "deny" }))).await;
+    assert_eq!(s, StatusCode::OK, "denying needs no value");
+    assert_eq!(rx.await.unwrap().decision, Decision::Deny);
+}
+
 // The person's answer to an agent's use of an entry comes only from the host, "always" only
 // when it was offered, and a grant can be revoked.
 #[tokio::test]
@@ -233,6 +270,8 @@ async fn answering_a_use_and_revoking_a_grant_go_through_the_host_only() {
         field: "SSN".into(),
         offer_always,
         reason: "a new site".into(),
+        needs_value: false,
+        kind: "ssn".into(),
         requested_ms: agentmux_common::time::now_ms_u64(),
     };
 
@@ -242,7 +281,7 @@ async fn answering_a_use_and_revoking_a_grant_go_through_the_host_only() {
     assert_eq!(s, StatusCode::FORBIDDEN, "an agent can't answer for the person");
     let (s, body) = send(&app, host(answer.clone())).await;
     assert_eq!(s, StatusCode::OK, "{body}");
-    assert_eq!(rx.await.unwrap(), Decision::Always);
+    assert_eq!(rx.await.unwrap().decision, Decision::Always);
     let (s, body) = send(&app, host(answer)).await;
     assert_eq!(s, StatusCode::BAD_REQUEST, "answered already: {body}");
 
@@ -254,7 +293,7 @@ async fn answering_a_use_and_revoking_a_grant_go_through_the_host_only() {
     assert_eq!(s, StatusCode::BAD_REQUEST);
     let (s, _) = send(&app, host(json!({ "op": "answer_use", "id": "answer-2", "decision": "deny" }))).await;
     assert_eq!(s, StatusCode::OK);
-    assert_eq!(rx.await.unwrap(), Decision::Deny);
+    assert_eq!(rx.await.unwrap().decision, Decision::Deny);
 
     // Revoking a grant that isn't there is refused, and an agent can't revoke at all.
     let (_, made) = send(&app, host(new_ssn())).await;

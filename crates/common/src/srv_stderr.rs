@@ -37,6 +37,11 @@
 //!   snapshot, waiting for another AgentMux's migrations, the backup. Written
 //!   by srv's startup and by `agentmux-srv migrate --prepare`; the launcher
 //!   shows each as a sub-row of `backend`, like a migration.
+//! - `AGENTMUXSRV-NEEDS-PREPARE reason:<text>` — srv was started by a
+//!   supervisor that prepares data ([`SUPERVISOR_PREPARES_ENV`]) and found data
+//!   that needs preparing (a previous version to copy forward, or pending
+//!   migrations); it exits [`NEEDS_PREPARE_EXIT`] before writing anything, and
+//!   the supervisor runs `agentmux-srv migrate --prepare`, then starts it again.
 //! - `AGENTMUXSRV-MIGRATION-FAILED error:<text>` — a migration failed and srv
 //!   is about to exit 1 **without** emitting ESTART. Added by Phase 1 of
 //!   `docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md`; before it,
@@ -144,6 +149,29 @@ fn one_line(s: &str) -> String {
         .join(" | ")
 }
 
+/// Set to `1` by a supervisor that runs `agentmux-srv migrate --prepare`
+/// itself (the launcher). srv then never copies, snapshots or migrates at boot:
+/// it checks read-only and exits [`NEEDS_PREPARE_EXIT`] when the data needs it.
+/// Without it (headless srv, `task dev:standalone`) srv prepares in-process.
+pub const SUPERVISOR_PREPARES_ENV: &str = "AGENTMUX_SUPERVISOR_PREPARES";
+
+/// srv's exit code after an `AGENTMUXSRV-NEEDS-PREPARE` line.
+pub const NEEDS_PREPARE_EXIT: i32 = 4;
+
+/// Prefix of the line srv writes, under [`SUPERVISOR_PREPARES_ENV`], before
+/// exiting because its data needs `migrate --prepare`.
+pub const NEEDS_PREPARE_PREFIX: &str = "AGENTMUXSRV-NEEDS-PREPARE";
+
+pub fn needs_prepare_line(reason: &str) -> String {
+    format!("{NEEDS_PREPARE_PREFIX} reason:{}", one_line(reason))
+}
+
+/// The reason of a `NEEDS_PREPARE_PREFIX` line; `None` for any other line.
+pub fn parse_needs_prepare_line(line: &str) -> Option<String> {
+    let rest = line.strip_prefix(NEEDS_PREPARE_PREFIX)?.trim_start();
+    Some(rest.strip_prefix("reason:").unwrap_or(rest).trim().to_string())
+}
+
 /// Prefix of the line srv writes when a data-preparation step starts.
 pub const STEP_BEGIN_PREFIX: &str = "AGENTMUXSRV-STEP-BEGIN";
 /// Prefix of the line srv writes when that step ends.
@@ -247,6 +275,12 @@ pub fn parse_migration_end_line(line: &str) -> Option<MigrationEnd> {
 /// Prefix of the line srv writes when the user chose "Upgrade & restart".
 pub const UPGRADE_PREFIX: &str = "AGENTMUXSRV-UPGRADE";
 
+/// What the launcher leaves in `updates/` of the data folder when the user
+/// answered No to the restart question, or the question lapsed: the version it
+/// asked about. srv reads it to stop saying "Restarting" (the launcher has no
+/// other way to tell it), so the user can start the upgrade again at once.
+pub const UPGRADE_DECLINED_FILE: &str = "declined.txt";
+
 /// What an upgrade restarts into.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UpgradeTarget {
@@ -341,6 +375,14 @@ mod tests {
         assert!(parse_migration_begin_line(&begin).is_none());
         assert!(!is_migrating_line(&begin));
         assert_eq!(parse_step_end_line("AGENTMUXSRV-STEP-END id:backup duration_ms:x"), None);
+    }
+
+    #[test]
+    fn needs_prepare_line_round_trips() {
+        let line = needs_prepare_line("2 migration(s) pending,\nfirst 0038_x");
+        assert_eq!(parse_needs_prepare_line(&line).as_deref(), Some("2 migration(s) pending, | first 0038_x"));
+        assert_eq!(parse_needs_prepare_line(&migrating_line("migrations", 2)), None);
+        assert!(parse_migration_failed_line(&line).is_none());
     }
 
     #[test]
