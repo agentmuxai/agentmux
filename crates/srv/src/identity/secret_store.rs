@@ -32,8 +32,9 @@
 //! `task dev` build changes identity on each rebuild) used to bring up "AgentMux
 //! Server wants to use your confidential information…" unasked, at startup,
 //! after an upgrade. Now such a read fails at once with [`NEEDS_CONSENT`],
-//! and each caller decides: the MuxBus sign-in counts as signed out (signing
-//! in again writes a fresh entry), and everything else reports it. A write
+//! and each caller decides: the MuxBus sign-in counts as signed out
+//! ([`get_optional_if_trusted`]; signing in again writes a fresh entry), and
+//! everything else reports it. A write
 //! over such an item replaces it ([`put`]), so the new one trusts this build.
 //! docs/analysis/ANALYSIS_MACOS_KEYCHAIN_PROMPT_AFTER_UPGRADE_2026_10_21.md.
 //!
@@ -445,6 +446,21 @@ pub fn get_optional(account_id: &str) -> Result<Option<Zeroizing<String>>, Strin
     }
 }
 
+/// [`get_optional`], except that an entry this build may not read without
+/// asking ([`NEEDS_CONSENT`]) counts as absent, and is logged. For the MuxBus
+/// sign-in: one saved by an older build is then signed out, and signing in
+/// again writes a fresh entry this build owns, so no dialog ever shows.
+/// Never for a key whose absence makes the caller create a new one (the Vault).
+pub fn get_optional_if_trusted(account_id: &str) -> Result<Option<Zeroizing<String>>, String> {
+    match get_optional(account_id) {
+        Err(e) if is_needs_consent(&e) => {
+            tracing::warn!(account = %account_key(account_id), "secret store: {e}; treating it as absent");
+            Ok(None)
+        }
+        other => other,
+    }
+}
+
 fn get_optional_now(account_id: &str) -> Result<Option<Zeroizing<String>>, String> {
     match entry(account_id)?.get_password() {
         Ok(pw) => Ok(Some(Zeroizing::new(pw))),
@@ -629,11 +645,13 @@ mod tests {
         let started = std::time::Instant::now();
         let read = get_optional(&id).map(|v| v.map(|z| z.to_string()));
         let fast = started.elapsed() < std::time::Duration::from_secs(2);
+        let lenient = get_optional_if_trusted(&id).map(|v| v.map(|z| z.to_string()));
         let replaced = put(&id, "new");
         let after = get_optional(&id).map(|v| v.map(|z| z.to_string()));
         let _ = delete(&id);
         assert!(matches!(&read, Err(e) if is_needs_consent(e)), "{read:?}");
         assert!(fast, "no dialog was waited on");
+        assert_eq!(lenient, Ok(None), "an entry this build may not read counts as absent");
         assert_eq!(replaced, Ok(()));
         assert_eq!(after, Ok(Some("new".to_string())));
     }

@@ -953,7 +953,7 @@ impl Store {
                 }
             }
         } else {
-            match secret_store::get_optional(&blob_key(&ns)) {
+            match secret_store::get_optional_if_trusted(&blob_key(&ns)) {
                 Ok(Some(blob)) => {
                     // reagent P2: a corrupted/unparseable keychain blob used
                     // to silently collapse to MuxBusTokens::default() via
@@ -1028,16 +1028,6 @@ impl Store {
                     return Ok(parsed.tokens);
                 }
                 Ok(None) => {} // not yet on the single-blob layout — check other sources below
-                // macOS: saved by a build the keychain doesn't trust for this
-                // one (every srv before v0.59.16). Reading it would ask the
-                // person, so it counts as not signed in: signing in again
-                // writes a fresh entry this build owns, and no dialog shows.
-                Err(e) if secret_store::is_needs_consent(&e) => {
-                    tracing::warn!(
-                        namespace = %ns,
-                        "muxbus: the stored sign-in was saved by an AgentMux build this one may not read without a keychain prompt — treating it as signed out; signing in again replaces it"
-                    );
-                }
                 Err(e) => {
                     if !legacy_access.is_empty() {
                         tracing::warn!(
@@ -1128,9 +1118,6 @@ impl Store {
                     return Ok(tokens);
                 }
                 Ok(SplitRead::Absent) => {}
-                // Old split entries saved by a build the keychain doesn't
-                // trust for this one: not signed in, as for the blob above.
-                Err(e) if secret_store::is_needs_consent(&e.to_string()) => {}
                 Err(e) => {
                     if !legacy_access.is_empty() {
                         tracing::warn!(
