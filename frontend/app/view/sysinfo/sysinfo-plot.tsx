@@ -11,7 +11,7 @@
  */
 
 import type { JSX } from "solid-js";
-import { createContext, createEffect, createMemo, createSignal, on, onCleanup, onMount, Show, useContext } from "solid-js";
+import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show, useContext } from "solid-js";
 import { throttle } from "throttle-debounce";
 import uPlot from "uplot";
 
@@ -19,6 +19,7 @@ import { appliedWindowTheme } from "@/app/store/window-appearance";
 
 import "uplot/dist/uPlot.min.css";
 import "./sysinfo-plot.scss";
+import { SysinfoZoomContext } from "./sysinfo-zoom";
 
 import {
     formatValue,
@@ -44,12 +45,6 @@ const TEXT_INSET_PX = 1;
 /** Least room between y ticks at 100% zoom (uPlot's default), so a short chart shows fewer labels. */
 const Y_LABEL_SPACE_PX = 30;
 
-/**
- * The pane's zoom (`term:zoom`) for Sysinfo's text: the charts' axis labels and
- * the room they take scale with it, their lines and fills don't. Provided by the
- * view (sysinfo-view.tsx); 1 outside it.
- */
-export const SysinfoZoomContext = createContext<() => number>(() => 1);
 
 /**
  * Width of a y axis that fits its widest label (uPlot's own sizing recipe). It

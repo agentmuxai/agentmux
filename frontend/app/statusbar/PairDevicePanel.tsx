@@ -13,7 +13,6 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { viewerPairedAtom } from "@/store/global";
 import { writeText } from "@/util/clipboard";
-import QRCode from "qrcode";
 import { createEffect, createMemo, createSignal, on, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 
 type Pairing = { url: string; expiresMs: number };
@@ -83,10 +82,19 @@ export function PairDevicePanel(props: { lanDiscoveryEnabled: Accessor<boolean> 
     createEffect(() => {
         const p = pairing();
         if (!p || !live() || !canvas) return;
-        QRCode.toCanvas(canvas, p.url, { width: 176, margin: 1 }, (err) => {
-            // Never log the URL: it carries the pairing code.
-            if (err) console.error("[PairDevicePanel] failed to render the pairing QR code:", err.message);
-        });
+        const target = canvas;
+        // Loaded when a code is first drawn, not at startup
+        // (SPEC_FRONTEND_BUNDLE_SPLITTING_2026_10_21.md §5).
+        import("qrcode")
+            .then(({ default: QRCode }) => {
+                // Pairing may have ended, or a new code replaced this one, meanwhile.
+                if (pairing() !== p || !live()) return;
+                QRCode.toCanvas(target, p.url, { width: 176, margin: 1 }, (err) => {
+                    // Never log the URL: it carries the pairing code.
+                    if (err) console.error("[PairDevicePanel] failed to render the pairing QR code:", err.message);
+                });
+            })
+            .catch((err) => console.error("[PairDevicePanel] failed to load the QR code library:", err?.message ?? err));
     });
 
     return (

@@ -1097,7 +1097,6 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     // signal — same reasoning as the floating-pane-workspace's always-on
     // suppression (frontend/app/workspace/floating-pane-workspace.scss).
     const isAlone = () => nodeModel.numLeafs() <= 1;
-    const customBg = util.useAtomValueSafe(props.viewModel?.blockBg);
     const manageConnection = util.useAtomValueSafe(props.viewModel?.manageConnection);
     const changeConnModalAtom = useBlockAtom(nodeModel.blockId, "changeConn", () => {
         return util.createSignalAtom(false);
@@ -1235,10 +1234,10 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
 
     const viewIconUnion = util.useAtomValueSafe(props.viewModel?.viewIcon) ?? blockViewToIcon(blockData()?.meta?.view);
     const viewIconElem = getViewIconElem(viewIconUnion, blockData());
-    let innerStyle: JSX.CSSProperties = {};
-    if (!props.preview) {
-        innerStyle = computeBgStyleFromMeta(customBg);
-    }
+    // Reactive: a background with `url(...)` is computed once its parser has
+    // loaded (computeBgStyleFromMeta).
+    const innerStyle = (): JSX.CSSProperties =>
+        props.preview ? {} : computeBgStyleFromMeta(util.useAtomValueSafe(props.viewModel?.blockBg));
     const previewElem = <div class="block-frame-preview">{viewIconElem}</div>;
     // Trivial wrapper — behavior-preserving today. A hoisted pane-chrome
     // caller (PR 3) will pass nodeModel.activeBlockId instead, to track a
@@ -1385,7 +1384,7 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                     changeConnModalAtom={changeConnModalAtom}
                 />
             </Show>
-            <div class="block-frame-default-inner" style={innerStyle}>
+            <div class="block-frame-default-inner" style={innerStyle()}>
                 {noHeader() || <ErrorBoundary fallback={headerElemNoView}>{headerElem}</ErrorBoundary>}
                 <Show when={!props.preview && blockData()}>
                     <TitleBar
