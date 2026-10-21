@@ -193,11 +193,13 @@ async fn run(run_id: u64, d: DownloadStatus, target: UpgradeTarget, now: bool) {
     }
     let listed = stopping_now().await;
     let declined = declined_file();
-    if let Some(file) = declined.as_deref() {
-        // Before the launcher is asked: an answer from an earlier attempt isn't this one's.
-        let _ = std::fs::remove_file(file);
-    }
     let asked = if_current(run_id, || {
+        // In the same guarded step that asks, so a run that was superseded while it
+        // listed what it stops can't remove a newer run's answer. Before the
+        // launcher is asked: an answer from an earlier attempt isn't this one's.
+        if let Some(file) = declined.as_deref() {
+            let _ = std::fs::remove_file(file);
+        }
         set(&d, "restarting", 0, None, listed);
         tracing::info!(version = %d.version, target = ?target, "upgrade: asking the launcher to restart");
         eprintln!("{}", agentmux_common::srv_stderr::upgrade_line(&d.version, &target));
