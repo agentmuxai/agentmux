@@ -115,12 +115,28 @@ pub fn read(text: &str, mapping: Option<&Mapping>) -> Result<Imported, ReadError
         }
         // A password is kept exactly as exported, spaces and all.
         let password = cols.password.and_then(|i| row.get(i)).unwrap_or("");
-        if password.is_empty() {
-            skipped.push((label, "it has no password".to_string()));
-            continue;
-        }
         // LastPass keeps a login's notes in `extra`.
         let notes_col = cols.notes.or(if source == Source::LastPass { cols.extra } else { None });
+        if password.is_empty() {
+            // Bitwarden's CSV puts a secure note in a row with no login: its text is the point, so it
+            // is kept (sealed) with where and who it was filed under; a row with nothing but an
+            // address or a name is listed as skipped.
+            let notes = cell(row, notes_col);
+            if notes.is_empty() {
+                skipped.push((label, "it has no password".to_string()));
+            } else {
+                let mut text = String::new();
+                for (name, value) in [("site", site), ("username", cell(row, cols.username))] {
+                    if !value.is_empty() {
+                        text.push_str(&format!("{name}: {value}"));
+                        text.push(char::from(10));
+                    }
+                }
+                text.push_str(notes);
+                entries.push(Incoming::new("note", &label).part("text", &text).tag(folder));
+            }
+            continue;
+        }
         let mut login = Incoming::new("login", &label).part("password", password).field("site", site).field("username", cell(row, cols.username)).tag(folder);
         let totp = cell(row, cols.totp);
         if !totp.is_empty() {
