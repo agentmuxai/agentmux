@@ -108,3 +108,8 @@
         text-overflow: unset;
     }
 }
+
+// The Vault's oversight half (what agents did with secrets, and where each may use one).
+.warden-secrets {
+    margin-top: var(--space-4);
+}

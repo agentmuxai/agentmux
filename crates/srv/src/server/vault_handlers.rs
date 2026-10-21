@@ -176,6 +176,20 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                 }
                 Ok((json!({}), true))
             }
+            // Who may use which entry without asking, with no value and no key: Warden's
+            // view of the standing permissions, which must not make the OS ask for the key.
+            "grants" => {
+                let mut grants = store.vault_grants().map_err(|e| e.to_string())?;
+                let rows = store.vault_list().map_err(|e| e.to_string())?;
+                let granted: Vec<Value> = rows
+                    .into_iter()
+                    .filter_map(|r| {
+                        let g = grants.remove(&r.id)?;
+                        Some(json!({ "id": r.id, "label": r.label, "kind": r.kind, "grants": g }))
+                    })
+                    .collect();
+                Ok((json!({ "granted": granted }), false))
+            }
             "revoke_grant" => {
                 let s = |k: &str| body.get(k).and_then(Value::as_str).unwrap_or("").to_string();
                 let (entry, origin) = (s("entry_id"), s("origin"));

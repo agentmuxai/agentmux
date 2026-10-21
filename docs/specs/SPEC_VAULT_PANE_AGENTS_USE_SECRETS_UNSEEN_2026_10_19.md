@@ -131,7 +131,7 @@ An entry's id is made once from its kind and label (`ssn-alex`, then `ssn-alex-2
 
 ### 5.6 Activity and grants in Warden too
 
-The operator decided on 2026-10-19 that the Vault stays its own pane, and that Warden also shows its oversight half: the record of agents' uses of entries and the standing "Always" grants, as a section or as Audit events, linked both ways with the Vault. Built with the grants, in P3.
+The operator decided on 2026-10-19 that the Vault stays its own pane, and that Warden also shows its oversight half: the record of agents' uses of entries and the standing "Always" grants, as a section or as Audit events, linked both ways with the Vault. Built in P7: Warden's Audit section ends with **Secrets**, listing what agents did with entries (their uses, not the person's own doings, with the outcome) and the standing permissions (sites and commands apart, each with a way to stop it), and a button to open the Vault; the Vault's Activity tab has a button back to the Audit section.
 
 ### 5.7 What the person is asked, and when
 

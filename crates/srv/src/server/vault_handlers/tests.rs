@@ -348,3 +348,17 @@ async fn export_and_import_work_through_the_host_without_a_value_in_any_answer()
     let (_, p) = send(&app, host(json!({ "op": "suggest_passphrase" }))).await;
     assert_eq!(p["data"]["passphrase"].as_str().unwrap().split('-').count(), 8);
 }
+
+// Warden's list of standing permissions is metadata only: the host reads it, an agent can't, and it
+// carries labels and grants, never a value.
+#[tokio::test]
+async fn the_standing_permissions_are_the_hosts_to_read_and_carry_no_value() {
+    let app = app().await;
+    let host = |body: Value| post("/api/v1/host/vault", &[HOST], body);
+    send(&app, host(new_ssn())).await;
+    let (s, _) = send(&app, post("/api/v1/host/vault", &[], json!({ "op": "grants" }))).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, body) = send(&app, host(json!({ "op": "grants" }))).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert!(body["data"]["granted"].is_array() && !body.to_string().contains("123-45"), "{body}");
+}
