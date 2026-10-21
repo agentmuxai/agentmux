@@ -721,7 +721,7 @@ $browser-nav-stack-below: 388px;
     gap: 8px;
     max-width: 420px;
     min-width: 0;
-    font-size: 13px;
+    font-size: var(--text-base);
     line-height: 1.45;
 
     p {

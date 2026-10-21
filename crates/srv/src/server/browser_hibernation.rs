@@ -67,6 +67,22 @@ pub(crate) async fn ensure_awake(state: &AppState, block_id: &str) -> Result<boo
     ))
 }
 
+/// Every srv call into the host's browser API goes through here: a hibernated
+/// browser pane named by the body's `block_id` has no page, so it is woken
+/// first, and the answer says so.
+pub(crate) async fn post_to_host_awake(
+    state: &AppState,
+    host: &crate::server::HostIpc,
+    route: &str,
+    body: serde_json::Value,
+    timeout: Option<Duration>,
+) -> Result<serde_json::Value, String> {
+    let block_id = body.get("block_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let woke = ensure_awake(state, &block_id).await?;
+    let resp = super::host_http::post_to_host(&state.http_client, host, route, body, timeout).await?;
+    Ok(if woke { mark_woken(resp) } else { resp })
+}
+
 /// The host's answer to a call that woke the pane, marked so the agent's tool
 /// can say its page was reloaded.
 pub(crate) fn mark_woken(mut host_resp: serde_json::Value) -> serde_json::Value {

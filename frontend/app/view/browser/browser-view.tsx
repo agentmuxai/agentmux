@@ -271,7 +271,18 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
         setWakeLoadedMs(0);
     };
     const wake = (why: string) => {
-        if (!sleeping() || wakeRequested()) return;
+        if (!sleeping()) return;
+        if (wakeRequested()) {
+            // A hover's speculative wake is already loading: an agent's call or
+            // the command makes it a real one, which must not go back to sleep.
+            if (wakeWhy === "intent" && (why === "agent" || why === "command")) {
+                wakeWhy = why;
+                clearTimeout(wakeGiveUp);
+                diag(`[hibernate] wake-upgraded why=${why}`);
+                if (wakeLoadedMs() > 0) void model.endSleep(wakeLoadedMs()).catch(() => {});
+            }
+            return;
+        }
         wakeWhy = why;
         setWakeStartedAt(performance.now());
         setWakeRequested(true);

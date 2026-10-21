@@ -32,14 +32,13 @@ A browser pane that has been out of sight for a while **hibernates**: AgentMux c
 
 ## 3. How long a wake takes
 
-From this machine's host log (`browser pane created on UI thread` to the first `emit-nav-state … raw_cef_is_loading=false`), 2026-10-19 and 20, 15 creations:
+From this machine's host log (`browser pane created on UI thread` to the first `emit-nav-state … raw_cef_is_loading=false`), 2026-10-19 and 20, by kind of page:
 
 | Page | Create to loaded |
 |---|---|
 | GitHub issue or PR, first load of the session | 2.3–3.8 s |
 | GitHub issue or PR, later | 1.4–2.3 s |
 | agentmux.ai, docs.agentmux.ai, a localhost dev server | 0.3–1.0 s |
-| A state government upload form | 2.4 s |
 
 A wake is a pane creation plus a page load, so these are its expected range. The spike measured wakes directly, cache warm: example.org 0.36 s, docs 0.44–0.49 s, Wikipedia 0.53–0.94 s, The Guardian 0.75 s, OpenStreetMap 0.76–1.07 s, Reddit 1.7–2.0 s, GitHub 2.0–2.3 s; a 600 ms hover before the click had three of seven pages ready before the tab showed (report §4).
 
@@ -73,9 +72,9 @@ A pane is a candidate when it is hidden (collapsed, in a hidden window tab, an i
 
 | Pressure | Hidden for | Order |
 |---|---|---|
-| Normal | **30 minutes** | largest renderer first, one per tick |
-| Warn | 5 minutes | largest first, up to 3 per tick |
-| Critical | 1 minute | largest first, all candidates |
+| Normal | **30 minutes** | longest hidden first, one per tick |
+| Warn | 5 minutes | longest hidden first, up to 3 per tick |
+| Critical | 1 minute | longest hidden first, all candidates |
 
 `browser:hibernateafter` (minutes) replaces the Normal figure. The Warn and Critical figures are constants. 30 minutes is a starting point for the spike to check against how often the operator returns to hidden panes.
 

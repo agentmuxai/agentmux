@@ -209,12 +209,7 @@ pub(crate) async fn proxy_to_host_timeout(
     body: serde_json::Value,
     timeout: Option<std::time::Duration>,
 ) -> Result<serde_json::Value, String> {
-    // A hibernated browser pane has no page: wake it before acting on it
-    // (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md §8).
-    let block_id = body.get("block_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let woke = super::browser_hibernation::ensure_awake(state, &block_id).await?;
-    let resp = super::host_http::post_to_host(&state.http_client, host, route, body, timeout).await?;
-    Ok(if woke { super::browser_hibernation::mark_woken(resp) } else { resp })
+    super::browser_hibernation::post_to_host_awake(state, host, route, body, timeout).await
 }
 
 pub(crate) fn err_response(status: StatusCode, e: String) -> Response {
