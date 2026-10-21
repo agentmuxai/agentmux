@@ -10,6 +10,7 @@ fn read_ok(text: &str, name: &str) -> Imported {
         Ok(i) => i,
         Err(ReadError::Other(e)) => panic!("{e}"),
         Err(ReadError::NeedsMapping(_)) => panic!("needs a mapping"),
+        Err(ReadError::NeedsPassphrase) => panic!("needs a password"),
     }
 }
 
@@ -17,6 +18,7 @@ fn err_of(bytes: &[u8], name: &str) -> String {
     match read(bytes, name, None) {
         Err(ReadError::Other(e)) => e,
         Err(ReadError::NeedsMapping(m)) => format!("needs mapping {:?}", m.columns),
+        Err(ReadError::NeedsPassphrase) => "needs a password".to_string(),
         Ok(_) => panic!("expected an error"),
     }
 }
