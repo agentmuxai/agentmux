@@ -56,6 +56,8 @@ export function WardenView(props: { model: WardenViewModel }): JSX.Element {
                             onNeedsCount={model.setKanbanNeeds}
                             openRequest={model.kanbanOpenAtom()}
                             onOpenHandled={() => model.setMeta({ "kanban:open": null })}
+                            lanes={model.kanbanLanesAtom()}
+                            onLanes={(on) => model.setMeta({ "kanban:lanes": on })}
                         />
                     </div>
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "host" }}>

@@ -47,6 +47,8 @@ export class WardenViewModel {
     setKanbanNeeds: (n: number) => void;
     /** A task another view asked to show (`kanban:open` meta, kanban-held.tsx), until the section opens it. */
     kanbanOpenAtom: Accessor<string | null>;
+    /** The Kanban in one lane per repository (`kanban:lanes` meta). */
+    kanbanLanesAtom: Accessor<boolean>;
 
     // A native pane tab (Pane Tab contract Phase 2c): built by `create(ctx)`;
     // its memos live in the instance's own root (host rule 8), so they no
@@ -64,6 +66,7 @@ export class WardenViewModel {
             const id = meta()?.["kanban:open"];
             return typeof id === "string" && id ? id : null;
         });
+        this.kanbanLanesAtom = createMemo<boolean>(() => meta()?.["kanban:lanes"] === true);
         const [kanbanNeeds, setKanbanNeeds] = createSignal(0);
         this.kanbanNeeds = kanbanNeeds;
         this.setKanbanNeeds = setKanbanNeeds;
