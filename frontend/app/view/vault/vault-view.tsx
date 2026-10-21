@@ -5,7 +5,7 @@
 // seeing them (docs/specs/SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §5).
 // A rail of sections like Warden's; agents' requests for new entries on top.
 
-import { createEffect, createSignal, For, on, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js";
 
 import { ModalLayer } from "@/app/element/ModalLayer";
 import { Button, TabbedPane, type TabItem } from "@/app/element/ui";
@@ -26,9 +26,9 @@ import type { VaultViewModel } from "./vault-model";
 import {
     declineRequest,
     followVault,
+    holdVaultShown,
     loadActivity,
     loadKept,
-    refreshVault,
     setVaultOnScreen,
     vaultAvailable,
     vaultChangedMs,
@@ -219,10 +219,12 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
         setForm({ mode: "new", section: kind?.section ?? "personal", request: r });
     };
 
-    onMount(() => {
-        if (!vaultAvailable()) return;
+    // Only while shown: the list decrypts every entry, which can make the OS ask for the Vault key,
+    // so a Vault that is hidden (another Warden section, another tab) or closed never reads it.
+    createEffect(() => {
+        if (!vaultAvailable() || !model.shown()) return;
         followVault();
-        void refreshVault();
+        onCleanup(holdVaultShown());
     });
 
     // While shown, renew srv's note that a Vault pane is on screen every 10 s
