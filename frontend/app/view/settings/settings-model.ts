@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createSignal } from "solid-js";
+import { createEffect, createSignal, on } from "solid-js";
 
 import { sectionKeyOf, sectionOf, type PaneSections } from "@/app/block/pane-sections";
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
@@ -86,8 +86,17 @@ export class SettingsViewModel {
      *  (tests), the section is local state. */
     constructor(block?: Pick<PaneTabHostContext, "meta" | "setMeta">) {
         if (block) {
-            this.activeSection = () => sectionOf(SETTINGS_SECTIONS, "settings", block.meta());
-            this.setSection = (s) => void block.setMeta({ [sectionKeyOf("settings")]: s });
+            // Shown at once, then saved: a search result in another section looks for its row
+            // right after switching, before the meta write comes back. A change from outside
+            // (another entry point asking for a section) still lands through the meta.
+            const fromMeta = () => sectionOf(SETTINGS_SECTIONS, "settings", block.meta());
+            const [section, setLocal] = createSignal<SettingsSection>(fromMeta());
+            createEffect(on(fromMeta, setLocal, { defer: true }));
+            this.activeSection = section;
+            this.setSection = (s) => {
+                setLocal(s);
+                void block.setMeta({ [sectionKeyOf("settings")]: s });
+            };
         } else {
             const [section, setSection] = createSignal<SettingsSection>(SETTINGS_SECTIONS.default);
             this.activeSection = section;
