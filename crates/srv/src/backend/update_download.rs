@@ -115,7 +115,7 @@ fn set(version: &str, state: &str, received: u64, total: u64, error: Option<Stri
 enum Job {
     /// A new portable folder beside `root`'s.
     Portable(PathBuf),
-    /// A `setup.exe` installer in `updates/<version>/`.
+    /// A `setup.exe` installer (or a macOS `.dmg`) in `updates/<version>/`.
     Installer,
     /// The next AppImage beside this one.
     AppImage(PathBuf),
@@ -136,7 +136,9 @@ pub fn start() -> Result<AppUpdateStatus, String> {
     // install's installer is kept as is; an AppImage's next one goes beside it.
     let job = match update_check::install_kind() {
         InstallKind::WindowsPortable { root } | InstallKind::LinuxPortable { root } => Job::Portable(root),
-        InstallKind::WindowsSetup => Job::Installer,
+        // A macOS app's .dmg is staged like a setup.exe installer; the
+        // launcher mounts it and swaps the app after the quit.
+        InstallKind::WindowsSetup | InstallKind::MacApp { blocked: None, .. } => Job::Installer,
         InstallKind::LinuxAppImage => match std::env::current_exe()
             .ok()
             .and_then(|exe| agentmux_common::runtime_mode::running_appimage(&exe))
