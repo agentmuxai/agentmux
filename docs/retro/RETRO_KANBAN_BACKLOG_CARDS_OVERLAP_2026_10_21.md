@@ -2,7 +2,7 @@
 
 **Status:** retro
 **Trigger:** the operator: "i am noticing abberitions on the kanban. Entries overlapping eachother."
-**Outcome:** root-caused and reproduced outside the app. One CSS rule from #5235 (`min-height: 32px` on `.kanban-group`) lets each Backlog group shrink to 32 px when the Backlog is taller than its column, so a group's cards spill over the next group's. Fixed in #PRNUM: `flex: none` on `.kanban-group`, and every item in a column's list kept from shrinking.
+**Outcome:** root-caused and reproduced outside the app. One CSS rule from #5235 (`min-height: 32px` on `.kanban-group`) lets each Backlog group shrink to 32 px when the Backlog is taller than its column, so a group's cards spill over the next group's. Fixed in #5294: `flex: none` on `.kanban-group`, and every item in a column's list kept from shrinking.
 **Author:** Loap-3@narko
 **Verified against:** `agentmux` `main` @ `a144c6bf2`, the operator's Kanban (Warden ▸ Kanban, 136 tasks in the Backlog), and a standalone page with the same rules rendered in headless Edge.
 
@@ -55,7 +55,7 @@ A standalone page with the same three rules (`.kanban-column__list`, `.kanban-gr
 3. **The rule came in with the drop target.** `min-height: 32px` arrived with the drag-and-drop work in the same PR, to keep empty groups droppable. Its interaction with flex shrinking wasn't considered, and review (muxreview, Codex) read it as a harmless floor.
 4. **It needs real volume.** It only shows once the Backlog is taller than the pane: dozens of tasks, which the board reached through dogfooding (136 now). Wider panes and fewer tasks hide it.
 
-## Fix (#PRNUM)
+## Fix (#5294)
 
 In `kanban.scss`:
 
@@ -81,4 +81,4 @@ Lanes (#5260) aren't affected: inside a lane the list is `overflow: visible` wit
 
 - 2026-10-20: #5235 merges the Kanban section, with `.kanban-group { min-height: 32px }`.
 - 2026-10-20: the section is first checked in a dev build with three tasks.
-- 2026-10-21: the board reaches 136 Backlog tasks in normal use. The operator reports overlapping entries; root-caused, reproduced, this retro written, and fixed in #PRNUM.
+- 2026-10-21: the board reaches 136 Backlog tasks in normal use. The operator reports overlapping entries; root-caused, reproduced, this retro written, and fixed in #5294.
