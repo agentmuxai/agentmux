@@ -577,6 +577,14 @@ done
 echo "==> Verifying signature"
 codesign --verify --deep --strict --verbose=2 "$APP"
 
+# srv must still be the app the login keychain trusts: identifier
+# ai.agentmux.srv, signed by this cert's team. A build that comes out
+# otherwise makes every keychain item ask again after the upgrade, so it stops
+# here, before the DMG and notarization (it lost this once before, #4482).
+echo "==> Verifying srv's signing identity"
+bash "$REPO_ROOT/scripts/verify-srv-identity-darwin.sh" "$APP" "$CERT" \
+    || { echo "❌ srv is not signed as ai.agentmux.srv by the signing team; not packaging." >&2; exit 1; }
+
 echo "==> Creating DMG (icon-view drag-to-install layout)"
 mkdir -p "$OUTDIR"
 rm -f "$DMG"

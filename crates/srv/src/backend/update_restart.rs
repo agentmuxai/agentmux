@@ -333,6 +333,26 @@ mod tests {
         let mut appimage = with_asset.clone();
         appimage.install = "linux-appimage".into();
         assert_eq!(staged(&appimage).unwrap().1, UpgradeTarget::Launcher(installer));
+        // A macOS app restarts through its staged .dmg, with the release's digest.
+        let dmg = dir.path().join("AgentMux_0.59.27_arm64.dmg");
+        std::fs::write(&dmg, b"x").unwrap();
+        let mut mac = download("ready", None);
+        mac.installer = Some(dmg.display().to_string());
+        let mut mac = status(Some(mac));
+        mac.install = "macos-app".into();
+        assert!(staged(&mac).unwrap_err().contains("checksum"));
+        mac.asset = Some(crate::backend::update_check::ReleaseAsset {
+            name: "AgentMux_0.59.27_arm64.dmg".into(),
+            size: 1,
+            url: String::new(),
+            sha256: "CD".repeat(32),
+        });
+        let (d, target) = staged(&mac).unwrap();
+        assert_eq!(target, UpgradeTarget::Installer { installer: dmg.clone(), sha256: "cd".repeat(32) });
+        assert_eq!(
+            agentmux_common::srv_stderr::upgrade_line(&d.version, &target),
+            format!("AGENTMUXSRV-UPGRADE version:0.59.27 sha256:{} installer:{}", "cd".repeat(32), dmg.display())
+        );
         // A download of an older release than the latest doesn't count.
         let mut newer = status(Some(download("ready", Some(&folder))));
         newer.latest = Some("0.59.28".into());

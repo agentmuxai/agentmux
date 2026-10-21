@@ -46,6 +46,7 @@ That bundles a copy into your widget, which works with any AgentMux that speaks 
 | `am.files.pick()`, `am.files.save()` | Files the user picks (`files`). |
 | `am.clipboard.writeText()` | `clipboard:write`. |
 | `am.agents.list()`, `am.agents.send()` | `agents:read`, `agents:send`. |
+| `am.tasks.list()` | The Kanban's tasks: number, title, state, agent, repository, PR, checklist progress (`tasks:read`). |
 | `useVisibility(am, { onActive, onDormant })` | Pause work while the pane is hidden. |
 | `AgentMuxError` | `code`, `name` (`permission_denied`, …), `message`, `data`. |
 

@@ -54,6 +54,12 @@ impl Entry {
         }
     }
 
+    /// A service not checked yet, its first probe due now.
+    fn unchecked(now_ms: i64) -> Self {
+        let probe = Some(ProbeSchedule { due_ms: now_ms, interval_ms: PROBE_FIRST_MS, in_flight: None });
+        Self { state: Reachability::Unknown, probe, ..Self::new(now_ms) }
+    }
+
     fn forget_old_failures(&mut self, now_ms: i64) {
         while self.recent_failures.front().is_some_and(|t| now_ms - t > DEGRADED_WINDOW_MS) {
             self.recent_failures.pop_front();
@@ -124,6 +130,16 @@ impl Tracker {
         Self { services: BTreeMap::new(), internet: (Reachability::Online, now_ms), revision: first_revision, next_ticket: 0 }
     }
 
+    /// Lists `service` as not checked yet, with a probe due now, unless it
+    /// has already reported. Returns the new status when it was added.
+    pub(super) fn seed(&mut self, service: Service, now_ms: i64) -> Option<ConnectivityStatus> {
+        if self.services.contains_key(&service) {
+            return None;
+        }
+        self.services.insert(service, Entry::unchecked(now_ms));
+        self.changed(true, now_ms)
+    }
+
     /// An outcome from a request a subsystem made. Returns the new status
     /// when a state changed; a new error text alone waits for the next one.
     pub(super) fn report(&mut self, service: Service, outcome: Outcome, now_ms: i64) -> Option<ConnectivityStatus> {
@@ -174,10 +190,11 @@ impl Tracker {
 
     /// The internet is `Offline` when two or more services are and none
     /// answers: one unreachable host is that host's problem (a block, a
-    /// captive portal), not the connection's.
+    /// captive portal), not the connection's. One not checked yet says
+    /// nothing either way.
     fn derive_internet(&self) -> Reachability {
         let offline = self.services.values().filter(|e| e.state == Reachability::Offline).count();
-        let reachable = self.services.values().any(|e| e.state != Reachability::Offline);
+        let reachable = self.services.values().any(|e| matches!(e.state, Reachability::Online | Reachability::Degraded));
         if offline >= 2 && !reachable {
             Reachability::Offline
         } else {

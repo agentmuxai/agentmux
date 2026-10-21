@@ -421,6 +421,131 @@ pub fn appimage_channel_file(appimage: &Path) -> PathBuf {
     appimage.with_file_name(format!("{name}.{RECORDED_CHANNEL_FILE}"))
 }
 
+/// The `.app` bundle the binary at `path` (or its `Contents/MacOS` folder)
+/// belongs to, by the bundle layout rather than by name: the innermost
+/// `*.app` whose `Contents/MacOS` holds `path`, and, for a helper app nested in
+/// another app's `Contents/Helpers` or `Contents/Frameworks` (srv, the CEF
+/// helpers), the app above it. A folder that merely ends in `.app` around the
+/// install is never taken for it.
+pub fn app_bundle_of(path: &Path) -> Option<PathBuf> {
+    let is_app = |p: &Path| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("app"));
+    let mut bundle = path.ancestors().find(|a| is_app(a) && path.starts_with(a.join("Contents").join("MacOS")))?;
+    let nested_in = bundle.parent().filter(|p| p.file_name().is_some_and(|n| n == "Helpers" || n == "Frameworks"));
+    if let Some(outer) = nested_in
+        .and_then(Path::parent)
+        .filter(|c| c.file_name().is_some_and(|n| n == "Contents"))
+        .and_then(Path::parent)
+        .filter(|o| is_app(o))
+    {
+        bundle = outer;
+    }
+    Some(bundle.to_path_buf())
+}
+
+/// Why an account other than this user, root or the `admin` group (whose
+/// members can become root anyway) could change the entries of the folder
+/// that holds an app, or `None` when none can. An in-place upgrade creates,
+/// checks and renames entries there, so anyone else who can rename them
+/// could swap a checked bundle for another. macOS also checks every folder
+/// above it, since renaming one of those moves the whole path.
+pub fn folder_others_can_change(dir: &Path) -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        dir.ancestors().find_map(one_folder_others_can_change)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        one_folder_others_can_change(dir)
+    }
+}
+
+#[cfg(unix)]
+fn one_folder_others_can_change(dir: &Path) -> Option<String> {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(meta) = std::fs::metadata(dir) else {
+        return Some(format!("{} can't be read", dir.display()));
+    };
+    // SAFETY: geteuid has no preconditions.
+    let me = unsafe { libc::geteuid() };
+    let mode = meta.mode();
+    if meta.uid() != me && meta.uid() != 0 {
+        return Some(format!("{} belongs to another account", dir.display()));
+    }
+    if mode & 0o002 != 0 {
+        return Some(format!("every account can change {}", dir.display()));
+    }
+    if mode & 0o020 != 0 && Some(meta.gid()) != admin_gid() {
+        return Some(format!("the accounts in its group can change {}", dir.display()));
+    }
+    acl_allows_changes(dir).then(|| format!("an access list lets other accounts change {}", dir.display()))
+}
+
+#[cfg(not(unix))]
+fn one_folder_others_can_change(_dir: &Path) -> Option<String> {
+    None
+}
+
+/// The `admin` group's id, if there is one.
+#[cfg(unix)]
+fn admin_gid() -> Option<u32> {
+    // SAFETY: a NUL-terminated name; the entry is read before any other call.
+    let group = unsafe { libc::getgrnam(c"admin".as_ptr()) };
+    (!group.is_null()).then(|| unsafe { (*group).gr_gid })
+}
+
+/// Whether `dir` has an extended ACL with an `allow` entry that lets someone
+/// add, remove or rename its entries (macOS: `chmod +a`).
+#[cfg(target_os = "macos")]
+fn acl_allows_changes(dir: &Path) -> bool {
+    use std::os::raw::{c_char, c_int, c_void};
+    use std::os::unix::ffi::OsStrExt;
+    extern "C" {
+        fn acl_get_file(path: *const c_char, ty: c_int) -> *mut c_void;
+        fn acl_to_text(acl: *mut c_void, len: *mut isize) -> *mut c_char;
+        fn acl_free(obj: *mut c_void) -> c_int;
+    }
+    const ACL_TYPE_EXTENDED: c_int = 0x0000_0100;
+    let Ok(path) = std::ffi::CString::new(dir.as_os_str().as_bytes()) else { return true };
+    // SAFETY: a NUL-terminated path; every object acl_* returns is freed once.
+    unsafe {
+        let acl = acl_get_file(path.as_ptr(), ACL_TYPE_EXTENDED);
+        if acl.is_null() {
+            return false; // no ACL
+        }
+        let text = acl_to_text(acl, std::ptr::null_mut());
+        let changes = !text.is_null() && acl_text_allows_changes(&std::ffi::CStr::from_ptr(text).to_string_lossy());
+        if !text.is_null() {
+            acl_free(text.cast());
+        }
+        acl_free(acl);
+        changes
+    }
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn acl_allows_changes(_dir: &Path) -> bool {
+    false
+}
+
+/// [`acl_allows_changes`] on `acl_to_text`'s text: one entry a line,
+/// `<who>:…:allow|deny:<perm>,<perm>`.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn acl_text_allows_changes(text: &str) -> bool {
+    const CHANGES: &[&str] = &["add_file", "add_subdirectory", "delete_child", "write", "delete", "writesecurity", "chown"];
+    text.lines().any(|line| {
+        let mut parts = line.split(':');
+        parts.any(|p| p == "allow") && line.rsplit(':').next().is_some_and(|perms| perms.split(',').any(|p| CHANGES.contains(&p.trim())))
+    })
+}
+
+/// Where a macOS upgrade records the data channel of an `.app`: beside it,
+/// hidden, as `.<name>.app.agentmux-channel`, since writing inside the bundle
+/// would break its code signature.
+pub fn mac_app_channel_file(app: &Path) -> PathBuf {
+    let name = app.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    app.with_file_name(format!(".{name}.{RECORDED_CHANNEL_FILE}"))
+}
+
 /// The AppImage the binary at `exe` runs from: `$APPIMAGE`, when `exe` is
 /// inside that AppImage's mount (`$APPDIR`) or the folder AppRun extracted it
 /// to (`$AGENTMUX_EXTRACTED_RUN`). `APPIMAGE` alone isn't enough: any other
@@ -437,13 +562,20 @@ pub fn inside_appimage(exe: &Path, roots: &[std::ffi::OsString]) -> bool {
 }
 
 /// The data channel the running binary's install records: beside the AppImage
-/// it runs from, else in its portable folder ([`recorded_channel_in`]).
+/// it runs from, beside its `.app` on macOS, else in its portable folder
+/// ([`recorded_channel_in`]).
 pub fn recorded_channel() -> Option<String> {
     let exe = std::env::current_exe().ok()?;
-    match running_appimage(&exe) {
-        Some(appimage) => read_channel_file(&appimage_channel_file(&appimage)),
-        None => recorded_channel_in(exe.parent()?),
+    if let Some(appimage) = running_appimage(&exe) {
+        return read_channel_file(&appimage_channel_file(&appimage));
     }
+    // macOS: beside the `.app` an upgrade replaced.
+    if cfg!(target_os = "macos") {
+        if let Some(channel) = app_bundle_of(&exe).and_then(|app| read_channel_file(&mac_app_channel_file(&app))) {
+            return Some(channel);
+        }
+    }
+    recorded_channel_in(exe.parent()?)
 }
 
 /// True when `exe_dir` is one of our known dev-build output dirs.
@@ -1017,5 +1149,52 @@ mod tests {
         assert!(inside_appimage(inside, &[extracted.clone()]));
         assert!(!inside_appimage(elsewhere, &[extracted]), "another build that only inherited APPIMAGE");
         assert!(!inside_appimage(inside, &[std::ffi::OsString::new()]));
+    }
+
+    #[test]
+    fn a_macos_app_records_its_channel_beside_it() {
+        let app = Path::new("/Applications/AgentMux.app");
+        assert_eq!(mac_app_channel_file(app), Path::new("/Applications/.AgentMux.app.agentmux-channel"));
+        let srv = Path::new("/Applications/AgentMux.app/Contents/Helpers/AgentMux Server.app/Contents/MacOS/srv");
+        assert_eq!(app_bundle_of(srv).as_deref(), Some(app));
+        assert_eq!(app_bundle_of(Path::new("/Applications/AgentMux.app/Contents/MacOS")).as_deref(), Some(app));
+        let gpu = Path::new("/Applications/AgentMux.app/Contents/Frameworks/AgentMux Helper (GPU).app/Contents/MacOS/AgentMux Helper (GPU)");
+        assert_eq!(app_bundle_of(gpu).as_deref(), Some(app));
+        // A folder that only ends in .app around the install is not the app.
+        let archived = Path::new("/Users/u/Archive.app/AgentMux.app/Contents/MacOS/agentmux-launcher");
+        assert_eq!(app_bundle_of(archived).as_deref(), Some(Path::new("/Users/u/Archive.app/AgentMux.app")));
+        let in_resources = Path::new("/Users/u/Foo.app/Resources/AgentMux.app/Contents/Helpers/AgentMux Server.app/Contents/MacOS/srv");
+        assert_eq!(app_bundle_of(in_resources).as_deref(), Some(Path::new("/Users/u/Foo.app/Resources/AgentMux.app")));
+        assert_eq!(app_bundle_of(Path::new("/usr/bin/agentmux-srv")), None);
+        assert_eq!(app_bundle_of(Path::new("/Users/u/Foo.app/srv")), None, "not in a bundle's Contents/MacOS");
+    }
+
+    #[test]
+    fn an_access_list_that_lets_others_change_a_folder_is_seen() {
+        assert!(acl_text_allows_changes("!#acl 1\ngroup:ABC:staff:20:allow:add_file,search\n"));
+        assert!(acl_text_allows_changes("user:XYZ:bob:501:allow:list,delete_child\n"));
+        // The usual /Applications-style entry only denies.
+        assert!(!acl_text_allows_changes("!#acl 1\ngroup:ABCDEFAB-CDEF-ABCD-EFAB-CDEF0000000C:everyone:12:deny:delete\n"));
+        assert!(!acl_text_allows_changes("group:ABC:staff:20:allow:list,search,readattr\n"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_only_this_user_can_change_passes_and_a_shared_one_does_not() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("Apps");
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(one_folder_others_can_change(&folder), None);
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o1777)).unwrap();
+        assert!(one_folder_others_can_change(&folder).unwrap().contains("every account"));
+        // Group-writable passes only when the folder's group is admin.
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o775)).unwrap();
+        let group_ok = {
+            use std::os::unix::fs::MetadataExt;
+            Some(std::fs::metadata(&folder).unwrap().gid()) == admin_gid()
+        };
+        assert_eq!(one_folder_others_can_change(&folder).is_none(), group_ok);
     }
 }

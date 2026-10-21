@@ -1,0 +1,381 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! 1Password's `.1pux` export: a zip whose `export.data` is JSON of accounts,
+//! vaults and items (spec §8.4). It holds every secret unencrypted.
+//!
+//! The category of an item says what it is (`001` login, `002` card, …) but the
+//! fields inside vary, so cards and bank accounts are found by what a field
+//! holds or its id, and anything that isn't a kind the Vault has is kept whole,
+//! field by field, in a sealed note rather than dropped.
+
+use std::io::Read;
+
+use std::collections::HashSet;
+
+use serde_json::Value;
+
+use super::{Imported, Incoming, ReadError, Source, MAX_ITEMS};
+
+/// The uncompressed `export.data` may be at most this big: the zip is read
+/// through this cap, so a crafted archive can't expand without limit (§8.7).
+const MAX_DATA_BYTES: u64 = 128 * 1024 * 1024;
+/// Per item: how many of its tags and addresses are kept.
+const MOST_TAGS: usize = 40;
+const MOST_URLS: usize = 50;
+/// A `.1pux` holds a few files and its attachments; a zip of more is not one.
+const MAX_ZIP_ENTRIES: usize = 100_000;
+
+pub fn looks_like(bytes: &[u8]) -> bool {
+    zip::ZipArchive::new(std::io::Cursor::new(bytes)).is_ok_and(|z| z.file_names().any(|n| n == "export.data"))
+}
+
+pub fn read(bytes: &[u8]) -> Result<Imported, ReadError> {
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|_| ReadError::from("this zip file is damaged or isn't one"))?;
+    if archive.len() > MAX_ZIP_ENTRIES {
+        return Err("this zip has more files than a 1Password export does".into());
+    }
+    let mut data = Vec::new();
+    {
+        let file = archive.by_name("export.data").map_err(|_| ReadError::from("this zip isn't a 1Password export: it has no export.data"))?;
+        file.take(MAX_DATA_BYTES + 1).read_to_end(&mut data).map_err(|_| ReadError::from("couldn't read export.data from the zip"))?;
+    }
+    if data.len() as u64 > MAX_DATA_BYTES {
+        return Err("this export's data is larger than the Vault imports".into());
+    }
+    let root: Value = serde_json::from_slice(&data).map_err(|_| ReadError::from("export.data isn't the JSON a 1Password export holds"))?;
+    drop(data);
+    let mut entries = Vec::new();
+    let mut skipped = Vec::new();
+    let mut count = 0usize;
+    for account in root.get("accounts").and_then(Value::as_array).into_iter().flatten() {
+        for vault in account.get("vaults").and_then(Value::as_array).into_iter().flatten() {
+            let tag = vault.pointer("/attrs/name").and_then(Value::as_str).unwrap_or("");
+            for item in vault.get("items").and_then(Value::as_array).into_iter().flatten() {
+                count += 1;
+                if count > MAX_ITEMS {
+                    return Err(format!("this export has more than {MAX_ITEMS} items, more than the Vault imports").into());
+                }
+                item_into(item, tag, &mut entries, &mut skipped);
+            }
+        }
+    }
+    if count == 0 {
+        return Err("this 1Password export has no items".into());
+    }
+    Ok(Imported { source: Source::OnePassword, entries, skipped, plaintext: true })
+}
+
+/// One field of an item, as text, with what it is called.
+struct Field {
+    id: String,
+    title: String,
+    value: String,
+    /// What the value is: `string`, `concealed`, `totp`, `creditCardNumber`, `monthYear`, …
+    kind: String,
+}
+
+fn text_of(kind: &str, v: &Value) -> Option<String> {
+    let s = match v {
+        Value::String(s) => s.clone(),
+        Value::Number(n) if kind == "monthYear" => {
+            // 203012: December 2030.
+            let n = n.as_i64()?;
+            format!("{:02}/{}", n % 100, n / 100)
+        }
+        Value::Number(n) => n.to_string(),
+        Value::Object(_) | Value::Array(_) => {
+            // A structured value (an address, an SSH key with its metadata): every text in it, with
+            // its name, however deeply it is nested. A single text is just that text.
+            let mut leaves: Vec<(String, String)> = Vec::new();
+            collect_leaves(v, "", 0, &mut leaves);
+            match leaves.len() {
+                0 => return None,
+                1 => leaves.remove(0).1,
+                _ => leaves.into_iter().map(|(k, t)| format!("{k}: {t}")).collect::<Vec<_>>().join("\n"),
+            }
+        }
+        _ => return None,
+    };
+    let s = s.trim().to_string();
+    (!s.is_empty()).then_some(s)
+}
+
+/// The most texts one structured value yields, and how deep it is read: a crafted value can't make this unbounded.
+const MAX_LEAVES: usize = 200;
+const MAX_DEPTH: usize = 8;
+
+fn collect_leaves(v: &Value, name: &str, depth: usize, out: &mut Vec<(String, String)>) {
+    if depth > MAX_DEPTH || out.len() >= MAX_LEAVES {
+        return;
+    }
+    match v {
+        Value::String(s) if !s.trim().is_empty() => out.push((name.to_string(), s.clone())),
+        Value::Number(n) => out.push((name.to_string(), n.to_string())),
+        Value::Object(o) => {
+            for (k, x) in o {
+                let path = if name.is_empty() { k.clone() } else { format!("{name}.{k}") };
+                collect_leaves(x, &path, depth + 1, out);
+            }
+        }
+        Value::Array(a) => {
+            for x in a {
+                collect_leaves(x, name, depth + 1, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn fields_of(details: &Value) -> Vec<Field> {
+    let mut out = Vec::new();
+    for section in details.get("sections").and_then(Value::as_array).into_iter().flatten() {
+        for f in section.get("fields").and_then(Value::as_array).into_iter().flatten() {
+            let Some(value) = f.get("value").and_then(Value::as_object) else { continue };
+            // A value is a one-key object: {"concealed": "…"}, {"totp": "otpauth://…"}.
+            let Some((kind, inner)) = value.iter().next() else { continue };
+            let Some(text) = text_of(kind, inner) else { continue };
+            out.push(Field {
+                id: f.get("id").and_then(Value::as_str).unwrap_or("").to_string(),
+                title: f.get("title").and_then(Value::as_str).unwrap_or("").to_string(),
+                value: text,
+                kind: kind.clone(),
+            });
+        }
+    }
+    out
+}
+
+/// Whether the item carries a file (a document, or a file field): the Vault keeps
+/// text, not files, so it is listed as skipped.
+fn has_attachment(details: &Value) -> bool {
+    details.get("documentAttributes").is_some_and(|d| !d.is_null())
+        || details
+            .get("sections")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .flat_map(|s| s.get("fields").and_then(Value::as_array).into_iter().flatten())
+            .any(|f| f.pointer("/value/file").is_some())
+}
+
+fn find<'a>(fields: &'a [Field], ids: &[&str]) -> Option<&'a Field> {
+    fields.iter().find(|f| ids.iter().any(|i| f.id.eq_ignore_ascii_case(i)))
+}
+
+/// The item's one secret, by its field id. Never guessed from another field: a
+/// passport with only an owner's name would otherwise get that name as its number.
+fn main_secret(fields: &[Field], ids: &[&str]) -> Option<String> {
+    find(fields, ids).map(|f| f.value.clone())
+}
+
+fn item_into(item: &Value, tag: &str, entries: &mut Vec<Incoming>, skipped: &mut Vec<(String, String)>) {
+    let overview = item.get("overview").cloned().unwrap_or(Value::Null);
+    let details = item.get("details").cloned().unwrap_or(Value::Null);
+    let title = overview.get("title").and_then(Value::as_str).map(str::trim).filter(|t| !t.is_empty()).unwrap_or("(unnamed)").to_string();
+    if item.get("trashed").and_then(Value::as_bool) == Some(true) {
+        skipped.push((title, "it is in 1Password's trash".to_string()));
+        return;
+    }
+    let fields = fields_of(&details);
+    let notes = details.get("notesPlain").and_then(Value::as_str).map(str::trim).unwrap_or("").to_string();
+    let site = overview
+        .get("url")
+        .and_then(Value::as_str)
+        .filter(|u| !u.is_empty())
+        .or_else(|| overview.pointer("/urls/0/url").and_then(Value::as_str))
+        .unwrap_or("")
+        .to_string();
+    let mut made: Vec<Incoming> = Vec::new();
+    // Fields the item's own kind doesn't take, kept whole in the sealed note.
+    let mut used: HashSet<usize> = HashSet::new();
+    let mark = |used: &mut HashSet<usize>, f: &Field| {
+        if let Some(i) = fields.iter().position(|x| std::ptr::eq(x, f)) {
+            used.insert(i);
+        }
+    };
+    match item.get("categoryUuid").and_then(Value::as_str).unwrap_or("") {
+        "001" | "005" => {
+            let login = |designation: &str| -> Option<String> {
+                details
+                    .get("loginFields")
+                    .and_then(Value::as_array)?
+                    .iter()
+                    .find(|f| f.get("designation").and_then(Value::as_str) == Some(designation))
+                    .and_then(|f| f.get("value").and_then(Value::as_str))
+                    // A password is kept exactly as exported, spaces and all.
+                    .map(|v| if designation == "password" { v } else { v.trim() })
+                    .filter(|v| !v.is_empty())
+                    .map(str::to_string)
+            };
+            // An item of the Password category keeps its password in `details.password`.
+            let password = login("password").or_else(|| details.get("password").and_then(Value::as_str).filter(|p| !p.is_empty()).map(str::to_string));
+            match password {
+                Some(pw) => {
+                    let mut e = Incoming::new("login", &title).part("password", &pw).field("site", &site).field("username", &login("username").unwrap_or_default());
+                    if let Some(t) = fields.iter().find(|f| f.kind == "totp") {
+                        e = e.part("totp", &t.value);
+                        mark(&mut used, t);
+                    }
+                    made.push(e);
+                }
+                // No password: the username, addresses and anything else go to the note below.
+                None => {}
+            }
+        }
+        "002" => match fields.iter().find(|f| f.kind == "creditCardNumber").or_else(|| find(&fields, &["ccnum"])) {
+            Some(number) => {
+                mark(&mut used, number);
+                let mut e = Incoming::new("card", &title).part("number", &number.value);
+                for (part, ids, kind) in [("expiry", &["expiry", "validUntil"][..], "monthYear"), ("cvc", &["cvv"][..], ""), ("name", &["cardholder"][..], "")] {
+                    let hit = find(&fields, ids).or_else(|| if kind.is_empty() { None } else { fields.iter().find(|f| f.kind == kind) });
+                    if let Some(f) = hit {
+                        e = e.part(part, &f.value);
+                        mark(&mut used, f);
+                    }
+                }
+                made.push(e);
+            }
+            None => {}
+        },
+        "101" => {
+            if let Some(account) = find(&fields, &["accountNo", "accountNumber", "iban"]) {
+                mark(&mut used, account);
+                let mut e = Incoming::new("bank-account", &title).part("account", &account.value);
+                if let Some(r) = find(&fields, &["routingNo", "routing"]) {
+                    e = e.part("routing", &r.value);
+                    mark(&mut used, r);
+                }
+                if let Some(b) = find(&fields, &["bankName"]) {
+                    e = e.field("bank", &b.value);
+                    mark(&mut used, b);
+                }
+                made.push(e);
+            }
+        }
+        kind @ ("108" | "106" | "103") => {
+            let (name, ids): (&str, &[&str]) = match kind {
+                "108" => ("ssn", &["number", "ssn"]),
+                "106" => ("passport", &["number", "passportNumber"]),
+                _ => ("drivers-licence", &["number", "licenseNumber"]),
+            };
+            if let Some(v) = main_secret(&fields, ids) {
+                if let Some(f) = fields.iter().find(|f| f.value == v) {
+                    mark(&mut used, f);
+                }
+                let mut e = Incoming::new(name, &title).part("value", &v);
+                if let Some(o) = find(&fields, &["fullname", "name", "owner"]) {
+                    e = e.field("owner", &o.value);
+                    mark(&mut used, o);
+                }
+                made.push(e);
+            }
+        }
+        "112" => {
+            if let Some(v) = main_secret(&fields, &["credential"]) {
+                if let Some(f) = fields.iter().find(|f| f.value == v) {
+                    mark(&mut used, f);
+                }
+                made.push(Incoming::new("api-key", &title).part("value", &v).field("service", &site));
+            }
+        }
+        _ => {}
+    }
+    // What is left (a note's text, other fields, an item of a category the Vault has no
+    // kind for) is kept whole, so nothing in the item is lost without being listed.
+    let mut rest = String::new();
+    let mut line = |rest: &mut String, text: String| {
+        if !rest.is_empty() {
+            rest.push('\n');
+        }
+        rest.push_str(&text);
+    };
+    if !notes.is_empty() {
+        line(&mut rest, notes.clone());
+    }
+    // The sign-in fields and the addresses, unless a login or an API key took them.
+    let login_made = made.iter().any(|m| m.kind == "login");
+    for f in details.get("loginFields").and_then(Value::as_array).into_iter().flatten() {
+        let value = f.get("value").and_then(Value::as_str).map(str::trim).unwrap_or("");
+        let designation = f.get("designation").and_then(Value::as_str).unwrap_or("");
+        if value.is_empty() || (login_made && (designation == "username" || designation == "password")) {
+            continue;
+        }
+        let name = [f.get("name"), f.get("id")].into_iter().flatten().filter_map(Value::as_str).find(|n| !n.is_empty()).unwrap_or(designation);
+        line(&mut rest, format!("{name}: {value}"));
+    }
+    let site_taken = made.iter().any(|m| m.kind == "login" || m.kind == "api-key");
+    // Distinct addresses in order, at most MOST_URLS: a crafted item can't make this quadratic.
+    let mut seen: HashSet<&str> = HashSet::new();
+    let mut urls: Vec<&str> = Vec::new();
+    let extra = overview.get("urls").and_then(Value::as_array).into_iter().flatten().filter_map(|u| u.get("url").and_then(Value::as_str));
+    let mut cut = false;
+    for u in std::iter::once(site.as_str()).chain(extra) {
+        if u.is_empty() || !seen.insert(u) {
+            continue;
+        }
+        if urls.len() >= MOST_URLS {
+            cut = true;
+            break;
+        }
+        urls.push(u);
+    }
+    for (i, u) in urls.iter().enumerate() {
+        // The first is the login's or API key's own `site`, when one took it.
+        if i == 0 && site_taken && *u == site {
+            continue;
+        }
+        line(&mut rest, format!("url: {u}"));
+    }
+    if cut {
+        skipped.push((format!("{title} (addresses)"), format!("it has more than {MOST_URLS} addresses: the rest weren't kept")));
+    }
+    for (i, f) in fields.iter().enumerate() {
+        if used.contains(&i) {
+            continue;
+        }
+        if !rest.is_empty() {
+            rest.push('\n');
+        }
+        let name = if f.title.is_empty() { &f.id } else { &f.title };
+        rest.push_str(&format!("{name}: {}", f.value));
+    }
+    if !rest.is_empty() {
+        let name = if made.is_empty() { title.clone() } else { format!("{title} (notes)") };
+        made.push(Incoming::new("note", &name).part("text", &rest));
+    }
+    if has_attachment(&details) {
+        skipped.push((format!("{title} (attached file)"), "the Vault keeps text, not files: the file isn't imported".to_string()));
+        if made.is_empty() {
+            return;
+        }
+    }
+    if made.is_empty() {
+        let why = if matches!(item.get("categoryUuid").and_then(Value::as_str), Some("001" | "005")) { "it has no password" } else { "it holds nothing the Vault can keep" };
+        skipped.push((title, why.to_string()));
+        return;
+    }
+    // The vault's name, and the item's own tags: distinct, and at most MOST_TAGS (a crafted item
+    // can't make adding them quadratic, and an entry holds 50).
+    let mut seen_tags: HashSet<&str> = HashSet::new();
+    let mut own: Vec<&str> = Vec::new();
+    let mut over = false;
+    for t in overview.get("tags").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::trim).filter(|t| !t.is_empty()) {
+        if !seen_tags.insert(t) {
+            continue;
+        }
+        if own.len() >= MOST_TAGS {
+            over = true;
+            break;
+        }
+        own.push(t);
+    }
+    if over {
+        skipped.push((format!("{title} (tags)"), format!("it has more than {MOST_TAGS} tags: the rest weren't kept")));
+    }
+    entries.extend(made.into_iter().map(|m| own.iter().fold(m.tag(tag), |m, t| m.tag(t))));
+}
+
+#[cfg(test)]
+#[path = "onepux_tests.rs"]
+mod tests;

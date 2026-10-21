@@ -33,7 +33,7 @@ export const DEGRADED_QUIET_MS = 30_000;
 
 const INTERNET = "internet";
 const MUXBUS = "muxbus";
-const STATES = new Set(["online", "degraded", "offline"]);
+const STATES = new Set(["online", "degraded", "offline", "unknown"]);
 
 const [connectivity, setConnectivity] = createSignal<ConnectivityStatus | null>(null);
 

@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! "Upgrade & restart" (`docs/specs/SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md`
-//! §4.1, phases 3b and 3d): restart a Windows portable into the newer
-//! release srv downloaded, verified and unpacked next to it, or run the newer
-//! release's installer on a `setup.exe` install (`backend/update_download.rs`).
+//! §4.1, phases 3b, 3c and 3d): restart a Windows portable into the newer
+//! release srv downloaded, verified and unpacked next to it, run the newer
+//! release's installer on a `setup.exe` install, or replace a macOS
+//! `AgentMux.app` from the release's `.dmg` (`upgrade_macos`;
+//! `backend/update_download.rs`).
 //!
 //! srv asks with an `AGENTMUXSRV-UPGRADE` line on its stderr
 //! (`agentmux_common::srv_stderr`); the reader in `srv_spawner` hands it here.
@@ -100,6 +102,9 @@ pub enum Staged {
     /// from the previous install, which the folder alone can't tell.
     /// `sha256` is the release's digest, checked again as it runs.
     Installer { installer: PathBuf, sha256: String, own_dir: PathBuf },
+    /// A macOS `.app`: replace it from the release's `.dmg` once this
+    /// launcher has exited (`upgrade_macos`).
+    MacDmg(crate::upgrade_macos::MacUpgrade),
 }
 
 impl std::fmt::Display for Staged {
@@ -108,17 +113,18 @@ impl std::fmt::Display for Staged {
         match self {
             Staged::Launcher(launcher) => write!(f, "{}", launcher.display()),
             Staged::Installer { installer, .. } => write!(f, "{}", installer.display()),
+            Staged::MacDmg(up) => write!(f, "{}", up.dmg.display()),
         }
     }
 }
 
 /// 64 lowercase hex digits: all that is ever put in the script.
-fn is_sha256_hex(s: &str) -> bool {
+pub(crate) fn is_sha256_hex(s: &str) -> bool {
     s.len() == 64 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 /// The file's SHA-256 in lowercase hex, or `None` if it can't be read.
-fn file_sha256(path: &Path) -> Option<String> {
+pub(crate) fn file_sha256(path: &Path) -> Option<String> {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     std::io::copy(&mut std::fs::File::open(path).ok()?, &mut hasher).ok()?;
@@ -136,6 +142,13 @@ pub fn staged(req: &UpgradeRequest, own_dir: &Path, data_dir: &Path, channel_dir
         _ => return Err(format!("{} isn't newer than {own_version}", req.version)),
     }
     match &req.target {
+        // macOS: the release's `.dmg`, which replaces this `.app` (`upgrade_macos`).
+        UpgradeTarget::Installer { installer, sha256 } if cfg!(target_os = "macos") => {
+            crate::upgrade_macos::check_dmg(installer, sha256, &req.version, own_dir, data_dir, channel_dir).map(Staged::MacDmg)
+        }
+        UpgradeTarget::Launcher(launcher) if cfg!(target_os = "macos") => {
+            Err(format!("{} isn't how a macOS install upgrades (it takes the release's .dmg)", launcher.display()))
+        }
         // Linux: a portable's `agentmux.sh`, or an AppImage (`upgrade_linux`).
         UpgradeTarget::Launcher(launcher) if !cfg!(windows) => {
             let own_appimage = std::env::current_exe()
@@ -298,11 +311,18 @@ fn dismiss(thread: u32) {
     }
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+#[cfg(target_os = "macos")]
+fn dismiss(thread: u32) {
+    if thread != 0 {
+        crate::upgrade_macos::dismiss();
+    }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
 fn dismiss(_thread: u32) {}
 
 /// The question for a restart into the new version at `from`.
-#[cfg_attr(not(any(target_os = "windows", target_os = "linux")), allow(dead_code))]
+#[cfg_attr(not(any(target_os = "windows", target_os = "linux", target_os = "macos")), allow(dead_code))]
 fn restart_question(version: &str, from: &Path, stopping: &[String]) -> String {
     format!(
         "Restart AgentMux to upgrade to {version}?\n\n\
@@ -364,6 +384,7 @@ fn confirm(version: &str, staged: &Staged, stopping: &[String]) -> bool {
              and AgentMux opens again.\n\nYour tabs come back and agents resume their conversations.{}",
             stopping_paragraph(stopping)
         ),
+        Staged::MacDmg(up) => crate::upgrade_macos::question(up, &stopping_paragraph(stopping)),
     };
     let wide = |s: &str| std::ffi::OsStr::new(s).encode_wide().chain(Some(0)).collect::<Vec<u16>>();
     let (title, body) = (wide(DIALOG_TITLE), wide(&body));
@@ -385,13 +406,23 @@ fn confirm(version: &str, staged: &Staged, stopping: &[String]) -> bool {
     let shown = match staged {
         Staged::Launcher(p) if p.file_name().is_some_and(|n| n == "agentmux.sh") => p.parent().unwrap_or(p),
         Staged::Launcher(p) | Staged::Installer { installer: p, .. } => p.as_path(),
+        Staged::MacDmg(up) => up.dmg.as_path(),
     };
     crate::upgrade_linux::confirm(DIALOG_TITLE, &restart_question(version, shown, stopping))
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+/// macOS: a native dialog through `osascript` (`upgrade_macos::confirm`).
+#[cfg(target_os = "macos")]
+fn confirm(version: &str, staged: &Staged, stopping: &[String]) -> bool {
+    let body = match staged {
+        Staged::MacDmg(up) => crate::upgrade_macos::question(up, &stopping_paragraph(stopping)),
+        Staged::Launcher(p) | Staged::Installer { installer: p, .. } => restart_question(version, p, stopping),
+    };
+    crate::upgrade_macos::confirm(DIALOG_TITLE, &body)
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
 fn confirm(_version: &str, _staged: &Staged, _stopping: &[String]) -> bool {
-    // macOS restarts itself in phase 3c.
     false
 }
 
@@ -473,6 +504,8 @@ pub fn relaunch(staged: &Staged) -> std::io::Result<()> {
             }
             c
         }
+        // The swap runs after this launcher exits; it opens the new app itself.
+        Staged::MacDmg(up) => crate::upgrade_macos::apply_command(up, std::process::id()),
         Staged::Installer { installer, sha256, own_dir } => {
             let mut c = std::process::Command::new(powershell_exe());
             c.args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand"])
@@ -510,6 +543,7 @@ pub fn relaunch(staged: &Staged) -> std::io::Result<()> {
 mod tests {
     use super::*;
 
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     fn portable(dir: &Path, version: &str) -> PathBuf {
         std::fs::create_dir_all(dir.join("runtime")).unwrap();
         std::fs::write(dir.join("runtime/agentmux-portable.marker"), b"").unwrap();
@@ -526,6 +560,7 @@ mod tests {
     /// SHA-256 of the empty file, which the tests' installers are.
     const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     fn setup_req(version: &str, installer: &Path) -> UpgradeRequest {
         let target = UpgradeTarget::Installer { installer: installer.to_path_buf(), sha256: EMPTY_SHA256.into() };
         UpgradeRequest { version: version.into(), target }
@@ -557,6 +592,8 @@ mod tests {
         assert!(staged(&req("0.59.27", &new), &installed, &data, &data, "0.59.26").is_err());
     }
 
+    // On macOS an installer is the release's .dmg (upgrade_macos's tests).
+    #[cfg(not(target_os = "macos"))]
     #[test]
     fn only_that_versions_installer_in_this_versions_updates_runs_on_a_setup_install() {
         let root = tempfile::tempdir().unwrap();

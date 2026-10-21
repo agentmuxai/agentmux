@@ -686,6 +686,13 @@ jobs:
       - name: macOS CEF framework check self-test
         run: bash scripts/verify-cef-framework-darwin.test.sh
 
+      # package-macos.sh refuses to package a build whose srv isn't signed as
+      # ai.agentmux.srv by the signing team: the login keychain trusts srv by
+      # that requirement, and a different one makes every keychain item ask
+      # again after an upgrade. Fake codesign; runs on Linux.
+      - name: macOS srv signing identity check self-test
+        run: bash scripts/verify-srv-identity-darwin.test.sh
+
       # Hash files from stdin, never by name: given a path containing `\` (every
       # Windows path), coreutils prefixes the hash with `\` and a pin check
       # refuses the right file -- the guard above did, for the correct r2 runtime.

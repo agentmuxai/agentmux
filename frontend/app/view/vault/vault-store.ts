@@ -223,4 +223,12 @@ export const updateEntry = (change: VaultEntryChange) => call<unknown>("update",
 export const deleteEntry = (id: string) => call<unknown>("delete", { id });
 export const declineRequest = (requestId: string) => call<unknown>("decline_request", { request_id: requestId });
 export const loadActivity = (limit = 200) => call<{ activity: VaultActivity[] }>("activity", { limit }).then((r) => r.activity);
+/** An entry with standing permissions, from a read that needs no key (Warden's view). */
+export interface GrantedEntry {
+    id: string;
+    label: string;
+    kind: string;
+    grants: string[];
+}
+export const loadGrants = () => call<{ granted: GrantedEntry[] }>("grants").then((r) => r.granted);
 export const loadKept = () => call<{ kept: KeptSecret[] }>("kept").then((r) => r.kept);

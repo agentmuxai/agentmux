@@ -273,4 +273,42 @@ mod tests {
         assert_eq!(run_shim(false, false, &["test"]).unwrap(), "REAL test", "no lock script: cargo still runs");
         assert_eq!(run_shim(true, true, &["test"]).unwrap(), "REAL test", "AGENTMUX_BUILD_SLOT_OFF skips the slot");
     }
+
+    /// A wait started by a native program (this test binary; on Windows also `cmd.exe` and
+    /// `task.exe`, which is how the `cargo` shim usually reaches the script) is not an orphan.
+    /// Git Bash reports pid 1 as the parent of such a wait; the script used to read that as
+    /// "the process that started this wait is gone" and leave the queue with exit 129, so a
+    /// `cargo build` that had to wait for the slot failed instead of waiting.
+    #[test]
+    fn a_wait_started_by_a_native_parent_waits_instead_of_leaving() {
+        let Some(bash) = bash() else { return };
+        let h = home();
+        let script = h.path().join("build-slot.sh");
+        std::fs::write(&script, lf(SCRIPT)).unwrap();
+        // A slot held by someone else, with a heartbeat from just now.
+        let root = h.path().join("slots");
+        let slot = root.join("slot");
+        std::fs::create_dir_all(&slot).unwrap();
+        std::fs::write(slot.join("owner"), "agent=other\ntoken=t\nstart=1\ncwd=/\ncmd=cargo test\n").unwrap();
+        std::fs::write(slot.join("heartbeat"), "").unwrap();
+        let mut cmd = std::process::Command::new(bash);
+        cmd.arg(&script)
+            .args(["--", "echo", "never"])
+            .env("AGENTMUX_BUILD_SLOT_DIR", &root)
+            // A test run inside the slot (build-slot.sh -- cargo test) inherits this, and a
+            // script that finds it set runs its command without waiting.
+            .env_remove("BUILD_SLOT_HELD")
+            .env("BUILD_SLOT_POLL", "1")
+            .env("BUILD_SLOT_MAX_WAIT", "3");
+        #[cfg(windows)]
+        {
+            use crate::win32::NoWindow;
+            cmd.no_window();
+        }
+        let out = cmd.output().unwrap();
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(!err.contains("is gone"), "the wait took its parent for gone: {err}");
+        assert_eq!(out.status.code(), Some(75), "it should wait out BUILD_SLOT_MAX_WAIT and give up: {err}");
+        assert!(!String::from_utf8_lossy(&out.stdout).contains("never"), "the command must not run while the slot is held");
+    }
 }

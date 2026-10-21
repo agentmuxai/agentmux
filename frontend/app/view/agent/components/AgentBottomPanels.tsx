@@ -18,7 +18,10 @@ import { AgentDecisionPanel } from "./AgentDecisionPanel";
 import { AgentDisconnectedBanner } from "./AgentDisconnectedBanner";
 import { AgentAuthPanel } from "./AgentDocumentView";
 import { AgentWorkingRow } from "./AgentFooter";
-import { PaneApiRetryRow } from "./ApiRetryRow";
+import { ApiRetryRow } from "./ApiRetryRow";
+import { HeldInputPanel } from "../offline/HeldInputPanel";
+import type { useOfflineInput } from "../offline/useOfflineInput";
+import { clockTime } from "@/store/muxbus-delivery";
 import { AgentQuestionPanel } from "./AgentQuestionPanel";
 import { AgentSessionNotices } from "./AgentSessionNotices";
 import { compactionModelKey } from "../compaction-estimate";
@@ -36,7 +39,8 @@ type QuestionProps = ComponentProps<typeof AgentQuestionPanel>;
 /**
  * Everything docked between the transcript and the composer strip: login,
  * decision and question panels, the queue, the recovery banners, the activity
- * dock, an API retry in progress, the working row and the session notices.
+ * dock, an API retry in progress, input held while the API is unreachable,
+ * the working row and the session notices.
  *
  * Renders a fragment, not a wrapper: each panel stays a direct flex child of
  * `.agent-view-zoomed`, which the layout and AgentDocumentVirtualList's
@@ -66,6 +70,9 @@ export const AgentBottomPanels = (props: {
     workingRowLoading: Accessor<boolean>;
     /** Stops the running turn (the composer's Esc). */
     onStop: () => void;
+    /** The API retry, input held while the API is unreachable, and what
+     *  the pane did once it was back (offline/useOfflineInput.ts). */
+    offline: ReturnType<typeof useOfflineInput>;
 }) => (
     <>
         {/* Login UI — bottom-docked like AgentDecisionPanel/
@@ -238,7 +245,15 @@ export const AgentBottomPanels = (props: {
             looking={() => makeWindowFocusSignal()() && focusManager.blockFocusAtom() === props.blockId}
             busy={props.workingRowLoading}
         />
-        <PaneApiRetryRow blockId={props.blockId} onStop={props.onStop} />
+        <ApiRetryRow retry={props.offline.apiRetry()} onStop={props.onStop} />
+        <HeldInputPanel
+            held={props.offline.held()}
+            notices={props.offline.notices()}
+            onSendNow={() => void props.offline.sendNow()}
+            onCancel={props.offline.cancel}
+            onDismissNotice={props.offline.dismissNotice}
+            clockTime={clockTime}
+        />
         <div class="agent-working-row-anchor">
             <Show when={props.workingRowVisible()}>
                 <AgentWorkingRow

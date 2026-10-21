@@ -25,6 +25,19 @@
 //!
 //! The rest of this comment is about the keychain backend.
 //!
+//! **macOS: srv never shows the keychain's consent dialog**
+//! ([`keychain_without_dialogs`]). A keychain item trusts the code identity
+//! that wrote it, plus any the person allowed. One written by a build with
+//! another identity (every srv before v0.59.16 had a versioned one; a
+//! `task dev` build changes identity on each rebuild) used to bring up "AgentMux
+//! Server wants to use your confidential information…" unasked, at startup,
+//! after an upgrade. Now such a read fails at once with [`NEEDS_CONSENT`],
+//! and each caller decides: the MuxBus sign-in counts as signed out
+//! ([`get_optional_if_trusted`]; signing in again writes a fresh entry), and
+//! everything else reports it. A write
+//! over such an item replaces it ([`put`]), so the new one trusts this build.
+//! docs/analysis/ANALYSIS_MACOS_KEYCHAIN_PROMPT_AFTER_UPGRADE_2026_10_21.md.
+//!
 //! **Reads are bounded by [`TIMEOUT`]; writes are not — see below.** Every
 //! operation here can require interactive OS consent ("App wants to access
 //! your confidential information...") the first time a given code
@@ -218,8 +231,142 @@ fn shared_reads() -> &'static SharedReads {
 }
 
 fn entry(account_id: &str) -> Result<Entry, String> {
+    keychain_without_dialogs()?;
     Entry::new(SERVICE, &account_key(account_id))
         .map_err(|e| format!("keychain entry init failed: {e}"))
+}
+
+/// What a keychain read or write of an item this build isn't trusted for
+/// fails with on macOS, instead of asking the person ([`is_needs_consent`]).
+pub const NEEDS_CONSENT: &str = "keychain: this entry was saved by an older AgentMux build, which macOS won't let this one \
+     read without asking; save it again (sign in again, or re-enter the key) and this build keeps it from then on";
+
+/// Whether `err` (from [`get`], [`get_optional`] or [`put`]) is
+/// [`NEEDS_CONSENT`]: the entry exists, but this build may not use it
+/// without the person's consent. Not a transient failure, and not "no entry".
+pub fn is_needs_consent(err: &str) -> bool {
+    err.contains(NEEDS_CONSENT)
+}
+
+/// Turn off the keychain's consent and unlock dialogs for this process.
+/// macOS only (`SecKeychainSetUserInteractionAllowed`, process-wide): a call
+/// that would show one fails at once instead, with `errSecAuthFailed` for an
+/// item that doesn't trust this build, or `errSecInteractionNotAllowed` when
+/// the keychain is locked. Until it has worked, every keychain call tries
+/// again first and is refused if it still can't: never a call with dialogs on.
+fn keychain_without_dialogs() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        static OFF: OnceLock<()> = OnceLock::new();
+        if OFF.get().is_none() {
+            let lock = security_framework::os::macos::keychain::SecKeychain::disable_user_interaction()
+                .map_err(|e| format!("keychain unavailable: couldn't turn off its dialogs: {e}"))?;
+            // The lock turns the dialogs back on when dropped; keep them off.
+            std::mem::forget(lock);
+            let _ = OFF.set(());
+        }
+    }
+    Ok(())
+}
+
+/// How a keychain error is reported: [`NEEDS_CONSENT`] for an item this build
+/// isn't trusted for, a locked keychain said plainly, anything else as is.
+fn keychain_error(op: &str, e: &keyring::Error) -> String {
+    match keychain_status(e) {
+        Some(ERR_SEC_AUTH_FAILED) => NEEDS_CONSENT.to_string(),
+        Some(ERR_SEC_INTERACTION_NOT_ALLOWED) => format!("keychain {op} failed: the keychain is locked ({e})"),
+        _ => format!("keychain {op} failed: {e}"),
+    }
+}
+
+/// `errSecAuthFailed`: with dialogs off, the item doesn't trust this build.
+const ERR_SEC_AUTH_FAILED: i32 = -25293;
+/// `errSecInteractionNotAllowed`: with dialogs off, the keychain is locked.
+const ERR_SEC_INTERACTION_NOT_ALLOWED: i32 = -25308;
+/// `errSecDuplicateItem`: what a write over an item that doesn't trust this
+/// build ends in (it can't be read to be updated, so a new one is added).
+const ERR_SEC_DUPLICATE_ITEM: i32 = -25299;
+
+/// Delete the keychain item for `account` without reading it, which an item
+/// that doesn't trust this build allows: found by reference, never by its
+/// secret (`keyring`'s delete reads the secret first). `Ok(false)` when
+/// there is none. macOS only.
+#[cfg(target_os = "macos")]
+fn delete_without_reading(account: &str) -> Result<bool, String> {
+    use security_framework::item::{ItemClass, ItemSearchOptions, Reference, SearchResult};
+    let find = || {
+        ItemSearchOptions::new()
+            .class(ItemClass::generic_password())
+            .service(SERVICE)
+            .account(account)
+            .load_refs(true)
+            .search()
+    };
+    let items = match find() {
+        Ok(items) => items,
+        Err(e) if e.code() == -25300 => return Ok(false), // errSecItemNotFound
+        Err(e) => return Err(format!("keychain delete failed: {e}")),
+    };
+    for found in items {
+        if let SearchResult::Ref(Reference::KeychainItem(item)) = found {
+            item.delete();
+        }
+    }
+    match find() {
+        Err(e) if e.code() == -25300 => Ok(true),
+        Ok(_) => Err("keychain delete failed: the entry is still there".to_string()),
+        Err(e) => Err(format!("keychain delete failed: {e}")),
+    }
+}
+
+/// Whether a failed keychain call means the item exists but doesn't trust
+/// this build: a read says `errSecAuthFailed`, a write `errSecDuplicateItem`.
+fn untrusted_item(e: &keyring::Error) -> bool {
+    matches!(keychain_status(e), Some(ERR_SEC_AUTH_FAILED | ERR_SEC_DUPLICATE_ITEM))
+}
+
+/// [`delete_without_reading`] as a `keyring` result, for [`replace_untrusted`].
+fn delete_untrusted(account_id: &str) -> Result<(), keyring::Error> {
+    #[cfg(target_os = "macos")]
+    {
+        delete_without_reading(&account_key(account_id))
+            .map(|_| ())
+            .map_err(|e| keyring::Error::PlatformFailure(Box::new(std::io::Error::other(e))))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = account_id;
+        Err(keyring::Error::NoEntry)
+    }
+}
+
+/// The macOS `OSStatus` behind a keychain error, if it carries one.
+fn keychain_status(e: &keyring::Error) -> Option<i32> {
+    #[cfg(target_os = "macos")]
+    if let keyring::Error::PlatformFailure(inner) | keyring::Error::NoStorageAccess(inner) = e {
+        return inner.downcast_ref::<security_framework::base::Error>().map(|se| se.code());
+    }
+    let _ = e;
+    None
+}
+
+/// Write with `set`; when the existing item doesn't trust this build
+/// (`needs_consent`), `delete` it and write again, so the new item does.
+/// Deleting needs no consent. `missing` is "no such item" for the delete.
+fn replace_untrusted<E>(
+    set: impl Fn() -> Result<(), E>,
+    delete: impl Fn() -> Result<(), E>,
+    needs_consent: impl Fn(&E) -> bool,
+    missing: impl Fn(&E) -> bool,
+) -> Result<(), E> {
+    match set() {
+        Err(e) if needs_consent(&e) => match delete() {
+            Ok(()) => set(),
+            Err(d) if missing(&d) => set(),
+            Err(d) => Err(d),
+        },
+        other => other,
+    }
 }
 
 /// Build the keychain account string for an identity-account id.
@@ -259,9 +406,16 @@ pub fn put(account_id: &str, secret: &str) -> Result<(), String> {
     if let Some(dir) = FILE_STORE.get() {
         return file::put(dir, &account_key(account_id), secret);
     }
-    let written = entry(account_id)?
-        .set_password(secret)
-        .map_err(|e| format!("keychain write failed: {e}"));
+    let e = entry(account_id)?;
+    // An entry saved by a build macOS doesn't trust for it can't be written
+    // over without consent: replace it, so the new one trusts this build.
+    let written = replace_untrusted(
+        || e.set_password(secret),
+        || delete_untrusted(account_id),
+        untrusted_item,
+        |err| matches!(err, keyring::Error::NoEntry),
+    )
+    .map_err(|err| keychain_error("write", &err));
     shared_reads().after_write(account_id, written)
 }
 
@@ -296,11 +450,26 @@ pub fn get_optional(account_id: &str) -> Result<Option<Zeroizing<String>>, Strin
     }
 }
 
+/// [`get_optional`], except that an entry this build may not read without
+/// asking ([`NEEDS_CONSENT`]) counts as absent, and is logged. For the MuxBus
+/// sign-in: one saved by an older build is then signed out, and signing in
+/// again writes a fresh entry this build owns, so no dialog ever shows.
+/// Never for a key whose absence makes the caller create a new one (the Vault).
+pub fn get_optional_if_trusted(account_id: &str) -> Result<Option<Zeroizing<String>>, String> {
+    match get_optional(account_id) {
+        Err(e) if is_needs_consent(&e) => {
+            tracing::warn!(account = %account_key(account_id), "secret store: {e}; treating it as absent");
+            Ok(None)
+        }
+        other => other,
+    }
+}
+
 fn get_optional_now(account_id: &str) -> Result<Option<Zeroizing<String>>, String> {
     match entry(account_id)?.get_password() {
         Ok(pw) => Ok(Some(Zeroizing::new(pw))),
         Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(format!("keychain read failed: {e}")),
+        Err(e) => Err(keychain_error("read", &e)),
     }
 }
 
@@ -316,7 +485,9 @@ pub fn delete(account_id: &str) -> Result<(), String> {
     let deleted = match entry(account_id)?.delete_password() {
         Ok(()) => Ok(()),
         Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(format!("keychain delete failed: {e}")),
+        // It can't be read, which keyring's delete needs; it can be deleted.
+        Err(e) if untrusted_item(&e) => delete_untrusted(account_id).map_err(|e| keychain_error("delete", &e)),
+        Err(e) => Err(keychain_error("delete", &e)),
     };
     shared_reads().after_write(account_id, deleted)
 }
@@ -413,6 +584,81 @@ mod file {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_write_over_an_entry_that_does_not_trust_this_build_replaces_it() {
+        use std::cell::RefCell;
+        // (calls, set results in order, delete result)
+        let run = |sets: Vec<Result<(), &'static str>>, del: Result<(), &'static str>| {
+            let calls = RefCell::new(Vec::new());
+            let sets = RefCell::new(sets.into_iter());
+            let out = replace_untrusted(
+                || {
+                    calls.borrow_mut().push("set");
+                    sets.borrow_mut().next().unwrap()
+                },
+                || {
+                    calls.borrow_mut().push("delete");
+                    del
+                },
+                |e| *e == "consent",
+                |e| *e == "missing",
+            );
+            (out, calls.into_inner())
+        };
+        assert_eq!(run(vec![Ok(())], Ok(())), (Ok(()), vec!["set"]));
+        assert_eq!(run(vec![Err("consent"), Ok(())], Ok(())), (Ok(()), vec!["set", "delete", "set"]));
+        assert_eq!(run(vec![Err("consent"), Ok(())], Err("missing")), (Ok(()), vec!["set", "delete", "set"]));
+        assert_eq!(run(vec![Err("consent")], Err("locked")), (Err("locked"), vec!["set", "delete"]));
+        // Any other failure is reported as it is, and nothing is deleted.
+        assert_eq!(run(vec![Err("locked")], Ok(())), (Err("locked"), vec!["set"]));
+    }
+
+    #[test]
+    fn needs_consent_is_told_apart_from_other_failures() {
+        assert!(is_needs_consent(NEEDS_CONSENT));
+        assert!(is_needs_consent(&format!("muxbus: keychain read failed: {NEEDS_CONSENT}")));
+        assert!(!is_needs_consent("keychain read failed: the keychain is locked"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_codes_map_to_needs_consent_or_locked() {
+        let err = |code| keyring::Error::PlatformFailure(Box::new(security_framework::base::Error::from_code(code)));
+        assert_eq!(keychain_error("read", &err(ERR_SEC_AUTH_FAILED)), NEEDS_CONSENT);
+        assert!(keychain_error("read", &err(ERR_SEC_INTERACTION_NOT_ALLOWED)).contains("locked"));
+        assert!(!is_needs_consent(&keychain_error("read", &err(-25299))));
+        assert!(!is_needs_consent(&keychain_error("read", &keyring::Error::NoEntry)));
+    }
+
+    /// Against the real login keychain: an `agentmux` entry that trusts no
+    /// app (as one saved by an older srv looks to this build) is reported as
+    /// NEEDS_CONSENT at once, with no dialog, and a write replaces it with one
+    /// this build can read. `cargo test -p agentmux-srv -- --ignored needs_consent_live`
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "uses the real login keychain"]
+    fn needs_consent_live_against_the_login_keychain() {
+        let id = format!("test-needs-consent-{}", uuid::Uuid::new_v4().simple());
+        let account = account_key(&id);
+        let added = std::process::Command::new("/usr/bin/security")
+            .args(["add-generic-password", "-s", SERVICE, "-a", &account, "-w", "old", "-T", ""])
+            .status()
+            .unwrap();
+        assert!(added.success());
+        let started = std::time::Instant::now();
+        let read = get_optional(&id).map(|v| v.map(|z| z.to_string()));
+        let fast = started.elapsed() < std::time::Duration::from_secs(2);
+        let lenient = get_optional_if_trusted(&id).map(|v| v.map(|z| z.to_string()));
+        let replaced = put(&id, "new");
+        let after = get_optional(&id).map(|v| v.map(|z| z.to_string()));
+        let _ = delete(&id);
+        assert!(matches!(&read, Err(e) if is_needs_consent(e)), "{read:?}");
+        assert!(fast, "no dialog was waited on");
+        assert_eq!(lenient, Ok(None), "an entry this build may not read counts as absent");
+        assert_eq!(replaced, Ok(()));
+        assert_eq!(after, Ok(Some("new".to_string())));
+    }
 
     #[test]
     fn file_store_round_trips_overwrites_and_deletes() {

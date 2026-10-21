@@ -56,6 +56,7 @@ await am.meta.set({ filter: "open" }); // this pane's own state
 | `clipboard:write` | Copy text to your clipboard |
 | `panes` | Open other kinds of panes |
 | `agents:read` | See your agents' names and whether they're working |
+| `tasks:read` | See the Kanban's tasks: their titles, who is on them and where they stand |
 | `agents:send` | Send messages to your agents |
 
 A **trusted** widget (`"kind": "trusted"`) is a Solid ES module that runs as part of AgentMux, with full access. Use one only when a sandboxed widget can't do what you need, and only install trusted widgets from authors you trust.

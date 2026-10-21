@@ -3,4 +3,4 @@
 /**
  * Whether a service can be reached.
  */
-export type Reachability = "online" | "degraded" | "offline";
+export type Reachability = "online" | "degraded" | "offline" | "unknown";

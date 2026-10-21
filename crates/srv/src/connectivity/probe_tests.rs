@@ -126,3 +126,14 @@ async fn each_service_is_probed_on_its_own_schedule() {
     // The API's first probe fails and its next is 10 s later; MuxBus answers its only one.
     assert_eq!(calls, [("model_api:anthropic".to_string(), 5_000), ("muxbus".to_string(), 7_000), ("model_api:anthropic".to_string(), 15_000)]);
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_tracked_api_is_probed_at_startup() {
+    let h = Harness::start(Vec::new(), false);
+    h.shared.seed_at((h.clock)());
+    assert_eq!(h.state("model_api:anthropic"), Reachability::Unknown);
+    h.shared.wake.notify_one();
+    wait(10).await;
+    assert_eq!(h.call_times(), [0]);
+    assert_eq!(h.state("model_api:anthropic"), Reachability::Online);
+}

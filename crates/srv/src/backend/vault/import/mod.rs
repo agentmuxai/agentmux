@@ -18,6 +18,7 @@ mod bitwarden;
 mod env;
 mod kdbx;
 mod logins;
+mod onepux;
 
 use std::collections::BTreeMap;
 
@@ -169,7 +170,10 @@ pub fn read_with(bytes: &[u8], file_name: &str, mapping: Option<&Mapping>, passp
         return kdbx::read(bytes, passphrase.unwrap_or(""));
     }
     if bytes.starts_with(b"PK\x03\x04") {
-        return Err("this is a zip file (a 1Password .1pux or Proton Pass export), which AgentMux can't import yet; export a CSV or JSON from that app instead".into());
+        if onepux::looks_like(bytes) {
+            return onepux::read(bytes);
+        }
+        return Err("this is a zip file that isn't a 1Password export (a Proton Pass export is a zip too, which AgentMux can't import yet); export a CSV or JSON from that app instead".into());
     }
     let text = std::str::from_utf8(bytes).map_err(|_| "this isn't a text file AgentMux knows how to read: its export formats are CSV, JSON and .env".to_string())?;
     let text = text.trim_start_matches('\u{feff}');

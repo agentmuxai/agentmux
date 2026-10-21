@@ -176,3 +176,37 @@ fn the_status_serializes_snake_case() {
     );
     assert_eq!(v["services"][0]["state"], "online");
 }
+
+#[test]
+fn a_tracked_api_starts_not_checked_with_a_probe_due_at_once() {
+    let mut t = Tracker::new(0, T0);
+    let seeded = t.seed(api(), T0).expect("listed");
+    assert_eq!(state_of(&t, "model_api:anthropic"), (Reachability::Unknown, T0));
+    assert_eq!(serde_json::to_value(&seeded.services[1]).unwrap()["state"], "unknown");
+    // Not checked says nothing about the internet.
+    assert_eq!(state_of(&t, "internet").0, Reachability::Online);
+    assert_eq!(t.seed(api(), T0 + 1), None, "listed once");
+    let (service, ticket) = t.take_due_probes(T0).remove(0);
+    let online = t.probe_finished(&service, ticket, Outcome::Answered, T0 + 300).expect("checked");
+    assert!(online.revision > seeded.revision);
+    assert_eq!(state_of(&t, "model_api:anthropic"), (Reachability::Online, T0 + 300));
+    assert_eq!(t.next_probe_due(), None, "an answering API isn't probed again");
+}
+
+#[test]
+fn a_tracked_api_whose_first_probe_fails_is_offline_and_keeps_being_probed() {
+    let mut t = Tracker::new(0, T0);
+    t.seed(api(), T0);
+    let (service, ticket) = t.take_due_probes(T0).remove(0);
+    t.probe_finished(&service, ticket, down("connection refused"), T0 + 200).expect("checked");
+    assert_eq!(state_of(&t, "model_api:anthropic"), (Reachability::Offline, T0 + 200));
+    assert_eq!(t.next_probe_due(), Some(T0 + 200 + 2 * PROBE_FIRST_MS));
+}
+
+#[test]
+fn a_service_that_already_reported_isnt_seeded_over() {
+    let mut t = Tracker::new(0, T0);
+    t.report(api(), Outcome::Answered, T0);
+    assert_eq!(t.seed(api(), T0 + 1), None);
+    assert_eq!(state_of(&t, "model_api:anthropic"), (Reachability::Online, T0));
+}

@@ -151,6 +151,9 @@ zbus = { version = "5", default-features = false, features = ["tokio"] }
 # these versions via the trash crate, so they add no new supply-chain surface.
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSError", "NSFileManager", "NSString", "NSURL"] }
+# The keychain without its consent dialog, and the codes of its errors
+# (identity/secret_store.rs). Already in the tree at this version via keyring.
+security-framework = "2.11"
 
 [target.'cfg(windows)'.dependencies]
 # Read-only COM access to Windows Defender Firewall and the network list, to

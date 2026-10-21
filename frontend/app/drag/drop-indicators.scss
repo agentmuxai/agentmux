@@ -90,3 +90,15 @@
     50%  { filter: invert(0); }
     100% { filter: invert(0); }
 }
+
+// The same flash, but it lands inverted and stays there (animation-fill-mode:
+// forwards) for as long as the hover lasts: negative for the first half
+// (200ms), normal for the second (200ms), then negative again, held. One
+// iteration, so two inversions in the first 400ms and never more than three
+// flashes in any one second (WCAG 2.3.1).
+// docs/specs/SPEC_DROP_TARGET_LANDS_INVERTED_2026_10_21.md
+@keyframes tab-drop-invert-hold {
+    0%   { filter: invert(1); }
+    50%  { filter: invert(0); }
+    100% { filter: invert(1); }
+}

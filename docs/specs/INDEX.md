@@ -650,6 +650,7 @@ partial list.
 | [`SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03`](SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md) | Docs Lifecycle Audit & Hardening Plan |
 | [`SPEC_DOCUMENT_TABS_2026_10_02`](SPEC_DOCUMENT_TABS_2026_10_02.md) | SPEC: Document tabs: one shared tab system for the documents inside a pane |
 | [`SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13`](SPEC_DRAG_SPACE_AFFORDANCE_2026_10_13.md) | Drag space in the window and pane headers: does it need a grip? |
+| [`SPEC_DROP_TARGET_LANDS_INVERTED_2026_10_21`](SPEC_DROP_TARGET_LANDS_INVERTED_2026_10_21.md) | Spec: The drop target lands inverted — a pane tab dragged over another pane's tab bar flashes once and then stays in the negative until the drag ends |
 | [`SPEC_DURABLE_BINDINGS_2026_09_10`](SPEC_DURABLE_BINDINGS_2026_09_10.md) | Spec: Durable Bindings |
 | [`SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23`](SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md) | SPEC: durable conversation memory — one continuous conversation per agent, in every case |
 | [`SPEC_DURABLE_JEKT_DELIVERY_2026_09_24`](SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md) | SPEC: durable jekt delivery — a message to an absent agent is held, not dropped |
