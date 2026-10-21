@@ -34,12 +34,12 @@ describe("blockMetaStorage", () => {
 
     it("reads held messages saved for this agent, as after a restart", () => {
         hub.meta["b1"] = { [HELD_INPUT_META_KEY]: { agentId: "agent-a", messages: [msg("one")] } };
-        expect(blockMetaStorage("b1", () => "agent-a").loadHeld()).toEqual([msg("one")]);
+        expect(blockMetaStorage("b1", () => "agent-a").held()).toEqual([msg("one")]);
     });
 
     it("never hands one agent's held messages to another the pane switched to", () => {
         hub.meta["b2"] = { [HELD_INPUT_META_KEY]: { agentId: "agent-a", messages: [msg("one")] } };
-        expect(blockMetaStorage("b2", () => "agent-b").loadHeld()).toEqual([]);
+        expect(blockMetaStorage("b2", () => "agent-b").held()).toEqual([]);
     });
 
     it("saves with the agent, deletes the key when nothing is held, and reads its own write before the meta catches up", () => {
@@ -47,12 +47,12 @@ describe("blockMetaStorage", () => {
         storage.saveHeld([msg("one")]);
         expect(hub.writes.at(-1)).toEqual({ blockId: "b3", meta: { [HELD_INPUT_META_KEY]: { agentId: "agent-a", messages: [msg("one")] } } });
         // The meta atom still reads nothing: a remount sees the write anyway.
-        expect(blockMetaStorage("b3", () => "agent-a").loadHeld()).toEqual([msg("one")]);
+        expect(blockMetaStorage("b3", () => "agent-a").held()).toEqual([msg("one")]);
         storage.saveHeld([]);
         expect(hub.writes.at(-1)?.meta).toEqual({ [HELD_INPUT_META_KEY]: null });
         // A stale meta copy must not bring a sent message back.
         hub.meta["b3"] = { [HELD_INPUT_META_KEY]: { agentId: "agent-a", messages: [msg("one")] } };
-        expect(blockMetaStorage("b3", () => "agent-a").loadHeld()).toEqual([]);
+        expect(blockMetaStorage("b3", () => "agent-a").held()).toEqual([]);
     });
 
     it("keeps the automatic-retry marker in the block's meta", () => {

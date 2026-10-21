@@ -14,7 +14,7 @@
  * block's meta until then, so closing the window or quitting loses nothing.
  */
 
-import { onCleanup, untrack } from "solid-js";
+import { type Accessor, createSignal, onCleanup, type Setter, untrack } from "solid-js";
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import { addEventListener as addPaneEventListener } from "@/app/store/agent-pane-state-store";
 import { workingFromPhase } from "@/app/store/agent-pane-state/types";
@@ -28,12 +28,14 @@ import { useApiRetryState } from "../hooks/useApiRetryState";
 import type { ProviderDefinition } from "../providers";
 import {
     type AutoRetryMarker,
+    confirmedSend,
     createOfflineInput,
     type HeldInput,
     keyedLock,
     modelApiService,
     type OfflineInput,
     type OfflineStorage,
+    type PaneMessageEvent,
     serviceReachability,
 } from "./offline-input";
 
@@ -42,11 +44,12 @@ export const AUTO_RETRY_META_KEY = "agent:auto_retried_turn";
 export const AUTO_RETRY_SETTING = "agent:retryonreconnect";
 
 /**
- * What this renderer last wrote, per block: the meta atom catches up only
- * after the write's round trip, and a pane mounted in between must not see
- * a held message that already went.
+ * Each block's held messages, read from its meta once and then kept here:
+ * the meta atom catches up only after a write's round trip, and a pane
+ * mounted in between must not see a held message that already went. One
+ * signal per block, so every mount of a pane sees the same list.
  */
-const heldByBlock = new Map<string, { agentId: string | undefined; messages: HeldInput[] }>();
+const heldByBlock = new Map<string, { agentId: string | undefined; get: Accessor<HeldInput[]>; set: Setter<HeldInput[]> }>();
 const locks = new Map<string, Promise<unknown>>();
 
 function writeMeta(blockId: string, meta: Record<string, unknown>) {
@@ -58,17 +61,24 @@ function writeMeta(blockId: string, meta: Record<string, unknown>) {
  * switched to another agent never sends them there.
  */
 export function blockMetaStorage(blockId: string, agentId: () => string | undefined): OfflineStorage {
+    const cell = () => {
+        const id = untrack(agentId);
+        const cached = heldByBlock.get(blockId);
+        if (cached?.agentId === id) return cached;
+        const stored = untrack(() => getBlockMetaKeyAtom(blockId, HELD_INPUT_META_KEY)());
+        const own = stored && stored.agentId === id && Array.isArray(stored.messages) ? stored.messages : [];
+        const [get, set] = createSignal<HeldInput[]>(own);
+        const made = { agentId: id, get, set };
+        heldByBlock.set(blockId, made);
+        return made;
+    };
     return {
-        loadHeld() {
-            const id = agentId();
-            const cached = heldByBlock.get(blockId);
-            if (cached) return cached.agentId === id ? cached.messages : [];
-            const stored = untrack(() => getBlockMetaKeyAtom(blockId, HELD_INPUT_META_KEY)());
-            return stored && stored.agentId === id && Array.isArray(stored.messages) ? stored.messages : [];
+        held() {
+            return cell().get();
         },
         saveHeld(held) {
             const id = agentId();
-            heldByBlock.set(blockId, { agentId: id, messages: held });
+            cell().set(held);
             writeMeta(blockId, { [HELD_INPUT_META_KEY]: held.length > 0 && id ? { agentId: id, messages: held } : null });
         },
         loadMarker() {
@@ -101,6 +111,13 @@ export function useOfflineInput(opts: {
         document: () => opts.paneModel.document(),
         autoRetryOn: () => getSettingsKeyAtom(AUTO_RETRY_SETTING)() !== false,
         send: opts.send,
+        deliver: confirmedSend(
+            opts.send,
+            (cb) => addPaneEventListener((blockId, event) => blockId === opts.blockId && cb(event as PaneMessageEvent)),
+            () => workingFromPhase(state.turnPhase)
+        ),
+        restoreFailure: (f) =>
+            opts.paneModel.dispatchPane({ type: "FailureObserved", failure: f.data, at: f.at, turnAttempted: f.turnAttempted }, "system"),
         stop: opts.stop,
         storage,
         lock: keyedLock(locks, opts.blockId),

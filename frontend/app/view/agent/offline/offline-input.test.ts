@@ -8,6 +8,7 @@ import type { Reachability } from "@/types/rpc/Reachability";
 import type { DocumentNode } from "../types";
 import {
     type AutoRetryMarker,
+    confirmedSend,
     createOfflineInput,
     decideOnReconnect,
     failedTurnSnapshot,
@@ -18,6 +19,7 @@ import {
     keyedLock,
     modelApiService,
     type OfflineInput,
+    type PaneMessageEvent,
     serviceReachability,
 } from "./offline-input";
 
@@ -92,6 +94,72 @@ describe("pure rules", () => {
     });
 });
 
+describe("confirmedSend", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    /** A send path that queues an entry, then reports `outcome` for it. */
+    const harness = (outcome: "accepted" | "rejected" | "expired" | "none", busy = false) => {
+        const sinks = new Set<(e: PaneMessageEvent) => void>();
+        const emit = (e: PaneMessageEvent) => sinks.forEach((cb) => cb(e));
+        const send = vi.fn(async () => {
+            if (outcome === "none") return; // handled in the pane: no entry
+            emit({ type: "pending-queued", id: "m1" });
+            // Another message's events must not count for this one.
+            emit({ type: "pending-accepted", id: "other" });
+            await Promise.resolve();
+            emit({ type: `pending-${outcome}`, id: "m1" });
+        });
+        const deliver = confirmedSend(
+            send,
+            (cb) => {
+                sinks.add(cb);
+                return () => sinks.delete(cb);
+            },
+            () => busy,
+            5_000
+        );
+        return { send, deliver, sinks };
+    };
+
+    it("is true once srv accepted the message", async () => {
+        const h = harness("accepted");
+        await expect(h.deliver("hi")).resolves.toBe(true);
+        expect(h.sinks.size).toBe(0);
+    });
+
+    it("is false when the send path rejected it or lost it", async () => {
+        await expect(harness("rejected").deliver("hi")).resolves.toBe(false);
+        await expect(harness("expired").deliver("hi")).resolves.toBe(false);
+    });
+
+    it("is false when nothing was queued for srv", async () => {
+        await expect(harness("none").deliver("hi")).resolves.toBe(false);
+    });
+
+    it("doesn't send while a turn runs: the message would only join the pane's own queue", async () => {
+        const h = harness("accepted", true);
+        await expect(h.deliver("hi")).resolves.toBe(false);
+        expect(h.send).not.toHaveBeenCalled();
+    });
+
+    it("is false when no answer comes", async () => {
+        const sinks = new Set<(e: PaneMessageEvent) => void>();
+        const deliver = confirmedSend(
+            async () => sinks.forEach((cb) => cb({ type: "pending-queued", id: "m1" })),
+            (cb) => {
+                sinks.add(cb);
+                return () => sinks.delete(cb);
+            },
+            () => false,
+            5_000
+        );
+        const result = deliver("hi");
+        await vi.advanceTimersByTimeAsync(5_000);
+        await expect(result).resolves.toBe(false);
+    });
+});
+
 /** A pane: plain signals for what the controller reads, a recording send. */
 function makePane(opts: { api?: Reachability | null; held?: HeldInput[]; marker?: AutoRetryMarker | null } = {}) {
     const [retrying, setRetrying] = createSignal(false);
@@ -101,7 +169,13 @@ function makePane(opts: { api?: Reachability | null; held?: HeldInput[]; marker?
     const [failure, setFailure] = createSignal<PaneFailure | null>(null);
     const [autoRetryOn, setAutoRetryOn] = createSignal(true);
     let doc: DocumentNode[] = [];
-    const store = { held: opts.held ?? [], marker: opts.marker ?? null, savedHeld: [] as HeldInput[][] };
+    const [held, setHeld] = createSignal<HeldInput[]>(opts.held ?? []);
+    const store = {
+        get held() {
+            return held();
+        },
+        marker: opts.marker ?? null,
+    };
     const sent: string[] = [];
     const stop = vi.fn();
     // As the pane's send: the turn starts, which clears the failure row.
@@ -109,6 +183,16 @@ function makePane(opts: { api?: Reachability | null; held?: HeldInput[]; marker?
         sent.push(text);
         setFailure(null);
     });
+    // As confirmedSend over that send: whether srv took it. A rejected send
+    // also clears the row (TurnStart), then rolls the turn back.
+    const accepts: boolean[] = [];
+    const deliver = vi.fn(async (text: string) => {
+        setFailure(null);
+        const ok = accepts.length > 0 ? accepts.shift()! : true;
+        if (ok) sent.push(text);
+        return ok;
+    });
+    const restoreFailure = vi.fn((f: PaneFailure) => setFailure(f));
     let ui!: OfflineInput;
     const dispose = createRoot((d) => {
         ui = createOfflineInput({
@@ -120,13 +204,12 @@ function makePane(opts: { api?: Reachability | null; held?: HeldInput[]; marker?
             document: () => doc,
             autoRetryOn,
             send,
+            deliver,
+            restoreFailure,
             stop,
             storage: {
-                loadHeld: () => store.held,
-                saveHeld: (h) => {
-                    store.held = h;
-                    store.savedHeld.push(h);
-                },
+                held,
+                saveHeld: setHeld,
                 loadMarker: () => store.marker,
                 saveMarker: (m) => {
                     store.marker = m;
@@ -143,6 +226,10 @@ function makePane(opts: { api?: Reachability | null; held?: HeldInput[]; marker?
         ui,
         sent,
         send,
+        deliver,
+        accepts,
+        restoreFailure,
+        failure,
         stop,
         store,
         dispose,
@@ -221,14 +308,81 @@ describe("held input", () => {
         const p = makePane({ api: "offline" });
         await p.ui.submit("one");
         await p.ui.submit("two");
-        p.send.mockImplementationOnce(async (text: string) => {
+        p.deliver.mockImplementationOnce(async (text: string) => {
             p.sent.push(text);
             p.setRetrying(true);
+            return true;
         });
         p.setApi("online");
         await flush();
         expect(p.sent).toEqual(["one"]);
         expect(p.ui.held().map((m) => m.text)).toEqual(["two"]);
+        p.dispose();
+    });
+
+    it("keeps a held message srv didn't accept, says so, and doesn't count it as sent", async () => {
+        const p = makePane({ api: "offline" });
+        await p.ui.submit("one");
+        await p.ui.submit("two");
+        p.accepts.push(false);
+        p.setApi("online");
+        await flush();
+        expect(p.sent).toEqual([]);
+        expect(p.store.held.map((m) => m.text)).toEqual(["one", "two"]);
+        expect(p.ui.held().map((m) => m.text)).toEqual(["one", "two"]);
+        expect(p.ui.notices().map((n) => n.text)).toEqual([
+            "Couldn't send your held message, so it is still held. Send now tries again.",
+        ]);
+        // No retry loop: a turn starting and ending around the rejection
+        // doesn't send it again by itself.
+        p.setWorking(true);
+        p.setWorking(false);
+        await flush();
+        expect(p.deliver).toHaveBeenCalledTimes(1);
+        // Send now tries again, in order.
+        await p.ui.sendNow();
+        await flush();
+        expect(p.sent).toEqual(["one", "two"]);
+        expect(p.store.held).toEqual([]);
+        p.dispose();
+    });
+
+    it("keeps the held message stored, but out of the list, while it is being sent", async () => {
+        const p = makePane({ api: "offline" });
+        await p.ui.submit("one");
+        let accept!: (ok: boolean) => void;
+        p.deliver.mockImplementationOnce(() => new Promise<boolean>((r) => (accept = r)));
+        p.setApi("online");
+        await flush();
+        expect(p.store.held.map((m) => m.text)).toEqual(["one"]);
+        expect(p.ui.held()).toEqual([]);
+        // A new message waits behind it.
+        await p.ui.submit("two");
+        expect(p.ui.held().map((m) => m.text)).toEqual(["two"]);
+        accept(true);
+        await flush();
+        expect(p.store.held.map((m) => m.text)).toEqual([]);
+        expect(p.deliver.mock.calls.map((c) => c[0])).toEqual(["one", "two"]);
+        p.dispose();
+    });
+
+    it("sends the next held message only once the turn the last one started has ended", async () => {
+        const p = makePane({ api: "offline" });
+        await p.ui.submit("one");
+        await p.ui.submit("two");
+        p.deliver.mockImplementationOnce(async (text: string) => {
+            p.sent.push(text);
+            p.setWorking(true);
+            return true;
+        });
+        p.setApi("online");
+        await flush();
+        expect(p.sent).toEqual(["one"]);
+        expect(p.store.held.map((m) => m.text)).toEqual(["two"]);
+        p.setWorking(false);
+        await flush();
+        expect(p.sent).toEqual(["one", "two"]);
+        expect(p.ui.notices().map((n) => n.text)).toEqual(["Sent your 2 held messages (held under a minute)."]);
         p.dispose();
     });
 
@@ -354,6 +508,38 @@ describe("a turn that failed on the network", () => {
         p.dispose();
     });
 
+    it("marks nothing and puts the failure row back when the retry isn't accepted", async () => {
+        const p = failedOffline();
+        p.accepts.push(false);
+        p.setApi("online");
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(p.deliver).toHaveBeenCalledTimes(1);
+        expect(p.sent).toEqual([]);
+        expect(p.store.marker).toBeNull();
+        expect(p.ui.notices()).toEqual([]);
+        // The row is back, the same failure, so its Retry is offered again.
+        expect(p.restoreFailure).toHaveBeenCalledTimes(1);
+        expect(p.failure()?.at).toBe(1_000);
+        // And it doesn't start another automatic retry.
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(p.deliver).toHaveBeenCalledTimes(1);
+        p.dispose();
+    });
+
+    it("keeps the offered retry when it isn't accepted", async () => {
+        const p = failedOffline();
+        await p.ui.submit("actually, wait");
+        p.setApi("online");
+        await vi.advanceTimersByTimeAsync(5_000);
+        const offer = p.ui.notices().find((n) => n.retry);
+        p.accepts.push(false);
+        offer!.retry!();
+        await flush();
+        expect(p.sent).toEqual(["actually, wait"]);
+        expect(p.ui.notices().some((n) => n.retry)).toBe(true);
+        p.dispose();
+    });
+
     it("doesn't retry automatically a second time when the retried turn fails too", async () => {
         const p = failedOffline({ marker: { text: "build it", at: 900 } });
         p.setApi("online");
@@ -422,6 +608,7 @@ describe("a turn that failed on the network", () => {
             "Back online. Your message from 14:32 failed while the API was unreachable; it wasn't sent again, since you wrote after it.",
         );
         offer!.retry!();
+        await flush();
         expect(p.sent).toEqual(["actually, wait", "build it"]);
         expect(p.ui.notices().some((n) => n.retry)).toBe(false);
         p.dispose();
@@ -431,9 +618,11 @@ describe("a turn that failed on the network", () => {
         const p = failedOffline();
         await p.ui.submit("next");
         p.setApi("online");
+        await flush();
+        expect(p.sent).toEqual(["next"]);
+        // Its turn runs.
         p.setWorking(true);
         await vi.advanceTimersByTimeAsync(5_000);
-        expect(p.sent).toEqual(["next"]);
         expect(p.ui.notices().some((n) => n.retry)).toBe(false);
         p.setWorking(false);
         await vi.advanceTimersByTimeAsync(1_000);

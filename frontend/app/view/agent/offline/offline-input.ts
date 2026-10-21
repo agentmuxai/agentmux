@@ -9,9 +9,10 @@
  * **Held input.** A message typed while the pane's turn is retrying an API
  * request, or while srv's connectivity state says the provider's API is
  * offline, isn't sent: it waits under the composer with Send now and Cancel,
- * and goes out by itself, in order and once, when neither holds. It is kept
- * with the pane's block meta, so a reload or a restart keeps it. A `/` or
- * `!` command is never held.
+ * and goes out by itself, in order and once, when neither holds, one at a
+ * time while the pane is idle. It is kept with the pane's block meta until
+ * srv accepts it, so a rejected send, a reload or a restart keeps it. A `/`
+ * or `!` command is never held.
  *
  * **A turn that failed on the network.** When the provider's API answers
  * again, the turn is retried once by itself if nothing argues against it:
@@ -48,7 +49,8 @@ export interface AutoRetryMarker {
 
 /** What the pane keeps between reloads. */
 export interface OfflineStorage {
-    loadHeld(): HeldInput[];
+    /** The held messages, shared by every mount of the pane. Reactive. */
+    held(): HeldInput[];
     saveHeld(held: HeldInput[]): void;
     loadMarker(): AutoRetryMarker | null;
     saveMarker(marker: AutoRetryMarker | null): void;
@@ -67,6 +69,54 @@ export function keyedLock(chains: Map<string, Promise<unknown>>, key: string): O
             });
             return next;
         },
+    };
+}
+
+/** What a pane's send reports about one message, as reducer events. */
+export type PaneMessageEvent = { type: string; id?: string };
+
+/**
+ * `send`, resolved true only once srv accepted the message (the pane's
+ * `pending-accepted` for it). The send path resolves either way: it turns
+ * a failed `AgentInputCommand` or a login guard into `pending-rejected`, a
+ * lost delivery into `pending-expired`, and a command it handles itself
+ * into no pending entry at all. A message sent while a turn runs would only
+ * join the pane's own queue, which a reload drops, so it isn't sent.
+ */
+export function confirmedSend(
+    send: (text: string, attachments?: AttachmentRef[]) => Promise<void>,
+    listen: (cb: (e: PaneMessageEvent) => void) => () => void,
+    working: () => boolean,
+    timeoutMs = 120_000
+): (text: string, attachments?: AttachmentRef[]) => Promise<boolean> {
+    return (text, attachments) => {
+        if (working()) return Promise.resolve(false);
+        return new Promise<boolean>((resolve) => {
+            let id: string | null = null;
+            let settled = false;
+            const finish = (ok: boolean) => {
+                if (settled) return;
+                settled = true;
+                unsub();
+                clearTimeout(timer);
+                resolve(ok);
+            };
+            // The send path queues its entry synchronously, before any await.
+            const unsub = listen((e) => {
+                if (e.type === "pending-queued" && id === null) id = e.id ?? null;
+                else if (id !== null && e.id === id) {
+                    if (e.type === "pending-accepted") finish(true);
+                    else if (e.type === "pending-rejected" || e.type === "pending-expired") finish(false);
+                }
+            });
+            const timer = setTimeout(() => finish(false), timeoutMs);
+            send(text, attachments).then(
+                () => {
+                    if (id === null) finish(false);
+                },
+                () => finish(false)
+            );
+        });
     };
 }
 
@@ -172,6 +222,10 @@ export interface OfflineInputDeps {
     autoRetryOn: Accessor<boolean>;
     /** Send as if typed, with no hold: the pane's own send path. */
     send: (text: string, attachments?: AttachmentRef[]) => Promise<void>;
+    /** The same, resolving true only once srv accepted it ({@link confirmedSend}). */
+    deliver: (text: string, attachments?: AttachmentRef[]) => Promise<boolean>;
+    /** Put a failure back on the row, after a retry that didn't go out. */
+    restoreFailure: (failure: PaneFailure) => void;
     /** Stop the running turn. */
     stop: () => void;
     storage: OfflineStorage;
@@ -189,6 +243,7 @@ export interface OfflineInputDeps {
 }
 
 interface FailedTurn {
+    failure: PaneFailure;
     at: number;
     typedSince: boolean;
     snapshot: FailedTurnSnapshot | null;
@@ -200,7 +255,8 @@ export interface OfflineInput {
     /** The composer's send: holds while {@link holdsInput} says so, or
      *  while earlier held messages haven't gone yet. */
     submit: (text: string, attachments?: AttachmentRef[]) => Promise<void>;
-    /** Stop a running turn, then send everything held, in order. */
+    /** Stop a running turn, then send everything held, in order, even
+     *  while the API looks unreachable. */
     sendNow: () => Promise<void>;
     cancel: (id: string) => void;
     dismissNotice: (id: number) => void;
@@ -225,53 +281,80 @@ let nextHeldSeq = 0;
 export function createOfflineInput(deps: OfflineInputDeps): OfflineInput {
     const now = deps.now ?? Date.now;
     const clock = deps.clockTime ?? defaultClock;
-    const [held, setHeld] = createSignal<HeldInput[]>(deps.storage.loadHeld());
+    const held = () => deps.storage.held();
     const [notices, setNotices] = createSignal<OfflineNotice[]>([]);
     const [failed, setFailed] = createSignal<FailedTurn | null>(null);
+    /** The held message being sent now: it stays stored until srv takes it. */
+    const [inFlight, setInFlight] = createSignal<string | null>(null);
+    /** Send now: send while the hold lasts. */
+    const [forced, setForced] = createSignal(false);
+    /** A held message didn't go out: wait for the operator, or the next outage. */
+    const [paused, setPaused] = createSignal(false);
     let nextNoticeId = 0;
     let disposed = false;
     let settleTimer: ReturnType<typeof setTimeout> | null = null;
+    /** The failure an automatic retry was decided for: one put back after
+     *  that retry didn't go out must not start another. */
+    let decidedAt: number | null = null;
+    /** Held messages sent since the list was last empty, for one notice. */
+    let burst: { noticeId: number; sent: number; oldest: number } | null = null;
     onCleanup(() => {
         disposed = true;
         if (settleTimer) clearTimeout(settleTimer);
     });
 
     const holding = () => holdsInput(deps.retrying(), deps.api());
-    const writeHeld = (next: HeldInput[]) => {
-        setHeld(next);
-        deps.storage.saveHeld(next);
-    };
     const notice = (text: string, retry?: () => void) =>
         setNotices((list) => [...list, { id: nextNoticeId++, text, ...(retry ? { retry } : {}) }]);
     const dismissNotice = (id: number) => setNotices((list) => list.filter((n) => n.id !== id));
 
+    const noteSent = (item: HeldInput) => {
+        const b = burst ?? { noticeId: nextNoticeId++, sent: 0, oldest: Infinity };
+        burst = { ...b, sent: b.sent + 1, oldest: Math.min(b.oldest, item.heldAt) };
+        const what = burst.sent === 1 ? "Sent your held message" : `Sent your ${burst.sent} held messages`;
+        const text = `${what} (${heldForText(now() - burst.oldest)}).`;
+        const id = burst.noticeId;
+        setNotices((list) => [...list.filter((n) => n.id !== id), { id, text }]);
+    };
+
     /**
-     * Send held messages, oldest first, each taken off the list before it
-     * goes so it can't go twice. `force` (Send now) sends while held; else
-     * it stops when the hold comes back, which a sent message can cause.
+     * Send the oldest held message, and take it off the list only once srv
+     * accepted it, so a rejected send, or a reload mid-send, keeps it. One
+     * at a time, each when the pane is idle: a message sent during a turn
+     * would only join the pane's own queue, which a reload loses.
      */
-    const release = (force: boolean): Promise<void> =>
+    const releaseOne = (): Promise<void> =>
         deps.lock.run(async () => {
-            let sent = 0;
-            let oldest = Infinity;
-            while (!disposed && untrack(() => deps.ready())) {
-                const list = untrack(held);
-                if (list.length === 0 || (!force && untrack(holding))) break;
-                const [item, ...rest] = list;
-                writeHeld(rest);
-                sent += 1;
-                oldest = Math.min(oldest, item.heldAt);
-                await deps.send(item.text, item.attachments);
+            const item = untrack(held)[0];
+            const blocked = !untrack(forced) && untrack(holding);
+            if (disposed || !item || blocked || untrack(paused) || untrack(deps.working) || !untrack(deps.ready)) return;
+            setInFlight(item.id);
+            const ok = await deps.deliver(item.text, item.attachments);
+            setInFlight(null);
+            if (!ok) {
+                setPaused(true);
+                setForced(false);
+                notice("Couldn't send your held message, so it is still held. Send now tries again.");
+                return;
             }
-            if (sent > 0) {
-                const what = sent === 1 ? "Sent your held message" : `Sent your ${sent} held messages`;
-                notice(`${what} (${heldForText(now() - oldest)}).`);
+            const rest = untrack(held).filter((m) => m.id !== item.id);
+            deps.storage.saveHeld(rest);
+            noteSent(item);
+            if (rest.length === 0) {
+                burst = null;
+                setForced(false);
             }
         });
 
-    // Release once nothing holds: the API is reachable and the turn isn't retrying.
+    // Release once nothing holds (the API is reachable and the turn isn't
+    // retrying) and the pane is idle; the next goes when that turn ends.
     createEffect(() => {
-        if (held().length > 0 && !holding() && deps.ready()) void release(false);
+        const due = held().length > 0 && (forced() || !holding()) && !paused() && deps.ready() && !deps.working();
+        if (due && inFlight() === null) void releaseOne();
+    });
+    // A new outage starts over: what didn't go out last time is tried again.
+    createEffect(() => {
+        if (holding()) setPaused(false);
     });
 
     const submit = async (text: string, attachments?: AttachmentRef[]): Promise<void> => {
@@ -293,7 +376,8 @@ export function createOfflineInput(deps: OfflineInputDeps): OfflineInput {
                 heldAt: now(),
                 ...(attachments?.length ? { attachments } : {}),
             };
-            writeHeld([...untrack(held), item]);
+            deps.storage.saveHeld([...untrack(held), item]);
+            setPaused(false);
             return;
         }
         await deps.send(text, attachments);
@@ -306,15 +390,21 @@ export function createOfflineInput(deps: OfflineInputDeps): OfflineInput {
         }
     };
 
+    /** Lifts the hold until everything held has gone; a running turn is
+     *  stopped first, and each message goes once the pane is idle. */
     const sendNow = async (): Promise<void> => {
+        setPaused(false);
+        setForced(true);
         if (untrack(deps.working)) {
             deps.stop();
             await waitUntilIdle();
         }
-        await release(true);
     };
 
-    const cancel = (id: string) => writeHeld(untrack(held).filter((m) => m.id !== id));
+    const cancel = (id: string) => {
+        if (id === untrack(inFlight)) return;
+        deps.storage.saveHeld(untrack(held).filter((m) => m.id !== id));
+    };
 
     // A network failure starts waiting for the API; any other clears the wait,
     // and so does the failure going away unless the operator typed since (then
@@ -328,12 +418,13 @@ export function createOfflineInput(deps: OfflineInputDeps): OfflineInput {
                 if (turn && !turn.typedSince) setFailed(null);
                 return;
             }
-            if (f.data.code !== "network" || !tracked) {
+            if (f.data.code !== "network" || !tracked || f.at === decidedAt) {
                 setFailed(null);
                 return;
             }
             if (turn?.at === f.at) return;
             setFailed({
+                failure: f,
                 at: f.at,
                 typedSince: held().length > 0,
                 snapshot: deps.ready() ? failedTurnSnapshot(deps.document()) : null,
@@ -341,8 +432,9 @@ export function createOfflineInput(deps: OfflineInputDeps): OfflineInput {
         });
     });
 
-    const decide = (turn: FailedTurn) => {
+    const decide = async (turn: FailedTurn) => {
         setFailed(null);
+        decidedAt = turn.at;
         const snapshot = turn.snapshot ?? failedTurnSnapshot(deps.document());
         const marker = deps.storage.loadMarker();
         const decision = decideOnReconnect({ turn: snapshot, typedSince: turn.typedSince, autoRetryOn: deps.autoRetryOn(), marker });
@@ -351,19 +443,26 @@ export function createOfflineInput(deps: OfflineInputDeps): OfflineInput {
         // the time it was read, not the time it happened.
         const which = snapshot.sentAt ? `your message from ${clock(snapshot.sentAt)}` : "your last message";
         if (decision.kind === "retry" && text) {
-            deps.storage.saveMarker({ text, at: now() });
-            notice(`Back online: sent ${which} again, since its turn failed while the API was unreachable.`);
-            void deps.send(text);
+            // Marked and announced only once srv took it. Otherwise the
+            // failure row, which the send cleared, comes back with its Retry.
+            if (await deps.deliver(text)) {
+                deps.storage.saveMarker({ text, at: now() });
+                notice(`Back online: sent ${which} again, since its turn failed while the API was unreachable.`);
+            } else if (!disposed && !untrack(deps.failure)) {
+                deps.restoreFailure(turn.failure);
+            }
             return;
         }
         // The failure row still offers Retry unless the operator's own send
-        // cleared it; then the offer is here.
+        // cleared it; then the offer is here, until a retry goes out.
         if (decision.kind === "offer" && decision.reason === "typed" && text && !deps.failure()) {
-            const offer = () => {
-                setNotices((list) => list.filter((n) => n.retry !== offer));
-                void deps.send(text);
+            const retry = () => {
+                void deps.deliver(text).then((ok) => {
+                    if (ok) setNotices((list) => list.filter((n) => n.retry !== retry));
+                });
             };
-            notice(`Back online. ${which[0].toUpperCase()}${which.slice(1)} failed while the API was unreachable; it wasn't sent again, since you wrote after it.`, offer);
+            const what = which[0].toUpperCase() + which.slice(1);
+            notice(`Back online. ${what} failed while the API was unreachable; it wasn't sent again, since you wrote after it.`, retry);
         }
     };
 
@@ -376,7 +475,7 @@ export function createOfflineInput(deps: OfflineInputDeps): OfflineInput {
         if (!due) return;
         settleTimer = setTimeout(() => {
             settleTimer = null;
-            if (!disposed && untrack(failed) === turn) untrack(() => decide(turn));
+            if (!disposed && untrack(failed) === turn) void untrack(() => decide(turn));
         }, (deps.settleMs ?? defaultSettleMs)());
     });
 
@@ -393,7 +492,7 @@ export function createOfflineInput(deps: OfflineInputDeps): OfflineInput {
     };
 
     return {
-        held,
+        held: () => held().filter((m) => m.id !== inFlight()),
         notices,
         submit,
         sendNow,
