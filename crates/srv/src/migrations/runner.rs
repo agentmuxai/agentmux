@@ -195,14 +195,14 @@ fn cmd_list(shared_store: &Store, channel_store: Option<&Store>) -> i32 {
     0
 }
 
-// ── In-process migration runner (used by srv startup) ────────────────────────
+// ── In-process migration runner (migrate --prepare; unsupervised srv) ────────
 
 /// Apply all pending migrations in-process before srv opens its stores.
 ///
-/// Called unconditionally at srv startup so the shared store is fully backfilled
-/// before `id_store` binds to it. This prevents apparent data loss (empty shared
-/// store) on first boot after an upgrade. Fast-path: returns `Ok(0)` immediately
-/// when all migrations are already applied.
+/// Under the launcher, srv never calls this at boot: its gate exits 4 and the
+/// launcher runs `migrate --prepare`. A srv without a supervisor (headless,
+/// `task dev:standalone`) calls it from `prepare_in_process` before `id_store`
+/// binds to the shared store. Returns `Ok(0)` when nothing is pending.
 ///
 /// Unlike `run_migrate_command` this writes progress via `tracing` rather than
 /// stdout JSON and is meant to be called from within the daemon process rather
