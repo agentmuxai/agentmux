@@ -171,13 +171,25 @@ fn vault_block_count(store: &Store) -> Result<usize, String> {
 }
 
 /// widgets.json with every entry that opens the `vault` view retargeted, or None when none does.
+/// An entry's own `"section"` (widgets.json's section field) named one of the Vault's sections;
+/// on Warden that is `vault/<it>`, or srv would write it as Warden's own section.
 fn migrated_widgets(widgets: &Map<String, Value>) -> Option<Map<String, Value>> {
     let mut out = widgets.clone();
     let mut changed = false;
     for entry in out.values_mut() {
-        if let Some(Value::Object(meta)) = entry.get_mut("blockdef").and_then(|b| b.get_mut("meta")) {
-            changed |= migrate_meta(meta);
+        let moved = match entry.get_mut("blockdef").and_then(|b| b.get_mut("meta")) {
+            Some(Value::Object(meta)) => migrate_meta(meta),
+            _ => false,
+        };
+        if moved {
+            if let Some(obj) = entry.as_object_mut() {
+                let section = obj.get("section").and_then(Value::as_str).unwrap_or("").to_string();
+                if !section.is_empty() && section != "vault" && !section.starts_with("vault/") {
+                    obj.insert("section".into(), Value::String(format!("vault/{section}")));
+                }
+            }
         }
+        changed |= moved;
     }
     changed.then_some(out)
 }
@@ -243,6 +255,22 @@ mod tests {
         assert_eq!(next["my@cards"]["blockdef"]["meta"], json!({ "view": "warden", "warden:section": "vault", "vault:section": "cards" }));
         assert_eq!(next["my@term"], widgets["my@term"]);
         assert!(migrated_widgets(&next).is_none());
+    }
+
+    #[test]
+    fn an_entrys_own_section_becomes_the_vaults_section_on_warden() {
+        let widgets = meta(json!({
+            "my@cards": { "label": "Cards", "section": "cards", "blockdef": { "meta": { "view": "vault" } } },
+            "my@vault": { "label": "Vault", "blockdef": { "meta": { "view": "vault" } } }
+        }));
+        let next = migrated_widgets(&widgets).unwrap();
+        assert_eq!(next["my@cards"]["section"], "vault/cards");
+        assert!(next["my@vault"].get("section").is_none());
+        // And srv then opens Warden on the Vault's Cards, not on a "cards" section Warden lacks.
+        let mut cards: crate::backend::wconfig::WidgetConfigType = serde_json::from_value(next["my@cards"].clone()).unwrap();
+        cards.resolve_section();
+        assert_eq!(cards.block_def.meta.get("warden:section").and_then(|v| v.as_str()), Some("vault"));
+        assert_eq!(cards.block_def.meta.get("vault:section").and_then(|v| v.as_str()), Some("cards"));
     }
 
     #[test]
