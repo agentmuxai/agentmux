@@ -59,7 +59,7 @@ pub fn key(create: bool) -> Result<Key, String> {
     if let Some(k) = cached.as_ref() {
         return Ok(k.clone());
     }
-    let key = match secret_store::get_optional(KEY_ID)? {
+    let key = match secret_store::get_optional(KEY_ID).map_err(|e| explain_key_error(&e))? {
         Some(hex_key) => decode_key(&hex_key)?,
         None if create => {
             let mut k: Key = Zeroizing::new([0u8; KEY_LEN]);
@@ -78,6 +78,19 @@ pub fn key(create: bool) -> Result<Key, String> {
     };
     *cached = Some(key.clone());
     Ok(key)
+}
+
+/// A keychain error reading the Vault key, in the Vault's words. On macOS an item
+/// another build wrote can't be read here without asking (a `task dev` or unsigned
+/// build sharing the key); the generic advice, to save it again, is wrong for the
+/// Vault: a new key would not open the entries the old one sealed.
+fn explain_key_error(err: &str) -> String {
+    if secret_store::is_needs_consent(err) {
+        "the Vault key was saved by another AgentMux build (a development or unsigned one), which macOS won't let this build read without          asking: open the Vault from the build that created it, normally the installed, signed AgentMux. Nothing was changed, and the          entries are safe."
+            .to_string()
+    } else {
+        err.to_string()
+    }
 }
 
 fn decode_key(hex_key: &str) -> Result<Key, String> {
@@ -152,6 +165,15 @@ mod tests {
         let sealed = seal(&key, "e1", &parts(&[("value", "123-45-6789")])).unwrap();
         assert!(!sealed.windows(11).any(|w| w == b"123-45-6789"));
         assert_eq!(open(&key, "e1", &sealed).unwrap().get("value"), Some("123-45-6789"));
+    }
+
+    #[test]
+    fn a_keychain_that_wont_let_this_build_read_the_key_says_so_in_the_vaults_terms() {
+        let said = explain_key_error(secret_store::NEEDS_CONSENT);
+        assert!(said.contains("another AgentMux build") && said.contains("entries are safe"), "{said}");
+        // Not the generic advice to save it again: a new key would not open the old entries.
+        assert!(!said.contains("save it again") && !said.contains("re-enter"), "{said}");
+        assert_eq!(explain_key_error("keychain: locked"), "keychain: locked");
     }
 
     #[test]
