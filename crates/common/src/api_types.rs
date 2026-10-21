@@ -133,6 +133,27 @@ pub struct ShellStatusResponse {
     pub line_count: u64,
 }
 
+/// `POST /api/v1/shell/output` - the cleaned output of a job that was given Vault
+/// secrets (`ShellCreateRequest.secrets`). Only such a job keeps its output, and
+/// only the agent whose pane started it may read it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShellOutputRequest {
+    pub shell_id: String,
+    pub agent_block_id: String,
+}
+
+/// Response from `POST /api/v1/shell/output`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShellOutputResponse {
+    pub running: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    /// The last lines the job wrote, with every Vault value taken out.
+    pub output: String,
+    /// Older lines were left out.
+    pub truncated: bool,
+}
+
 // ── PTY Shell ─────────────────────────────────────────────────────────────────
 //
 // A REAL PTY-backed shell (not the piped subprocess `Shell` above) — for

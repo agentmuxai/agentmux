@@ -208,3 +208,37 @@ async fn a_command_too_long_to_show_whole_is_refused_without_asking() {
     assert!(inject(&s.state, &s.block, Some(&s.auth), Some(&wanted(&s)), false, &at_limit, "C:/work").await.is_ok());
     assert_eq!(ask.await.unwrap().command, at_limit);
 }
+
+// A job given secrets keeps its cleaned output for the agent whose pane started it, and no other job does.
+#[tokio::test]
+async fn the_cleaned_output_is_read_back_only_by_the_agent_that_ran_the_job() {
+    use crate::backend::shell_node::ShellStatusInfo;
+    use agentmux_common::api_types::ShellOutputRequest;
+    use axum::response::IntoResponse;
+    let s = setup().await;
+    let tail = std::sync::Arc::new(parking_lot::Mutex::new(std::collections::VecDeque::from(["token=[vault:x]".to_string(), "done".to_string()])));
+    let status = std::sync::Arc::new(parking_lot::Mutex::new(ShellStatusInfo { running: false, exit_code: Some(0), line_count: 2, block_id: s.block.clone(), tail: Some(tail), ..Default::default() }));
+    let (tx, _rx) = tokio::sync::oneshot::channel::<()>();
+    s.state.shell_sessions.register_full("job-with-secrets".to_string(), tx, None, status);
+    let plain = std::sync::Arc::new(parking_lot::Mutex::new(ShellStatusInfo { running: false, exit_code: Some(0), line_count: 1, block_id: s.block.clone(), ..Default::default() }));
+    let (tx2, _rx2) = tokio::sync::oneshot::channel::<()>();
+    s.state.shell_sessions.register_full("job-without".to_string(), tx2, None, plain);
+
+    let ask = |id: &str, block: &str| {
+        let req = ShellOutputRequest { shell_id: id.to_string(), agent_block_id: block.to_string() };
+        let state = s.state.clone();
+        async move {
+            let resp = crate::server::http_shell::handle_shell_output(axum::extract::State(state), axum::Json(req)).await.into_response();
+            let status = resp.status();
+            let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+            (status, serde_json::from_slice::<serde_json::Value>(&bytes).unwrap_or_default())
+        }
+    };
+    let (code, body) = ask("job-with-secrets", &s.block).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert_eq!((body["output"].as_str(), body["exit_code"].as_i64(), body["running"].as_bool(), body["truncated"].as_bool()), (Some("token=[vault:x]\ndone"), Some(0), Some(false), Some(false)));
+    // Another pane, a job that kept nothing, and an id nobody has.
+    assert_eq!(ask("job-with-secrets", "another-pane").await.0, StatusCode::NOT_FOUND);
+    assert_eq!(ask("job-without", &s.block).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(ask("no-such-job", &s.block).await.0, StatusCode::NOT_FOUND);
+}

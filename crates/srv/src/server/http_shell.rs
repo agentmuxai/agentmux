@@ -293,6 +293,27 @@ pub(super) async fn handle_shell_status(
     }))
 }
 
+/// `POST /api/v1/shell/output` - the cleaned output of a job that was given Vault
+/// secrets, to the agent whose pane started it (spec section 7.1). Any other job has
+/// no kept output, and another agent's pane is refused.
+pub(super) async fn handle_shell_output(
+    State(state): State<AppState>,
+    Json(req): Json<agentmux_common::api_types::ShellOutputRequest>,
+) -> impl IntoResponse {
+    let s = state.shell_sessions.get_status(&req.shell_id);
+    let (Some(tail), true) = (s.tail.as_ref(), s.block_id == req.agent_block_id) else {
+        let why = "no cleaned output is kept for this job: only a job given Vault secrets keeps it, and only for the pane that started it";
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": why }))).into_response();
+    };
+    let lines: Vec<String> = tail.lock().iter().cloned().collect();
+    let truncated = s.line_count as usize > lines.len();
+    (
+        StatusCode::OK,
+        Json(agentmux_common::api_types::ShellOutputResponse { running: s.running, exit_code: s.exit_code, output: lines.join("\n"), truncated }),
+    )
+        .into_response()
+}
+
 // Meta key persisting which sub-block is "this pane's one shell" — the same
 // key the human-facing shell drawer uses: `agent-view.tsx` reads it into
 // `AgentShellDrawer`'s `shellSubBlockId` prop, and `AgentShellDrawer.tsx`'s
