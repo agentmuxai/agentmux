@@ -205,5 +205,5 @@ pub fn read(text: &str) -> Result<Imported, ReadError> {
             entries.push(e.tag(&tag));
         }
     }
-    Ok(Imported { source: Source::Bitwarden, entries, skipped })
+    Ok(Imported { source: Source::Bitwarden, entries, skipped, plaintext: true })
 }

@@ -1,6 +1,6 @@
 # SPEC: the Vault: one pane for the person's secrets, which agents use without seeing them
 
-**Status:** active — P1 (§4, §11) shipped in #5180; P2a (§5: the pane, the store, the `Vault` tool, agents kept out) P2b (Reveal and Copy, Windows), P2c (`.vault` export and import), P3 (§6.1 to §6.4, §6.6, as §6.7 says) and P4 (§6.5) are built; P5 is partly built (the CSV, JSON and .env importers, §8.8); P6 to P8 and the rest of P5 remain. The operator took the recommended answers to §13 on 2026-10-19.
+**Status:** active — P1 (§4, §11) shipped in #5180; P2a (§5: the pane, the store, the `Vault` tool, agents kept out) P2b (Reveal and Copy, Windows), P2c (`.vault` export and import), P3 (§6.1 to §6.4, §6.6, as §6.7 says) and P4 (§6.5) are built; P5 is partly built (the CSV, JSON, .env and KeePass importers, §8.8); P6 to P8 and the rest of P5 remain. The operator took the recommended answers to §13 on 2026-10-19.
 **Date:** 2026-10-19
 **Author:** Agent2 #6 (agent2-6@narko), at the operator's request
 **Trigger (operator, 2026-10-19):** an agent filling a US state's corporate-registry certificate request form was refused on the address, city, ZIP and email fields, then could not tick a checkbox, so the person had to finish the form by hand. "Agentmux needs to be able to fill in personal information including ssn." … "we'll need to pivot into that work now, write a spec to file." On a first draft that put saved values in Settings: "sounds like we may need a new pane type, a vault, or settings wouldn't really make sense" … "api keys and anything secret can be kept there." … "we want rich features, like support for pw protected encrypted export file (.vault file), and imports from kdbx files and last pass, and any other popular services should be supported."
@@ -282,6 +282,7 @@ The importers that read plaintext files, found from a file's contents (not its n
 | **1Password** | the CSV export (columns found by name) | logins |
 | **Bitwarden, Vaultwarden** | the unencrypted `.json` export | logins with one-time-code seeds and their first URL; cards; secure notes; an identity's Social Security, passport and licence numbers as entries of those kinds |
 | **Chrome, Edge, Brave, Firefox, Safari, Apple Passwords** | the password CSV | logins, with Safari's and Apple's one-time codes |
+| **KeePass, KeePassXC, KeePassDX, KeeWeb, Strongbox** | the `.kdbx` database (KDBX 3.1 and 4; AES or ChaCha20; AES-KDF or Argon2), opened with the master password | logins with their `otp` seed; a custom field named like a kind (`SSN`, `Card number`, `API key`) becomes that kind; other custom fields and the notes are sealed in a note; an entry with only notes is a note; the Recycle Bin is skipped; a group below the root is a tag |
 | **`.env` files and `export` lines** | any file whose every line is `NAME=value` | API keys named for their variable, which is also the suggested environment variable; quoting and `#` comments are read, and a later assignment of a name wins |
 | **Any other CSV** | the file, with the person's choice of which column is the label, the main value, and for a login the site and username | one entry kind for every row |
 
@@ -289,7 +290,8 @@ The importers that read plaintext files, found from a file's contents (not its n
 - **A folder or group becomes a tag.** An item of a type the Vault has no kind for (a Bitwarden key), an item with no password or value, and a row over the limits of §5.5 are listed in the preview with the reason and not imported.
 - **A plaintext export is called one** (§8.6): after importing, the pane says the file holds every secret unencrypted, offers **Delete the file** (the host deletes the file the person picked, by its id; it says plainly that this isn't a secure erase), and warns if the file is in a OneDrive, Dropbox, iCloud Drive or Google Drive folder, where a copy may already be in the cloud and in that service's file history.
 - **Parsers are bounded** (§8.7): 64 MiB, 100,000 rows or items, and 1 MiB a value; a table test feeds every parser hostile bytes and expects a refusal, never a panic.
-- **Not built yet, and refused with a message saying so:** KeePass `.kdbx` (import and export), 1Password's `.1pux` and Proton Pass's zip, Bitwarden's password-protected JSON, and the second wave of §12 P6.
+- **A KeePass database is encrypted, not a plaintext export**, so the pane asks for its master password (the same field as a `.vault` passphrase) and doesn't offer to delete the file. The header is read by hand first and a database asking for more than 1 GiB of Argon2 memory, 100 iterations, 64 lanes or 150 million AES-KDF rounds is refused before any password is tried (§8.7). A database that also needs a key file can't be opened yet, and the decompressed size of its contents isn't capped beyond the 64 MiB file cap.
+- **Not built yet, and refused with a message saying so:** KeePass export, a KeePass key file, 1Password's `.1pux` and Proton Pass's zip, Bitwarden's password-protected JSON, and the second wave of §12 P6.
 
 ### 8.5 Import: the preview
 
@@ -358,7 +360,7 @@ Fix (built in P1):
 | **P2c** | `.vault` export and import (§8.1, §8.2, §8.5), so there is a backup early | The person exports the Vault, deletes the entries and imports them back |
 | **P3** | Browser fill from the Vault (§6.1 to §6.4, §6.6), taint, grants. Built (§6.7); Activity and grants in Warden (§5.6) follow | An agent fills an SSN fixture field; its result, snapshot, screenshot and transcript have no trace of the value; another origin is asked |
 | **P4** | §6.5: the prompt's value field and **Save to Vault**; `request_value`. Built (§6.8) | A form with an SSN field is done by the agent plus one value typed in the banner |
-| **P5** | Importers, first wave (§8.4): KeePass `.kdbx`, LastPass, 1Password, Bitwarden, the browsers' CSVs, `.env`, any CSV; plaintext-file handling (§8.6); fuzzing (§8.7); KeePass export (§8.3). Built so far: all but `.kdbx`, `.1pux`, Bitwarden's password-protected JSON and KeePass export (§8.8) | Each imports its real-export fixture with the right kinds and no loss the preview didn't list |
+| **P5** | Importers, first wave (§8.4): KeePass `.kdbx`, LastPass, 1Password, Bitwarden, the browsers' CSVs, `.env`, any CSV; plaintext-file handling (§8.6); fuzzing (§8.7); KeePass export (§8.3). Built so far: all but a `.kdbx` key file, `.1pux`, Bitwarden's password-protected JSON and KeePass export (§8.8) | Each imports its real-export fixture with the right kinds and no loss the preview didn't list |
 | **P6** | Importers, second wave: Proton Pass, Dashlane, Keeper, NordPass, RoboForm, Enpass, Zoho Vault, Sticky Password | The same, per source |
 | **P7** | §7: `Terminal` `run` with `secrets`, scrubbing, approval, grants | A command reads `STRIPE_API_KEY` from the Vault; its echoed output shows `[vault:<id>]` |
 | **P8** | Only on a yes to §13 question 1 or 2 | — |

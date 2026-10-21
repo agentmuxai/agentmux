@@ -90,5 +90,5 @@ pub fn read(text: &str) -> Result<Imported, ReadError> {
     if entries.is_empty() && skipped.is_empty() {
         return Err("no NAME=value lines were found".into());
     }
-    Ok(Imported { source: Source::Env, entries, skipped })
+    Ok(Imported { source: Source::Env, entries, skipped, plaintext: true })
 }
