@@ -97,7 +97,7 @@ No Taskfile/CI/package.json entry for these. Plausibly still useful; listed so t
 - `scripts/dev/gen-splash-font.py` (49): regenerates `crates/launcher/src/splash_font.rs` (the generated file's header names it). Keep.
 
 ### 1.13 Root-level configs touching scripts
-- `knip.json` / `knip.prod.json` (repo root, adjacent to scope): CONFIRMED nothing invokes `knip` (`rg -w knip` over Taskfile, package.json scripts, `.github`, scripts = 0; only the devDependency and prose). `VERSION_HISTORY.md:581` says npm deps are gated in CI with knip, but no workflow does. `knip.prod.json` has zero references of any kind. LIKELY dead config or a missing gate - needs a human decision either way.
+- `knip.json`: **LIVE, keep it.** `.github/workflows/ci-pr.yml` runs `npx knip --dependencies --files --no-progress` in the step "npm dependencies match imports, no unused files (knip)" (shard 2). An earlier pass of this audit wrongly reported that nothing invokes knip; the main audit retracts that. `knip.prod.json`: re-check with `git grep -n knip.prod` before touching it (the first pass found no reference to it).
 - `.githooks/pre-commit` comment says `npm run setup-hooks`; no such script exists (package.json `prepare` sets `core.hooksPath` instead). Cosmetic.
 
 ---
