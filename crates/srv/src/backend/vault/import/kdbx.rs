@@ -226,7 +226,8 @@ fn entry_into(e: &keepass::db::Entry, tag: &str, entries: &mut Vec<Incoming>, sk
     };
     let label = if label.is_empty() { "(unnamed)".to_string() } else { label };
     let mut made = Vec::new();
-    let password = get("Password");
+    // A password is kept exactly as saved, spaces and all.
+    let password = e.get("Password").unwrap_or("");
     if !password.is_empty() {
         let mut login = Incoming::new("login", &label).part("password", password).field("site", site).field("username", get("UserName"));
         // KeePassXC's `otp` field, or KeePass's own TimeOtp fields.
