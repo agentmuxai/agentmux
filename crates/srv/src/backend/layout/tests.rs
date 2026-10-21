@@ -534,6 +534,41 @@ fn prune_is_a_noop_on_a_clean_tree() {
     assert_eq!(root, before);
 }
 
+fn chip(id: &str, block_id: &str) -> LayoutNode {
+    let mut n = leaf(id, block_id, 5.0);
+    n.minimized = true;
+    n
+}
+
+fn minimized_of(root: &Option<LayoutNode>, id: &str) -> bool {
+    find_node_by_id(root.as_ref().unwrap(), id).unwrap().minimized
+}
+
+#[test]
+fn pruning_the_only_expanded_pane_restores_the_nearest_chip() {
+    let mut root = Some(group("root", FlexDirection::Row, 10.0, vec![leaf("a", "gone", 5.0), chip("m1", "b1"), chip("m2", "b2")]));
+    assert_eq!(prune_dangling_block_refs(&mut root, &live(&["b1", "b2"])), 1);
+    assert_eq!((minimized_of(&root, "m1"), minimized_of(&root, "m2")), (false, true));
+}
+
+/// A delete restores the nearest chip, and that chip's block is gone: the prune that follows
+/// removes it and shows the next one, so the tab never ends with only chips.
+#[test]
+fn a_restored_chip_that_is_pruned_hands_over_to_the_next() {
+    let mut root = Some(group(
+        "root",
+        FlexDirection::Row,
+        10.0,
+        vec![chip("m0", "b0"), leaf("a", "ba", 5.0), chip("d", "gone"), chip("m2", "b2")],
+    ));
+    intent::apply_intent(&mut root, agentmux_common::LayoutIntent::Delete { node_id: "a".into() }, &mut intent::NodeIds::new("00000000-act"))
+        .unwrap();
+    assert!(!minimized_of(&root, "d"), "the delete restored the next pane");
+    prune_dangling_block_refs(&mut root, &live(&["b0", "b2"]));
+    assert!(find_node_by_id(root.as_ref().unwrap(), "d").is_none());
+    assert_eq!((minimized_of(&root, "m0"), minimized_of(&root, "m2")), (true, false));
+}
+
 #[test]
 fn prune_is_a_noop_on_an_empty_tree() {
     let mut root: Option<LayoutNode> = None;

@@ -328,7 +328,7 @@ pub fn delete_and_balance(root: &mut LayoutNode, node_id: &str) -> Result<(), La
 }
 
 /// The panes in reading order (depth first), to find "the nearest pane".
-fn leaf_ids(node: &LayoutNode) -> Vec<String> {
+pub(crate) fn leaf_ids(node: &LayoutNode) -> Vec<String> {
     fn walk(node: &LayoutNode, out: &mut Vec<String>) {
         if node.children.is_empty() {
             if node.data.is_some() {
@@ -347,7 +347,7 @@ fn leaf_ids(node: &LayoutNode) -> Vec<String> {
 /// pane left is minimized, restore the nearest one, the pane that followed it in reading order or
 /// else the one before it, so a tab always shows one. `before` is the reading order with the
 /// removed panes still in it. `deleteNode` (layoutTree.ts) does the same.
-fn restore_nearest_if_all_minimized(tree: &mut LayoutNode, before: &[String], removed: &[String]) {
+pub(crate) fn restore_nearest_if_all_minimized(tree: &mut LayoutNode, before: &[String], removed: &[String]) {
     if expanded_leaves(tree) > 0 {
         return;
     }

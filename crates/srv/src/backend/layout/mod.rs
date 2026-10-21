@@ -466,12 +466,16 @@ pub fn prune_dangling_block_refs(
             continue;
         }
         if let Some(t) = root.as_mut() {
+            // Pruning is a removal too: if the pruned pane was the only one showing content (or the
+            // one a delete just restored), the nearest minimized pane is shown, as after a close.
+            let before = intent::leaf_ids(t);
             // A `NodeNotFound` here would mean the id vanished via this
             // same loop's prior collapse without our fresh re-scan
             // catching it first — shouldn't happen given the re-scan, but
             // isn't a correctness problem either way: the node is gone,
             // which is the outcome we wanted.
             let _ = delete_node(t, &dangling_id);
+            intent::restore_nearest_if_all_minimized(t, &before, std::slice::from_ref(&dangling_id));
         }
     }
     // In-pane tabs (SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §4.3):
