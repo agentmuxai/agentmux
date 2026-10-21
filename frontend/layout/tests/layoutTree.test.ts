@@ -2,7 +2,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { assert, test } from "vitest";
+import { assert, describe, expect, it, test } from "vitest";
 import { newLayoutNode } from "../lib/layoutNode";
 import {
     clearTree,
@@ -25,6 +25,7 @@ import {
     LayoutTreeActionType,
     LayoutTreeComputeMoveNodeAction,
     LayoutTreeMoveNodeAction,
+    type LayoutNode,
 } from "../lib/types";
 import { newLayoutTreeState } from "./model";
 
@@ -601,4 +602,40 @@ test("computeMoveNode - Center direction with a foreign node is undefined (no cr
         nodeToMove: foreignNode,
     } as LayoutTreeComputeMoveNodeAction);
     assert(pendingAction === undefined, "Center + foreign node should produce no action");
+});
+
+// Closing the only pane that shows content, while the others are minimized, restores the nearest
+// one (the next in reading order, else the one before), so a tab always shows a pane. srv does
+// the same (`restore_nearest_if_all_minimized`).
+describe("deleteNode restores the nearest pane when only minimized ones are left", () => {
+    const pane = (id: string, minimized = false) => {
+        const n = newLayoutNode(FlexDirection.Row, 10, undefined, { blockId: id });
+        n.id = id;
+        if (minimized) n.minimized = true;
+        return n;
+    };
+    const find = (root: LayoutNode, id: string) => (root.children ?? []).flatMap((c) => (c.children?.length ? c.children : [c])).find((c) => c.id === id)!;
+
+    it("restores the pane after the closed one", () => {
+        const root = newLayoutNode(FlexDirection.Row, 10, [pane("m1", true), pane("a"), pane("m2", true), pane("m3", true)]);
+        const state = newLayoutTreeState(root);
+        deleteNode(state, { type: LayoutTreeActionType.DeleteNode, nodeId: "a" });
+        expect([find(root, "m1").minimized, find(root, "m2").minimized, find(root, "m3").minimized]).toEqual([true, undefined, true]);
+    });
+
+    it("restores the pane before it when the closed one was last", () => {
+        const col = newLayoutNode(FlexDirection.Column, 10, [pane("m2", true), pane("a")]);
+        const root = newLayoutNode(FlexDirection.Row, 10, [pane("m1", true), col]);
+        const state = newLayoutTreeState(root);
+        deleteNode(state, { type: LayoutTreeActionType.DeleteNode, nodeId: "a" });
+        expect(find(root, "m1").minimized).toBe(true);
+        expect(find(root, "m2").minimized).toBeUndefined();
+    });
+
+    it("restores nothing while another pane shows content", () => {
+        const root = newLayoutNode(FlexDirection.Row, 10, [pane("a"), pane("b"), pane("m", true)]);
+        const state = newLayoutTreeState(root);
+        deleteNode(state, { type: LayoutTreeActionType.DeleteNode, nodeId: "a" });
+        expect(find(root, "m").minimized).toBe(true);
+    });
 });

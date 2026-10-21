@@ -183,6 +183,56 @@ fn delete_leaves_tidying_to_the_balance_pass() {
     assert_eq!(root.children[1].flex_direction, FlexDirection::Column);
 }
 
+fn is_min(tree: &Option<LayoutNode>, id: &str) -> bool {
+    find_node_by_id(tree.as_ref().unwrap(), id).unwrap().minimized
+}
+
+#[test]
+fn closing_the_last_expanded_pane_restores_the_one_after_it() {
+    // m1 [a] m2 m3: closing a, the only expanded pane, restores m2 (next in reading order).
+    let mut tree = Some(branch(
+        "r",
+        FlexDirection::Row,
+        vec![minimized(leaf("m1", "b1")), leaf("a", "ba"), minimized(leaf("m2", "b2")), minimized(leaf("m3", "b3"))],
+    ));
+    apply(&mut tree, LayoutIntent::Delete { node_id: "a".into() }).unwrap();
+    assert_eq!((is_min(&tree, "m1"), is_min(&tree, "m2"), is_min(&tree, "m3")), (true, false, true));
+}
+
+#[test]
+fn closing_the_last_expanded_pane_at_the_end_restores_the_one_before_it() {
+    let mut tree = Some(branch(
+        "r",
+        FlexDirection::Row,
+        vec![
+            minimized(leaf("m1", "b1")),
+            branch("col", FlexDirection::Column, vec![minimized(leaf("m2", "b2")), leaf("a", "ba")]),
+        ],
+    ));
+    apply(&mut tree, LayoutIntent::Delete { node_id: "a".into() }).unwrap();
+    assert!(is_min(&tree, "m1"));
+    assert!(!is_min(&tree, "m2"));
+}
+
+#[test]
+fn closing_a_pane_while_another_shows_content_restores_nothing() {
+    let mut tree = Some(branch(
+        "r",
+        FlexDirection::Row,
+        vec![leaf("a", "ba"), leaf("b", "bb"), minimized(leaf("m", "bm"))],
+    ));
+    apply(&mut tree, LayoutIntent::Delete { node_id: "a".into() }).unwrap();
+    assert!(is_min(&tree, "m"));
+}
+
+#[test]
+fn a_pane_emptied_by_a_move_restores_the_nearest_too() {
+    let mut root = branch("r", FlexDirection::Row, vec![leaf("a", "ba"), minimized(leaf("m1", "b1")), minimized(leaf("m2", "b2"))]);
+    super::super::intent::delete_and_balance(&mut root, "a").unwrap();
+    let tree = Some(root);
+    assert_eq!((is_min(&tree, "m1"), is_min(&tree, "m2")), (false, true));
+}
+
 #[test]
 fn delete_of_the_root_empties_the_tree() {
     let mut tree = Some(leaf("a", "ba"));
