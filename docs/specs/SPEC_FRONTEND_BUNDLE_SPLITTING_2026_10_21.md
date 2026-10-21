@@ -1,6 +1,6 @@
 # Spec: a smaller startup bundle, so each window starts sooner
 
-**Status:** active — step 1 (§5) in #5269; steps 2 and 3 (§6, §7) in the follow-up PR to #5269; measured in §7.
+**Status:** active — step 1 (§5) in #5269; steps 2 and 3 (§6, §7) in #5281, measured in §7. Remaining: §8 (not planned).
 **Date:** 2026-10-21
 **Author:** AgentA@Area54, at the operator's request
 **Verified against:** `agentmux` `main` @ `afd0387db` (2026-10-21), by reading code and measuring a portable build (`task package -- --fresh`) on Windows 10.
