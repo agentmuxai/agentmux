@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// The Vault pane: the person's secrets, which agents use by name without
+// The Vault, Warden's Vault section (vault-in-warden.ts): the person's secrets, which agents use by name without
 // seeing them (docs/specs/SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §5).
 // A rail of sections like Warden's; agents' requests for new entries on top.
 

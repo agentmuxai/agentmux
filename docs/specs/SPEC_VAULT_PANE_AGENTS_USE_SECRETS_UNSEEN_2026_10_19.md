@@ -1,6 +1,6 @@
 # SPEC: the Vault: one pane for the person's secrets, which agents use without seeing them
 
-**Status:** active — P1 (§4, §11) shipped in #5180; P2a (§5: the pane, the store, the `Vault` tool, agents kept out) P2b (Reveal and Copy, Windows), P2c (`.vault` export and import), P3 (§6.1 to §6.4, §6.6, as §6.7 says) and P4 (§6.5) are built; P5 is partly built (the CSV, JSON, .env, KeePass and 1Password `.1pux` importers, §8.8); P7 (§7, background jobs) is built; P6, P8 and the rest of P5 remain. The operator took the recommended answers to §13 on 2026-10-19.
+**Status:** active — P1 (§4, §11) shipped in #5180; P2a (§5: the pane, the store, the `Vault` tool, agents kept out) P2b (Reveal and Copy, Windows), P2c (`.vault` export and import), P3 (§6.1 to §6.4, §6.6, as §6.7 says) and P4 (§6.5) are built; P5 is partly built (the CSV, JSON, .env, KeePass and 1Password `.1pux` importers, §8.8); P7 (§7, background jobs) is built; P6, P8 and the rest of P5 remain. The operator took the recommended answers to §13 on 2026-10-19. On 2026-10-21 the operator moved the Vault into Warden as its Vault section (§5.6 amendment).
 **Date:** 2026-10-19
 **Author:** Agent2 #6 (agent2-6@narko), at the operator's request
 **Trigger (operator, 2026-10-19):** an agent filling a US state's corporate-registry certificate request form was refused on the address, city, ZIP and email fields, then could not tick a checkbox, so the person had to finish the form by hand. "Agentmux needs to be able to fill in personal information including ssn." … "we'll need to pivot into that work now, write a spec to file." On a first draft that put saved values in Settings: "sounds like we may need a new pane type, a vault, or settings wouldn't really make sense" … "api keys and anything secret can be kept there." … "we want rich features, like support for pw protected encrypted export file (.vault file), and imports from kdbx files and last pass, and any other popular services should be supported."
@@ -81,9 +81,11 @@ The refusal and the snapshot mark name the rule that fired (`[secret: ask the us
 
 Settings holds how AgentMux behaves; the Vault holds things the person owns, with its own reveal, approval and audit rules. Identity holds the accounts agents run as; Warden watches what agents do. A Vault entry belongs to the person and is lent to agents one use at a time. A pane of its own also lets it stay closed and locked until the person opens it.
 
+*Amended 2026-10-21:* the Vault is now Warden's Vault section, not a pane of its own (§5.6). Nothing here was ever unlocked for a session (§5.3: every Reveal and Copy confirms the person on its own), so a section loses nothing a pane gave it; what was tied to "the pane" is now tied to "the section is shown" (§5.6).
+
 ### 5.2 Layout
 
-A new view, `vault`, with a manifest in the block registry, a `lock` icon, opened from the widget bar, the command palette and `openOrFocusPaneByView("vault")`. Like Warden, a rail of sections:
+A new view, `vault`, with a manifest in the block registry, a `lock` icon, opened from the widget bar, the command palette and `openOrFocusPaneByView("vault")`. *(Since 2026-10-21 it is Warden's Vault section instead, §5.6.)* Like Warden, a rail of sections:
 
 | Section | Entry kinds | Fields of an entry |
 |---|---|---|
@@ -129,9 +131,18 @@ An entry's id is made once from its kind and label (`ssn-alex`, then `ssn-alex-2
 - **Activity** (`db_vault_activity`) records what was done, by whom, to which entry and where; never a value.
 - Deleting an entry deletes its row, and its sealed parts with it.
 
-### 5.6 Activity and grants in Warden too
+### 5.6 Activity and grants in Warden too, and then the Vault inside Warden
 
 The operator decided on 2026-10-19 that the Vault stays its own pane, and that Warden also shows its oversight half: the record of agents' uses of entries and the standing "Always" grants, as a section or as Audit events, linked both ways with the Vault. Built in P7: Warden's Audit section ends with **Secrets**, listing what agents did with entries (their uses, not the person's own doings, with the outcome) and the standing permissions (sites and commands apart, each with a way to stop it), and a button to open the Vault; the Vault's Activity tab has a button back to the Audit section.
+
+**Amendment, 2026-10-21 (the operator, live):** "we want the vault inside of warden, its better placed there." The Vault is now **Warden's Vault section**, second in its rail after Kanban, with its own sections as before (`vault:section`, `vault:request` keep their meaning). Analysis and plan: `docs/reports/REPORT_PANE_SECTIONS_AS_WIDGETS_AND_VAULT_IN_WARDEN_2026_10_21.md` §5. What changed:
+
+- **Where:** `frontend/app/view/vault/vault-in-warden.ts` gives the Vault's model Warden's block as its host. `defwidget@vault` keeps its key (so pins survive) and opens `{ view: "warden", "warden:section": "vault" }`; `open:vault`, `openVault(section, requestId)` and the Audit section's link switch the Warden already in the tab there. The Vault's import, export and note buttons are in Warden's header while the section is shown; Warden's title reads "Vault · <its section>".
+- **Shown means the section is shown.** Warden keeps its sections mounted, so the Vault is "shown" only while Warden is on screen **and** on the Vault section: the on-screen note that makes `UI window` refuse AgentMux windows (§5.3) is sent only then and cleared on leaving the section, and an open Reveal closes (hiding its values) when the section is left.
+- **Loaded when first shown.** The section mounts the first time it is selected, so a Warden opened on another section never lists, and never decrypts, the entries.
+- **No zoom of its own:** Warden zooms the whole pane.
+- **Old panes:** migration `m0039_vault_into_warden` moves saved blocks, the session snapshot and the user's widgets.json entries; layout files saying `vault` open Warden's Vault section; Warden's manifest keeps `vault` as an alias, and a block still saved as `vault` opens on the Vault section.
+- **Unchanged:** the `data-agent-hidden` marker and screenshot blackout (§5.3), Reveal and Copy through Windows Hello, every srv rule on who may write.
 
 ### 5.7 What the person is asked, and when
 

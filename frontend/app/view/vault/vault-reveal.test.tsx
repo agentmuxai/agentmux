@@ -7,6 +7,7 @@
  *  (docs/specs/SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §5.3). */
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setPlatform } from "@/util/platformutil";
@@ -17,7 +18,7 @@ const vaultCopy = vi.fn();
 vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ approvals: { vaultReveal, vaultCopy } }) }));
 vi.mock("@/app/store/mps", () => ({ onMuxEvent: () => () => {} }));
 
-import { REVEAL_SHOWN_MS, VaultRevealDialog } from "./vault-reveal";
+import { REVEAL_SHOWN_MS, VaultRevealDialog, VaultShown } from "./vault-reveal";
 
 const card: VaultEntryInfo = {
     id: "card-company",
@@ -167,6 +168,20 @@ describe("Reveal and Copy", () => {
         await waitFor(() => expect(part("number").textContent).toContain("4111"));
         unmount();
         expect(document.body.innerHTML).not.toContain("4111111111111111");
+    });
+
+    it("closes when the Vault stops being shown (another Warden section, another tab)", async () => {
+        const [shown, setShown] = createSignal(true);
+        const onClose = vi.fn();
+        render(() => (
+            <VaultShown.Provider value={shown}>
+                <VaultRevealDialog entry={card} onClose={onClose} />
+            </VaultShown.Provider>
+        ));
+        await screen.findByRole("dialog");
+        expect(onClose).not.toHaveBeenCalled();
+        setShown(false);
+        expect(onClose).toHaveBeenCalledTimes(1);
     });
 
     it("explains instead of asking where Windows Hello isn't built", async () => {
