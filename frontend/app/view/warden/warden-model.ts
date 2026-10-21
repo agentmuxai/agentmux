@@ -1,6 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { sectionOf, type PaneSections } from "@/app/block/pane-sections";
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { readZoom } from "@/app/store/zoom-factor";
@@ -21,9 +22,18 @@ export const WARDEN_SECTION_LABELS: Record<WardenSection, string> = {
     history: "History",
 };
 
-function isWardenSection(v: unknown): v is WardenSection {
-    return typeof v === "string" && Object.prototype.hasOwnProperty.call(WARDEN_SECTION_LABELS, v);
-}
+/** Warden's sections, in rail order, as its manifest declares them (pane-sections.ts). */
+export const WARDEN_SECTIONS: PaneSections<WardenSection> = {
+    default: "host",
+    items: [
+        { id: "kanban", label: WARDEN_SECTION_LABELS.kanban, icon: "table-columns" },
+        { id: "host", label: WARDEN_SECTION_LABELS.host, icon: "server" },
+        { id: "lan", label: WARDEN_SECTION_LABELS.lan, icon: "network-wired" },
+        { id: "internet", label: WARDEN_SECTION_LABELS.internet, icon: "globe" },
+        { id: "audit", label: WARDEN_SECTION_LABELS.audit, icon: "list-check" },
+        { id: "history", label: WARDEN_SECTION_LABELS.history, icon: "clock-rotate-left" },
+    ],
+};
 
 /** Warden's state behind its native pane tab (warden.tsx). */
 export class WardenViewModel {
@@ -58,10 +68,7 @@ export class WardenViewModel {
         this.setMeta = (patch) => void ctx.setMeta(patch);
         const meta = ctx.meta;
         this.zoomAtom = createMemo<number>(() => readZoom(meta()));
-        this.sectionAtom = createMemo<WardenSection>(() => {
-            const s = meta()?.["warden:section"];
-            return isWardenSection(s) ? s : "host";
-        });
+        this.sectionAtom = createMemo<WardenSection>(() => sectionOf(WARDEN_SECTIONS, "warden", meta()));
         this.kanbanOpenAtom = createMemo<string | null>(() => {
             const id = meta()?.["kanban:open"];
             return typeof id === "string" && id ? id : null;

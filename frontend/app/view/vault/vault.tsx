@@ -4,6 +4,7 @@
 // Vault module barrel: its native pane tab manifest (and the model).
 
 import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
+import { VAULT_SECTIONS } from "./vault-kinds";
 import { VaultViewModel } from "./vault-model";
 import { VaultView } from "./vault-view";
 
@@ -16,6 +17,7 @@ export const vaultPaneTab: PaneTabManifest = {
     icon: "lock",
     defaultHue: 60,
     capabilities: { paneZoom: {} },
+    sections: VAULT_SECTIONS,
     create: (ctx) => {
         const model = new VaultViewModel(ctx);
         return {

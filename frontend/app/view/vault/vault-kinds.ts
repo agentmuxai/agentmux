@@ -7,6 +7,7 @@
 // refuses a part or field a kind doesn't have, and vault-kinds.test.ts checks
 // this list names the same kinds, parts and fields.
 
+import type { PaneSections } from "@/app/block/pane-sections";
 import type { VaultSection } from "@/types/rpc/VaultSection";
 
 export type VaultPaneSection = VaultSection | "kept" | "activity";
@@ -109,6 +110,20 @@ export const SECTION_LABELS: Record<VaultPaneSection, string> = {
 export function isVaultPaneSection(v: unknown): v is VaultPaneSection {
     return typeof v === "string" && Object.prototype.hasOwnProperty.call(SECTION_LABELS, v);
 }
+
+/** The Vault's sections, in rail order, as its manifest declares them (pane-sections.ts). */
+export const VAULT_SECTIONS: PaneSections<VaultPaneSection> = {
+    default: "personal",
+    items: [
+        { id: "personal", label: SECTION_LABELS.personal, icon: "id-card" },
+        { id: "cards", label: SECTION_LABELS.cards, icon: "credit-card" },
+        { id: "api-keys", label: SECTION_LABELS["api-keys"], icon: "key" },
+        { id: "logins", label: SECTION_LABELS.logins, icon: "right-to-bracket" },
+        { id: "notes", label: SECTION_LABELS.notes, icon: "note-sticky" },
+        { id: "kept", label: SECTION_LABELS.kept, icon: "box-archive" },
+        { id: "activity", label: SECTION_LABELS.activity, icon: "list-check" },
+    ],
+};
 
 export function vaultKind(name: string): VaultKind | undefined {
     return VAULT_KINDS.find((k) => k.name === name);

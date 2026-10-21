@@ -3,13 +3,14 @@
 
 /**
  * A pane with a row of sections, each one manager component: the shape of
- * the Connectors and Memory panes (connectors.tsx, memory.tsx). The selected section lives in block meta under the
- * pane's own key, so it names the pane, survives a remount, and lets an entry
+ * the Connectors and Memory panes (connectors.tsx, memory.tsx). The selected section lives in block meta under
+ * `<view>:section` (pane-sections.ts), so it names the pane, survives a remount, and lets an entry
  * point open the pane on a given section (panes.ts).
  */
 
 import { createMemo, For, type Accessor, type JSX } from "solid-js";
 
+import { sectionKeyOf, sectionOf, type PaneSections } from "@/app/block/pane-sections";
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { TabbedPane } from "@/app/element/ui";
 import { readZoom } from "@/app/store/zoom-factor";
@@ -28,13 +29,19 @@ export interface PaneSection<Id extends string> {
 
 export interface SectionPaneSpec<Id extends string> {
     view: string;
-    /** Block meta key holding the selected section id. */
-    sectionKey: string;
     /** Section shown when the meta holds none, or an unknown id. */
     defaultSection: Id;
     /** The section tabs' accessible name. */
     ariaLabel: string;
     sections: readonly PaneSection<Id>[];
+}
+
+/** The spec's sections as the pane's manifest declares them (`PaneTabManifest.sections`). */
+export function sectionsOfSpec<Id extends string>(spec: SectionPaneSpec<Id>): PaneSections<Id> {
+    return {
+        default: spec.defaultSection,
+        items: spec.sections.map(({ id, label, icon, tooltip }) => ({ id, label, icon, tooltip })),
+    };
 }
 
 /** A section pane's state: the selected section and the zoom, both in block meta. */
@@ -59,18 +66,15 @@ export class SectionPaneModel<Id extends string> {
         const meta = ctx.meta;
         this.meta = meta;
         this.zoomAtom = createMemo<number>(() => readZoom(meta()));
-        this.sectionAtom = createMemo<Id>(() => {
-            const m = meta() as Record<string, unknown> | undefined;
-            const s = m?.[spec.sectionKey];
-            return spec.sections.some((sec) => sec.id === s) ? (s as Id) : spec.defaultSection;
-        });
+        const sections = sectionsOfSpec(spec);
+        this.sectionAtom = createMemo<Id>(() => sectionOf(sections, spec.view, meta() as Record<string, unknown> | undefined));
         this.viewName = createMemo<string>(
             () => spec.sections.find((sec) => sec.id === this.sectionAtom())?.label ?? ""
         );
     }
 
     selectSection(id: Id): void {
-        this.setMeta({ [this.spec.sectionKey]: id });
+        this.setMeta({ [sectionKeyOf(this.spec.view)]: id });
     }
 }
 

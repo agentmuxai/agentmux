@@ -9,13 +9,12 @@ import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
 import { BundleManager } from "@/app/view/bundle/bundle-manager";
 import { GlobalBundleManager } from "@/app/view/global-bundle/global-bundle-manager";
 import { NativeMemoryManager } from "@/app/view/native-memory/native-memory-manager";
-import { MEMORY_SECTION_KEY, MEMORY_VIEW, type MemorySection } from "@/app/view/section-pane/panes";
-import { SectionPaneModel, SectionPaneView, type SectionPaneSpec } from "@/app/view/section-pane/section-pane";
+import { MEMORY_VIEW, type MemorySection } from "@/app/view/section-pane/panes";
+import { SectionPaneModel, SectionPaneView, sectionsOfSpec, type SectionPaneSpec } from "@/app/view/section-pane/section-pane";
 import { SkillManager } from "@/app/view/skill/skill-manager";
 
 const MEMORY_SPEC: SectionPaneSpec<MemorySection> = {
     view: MEMORY_VIEW,
-    sectionKey: MEMORY_SECTION_KEY,
     defaultSection: "global",
     ariaLabel: "Memory section",
     sections: [
@@ -53,6 +52,7 @@ export const memoryPaneTab: PaneTabManifest = {
     defaultHue: 150,
     // Applies `term:zoom` as CSS zoom.
     capabilities: { paneZoom: {} },
+    sections: sectionsOfSpec(MEMORY_SPEC),
     create: (ctx) => {
         const model = new SectionPaneModel(ctx, MEMORY_SPEC);
         return {

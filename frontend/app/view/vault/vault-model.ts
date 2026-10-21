@@ -4,7 +4,8 @@
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { readZoom } from "@/app/store/zoom-factor";
-import { isVaultPaneSection, SECTION_LABELS, type VaultPaneSection } from "./vault-kinds";
+import { sectionOf } from "@/app/block/pane-sections";
+import { SECTION_LABELS, VAULT_SECTIONS, type VaultPaneSection } from "./vault-kinds";
 
 /** The Vault's state behind its native pane tab (vault.tsx). */
 export class VaultViewModel {
@@ -31,10 +32,7 @@ export class VaultViewModel {
         this.setMeta = (patch) => void ctx.setMeta(patch);
         const meta = ctx.meta;
         this.zoomAtom = createMemo<number>(() => readZoom(meta()));
-        this.sectionAtom = createMemo<VaultPaneSection>(() => {
-            const s = meta()?.["vault:section"];
-            return isVaultPaneSection(s) ? s : "personal";
-        });
+        this.sectionAtom = createMemo<VaultPaneSection>(() => sectionOf(VAULT_SECTIONS, "vault", meta()));
         this.requestAtom = createMemo<string>(() => {
             const r = meta()?.["vault:request"];
             return typeof r === "string" ? r : "";

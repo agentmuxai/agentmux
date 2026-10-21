@@ -1483,6 +1483,8 @@ declare global {
         children?: string[];
         /** A third-party pane tab's ES module (Pane Tab contract Phase 6). */
         module?: string;
+        /** The section of a sectioned pane it opens on; srv has already written it into `blockdef.meta` as `<view>:section` (pane-sections.ts). */
+        section?: string;
         blockdef: BlockDef;
     };
 

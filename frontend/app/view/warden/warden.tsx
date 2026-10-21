@@ -4,7 +4,7 @@
 // Warden module barrel — its native pane tab manifest (and the model).
 
 import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
-import { WardenViewModel } from "./warden-model";
+import { WARDEN_SECTIONS, WardenViewModel } from "./warden-model";
 import { WardenView } from "./warden-view";
 
 /** Warden as a native pane tab (Pane Tab contract Phase 2c). */
@@ -16,6 +16,7 @@ export const wardenPaneTab: PaneTabManifest = {
     defaultHue: 270,
     // Applies `term:zoom` as CSS zoom.
     capabilities: { paneZoom: {} },
+    sections: WARDEN_SECTIONS,
     create: (ctx) => {
         const model = new WardenViewModel(ctx);
         return {

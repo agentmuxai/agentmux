@@ -14,8 +14,8 @@ import { AccountsManager } from "@/app/view/accounts/accounts-manager";
 import { McpManager } from "@/app/view/mcp/mcp-manager";
 import { RemotesViewModel } from "@/app/view/remotes/remotes-model";
 import { RemotesView } from "@/app/view/remotes/remotes-view";
-import { CONNECTORS_SECTION_KEY, CONNECTORS_VIEW, type ConnectorsSection } from "@/app/view/section-pane/panes";
-import { SectionPaneModel, SectionPaneView, type SectionPaneSpec } from "@/app/view/section-pane/section-pane";
+import { CONNECTORS_VIEW, type ConnectorsSection } from "@/app/view/section-pane/panes";
+import { SectionPaneModel, SectionPaneView, sectionsOfSpec, type SectionPaneSpec } from "@/app/view/section-pane/section-pane";
 
 /** The Remotes list, on this pane's block: New terminal splits beside it, and
  *  another pane's link reaches it through `remotes:expand` (open-remotes.ts). */
@@ -46,7 +46,6 @@ function RemotesSection(props: { pane: SectionPaneModel<ConnectorsSection> }): J
 
 const CONNECTORS_SPEC: SectionPaneSpec<ConnectorsSection> = {
     view: CONNECTORS_VIEW,
-    sectionKey: CONNECTORS_SECTION_KEY,
     defaultSection: "accounts",
     ariaLabel: "Connectors section",
     sections: [
@@ -76,6 +75,7 @@ export const connectorsPaneTab: PaneTabManifest = {
     defaultHue: 90,
     // Applies `term:zoom` as CSS zoom.
     capabilities: { paneZoom: {} },
+    sections: sectionsOfSpec(CONNECTORS_SPEC),
     create: (ctx) => {
         const model = new SectionPaneModel(ctx, CONNECTORS_SPEC);
         return {

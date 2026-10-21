@@ -34,6 +34,16 @@ export declare class AgentMuxError extends Error {
 
 export type Visibility = "active" | "dormant" | "windowHidden";
 
+/** The sections of AgentMux's own sectioned panes, by view. A pane opens on one when its meta
+ *  holds `<view>:section` (see `panes.open`); any other id opens its first section. */
+export interface PaneSections {
+    warden: "kanban" | "host" | "lan" | "internet" | "audit" | "history";
+    vault: "personal" | "cards" | "api-keys" | "logins" | "notes" | "kept" | "activity";
+    connectors: "accounts" | "mcp" | "remotes";
+    memory: "global" | "personal" | "skills" | "bundles";
+    settings: "appearance" | "window" | "browser" | "terminal" | "sounds" | "notifications" | "recording" | "devices" | "widgets" | "advanced";
+}
+
 export interface Theme {
     mode: "dark" | "light";
     /** CSS custom properties: --am-bg, --am-fg, --am-muted, --am-accent, --am-border,
@@ -167,6 +177,13 @@ export interface AgentMux {
     };
     theme: { get(): Promise<Theme> };
     panes: {
+        /** Opens one of AgentMux's sectioned panes on a section (needs `panes`):
+         *  `am.panes.open("warden", { "warden:section": "kanban" })`. */
+        open<V extends keyof PaneSections>(
+            view: V,
+            meta?: { [K in `${V}:section`]?: PaneSections[V] },
+            split?: "right" | "down" | "tab"
+        ): Promise<{ pane: string }>;
         /** The package's own views need no permission; any other view needs `panes`.
          *  For an own view, `meta` becomes that pane's widget meta (what `meta.get` reads there).
          *  Another view gets only its section (`{ "warden:section": "kanban" }`; also `vault:`,

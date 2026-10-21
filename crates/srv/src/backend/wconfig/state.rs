@@ -70,7 +70,8 @@ impl ConfigState {
 
     /// Replace the widget set (the built-ins merged with the user's own
     /// `widgets.json` — `backend::user_widgets`).
-    pub fn update_widgets(&self, widgets: std::collections::HashMap<String, super::WidgetConfigType>) {
+    pub fn update_widgets(&self, mut widgets: std::collections::HashMap<String, super::WidgetConfigType>) {
+        widgets.values_mut().for_each(super::WidgetConfigType::resolve_section);
         let mut current = self.config.write().unwrap();
         let mut new_config = (**current).clone();
         new_config.widgets = widgets;
