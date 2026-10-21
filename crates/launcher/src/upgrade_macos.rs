@@ -79,16 +79,21 @@ fn world_writable(_dir: &Path) -> bool {
     false
 }
 
-/// Whether this user can create a file in `dir` (a read-only volume can't).
+/// Whether this user can create and remove entries in `dir`, asked without
+/// writing anything there (`access(2)`, which also says no on a read-only
+/// volume): a probe file at a predictable name could follow a link someone
+/// else planted.
+#[cfg(unix)]
 fn can_write_in(dir: &Path) -> bool {
-    let probe = dir.join(format!(".agentmux-write-check-{}", std::process::id()));
-    match std::fs::File::create(&probe) {
-        Ok(_) => {
-            let _ = std::fs::remove_file(&probe);
-            true
-        }
-        Err(_) => false,
-    }
+    use std::os::unix::ffi::OsStrExt;
+    std::ffi::CString::new(dir.as_os_str().as_bytes())
+        // SAFETY: `c` is a NUL-terminated path; `access` only reads it.
+        .is_ok_and(|c| unsafe { libc::access(c.as_ptr(), libc::W_OK | libc::X_OK) } == 0)
+}
+
+#[cfg(not(unix))]
+fn can_write_in(_dir: &Path) -> bool {
+    true
 }
 
 /// What a confirmed macOS upgrade needs: the verified `.dmg`, its digest, the
