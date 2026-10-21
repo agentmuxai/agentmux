@@ -954,11 +954,13 @@ pub fn balance_node(node: &mut LayoutNode) -> Result<(), LayoutError> {
         balance_node(child)?;
     }
 
-    // AFTER-walk: collapse a single leaf child into this node.
+    // AFTER-walk: collapse a single leaf child into this node, with its `minimized` flag: a
+    // chip left alone in its column stays a chip (as `delete_recursive` keeps it).
     if node.children.len() == 1 && node.children[0].children.is_empty() {
         let only = node.children.remove(0);
         node.data = only.data;
         node.id = only.id;
+        node.minimized = only.minimized;
         node.children = Vec::new();
     }
     Ok(())
