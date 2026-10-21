@@ -1,6 +1,6 @@
 # RCA: a CPU floor of about 30% that never goes away, from AgentMux's hidden pre-warmed windows
 
-**Status:** analysis. Written 2026-10-21 against `main` at afd0387db, measured on the operator's machine (Area54: Windows 10, 8 logical cores) in a running 0.59.34 portable. The main cause is fixed in #5145 (released in v0.59.35). §6 lists what is still open.
+**Status:** analysis. Written 2026-10-21 against `main` at afd0387db, measured on the operator's machine (Area54: Windows 10, 8 logical cores) in a running 0.59.34 portable. The main cause is fixed in #5145 (released in v0.59.35).  Verified after upgrading to 0.59.36 (§6 item 1). §6 lists what is still open.
 **Author:** Manoz@Area54, at the operator's request
 **Trigger (operator, 2026-10-21):** "why does it appear like there is a bottom floor around 30% cpu that is always active? what is using that?" Then: "lets rca this to file. also during research, record any time consuming blockers so that future research agents work faster."
 **Related:** #5145 (the fix: the splash pulse is paused in a waiting pool window), #4767 (`SPEC_WINDOW_OPEN_LATENCY_AND_WARM_POOLS_2026_10_13.md`: pools are no longer shed at Warn memory pressure), `SPEC_TEAR_OFF_POOL_PATH_2026_05_06.md` (what a pool window is). The research notes in §7 are also in [`docs/debug/RUNBOOK_ATTRIBUTE_AGENTMUX_CPU_ON_WINDOWS.md`](../debug/RUNBOOK_ATTRIBUTE_AGENTMUX_CPU_ON_WINDOWS.md).
@@ -110,7 +110,16 @@ The cost is flat, and the new-window pages stayed throttled the whole time. So t
 
 ## 6. What to do
 
-1. **Upgrade the running instance to v0.59.35 or later** (v0.59.36 is out). It needs a restart, which also restarts the agents. Then check (§7.6): the two pre-warmed window renderers should drop to about 0% and the GPU process to a few percent.
+1. **Upgrade the running instance to v0.59.35 or later.** Done 2026-10-21 at 14:10: the operator upgraded to 0.59.36. Measured right after the restart, over 20 s:
+
+   | % of one core | 0.59.34 (before) | 0.59.36 (after) |
+   |---|---:|---:|
+   | the two pre-warmed window renderers | ~47% each | 0.0% and 0.2% |
+   | pre-warmed pane window renderer | ~2% | 0.0% |
+   | GPU process | ~19% | 12.3% |
+   | main window renderer | ~30–36% | 20.6% |
+
+   The whole machine went from about 30% to **7.1% of all cores**. That figure has no build in it, and before it had about 12% from a build, so AgentMux's own share fell from about 16% to about 4.5%.
 2. **Guard against the next animation in a pool page.** #5145 pauses one selector (`#startup-loading svg`). Any other infinite animation added to the splash, or to whatever a pool page shows while it waits, brings the cost back. Proposed: one test that loads a waiting pool page and asserts `document.getAnimations().filter(a => a.playState === "running")` is empty, rather than checking one element's `animation-play-state`.
 3. **Make the hidden windows really hidden to Chromium.** Pausing one animation treats the symptom: any timer-driven repaint in a pool page would cost the same. Worth a spike: tell Chromium the pool windows are hidden while they wait, for example by keeping their HWND hidden in a way Chromium's visibility tracking honours, or a CEF patch, while keeping `CalculateNativeWinOcclusion` off for CEF #3638.
 4. **Answer §3** before deciding item 3's priority. If item 1 of §3 is right, other hidden or covered windows pay the same 15× cost for any animation they run.
