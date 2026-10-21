@@ -14,8 +14,8 @@ import { AccountsManager } from "@/app/view/accounts/accounts-manager";
 import { McpManager } from "@/app/view/mcp/mcp-manager";
 import { RemotesViewModel } from "@/app/view/remotes/remotes-model";
 import { RemotesView } from "@/app/view/remotes/remotes-view";
-import { CONNECTORS_SECTION_KEY, CONNECTORS_VIEW, type ConnectorsSection } from "@/app/view/section-pane/panes";
-import { SectionPaneModel, SectionPaneView, type SectionPaneSpec } from "@/app/view/section-pane/section-pane";
+import { CONNECTORS_SECTIONS, CONNECTORS_VIEW, type ConnectorsSection } from "@/app/view/section-pane/panes";
+import { SectionPaneModel, SectionPaneView, sectionPaneSpec } from "@/app/view/section-pane/section-pane";
 
 /** The Remotes list, on this pane's block: New terminal splits beside it, and
  *  another pane's link reaches it through `remotes:expand` (open-remotes.ts). */
@@ -44,29 +44,11 @@ function RemotesSection(props: { pane: SectionPaneModel<ConnectorsSection> }): J
     );
 }
 
-const CONNECTORS_SPEC: SectionPaneSpec<ConnectorsSection> = {
-    view: CONNECTORS_VIEW,
-    sectionKey: CONNECTORS_SECTION_KEY,
-    defaultSection: "accounts",
-    ariaLabel: "Connectors section",
-    sections: [
-        {
-            id: "accounts",
-            label: "Accounts",
-            icon: "key",
-            tooltip: "Sign-ins to providers and services, bound to agents",
-            component: () => <AccountsManager />,
-        },
-        { id: "mcp", label: "MCP servers", icon: "plug", component: () => <McpManager /> },
-        {
-            id: "remotes",
-            label: "Remotes",
-            icon: "server",
-            tooltip: "Remote machines (SSH, WSL)",
-            component: (pane) => <RemotesSection pane={pane} />,
-        },
-    ],
-};
+const CONNECTORS_SPEC = sectionPaneSpec<ConnectorsSection>(CONNECTORS_VIEW, "Connectors section", CONNECTORS_SECTIONS, {
+    accounts: () => <AccountsManager />,
+    mcp: () => <McpManager />,
+    remotes: (pane) => <RemotesSection pane={pane} />,
+});
 
 /** A Connectors pane's instance, loaded with the first one (connectors.tsx). */
 export function create(ctx: PaneTabHostContext): PaneTabInstance {

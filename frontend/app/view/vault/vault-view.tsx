@@ -17,7 +17,7 @@ import { VaultExportDialog } from "./vault-export";
 import { VaultImportDialog } from "./vault-import";
 import { VaultEntryForm, type VaultFormTarget } from "./vault-entry-form";
 import { formatWhen } from "./vault-format";
-import { SECTION_LABELS, vaultKind, type VaultPaneSection } from "./vault-kinds";
+import { VAULT_SECTIONS, vaultKind, type VaultPaneSection } from "./vault-kinds";
 import { vaultPromptNotes } from "./vault-prompts";
 import { openWarden } from "@/app/view/warden/open-warden";
 import { getPlatform } from "@/util/platformutil";
@@ -42,15 +42,7 @@ import "./vault-view.scss";
 
 const ENTRY_SECTIONS: VaultSection[] = ["personal", "cards", "api-keys", "logins", "notes"];
 
-const RAIL: TabItem<VaultPaneSection>[] = [
-    { id: "personal", label: SECTION_LABELS.personal, icon: "id-card" },
-    { id: "cards", label: SECTION_LABELS.cards, icon: "credit-card" },
-    { id: "api-keys", label: SECTION_LABELS["api-keys"], icon: "key" },
-    { id: "logins", label: SECTION_LABELS.logins, icon: "right-to-bracket" },
-    { id: "notes", label: SECTION_LABELS.notes, icon: "note-sticky" },
-    { id: "kept", label: SECTION_LABELS.kept, icon: "box-archive" },
-    { id: "activity", label: SECTION_LABELS.activity, icon: "list-check" },
-];
+const RAIL: TabItem<VaultPaneSection>[] = [...VAULT_SECTIONS.items];
 
 const MANAGED_IN: Record<string, string> = {
     accounts: "the Accounts pane",

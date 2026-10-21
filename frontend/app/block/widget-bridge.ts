@@ -9,7 +9,8 @@
  */
 
 import type { WidgetPackageInfo, WidgetPaneInfo } from "@/app/store/rpc-api/widgets";
-import type { PaneTabHostContext } from "./pane-tab-registry";
+import { hasSection, paneSectionsOf, sectionKeyOf } from "./pane-sections";
+import { resolvePaneTabView, type PaneTabHostContext } from "./pane-tab-registry";
 import type { StatusLook, StatusTone } from "./widget-panes";
 
 export const ERR = {
@@ -409,23 +410,21 @@ const isWebUrl = (v: unknown): boolean => {
         return false;
     }
 };
-const sectionKey = (key: string) => (k: string, v: unknown) => k === key && str(v, 64);
 
-/** The meta keys a widget may set on a pane of another kind: the section a sectioned pane opens on,
- *  and a browser's address. */
-const OTHER_VIEW_META: Record<string, (key: string, value: unknown) => boolean> = {
-    warden: sectionKey("warden:section"),
-    vault: sectionKey("vault:section"),
-    connectors: sectionKey("connectors:section"),
-    memory: sectionKey("memory:section"),
-    settings: sectionKey("settings:section"),
-    browser: (k, v) => k === "url" && isWebUrl(v),
-};
+/** Whether a widget may set `key` on a pane of view `view`: the section a sectioned pane opens on
+ *  (one its manifest declares, pane-sections.ts), and a browser's http(s) address. */
+function otherViewAllows(view: string, key: string, value: unknown): boolean {
+    if (view === "browser") return key === "url" && isWebUrl(value);
+    // An old view name opens its pane, which reads its own name's key: no section through an alias.
+    if (resolvePaneTabView(view) !== view) return false;
+    const sections = paneSectionsOf(view);
+    return !!sections && key === sectionKeyOf(view) && hasSection(sections, value);
+}
 
 /**
  * The meta a pane opened by `panes.open` gets. A pane of the widget's own gets the widget's meta,
  * under its namespace as `meta.set` writes it. A pane of another kind gets only the keys
- * `OTHER_VIEW_META` allows: everything else (a controller, a command, a connection) is dropped, so
+ * `otherViewAllows` allows: everything else (a controller, a command, a connection) is dropped, so
  * `panes` opens panes and never runs anything.
  */
 export function paneMetaForWidget(pkg: Pick<WidgetPackageInfo, "id" | "panes">, view: string, meta: Record<string, unknown>): Record<string, unknown> {
@@ -434,10 +433,7 @@ export function paneMetaForWidget(pkg: Pick<WidgetPackageInfo, "id" | "panes">, 
         for (const [k, v] of Object.entries(meta)) if (v !== null && v !== undefined) out[`widget:${pkg.id}:${k}`] = v;
         return out;
     }
-    // Own keys only: "constructor" or "__proto__" must not reach Object.prototype.
-    if (!Object.hasOwn(OTHER_VIEW_META, view)) return out;
-    const allowed = OTHER_VIEW_META[view];
-    for (const [k, v] of Object.entries(meta)) if (allowed(k, v)) out[k] = v;
+    for (const [k, v] of Object.entries(meta)) if (otherViewAllows(view, k, v)) out[k] = v;
     return out;
 }
 

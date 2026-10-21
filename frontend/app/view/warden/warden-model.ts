@@ -1,29 +1,13 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { sectionOf } from "@/app/block/pane-sections";
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { readZoom } from "@/app/store/zoom-factor";
 
-export type WardenSection = "kanban" | "host" | "lan" | "internet" | "audit" | "history";
-
-// Label text only (not icon), hoisted here so viewName can read it without
-// importing from warden-view.tsx, which would reintroduce the circular
-// import warden.tsx exists to avoid. warden-view.tsx's RAIL references this
-// too, so the two can never drift out of sync, like the section labels in
-// connectors.tsx and memory.tsx.
-export const WARDEN_SECTION_LABELS: Record<WardenSection, string> = {
-    kanban: "Kanban",
-    host: "Host",
-    lan: "LAN",
-    internet: "Internet",
-    audit: "Audit",
-    history: "History",
-};
-
-function isWardenSection(v: unknown): v is WardenSection {
-    return typeof v === "string" && Object.prototype.hasOwnProperty.call(WARDEN_SECTION_LABELS, v);
-}
+export { WARDEN_SECTION_LABELS, WARDEN_SECTIONS, type WardenSection } from "./warden-sections";
+import { WARDEN_SECTIONS, WARDEN_SECTION_LABELS, type WardenSection } from "./warden-sections";
 
 /** Warden's state behind its native pane tab (warden.tsx). */
 export class WardenViewModel {
@@ -58,10 +42,7 @@ export class WardenViewModel {
         this.setMeta = (patch) => void ctx.setMeta(patch);
         const meta = ctx.meta;
         this.zoomAtom = createMemo<number>(() => readZoom(meta()));
-        this.sectionAtom = createMemo<WardenSection>(() => {
-            const s = meta()?.["warden:section"];
-            return isWardenSection(s) ? s : "host";
-        });
+        this.sectionAtom = createMemo<WardenSection>(() => sectionOf(WARDEN_SECTIONS, "warden", meta()));
         this.kanbanOpenAtom = createMemo<string | null>(() => {
             const id = meta()?.["kanban:open"];
             return typeof id === "string" && id ? id : null;

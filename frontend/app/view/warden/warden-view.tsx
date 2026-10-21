@@ -10,17 +10,10 @@ import { WardenInternetStub } from "@/app/view/warden-internet/warden-internet-s
 import { WardenAuditManager } from "@/app/view/warden-audit/warden-audit-manager";
 import { WardenHistoryManager } from "@/app/view/warden-history/warden-history-manager";
 import { WardenKanbanManager } from "@/app/view/warden-kanban/warden-kanban-manager";
-import { WARDEN_SECTION_LABELS, type WardenSection, type WardenViewModel } from "./warden-model";
+import { WARDEN_SECTIONS, type WardenSection, type WardenViewModel } from "./warden-model";
 import "./warden-view.scss";
 
-const RAIL: TabItem<WardenSection>[] = [
-    { id: "kanban",   label: WARDEN_SECTION_LABELS.kanban,   icon: "table-columns" },
-    { id: "host",     label: WARDEN_SECTION_LABELS.host,     icon: "server" },
-    { id: "lan",      label: WARDEN_SECTION_LABELS.lan,      icon: "network-wired" },
-    { id: "internet", label: WARDEN_SECTION_LABELS.internet, icon: "globe" },
-    { id: "audit",    label: WARDEN_SECTION_LABELS.audit,    icon: "list-check" },
-    { id: "history",  label: WARDEN_SECTION_LABELS.history,  icon: "clock-rotate-left" },
-];
+const RAIL: TabItem<WardenSection>[] = [...WARDEN_SECTIONS.items];
 
 export function WardenView(props: { model: WardenViewModel }): JSX.Element {
     const model = props.model;

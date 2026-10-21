@@ -34,6 +34,16 @@ export declare class AgentMuxError extends Error {
 
 export type Visibility = "active" | "dormant" | "windowHidden";
 
+/** The sections of AgentMux's own sectioned panes, by view. A pane opens on one when its meta
+ *  holds `<view>:section` (see `panes.open`); any other id opens its first section. */
+export interface PaneSections {
+    warden: "kanban" | "host" | "lan" | "internet" | "audit" | "history";
+    vault: "personal" | "cards" | "api-keys" | "logins" | "notes" | "kept" | "activity";
+    connectors: "accounts" | "mcp" | "remotes";
+    memory: "global" | "personal" | "skills" | "bundles";
+    settings: "appearance" | "window" | "browser" | "terminal" | "sounds" | "notifications" | "recording" | "devices" | "widgets" | "advanced";
+}
+
 export interface Theme {
     mode: "dark" | "light";
     /** CSS custom properties: --am-bg, --am-fg, --am-muted, --am-accent, --am-border,
@@ -167,12 +177,24 @@ export interface AgentMux {
     };
     theme: { get(): Promise<Theme> };
     panes: {
+        /** Opens one of AgentMux's sectioned panes on a section (needs `panes`):
+         *  `am.panes.open("warden", { "warden:section": "kanban" })`. */
+        open<V extends keyof PaneSections>(
+            view: V,
+            meta?: { [K in `${V}:section`]?: PaneSections[V] },
+            split?: "right" | "down" | "tab"
+        ): Promise<{ pane: string }>;
         /** The package's own views need no permission; any other view needs `panes`.
          *  For an own view, `meta` becomes that pane's widget meta (what `meta.get` reads there).
          *  Another view gets only its section (`{ "warden:section": "kanban" }`; also `vault:`,
          *  `connectors:`, `memory:` and `settings:section`) or, for `browser`, an http(s) `url`;
          *  every other key is dropped. */
-        open(view: string, meta?: Record<string, unknown>, split?: "right" | "down" | "tab"): Promise<{ pane: string }>;
+        open<V extends string>(
+            // A sectioned pane's own name takes the typed overload above, so its sections are checked.
+            view: V & (V extends keyof PaneSections ? never : unknown),
+            meta?: Record<string, unknown>,
+            split?: "right" | "down" | "tab"
+        ): Promise<{ pane: string }>;
     };
     /** Needs `storage`. Per package, at most 5 MB, values up to 1 MB. */
     storage: {

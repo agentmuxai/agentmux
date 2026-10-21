@@ -5,6 +5,7 @@
 // with the first Settings pane (settings-instance.tsx).
 
 import { lazyPaneTab } from "@/app/block/lazy-pane-tab";
+import { SETTINGS_SECTIONS } from "./settings-model";
 
 /** The settings pane as a native pane tab (Pane Tab contract Phase 2c),
  *  titled with its open section. */
@@ -14,6 +15,7 @@ export const settingsPaneTab = lazyPaneTab({
     label: "Settings",
     icon: "cog",
     defaultHue: 0,
+    sections: SETTINGS_SECTIONS,
     members: ["liveTitle"],
     load: () => import("./settings-instance"),
 });

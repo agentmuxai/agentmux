@@ -5,7 +5,7 @@
 // first Connectors pane (connectors-instance.tsx).
 
 import { lazyPaneTab } from "@/app/block/lazy-pane-tab";
-import { CONNECTORS_VIEW } from "@/app/view/section-pane/panes";
+import { CONNECTORS_SECTIONS, CONNECTORS_VIEW } from "@/app/view/section-pane/panes";
 
 export const connectorsPaneTab = lazyPaneTab({
     apiVersion: 1,
@@ -15,6 +15,7 @@ export const connectorsPaneTab = lazyPaneTab({
     defaultHue: 90,
     // Applies `term:zoom` as CSS zoom.
     capabilities: { paneZoom: {} },
+    sections: CONNECTORS_SECTIONS,
     members: ["liveTitle"],
     load: () => import("./connectors-instance"),
 });

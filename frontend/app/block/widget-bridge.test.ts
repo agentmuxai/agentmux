@@ -6,9 +6,29 @@
  *  (docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §6.3–§6.6). */
 
 import { existsSync } from "node:fs";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { WidgetPackageInfo } from "@/app/store/rpc-api/widgets";
 import { BridgeError, ERR, handleBridgeRequest, originMatches, permissionFor, type BridgeHost, type BridgeState } from "./widget-bridge";
+import { registerPaneTab } from "./pane-tab-registry";
+
+// Two sectioned panes, as their manifests declare them (pane-sections.ts).
+const unregister: (() => void)[] = [];
+beforeAll(() => {
+    for (const [view, ids] of [["warden", ["kanban", "host"]], ["memory", ["global", "skills"]]] as const) {
+        unregister.push(
+            registerPaneTab({
+                apiVersion: 1,
+                view,
+                ...(view === "memory" ? { aliases: ["old-memory"] } : {}),
+                label: view,
+                icon: "x",
+                sections: { default: ids[0], items: ids.map((id) => ({ id, label: id, icon: "x" })) },
+                create: () => ({ component: () => null }),
+            })
+        );
+    }
+});
+afterAll(() => unregister.forEach((u) => u()));
 
 function pkg(over: Partial<WidgetPackageInfo> = {}): WidgetPackageInfo {
     return {
@@ -203,6 +223,12 @@ describe("permissions", () => {
         const state = await ready(h);
         await handleBridgeRequest(h, state, "panes.open", { view: "warden", meta: { "warden:section": "kanban", cmd: "x" } });
         expect(h.openPane).toHaveBeenLastCalledWith("warden", { "warden:section": "kanban" }, "right");
+        // Through an old view name, the section would land under a key the pane doesn't read: dropped.
+        await handleBridgeRequest(h, state, "panes.open", { view: "old-memory", meta: { "old-memory:section": "skills", "memory:section": "skills" } });
+        expect(h.openPane).toHaveBeenLastCalledWith("old-memory", {}, "right");
+        // A section the pane doesn't declare is dropped.
+        await handleBridgeRequest(h, state, "panes.open", { view: "warden", meta: { "warden:section": "nope" } });
+        expect(h.openPane).toHaveBeenLastCalledWith("warden", {}, "right");
         // Another pane's section key does nothing on this one.
         await handleBridgeRequest(h, state, "panes.open", { view: "memory", meta: { "warden:section": "kanban" } });
         expect(h.openPane).toHaveBeenLastCalledWith("memory", {}, "right");

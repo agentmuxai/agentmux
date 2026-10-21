@@ -5,6 +5,7 @@
 // first Vault pane (vault-instance.tsx).
 
 import { lazyPaneTab } from "@/app/block/lazy-pane-tab";
+import { VAULT_SECTIONS } from "./vault-kinds";
 
 /** The Vault as a native pane tab
  *  (docs/specs/SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §5). */
@@ -15,6 +16,7 @@ export const vaultPaneTab = lazyPaneTab({
     icon: "lock",
     defaultHue: 60,
     capabilities: { paneZoom: {} },
+    sections: VAULT_SECTIONS,
     members: ["liveTitle", "headerActions"],
     load: () => import("./vault-instance"),
 });

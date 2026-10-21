@@ -5,6 +5,7 @@
 // the first Warden pane (warden-instance.tsx).
 
 import { lazyPaneTab } from "@/app/block/lazy-pane-tab";
+import { WARDEN_SECTIONS } from "./warden-sections";
 
 /** Warden as a native pane tab (Pane Tab contract Phase 2c). */
 export const wardenPaneTab = lazyPaneTab({
@@ -15,6 +16,7 @@ export const wardenPaneTab = lazyPaneTab({
     defaultHue: 270,
     // Applies `term:zoom` as CSS zoom.
     capabilities: { paneZoom: {} },
+    sections: WARDEN_SECTIONS,
     members: ["liveTitle"],
     load: () => import("./warden-instance"),
 });
