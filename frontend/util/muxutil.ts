@@ -21,7 +21,11 @@ function loadCssTree(): void {
             cssTree = m;
             setCssTreeLoaded(true);
         })
-        .catch((e) => console.error("error loading the background parser", e));
+        .catch((e) => {
+            // Let the next background that needs it try again.
+            cssTreeLoading = false;
+            console.error("error loading the background parser", e);
+        });
 }
 
 function encodeFileURL(file: string) {
@@ -43,8 +47,9 @@ function processBackgroundUrls(cssText: string): string {
     cssText = cssText.replace(attrRe, "");
     // Only a value that can load something (`url()`, `src()`, `image()`,
     // `image-set()`) needs the parser to vet and rewrite it; anything else (a
-    // colour, a gradient) is used as written.
-    if (!/(url|src|image(-set)?)\s*\(/i.test(cssText)) {
+    // colour, a gradient) is used as written. A backslash always goes to the
+    // parser: CSS escapes can spell a function name (`\75rl(` is `url(`).
+    if (!cssText.includes("\\") && !/(url|src|image(-set)?)\s*\(/i.test(cssText)) {
         return cssText;
     }
     if (!cssTreeLoaded() || cssTree == null) {
@@ -57,6 +62,20 @@ function processBackgroundUrls(cssText: string): string {
         context: "declaration",
     });
     let hasUnsafeUrl = false;
+    // What the parser couldn't read, or a name spelled with escapes, may be a
+    // function it didn't recognise as one: a browser decodes `\75rl(a.png)`
+    // to `url(a.png)`, which the parser leaves as raw text. Refuse those. A
+    // backslash inside a URL itself (a Windows path) is fine.
+    walkCSS(ast, (node) => {
+        const name = (node as { name?: string }).name;
+        if (node.type === "Raw" || (typeof name === "string" && name.includes("\\"))) {
+            hasUnsafeUrl = true;
+        }
+    });
+    if (hasUnsafeUrl) {
+        console.log("Invalid background, contains CSS the parser could not read or an escaped name");
+        return null;
+    }
     walkCSS(ast, {
         visit: "Url",
         enter(node) {

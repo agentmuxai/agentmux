@@ -27,4 +27,15 @@ describe("computeBgStyleFromMeta", () => {
         expect(bg("url(ftp://example.com/a.png)")).toBeNull();
         expect(bg('url("javascript:void 0")')).toBeNull();
     });
+
+    it("refuses a function name spelled with CSS escapes, which a browser reads as url()", async () => {
+        await vi.waitFor(() => expect(bg("url(/home/me/a.png)")).not.toBeNull());
+        const b = "\\";
+        expect(bg(`${b}75rl(a.png)`)).toBeNull();
+        expect(bg(`u${b}72l(https://example.com/a.png)`)).toBeNull();
+        // A backslash inside the URL (a Windows path) is still fine.
+        expect(bg(`url("C:${b}${b}Users${b}${b}me${b}${b}a.png")`)).toContain("/agentmux/stream-file?path=");
+        // A full shorthand still parses.
+        expect(bg("url(/home/me/a.png) no-repeat center / cover, #000")).toContain("no-repeat");
+    });
 });
