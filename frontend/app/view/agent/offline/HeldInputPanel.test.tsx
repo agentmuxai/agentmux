@@ -35,6 +35,20 @@ describe("HeldInputPanel", () => {
         expect(onCancel).toHaveBeenCalledWith("b");
     });
 
+    it("marks one that may have gone already", () => {
+        render(() => (
+            <HeldInputPanel
+                held={[{ id: "a", text: "u there?", heldAt: 1, unconfirmed: true }]}
+                notices={[]}
+                onSendNow={() => {}}
+                onCancel={() => {}}
+                onDismissNotice={() => {}}
+                clockTime={(ms) => `t${ms}`}
+            />
+        ));
+        expect(screen.getByText("t1 · may have gone already")).toBeTruthy();
+    });
+
     it("shows nothing held when nothing is", () => {
         render(() => (
             <HeldInputPanel held={[]} notices={[]} onSendNow={() => {}} onCancel={() => {}} onDismissNotice={() => {}} clockTime={String} />

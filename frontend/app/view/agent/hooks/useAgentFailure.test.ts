@@ -53,6 +53,8 @@ vi.mock("@/app/store/mos", () => ({ makeORef: (a: string, b: string) => `${a}:${
 vi.mock("@/app/store/global", () => ({
     getBlockMetaKeyAtom: (_blockId: string, _key: string) => () => hub.persistedFailure,
 }));
+const setBlockMetaMock = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock("@/app/store/block-meta", () => ({ setBlockMeta: setBlockMetaMock }));
 const writeTextMock = vi.fn();
 vi.mock("@/util/clipboard", () => ({ writeText: (text: string) => writeTextMock(text) }));
 
@@ -732,6 +734,24 @@ describe("useAgentFailure — a network failure that waits for its API", () => {
             // Other transient classes keep their ladder.
             fire("agentfailure", transient());
             expect(counting(ui)).toBe(true);
+            dispose();
+        });
+    });
+
+    it("dismissing a network failure clears the stored one, so a reload doesn't offer it again", async () => {
+        await createRoot(async (dispose) => {
+            setBlockMetaMock.mockClear();
+            const { ui } = mkUI(vi.fn(), { waitsForReconnect: () => true, reconnectHint: () => null });
+            await Promise.resolve();
+            fire("agentfailure", network());
+            ui.row()!.actions.find((a) => a.title === "Dismiss")!.onClick();
+            expect(setBlockMetaMock).toHaveBeenCalledWith(BLOCK_ID, { "agent:last_failure": null });
+            expect(ui.row()).toBeNull();
+            // Other classes stay stored: srv routes work by them.
+            setBlockMetaMock.mockClear();
+            fire("agentfailure", transient());
+            ui.row()!.actions.find((a) => a.title === "Dismiss")!.onClick();
+            expect(setBlockMetaMock).not.toHaveBeenCalled();
             dispose();
         });
     });

@@ -46,6 +46,7 @@ import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import * as MOS from "@/app/store/mos";
 import { getBlockMetaKeyAtom } from "@/app/store/global";
+import { setBlockMeta } from "@/app/store/block-meta";
 import { addEventListener as addPaneEventListener } from "@/app/store/agent-pane-state-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import type { PaneFailure } from "@/app/store/agent-pane-state/types";
@@ -442,7 +443,16 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 bindAccount: opts.onBindAccount ?? (() => {}),
                 newSession: opts.onNewSession,
                 toggleDetails: () => setExpanded((v) => !v),
-                dismiss: endEpisode,
+                dismiss: () => {
+                    // Dismissed is done with: don't read a network failure back
+                    // on the next mount, where it would be offered again
+                    // (offline/offline-input.ts). Network only: srv reads the
+                    // usage-limit and sign-in classes to route work by account.
+                    if (f.code === "network") {
+                        setBlockMeta(opts.blockId, { "agent:last_failure": null }).catch(() => {});
+                    }
+                    endEpisode();
+                },
                 takeOver: opts.onTakeOver ? () => takeOver(pf.turnAttempted ?? true) : undefined,
             },
         );

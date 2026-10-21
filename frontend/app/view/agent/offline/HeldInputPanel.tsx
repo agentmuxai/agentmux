@@ -33,7 +33,10 @@ export function HeldInputPanel(props: {
                         {(msg) => (
                             <div class="agent-pending-item agent-held-item" data-held-id={msg.id}>
                                 <pre>{msg.text}</pre>
-                                <span class="agent-held-time">{props.clockTime(msg.heldAt)}</span>
+                                <span class="agent-held-time">
+                                    {props.clockTime(msg.heldAt)}
+                                    {msg.unconfirmed ? " · may have gone already" : ""}
+                                </span>
                                 <Button density="compact" tone="quiet" onClick={() => props.onCancel(msg.id)}>
                                     Cancel
                                 </Button>

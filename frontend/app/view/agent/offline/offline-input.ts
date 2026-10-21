@@ -18,7 +18,9 @@
  * again, the turn is retried once by itself if nothing argues against it:
  * the operator hasn't typed in the pane since (their message goes first,
  * and the turn is only offered), no tool ran in it (a retry would run the
- * tool again), it isn't itself an automatic retry that failed, and the
+ * tool again), it isn't itself an automatic retry that failed, the failure
+ * happened while this pane was open (one read back after a reload or a
+ * restart is only offered: it may have been dismissed before), and the
  * `agent:retryonreconnect` setting is on.
  *
  * {@link createOfflineInput} holds the rules over injected inputs, so tests
@@ -39,6 +41,9 @@ export interface HeldInput {
     /** When it was typed, in ms since the epoch. */
     heldAt: number;
     attachments?: AttachmentRef[];
+    /** Sent, but srv's answer never came: it may have gone. Not sent again
+     *  by itself; Send now says so. */
+    unconfirmed?: boolean;
 }
 
 /** The turn an automatic retry re-sent, so its failure isn't retried again. */
@@ -75,46 +80,64 @@ export function keyedLock(chains: Map<string, Promise<unknown>>, key: string): O
 /** What a pane's send reports about one message, as reducer events. */
 export type PaneMessageEvent = { type: string; id?: string };
 
+/** What became of a message sent with {@link confirmedSend}. `unknown`:
+ *  no answer in time, so it may or may not have gone. */
+export type DeliveryOutcome = "accepted" | "rejected" | "unknown";
+
+/** How long a late answer is still listened for after `unknown`. */
+const LATE_ANSWER_MS = 30 * 60_000;
+
 /**
- * `send`, resolved true only once srv accepted the message (the pane's
+ * `send`, resolved `accepted` only once srv accepted the message (the pane's
  * `pending-accepted` for it). The send path resolves either way: it turns
  * a failed `AgentInputCommand` or a login guard into `pending-rejected`, a
  * lost delivery into `pending-expired`, and a command it handles itself
- * into no pending entry at all. A message sent while a turn runs would only
- * join the pane's own queue, which a reload drops, so it isn't sent.
+ * into no pending entry at all; all are `rejected`. A message sent while a
+ * turn runs would only join the pane's own queue, which a reload drops, so
+ * it isn't sent. With no answer by `timeoutMs` it is `unknown`, and an
+ * answer that comes later still reaches `onLate`.
  */
 export function confirmedSend(
     send: (text: string, attachments?: AttachmentRef[]) => Promise<void>,
     listen: (cb: (e: PaneMessageEvent) => void) => () => void,
     working: () => boolean,
     timeoutMs = 120_000
-): (text: string, attachments?: AttachmentRef[]) => Promise<boolean> {
-    return (text, attachments) => {
-        if (working()) return Promise.resolve(false);
-        return new Promise<boolean>((resolve) => {
+): OfflineInputDeps["deliver"] {
+    return (text, attachments, onLate) => {
+        if (working()) return Promise.resolve("rejected");
+        return new Promise<DeliveryOutcome>((resolve) => {
             let id: string | null = null;
-            let settled = false;
-            const finish = (ok: boolean) => {
-                if (settled) return;
-                settled = true;
+            let timedOut = false;
+            let done = false;
+            const settle = (accepted: boolean) => {
+                if (done) return;
+                done = true;
                 unsub();
                 clearTimeout(timer);
-                resolve(ok);
+                if (timedOut) onLate?.(accepted);
+                else resolve(accepted ? "accepted" : "rejected");
             };
             // The send path queues its entry synchronously, before any await.
             const unsub = listen((e) => {
                 if (e.type === "pending-queued" && id === null) id = e.id ?? null;
                 else if (id !== null && e.id === id) {
-                    if (e.type === "pending-accepted") finish(true);
-                    else if (e.type === "pending-rejected" || e.type === "pending-expired") finish(false);
+                    if (e.type === "pending-accepted") settle(true);
+                    else if (e.type === "pending-rejected" || e.type === "pending-expired") settle(false);
                 }
             });
-            const timer = setTimeout(() => finish(false), timeoutMs);
+            let timer = setTimeout(() => {
+                timedOut = true;
+                resolve("unknown");
+                timer = setTimeout(() => {
+                    done = true;
+                    unsub();
+                }, LATE_ANSWER_MS);
+            }, timeoutMs);
             send(text, attachments).then(
                 () => {
-                    if (id === null) finish(false);
+                    if (id === null) settle(false);
                 },
-                () => finish(false)
+                () => settle(false)
             );
         });
     };
@@ -177,17 +200,20 @@ export function failedTurnSnapshot(doc: readonly DocumentNode[]): FailedTurnSnap
 
 export type ReconnectDecision =
     | { kind: "retry" }
-    | { kind: "offer"; reason: "typed" | "tool_ran" | "setting_off" | "retried_once" | "nothing_to_resend" };
+    | { kind: "offer"; reason: "typed" | "read_back" | "tool_ran" | "setting_off" | "retried_once" | "nothing_to_resend" };
 
 /** What to do with a network-failed turn once its API answers again. */
 export function decideOnReconnect(input: {
     turn: FailedTurnSnapshot;
     typedSince: boolean;
+    /** The failure happened while this pane was open, not read back on mount. */
+    live: boolean;
     autoRetryOn: boolean;
     marker: AutoRetryMarker | null;
 }): ReconnectDecision {
     if (!input.turn.text) return { kind: "offer", reason: "nothing_to_resend" };
     if (input.typedSince) return { kind: "offer", reason: "typed" };
+    if (!input.live) return { kind: "offer", reason: "read_back" };
     if (input.turn.toolRan) return { kind: "offer", reason: "tool_ran" };
     if (!input.autoRetryOn) return { kind: "offer", reason: "setting_off" };
     if (input.marker?.text === input.turn.text) return { kind: "offer", reason: "retried_once" };
@@ -222,8 +248,13 @@ export interface OfflineInputDeps {
     autoRetryOn: Accessor<boolean>;
     /** Send as if typed, with no hold: the pane's own send path. */
     send: (text: string, attachments?: AttachmentRef[]) => Promise<void>;
-    /** The same, resolving true only once srv accepted it ({@link confirmedSend}). */
-    deliver: (text: string, attachments?: AttachmentRef[]) => Promise<boolean>;
+    /** The same, saying whether srv accepted it ({@link confirmedSend});
+     *  after `unknown`, a late answer goes to `onLate`. */
+    deliver: (
+        text: string,
+        attachments?: AttachmentRef[],
+        onLate?: (accepted: boolean) => void
+    ) => Promise<DeliveryOutcome>;
     /** Put a failure back on the row, after a retry that didn't go out. */
     restoreFailure: (failure: PaneFailure) => void;
     /** Stop the running turn. */
@@ -245,6 +276,8 @@ export interface OfflineInputDeps {
 interface FailedTurn {
     failure: PaneFailure;
     at: number;
+    /** Seen while this pane was open, after a turn ran in it. */
+    live: boolean;
     typedSince: boolean;
     snapshot: FailedTurnSnapshot | null;
 }
@@ -298,6 +331,12 @@ export function createOfflineInput(deps: OfflineInputDeps): OfflineInput {
     let decidedAt: number | null = null;
     /** Held messages sent since the list was last empty, for one notice. */
     let burst: { noticeId: number; sent: number; oldest: number } | null = null;
+    /** A turn ran in this pane since it mounted or since the last failure:
+     *  a failure that follows it was seen live, not read back on mount. */
+    let workedSinceFailure = false;
+    createEffect(() => {
+        if (deps.working()) workedSinceFailure = true;
+    });
     onCleanup(() => {
         disposed = true;
         if (settleTimer) clearTimeout(settleTimer);
@@ -326,25 +365,56 @@ export function createOfflineInput(deps: OfflineInputDeps): OfflineInput {
     const releaseOne = (): Promise<void> =>
         deps.lock.run(async () => {
             const item = untrack(held)[0];
-            const blocked = !untrack(forced) && untrack(holding);
+            const isForced = untrack(forced);
+            // One that may have gone already waits for the operator, and so
+            // does everything after it.
+            const blocked = !isForced && (untrack(holding) || !!item?.unconfirmed);
             if (disposed || !item || blocked || untrack(paused) || untrack(deps.working) || !untrack(deps.ready)) return;
             setInFlight(item.id);
-            const ok = await deps.deliver(item.text, item.attachments);
+            const outcome = await deps.deliver(item.text, item.attachments, (accepted) => settleLate(item.id, accepted));
             setInFlight(null);
-            if (!ok) {
+            if (outcome === "unknown") {
+                markHeld(item.id, { unconfirmed: true });
+                setForced(false);
+                notice("No answer yet for your held message, so it may have gone. It stays here and isn't sent again by itself.");
+                return;
+            }
+            if (outcome === "rejected") {
                 setPaused(true);
                 setForced(false);
                 notice("Couldn't send your held message, so it is still held. Send now tries again.");
                 return;
             }
-            const rest = untrack(held).filter((m) => m.id !== item.id);
-            deps.storage.saveHeld(rest);
-            noteSent(item);
-            if (rest.length === 0) {
-                burst = null;
-                setForced(false);
-            }
+            if (item.unconfirmed) notice("Sent your held message again. It may have gone once already.");
+            accepted(item);
         });
+
+    const markHeld = (id: string, patch: Partial<HeldInput>) =>
+        deps.storage.saveHeld(untrack(held).map((m) => (m.id === id ? { ...m, ...patch } : m)));
+
+    const accepted = (item: HeldInput) => {
+        const rest = untrack(held).filter((m) => m.id !== item.id);
+        deps.storage.saveHeld(rest);
+        noteSent(item);
+        if (rest.length === 0) {
+            burst = null;
+            setForced(false);
+        }
+    };
+
+    /** srv's answer for a message that timed out: drop it once accepted, or
+     *  hold it as before once rejected. */
+    const settleLate = (id: string, ok: boolean) => {
+        if (disposed) return;
+        const item = untrack(held).find((m) => m.id === id);
+        if (!item?.unconfirmed) return;
+        if (ok) {
+            accepted(item);
+            return;
+        }
+        markHeld(id, { unconfirmed: false });
+        setPaused(true);
+    };
 
     // Release once nothing holds (the API is reachable and the turn isn't
     // retrying) and the pane is idle; the next goes when that turn ends.
@@ -423,9 +493,12 @@ export function createOfflineInput(deps: OfflineInputDeps): OfflineInput {
                 return;
             }
             if (turn?.at === f.at) return;
+            const live = workedSinceFailure;
+            workedSinceFailure = false;
             setFailed({
                 failure: f,
                 at: f.at,
+                live,
                 typedSince: held().length > 0,
                 snapshot: deps.ready() ? failedTurnSnapshot(deps.document()) : null,
             });
@@ -437,7 +510,13 @@ export function createOfflineInput(deps: OfflineInputDeps): OfflineInput {
         decidedAt = turn.at;
         const snapshot = turn.snapshot ?? failedTurnSnapshot(deps.document());
         const marker = deps.storage.loadMarker();
-        const decision = decideOnReconnect({ turn: snapshot, typedSince: turn.typedSince, autoRetryOn: deps.autoRetryOn(), marker });
+        const decision = decideOnReconnect({
+            turn: snapshot,
+            typedSince: turn.typedSince,
+            live: turn.live,
+            autoRetryOn: deps.autoRetryOn(),
+            marker,
+        });
         const text = snapshot.text;
         // The message's own time: a failure read back after a reload carries
         // the time it was read, not the time it happened.
@@ -445,21 +524,24 @@ export function createOfflineInput(deps: OfflineInputDeps): OfflineInput {
         if (decision.kind === "retry" && text) {
             // Marked and announced only once srv took it. Otherwise the
             // failure row, which the send cleared, comes back with its Retry.
-            if (await deps.deliver(text)) {
-                deps.storage.saveMarker({ text, at: now() });
-                notice(`Back online: sent ${which} again, since its turn failed while the API was unreachable.`);
-            } else if (!disposed && !untrack(deps.failure)) {
-                deps.restoreFailure(turn.failure);
-            }
+            const settled = (ok: boolean) => {
+                if (ok) {
+                    deps.storage.saveMarker({ text, at: now() });
+                    notice(`Back online: sent ${which} again, since its turn failed while the API was unreachable.`);
+                } else if (!disposed && !untrack(deps.failure)) {
+                    deps.restoreFailure(turn.failure);
+                }
+            };
+            const outcome = await deps.deliver(text, undefined, settled);
+            if (outcome !== "unknown") settled(outcome === "accepted");
             return;
         }
         // The failure row still offers Retry unless the operator's own send
         // cleared it; then the offer is here, until a retry goes out.
         if (decision.kind === "offer" && decision.reason === "typed" && text && !deps.failure()) {
             const retry = () => {
-                void deps.deliver(text).then((ok) => {
-                    if (ok) setNotices((list) => list.filter((n) => n.retry !== retry));
-                });
+                const drop = (ok: boolean) => ok && setNotices((list) => list.filter((n) => n.retry !== retry));
+                void deps.deliver(text, undefined, drop).then((outcome) => drop(outcome === "accepted"));
             };
             const what = which[0].toUpperCase() + which.slice(1);
             notice(`Back online. ${what} failed while the API was unreachable; it wasn't sent again, since you wrote after it.`, retry);
@@ -485,6 +567,7 @@ export function createOfflineInput(deps: OfflineInputDeps): OfflineInput {
         const decision = decideOnReconnect({
             turn: turn.snapshot ?? failedTurnSnapshot(deps.document()),
             typedSince: turn.typedSince,
+            live: turn.live,
             autoRetryOn: deps.autoRetryOn(),
             marker: deps.storage.loadMarker(),
         });
