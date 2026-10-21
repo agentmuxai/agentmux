@@ -43,7 +43,6 @@ import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
 import remarkRehype from "remark-rehype";
 import rehypeRaw from "rehype-raw";
-import rehypeHighlight from "rehype-highlight";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import rehypeSlug from "rehype-slug";
 import RemarkFlexibleToc from "remark-flexible-toc";
@@ -133,7 +132,10 @@ function buildProcessor(highlight) {
     const tocRef = [];
     const rehypePlugins = [
         rehypeRaw,
-        ...(highlight ? [rehypeHighlight] : []),
+        // Code colour is no longer in the pipeline: markdown.tsx marks fenced
+        // blocks and shiki colours each one after render
+        // (SPEC_MARKDOWN_CODE_ON_SHIKI_AND_REDUNDANT_LIBRARIES_2026_10_21.md §4),
+        // so `highlight` no longer changes this processor's cost.
         // rehypeAlignToClass / rehypeLinkify are app-local and trivial
         // (single unist visits); omitted here, so this is a slight
         // UNDER-estimate of the real cost, consistent with the rest.
@@ -142,7 +144,7 @@ function buildProcessor(highlight) {
                 ...defaultSchema,
                 attributes: {
                     ...defaultSchema.attributes,
-                    span: [...(defaultSchema.attributes?.span || []), ["className", /^hljs-./], ["srcset"], ["media"], ["type"]],
+                    span: [...(defaultSchema.attributes?.span || []), ["srcset"], ["media"], ["type"]],
                     th: [...(defaultSchema.attributes?.th || []), ["className", ALIGN_CLASS_REGEX]],
                     td: [...(defaultSchema.attributes?.td || []), ["className", ALIGN_CLASS_REGEX]],
                     waveblock: [["blockkey"]],
