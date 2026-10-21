@@ -102,10 +102,12 @@ export function KanbanBoard(props: {
     onOpenAgent: (blockId: string) => void;
     /** Review's soft limit (`kanban:reviewlimit`): past it the header turns amber. 0: none. */
     reviewLimit: number;
+    /** How many tasks the whole board has in Review, which the limit is about (a lane holds some). */
+    reviewTotal: number;
 }): JSX.Element {
     const groups = createMemo(() => backlogGroups(props.tasks, props.agents));
     const review = createMemo(() => reviewLoad(props.tasks, props.now));
-    const over = () => props.reviewLimit > 0 && review().count > props.reviewLimit;
+    const over = () => props.reviewLimit > 0 && props.reviewTotal > props.reviewLimit;
 
     const columnHead = (id: ColumnId, label: string, count: number) => (
         <div class="kanban-column__head">

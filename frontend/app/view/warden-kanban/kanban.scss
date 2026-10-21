@@ -102,18 +102,8 @@
 .kanban-lane__head {
     display: flex;
     align-items: baseline;
+    align-self: flex-start;
     gap: var(--space-2);
-    padding: var(--space-1) 0;
-    border: none;
-    background: none;
-    color: inherit;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-
-    &:focus-visible {
-        @include mixins.focus-ring;
-    }
 }
 
 .kanban-lane__name {

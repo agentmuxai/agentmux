@@ -99,6 +99,8 @@ export const WardenKanbanManager = (props: {
         (board()?.tasks ?? []).find((t) => (t.state === "claimed" || t.state === "blocked") && t.claimed_by === agent);
     const untracked = createMemo(() => (showUntracked() ? untrackedAgents(agents(), board()?.tasks ?? []) : []));
     const laneList = createMemo(() => repoLanes(tasks()));
+    // The soft limit is on the board's whole Review column, every lane's included.
+    const reviewTotal = createMemo(() => tasks().filter((t) => t.state === "review").length);
     const open = (t: KanbanTask) => setOpenId(t.id);
     const openAgent = (blockId: string) => void revealBlock(blockId, { source: "kanban" });
 
@@ -181,6 +183,7 @@ export const WardenKanbanManager = (props: {
                             onOpen={open}
                             onOpenAgent={openAgent}
                             reviewLimit={reviewLimit()}
+                            reviewTotal={reviewTotal()}
                         />
                     }
                 >
@@ -202,6 +205,7 @@ export const WardenKanbanManager = (props: {
                                     onOpen={open}
                                     onOpenAgent={openAgent}
                                     reviewLimit={reviewLimit()}
+                                    reviewTotal={reviewTotal()}
                                 />
                             </section>
                         </Show>
@@ -211,16 +215,14 @@ export const WardenKanbanManager = (props: {
                                 <Show when={laneList().find((l) => l.repo === repo)}>
                                     {(lane) => (
                                         <section class="kanban-lane" aria-label={repoLabel(repo)}>
-                                            <button
-                                                type="button"
+                                            <Button
+                                                density="compact"
+                                                tone="quiet"
+                                                icon={folded().has(repo) ? "chevron-right" : "chevron-down"}
                                                 class="kanban-lane__head"
                                                 aria-expanded={!folded().has(repo)}
                                                 onClick={() => fold(repo)}
                                             >
-                                                <i
-                                                    class={`fa-solid fa-chevron-${folded().has(repo) ? "right" : "down"}`}
-                                                    aria-hidden="true"
-                                                />
                                                 <span class="kanban-lane__name">{lane().label}</span>
                                                 <span class="warden-manager-dim">
                                                     {lane().tasks.filter((t) => columnOf(t) !== "done").length} open
@@ -228,7 +230,7 @@ export const WardenKanbanManager = (props: {
                                                     {lane().tasks.filter((t) => columnOf(t) === "needs").length} need
                                                     you
                                                 </span>
-                                            </button>
+                                            </Button>
                                             <Show when={!folded().has(repo)}>
                                                 <KanbanBoard
                                                     tasks={lane().tasks}
@@ -240,6 +242,7 @@ export const WardenKanbanManager = (props: {
                                                     onOpen={open}
                                                     onOpenAgent={openAgent}
                                                     reviewLimit={reviewLimit()}
+                                                    reviewTotal={reviewTotal()}
                                                 />
                                             </Show>
                                         </section>
