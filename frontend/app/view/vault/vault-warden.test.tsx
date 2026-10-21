@@ -19,7 +19,7 @@ vi.mock("@/app/store/block-component-registry", () => ({ openOrFocusPaneByView: 
 let entries: VaultEntryInfo[] = [];
 let activity: VaultActivity[] = [];
 const vault = vi.fn(async (op: string, _args?: Record<string, unknown>): Promise<unknown> => {
-    if (op === "list") return { entries, problem: null, requests: [], uses: [], backend: "keychain" };
+    if (op === "grants") return { granted: entries.filter((e) => e.grants.length > 0).map((e) => ({ id: e.id, label: e.label, kind: e.kind, grants: e.grants })) };
     if (op === "activity") return { activity };
     return {};
 });
@@ -77,7 +77,9 @@ describe("Secrets in Warden's Audit section", () => {
         await new Promise((r) => setTimeout(r, 20));
         expect(vault).not.toHaveBeenCalled();
         setShown(true);
-        await waitFor(() => expect(vault.mock.calls.some((c) => c[0] === "list")).toBe(true));
+        await waitFor(() => expect(vault.mock.calls.some((c) => c[0] === "grants")).toBe(true));
+        // Never the decrypting list, which can make the OS ask for the Vault key.
+        expect(vault.mock.calls.some((c) => c[0] === "list")).toBe(false);
         expect(await screen.findByRole("table", { name: "Agents' use of secrets" })).toBeInTheDocument();
     });
 

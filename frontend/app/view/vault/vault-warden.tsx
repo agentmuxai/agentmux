@@ -14,7 +14,7 @@ import type { VaultActivity } from "@/types/rpc/VaultActivity";
 import { formatWhen } from "./vault-format";
 import { openVault } from "./open-vault";
 import { COMMAND_GRANT, commandGrantLabel, siteOf } from "./vault-use-prompts";
-import { followVault, loadActivity, refreshVault, revokeGrant, vaultAvailable, vaultChangedMs, vaultEntries } from "./vault-store";
+import { loadActivity, loadGrants, revokeGrant, vaultAvailable, vaultChangedMs, type GrantedEntry } from "./vault-store";
 
 /** How many of an agent's recent uses to list. */
 const RECENT = 50;
@@ -30,21 +30,18 @@ export function WardenSecrets(props: { visible?: boolean }): JSX.Element {
     if (!vaultAvailable()) return <></>;
     const visible = () => props.visible ?? true;
     const [rows, setRows] = createSignal<VaultActivity[] | null>(null);
+    const [granted, setGranted] = createSignal<GrantedEntry[]>([]);
     const [error, setError] = createSignal<string | null>(null);
+    // Neither read opens the Vault key, so showing this never makes the OS ask for it (the
+    // entries' list, which decrypts, is the Vault pane's alone).
     const load = () =>
-        loadActivity(500)
-            .then((r) => {
-                setRows(r.filter(isAgentUse).slice(0, RECENT));
+        Promise.all([loadActivity(500), loadGrants()])
+            .then(([activity, grants]) => {
+                setRows(activity.filter(isAgentUse).slice(0, RECENT));
+                setGranted(grants);
                 setError(null);
             })
             .catch((e) => setError(String(e)));
-    let started = false;
-    createEffect(() => {
-        if (!visible() || started) return;
-        started = true;
-        followVault();
-        void refreshVault();
-    });
     // When first shown, and again whenever the Vault changes while shown (a use is recorded,
     // a grant is made or revoked).
     createEffect(
@@ -53,11 +50,10 @@ export function WardenSecrets(props: { visible?: boolean }): JSX.Element {
         })
     );
 
-    const granted = () => (vaultEntries() ?? []).filter((e) => e.grants.length > 0);
     const revoke = async (entryId: string, origin: string) => {
         try {
             await revokeGrant(entryId, origin);
-            await refreshVault();
+            await load();
         } catch (e) {
             setError(String(e));
         }
