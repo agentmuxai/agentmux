@@ -1,7 +1,7 @@
 # Report: browser-pane hibernation spike (Phase 0)
 
 **Date:** 2026-10-20
-**Status:** measured. Phase 0 of `docs/specs/SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md` §9.
+**Status:** analysis. Measured; Phase 0 of `docs/specs/SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md` §9.
 **Author:** korp
 **Build:** production portables of branch `korp/browser-hibernation-spike` on `main` @ `30daa7c28`, Windows 11 (narko), each run in an isolated instance (own data folder, CDP port 9341). Lab script: built on Camper's browser-pane lab and the memory lab's `driver.mjs` / `sample.mjs`.
 
