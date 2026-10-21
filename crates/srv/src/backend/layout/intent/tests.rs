@@ -449,6 +449,20 @@ fn a_chip_moves_to_another_parent_and_stays_a_chip() {
 }
 
 #[test]
+fn moving_one_chip_out_of_a_strip_of_two_leaves_the_other_a_chip() {
+    // The operator's tab: a strip of two chips beside a pane. Moving one chip next to the pane
+    // leaves the strip with one child; the balance pass folds it in, keeping the flag.
+    let mut tree = Some(branch(
+        "r",
+        FlexDirection::Row,
+        vec![branch("col", FlexDirection::Column, vec![minimized(leaf("m1", "b1")), minimized(leaf("m2", "b2"))]), leaf("p", "bp")],
+    ));
+    apply(&mut tree, LayoutIntent::Move { node_id: "m1".into(), parent_id: Some("p".into()), index: 1, insert_at_root: false }).unwrap();
+    assert!(min_of(&tree, "m1"));
+    assert!(min_of(&tree, "m2"), "the chip left alone in its strip stays minimized");
+}
+
+#[test]
 fn only_a_chip_may_go_into_a_strip_of_chips() {
     let chips = || branch("col", FlexDirection::Column, vec![minimized(leaf("m1", "b1")), minimized(leaf("m2", "b2"))]);
     let base = || Some(branch("r", FlexDirection::Row, vec![leaf("a", "ba"), chips(), leaf("c", "bc"), minimized(leaf("m3", "b3"))]));

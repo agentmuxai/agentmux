@@ -6,7 +6,7 @@
 // SPEC_DRAG_MINIMIZED_PANES_2026_10_20.md §3 B. srv's side: crates/srv/src/backend/layout/intent/tests.rs.
 
 import { describe, expect, it } from "vitest";
-import { newLayoutNode } from "../lib/layoutNode";
+import { balanceNode, findNode, newLayoutNode } from "../lib/layoutNode";
 import { computeMoveNode, moveIsLockedByMinimize, moveNode, swapNode } from "../lib/layoutTree";
 import {
     DropDirection,
@@ -41,6 +41,16 @@ describe("moving and swapping a minimized pane", () => {
         expect(ids(col)).toEqual(["b", "m", "c"]);
         expect(col.children![1].minimized).toBe(true);
         expect(ids(root)).toEqual(["a", "col"]);
+    });
+
+    it("moving one chip out of a strip of two leaves the other a chip after the balance pass", () => {
+        const strip = branch("col", FlexDirection.Column, [pane("m1", true), pane("m2", true)]);
+        const root = branch("r", FlexDirection.Row, [strip, pane("p")]);
+        const state = newLayoutTreeState(root);
+        moveNode(state, { type: LayoutTreeActionType.Move, node: strip.children![0], parentId: "p", index: 1 } as LayoutTreeMoveNodeAction);
+        state.rootNode = balanceNode(state.rootNode!);
+        expect(findNode(state.rootNode, "m1")?.minimized).toBe(true);
+        expect(findNode(state.rootNode, "m2")?.minimized, "the chip left alone in its strip stays minimized").toBe(true);
     });
 
     it("only a chip may go into a strip of chips", () => {

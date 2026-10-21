@@ -75,6 +75,7 @@ import {
     collapseMaximizedNode as collapseMaximizedNodeImpl,
     restoreMaximizedNode as restoreMaximizedNodeImpl,
     rebuildMinimizedSet as rebuildMinimizedSetImpl,
+    isNodeLocked,
 } from "./layoutMinimize";
 import {
     initializeFromMuxObject as initializeFromMuxObjectImpl,
@@ -804,6 +805,26 @@ export class LayoutModel {
                                 }
                             }
 
+                            // A minimized pane lands as a chip: show its own size at the edge it goes to,
+                            // not a half-pane slot (SPEC_DRAG_MINIMIZED_PANES_2026_10_20.md §3 A).
+                            const chip = this.draggedChipSize(action.node?.id);
+                            if (chip) {
+                                const after = action.index > targetIndex;
+                                if (parentNode.flexDirection === FlexDirection.Column) {
+                                    placeholderDimensions.height = Math.min(chip.height, targetBoundingRect.height);
+                                    placeholderDimensions.top = after
+                                        ? targetBoundingRect.top + targetBoundingRect.height - placeholderDimensions.height
+                                        : targetBoundingRect.top;
+                                } else {
+                                    placeholderDimensions.width = Math.min(chip.width, targetBoundingRect.width);
+                                    placeholderDimensions.height = Math.min(chip.height, targetBoundingRect.height);
+                                    placeholderDimensions.top = targetBoundingRect.top;
+                                    placeholderDimensions.left = after
+                                        ? targetBoundingRect.left + targetBoundingRect.width - placeholderDimensions.width
+                                        : targetBoundingRect.left;
+                                }
+                            }
+
                             return setTransform(placeholderDimensions);
                         }
                     }
@@ -813,10 +834,12 @@ export class LayoutModel {
                     const action = pendingAction as LayoutTreeSwapNodeAction;
                     const targetNodeId = action.node1Id;
                     const targetBoundingRect = this.getNodeRectById(targetNodeId);
+                    // A dragged chip takes the target's slot as a chip: its own height at the slot's top.
+                    const chip = this.draggedChipSize(action.node2Id);
                     const placeholderDimensions: Dimensions = {
                         top: targetBoundingRect.top,
                         left: targetBoundingRect.left,
-                        height: targetBoundingRect.height,
+                        height: chip ? Math.min(chip.height, targetBoundingRect.height) : targetBoundingRect.height,
                         width: targetBoundingRect.width,
                     };
 
@@ -966,6 +989,15 @@ export class LayoutModel {
 
     getNodeTransform(node: LayoutNode): CSSProperties {
         return getNodeTransformByIdImpl(this, node.id);
+    }
+
+    /** The on-screen size of the pane being dragged, when it is a minimized pane in this tab. */
+    private draggedChipSize(nodeId: string | undefined): { width: number; height: number } | undefined {
+        if (!nodeId) return undefined;
+        const node = findNode(this.treeState.rootNode, nodeId);
+        if (!node || node.children?.length || !isNodeLocked(node)) return undefined;
+        const rect = this.getNodeRectById(nodeId);
+        return rect?.height > 0 && rect?.width > 0 ? { width: rect.width, height: rect.height } : undefined;
     }
 
     getNodeRectById(nodeId: string): Dimensions {

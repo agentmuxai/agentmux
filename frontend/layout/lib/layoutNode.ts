@@ -271,6 +271,8 @@ export function balanceNode(
             if (node.children?.length === 1 && !node.children[0].children) {
                 node.data = node.children[0].data;
                 node.id = node.children[0].id;
+                // A chip left alone in its column stays a chip.
+                node.minimized = node.children[0].minimized;
                 node.children = undefined;
             }
             afterWalkCallback?.(node);
