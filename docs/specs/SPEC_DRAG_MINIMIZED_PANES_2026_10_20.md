@@ -3,7 +3,7 @@
 **Date:** 2026-10-20
 **Author:** Maricon@charlie
 **Type:** Spec (a missing feature and a drag-image fix)
-**Status:** proposed
+**Status:** implemented (#5257)
 **Decisions applied:** D1 to D4 as recommended (the operator, 2026-10-20: *"go"*).
 **Requested by:** the operator: *"we also want to add a missing feature, you should be able to dnd minimized panes. the ghost would be the size of the minimized pane (currently dragging a minimized pane will have a ghost the size of what appears to be the restored pane."*
 **Related:** `SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md` (where minimized panes were locked against moves; §8 made minimize a display mode), `SPEC_PANE_CONTROLS_TILED_RESTORE_ICON_AND_MINIMIZE_FROM_MAXIMIZED_2026_10_12.md` (minimize from maximized), `SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md`, `SPEC_PANE_DRAG_TO_TAB_2026_07_10.md` (cross-tab drops), `SPEC_NATIVE_POINTER_DRAG_TEAROFF_2026_07_28.md` (tear-off).
