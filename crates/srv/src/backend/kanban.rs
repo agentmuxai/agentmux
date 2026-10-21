@@ -9,9 +9,14 @@
 //!   done without the operator coming back. Off with `kanban:reminders`
 //!   false, or for one agent with its block's `kanban:continue` false.
 //! - **The PR link** (§6.8): an agent opening a PR while it holds exactly one
-//!   task gets that task's branch set.
+//!   task gets that task's branch set, and the PR itself once GitHub lists it
+//!   ([`prs`]).
+//! - **Closing on merge** (D5, [`prs`]): a task in Review whose PR merged is
+//!   accepted.
 //!
 //! The history line and the board event come with each.
+
+pub mod prs;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock};
@@ -44,14 +49,15 @@ struct Context {
     identity: Arc<Store>,
     config: Arc<ConfigState>,
     broker: Arc<Broker>,
+    http: reqwest::Client,
 }
 
 static CONTEXT: OnceLock<Context> = OnceLock::new();
 
 /// Turn the Kanban's background work on for this srv. Until this is called
 /// (and in tests) nothing here acts.
-pub fn install(mstore: Arc<Store>, identity: Arc<Store>, config: Arc<ConfigState>, broker: Arc<Broker>) {
-    let _ = CONTEXT.set(Context { mstore, identity, config, broker });
+pub fn install(mstore: Arc<Store>, identity: Arc<Store>, config: Arc<ConfigState>, broker: Arc<Broker>, http: reqwest::Client) {
+    let _ = CONTEXT.set(Context { mstore, identity, config, broker, http });
 }
 
 fn publish_changed(broker: &Broker) {
@@ -222,7 +228,8 @@ pub async fn run_reminder_loop() {
 }
 
 /// The progress watcher saw these agents open PRs: an agent holding exactly
-/// one task gets the PR's branch on it. With several, nothing is guessed.
+/// one task gets the PR's branch on it, and the PR once GitHub lists it. With
+/// several, nothing is guessed.
 pub fn on_new_prs(prs: &[NewPr]) {
     let Some(ctx) = CONTEXT.get() else { return };
     if prs.is_empty() {
@@ -231,19 +238,48 @@ pub fn on_new_prs(prs: &[NewPr]) {
     let regs = crate::backend::reactive::get_global_handler().list_agents();
     let mut changed = false;
     for pr in prs {
-        let uid = regs.iter().find(|r| r.block_id == pr.block_id).and_then(|r| r.uid.clone()).unwrap_or_default();
+        let reg = regs.iter().find(|r| r.block_id == pr.block_id);
+        let uid = reg.and_then(|r| r.uid.clone()).unwrap_or_default();
         let held = ctx.identity.work_queue_claimed_by(&pr.agent_id, &uid).unwrap_or_default();
         let [task] = held.as_slice() else { continue };
-        let Some(head) = pr.head.as_deref().map(|h| h.rsplit(':').next().unwrap_or(h).to_string()) else { continue };
+        // `--head`, else the branch checked out, which is gh's own default.
+        let (owner, head) = match pr.head.as_deref() {
+            Some(h) => split_head(h),
+            None => {
+                let channel = crate::backend::work_facts::cross_channel::own_channel();
+                let checked_out = reg
+                    .and_then(|r| crate::backend::work_facts::collect_local(&ctx.mstore, std::slice::from_ref(r), &channel).pop())
+                    .and_then(|f| f.branch);
+                match checked_out {
+                    Some(b) => (None, b),
+                    None => continue,
+                }
+            }
+        };
+        if head.is_empty() {
+            continue;
+        }
         let now = agentmux_common::time::now_ms();
         let _ = ctx.identity.work_card_ensure(&task.id, now);
         if ctx.identity.work_card_update(&task.id, &CardUpdate { branch: Some(head.clone()), ..Default::default() }, now).is_ok() {
             record(&ctx.identity, &task.id, &pr.agent_id, "linked", &format!("opened a PR from {head}"));
             changed = true;
+            let repo = ctx.identity.work_board_get(&task.id).ok().flatten().map(|t| t.card.repo).unwrap_or_default();
+            prs::find_opened(task.id.clone(), repo, owner, head, now);
         }
     }
     if changed {
         publish_changed(&ctx.broker);
+    }
+}
+
+/// `alice:feature` -> (`alice`, `feature`); `feature` -> (none, `feature`):
+/// `gh pr create --head` names a fork's branch with its owner.
+pub fn split_head(head: &str) -> (Option<String>, String) {
+    match head.trim().split_once(':') {
+        Some((owner, branch)) if !owner.is_empty() => (Some(owner.to_string()), branch.to_string()),
+        Some((_, branch)) => (None, branch.to_string()),
+        None => (None, head.trim().to_string()),
     }
 }
 
@@ -329,6 +365,13 @@ mod tests {
             .unwrap();
         assert_eq!(ids(due(&s, "Loap-3", "", 15_000, 30_000)), ["b"]);
         assert!(due(&s, "Naki", "", 0, 30_000).is_empty(), "not Naki's");
+    }
+
+    #[test]
+    fn a_head_names_its_fork_owner_or_none() {
+        assert_eq!(split_head("alice:feature/x"), (Some("alice".into()), "feature/x".into()));
+        assert_eq!(split_head("feature/x"), (None, "feature/x".into()));
+        assert_eq!(split_head(":x"), (None, "x".into()));
     }
 
     #[test]

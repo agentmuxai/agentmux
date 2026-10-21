@@ -26,4 +26,13 @@ offer_always: boolean,
  * Why the person is being asked: it is a new site, or the field doesn't look
  * like what the entry is.
  */
-reason: string, requested_ms: number, };
+reason: string, 
+/**
+ * There is no entry yet: the person types the value in the prompt, and may
+ * keep it in the Vault (spec section 6.5).
+ */
+needs_value: boolean, 
+/**
+ * The kind of entry that would be kept, when `needs_value`.
+ */
+kind: string, requested_ms: number, };

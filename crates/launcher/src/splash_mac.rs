@@ -111,7 +111,7 @@ const STAGE_AREA_H: f64 = STAGE_PAD_TOP + MAX_STAGE_ROWS as f64 * STAGE_ROW_H + 
 /// Split point between the name column and the right-aligned time column,
 /// as a fraction of SPLASH_W.
 const STAGE_NAME_FRAC: f64 = 0.60;
-const STAGE_LABEL_MAX_CHARS: usize = 16;
+const STAGE_LABEL_MAX_CHARS: usize = crate::splash_core::STAGE_LABEL_MAX_CHARS;
 const SUB_LABEL_MAX_CHARS: usize = 13;
 const STAGE_INDENT: f64 = 14.0;
 

@@ -1,58 +1,22 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Phase 1 of the fast-startup redesign
-//! (`docs/specs/SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md`,
-//! tracked by issue #3258) — the primitives a "quiesce srv, run pending
-//! migrations, come back" upgrade action needs, built and tested in
-//! isolation ahead of wiring them into a live caller.
+//! [`quiesce_srv`]: the launcher's one way of stopping srv, used on every
+//! quit by both supervisors and on "Upgrade & restart". It returns only once
+//! the OS has genuinely reaped the process (`Child::wait()`'s own contract),
+//! never after a fixed sleep: data must never change while a srv may still
+//! hold it (`341faa981`'s data-loss incident).
 //!
-//! WHY THIS IS SPLIT FROM ITS EVENTUAL CALLER. The spec's §4.3 sequence
-//! (maintenance state → quiesce → snapshot → migrate → relaunch) has two
-//! halves with very different risk profiles: the actual quiesce/migrate
-//! logic below is a self-contained, thoroughly-testable async function; the
-//! "suspend the live supervisor loop's respawn/teardown handling" half
-//! means editing `supervisor/windows.rs`'s and `supervisor/unix.rs`'s
-//! `tokio::select!` state machines — ~700- and ~1200-line functions this
-//! repo has no way to exercise end-to-end outside a real multi-process
-//! launcher run (see the I1-I6 isolation invariants in
-//! `docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md`;
-//! this is exactly the surface they exist to protect). §4.2 also hasn't landed yet, which is what
-//! decides WHEN this runs at all — an upgrade-only srv mode most likely
-//! means srv is never handed to the normal supervised loop as a
-//! respawn-on-exit child in the first place, so the "suspend the loop"
-//! problem may look completely different once that exists. Wiring this into
-//! today's loops now would be guessing at an integration shape that phase 2
-//! gets to actually decide. This module is deliberately the callable,
-//! tested half; the calling half is follow-up work once §4.2 lands.
-//! ([`quiesce_srv`] itself is live: both supervisors stop srv with it on
-//! quit, after their loops have ended, so no respawn handling is involved.)
-//!
-//! Constraint 2 from the spec — "migrations only run with no live srv
-//! holding that data dir" (`341faa981`'s data-loss incident) — is what
-//! [`quiesce_srv`] exists to guarantee: it returns only once the OS has
-//! genuinely reaped the process (`Child::wait()`'s own contract), replacing
-//! `crates/cef/src/commands/backend.rs`'s dev-mode-only 300ms sleep
-//! heuristic with a real wait for real exit.
-//!
-//! No snapshot step lives here on purpose: `agentmux-srv migrate`'s own
-//! `apply_pending` (shared with the in-process daemon path) already takes
-//! its own backup under the same cross-process migration lock before
-//! applying anything (`crates/srv/src/migrations/runner.rs`'s
-//! `backup_stores` call) — a launcher-side snapshot would be redundant with,
-//! not a replacement for, that one. The spec's §4.3 step 3 was written
-//! assuming the launcher would re-implement what `bootstrap/stores.rs` does for
-//! the in-process path; going through the CLI subcommand instead means that
-//! safety property already exists on this path.
+//! This module began as phase 1 of
+//! `docs/specs/SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md`,
+//! with a "quiesce srv, migrate, come back" path for an upgrade action. That
+//! path became the launcher's prepare step instead (§10): srv refuses data
+//! that needs preparing and exits, and `srv_spawner::spawn_srv` runs
+//! `agentmux-srv migrate --prepare` before starting it again.
 
-use std::path::Path;
 use std::time::Duration;
 
 use tokio::process::Child;
-
-use crate::data_dir::DataPaths;
-use crate::srv_spawner::{run_migrate, SrvSpawnError};
-use crate::startup_events::StartupEventSink;
 
 /// How long [`quiesce_srv`] waits for srv to exit on its own before
 /// escalating to a hard kill: long enough for srv to close every agent
@@ -75,7 +39,7 @@ pub enum QuiesceOutcome {
 
 /// Stop srv and return only once it has genuinely exited — never a fixed
 /// sleep. The launcher's one way of stopping srv: on every quit (both
-/// supervisors) and before a migration ([`run_migration_upgrade`]).
+/// supervisors) and on "Upgrade & restart".
 ///
 /// Telling srv to stop is dropping `stdin`, its keepalive pipe: srv reads
 /// EOF as "shut down" on every platform (`bootstrap::install_shutdown_handlers`)
@@ -102,64 +66,6 @@ pub async fn quiesce_srv(
             Ok((status, QuiesceOutcome::ExitedAfterForceKill))
         }
     }
-}
-
-/// Why [`run_migration_upgrade`] didn't complete.
-#[derive(Debug)]
-pub enum UpgradeError {
-    /// Stopping the running srv failed at the OS level (not "srv refused to
-    /// stop" — [`quiesce_srv`] always eventually forces that; this is e.g.
-    /// a `wait()` syscall failure).
-    Quiesce(std::io::Error),
-    /// The migration subprocess itself failed — see [`SrvSpawnError`] for
-    /// which case (spawn failure, a real `AGENTMUXSRV-MIGRATION-FAILED`,
-    /// etc). The data is left exactly as `agentmux-srv migrate` left it:
-    /// possibly partially migrated (no batch transaction — see the spec's
-    /// §4.3 "partial application" note), with a pre-migration backup
-    /// already written under `~/.agentmux/shared/backups/`.
-    Migrate(SrvSpawnError),
-}
-
-impl std::fmt::Display for UpgradeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Quiesce(e) => write!(f, "failed to stop the running srv: {e}"),
-            Self::Migrate(e) => write!(f, "migration failed: {e}"),
-        }
-    }
-}
-
-/// Quiesce the running srv, then run pending migrations via the
-/// `agentmux-srv migrate` subprocess. Does NOT relaunch srv afterward and
-/// does NOT install a staged app update first — both are the caller's
-/// responsibility once one exists (§4.2's boot gate for the former;
-/// `app-update-check.md`'s still-unimplemented `install_update` for the
-/// latter, per the spec's §5.4 ordering — a staged update must be installed
-/// BEFORE this runs, so its migrations are the ones that end up applied).
-///
-/// `srv_child` must be the handle for the ALREADY-RUNNING srv this upgrade
-/// is replacing — this function does not spawn or discover it — and
-/// `srv_stdin` its stdin keepalive (see [`quiesce_srv`]).
-// No caller until phase 1b of SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md §8.
-#[allow(dead_code)]
-pub async fn run_migration_upgrade(
-    launcher_exe_dir: &Path,
-    paths: &DataPaths,
-    srv_child: &mut Child,
-    srv_stdin: Option<tokio::process::ChildStdin>,
-    sink: &StartupEventSink,
-) -> Result<(), UpgradeError> {
-    let (status, outcome) = quiesce_srv(srv_child, srv_stdin, GRACEFUL_QUIESCE_TIMEOUT)
-        .await
-        .map_err(UpgradeError::Quiesce)?;
-    crate::log(&format!(
-        "upgrade: srv quiesced ({:?}, exit={:?}) — starting migration",
-        outcome, status
-    ));
-
-    run_migrate(launcher_exe_dir, paths, sink)
-        .await
-        .map_err(UpgradeError::Migrate)
 }
 
 #[cfg(test)]

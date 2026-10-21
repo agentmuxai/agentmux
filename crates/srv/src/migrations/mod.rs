@@ -87,11 +87,13 @@ mod m0036_drop_bundle_mcp;
 mod m0037_retire_old_pane_names;
 mod m0038_drop_drone_runs_definition_fk;
 mod backup;
+mod gate;
 mod prepare;
 mod runner;
 #[cfg(test)]
 mod phase5_tests;
 
+pub use gate::data_needs_preparing;
 pub use runner::count_pending_migrations;
 pub use runner::doctor_report_for_instance;
 pub use runner::run_migrate_command;

@@ -402,11 +402,11 @@ Requested by the operator on 2026-10-20: *"can we move migrations completely out
 
 It reports progress on stderr in the `srv_stderr` protocol, so the launcher's native splash shows each step.
 
-**Two callers, the same step:**
-- **The in-app update route:** between `quiesce_srv` and relaunch, the launcher runs the staged version's `migrate --prepare` (phase 1b). A failure stops the relaunch and offers retry or to keep the current version, which is untouched.
-- **Any other way a new version arrives** (installer, manual unzip, channel switch, `task dev`, `task package`): srv's boot gate does a read-only, fail-closed pending check (S1b, S1c). If anything is pending, or the check can't tell, srv exits with a dedicated status **before writing anything**, carry-forward included. The launcher then asks "This version needs to update your data: Update now / Quit", runs the same step with splash progress, and starts srv again.
+**One caller, every path: the new version's own launcher.** srv's boot gate (`migrations/gate.rs`) does a read-only, fail-closed check (S1b, S1c): is there a previous version to copy forward, and are any migrations pending? If either, or if it can't tell, srv writes `AGENTMUXSRV-NEEDS-PREPARE reason:<why>` and exits 4 **before writing anything**, carry-forward included. The launcher (`srv_spawner::spawn_srv`) waits for that exit, runs `migrate --prepare` as the splash's "Updating data" stage, and starts srv again, once. This covers the in-app update (portable and `setup.exe` alike), a manual install or unzip, a channel switch, `task dev` and `task package` with one code path. *(Revised 2026-10-20, during S1b: the update route first meant to run the staged version's prepare itself between `quiesce_srv` and relaunch, but a `setup.exe` update only installs the new version after this launcher exits, so the old launcher can't run it. Running it in the new launcher works for every path.)*
 
-**srv never migrates at boot.** The in-process run in `bootstrap/stores.rs` is removed. A boot with nothing pending is unchanged: no new spawn, file or network call (the 2026-06-27 rule).
+**No prompt** (operator, 2026-10-20): the launcher runs the step on its own, as srv used to; the splash shows each part.
+
+**srv never migrates at boot** under the launcher, which sets `AGENTMUX_SUPERVISOR_PREPARES=1`. Without it (headless srv, `task dev:standalone`) srv still prepares in-process (`bootstrap/stores.rs`'s `prepare_in_process`). A boot with nothing to prepare costs two read-only opens, in place of the read-write pending count and the migration lock it replaces: no new spawn, file or network call (the 2026-06-27 rule).
 
 ### 10.3 Decisions
 
@@ -421,8 +421,7 @@ These were taken on 2026-10-20 with the defaults the audit recommended; the oper
 | Phase | Scope | State |
 |---|---|---|
 | S0 | One stderr protocol (`srv_stderr`), a splash row always running, restart splash fed, `VACUUM INTO` backups | In PRs (2026-10-20) |
-| S1a | `migrate --prepare`: carry-forward inside it, the backup rule, progress lines | Next. No change to boot behaviour |
-| S1b | The update route runs it (phase 1b) | |
-| S1c | srv's read-only, fail-closed boot gate and its exit status; the launcher's prompt, run and relaunch; in-process migrations removed from `stores.rs` | The behaviour change |
+| S1a | `migrate --prepare`: carry-forward inside it, the backup rule, progress lines | In review (#5242). No change to boot behaviour |
+| S1b + S1c | srv's read-only, fail-closed boot gate and exit 4; the launcher runs `migrate --prepare` and starts srv again; no in-process preparation under the launcher. One path for the update route and every other arrival (see 10.2) | The behaviour change |
 | S2 | Lean boot: open each store once, version-gated schema setup, every-boot repairs to one-time or post-ESTART, the §6 budget test | |
 | S3 | Retire migrations below `UPGRADE_FLOOR` | |

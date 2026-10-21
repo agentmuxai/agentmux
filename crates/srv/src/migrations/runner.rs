@@ -1,18 +1,17 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Migration runner — invoked by `agentmux-srv migrate` (a CLI subcommand,
-//! and the now-dead `agentmux-launcher::srv_spawner::run_migrate` subprocess
-//! path) and, separately, in-process at every srv boot via
-//! `run_pending_migrations`.
+//! Migration runner — invoked by `agentmux-srv migrate` (a CLI subcommand;
+//! the launcher runs `migrate --prepare` through `srv_spawner::run_prepare`
+//! when srv's boot gate asks for it) and, separately, in-process at boot via
+//! `run_pending_migrations`, only when no supervisor prepares data (headless
+//! srv, `task dev:standalone`).
 //!
-//! Both paths report the SAME per-migration begin/done progress
-//! (`ApplyProgress`) but over different channels: the CLI path emits
-//! newline-delimited JSON to stdout (read by the dead subprocess path, kept
-//! for that reason); `run_pending_migrations` emits `agentmux_common::
-//! srv_stderr`'s `AGENTMUXSRV-MIGRATION-BEGIN`/`-END` lines to stderr — the
-//! real, in-process boot path's own protocol, so the launcher's splash
-//! screen can show live per-migration sub-rows instead of a silent clock.
+//! `--prepare` and the in-process path report per-migration progress as
+//! `agentmux_common::srv_stderr`'s `AGENTMUXSRV-MIGRATION-BEGIN`/`-END` lines
+//! on stderr (`STDERR_PROGRESS`), which the launcher's splash shows as
+//! sub-rows. Plain `migrate` (no flags) prints newline-delimited JSON on
+//! stdout instead, for scripts and operators running it by hand.
 //! Failures are written to `<home>/logs/migration-error.log`; the
 //! process exits non-zero so the launcher can surface the error rather than
 //! booting with a half-migrated data dir.
@@ -146,8 +145,8 @@ pub fn run_migrate_command(data_dir: &Path, dry_run: bool, list: bool, verify: b
     // stores are opened, so a daemon holding a write transaction longer than
     // `Store::open*`'s own 5 s busy timeout waits on the lock instead of
     // failing with a spurious "database is locked" (reagent P1 on #3062).
-    // The only CLI-specific parts are the NDJSON progress lines the
-    // launcher's `run_migrate` reader expects and the error log file.
+    // The only CLI-specific parts are the NDJSON progress lines on stdout
+    // (for a person or script running `migrate`) and the error log file.
     let progress = ApplyProgress {
         on_start: &|id, description| {
             emit("migration_start", id, &format!("\"description\":\"{}\"", description));
@@ -196,14 +195,14 @@ fn cmd_list(shared_store: &Store, channel_store: Option<&Store>) -> i32 {
     0
 }
 
-// ── In-process migration runner (used by srv startup) ────────────────────────
+// ── In-process migration runner (migrate --prepare; unsupervised srv) ────────
 
 /// Apply all pending migrations in-process before srv opens its stores.
 ///
-/// Called unconditionally at srv startup so the shared store is fully backfilled
-/// before `id_store` binds to it. This prevents apparent data loss (empty shared
-/// store) on first boot after an upgrade. Fast-path: returns `Ok(0)` immediately
-/// when all migrations are already applied.
+/// Under the launcher, srv never calls this at boot: its gate exits 4 and the
+/// launcher runs `migrate --prepare`. A srv without a supervisor (headless,
+/// `task dev:standalone`) calls it from `prepare_in_process` before `id_store`
+/// binds to the shared store. Returns `Ok(0)` when nothing is pending.
 ///
 /// Unlike `run_migrate_command` this writes progress via `tracing` rather than
 /// stdout JSON and is meant to be called from within the daemon process rather
@@ -233,14 +232,12 @@ pub fn run_pending_migrations(data_dir: &Path) -> Result<usize, String> {
     // (MIGRATION_LOCK_WAIT) — with no indication anything unusual is
     // happening inside it. See
     // docs/reports/REPORT_SPLASH_SCREEN_ARCHITECTURE_RETHINK_2026_09_14.md
-    // §2.1. Unlike `run_migrate_command`'s stdout JSON (read by the
-    // now-dead subprocess path), this goes to STDERR — the channel every
-    // real daemon-boot marker (ESTART, MIGRATING, MIGRATION-FAILED) already
-    // uses — via `agentmux_common::srv_stderr`, which both real consumers
-    // (the launcher and, in `task dev:standalone`, the CEF host sidecar)
-    // already parse the rest of this protocol from. The launcher parses
-    // these two lines (`srv_spawner.rs`); a supervisor that doesn't (the
-    // CEF host sidecar today) just logs them like any other stderr line.
+    // §2.1. Unlike `run_migrate_command`'s stdout JSON (only logged), this
+    // goes to STDERR — the channel every daemon-boot marker (ESTART,
+    // MIGRATING, MIGRATION-FAILED) uses — via `agentmux_common::srv_stderr`.
+    // The launcher's `run_prepare` (`srv_spawner.rs`) reads these lines from
+    // `migrate --prepare` and shows them as splash rows; a supervisor that
+    // doesn't parse them (the CEF host sidecar today) just logs them.
     apply_pending(REGISTRY, &home, &shared_store_path, data_dir, Some(&STDERR_PROGRESS)).map(|o| o.applied)
 }
 
@@ -404,9 +401,22 @@ pub(super) fn apply_pending(
             Ok::<_, String>((shared, channel))
         })?;
 
+    // Back up BEFORE the stores are opened: opening runs schema setup, which
+    // changes the files. The decision is the boot gate's read-only check.
+    let channel_store_path = channel_db_dir.join("objects.db");
+    let identity_store_path = home.join("shared").join("identity-store.db");
+    if super::gate::pending_reason(regs, shared_store_path, &channel_store_path, &identity_store_path).is_some() {
+        super::backup::backup_stores(home, shared_store_path, data_dir)
+            .map_err(|e| format!("run_pending_migrations: backup failed: {}", e))?;
+    }
     let (shared_store, channel_store) = open_stores_for_preview(shared_store_path, data_dir)
         .map_err(|e| format!("run_pending_migrations: {}", e))?;
-    let channel_store_path = channel_db_dir.join("objects.db");
+    // Its schema setup too, here under the backup rather than in srv's startup.
+    if identity_store_path.exists() {
+        if let Err(e) = Store::open_identity_store(&identity_store_path) {
+            tracing::warn!(error = %e, "run_pending_migrations: identity store not opened");
+        }
+    }
 
     let pending = pending_of(regs, &shared_store, channel_store.as_ref());
     if pending.is_empty() {
@@ -420,10 +430,6 @@ pub(super) fn apply_pending(
         shared_store_path: shared_store_path.to_path_buf(),
         channel_store_path: channel_store_path.clone(),
     };
-
-    if let Err(e) = super::backup::backup_stores(home, shared_store_path, data_dir) {
-        return Err(format!("run_pending_migrations: backup failed: {}", e));
-    }
 
     let mut applied = 0;
     for m in &pending {

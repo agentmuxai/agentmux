@@ -12,7 +12,7 @@ import { Button, Pill, StatusDot, type StatusTone } from "@/app/element/ui";
 import { MOS } from "@/app/store/global";
 import { formatAge } from "@/app/view/warden-shared/warden-shared";
 
-import { checklistProgress, columnOf, needsReason, requestedBy, waitingOn } from "./kanban-columns";
+import { checklistProgress, columnOf, needsReason, prLabel, requestedBy, waitingOn } from "./kanban-columns";
 import type { KanbanAgent, KanbanAgentState, KanbanTask } from "./kanban-types";
 
 export function agentTone(state: KanbanAgentState | undefined): StatusTone {
@@ -130,7 +130,7 @@ export function KanbanCard(props: {
                 <Show when={checklistProgress(t())}>{(p) => <Pill icon="list-check">{p()}</Pill>}</Show>
                 <Show when={t().card.pr_url}>
                     <Pill icon="code-pull-request" tone="accent" title={t().card.pr_url}>
-                        PR
+                        {prLabel(t().card.pr_url)}
                     </Pill>
                 </Show>
                 <Show when={t().attempts > 1}>

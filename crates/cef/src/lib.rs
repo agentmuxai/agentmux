@@ -769,7 +769,7 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     // (dev:standalone, or this is a subprocess role that never connects).
     #[cfg(target_os = "macos")]
     {
-        launcher_ipc::report_startup_stage_begin("dlopen", "Load CEF framework");
+        launcher_ipc::report_startup_stage_begin("dlopen", "Load CEF library");
         launcher_ipc::report_startup_stage_end("dlopen", dlopen_ms, "ok", None);
     }
 

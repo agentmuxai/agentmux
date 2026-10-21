@@ -11,6 +11,8 @@ import {
     DRAG_PREVIEW_MIN_PX,
     dragPreviewCursorOffset,
     pressCanStartPaneDrag,
+    dragImageChoice,
+    headerGrabOffset,
 } from "./drag-preview-size";
 
 const ratio = (s: { width: number; height: number }) => s.width / s.height;
@@ -190,5 +192,35 @@ describe("pressCanStartPaneDrag", () => {
         const q = header();
         expect(pressCanStartPaneDrag(q(".body p"))).toBe(false);
         expect(pressCanStartPaneDrag(null)).toBe(false);
+    });
+});
+
+describe("dragImageChoice", () => {
+    const size = { width: 360, height: 220 };
+    it("drags a minimized pane as its header, whatever is cached", () => {
+        expect(dragImageChoice(true, size, size)).toBe("header");
+        expect(dragImageChoice(true, null, { width: 360, height: 33 })).toBe("header");
+    });
+    it("uses the cached ghost only when it was drawn at the pane's size now", () => {
+        expect(dragImageChoice(false, size, { ...size })).toBe("cached");
+        // Drawn before a minimize, a restore or a resize: the header, not a picture of the pane as it was.
+        expect(dragImageChoice(false, size, { width: 360, height: 33 })).toBe("header");
+        expect(dragImageChoice(false, size, { width: 300, height: 220 })).toBe("header");
+    });
+    it("falls back to the header when nothing is cached yet", () => {
+        expect(dragImageChoice(false, undefined, size)).toBe("header");
+    });
+});
+
+describe("headerGrabOffset", () => {
+    const rect = { left: 100, top: 50, width: 180, height: 33 };
+    it("holds the header where the drag started", () => {
+        expect(headerGrabOffset(rect, { clientX: 140, clientY: 60 })).toEqual({ x: 40, y: 10 });
+    });
+    it("stays inside the header", () => {
+        expect(headerGrabOffset(rect, { clientX: 20, clientY: 500 })).toEqual({ x: 0, y: 33 });
+    });
+    it("has a small default without a start point", () => {
+        expect(headerGrabOffset(rect, undefined)).toEqual({ x: 10, y: 10 });
     });
 });

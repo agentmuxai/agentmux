@@ -98,7 +98,7 @@ const STAGE_AREA_H: i32 =
 // "First run can take longer" sub-row message (below) at its full length;
 // existing short sub-labels (individual migration names, etc.) are
 // unaffected, this only raises the truncation threshold.
-const LABEL_MAX_CHARS: usize = 16;
+const LABEL_MAX_CHARS: usize = crate::splash_core::STAGE_LABEL_MAX_CHARS;
 const SUB_LABEL_MAX_CHARS: usize = 28;
 
 // Colors

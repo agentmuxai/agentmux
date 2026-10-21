@@ -313,8 +313,10 @@ async fn app_main() {
         Arc::clone(&state.identity_store),
         Arc::clone(&state.config_watcher),
         state.broker.clone(),
+        state.http_client.clone(),
     );
     tokio::spawn(backend::kanban::run_reminder_loop());
+    tokio::spawn(backend::kanban::prs::run_merge_loop());
     // An agent's AgentMux MCP server that didn't connect is noticed and
     // repaired (`agent:mcpselfheal`).
     backend::mcp_health::install(Arc::clone(&state.config_watcher));

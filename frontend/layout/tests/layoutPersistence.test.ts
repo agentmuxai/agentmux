@@ -672,3 +672,48 @@ describe("pane-tab actions", () => {
         expect(data.blockStack).toEqual(["existing", "new-block"]);
     });
 });
+
+// srv minimizes a chip it placed in this tab (dragged in from another tab) and queues `minimize`
+// for the mirror. SPEC_DRAG_MINIMIZED_PANES_2026_10_20.md §3 C.
+describe("processPendingBackendActions — minimize", () => {
+    beforeEach(() => {
+        layoutStateSignals.clear();
+        vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it("minimizes the pane holding the block, once", async () => {
+        const model = createLayoutModel();
+        insertBlock(model, "existing");
+        setPendingActions(model, [
+            {
+                actiontype: LayoutTreeActionType.SplitHorizontal,
+                actionid: "place",
+                blockid: "moved-block",
+                targetblockid: "existing",
+                position: "after",
+                focused: false,
+                magnified: false,
+                ephemeral: false,
+            },
+            { actiontype: LayoutTreeActionType.Minimize, actionid: "chip", blockid: "moved-block", focused: false, magnified: false, ephemeral: false },
+            { actiontype: LayoutTreeActionType.Minimize, actionid: "chip-again", blockid: "moved-block", focused: false, magnified: false, ephemeral: false },
+        ]);
+
+        await processPendingBackendActions(model);
+
+        expect(findBlock(model, "moved-block")?.minimized).toBe(true);
+        expect(findBlock(model, "existing")?.minimized).toBeFalsy();
+    });
+
+    it("ignores a block that is in no pane", async () => {
+        const model = createLayoutModel();
+        insertBlock(model, "existing");
+        setPendingActions(model, [{ actiontype: LayoutTreeActionType.Minimize, actionid: "chip", blockid: "dup-block", focused: false, magnified: false, ephemeral: false }]);
+        await processPendingBackendActions(model);
+        expect(findBlock(model, "existing")?.minimized).toBeFalsy();
+    });
+});

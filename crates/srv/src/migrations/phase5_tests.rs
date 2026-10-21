@@ -542,6 +542,9 @@ fn prepare_copies_the_previous_version_forward_migrates_and_backs_up_once() {
         .execute_batch("CREATE TABLE prepare_marker (v TEXT); INSERT INTO prepare_marker VALUES ('from 0.1.0');")
         .unwrap();
     let data_dir = versions.join("0.2.0").join("data");
+    // An existing install's shared store, which the backup must cover (it is
+    // taken before anything opens, so a store that doesn't exist yet has no copy).
+    drop(Store::open_shared(&home.shared_store()).unwrap());
 
     let code = super::prepare::run_for_version(&data_dir, home.home(), &home.shared_store(), "0.2.0");
     assert_eq!(code, 0);

@@ -230,6 +230,10 @@ pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCall
         return WebReturnType::error(reason);
     }
 
+    // A chip dragged to another tab stays a chip there, unless it would be the only pane showing
+    // content (SPEC_DRAG_MINIMIZED_PANES_2026_10_20.md §3 C). Read before its leaf leaves the source.
+    let was_minimized = super::layout_intents::block_is_minimized(state, &source_tab_id, &block_id).await;
+
     // The block now belongs to the target tab. Take its leaf out of the
     // source tree first: a failure below must never leave the source showing
     // a block it no longer owns (the window would mirror that stale tree).
@@ -266,6 +270,12 @@ pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCall
         return WebReturnType::error(format!(
             "redock layout action failed: {e}"
         ));
+    }
+    // Joining another pane as one of its tabs, that pane's own state applies, not the chip's.
+    if was_minimized && !as_tab {
+        if let Err(e) = super::layout_intents::minimize_block_in_layout(state, &target_tab_id, &block_id).await {
+            tracing::warn!(target_tab = %target_tab_id, "RedockFloatingPane: keeping the moved chip minimized failed: {}", e);
+        }
     }
 
     // The rest of the stack, in order, as tabs of the pane that just landed.

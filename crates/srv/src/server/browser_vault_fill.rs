@@ -19,7 +19,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::backend::vault::uses::{self, Decision, UseRequest};
+use crate::backend::vault::uses::{self, Decision, UseAnswer, UseRequest};
 use crate::backend::vault::{self, FillTarget};
 use agentmux_common::api_types::UiAutomationAuth;
 
@@ -38,8 +38,15 @@ pub(crate) struct VaultFillRequest {
     pane: Option<String>,
     #[serde(rename = "ref")]
     ref_: String,
-    /// `"id"` or `"id.part"`.
-    vault: String,
+    /// `"id"` or `"id.part"`: fill from an entry.
+    #[serde(default)]
+    vault: Option<String>,
+    /// Or, with no entry yet: the kind and label of the value the person is asked to
+    /// type (`request_value`).
+    #[serde(default)]
+    request_kind: Option<String>,
+    #[serde(default)]
+    request_label: Option<String>,
 }
 
 /// What the host says about the field.
@@ -93,16 +100,20 @@ pub(crate) fn plan(origin_known: bool, password_like: bool, fillable: bool, gran
     }
 }
 
-fn record(state: &AppState, block_id: &str, target: &FillTarget, agent: &str, where_: &str, outcome: &str) {
-    crate::backend::vault::record(&state.identity_store, &target.id, &target.label, agent, "filled a web form", where_, outcome);
-    // The pane's own Log shows it too, with what was filled and never its value.
-    let how = match outcome {
-        "done" => How::Allowed,
+/// How an outcome reads in the pane's Log.
+fn how_of(outcome: &str) -> How {
+    match outcome {
+        o if o.starts_with("done") => How::Allowed,
         "denied" => How::Declined,
         "timed out" => How::TimedOut,
         other => How::Refused(other.to_string()),
-    };
-    note(block_id, agent, Kind::Fill).detail(&format!("{} from the Vault", target.what)).how(how).record(state);
+    }
+}
+
+fn record(state: &AppState, block_id: &str, target: &FillTarget, agent: &str, where_: &str, outcome: &str) {
+    crate::backend::vault::record(&state.identity_store, &target.id, &target.label, agent, "filled a web form", where_, outcome);
+    // The pane's own Log shows it too, with what was filled and never its value.
+    note(block_id, agent, Kind::Fill).detail(&format!("{} from the Vault", target.what)).how(how_of(outcome)).record(state);
 }
 
 /// Takes a use request down, and tells every window, however the wait ends: the
@@ -133,8 +144,14 @@ pub(crate) async fn handle_vault_fill(
     let agent = req.auth.agent_id.chars().take(64).collect::<String>();
     // The entry and part, by name only: nothing here reads the value yet.
     let store = state.identity_store.clone();
-    let wanted = req.vault.clone();
-    let target = match tokio::task::spawn_blocking(move || vault::fill_target(&store, &wanted)).await {
+    let (wanted, kind, label) = (req.vault.clone(), req.request_kind.clone(), req.request_label.clone());
+    let target = match tokio::task::spawn_blocking(move || match (wanted, kind) {
+        (Some(v), None) => vault::fill_target(&store, &v),
+        (None, Some(k)) => vault::request_target(&k, &label.unwrap_or_default()),
+        _ => Err("name an entry (vault), or ask for a value (request_value), not both".to_string()),
+    })
+    .await
+    {
         Ok(Ok(t)) => t,
         Ok(Err(e)) => return err_response(StatusCode::BAD_REQUEST, e),
         Err(e) => return err_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
@@ -152,11 +169,17 @@ pub(crate) async fn handle_vault_fill(
 
     let store = state.identity_store.clone();
     let (entry, origin) = (target.id.clone(), field.origin.clone());
-    let granted = tokio::task::spawn_blocking(move || store.vault_grant_check(&entry, &origin).unwrap_or(false)).await.unwrap_or(false);
+    let granted = !target.typed && tokio::task::spawn_blocking(move || store.vault_grant_check(&entry, &origin).unwrap_or(false)).await.unwrap_or(false);
     let fits = target.slot.is_some_and(|s| field.slots.iter().any(|x| x == s));
 
     let mut always = false;
-    match plan(!field.origin.is_empty(), field.password_like, field.fillable, granted, fits) {
+    let mut typed_answer: Option<UseAnswer> = None;
+    let mut decided = plan(!field.origin.is_empty(), field.password_like, field.fillable, granted, fits);
+    // A value nobody has stored yet is always asked for: the person types it.
+    if target.typed && !matches!(decided, Plan::Refuse(_)) {
+        decided = Plan::Ask { offer_always: false, reason: "there is no Vault entry for this yet, so you type it here" };
+    }
+    match decided {
         Plan::Refuse(why) => {
             record(&state, &block_id, &target, &agent, &site, "refused");
             return err_response(StatusCode::BAD_REQUEST, why.to_string());
@@ -174,6 +197,8 @@ pub(crate) async fn handle_vault_fill(
                 field: field.label.clone(),
                 offer_always,
                 reason: reason.to_string(),
+                needs_value: target.typed,
+                kind: target.kind.to_string(),
                 requested_ms: agentmux_common::time::now_ms_u64(),
             };
             let answer = uses::uses().ask(request);
@@ -188,9 +213,12 @@ pub(crate) async fn handle_vault_fill(
             );
             let decision = tokio::time::timeout(ANSWER_WAIT, answer).await;
             match decision {
-                Ok(Ok(Decision::Once)) => {}
-                Ok(Ok(Decision::Always)) => always = true,
-                Ok(Ok(Decision::Deny)) | Ok(Err(_)) => {
+                Ok(Ok(a)) if a.decision == Decision::Once => typed_answer = Some(a),
+                Ok(Ok(a)) if a.decision == Decision::Always => {
+                    always = true;
+                    typed_answer = Some(a);
+                }
+                Ok(Ok(_)) | Ok(Err(_)) => {
                     record(&state, &block_id, &target, &agent, &site, "denied");
                     return err_response(StatusCode::FORBIDDEN, "the person said no: nothing was typed".to_string());
                 }
@@ -207,19 +235,29 @@ pub(crate) async fn handle_vault_fill(
     }
 
     // The value leaves the sealed row only now, for the host's request.
-    let store = state.identity_store.clone();
-    let (entry, part, created) = (target.id.clone(), target.part, target.created_at);
-    let value = match tokio::task::spawn_blocking(move || vault::value_for_fill(&store, &entry, created, part)).await {
-        Ok(Ok(v)) => v,
-        Ok(Err(e)) => {
-            record(&state, &block_id, &target, &agent, &site, "failed");
-            return err_response(StatusCode::BAD_REQUEST, e);
+    let save = target.typed && typed_answer.as_ref().is_some_and(|a| a.save);
+    let value = if target.typed {
+        match typed_answer.and_then(|a| a.value).filter(|v| !v.is_empty()) {
+            Some(v) => v,
+            None => return err_response(StatusCode::BAD_REQUEST, "the person didn't type a value: nothing was typed".to_string()),
         }
-        Err(e) => {
-            record(&state, &block_id, &target, &agent, &site, "failed");
-            return err_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+    } else {
+        let store = state.identity_store.clone();
+        let (entry, part, created) = (target.id.clone(), target.part, target.created_at);
+        match tokio::task::spawn_blocking(move || vault::value_for_fill(&store, &entry, created, part)).await {
+            Ok(Ok(v)) => v,
+            Ok(Err(e)) => {
+                record(&state, &block_id, &target, &agent, &site, "failed");
+                return err_response(StatusCode::BAD_REQUEST, e);
+            }
+            Err(e) => {
+                record(&state, &block_id, &target, &agent, &site, "failed");
+                return err_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+            }
         }
     };
+    // Kept only if the person asked, and only once the page has taken it.
+    let to_keep = save.then(|| value.clone());
     let body = json!({
         "block_id": block_id,
         "ref": req.ref_,
@@ -238,12 +276,36 @@ pub(crate) async fn handle_vault_fill(
     drop(value);
     match filled {
         Ok(data) => {
-            record(&state, &block_id, &target, &agent, &site, "done");
-            let store = state.identity_store.clone();
-            let entry = target.id.clone();
-            let _ = tokio::task::spawn_blocking(move || store.vault_touch(&entry, agentmux_common::time::now_ms())).await;
+            record(&state, &block_id, &target, &agent, &site, if target.typed { "done (typed by the person)" } else { "done" });
+            let mut entry_id = target.id.clone();
+            let mut saved_note = None;
+            if let Some(kept) = to_keep {
+                let (store, kind, label, part) = (state.identity_store.clone(), target.kind.to_string(), target.label.clone(), target.part);
+                let (origin, fit) = (field.origin.clone(), fits);
+                let made = tokio::task::spawn_blocking(move || {
+                    let parts = vault::seal::Parts([(part.to_string(), kept.to_string())].into());
+                    let id = vault::create(&store, vault::NewEntry { kind, label, fields: Default::default(), tags: vec![], parts })?;
+                    if fit {
+                        let created = store.vault_get(&id).map_err(|e| e.to_string())?.map(|r| r.created_at).unwrap_or(0);
+                        store.vault_grant_add(&id, &origin, agentmux_common::time::now_ms(), created).map_err(|e| e.to_string())?;
+                    }
+                    Ok::<String, String>(id)
+                })
+                .await;
+                match made {
+                    Ok(Ok(id)) => {
+                        entry_id = id;
+                        super::vault_handlers::publish(&state);
+                    }
+                    Ok(Err(e)) => saved_note = Some(format!("it was typed in but couldn't be kept in the Vault: {e}")),
+                    Err(e) => saved_note = Some(format!("it was typed in but couldn't be kept in the Vault: {e}")),
+                }
+            } else if !target.id.is_empty() {
+                let (store, entry) = (state.identity_store.clone(), target.id.clone());
+                let _ = tokio::task::spawn_blocking(move || store.vault_touch(&entry, agentmux_common::time::now_ms())).await;
+            }
             let mut out = json!({
-                "filled_from_vault": target.id,
+                "filled_from_vault": entry_id,
                 "part": target.part,
                 "value": "[secret: hidden]",
                 "site": field.origin,
@@ -255,6 +317,13 @@ pub(crate) async fn handle_vault_fill(
                 }
                 if data.get("changed_by_page").and_then(Value::as_bool) == Some(true) {
                     o.insert("note".into(), json!("the page shortened or reformatted the value"));
+                }
+                if target.typed {
+                    o.insert("typed_by_the_person".into(), json!(true));
+                    o.insert("kept_in_vault".into(), json!(save && saved_note.is_none()));
+                }
+                if let Some(n) = saved_note {
+                    o.insert("kept_note".into(), json!(n));
                 }
             }
             (StatusCode::OK, Json(json!({ "ok": true, "data": out }))).into_response()

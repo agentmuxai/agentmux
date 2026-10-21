@@ -11,6 +11,7 @@ import {
     matchesQuery,
     needsReason,
     parseAfter,
+    prLabel,
     rankBetween,
     requestedBy,
     reviewLoad,
@@ -178,5 +179,10 @@ describe("what a card says", () => {
         expect(waitingOn(task(8, "open"))).toEqual([]);
         expect(parseAfter(" #12, 15;#3 ")).toEqual(["12", "15", "3"]);
         expect(parseAfter("")).toEqual([]);
+    });
+
+    it("labels a PR link with its number", () => {
+        expect(prLabel("https://github.com/agentmuxai/agentmux/pull/5248")).toBe("#5248");
+        expect(prLabel("https://example.com/merge_requests/3")).toBe("PR");
     });
 });
