@@ -7,11 +7,11 @@
 **Asked by the operator:** "check our code/scripts/dead code/tree shaking"
 
 **What was audited**
-- `origin/main` at `f755cd01c` (v0.59.35, 2026-10-20), extracted with `git archive` to `scratch/src`. No repo file, branch, commit or PR was touched.
+- `origin/main` at `f755cd01c` (v0.59.35, 2026-10-20), extracted with `git archive` to a temporary folder. No repo file, branch, commit or PR was touched.
 - Bundle numbers come from the existing v0.59.33 build in `agentmux-fe/dist/frontend`. The portable folder on the Desktop has the same chunks (72 MB).
 - No cargo command and no production build was run.
 - Frontend tools, run outside the repo against the snapshot: `knip` 5.88.1 (CI mode and production-only mode), source-map byte attribution per package, and small Node scripts for generated types, RPC stubs and SCSS classes.
-- Per-item evidence: `scratch/partial_rust.md` (Rust) and `scratch/partial_scripts.md` (scripts, Taskfile, workflows).
+- Per-item evidence: [ANALYSIS_DEAD_CODE_EVIDENCE_RUST_2026_10_20.md](ANALYSIS_DEAD_CODE_EVIDENCE_RUST_2026_10_20.md) (Rust) and [ANALYSIS_DEAD_CODE_EVIDENCE_SCRIPTS_2026_10_20.md](ANALYSIS_DEAD_CODE_EVIDENCE_SCRIPTS_2026_10_20.md) (scripts, Taskfile, workflows).
 
 **Confidence labels:** CONFIRMED means zero references after the greps listed. LIKELY means a human check is needed.
 
@@ -74,7 +74,7 @@ Static analysis only. Every item was re-grepped with `rg -w` over the repo (excl
   - Caveat: `CommandMessageData` is used at `frontend/app/store/rpc-client.ts:151`. `CommandDeleteBlockData` has a generated TS file and a re-export at `rpc-api/block.ts:43`. Check those two before removing.
   - Risk: low except those two.
 - **R-4 Allow-hidden dead items (CONFIRMED).**
-  - About 97 items, ~570 lines. Full list with line numbers is in `partial_rust.md` section 2a.
+  - About 97 items, ~570 lines. Full list with line numbers is in the Rust evidence file section 2a.
   - Largest groups:
     - `wcore/event.rs:13` (the whole 46-line file).
     - `base.rs` and `shellexec.rs`: about 25 consts and fns.
@@ -91,7 +91,7 @@ Static analysis only. Every item was re-grepped with `rg -w` over the repo (excl
     - `reactive/handler.rs try_register_agent_with_nonce` (77).
     - `shellexec.rs MockConn`, a test double in production code.
   - Leave the 12 `app_server_protocol` methods (305 lines). They are annotated "Unwired until SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER Slice 6".
-  - The 13 crate-wide `#![allow(dead_code)]` files are listed in `partial_rust.md` 2c.
+  - The 13 crate-wide `#![allow(dead_code)]` files are listed in the Rust evidence file 2c.
   - `srv/src/registry/mod.rs:18` looks removable (LIKELY).
   - 63 srv and 13 cef allows may be stale, but only a compile settles that.
   - Risk: low, but needs one `cargo check`. Warn before triggering it, since rebuilds are slow (the debug cache was cleared on 2026-10-18).
@@ -233,7 +233,7 @@ Largest JS chunks: `index` 4.51 MB, `pdf.worker.min.mjs` 1.26 MB, mermaid `cynef
 
 ## 6. Scripts and workflows
 
-Full detail is in `partial_scripts.md`.
+Full detail is in the scripts evidence file.
 
 - **S-1 Broken entries (CONFIRMED).**
   - `Taskfile.yml:98-110` `storybook` and `storybook:build` run npm scripts that do not exist. `CONTRIBUTING.md:52-55` still documents `task storybook`.
