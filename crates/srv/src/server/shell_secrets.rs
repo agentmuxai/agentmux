@@ -26,6 +26,10 @@ use super::AppState;
 const ANSWER_WAIT: Duration = Duration::from_secs(120);
 /// Most entries one command may be given.
 const MOST: usize = 16;
+/// The longest command line, and working directory, the prompt shows whole. A
+/// longer one is refused rather than shown cut: the person approves what runs.
+const MAX_COMMAND: usize = 2000;
+const MAX_CWD: usize = 300;
 
 /// The key a command grant is stored under, in the grants table that web forms
 /// use for sites: `command:<agent>:<part>` can't be a site's origin. It is for one
@@ -75,6 +79,12 @@ pub(super) async fn inject(
         return Err(refuse(
             StatusCode::BAD_REQUEST,
             "a Vault secret can't be sent to WSL or an SSH host yet: it would have to cross to another machine; run the command here",
+        ));
+    }
+    if cmd.chars().count() > MAX_COMMAND || cwd.chars().count() > MAX_CWD {
+        return Err(refuse(
+            StatusCode::BAD_REQUEST,
+            format!("a command given Vault secrets must fit in the approval prompt ({MAX_COMMAND} characters, folder {MAX_CWD}): put the steps in a script file and run that"),
         ));
     }
     if wanted.len() > MOST {
@@ -142,8 +152,8 @@ pub(super) async fn inject(
             reason: format!("it is the first time {agent} runs a command with this entry"),
             needs_value: false,
             kind: first.kind.to_string(),
-            command: clip(cmd, 500),
-            cwd: clip(cwd, 300),
+            command: cmd.to_string(),
+            cwd: cwd.to_string(),
             requested_ms: agentmux_common::time::now_ms_u64(),
         };
         let answer = uses::uses().ask(request);

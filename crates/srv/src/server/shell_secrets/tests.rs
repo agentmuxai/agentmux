@@ -189,3 +189,22 @@ async fn a_grant_is_for_one_part_and_the_question_names_every_part_asked_for() {
     let shown = ask.await.unwrap();
     assert!(shown.field.contains("CARD_NUMBER (number)") && !shown.field.contains("CARD_EXPIRY"), "{}", shown.field);
 }
+
+// The prompt shows the whole command or the command does not run: a line past a cut-off
+// could send the value anywhere, unseen.
+#[tokio::test]
+async fn a_command_too_long_to_show_whole_is_refused_without_asking() {
+    let s = setup().await;
+    let long = format!("echo hi {}", "x".repeat(MAX_COMMAND));
+    let err = inject(&s.state, &s.block, Some(&s.auth), Some(&wanted(&s)), false, &long, "C:/work").await.err().expect("refused");
+    assert!(err.1.contains("fit in the approval prompt"), "{err:?}");
+    let far = "d".repeat(MAX_CWD + 1);
+    let err = inject(&s.state, &s.block, Some(&s.auth), Some(&wanted(&s)), false, "echo hi", &far).await.err().expect("refused");
+    assert!(err.1.contains("fit in the approval prompt"), "{err:?}");
+    assert!(uses::uses().list().iter().all(|u| u.agent != s.auth.agent_id));
+    // At the limit it is shown whole.
+    let ask = tokio::spawn(answer_when_asked(s.auth.agent_id.clone(), Decision::Once));
+    let at_limit = "y".repeat(MAX_COMMAND);
+    assert!(inject(&s.state, &s.block, Some(&s.auth), Some(&wanted(&s)), false, &at_limit, "C:/work").await.is_ok());
+    assert_eq!(ask.await.unwrap().command, at_limit);
+}
