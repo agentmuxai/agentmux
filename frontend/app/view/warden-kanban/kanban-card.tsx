@@ -12,7 +12,7 @@ import { Button, Pill, StatusDot, type StatusTone } from "@/app/element/ui";
 import { MOS } from "@/app/store/global";
 import { formatAge } from "@/app/view/warden-shared/warden-shared";
 
-import { checklistProgress, columnOf, needsReason, prLabel, requestedBy } from "./kanban-columns";
+import { checklistProgress, columnOf, needsReason, prLabel, requestedBy, waitingOn } from "./kanban-columns";
 import type { KanbanAgent, KanbanAgentState, KanbanTask } from "./kanban-types";
 
 export function agentTone(state: KanbanAgentState | undefined): StatusTone {
@@ -114,6 +114,18 @@ export function KanbanCard(props: {
                 <Show when={who()}>{(w) => <AgentChip name={w().name} agent={w().agent} />}</Show>
                 <Show when={t().state === "held"}>
                     <Pill icon="pause">on hold</Pill>
+                </Show>
+                <Show when={column() === "backlog" && waitingOn(t()).length > 0}>
+                    <Pill
+                        icon="hourglass-half"
+                        title={`Starts after ${waitingOn(t())
+                            .map((a) => `#${a.num} ${a.title}`)
+                            .join(", ")}: nobody takes it until then`}
+                    >
+                        {`after #${waitingOn(t())
+                            .map((a) => a.num)
+                            .join(", #")}`}
+                    </Pill>
                 </Show>
                 <Show when={checklistProgress(t())}>{(p) => <Pill icon="list-check">{p()}</Pill>}</Show>
                 <Show when={t().card.pr_url}>

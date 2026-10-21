@@ -269,7 +269,15 @@ export const WardenKanbanManager = (props: {
 
             <Show when={openTask()}>
                 {(t) => (
-                    <KanbanDrawer model={model} task={t()} agents={agents()} now={now()} onClose={() => setOpenId(null)} onOpenAgent={openAgent} />
+                    <KanbanDrawer
+                        model={model}
+                        task={t()}
+                        agents={agents()}
+                        now={now()}
+                        onClose={() => setOpenId(null)}
+                        onOpenAgent={openAgent}
+                        onOpenTask={(id) => setOpenId(id)}
+                    />
                 )}
             </Show>
         </div>

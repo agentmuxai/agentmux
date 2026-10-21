@@ -86,6 +86,9 @@ pub(super) struct EnqueueRequest {
     /// Kanban: whether a person must accept it; default from who asked.
     #[serde(default)]
     pub review: Option<bool>,
+    /// Kanban: the tasks it starts after (ids or numbers).
+    #[serde(default)]
+    pub after: Vec<Value>,
 }
 
 pub(super) async fn handle_work_enqueue(
@@ -156,10 +159,22 @@ pub(super) async fn handle_work_enqueue(
         result: String::new(),
     };
 
+    let after = match super::work_tasks::resolve_after(&state, &req.after) {
+        Ok(a) => a,
+        Err(why) => return err(StatusCode::BAD_REQUEST, why),
+    };
     let filing = super::work_tasks::Filing { repo: req.repo, review: req.review };
     let card = super::work_tasks::prepare_card(&state, caller.as_deref(), &item.created_by, filing).await;
-    match state.identity_store.work_queue_enqueue(&item) {
-        Ok(()) => {
+    // With what it starts after, the row and the list in one transaction, so no
+    // claim takes it in between.
+    let enqueued = if after.is_empty() {
+        state.identity_store.work_queue_enqueue(&item).map(|()| None)
+    } else {
+        state.identity_store.work_queue_enqueue_after(&item, &after)
+    };
+    match enqueued {
+        Ok(Some(why)) => err(StatusCode::BAD_REQUEST, format!("after: {why}")),
+        Ok(None) => {
             let num = super::work_tasks::file_card(&state, &item, &card);
             publish_changed(&state);
             (StatusCode::OK, Json(json!({ "id": item.id, "num": num })))

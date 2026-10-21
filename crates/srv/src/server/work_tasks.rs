@@ -49,6 +49,24 @@ pub(super) fn resolve_id(state: &AppState, id: &str) -> String {
     trimmed.to_string()
 }
 
+/// The tasks a task starts after (§6.15), as given: ids or numbers (`12`,
+/// `"#12"`), resolved to ids. The store checks the list when it writes it.
+pub(super) fn resolve_after(state: &AppState, given: &[Value]) -> Result<Vec<String>, String> {
+    let mut ids: Vec<String> = Vec::new();
+    for v in given {
+        let raw = match v {
+            Value::String(s) => s.clone(),
+            Value::Number(n) => n.to_string(),
+            _ => return Err(format!("after: {v} is not a task id or number")),
+        };
+        let id = resolve_id(state, &raw);
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    Ok(ids)
+}
+
 /// Text kept on a card or in the history: sanitized, at most [`MAX_TEXT`]
 /// characters.
 pub(super) fn clean(text: &str) -> String {

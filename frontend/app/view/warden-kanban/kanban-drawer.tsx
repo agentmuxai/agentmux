@@ -10,6 +10,7 @@ import { Button, IconButton, Select } from "@/app/element/ui";
 import { openLink } from "@/app/store/misc-utils";
 import { formatAge } from "@/app/view/warden-shared/warden-shared";
 
+import { KanbanAfterSection } from "./kanban-after";
 import { agentStateWords, AgentChip } from "./kanban-card";
 import { columnOf, needsReason, requestedBy } from "./kanban-columns";
 import type { KanbanModel } from "./kanban-model";
@@ -62,6 +63,7 @@ export function KanbanDrawer(props: {
     now: number;
     onClose: () => void;
     onOpenAgent: (blockId: string) => void;
+    onOpenTask: (id: string) => void;
 }): JSX.Element {
     const t = () => props.task;
     // Re-read the history whenever the task changes on the board.
@@ -144,6 +146,8 @@ export function KanbanDrawer(props: {
                     </ul>
                 </section>
             </Show>
+
+            <KanbanAfterSection model={props.model} task={t()} onOpen={props.onOpenTask} />
 
             <Show when={t().result}>
                 <section class="kanban-drawer__section">
