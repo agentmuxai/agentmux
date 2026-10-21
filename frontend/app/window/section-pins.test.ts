@@ -79,14 +79,22 @@ describe("pinning a section to the widget bar", () => {
         const [kan] = shownSections({ view: "warden", "warden:section": "kanban" });
         await pinSection(kan);
         expect(sectionEntry).not.toHaveBeenCalled();
-        await vi.waitFor(() => expect(setConfig).toHaveBeenCalledWith({}, { "widget:pinned": ["warden", "kanban"] }));
+        expect(setConfig).toHaveBeenCalledWith({}, { "widget:pinned": ["warden", "kanban"] });
     });
 
     it("adds an entry through srv when none opens the section, then pins it by its key", async () => {
         const [, cards] = shownSections({ view: "warden", "warden:section": "vault", "vault:section": "cards" });
         await pinSection(cards);
         expect(sectionEntry).toHaveBeenCalledWith({}, { view: "warden", section: "vault/cards", label: "Cards and banks", icon: "credit-card" });
-        await vi.waitFor(() => expect(setConfig).toHaveBeenCalledWith({}, { "widget:pinned": ["warden", "section@warden-vault-cards"] }));
+        expect(setConfig).toHaveBeenCalledWith({}, { "widget:pinned": ["warden", "section@warden-vault-cards"] });
+    });
+
+    it("shows an entry the user had hidden when pinning it", async () => {
+        config.settings["widget:hidden"] = ["defwidget@kanban"];
+        const [kan] = shownSections({ view: "warden", "warden:section": "kanban" });
+        expect(sectionPinMenuItems({ view: "warden", "warden:section": "kanban" }).map((i) => i.label)).toEqual(["Pin “Kanban” to bar"]);
+        await pinSection(kan);
+        expect(setConfig).toHaveBeenCalledWith({}, { "widget:hidden": null, "widget:pinned": ["warden", "kanban"] });
     });
 
     it("offers to unpin a section whose entry is pinned", () => {

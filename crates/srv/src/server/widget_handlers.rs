@@ -91,7 +91,8 @@ pub struct WidgetSectionEntryReq {
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct WidgetSectionEntryResult {
-    /// The entry's key in widgets.json, which is also its pin id (`section@warden-lan`).
+    /// The entry's key in widgets.json, which is also its pin id (`section@warden-lan`, or
+    /// `section@warden-lan-2` when the user's file already used that key for something else).
     pub key: String,
 }
 
@@ -266,8 +267,8 @@ pub fn register_widget_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 "section": req.section,
                 "blockdef": { "meta": { "view": req.view } },
             });
-            let (config, bus, k) = (st.config_watcher.clone(), st.event_bus.clone(), key.clone());
-            tokio::task::spawn_blocking(move || crate::backend::user_widgets::add_user_widget(&config, &bus, &k, entry))
+            let (config, bus) = (st.config_watcher.clone(), st.event_bus.clone());
+            let key = tokio::task::spawn_blocking(move || crate::backend::user_widgets::add_section_entry(&config, &bus, &key, entry))
                 .await
                 .map_err(|e| e.to_string())??;
             Ok(WidgetSectionEntryResult { key })

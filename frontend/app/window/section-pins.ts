@@ -17,7 +17,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { atoms } from "@/store/global";
 import { fireAndForget } from "@/util/util";
-import { getSavedPinNames, pinIdOf, pinWidget, unpinWidget } from "./action-widgets-config";
+import { getPinnedKeys, pinIdOf, setWidgetBarState } from "./action-widgets-config";
 
 /** A section a pane shows, as a widget-bar entry would name it. */
 export interface ShownSection {
@@ -58,7 +58,8 @@ export function sectionEntryKey(section: ShownSection, widgets: Record<string, W
     })?.[0];
 }
 
-/** Pins the section's entry, adding one to widgets.json when none opens it. */
+/** Pins the section's entry, adding one to widgets.json when none opens it. Pinning also shows an
+ *  entry the user had hidden, in the same write (setWidgetBarState), so it lands on the bar. */
 export async function pinSection(section: ShownSection): Promise<void> {
     const config = atoms.fullConfigAtom();
     let key = sectionEntryKey(section, config?.widgets ?? {});
@@ -72,7 +73,7 @@ export async function pinSection(section: ShownSection): Promise<void> {
             })
         ).key;
     }
-    pinWidget(pinIdOf(key), config?.settings ?? {}, atoms.fullConfigAtom()?.widgets ?? {});
+    await setWidgetBarState(key, "pinned", config?.settings ?? {}, atoms.fullConfigAtom()?.widgets ?? {});
 }
 
 /** The header menu's items for the sections a pane shows: pin each, or unpin it if pinned. */
@@ -80,11 +81,12 @@ export function sectionPinMenuItems(meta: Record<string, unknown> | null | undef
     const config = atoms.fullConfigAtom();
     const widgets = config?.widgets ?? {};
     const settings = config?.settings ?? {};
-    const pinned = new Set(getSavedPinNames(settings, widgets));
+    // On the bar now: a pinned but hidden entry offers to pin (which shows it), not to unpin.
+    const pinned = new Set(getPinnedKeys(settings, widgets));
     return shownSections(meta).map((section) => {
         const key = sectionEntryKey(section, widgets);
         if (key && pinned.has(pinIdOf(key))) {
-            return { label: `Unpin “${section.label}” from bar`, click: () => unpinWidget(pinIdOf(key), settings, widgets) };
+            return { label: `Unpin “${section.label}” from bar`, click: () => fireAndForget(() => setWidgetBarState(key, "more", settings, widgets)) };
         }
         return { label: `Pin “${section.label}” to bar`, click: () => fireAndForget(() => pinSection(section)) };
     });

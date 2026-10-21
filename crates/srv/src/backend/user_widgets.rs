@@ -93,32 +93,48 @@ pub fn recompute(config_watcher: &ConfigState) {
     config_watcher.update_widgets(merge_widgets(&base, user));
 }
 
-/// widgets.json's text with `entry` added under `key`, or None when the key is already there
-/// (the user's own entry wins). An absent or empty file is `{}`; one that doesn't parse is an
-/// error, so a file the user is halfway through editing is never rewritten.
-pub fn with_entry(content: &str, key: &str, entry: serde_json::Value) -> Result<Option<String>, String> {
+/// Whether a widgets.json entry opens the same pane section as `entry` (its view and `section`).
+fn same_section(a: &serde_json::Value, b: &serde_json::Value) -> bool {
+    let view = |e: &serde_json::Value| e.pointer("/blockdef/meta/view").cloned();
+    a.get("section").is_some() && a.get("section") == b.get("section") && view(a) == view(b)
+}
+
+/// Where a section's `entry` is, or goes, in widgets.json: under `base` if that key is free or
+/// already opens this section, otherwise under the first free `base-2`, `base-3`, …, so a key the
+/// user reused for something else is never handed back as this section's. Returns the key and,
+/// when the entry has to be added, the file's new text. An absent or empty file is `{}`; one that
+/// doesn't parse is an error, so a file the user is halfway through editing is never rewritten.
+pub fn section_entry_in(content: &str, base: &str, entry: serde_json::Value) -> Result<(String, Option<String>), String> {
     let mut widgets: serde_json::Map<String, serde_json::Value> = if content.trim().is_empty() {
         serde_json::Map::new()
     } else {
         serde_json::from_str(content).map_err(|e| format!("widgets.json doesn't parse, so it was left alone: {e}"))?
     };
-    if widgets.contains_key(key) {
-        return Ok(None);
+    for n in 1..=50 {
+        let key = if n == 1 { base.to_string() } else { format!("{base}-{n}") };
+        match widgets.get(&key) {
+            Some(existing) if same_section(existing, &entry) => return Ok((key, None)),
+            Some(_) => continue,
+            None => {
+                widgets.insert(key.clone(), entry);
+                let text = serde_json::to_string_pretty(&widgets).map_err(|e| e.to_string())? + "\n";
+                return Ok((key, Some(text)));
+            }
+        }
     }
-    widgets.insert(key.to_string(), entry);
-    serde_json::to_string_pretty(&widgets).map(|t| Some(t + "\n")).map_err(|e| e.to_string())
+    Err(format!("widgets.json has no free key for {base}"))
 }
 
-/// Adds `entry` under `key` to the user's widgets.json (unless the key is there already) and
-/// applies the file at once, so the widget bar can pin the entry as soon as this returns; the
-/// file watcher applies it again a moment later, which changes nothing. For "Pin this section
-/// to the widget bar" (pane-sections.ts): the bar pins only an entry that exists.
-pub fn add_user_widget(
+/// Adds a section's `entry` to the user's widgets.json (`section_entry_in`) and applies the file
+/// at once, so the widget bar can pin the entry as soon as this returns; the file watcher applies
+/// it again a moment later, which changes nothing. Returns the entry's key. For "Pin this section
+/// to the widget bar" (section-pins.ts): the bar pins only an entry that exists.
+pub fn add_section_entry(
     config_watcher: &Arc<ConfigState>,
     event_bus: &Arc<EventBus>,
-    key: &str,
+    base: &str,
     entry: serde_json::Value,
-) -> Result<(), String> {
+) -> Result<String, String> {
     static WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _one_at_a_time = WRITE.lock().unwrap_or_else(|p| p.into_inner());
     let path = user_widgets_path();
@@ -127,7 +143,8 @@ pub fn add_user_widget(
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(format!("read widgets.json: {e}")),
     };
-    if let Some(text) = with_entry(&content, key, entry)? {
+    let (key, text) = section_entry_in(&content, base, entry)?;
+    if let Some(text) = text {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| format!("create the settings folder: {e}"))?;
         }
@@ -135,7 +152,7 @@ pub fn add_user_widget(
     }
     apply(config_watcher, read_user_widgets(&path)?);
     broadcast_full_config(config_watcher, event_bus);
-    Ok(())
+    Ok(key)
 }
 
 pub fn load_user_widgets_from_disk(config_watcher: &ConfigState) {
@@ -241,15 +258,30 @@ mod tests {
 
     #[test]
     fn a_section_entry_is_added_once_and_never_to_a_file_that_doesnt_parse() {
+        let base = "section@warden-lan";
         let entry = serde_json::json!({ "label": "LAN", "section": "lan", "blockdef": { "meta": { "view": "warden" } } });
-        let text = with_entry("", "section@warden-lan", entry.clone()).unwrap().unwrap();
-        let parsed: HashMap<String, WidgetConfigType> = serde_json::from_str(&text).unwrap();
-        assert_eq!(parsed["section@warden-lan"].section, "lan");
+        let (key, text) = section_entry_in("", base, entry.clone()).unwrap();
+        let parsed: HashMap<String, WidgetConfigType> = serde_json::from_str(&text.unwrap()).unwrap();
+        assert_eq!((key.as_str(), parsed[base].section.as_str()), (base, "lan"));
         // Kept beside what the user already has, and not added twice.
-        let both = with_entry(r#"{"mine@x":{"label":"Mine"}}"#, "section@warden-lan", entry.clone()).unwrap().unwrap();
-        assert!(both.contains("mine@x") && both.contains("section@warden-lan"));
-        assert_eq!(with_entry(&both, "section@warden-lan", entry.clone()).unwrap(), None);
-        assert!(with_entry("{ half typed", "section@warden-lan", entry).is_err());
+        let (_, both) = section_entry_in(r#"{"mine@x":{"label":"Mine"}}"#, base, entry.clone()).unwrap();
+        let both = both.unwrap();
+        assert!(both.contains("mine@x") && both.contains(base));
+        assert_eq!(section_entry_in(&both, base, entry.clone()).unwrap(), (base.to_string(), None));
+        assert!(section_entry_in("{ half typed", base, entry).is_err());
+    }
+
+    #[test]
+    fn a_section_entry_key_the_user_reused_for_something_else_is_never_handed_back() {
+        let base = "section@warden-lan";
+        let entry = serde_json::json!({ "label": "LAN", "section": "lan", "blockdef": { "meta": { "view": "warden" } } });
+        let taken = r#"{"section@warden-lan":{"label":"Mine","blockdef":{"meta":{"view":"term"}}}}"#;
+        let (key, text) = section_entry_in(taken, base, entry.clone()).unwrap();
+        assert_eq!(key, "section@warden-lan-2");
+        let text = text.unwrap();
+        assert!(text.contains("\"Mine\""));
+        // Pinning it again finds the one just added.
+        assert_eq!(section_entry_in(&text, base, entry).unwrap(), ("section@warden-lan-2".to_string(), None));
     }
 
     #[test]
