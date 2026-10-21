@@ -1,17 +1,13 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
+// Editor module barrel — its native pane tab manifest. Its code (CodeMirror
+// included) loads with the first Editor pane (editor-instance.tsx).
 
-// Editor module barrel — its native pane tab manifest (and the model).
-
-import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
-import { registerDocTabHost } from "@/app/doc-tabs/doc-tab-hosts";
-import { editorDocTabHost } from "./editor-doc-tabs";
-import { EditorViewModel } from "./editor-model";
-import { EditorViewComponent } from "./editor-view";
+import { lazyPaneTab } from "@/app/block/lazy-pane-tab";
 import { editorSplitBlockDef } from "./editor-split";
 
 /** The editor as a native pane tab (Pane Tab contract Phase 2c). */
-export const editorPaneTab: PaneTabManifest = {
+export const editorPaneTab = lazyPaneTab({
     apiVersion: 1,
     view: "editor",
     // The Media pane is folded into the Editor: a saved Media pane opens as
@@ -26,20 +22,6 @@ export const editorPaneTab: PaneTabManifest = {
     // A split opens an empty editor with this one's settings, not a copy of
     // its documents (SPEC_EDITOR_MEDIA_SPLIT_OPENS_EMPTY_2026_10_10.md).
     capabilities: { lifecycle: "keepAlive", paneZoom: { baseFontSize: 13 }, noPadding: true, splitBlockDef: editorSplitBlockDef },
-    create: (ctx) => {
-        const model = new EditorViewModel(ctx);
-        // Its tabs can move to and from other Editor panes (editor-doc-tabs.ts).
-        const unregisterHost = registerDocTabHost(ctx.blockId, editorDocTabHost(model));
-        return {
-            component: () => <EditorViewComponent model={model} />,
-            liveTitle: () => ({ text: model.viewName() }),
-            headerText: () => model.viewText(),
-            contextMenu: () => model.getBodyContextMenuItems(),
-            focus: () => model.giveFocus(),
-            dispose: () => {
-                unregisterHost();
-                model.dispose();
-            },
-        };
-    },
-};
+    members: ["liveTitle", "headerText", "contextMenu", "focus"],
+    load: () => import("./editor-instance"),
+});

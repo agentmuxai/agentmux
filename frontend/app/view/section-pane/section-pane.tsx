@@ -36,6 +36,21 @@ export interface SectionPaneSpec<Id extends string> {
     sections: readonly PaneSection<Id>[];
 }
 
+/** A spec from the sections a manifest declares (panes.ts) and each one's component. */
+export function sectionPaneSpec<Id extends string>(
+    view: string,
+    ariaLabel: string,
+    sections: PaneSections<Id>,
+    components: Record<Id, PaneSection<Id>["component"]>
+): SectionPaneSpec<Id> {
+    return {
+        view,
+        defaultSection: sections.default,
+        ariaLabel,
+        sections: sections.items.map((info) => ({ ...info, component: components[info.id] })),
+    };
+}
+
 /** The spec's sections as the pane's manifest declares them (`PaneTabManifest.sections`). */
 export function sectionsOfSpec<Id extends string>(spec: SectionPaneSpec<Id>): PaneSections<Id> {
     return {

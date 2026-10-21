@@ -1,5 +1,46 @@
 # AgentMux Version History
 
+## 0.59.37 — 2026-10-21
+
+- The mouse side buttons walk back and forward through the panes you selected, across tabs, with the caret following; Ctrl plus a side button is page back and forward over a browser pane
+- Panes' status colours (warnings, errors, success dots, banners in Identity, Drone, Warden, Browser, Bundle import, Agent and others) now come from the theme, so they read on the light themes too.
+- Agents can fill a web form field from a Vault entry by name (an SSN, a card number, an API key): you're asked the first time on each site, 'Always on this site' is remembered per entry, and the agent never sees the value; passwords are never filled
+- Agents can ask you to type a value that isn't in the Vault into a web form field (Browser request_value): you type it in AgentMux's own prompt, the agent never sees it, and you can choose to keep it in the Vault
+- Restore on a maximized pane that had been minimized now shows it expanded in its place, instead of putting it back as a minimized chip; Minimize still minimizes it
+- The Vault imports from LastPass, 1Password, Bitwarden, the browsers' password exports (Chrome, Edge, Brave, Firefox, Safari, Apple Passwords), .env files and any CSV, with a preview first, and offers to delete the plaintext file afterwards
+- Cloud messages (review and CI notices, messages from other installs) reach every running agent again after a MuxBus sign-in, including forked agents whose pane is known by both its name and its stored id
+- The status bar says Offline when AgentMux can't reach the Anthropic API or MuxBus, naming each service and since when, and clears it by itself when they answer again.
+- A new version's first start shows its data steps on the splash (copying from the previous version, snapshot, backup), copies objects.db once instead of three times, and agentmux-srv migrate --prepare runs the whole upgrade step
+- Developer tooling: scripts/net-fault, a local proxy that makes the network refuse, blackhole, fail DNS or flap on command, with a checklist for testing how AgentMux behaves offline
+- Migrations no longer run inside srv's startup: when a new version's data needs updating, the launcher runs it as one step ("Updating data") on the splash, then starts srv; a normal start skips the copy, snapshot and migration lock entirely
+- A pane whose turn ends with "Unable to connect to API (ConnectionRefused)" now reports a network error and offers Retry, instead of an unknown failure.
+- The Swarm shows the Kanban task each agent is on and opens it there; Codex's plans show as the agent's checklist, like Claude's
+- A Microsoft Store install's version panel now says "Update in the Store" and opens AgentMux's Store page, instead of sending you to the GitHub release page, and notes that the Store may not have the new version yet
+- Closing the only pane that shows content, when the rest are minimized, now restores the nearest minimized pane instead of leaving the tab with only header chips
+- A minimized pane can now be dragged and dropped like any pane: it stays minimized where it lands, swaps with a pane it is dropped on, and is dragged as itself instead of as a full-size picture of the pane
+- AgentMux's backend starts about 120 ms faster on machines with many channels: the check for older per-channel account data no longer compares every pair of channel files
+- Answering No to the restart question puts the version panel back to "ready" at once, so the upgrade can be started again, instead of showing "Restarting" for three minutes
+- feat(update): macOS installs download, verify and install a newer release themselves (Upgrade & restart replaces AgentMux.app from the release's .dmg)
+- The Kanban closes a task in Review when its PR merges, and links a task to the PR its agent opened without being told; turn the closing off with kanban:closeonmerge.
+- Dragging a minimized pane shows a drop highlight the size of the minimized pane, and moving one minimized pane out of a column of two no longer opens the other one
+- The main window appears about 1.7 s sooner at startup: it is shown cloaked while its first frame paints instead of hidden, which Chromium throttled.
+- Kanban tasks can start after others: a task waiting on an unfinished one stays in the Backlog until it's done (set it in New task, the task's drawer, or Tasks enqueue's after).
+- The Kanban can show one lane per repository (the Lanes switch), and Review's count turns amber past an optional limit set with kanban:reviewlimit.
+- Widgets can read the Kanban with the new tasks:read permission: am.tasks.list() gives each task's number, title, state, agent, repository, PR and checklist progress.
+- srv's boot timing line shows each store open, and srv no longer reopens every store at startup to count pending migrations when the launcher has already checked.
+- The version panel no longer shows a Migrations row or a Run migrations button, and the backend status no longer shows pending migrations: AgentMux updates its data before it starts.
+- The Vault imports a KeePass database (.kdbx) with its master password, from KeePass, KeePassXC, KeePassDX and others
+- Agents can run a background command with a Vault entry in its environment (Terminal run with secrets): you approve the command first, and the output is cleaned of the value
+- Each window starts with a 6.6% smaller frontend bundle: the background-image parser, Sysinfo's chart library, the pairing QR code and the source-map reader load when first used.
+- fix(panes): a tab dragged over another pane's tab bar flashes once and then keeps the bar in the negative until the drag ends, instead of settling back to normal
+- Updated the frontend build tool Vite to 6.4.5, which includes fixes to its dev server's file access checks.
+- Warden's Audit section shows what agents did with your Vault secrets and where each may use one without asking, with a way to stop it
+- fix(macos): packaging fails unless srv is signed as ai.agentmux.srv by the signing team, so a release can't make every keychain item ask again
+- fix(agents): the build slot no longer cancels a wait started by cmd.exe, PowerShell or task.exe, which made a cargo that had to wait for the slot exit 129 without running
+- fix(macos): AgentMux no longer shows the keychain's consent dialog on its own; a MuxBus sign-in saved by v0.59.15 or older asks you to sign in again instead, and saving replaces old entries so later upgrades never ask
+- The Vault imports a 1Password export (.1pux), with logins, cards, bank accounts, ID numbers, API credentials and notes
+- When the model API can't be reached, what you type into an agent pane is held, with Send now and Cancel, and sent by itself once the API answers again
+
 ## 0.59.36 — 2026-10-20
 
 - Agent History can open an agent's archived conversations, jump to any session or date and page forward from there, and shows how many sessions the conversation holds

@@ -7,7 +7,7 @@
  * pulling the managers in.
  */
 
-import { sectionKeyOf } from "@/app/block/pane-sections";
+import { sectionKeyOf, type PaneSections } from "@/app/block/pane-sections";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
 
 export const CONNECTORS_VIEW = "connectors";
@@ -15,10 +15,35 @@ export const MEMORY_VIEW = "memory";
 export const CONNECTORS_SECTION_KEY = sectionKeyOf(CONNECTORS_VIEW);
 export const MEMORY_SECTION_KEY = sectionKeyOf(MEMORY_VIEW);
 
-export const CONNECTORS_SECTION_IDS = ["accounts", "mcp", "remotes"] as const;
-export const MEMORY_SECTION_IDS = ["global", "personal", "skills", "bundles"] as const;
-export type ConnectorsSection = (typeof CONNECTORS_SECTION_IDS)[number];
-export type MemorySection = (typeof MEMORY_SECTION_IDS)[number];
+export type ConnectorsSection = "accounts" | "mcp" | "remotes";
+export type MemorySection = "global" | "personal" | "skills" | "bundles";
+
+/** Connectors' sections, as its manifest declares them; the instance adds each one's component. */
+export const CONNECTORS_SECTIONS: PaneSections<ConnectorsSection> = {
+    default: "accounts",
+    items: [
+        { id: "accounts", label: "Accounts", icon: "key", tooltip: "Sign-ins to providers and services, bound to agents" },
+        { id: "mcp", label: "MCP servers", icon: "plug" },
+        { id: "remotes", label: "Remotes", icon: "server", tooltip: "Remote machines (SSH, WSL)" },
+    ],
+};
+
+/** Memory's sections, as its manifest declares them; the instance adds each one's component. */
+export const MEMORY_SECTIONS: PaneSections<MemorySection> = {
+    default: "global",
+    items: [
+        { id: "global", label: "Global", icon: "globe", tooltip: "Instructions composed into every agent's startup file" },
+        { id: "personal", label: "Personal", icon: "brain", tooltip: "What each agent writes in its own memory, with history" },
+        { id: "skills", label: "Skills", icon: "wand-magic-sparkles" },
+        {
+            id: "bundles",
+            label: "Bundles",
+            icon: "layer-group",
+            tooltip: "Bundles: instructions and skills to give any agent; imports Agent Bundle Format (ABF) files",
+            highlight: true,
+        },
+    ],
+};
 
 /** Opens Connectors, or focuses the one already in this tab, on `section`. */
 export function openConnectors(section: ConnectorsSection = "accounts"): Promise<void> {

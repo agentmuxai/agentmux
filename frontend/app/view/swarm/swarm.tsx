@@ -1,12 +1,13 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
+//
+// Swarm module barrel: its native pane tab manifest. Its code loads with the
+// first Swarm pane (swarm-instance.tsx).
 
-import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
-import { SwarmViewModel } from "./swarm-model";
-import { SwarmView } from "./swarm-view";
+import { lazyPaneTab } from "@/app/block/lazy-pane-tab";
 
 /** Swarm as a native pane tab (Pane Tab contract Phase 2c). */
-export const swarmPaneTab: PaneTabManifest = {
+export const swarmPaneTab = lazyPaneTab({
     apiVersion: 1,
     view: "swarm",
     label: "Swarm",
@@ -14,11 +15,6 @@ export const swarmPaneTab: PaneTabManifest = {
     defaultHue: 0,
     // Applies `term:zoom` as CSS zoom; fills the pane edge to edge.
     capabilities: { paneZoom: {}, noPadding: true },
-    create: (ctx) => {
-        const model = new SwarmViewModel(ctx.blockId);
-        return {
-            component: () => <SwarmView model={model} ctx={ctx} />,
-            dispose: () => model.dispose(),
-        };
-    },
-};
+    members: [],
+    load: () => import("./swarm-instance"),
+});

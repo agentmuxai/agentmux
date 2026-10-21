@@ -57,8 +57,13 @@ vi.mock("@/app/store/block-component-registry", () => ({
 }));
 
 import type { PaneTabHostContext, PaneTabManifest } from "@/app/block/pane-tab-registry";
-import { connectorsPaneTab } from "@/app/view/connectors/connectors";
-import { memoryPaneTab } from "@/app/view/memory/memory";
+import { create as createConnectors } from "@/app/view/connectors/connectors-instance";
+import { create as createMemory } from "@/app/view/memory/memory-instance";
+
+// The panes' real instances: their manifests are lazy (lazy-pane-tab.tsx) and
+// would only give a stand-in until the code loads.
+const connectorsPaneTab = { create: createConnectors } as unknown as PaneTabManifest;
+const memoryPaneTab = { create: createMemory } as unknown as PaneTabManifest;
 
 // A real signal behind the host context, so a setMeta write flows back into
 // the pane the way the backend's meta push does.

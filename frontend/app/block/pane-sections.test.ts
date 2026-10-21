@@ -7,7 +7,7 @@
 import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SETTINGS_SECTIONS } from "@/app/view/settings/settings-model";
-import { CONNECTORS_SECTION_IDS, MEMORY_SECTION_IDS } from "@/app/view/section-pane/panes";
+import { CONNECTORS_SECTIONS, MEMORY_SECTIONS } from "@/app/view/section-pane/panes";
 import { VAULT_SECTIONS } from "@/app/view/vault/vault-kinds";
 import { WARDEN_SECTIONS } from "@/app/view/warden/warden-model";
 import { sectionKeyOf, sectionLabelOf, sectionOf, sectionProblem, type PaneSections } from "./pane-sections";
@@ -63,8 +63,8 @@ describe("pane sections", () => {
         expect(sdk).toEqual({
             warden: ids(WARDEN_SECTIONS),
             vault: ids(VAULT_SECTIONS),
-            connectors: [...CONNECTORS_SECTION_IDS],
-            memory: [...MEMORY_SECTION_IDS],
+            connectors: ids(CONNECTORS_SECTIONS),
+            memory: ids(MEMORY_SECTIONS),
             settings: ids(SETTINGS_SECTIONS),
         });
     });
