@@ -32,10 +32,7 @@ pub fn dmg_name(version: &str) -> String {
 /// The outermost `.app` bundle holding `path`: the launcher runs in
 /// `AgentMux.app/Contents/MacOS/`, and srv in a helper app nested inside it.
 pub fn outermost_app(path: &Path) -> Option<PathBuf> {
-    path.ancestors()
-        .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("app")))
-        .last()
-        .map(Path::to_path_buf)
+    agentmux_common::runtime_mode::outermost_app_bundle(path)
 }
 
 /// Why `app` can't be replaced where it is, or `None` when it can: macOS runs
@@ -351,6 +348,10 @@ mod tests {
         assert_eq!(cmd.get_program(), "/bin/sh");
         assert_eq!(args[0], "-c");
         assert!(!args[1].contains("My Apps"), "no path is inside the script");
+        // The record the script writes is the one the next version reads.
+        let record = agentmux_common::runtime_mode::mac_app_channel_file(&up.app);
+        assert_eq!(record, Path::new("/Users/u/My Apps/.AgentMux.app.agentmux-channel"));
+        assert!(args[1].contains(r#"record="$parent/.$base.agentmux-channel""#));
         assert_eq!(
             &args[2..],
             &[

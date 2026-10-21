@@ -421,6 +421,23 @@ pub fn appimage_channel_file(appimage: &Path) -> PathBuf {
     appimage.with_file_name(format!("{name}.{RECORDED_CHANNEL_FILE}"))
 }
 
+/// The outermost `.app` bundle holding `path` (macOS: the launcher runs in
+/// `AgentMux.app/Contents/MacOS/`, srv in a helper app nested inside it).
+pub fn outermost_app_bundle(path: &Path) -> Option<PathBuf> {
+    path.ancestors()
+        .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("app")))
+        .last()
+        .map(Path::to_path_buf)
+}
+
+/// Where a macOS upgrade records the data channel of an `.app`: beside it,
+/// hidden, as `.<name>.app.agentmux-channel`, since writing inside the bundle
+/// would break its code signature.
+pub fn mac_app_channel_file(app: &Path) -> PathBuf {
+    let name = app.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    app.with_file_name(format!(".{name}.{RECORDED_CHANNEL_FILE}"))
+}
+
 /// The AppImage the binary at `exe` runs from: `$APPIMAGE`, when `exe` is
 /// inside that AppImage's mount (`$APPDIR`) or the folder AppRun extracted it
 /// to (`$AGENTMUX_EXTRACTED_RUN`). `APPIMAGE` alone isn't enough: any other
@@ -437,13 +454,20 @@ pub fn inside_appimage(exe: &Path, roots: &[std::ffi::OsString]) -> bool {
 }
 
 /// The data channel the running binary's install records: beside the AppImage
-/// it runs from, else in its portable folder ([`recorded_channel_in`]).
+/// it runs from, beside its `.app` on macOS, else in its portable folder
+/// ([`recorded_channel_in`]).
 pub fn recorded_channel() -> Option<String> {
     let exe = std::env::current_exe().ok()?;
-    match running_appimage(&exe) {
-        Some(appimage) => read_channel_file(&appimage_channel_file(&appimage)),
-        None => recorded_channel_in(exe.parent()?),
+    if let Some(appimage) = running_appimage(&exe) {
+        return read_channel_file(&appimage_channel_file(&appimage));
     }
+    // macOS: beside the `.app` an upgrade replaced.
+    if cfg!(target_os = "macos") {
+        if let Some(channel) = outermost_app_bundle(&exe).and_then(|app| read_channel_file(&mac_app_channel_file(&app))) {
+            return Some(channel);
+        }
+    }
+    recorded_channel_in(exe.parent()?)
 }
 
 /// True when `exe_dir` is one of our known dev-build output dirs.
@@ -1011,6 +1035,11 @@ mod tests {
     fn an_appimage_records_its_channel_beside_it_and_only_its_own_binaries_read_it() {
         let file = Path::new("/home/u/Apps/AgentMux_0.59.30_amd64.AppImage");
         assert_eq!(appimage_channel_file(file), Path::new("/home/u/Apps/AgentMux_0.59.30_amd64.AppImage.agentmux-channel"));
+        let app = Path::new("/Applications/AgentMux.app");
+        assert_eq!(mac_app_channel_file(app), Path::new("/Applications/.AgentMux.app.agentmux-channel"));
+        let srv = Path::new("/Applications/AgentMux.app/Contents/Helpers/AgentMux Server.app/Contents/MacOS/srv");
+        assert_eq!(outermost_app_bundle(srv).as_deref(), Some(app));
+        assert_eq!(outermost_app_bundle(Path::new("/usr/bin/agentmux-srv")), None);
         let extracted = std::ffi::OsString::from("/home/u/.local/share/agentmux/extracted/0.59.30");
         let inside = Path::new("/home/u/.local/share/agentmux/extracted/0.59.30/usr/bin/agentmux-launcher");
         let elsewhere = Path::new("/home/u/AgentMux/usr/bin/agentmux-launcher");
