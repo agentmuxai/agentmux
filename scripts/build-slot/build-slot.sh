@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build-slot-version: 4
+# build-slot-version: 5
 # build-slot: run one heavy build or test command while holding the host-wide
 # build slot, so only one such command runs on this machine at a time.
 # Spec: docs/specs/SPEC_BUILD_SLOT_ENFORCEMENT_2026_10_20.md. AgentMux installs this file to
@@ -26,6 +26,11 @@ MAX_WAIT="${BUILD_SLOT_MAX_WAIT:-3600}"
 POLL="${BUILD_SLOT_POLL:-3}"
 ME="${AGENTMUX_AGENT_ID:-${USER:-unknown}}"
 PARENT="$PPID"
+# Whether we can watch our parent at all. Git Bash reports pid 1 (and cannot signal it) when
+# its parent is a native Windows program (cmd.exe, PowerShell, task.exe), which is how the
+# `cargo` shim usually reaches us; a wait must not take that for "the parent is gone".
+PARENT_VISIBLE=0
+if [ "$PARENT" -gt 1 ] 2>/dev/null && kill -0 "$PARENT" 2>/dev/null; then PARENT_VISIBLE=1; fi
 
 now() { date +%s; }
 # The "waiting" line goes to the terminal when there is one, even if stdout and stderr are
@@ -126,7 +131,7 @@ while :; do
   # A wait whose parent is gone (the tool or shell that started it was stopped) must not
   # keep a ticket in the queue: leave. BUILD_SLOT_DETACHED=1 turns this off for a wait
   # started on purpose with nohup or setsid.
-  if [ -z "${BUILD_SLOT_DETACHED:-}" ] && ! kill -0 "$PARENT" 2>/dev/null; then
+  if [ "$PARENT_VISIBLE" = 1 ] && [ -z "${BUILD_SLOT_DETACHED:-}" ] && ! kill -0 "$PARENT" 2>/dev/null; then
     echo "build-slot: the process that started this wait ($PARENT) is gone; leaving the queue" >&2; exit 129
   fi
   # Sleep in the background and wait for it, so a signal is handled at once, not after the sleep.
