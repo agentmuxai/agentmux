@@ -19,44 +19,42 @@ import { Dynamic } from "solid-js/web";
 
 type PlotModule = typeof import("./sysinfo-plot");
 
-let loaded: PlotModule | undefined;
+// Shared by every chart, and reactive: when any chart's Try again succeeds,
+// every chart waiting on the module draws.
+const [loaded, setLoaded] = createSignal<PlotModule>();
+const [failure, setFailure] = createSignal<string>();
 let loading: Promise<PlotModule> | undefined;
 
-function loadPlot(): Promise<PlotModule> {
-    loading ??= import("./sysinfo-plot").then(
-        (m) => (loaded = m),
+function loadPlot(): void {
+    if (loaded() || loading) return;
+    setFailure(undefined);
+    loading = import("./sysinfo-plot").then(
+        (m) => {
+            setLoaded(() => m);
+            return m;
+        },
         (e) => {
             loading = undefined;
+            console.error("[sysinfo] the chart code failed to load:", e);
+            setFailure(e instanceof Error ? e.message : String(e));
             throw e;
         }
     );
-    return loading;
+    loading.catch(() => {});
 }
 
 /** `pick`'s component from the plot module, once loaded. */
 function lazyChart<P extends object>(pick: (m: PlotModule) => (props: P) => JSX.Element) {
     return (props: P): JSX.Element => {
-        const [module, setModule] = createSignal(loaded);
-        const [failure, setFailure] = createSignal<string>();
-        const start = () => {
-            setFailure(undefined);
-            loadPlot().then(
-                (m) => setModule(() => m),
-                (e) => {
-                    console.error("[sysinfo] the chart code failed to load:", e);
-                    setFailure(e instanceof Error ? e.message : String(e));
-                }
-            );
-        };
-        if (!loaded) start();
+        loadPlot();
         return (
             <Show
-                when={module()}
+                when={loaded()}
                 fallback={
                     <Show when={failure()}>
                         <div role="alert">
                             Chart failed to load: {failure()}{" "}
-                            <Button density="compact" onClick={start}>
+                            <Button density="compact" onClick={loadPlot}>
                                 Try again
                             </Button>
                         </div>

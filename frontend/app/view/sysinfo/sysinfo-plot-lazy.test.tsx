@@ -13,16 +13,24 @@ vi.mock("./sysinfo-plot", () => {
     return { TimeChart: () => <div>time chart</div>, SingleLinePlot: () => <div>line plot</div> };
 });
 
-import { SingleLinePlot } from "./sysinfo-plot-lazy";
+import { SingleLinePlot, TimeChart } from "./sysinfo-plot-lazy";
 
 afterEach(() => cleanup());
 
 describe("sysinfo-plot-lazy", () => {
-    it("shows a failed chart load in its place, and Try again loads it anew", async () => {
+    it("shows a failed load in every chart's place, and one Try again draws them all", async () => {
         vi.spyOn(console, "error").mockImplementation(() => {});
-        render(() => <SingleLinePlot {...({} as any)} />);
-        await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Chart failed to load"));
-        fireEvent.click(screen.getByText("Try again"));
+        render(() => (
+            <>
+                <SingleLinePlot {...({} as any)} />
+                <TimeChart {...({} as any)} />
+            </>
+        ));
+        await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(2));
+        expect(screen.getAllByRole("alert")[0].textContent).toContain("Chart failed to load");
+        fireEvent.click(screen.getAllByText("Try again")[0]);
         await waitFor(() => expect(screen.getByText("line plot")).toBeTruthy());
+        expect(screen.getByText("time chart")).toBeTruthy();
+        expect(screen.queryByRole("alert")).toBeNull();
     });
 });

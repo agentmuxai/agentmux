@@ -74,8 +74,17 @@ function loadMap(jsUrl: string): Promise<SourceMapConsumer | "failed"> {
             const res = await fetch(mapUrlOf(jsUrl));
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const json = (await res.json()) as RawSourceMap;
-            const { SourceMapConsumer } = await import("source-map-js");
-            const consumer = new SourceMapConsumer(json);
+            let parser: typeof import("source-map-js");
+            try {
+                parser = await import("source-map-js");
+            } catch (importErr) {
+                // The parser's own chunk failed to load, not this map: forget the
+                // attempt so the next error in this chunk loads it again.
+                cache.delete(chunk);
+                console.warn(`[source-map] the source-map parser failed to load: ${(importErr as Error).message}`);
+                return "failed";
+            }
+            const consumer = new parser.SourceMapConsumer(json);
             cache.set(chunk, { kind: "ready", consumer });
             return consumer;
         } catch (err) {
