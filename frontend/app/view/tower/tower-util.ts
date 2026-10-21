@@ -14,7 +14,7 @@ export type CpuMode = "machine" | "core";
 
 /** `agents`: the rail of agents and what each runs. `processes`: every
  *  process on the machine. SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md §3. */
-export type TowerView = "agents" | "processes";
+export type TowerView = "agents" | "processes" | "panes";
 
 export type SortKey = "name" | "cpu" | "mem" | "count";
 export interface Sort {

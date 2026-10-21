@@ -9,6 +9,11 @@ export type TowerSampleReq = {
  */
 host?: boolean, 
 /**
+ * Also group this machine's AgentMux by window, tab and pane (the Panes
+ * view, SPEC_TOWER_PANES_VIEW_2026_10_21.md).
+ */
+panes?: boolean, 
+/**
  * Another machine: an SSH connection or `wsl://<distro>`, as a pane's
  * `connection` meta names it, or a paired AgentMux computer
  * (`peer:<id>`). Absent or `local`: this computer.

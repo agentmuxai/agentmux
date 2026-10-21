@@ -60,7 +60,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             tokio::task::spawn_blocking(move || {
                 let page = |id: &str| browser_page(&mstore, id);
                 let workspace = |id: &str| window_workspace(&mstore, id);
-                Tower::global()
+                let mut snap = Tower::global()
                     .sample(
                         req.host.unwrap_or(false),
                         &hostname,
@@ -69,7 +69,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // A renderer reported the PID it sees for itself (namespaced on Linux).
                         |pid| renderer_serves(&renderers, own_view_pid(pid), &page, &workspace),
                     )
-                    .map_err(|e| format!("tower.sample: {e}"))
+                    .map_err(|e| format!("tower.sample: {e}"))?;
+                // The Panes view: windows, tabs and panes (SPEC_TOWER_PANES_VIEW_2026_10_21.md).
+                if req.panes.unwrap_or(false) {
+                    let layout = crate::backend::tower_panes::read_layout(&mstore);
+                    snap.panes = Some(crate::backend::tower_panes::build(&layout, &snap, &renderers, &own_view_pid));
+                }
+                Ok(snap)
             })
             .await
             .map_err(|e| format!("tower.sample: {e}"))?

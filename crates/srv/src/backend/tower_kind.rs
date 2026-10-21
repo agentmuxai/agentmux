@@ -547,6 +547,7 @@ mod tests {
         let mut snap = TowerSnapshot {
             ts_ms: 0,
             hostname: "studio".into(),
+            panes: None,
             os: "macos".into(),
             cpu_count: 1,
             memory_metric: String::new(),
@@ -590,6 +591,7 @@ mod tests {
         let mut snap = TowerSnapshot {
             ts_ms: 0,
             hostname: "h".into(),
+            panes: None,
             os: "linux".into(),
             cpu_count: 1,
             memory_metric: String::new(),

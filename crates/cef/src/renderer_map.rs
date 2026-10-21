@@ -28,11 +28,52 @@ use serde::Serialize;
 
 use crate::state::{AppState, BrowserPaneLifecycle};
 
-/// Browser id → the PID of the renderer serving it. Process-wide: the host
-/// has one `AppState`, and this is only ever read for srv's Tower pane.
-fn pids() -> &'static Mutex<HashMap<i32, u32>> {
-    static PIDS: OnceLock<Mutex<HashMap<i32, u32>>> = OnceLock::new();
+/// The renderers serving one browser: the one its browser object was created
+/// in (its main frame's), and each frame's, which site isolation can put in
+/// other processes (a cross-site iframe: ads, embeds, sign-in widgets).
+/// SPEC_TOWER_PANES_VIEW_2026_10_21.md §6.1.
+#[derive(Debug, Default, Clone, PartialEq)]
+struct BrowserPids {
+    main: Option<u32>,
+    /// Frame identifier → the PID of the process its document runs in.
+    frames: HashMap<String, u32>,
+}
+
+impl BrowserPids {
+    /// Every PID serving the browser, the main one first, each once.
+    fn all(&self) -> Vec<u32> {
+        let mut out: Vec<u32> = self.main.into_iter().collect();
+        let mut rest: Vec<u32> = self.frames.values().copied().filter(|p| Some(*p) != self.main).collect();
+        rest.sort_unstable();
+        rest.dedup();
+        out.extend(rest);
+        out
+    }
+}
+
+/// What a renderer's message reports (`PID_MESSAGE`'s second argument).
+const REPORT_BROWSER: i32 = 0;
+const REPORT_FRAME: i32 = 1;
+const REPORT_FRAME_GONE: i32 = 2;
+
+/// Browser id → the renderers serving it. Process-wide: the host has one
+/// `AppState`, and this is read for srv's Tower pane and the recycle governor.
+fn pids() -> &'static Mutex<HashMap<i32, BrowserPids>> {
+    static PIDS: OnceLock<Mutex<HashMap<i32, BrowserPids>>> = OnceLock::new();
     PIDS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Apply one report to a browser's renderers.
+fn apply_report(entry: &mut BrowserPids, kind: i32, pid: u32, frame: &str) {
+    match kind {
+        REPORT_FRAME if !frame.is_empty() => {
+            entry.frames.insert(frame.to_string(), pid);
+        }
+        REPORT_FRAME_GONE => {
+            entry.frames.remove(frame);
+        }
+        _ => entry.main = Some(pid),
+    }
 }
 
 /// The process message a renderer sends with its PID.
@@ -56,13 +97,36 @@ wrap_render_process_handler! {
         // the sandbox's PID namespace makes this a namespace-local PID; srv
         // translates (tower_agentmux::own_view_pid).
         fn on_browser_created(&self, browser: Option<&mut Browser>, _extra_info: Option<&mut DictionaryValue>) {
-            let Some(frame) = browser.and_then(|b| b.main_frame()) else { return };
-            let Some(mut message) = process_message_create(Some(&CefString::from(PID_MESSAGE))) else { return };
-            let Some(args) = message.argument_list() else { return };
-            args.set_int(0, std::process::id() as i32);
-            frame.send_process_message(ProcessId::BROWSER, Some(&mut message));
+            let Some(mut frame) = browser.and_then(|b| b.main_frame()) else { return };
+            send_report(&mut frame, REPORT_BROWSER);
+        }
+
+        // Runs for every frame's document, in whichever process hosts it: a
+        // cross-site iframe's is another renderer, which Tower counts as the
+        // page's too (SPEC_TOWER_PANES_VIEW_2026_10_21.md §6.1).
+        fn on_context_created(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, _context: Option<&mut V8Context>) {
+            if let Some(frame) = frame {
+                send_report(frame, REPORT_FRAME);
+            }
+        }
+
+        fn on_context_released(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, _context: Option<&mut V8Context>) {
+            if let Some(frame) = frame {
+                send_report(frame, REPORT_FRAME_GONE);
+            }
         }
     }
+}
+
+/// A renderer's report, sent from `frame` to the browser process: this
+/// process's PID, what it reports, and the frame's identifier.
+fn send_report(frame: &mut Frame, kind: i32) {
+    let Some(mut message) = process_message_create(Some(&CefString::from(PID_MESSAGE))) else { return };
+    let Some(args) = message.argument_list() else { return };
+    args.set_int(0, std::process::id() as i32);
+    args.set_int(1, kind);
+    args.set_string(2, Some(&CefString::from(&frame.identifier())));
+    frame.send_process_message(ProcessId::BROWSER, Some(&mut message));
 }
 
 /// The browser process's half: take a renderer's report. Returns whether
@@ -81,7 +145,10 @@ pub fn record(
     }
     let (Some(browser), Some(args)) = (browser, message.argument_list()) else { return true };
     if let Some(pid) = u32::try_from(args.int(0)).ok().filter(|&p| p > 0) {
-        pids().lock().insert(browser.identifier(), pid);
+        // An older renderer sends only the PID: its browser's main renderer.
+        let kind = if args.size() > 1 { args.int(1) } else { REPORT_BROWSER };
+        let frame = if args.size() > 2 { CefString::from(&args.string(2)).to_string() } else { String::new() };
+        apply_report(pids().lock().entry(browser.identifier()).or_default(), kind, pid, &frame);
     }
     true
 }
@@ -97,6 +164,8 @@ pub struct RendererEntry {
     pub pid: u32,
     /// The browser's label (`main`, `window-pool-3`, a pane's own label, …).
     pub label: String,
+    /// The browser's own renderer (its main frame's), not one of its frames'.
+    pub main: bool,
     /// A browser pane's block id.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub block_id: Option<String>,
@@ -114,7 +183,7 @@ pub struct RendererMapData {
 
 /// Every browser whose renderer has reported, and what that browser is.
 pub fn snapshot(state: &AppState) -> Vec<RendererEntry> {
-    let pids: HashMap<i32, u32> = pids().lock().clone();
+    let pids: HashMap<i32, BrowserPids> = pids().lock().clone();
     if pids.is_empty() {
         return Vec::new();
     }
@@ -136,19 +205,62 @@ pub fn snapshot(state: &AppState) -> Vec<RendererEntry> {
     let mut out: Vec<RendererEntry> = state
         .list_browsers()
         .into_iter()
-        .filter_map(|(label, browser)| {
-            let pid = *pids.get(&browser.identifier())?;
+        .flat_map(|(label, browser)| {
+            let served = pids.get(&browser.identifier()).cloned().unwrap_or_default();
             let window_id = state.backend_window_id(&label);
             let pool_side = pool.contains(&label) || label.starts_with("floating-pool-");
-            Some(RendererEntry {
-                pid,
-                block_id: panes.get(&label).cloned(),
-                pool: pool_side && window_id.is_none(),
-                window_id,
-                label,
-            })
+            let block_id = panes.get(&label).cloned();
+            // One entry per renderer serving the browser: its own, then each
+            // of its frames' (SPEC_TOWER_PANES_VIEW_2026_10_21.md §6.1).
+            served
+                .all()
+                .into_iter()
+                .map(|pid| RendererEntry {
+                    pid,
+                    main: served.main.map_or(true, |m| m == pid),
+                    block_id: block_id.clone(),
+                    pool: pool_side && window_id.is_none(),
+                    window_id: window_id.clone(),
+                    label: label.clone(),
+                })
+                .collect::<Vec<_>>()
         })
         .collect();
     out.sort_by(|a, b| (a.pid, &a.label).cmp(&(b.pid, &b.label)));
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_browser_keeps_its_own_renderer_and_each_frames() {
+        let mut b = BrowserPids::default();
+        apply_report(&mut b, REPORT_BROWSER, 10, "");
+        apply_report(&mut b, REPORT_FRAME, 10, "main-frame");
+        apply_report(&mut b, REPORT_FRAME, 20, "ad-frame");
+        apply_report(&mut b, REPORT_FRAME, 30, "embed-frame");
+        assert_eq!(b.all(), vec![10, 20, 30]);
+        apply_report(&mut b, REPORT_FRAME_GONE, 20, "ad-frame");
+        assert_eq!(b.all(), vec![10, 30]);
+    }
+
+    #[test]
+    fn a_frame_moving_to_another_process_is_counted_once() {
+        let mut b = BrowserPids::default();
+        apply_report(&mut b, REPORT_BROWSER, 10, "");
+        apply_report(&mut b, REPORT_FRAME, 20, "f");
+        apply_report(&mut b, REPORT_FRAME, 30, "f");
+        apply_report(&mut b, REPORT_FRAME, 30, "g");
+        assert_eq!(b.all(), vec![10, 30]);
+    }
+
+    #[test]
+    fn an_older_renderers_report_is_its_main_renderer() {
+        let mut b = BrowserPids::default();
+        apply_report(&mut b, REPORT_BROWSER, 7, "");
+        assert_eq!(b.main, Some(7));
+        assert_eq!(b.all(), vec![7]);
+    }
 }
