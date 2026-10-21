@@ -439,17 +439,48 @@ export function deleteNode(layoutState: LayoutTreeState, action: LayoutTreeDelet
     } else {
         const parent = findParent(layoutState.rootNode, action.nodeId);
         if (parent) {
+            const before = leafIds(layoutState.rootNode);
             const node = parent.children.find((child) => child.id === action.nodeId);
+            const removed = leafIds(node);
             removeChild(parent, node);
             if (layoutState.focusedNodeId === node.id) {
                 layoutState.focusedNodeId = undefined;
             }
+            restoreNearestIfAllMinimized(layoutState.rootNode, before, removed);
         } else {
             console.error("unable to delete node, not found in tree");
         }
     }
 
     
+}
+
+/** The panes in reading order (depth first), to find "the nearest pane". */
+function leafIds(node: LayoutNode | undefined, out: string[] = []): string[] {
+    if (!node) return out;
+    if (node.children?.length) node.children.forEach((c) => leafIds(c, out));
+    else if (node.data !== undefined) out.push(node.id);
+    return out;
+}
+
+/**
+ * After a pane or a container left the tree (`removed`: its panes, in reading order): if every
+ * pane left is minimized, restore the nearest one, the pane that followed it in reading order or
+ * else the one before it, so a tab always shows one. `before` is the reading order with the
+ * removed panes still in it. srv does the same (`restore_nearest_if_all_minimized`,
+ * crates/srv/src/backend/layout/intent.rs).
+ */
+function restoreNearestIfAllMinimized(root: LayoutNode | undefined, before: string[], removed: string[]) {
+    if (!root || countExpandedLeaves(root) > 0) return;
+    const at = Math.max(0, before.indexOf(removed[0]));
+    const order = [...before.slice(at).filter((id) => !removed.includes(id)), ...before.slice(0, at).reverse()];
+    for (const id of order) {
+        const node = findNode(root, id);
+        if (node && !node.children?.length && node.data !== undefined) {
+            node.minimized = undefined;
+            return;
+        }
+    }
 }
 
 export function resizeNode(layoutState: LayoutTreeState, action: LayoutTreeResizeNodeAction) {
