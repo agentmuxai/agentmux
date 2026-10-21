@@ -167,7 +167,11 @@ export interface AgentMux {
     };
     theme: { get(): Promise<Theme> };
     panes: {
-        /** The package's own views need no permission; any other view needs `panes`. */
+        /** The package's own views need no permission; any other view needs `panes`.
+         *  For an own view, `meta` becomes that pane's widget meta (what `meta.get` reads there).
+         *  Another view gets only its section (`{ "warden:section": "kanban" }`; also `vault:`,
+         *  `connectors:`, `memory:` and `settings:section`) or, for `browser`, an http(s) `url`;
+         *  every other key is dropped. */
         open(view: string, meta?: Record<string, unknown>, split?: "right" | "down" | "tab"): Promise<{ pane: string }>;
     };
     /** Needs `storage`. Per package, at most 5 MB, values up to 1 MB. */

@@ -182,7 +182,7 @@ Methods marked "—" in the permission column need none.
 | `ui.openUrl` | `{ url: string }` (`http:` or `https:`) | `{}`: opens a browser pane next to the widget | — |
 | `ui.setStatusItem` | `{ id: string, text?: string, icon?: string, tooltip?: string, tone?: "info"\|"success"\|"warning"\|"error", hidden?: boolean }` | `{}` (§6.8) | — |
 | `theme.get` | `{}` | `Theme` | — |
-| `panes.open` | `{ view: string, meta?: object, split?: "right"\|"down"\|"tab" }` | `{ pane: string }` | — for the package's own views; `panes` for any other view |
+| `panes.open` | `{ view: string, meta?: object, split?: "right"\|"down"\|"tab" }` | `{ pane: string }` | — for the package's own views; `panes` for any other view. An own view's `meta` is namespaced like `meta.set`'s; another view takes only its section key or a browser's http(s) `url`, never a controller or command (amended 2026-10-21, `paneMetaForWidget`) |
 | `storage.get` | `{ key: string }` | `{ value: any \| null }` | `storage` |
 | `storage.set` | `{ key: string, value: any }` (JSON) | `{}` | `storage` |
 | `storage.delete` | `{ key: string }` | `{}` | `storage` |
