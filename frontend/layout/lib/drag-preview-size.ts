@@ -109,6 +109,33 @@ export function dragPreviewCursorOffset(size: DragPreviewSize, dpr: number): { x
 }
 
 /**
+ * Which image a pane's drag shows. A minimized pane (a chip) is dragged as itself: its header,
+ * given to `setDragImage` directly, so the ghost is the chip at its size and is ready at once. Any
+ * other pane shows its cached ghost only if that was drawn at the size the pane has now: one
+ * drawn before a minimize, a restore or a resize would show the pane as it was, so the header is
+ * used instead (the ghost is redrawn asynchronously and a quick drag can start before it is).
+ * SPEC_DRAG_MINIMIZED_PANES_2026_10_20.md §3 A.
+ */
+export function dragImageChoice(
+    minimized: boolean,
+    cached: DragPreviewSize | null | undefined,
+    now: DragPreviewSize
+): "cached" | "header" {
+    if (minimized || !cached) return "header";
+    return cached.width === now.width && cached.height === now.height ? "cached" : "header";
+}
+
+/** Where the cursor holds a header used as the drag image: the point the drag started from, inside it. */
+export function headerGrabOffset(
+    rect: { left: number; top: number; width: number; height: number },
+    at: { clientX: number; clientY: number } | undefined
+): { x: number; y: number } {
+    if (!at) return { x: 10, y: 10 };
+    const clamp = (v: number, max: number) => Math.min(Math.max(0, v), Math.max(0, max));
+    return { x: clamp(at.clientX - rect.left, rect.width), y: clamp(at.clientY - rect.top, rect.height) };
+}
+
+/**
  * How long the pointer must rest on a pane before its drag ghost is
  * rasterised. `toPng` of a pane costs ~170 ms of main thread
  * (SPEC_AGENT_OPEN_LATENCY_2026_09_27.md F4), and it used to run the moment

@@ -4,6 +4,7 @@
 **Author:** Maricon@charlie
 **Type:** Spec (a missing feature and a drag-image fix)
 **Status:** proposed
+**Decisions applied:** D1 to D4 as recommended (the operator, 2026-10-20: *"go"*).
 **Requested by:** the operator: *"we also want to add a missing feature, you should be able to dnd minimized panes. the ghost would be the size of the minimized pane (currently dragging a minimized pane will have a ghost the size of what appears to be the restored pane."*
 **Related:** `SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md` (where minimized panes were locked against moves; §8 made minimize a display mode), `SPEC_PANE_CONTROLS_TILED_RESTORE_ICON_AND_MINIMIZE_FROM_MAXIMIZED_2026_10_12.md` (minimize from maximized), `SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md`, `SPEC_PANE_DRAG_TO_TAB_2026_07_10.md` (cross-tab drops), `SPEC_NATIVE_POINTER_DRAG_TEAROFF_2026_07_28.md` (tear-off).
 
@@ -32,15 +33,15 @@ Code read on main at 2026-10-20.
 
 ### B. A chip can be moved and swapped within the tab
 
-4. **Move.** `moveNode` (frontend) and `move_node` (srv) accept an effectively minimized **source leaf**. The leaf keeps its `minimized` flag and its stored `size` (the size of the pane when restored), so it lands as a chip and restores later to a sensible size in its new parent. The **destination** rule changes to match the display-mode model: inserting into a fully-minimized branch (a column of chips) is allowed when the moved leaf is itself minimized (the branch stays all chips) and refused when it is expanded (an expanded pane would be laid out inside a header strip). A minimized *branch* as the source stays refused (only leaves are dragged).
+4. **Move.** `moveNode` (frontend) and `move_node` (srv) accept an effectively minimized **source leaf**. The leaf keeps its `minimized` flag, so it lands as a chip. Like any pane moved to another parent it takes the default size there (`DEFAULT_NODE_SIZE`; a move within its parent keeps its size), so it restores later to an even share of its new parent. The **destination** rule changes to match the display-mode model: inserting into a fully-minimized branch (a column of chips) is allowed when the moved leaf is itself minimized (the branch stays all chips) and refused when it is expanded (an expanded pane would be laid out inside a header strip). A minimized *branch* as the source stays refused (only leaves are dragged).
 5. **Swap.** Dropping a chip on the centre of an expanded pane swaps them, and each keeps its own flag: the chip takes the expanded pane's slot as a chip, and the expanded pane takes the chip's slot expanded. `swapNode` and `swap_nodes` accept minimized endpoints. A swap never changes how many panes are expanded, so the "one pane always shows content" rule cannot break.
 6. **No new geometry.** The chip's position and size in its new slot come from the existing derivation (the header strip of its column, or a chip in its row, with the slip rules).
 7. **Indicators.** The drop indicators shown for a chip are the ones that will be accepted: `computeMoveNode` returns no move for a destination the rule in 4 refuses, so the user never sees an indicator that then does nothing. Splitting stays refused, so a chip offers no split targets.
 
 ### C. Leaving the tab
 
-8. **To another tab** (`crossTabDrag.ts`, `SPEC_PANE_DRAG_TO_TAB_2026_07_10.md`): the pane arrives as a chip if the target tab has an expanded pane, and **restored** if it would otherwise be the only pane, or if every pane in the target tab is minimized.
-9. **Torn off to a window** (tear-off, `SPEC_NATIVE_POINTER_DRAG_TEAROFF_2026_07_28.md`): a floating window cannot be a chip, so the pane is restored as it leaves. Its stored size is not used for the window's size; the tear-off's own sizing applies.
+8. **To another tab** (`crossTabDrag.ts`, `SPEC_PANE_DRAG_TO_TAB_2026_07_10.md`): the pane arrives as a chip if the target tab has an expanded pane, and **restored** if it would otherwise be the only pane, or if every pane in the target tab is minimized. srv builds a new pane in the target tab (`RedockFloatingPane`, `server/service/tear_off.rs`), so it reads the flag before the source leaf goes, then minimizes the placed pane (`minimize_block_in_layout`, `server/service/layout_intents.rs`); the `minimize` intent's own rule refuses that when the pane would be the only one showing content, which leaves it restored. The window's mirror applies a queued `minimize` action (`layoutPersistence.ts`). Dropped as a tab of another pane, the pane joins that pane's state.
+9. **Torn off to a window** (tear-off, `SPEC_NATIVE_POINTER_DRAG_TEAROFF_2026_07_28.md`): a floating window cannot be a chip, so the pane is restored as it leaves. The tear-off already builds a new pane in the new window, without the flag, so this needs no change; the tear-off's own sizing applies.
 10. **What stays behind.** Dragging a chip out of a tab never leaves that tab with no expanded pane: a chip is not an expanded pane, so the count does not change.
 
 ## 4. Decisions for the operator

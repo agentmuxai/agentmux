@@ -43,6 +43,8 @@ import { dragState } from "./tilelayout-drag-state";
 import { createTileDragRegistrar } from "./tile-drag-registrar";
 import {
     computeDragPreviewSize,
+    dragImageChoice,
+    headerGrabOffset,
     createDragPreviewIntent,
     PANE_DRAG_EXCLUDED,
     pressCanStartPaneDrag,
@@ -451,12 +453,21 @@ export function createTileLayout(platform: TileLayoutPlatform) {
                         return true;
                     },
                     getInitialData: () => ({ nodeId: props.node.id, type: tileItemType }),
-                    onGenerateDragPreview: ({ nativeSetDragImage }) => {
+                    onGenerateDragPreview: ({ nativeSetDragImage, location }) => {
                         // A tear-off's release outside the window would slide
                         // the picture back on native Wayland (wayland-drag-image.ts).
                         if (hideDragImageOnNativeWayland(nativeSetDragImage)) return;
+                        if (!nativeSetDragImage) return;
                         const preview = previewImage();
-                        if (preview && nativeSetDragImage) {
+                        const now = computeDragPreviewSize(tileNodeRef?.getBoundingClientRect());
+                        // A chip is dragged as itself, and a ghost drawn at another size is never
+                        // shown (dragImageChoice).
+                        if (dragImageChoice(nodeModel.isMinimized(), preview?.size, now) === "header") {
+                            const offset = headerGrabOffset(handle.getBoundingClientRect(), location.initial.input);
+                            nativeSetDragImage(handle, offset.x, offset.y);
+                            return;
+                        }
+                        if (preview) {
                             const dpr =
                                 typeof devicePixelRatio === "function" ? (devicePixelRatio as () => number)() : devicePixelRatio;
                             // Offsets from the size THIS image was rasterised at,

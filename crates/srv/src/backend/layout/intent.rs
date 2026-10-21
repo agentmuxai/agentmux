@@ -327,10 +327,12 @@ fn move_node(tree: &mut LayoutNode, node_id: &str, parent_id: &str, index: i64, 
     }
     let mut node = find_node_by_id(tree, node_id).ok_or_else(|| not_found(node_id))?.clone();
     let parent = find_node_by_id(tree, parent_id).ok_or_else(|| not_found(parent_id))?;
-    if is_effectively_minimized(&node) {
+    // A chip moves like any pane and stays a chip; a strip of chips does not move; only a chip
+    // may go into a chip or a strip of them (`moveIsLockedByMinimize`, layoutTree.ts).
+    if !node.children.is_empty() && is_effectively_minimized(&node) {
         return Err(LayoutError::NodeLocked { id: node_id.to_string() });
     }
-    if is_effectively_minimized(parent) {
+    if is_effectively_minimized(parent) && !super::is_node_locked(&node) {
         return Err(LayoutError::NodeLocked { id: parent_id.to_string() });
     }
     if find_node_by_id(&node, parent_id).is_some() {
@@ -366,8 +368,9 @@ fn swap_nodes(tree: &mut LayoutNode, node1_id: &str, node2_id: &str) -> Result<(
     }
     let node1 = find_node_by_id(tree, node1_id).ok_or_else(|| not_found(node1_id))?.clone();
     let node2 = find_node_by_id(tree, node2_id).ok_or_else(|| not_found(node2_id))?.clone();
+    // A chip swaps like any pane and keeps its state; a strip of chips does not swap.
     for (id, node) in [(node1_id, &node1), (node2_id, &node2)] {
-        if is_effectively_minimized(node) {
+        if !node.children.is_empty() && is_effectively_minimized(node) {
             return Err(LayoutError::NodeLocked { id: id.to_string() });
         }
     }
