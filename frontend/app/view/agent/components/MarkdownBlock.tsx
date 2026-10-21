@@ -185,12 +185,10 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
                             "thinking-block": props.node.metadata?.thinking === true,
                         })}
                     >
-                        {/* scrollable={false}: agent markdown streams (reactive). With
-                            scrollable, OverlayScrollbars relocates SolidJS's children into
-                            its viewport, so the next streaming reconcile calls replaceChild
-                            on a node it has moved → the long-standing replaceChild crash
-                            (#1326). Per-block scroll is also wrong inside the virtualized
-                            document, which owns the scroll. */}
+                        {/* scrollable={false}: per-block scroll is wrong inside the
+                            virtualized document, which owns the scroll. (It also avoided
+                            the replaceChild crash, #1326, from the OverlayScrollbars that
+                            scrollable markdown used before it was removed.) */}
                         <Markdown text={view().text} streaming={view().streaming} scrollable={false} media={media()} />
                     </div>
                     {/* Peek overlay — see ToolBlock.tsx's identical pattern

@@ -33,7 +33,6 @@ import { PLATFORM } from "@/util/platformutil";
 import * as util from "@/util/util";
 import clsx from "clsx";
 import { debugLog } from "@/util/debuglog";
-import "overlayscrollbars/overlayscrollbars.css";
 import { createEffect, createSignal, For, onCleanup, onMount, Show, untrack } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import {

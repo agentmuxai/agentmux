@@ -140,26 +140,6 @@ body {
     color: var(--error-color);
 }
 
-/* OverlayScrollbars styling */
-.os-scrollbar {
-    --os-handle-bg: var(--scrollbar-thumb-color);
-    --os-handle-bg-hover: var(--scrollbar-thumb-hover-color);
-    --os-handle-bg-active: var(--scrollbar-thumb-active-color);
-    // OverlayScrollbars (markdown blocks, TOC, etc.) are never the main agent or
-    // terminal scroll, so they follow the thin default (library default is 10px).
-    --os-size: 7px;
-}
-
-.os-scrollbar-handle {
-    // Arrow, not the link hand — the OverlayScrollbars drag handle is a scroll
-    // affordance. Like the native `::-webkit-scrollbar*` pseudo-elements above,
-    // the handle would otherwise inherit its host's cursor (`text`/`pointer`),
-    // so the arrow is pinned explicitly via the cursor design token. The
-    // `scripts/check-scrollbar-cursor.sh` grep gate forbids `pointer`/`text` on
-    // any scrollbar/os-scrollbar selector to keep this from regressing.
-    cursor: var(--cursor-default);
-}
-
 // ─── Cursor layer ──────────────────────────────────────────────────────────
 // Rule: `cursor: pointer` (the link hand) appears ONLY on genuine hyperlinks
 // and filesystem-path openers. All buttons, menus, tabs, and controls use the

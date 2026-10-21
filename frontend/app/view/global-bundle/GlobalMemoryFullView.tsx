@@ -270,7 +270,6 @@ function PreviewView(props: { model: GlobalBundleViewModel }): JSX.Element {
                 <Markdown
                     text={props.model.previewAtom() || "(empty)"}
                     scrollable={true}
-                    nativeScrollbar={true}
                     contentClass="memory-content-markdown-content"
                 />
             </div>

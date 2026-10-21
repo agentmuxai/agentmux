@@ -78,12 +78,10 @@ function FilePreview(props: {
             <div class={`${props.classPrefix}-content ${props.classPrefix}-md`}>
                 {/* scrollable={false}, same as MarkdownBlock: this
                         preview lives inside the virtualized document,
-                        which owns the scroll. `scrollable` defaults to
-                        true, and each mount then constructs an
-                        OverlayScrollbars instance — getComputedStyle +
-                        scrollLeft probes that each force a layout of the
-                        whole pane. Measured at 46% of `flushPendingNodes`
-                        under load (ANALYSIS_AGENT_PANE_FLUSH_REMOUNT_CHURN_2026_09_23.md §2). */}
+                        which owns the scroll. (Scrollable markdown used to
+                        build an OverlayScrollbars instance per mount, 46% of
+                        `flushPendingNodes` under load:
+                        ANALYSIS_AGENT_PANE_FLUSH_REMOUNT_CHURN_2026_09_23.md §2.) */}
                 <Markdown text={props.markdown} scrollable={false} />
             </div>
             <Show when={props.doc.hidden}>

@@ -571,21 +571,6 @@
     }
 }
 
-// Compound selector (needs the extra specificity to beat the base `.content
-// { overflow: scroll }` rule in markdown.scss). `<Markdown nativeScrollbar>`
-// at this one call site skips OverlayScrollbars entirely, so `.content`'s
-// own CSS `overflow` is what actually renders the scrollbar — `auto` (not
-// `scroll`) matches CodeMirror's `.cm-scroller` default: no reserved
-// scrollbar gutter when content already fits.
-.content.editor-preview-markdown-content {
-    padding: 16px 24px;
-    // Shorthand, not just overflow-y: the base `.content { overflow: scroll }`
-    // rule (markdown.scss) sets BOTH axes — overriding only overflow-y left
-    // overflow-x: scroll in effect, permanently reserving a horizontal
-    // scrollbar even when content fits (codex P2 on PR #2774).
-    overflow: auto;
-}
-
 .editor-preview-markdown-content {
     padding: 16px 24px;
 }

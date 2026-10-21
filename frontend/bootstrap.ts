@@ -102,7 +102,6 @@ const startupReloadKeyHandler = (e: KeyboardEvent) => {
 window.addEventListener("keydown", startupReloadKeyHandler, true);
 
 // ── Static CSS imports ──────────────────────────────────────────────────────
-import "overlayscrollbars/overlayscrollbars.css";
 import "./app/app.scss";
 import "./tailwindsetup.css";
 
