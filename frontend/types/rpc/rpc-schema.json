@@ -6577,6 +6577,25 @@
     }
   },
   {
+    "command": "widgets.sectionentry",
+    "request": "agentmux_srv::server::widget_handlers::WidgetSectionEntryReq",
+    "requestName": "WidgetSectionEntryReq",
+    "requestTs": {
+      "imports": [
+        "WidgetSectionEntryReq"
+      ],
+      "name": "WidgetSectionEntryReq"
+    },
+    "response": "agentmux_srv::server::widget_handlers::WidgetSectionEntryResult",
+    "responseName": "WidgetSectionEntryResult",
+    "responseTs": {
+      "imports": [
+        "WidgetSectionEntryResult"
+      ],
+      "name": "WidgetSectionEntryResult"
+    }
+  },
+  {
     "command": "widgets.session",
     "request": "agentmux_srv::server::widget_access_handlers::WidgetSessionReq",
     "requestName": "WidgetSessionReq",

@@ -47,6 +47,7 @@ import { canTackFloatingPane, FloatingAlwaysOnTopButton } from "./floating-ontop
 import { FloatingRedockButton } from "./floating-redock";
 import { partitionHeaderElems } from "./header-elems";
 import { buildPaneContextMenu, joinMenuGroups, type PaneMenuSection } from "./pane-actions";
+import { sectionPinMenuItems } from "@/app/window/section-pins";
 import { applyHueToAllPanes, hueToActiveBorder, PANE_HUE_OPTIONS, setHue } from "./pane-color-menu";
 import { blockRoleColor, isLightThemeActive, widgetColorView, type PaneIdentityOptions } from "./pane-identity";
 import { PaneSizeBadge } from "./pane-size-badge";
@@ -230,6 +231,10 @@ function handleHeaderContextMenu(
 
     // Header-only: a pane on a remote links to that host's row in Remotes
     menu.push(...remoteSettingsMenuItems(blockData.oid, blockData.meta?.connection));
+
+    // Header-only: a sectioned pane pins the section it shows to the widget bar (section-pins.ts)
+    const pins = sectionPinMenuItems(blockData.meta);
+    if (pins.length > 0) menu.push({ type: "separator" }, ...pins);
 
     // Header-only: view-specific settings (font size, theme, etc.)
     const extraItems = viewModel?.getSettingsMenuItems?.();
