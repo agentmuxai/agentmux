@@ -921,6 +921,9 @@ async fn await_prompt(cx: &ToolCtx<'_>, id: &str) -> Result<()> {
     }
 }
 
+/// How long `run` with `secrets` waits for srv to know the job before saying it may not have started.
+const NEVER_STARTED: Duration = Duration::from_secs(15);
+
 /// `run` with `secrets`, not in the background: starts the job (srv asks the person
 /// first), waits for it to end, and returns its output as srv cleaned it of the
 /// Vault values, with its exit code. A job that outlasts `timeout_ms` keeps running
@@ -937,13 +940,37 @@ async fn run_with_secrets(arguments: &Value, command: &str, cx: &ToolCtx<'_>) ->
     let started = Instant::now();
     let deadline = started + Duration::from_millis(timeout_ms);
     let base = cx.local_url.trim_end_matches('/').to_string();
+    // srv registers a job's output only once its process has started, so the first polls
+    // can find nothing, and a poll can fail for a moment: retry, and never lose the job.
+    let mut seen = false;
+    let mut last_error = String::new();
+    let mut last: Option<agentmux_common::api_types::ShellOutputResponse> = None;
     loop {
         let body = serde_json::to_value(agentmux_common::api_types::ShellOutputRequest { shell_id: id.clone(), agent_block_id: cx.block_id.to_string() })?;
-        let v = srv_post_json(cx.client, &format!("{base}/api/v1/shell/output"), cx.auth_key, &body, "Terminal output").await?;
-        let r: agentmux_common::api_types::ShellOutputResponse = serde_json::from_value(v)?;
+        let polled = srv_post_json(cx.client, &format!("{base}/api/v1/shell/output"), cx.auth_key, &body, "Terminal output").await;
+        match polled.and_then(|v| Ok(serde_json::from_value::<agentmux_common::api_types::ShellOutputResponse>(v)?)) {
+            Ok(r) => {
+                seen = true;
+                last = Some(r);
+            }
+            Err(e) => last_error = e.to_string(),
+        }
+        // A job that never shows up (it failed to start) isn't waited for the whole timeout.
+        if !seen && (started.elapsed() > NEVER_STARTED || Instant::now() >= deadline) {
+            return Ok(json!({
+                "terminal": id,
+                "how": "no-output",
+                "note": format!("The job was created but srv has no output for it, so it may not have started ({last_error}). Check it with wait until \"exit\"; close stops it."),
+            }));
+        }
+        let Some(r) = last.clone() else {
+            tokio::time::sleep(POLL).await;
+            continue;
+        };
         let lines: Vec<&str> = r.output.lines().collect();
         let cut = lines.len() > MAX_RUN_LINES;
         let output = lines[lines.len().saturating_sub(MAX_RUN_LINES)..].join("\n");
+        // The job ended, as the last good poll saw it; a poll that failed since is not news.
         if !r.running {
             return Ok(json!({
                 "terminal": id,

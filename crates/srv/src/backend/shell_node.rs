@@ -27,6 +27,10 @@ use agentmux_common::api_types::ShellInputFailure;
 
 use agentmux_common::time::now_ms_u64 as now_ms;
 
+/// How much of a job's cleaned output is kept for the agent that ran it.
+const TAIL_LINES: usize = 400;
+const TAIL_LINE_CHARS: usize = 4000;
+
 /// Live status of a running (or recently exited) shell. Updated by
 /// `ShellNodeRunner` as output arrives and on exit.
 ///
@@ -80,10 +84,6 @@ struct ShellEntry {
 /// Per-shell stop handles + status. `ShellStop` fires the oneshot; `ShellInput`
 /// sends to the stdin relay; `ShellStatus` reads the live status arc.
 /// Lives in `AppState.shell_sessions`.
-/// How much of a job's cleaned output is kept for the agent that ran it.
-const TAIL_LINES: usize = 400;
-const TAIL_LINE_CHARS: usize = 4000;
-
 /// Max number of EXITED shell statuses retained for post-exit ShellStatus
 /// queries. Running shells are always kept regardless of this cap; only
 /// exited entries beyond it are evicted oldest-first. Bounds memory for
