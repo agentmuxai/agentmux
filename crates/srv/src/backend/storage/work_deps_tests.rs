@@ -97,14 +97,28 @@ fn a_task_cant_wait_on_itself_a_missing_task_or_its_own_followers() {
     for id in ["a", "b", "c"] {
         add(&s, id, 1000, "");
     }
-    s.work_deps_set("b", &ids(&["a"])).unwrap();
-    s.work_deps_set("c", &ids(&["b"])).unwrap();
-    assert!(s.work_deps_refusal("a", &ids(&["a"])).unwrap().unwrap().contains("itself"));
-    assert!(s.work_deps_refusal("a", &ids(&["nope"])).unwrap().unwrap().contains("no task"));
-    assert!(s.work_deps_refusal("a", &ids(&["c"])).unwrap().unwrap().contains("each other"), "c waits on b, which waits on a");
-    assert_eq!(s.work_deps_refusal("c", &ids(&["a", "b"])).unwrap(), None);
+    assert_eq!(s.work_deps_set("b", &ids(&["a"])).unwrap(), None);
+    assert_eq!(s.work_deps_set("c", &ids(&["b"])).unwrap(), None);
+    assert!(s.work_deps_set("a", &ids(&["a"])).unwrap().unwrap().contains("itself"));
+    assert!(s.work_deps_set("a", &ids(&["nope"])).unwrap().unwrap().contains("no task"));
+    assert!(s.work_deps_set("a", &ids(&["c"])).unwrap().unwrap().contains("each other"), "c waits on b, which waits on a");
+    assert!(s.work_deps_of("a").unwrap().is_empty(), "a refused list writes nothing");
+    assert_eq!(s.work_deps_set("c", &ids(&["a", "b"])).unwrap(), None);
     let many: Vec<String> = (0..=MAX_AFTER).map(|i| i.to_string()).collect();
-    assert!(s.work_deps_refusal("a", &many).unwrap().is_some());
+    assert!(s.work_deps_set("a", &many).unwrap().is_some());
+}
+
+#[test]
+fn a_new_task_and_its_list_are_written_together_or_not_at_all() {
+    let (s, _d) = store();
+    add(&s, "a", 1000, "");
+    let mut item = s.work_queue_get("a").unwrap().unwrap();
+    item.id = "b".into();
+    assert!(s.work_queue_enqueue_after(&item, &ids(&["nope"])).unwrap().is_some());
+    assert!(s.work_queue_get("b").unwrap().is_none(), "refused: not enqueued");
+    assert_eq!(s.work_queue_enqueue_after(&item, &ids(&["a"])).unwrap(), None);
+    assert_eq!(s.work_deps_of("b").unwrap().len(), 1);
+    assert_eq!(claim(&s, "Naki", 2000).as_deref(), Some("a"), "b waits");
 }
 
 #[test]
@@ -112,8 +126,9 @@ fn dependencies_of_tasks_gone_from_the_queue_are_pruned() {
     let (s, _d) = store();
     add(&s, "a", 1000, "");
     add(&s, "b", 1000, "");
+    add(&s, "c", 1000, "");
     s.work_deps_set("b", &ids(&["a"])).unwrap();
-    s.work_deps_set("a", &ids(&["b"])).unwrap();
+    s.work_deps_set("c", &ids(&["a"])).unwrap();
     assert_eq!(s.work_deps_prune().unwrap(), 0);
     s.conn().lock().unwrap().execute("DELETE FROM db_work_queue WHERE id = 'a'", []).unwrap();
     assert_eq!(s.work_deps_prune().unwrap(), 2, "both rows name a");

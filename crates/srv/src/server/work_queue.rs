@@ -159,20 +159,22 @@ pub(super) async fn handle_work_enqueue(
         result: String::new(),
     };
 
-    // Before the row exists, so no claim can take it in between.
-    let after = match super::work_tasks::resolve_after(&state, &item.id, &req.after) {
+    let after = match super::work_tasks::resolve_after(&state, &req.after) {
         Ok(a) => a,
-        Err(why) => return err(StatusCode::BAD_REQUEST, format!("after: {why}")),
+        Err(why) => return err(StatusCode::BAD_REQUEST, why),
     };
-    if !after.is_empty() {
-        if let Err(e) = state.identity_store.work_deps_set(&item.id, &after) {
-            return err(StatusCode::INTERNAL_SERVER_ERROR, format!("enqueue failed: {e}"));
-        }
-    }
     let filing = super::work_tasks::Filing { repo: req.repo, review: req.review };
     let card = super::work_tasks::prepare_card(&state, caller.as_deref(), &item.created_by, filing).await;
-    match state.identity_store.work_queue_enqueue(&item) {
-        Ok(()) => {
+    // With what it starts after, the row and the list in one transaction, so no
+    // claim takes it in between.
+    let enqueued = if after.is_empty() {
+        state.identity_store.work_queue_enqueue(&item).map(|()| None)
+    } else {
+        state.identity_store.work_queue_enqueue_after(&item, &after)
+    };
+    match enqueued {
+        Ok(Some(why)) => err(StatusCode::BAD_REQUEST, format!("after: {why}")),
+        Ok(None) => {
             let num = super::work_tasks::file_card(&state, &item, &card);
             publish_changed(&state);
             (StatusCode::OK, Json(json!({ "id": item.id, "num": num })))

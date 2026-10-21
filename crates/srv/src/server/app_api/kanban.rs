@@ -283,12 +283,14 @@ async fn act(state: &AppState, data: Value) -> Result<Value, String> {
                 not_before: None,
                 result: String::new(),
             };
-            // Before the row exists, so no claim can take it in between.
-            let after = resolve_after(state, &item.id, req.after.as_deref().unwrap_or_default())?;
-            if !after.is_empty() {
-                store.work_deps_set(&item.id, &after).map_err(|e| e.to_string())?;
+            // The row and what it starts after in one transaction, so no claim
+            // takes it in between.
+            let after = resolve_after(state, req.after.as_deref().unwrap_or_default())?;
+            if after.is_empty() {
+                store.work_queue_enqueue(&item).map_err(|e| e.to_string())?;
+            } else if let Some(why) = store.work_queue_enqueue_after(&item, &after).map_err(|e| e.to_string())? {
+                return Err(why);
             }
-            store.work_queue_enqueue(&item).map_err(|e| e.to_string())?;
             let card = NewCard {
                 repo: req.repo.clone().unwrap_or_default(),
                 branch: String::new(),
@@ -307,8 +309,13 @@ async fn act(state: &AppState, data: Value) -> Result<Value, String> {
         "edit" => {
             let t = get(&req.id)?;
             let id = &t.item.id;
-            // Checked first: a refused list changes nothing.
-            let after = req.after.as_ref().map(|given| resolve_after(state, id, given)).transpose()?;
+            // First: a refused list changes nothing.
+            let after = req.after.as_ref().map(|given| resolve_after(state, given)).transpose()?;
+            if let Some(after) = &after {
+                if let Some(why) = store.work_deps_set(id, after).map_err(|e| e.to_string())? {
+                    return Err(why);
+                }
+            }
             store
                 .work_task_edit(
                     id,
@@ -322,7 +329,6 @@ async fn act(state: &AppState, data: Value) -> Result<Value, String> {
             store.work_card_edit(id, None, req.review, req.repo.as_deref(), now).map_err(|e| e.to_string())?;
             let mut body = String::new();
             if let Some(after) = after {
-                store.work_deps_set(id, &after).map_err(|e| e.to_string())?;
                 body = after_words(store, &after);
             }
             record(state, id, OPERATOR, OPERATOR, "edited", &t.item.state, &t.item.state, &body);

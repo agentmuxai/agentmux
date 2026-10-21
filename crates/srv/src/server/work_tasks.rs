@@ -49,9 +49,8 @@ pub(super) fn resolve_id(state: &AppState, id: &str) -> String {
 }
 
 /// The tasks a task starts after (§6.15), as given: ids or numbers (`12`,
-/// `"#12"`). Resolved to ids, checked: each exists, none is `work_id`
-/// itself, and none already waits on it.
-pub(super) fn resolve_after(state: &AppState, work_id: &str, given: &[Value]) -> Result<Vec<String>, String> {
+/// `"#12"`), resolved to ids. The store checks the list when it writes it.
+pub(super) fn resolve_after(state: &AppState, given: &[Value]) -> Result<Vec<String>, String> {
     let mut ids: Vec<String> = Vec::new();
     for v in given {
         let raw = match v {
@@ -64,11 +63,7 @@ pub(super) fn resolve_after(state: &AppState, work_id: &str, given: &[Value]) ->
             ids.push(id);
         }
     }
-    match state.identity_store.work_deps_refusal(work_id, &ids) {
-        Ok(None) => Ok(ids),
-        Ok(Some(why)) => Err(why),
-        Err(e) => Err(e.to_string()),
-    }
+    Ok(ids)
 }
 
 /// Text kept on a card or in the history: sanitized, at most [`MAX_TEXT`]
