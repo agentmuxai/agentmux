@@ -90,6 +90,8 @@ export function sectionMetaOf(view: string, section: string): Record<string, str
 /** Whether `key: value` selects a section `view` declares: its own section key, or the key of a
  *  section's own sections. */
 export function isSectionMeta(view: string, key: string, value: unknown): boolean {
+    // An old view name opens its pane, which reads its own name's key: no section through an alias.
+    if (resolvePaneTabView(view) !== view) return false;
     const sections = paneSectionsOf(view);
     if (!sections) return false;
     if (key === sectionKeyOf(view) && hasSection(sections, value)) return true;
