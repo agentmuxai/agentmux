@@ -315,7 +315,8 @@ pub struct TowerSnapshot {
     /// Present when the request asked for it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub host: Option<TowerHost>,    /// The Panes view's windows, tabs and panes, when the request asked for them.
+    pub host: Option<TowerHost>,
+    /// The Panes view's windows, tabs and panes, when the request asked for them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub panes: Option<TowerPanes>,
