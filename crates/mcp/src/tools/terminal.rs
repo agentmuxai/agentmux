@@ -923,7 +923,18 @@ async fn await_prompt(cx: &ToolCtx<'_>, id: &str) -> Result<()> {
 
 async fn run_action(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {
     let command = str_arg(arguments, "command").ok_or_else(|| anyhow::anyhow!("run needs command"))?;
-    if arguments.get("background").and_then(|v| v.as_bool()).unwrap_or(false) {
+    let background = arguments.get("background").and_then(|v| v.as_bool()).unwrap_or(false);
+    if let Some(s) = arguments.get("secrets").filter(|v| !v.is_null()) {
+        if !s.as_object().is_some_and(|o| o.values().all(|v| v.is_string())) {
+            anyhow::bail!("secrets must be an object of environment variable names to Vault entry ids, e.g. {{\"STRIPE_API_KEY\": \"api-key-stripe\"}}");
+        }
+    }
+    if arguments.get("secrets").is_some_and(|s| s.as_object().is_some_and(|o| !o.is_empty())) && !background {
+        anyhow::bail!(
+            "secrets go only to a background job (background: true): a command typed into a terminal would show its value in the terminal; wait for the job with until \"exit\""
+        );
+    }
+    if background {
         let mut args = arguments.clone();
         args["cmd"] = json!(command);
         let id = shell::call("Shell", &args, cx).await?;

@@ -323,6 +323,9 @@ pub struct ShellNodeRunner {
     /// If false (default), stdin is /dev/null — avoids blocking programs that
     /// read stdin to EOF (e.g. `cat` with no args).
     pub capture_stdin: bool,
+    /// Takes the Vault values the command was given out of its output, before
+    /// anything is published (spec section 7.2).
+    pub scrubber: Option<Arc<crate::backend::vault::scrub::Scrubber>>,
 }
 
 impl ShellNodeRunner {
@@ -505,7 +508,10 @@ impl ShellNodeRunner {
         while let Some((kind, content, ts)) = rx.recv().await {
             line_count += 1;
             status_arc.lock().line_count = line_count;
-            publish_chunk(&broker, &block_id, &shell_id, kind, &content, ts);
+            match &self.scrubber {
+                Some(s) => publish_chunk(&broker, &block_id, &shell_id, kind, &s.scrub(&content), ts),
+                None => publish_chunk(&broker, &block_id, &shell_id, kind, &content, ts),
+            }
         }
 
         let _ = tokio::join!(t_stdout, t_stderr);
@@ -606,6 +612,37 @@ fn publish_chunk(broker: &Broker, _block_id: &str, shell_id: &str, kind: &str, c
 
 #[cfg(test)]
 mod tests {
+    // A real process, so ignored like the other real-process tests in this crate:
+    // run with `cargo test -p agentmux-srv --bin agentmux-srv a_runner_with_a_scrubber -- --ignored`.
+    #[tokio::test]
+    #[ignore]
+    async fn a_runner_with_a_scrubber_publishes_the_output_without_the_value() {
+        use crate::backend::vault::scrub::Scrubber;
+        const VALUE: &str = "sk_live_abcdefgh1234";
+        let broker = Arc::new(Broker::new());
+        let registry = ShellSessionRegistry::new();
+        let runner = ShellNodeRunner {
+            shell_id: "scrub-1".into(),
+            block_id: "block-1".into(),
+            cmd: format!("echo token={VALUE} && echo fine"),
+            title: "t".into(),
+            cwd: None,
+            launch: None,
+            askpass_secret: None,
+            extra_env: HashMap::new(),
+            broker: Arc::clone(&broker),
+            registry,
+            capture_stdin: false,
+            scrubber: Some(Arc::new(Scrubber::new(&[("api-key-x".to_string(), VALUE.to_string())]))),
+        };
+        runner.run().await;
+        let events = broker.read_event_history(crate::backend::mps::EVENT_SHELL_CHUNK, "shell:scrub-1", 20);
+        let text = events.iter().map(|e| e.data.clone().unwrap_or_default().to_string()).collect::<Vec<_>>().join("
+");
+        assert!(text.contains("token=[vault:api-key-x]") && text.contains("fine"), "{text}");
+        assert!(!text.contains(VALUE), "{text}");
+    }
+
     use super::*;
 
     #[test]

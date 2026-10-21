@@ -51,6 +51,23 @@ pub(super) async fn handle_shell_create(
     };
     let remote = !matches!(target, AgentTarget::Local);
 
+    // Vault secrets for this command: the person is asked first, and the values go
+    // into this one process's environment (further down) and out of its output.
+    let injected = match super::shell_secrets::inject(
+        &state,
+        &req.agent_block_id,
+        req.auth.as_ref(),
+        req.secrets.as_ref(),
+        remote,
+        &req.cmd,
+        req.cwd.as_deref().unwrap_or(""),
+    )
+    .await
+    {
+        Ok(i) => i,
+        Err((code, why)) => return (code, Json(json!({ "error": why }))).into_response(),
+    };
+
     let shell_id = uuid::Uuid::new_v4().to_string();
     let title = req.title.as_deref().unwrap_or(&req.cmd).to_string();
     let now_ms = agentmux_common::time::now_ms_u64();
@@ -112,6 +129,11 @@ pub(super) async fn handle_shell_create(
     if let Some(req_env) = req.env {
         effective_env.extend(req_env);
     }
+    // After the caller's env, so the agent can't name a value of its own over one.
+    let scrubber = injected.map(|i| {
+        effective_env.extend(i.env);
+        Arc::new(i.scrubber)
+    });
     // After the caller's overrides: a command run on an agent's behalf gets the
     // same plain-`gh` guard as the agent itself, and `req.env` can't lift it.
     // Nor can it hand that command the account's cloud login.
@@ -196,6 +218,7 @@ pub(super) async fn handle_shell_create(
         broker: Arc::clone(&state.broker),
         registry: Arc::clone(&state.shell_sessions),
         capture_stdin: req.capture_stdin.unwrap_or(false),
+        scrubber,
     };
     tokio::spawn(runner.run());
 

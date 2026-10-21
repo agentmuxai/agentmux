@@ -32,6 +32,7 @@ export function vaultPromptNotes(platform: VaultPlatform): string[] {
     } else {
         notes.push("Reveal and Copy need Windows Hello for now; Touch ID and the desktop's prompt aren't built yet.");
     }
+    notes.push("When an agent wants to fill a form field or run a command with an entry, AgentMux asks you in its own window, showing the site or the command. You can allow it once, always for that site or agent, or deny it.");
     notes.push("The Vault never asks for administrator rights. Agents never see these prompts, and can't answer them.");
     return notes;
 }

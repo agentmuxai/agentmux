@@ -1,6 +1,6 @@
 # SPEC: the Vault: one pane for the person's secrets, which agents use without seeing them
 
-**Status:** active — P1 (§4, §11) shipped in #5180; P2a (§5: the pane, the store, the `Vault` tool, agents kept out) P2b (Reveal and Copy, Windows), P2c (`.vault` export and import), P3 (§6.1 to §6.4, §6.6, as §6.7 says) and P4 (§6.5) are built; P5 is partly built (the CSV, JSON, .env and KeePass importers, §8.8); P6 to P8 and the rest of P5 remain. The operator took the recommended answers to §13 on 2026-10-19.
+**Status:** active — P1 (§4, §11) shipped in #5180; P2a (§5: the pane, the store, the `Vault` tool, agents kept out) P2b (Reveal and Copy, Windows), P2c (`.vault` export and import), P3 (§6.1 to §6.4, §6.6, as §6.7 says) and P4 (§6.5) are built; P5 is partly built (the CSV, JSON, .env and KeePass importers, §8.8); P7 (§7, background jobs) is built; P6, P8 and the rest of P5 remain. The operator took the recommended answers to §13 on 2026-10-19.
 **Date:** 2026-10-19
 **Author:** Agent2 #6 (agent2-6@narko), at the operator's request
 **Trigger (operator, 2026-10-19):** an agent filling a US state's corporate-registry certificate request form was refused on the address, city, ZIP and email fields, then could not tick a checkbox, so the person had to finish the form by hand. "Agentmux needs to be able to fill in personal information including ssn." … "we'll need to pivot into that work now, write a spec to file." On a first draft that put saved values in Settings: "sounds like we may need a new pane type, a vault, or settings wouldn't really make sense" … "api keys and anything secret can be kept there." … "we want rich features, like support for pw protected encrypted export file (.vault file), and imports from kdbx files and last pass, and any other popular services should be supported."
@@ -142,6 +142,7 @@ The operator asked on 2026-10-20 that people know before they're asked. The Vaul
 | Saving, changing or listing entries | nothing | the first time AgentMux uses the Vault key, and again after AgentMux updates: allow AgentMux to use the keychain item (**Always Allow**; Deny leaves the entries unopenable) | if the keyring is locked: its password, once | P2a |
 | Reveal or Copy | Windows Hello (PIN, fingerprint or face); needs Hello set up (an account-password fallback is not built) | Touch ID or the account password (not built; Reveal and Copy are disabled) | the desktop's polkit prompt (not built; disabled) | P2b |
 | An agent asks for an entry | AgentMux's own prompt in every window: Fill it in, or Not now | the same | the same | P2a |
+| An agent runs a command with an entry | AgentMux's own prompt in every window: the command, where it runs, Allow once, Always for that agent, or Deny | the same | the same | P7 |
 | Importing an encrypted file | the file's own password, typed in the pane | the same | the same | P2c, P5 |
 
 ## 6. Agents fill browser fields from the Vault
@@ -214,15 +215,17 @@ What shipped, and where it differs from §6.1 to §6.6:
 
 ### 7.1 The action
 
-`Terminal` `run` (foreground or `background: true`) takes `secrets: {"<ENV_NAME>": "<id>"}`. srv adds each value to that one process's environment in `POST /api/v1/shell/create`, after `cmd:env` and the caller's `env` (`http_shell.rs:93-118`), before `gh_guard`. Interactive shells (`Terminal` `open`/`type`) don't take secrets: a value would stay in a shell the agent keeps typing into.
+`Terminal` `run` takes `secrets: {"<ENV_NAME>": "<id>"}` (`"<id>.<part>"` for a part other than the entry's main one). srv adds each value to that one process's environment in `POST /api/v1/shell/create`, after `cmd:env` and the caller's `env`, before `gh_guard`. Interactive shells (`Terminal` `open`/`type`) don't take secrets: a value would stay in a shell the agent keeps typing into.
+
+**Built in P7:** `secrets` goes with `background: true`. A foreground `run` types its line into the terminal the person sees, so the value would show there; it is refused with that reason. The job's output goes to its row in the conversation (the person's view), cleaned of the values, and the agent reads the job's exit with `wait` `until: "exit"`. A foreground run that returns the cleaned output to the agent needs a read-back path for a job's output, which doesn't exist yet. The request must carry the agent's signed identity (the grant and the prompt name the agent), the entry names are checked first, an environment variable name may not start with `AGENTMUX_`, a command takes at most 16 entries, the command line must fit in the prompt whole (2,000 characters, the folder 300) since the person approves what runs and is never shown a cut-off line, and an entry shorter than 4 characters is refused since its output couldn't be cleaned of it.
 
 ### 7.2 Output scrubbing
 
-Before output reaches the agent, the pane or a log, srv replaces each injected value with `[vault:<id>]`, and also its base64, URL-encoded and hex forms. **This is a guard, not a boundary.** A command the agent writes can transform the value and print it, or send it anywhere the key reaches. What limits that is §7.3: the person sees the command before an entry is first used, and should prefer keys scoped to what the task needs.
+Before output is published, srv replaces each injected value with `[vault:<id>]`, and also its base64 (standard and URL-safe, padded or not), URL-encoded and hex forms. A value of several lines (a private key) is cleaned line by line too, since output arrives line by line. **This is a guard, not a boundary.** A command the agent writes can transform the value and print it, or send it anywhere the key reaches. What limits that is §7.3: the person sees the command before an entry is first used, and should prefer keys scoped to what the task needs. The scrubber works on whole lines, so a value split by the command itself across two lines is not found.
 
 ### 7.3 Approval
 
-The first use of an entry by an agent asks in a banner on the agent's pane: the entry, the agent, the command line and its working directory, **[Allow once] [Always for <agent>] [Deny]**. "Always" is a grant per entry and agent, shown and revocable in the Vault. Answers come through the host, as in §6.4.
+The first use of an entry by an agent asks in AgentMux's own prompt, in every window: the entry, the agent, the command line and its working directory, **[Allow once] [Always for <agent>] [Deny]**, naming every part the command asks for that isn't already allowed, and says that a command can send the value anywhere its line says. "Always" is a grant per entry, agent and part (a card's expiry is not its number), stored with the entry's site grants as `command:<agent>:<part>`, listed apart in the Vault ("Agents may run commands with it") and revocable there. Answers come through the host, as in §6.4. The Vault's Activity records each use ("ran a command", the command's start, and the outcome); the value is never in it.
 
 ### 7.4 Where commands can run
 
@@ -362,7 +365,7 @@ Fix (built in P1):
 | **P4** | §6.5: the prompt's value field and **Save to Vault**; `request_value`. Built (§6.8) | A form with an SSN field is done by the agent plus one value typed in the banner |
 | **P5** | Importers, first wave (§8.4): KeePass `.kdbx`, LastPass, 1Password, Bitwarden, the browsers' CSVs, `.env`, any CSV; plaintext-file handling (§8.6); fuzzing (§8.7); KeePass export (§8.3). Built so far: all but a `.kdbx` key file, `.1pux`, Bitwarden's password-protected JSON and KeePass export (§8.8) | Each imports its real-export fixture with the right kinds and no loss the preview didn't list |
 | **P6** | Importers, second wave: Proton Pass, Dashlane, Keeper, NordPass, RoboForm, Enpass, Zoho Vault, Sticky Password | The same, per source |
-| **P7** | §7: `Terminal` `run` with `secrets`, scrubbing, approval, grants | A command reads `STRIPE_API_KEY` from the Vault; its echoed output shows `[vault:<id>]` |
+| **P7** | §7: `Terminal` `run` with `secrets`, scrubbing, approval, grants. Built for background jobs (§7.1) | A command reads `STRIPE_API_KEY` from the Vault; its echoed output shows `[vault:<id>]` |
 | **P8** | Only on a yes to §13 question 1 or 2 | — |
 
 ## 13. Decisions for the operator

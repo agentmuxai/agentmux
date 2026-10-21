@@ -35,4 +35,13 @@ needs_value: boolean,
 /**
  * The kind of entry that would be kept, when `needs_value`.
  */
-kind: string, requested_ms: number, };
+kind: string, 
+/**
+ * A command the agent runs with the value in its environment (spec section 7.3);
+ * empty for a web form. `origin` and `field` are then empty too.
+ */
+command: string, 
+/**
+ * The command's working directory, when `command` is set.
+ */
+cwd: string, requested_ms: number, };

@@ -150,6 +150,18 @@
     user-select: text;
 }
 
+// The command an agent wants to run with a Vault value, shown as the person must read it.
+.vault-command {
+    margin: var(--space-1) 0;
+    padding: var(--space-1) var(--space-2);
+    border: 1px solid var(--border-color);
+    font-family: var(--font-mono, monospace);
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 12em;
+    overflow: auto;
+}
+
 // Where agents may fill an entry without asking.
 .vault-grants {
     display: flex;

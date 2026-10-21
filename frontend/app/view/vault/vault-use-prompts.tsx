@@ -24,6 +24,16 @@ export function siteOf(origin: string): string {
     }
 }
 
+/** A grant for commands is stored as `command:<agent>:<part>`; a site's is its origin. */
+export const COMMAND_GRANT = "command:";
+
+/** `command:<agent>:<part>` as a person reads it: `Agent1 (value)`. */
+export function commandGrantLabel(grant: string): string {
+    const rest = grant.slice(COMMAND_GRANT.length);
+    const cut = rest.lastIndexOf(":");
+    return cut < 0 ? rest : `${rest.slice(0, cut)} (${rest.slice(cut + 1)})`;
+}
+
 export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Element {
     const u = props.use;
     const [error, setError] = createSignal<string | null>(null);
@@ -55,12 +65,25 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
     };
     return (
         <Modal open={true} scope="window" onClose={() => void decide("deny")} size="sm" closeOnBackdropClick={false} closeOnEscape={!busy()}>
-            <ModalHeader title={u.needs_value ? `${u.agent} needs your ${u.what}` : `${u.agent} wants to fill your ${u.what}`} />
+            <ModalHeader
+                title={u.command ? `${u.agent} wants to run a command with your ${u.what}` : u.needs_value ? `${u.agent} needs your ${u.what}` : `${u.agent} wants to fill your ${u.what}`}
+            />
             <ModalBody>
-                <p>
-                    Into <strong>{u.field}</strong> on <strong>{siteOf(u.origin)}</strong>
-                    <span class="warden-manager-dim"> ({u.origin})</span>
-                </p>
+                <Show
+                    when={u.command}
+                    fallback={
+                        <p>
+                            Into <strong>{u.field}</strong> on <strong>{siteOf(u.origin)}</strong>
+                            <span class="warden-manager-dim"> ({u.origin})</span>
+                        </p>
+                    }
+                >
+                    <p>
+                        The command, with <strong>{u.entry_label}</strong> in its environment as <strong class="warden-manager-mono">{u.field}</strong>:
+                    </p>
+                    <pre class="vault-command">{u.command}</pre>
+                    <p class="warden-manager-dim">In {u.cwd || "its default folder"}. A command can do anything its line says, including sending the value somewhere: read it first.</p>
+                </Show>
                 <Show
                     when={u.needs_value}
                     fallback={
@@ -93,7 +116,7 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
                         <input type="submit" hidden />
                     </form>
                 </Show>
-                <p class="warden-manager-dim">{"The agent never sees the value. Check the site is the one you expect."}</p>
+                <p class="warden-manager-dim">{u.command ? "The agent never sees the value, and the command's output is cleaned of it." : "The agent never sees the value. Check the site is the one you expect."}</p>
                 <Show when={error()}>
                     <div class="warden-manager-error" role="alert">
                         {error()}
@@ -109,7 +132,7 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
                 </Button>
                 <Show when={u.offer_always}>
                     <Button tone="attention" disabled={busy()} onClick={() => void decide("always")}>
-                        Always on {siteOf(u.origin)}
+                        {u.command ? `Always for ${u.agent}` : `Always on ${siteOf(u.origin)}`}
                     </Button>
                 </Show>
             </ModalFooter>
