@@ -2,6 +2,7 @@
 
 export type WidgetSectionEntryResult = { 
 /**
- * The entry's key in widgets.json, which is also its pin id (`section@warden-lan`).
+ * The entry's key in widgets.json, which is also its pin id (`section@warden-lan`, or
+ * `section@warden-lan-2` when the user's file already used that key for something else).
  */
 key: string, };
