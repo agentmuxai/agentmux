@@ -113,7 +113,8 @@ pub fn read(text: &str, mapping: Option<&Mapping>) -> Result<Imported, ReadError
             }
             continue;
         }
-        let password = cell(row, cols.password);
+        // A password is kept exactly as exported, spaces and all.
+        let password = cols.password.and_then(|i| row.get(i)).unwrap_or("");
         if password.is_empty() {
             skipped.push((label, "it has no password".to_string()));
             continue;

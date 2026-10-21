@@ -230,3 +230,33 @@ fn an_attached_file_is_listed_as_skipped_and_the_items_own_tags_are_kept() {
     let note = i.entries.iter().find(|e| e.label == "Contract notes").expect("kept");
     assert_eq!(note.tags, vec!["Personal".to_string(), "legal".to_string(), "2026".to_string()]);
 }
+
+#[test]
+fn nested_values_are_kept_a_password_keeps_its_spaces_and_crafted_lists_are_bounded() {
+    let many_tags: Vec<String> = (0..100_000).map(|i| format!("t{i}")).collect();
+    let many_urls: Vec<serde_json::Value> = (0..100_000).map(|i| json!({ "url": format!("https://e.example/{i}") })).collect();
+    let items = json!([
+        {
+            "categoryUuid": "114",
+            "overview": { "title": "Deploy key" },
+            "details": { "notesPlain": "for ci", "sections": [{ "fields": [field("sshKey", "private key", json!({ "sshKey": { "privateKey": "-----BEGIN KEY-----abc", "metadata": { "privateKey": "-----BEGIN KEY-----abc", "keyType": "ed25519" } } }))] }] }
+        },
+        { "categoryUuid": "001", "overview": { "title": "Spaced" }, "details": { "loginFields": [{ "designation": "password", "value": "  pw with edges  " }] } },
+        { "categoryUuid": "001", "overview": { "title": "Blank pw" }, "details": { "loginFields": [{ "designation": "password", "value": "   " }] } },
+        { "categoryUuid": "003", "overview": { "title": "Crafted", "tags": many_tags, "urls": many_urls }, "details": { "notesPlain": "x" } }
+    ]);
+    let started = std::time::Instant::now();
+    let i = read(&export(items)).ok().expect("reads");
+    assert!(started.elapsed() < std::time::Duration::from_secs(10), "crafted lists are not quadratic: {:?}", started.elapsed());
+    let get = |label: &str| i.entries.iter().find(|e| e.label == label).unwrap_or_else(|| panic!("no {label}"));
+    // The nested private key is in the note, with its path, not dropped.
+    let key = get("Deploy key");
+    assert!(key.parts["text"].contains("metadata.privateKey: -----BEGIN KEY-----abc") && key.parts["text"].contains("metadata.keyType: ed25519"), "{:?}", key.parts);
+    assert!(key.parts["text"].contains("for ci"));
+    assert_eq!(get("Spaced").parts["password"], "  pw with edges  ");
+    assert_eq!(get("Blank pw").parts["password"], "   ", "an all-space password is a password");
+    let crafted = get("Crafted");
+    assert!(crafted.tags.len() <= 41, "{}", crafted.tags.len());
+    let why: std::collections::HashMap<_, _> = i.skipped.iter().cloned().collect();
+    assert!(why["Crafted (tags)"].contains("more than") && why["Crafted (addresses)"].contains("more than"), "{why:?}");
+}

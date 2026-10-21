@@ -11,6 +11,8 @@
 
 use std::io::Read;
 
+use std::collections::HashSet;
+
 use serde_json::Value;
 
 use super::{Imported, Incoming, ReadError, Source, MAX_ITEMS};
@@ -18,6 +20,9 @@ use super::{Imported, Incoming, ReadError, Source, MAX_ITEMS};
 /// The uncompressed `export.data` may be at most this big: the zip is read
 /// through this cap, so a crafted archive can't expand without limit (§8.7).
 const MAX_DATA_BYTES: u64 = 128 * 1024 * 1024;
+/// Per item: how many of its tags and addresses are kept.
+const MOST_TAGS: usize = 40;
+const MOST_URLS: usize = 50;
 /// A `.1pux` holds a few files and its attachments; a zip of more is not one.
 const MAX_ZIP_ENTRIES: usize = 100_000;
 
@@ -79,15 +84,47 @@ fn text_of(kind: &str, v: &Value) -> Option<String> {
             format!("{:02}/{}", n % 100, n / 100)
         }
         Value::Number(n) => n.to_string(),
-        Value::Object(o) => {
-            // An address, or an email or phone with its parts: the text parts, in order.
-            let parts: Vec<String> = o.values().filter_map(|x| x.as_str()).filter(|s| !s.is_empty()).map(str::to_string).collect();
-            parts.join(", ")
+        Value::Object(_) | Value::Array(_) => {
+            // A structured value (an address, an SSH key with its metadata): every text in it, with
+            // its name, however deeply it is nested. A single text is just that text.
+            let mut leaves: Vec<(String, String)> = Vec::new();
+            collect_leaves(v, "", 0, &mut leaves);
+            match leaves.len() {
+                0 => return None,
+                1 => leaves.remove(0).1,
+                _ => leaves.into_iter().map(|(k, t)| format!("{k}: {t}")).collect::<Vec<_>>().join("\n"),
+            }
         }
         _ => return None,
     };
     let s = s.trim().to_string();
     (!s.is_empty()).then_some(s)
+}
+
+/// The most texts one structured value yields, and how deep it is read: a crafted value can't make this unbounded.
+const MAX_LEAVES: usize = 200;
+const MAX_DEPTH: usize = 8;
+
+fn collect_leaves(v: &Value, name: &str, depth: usize, out: &mut Vec<(String, String)>) {
+    if depth > MAX_DEPTH || out.len() >= MAX_LEAVES {
+        return;
+    }
+    match v {
+        Value::String(s) if !s.trim().is_empty() => out.push((name.to_string(), s.clone())),
+        Value::Number(n) => out.push((name.to_string(), n.to_string())),
+        Value::Object(o) => {
+            for (k, x) in o {
+                let path = if name.is_empty() { k.clone() } else { format!("{name}.{k}") };
+                collect_leaves(x, &path, depth + 1, out);
+            }
+        }
+        Value::Array(a) => {
+            for x in a {
+                collect_leaves(x, name, depth + 1, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn fields_of(details: &Value) -> Vec<Field> {
@@ -151,10 +188,10 @@ fn item_into(item: &Value, tag: &str, entries: &mut Vec<Incoming>, skipped: &mut
         .to_string();
     let mut made: Vec<Incoming> = Vec::new();
     // Fields the item's own kind doesn't take, kept whole in the sealed note.
-    let mut used: Vec<usize> = Vec::new();
-    let mark = |used: &mut Vec<usize>, f: &Field| {
+    let mut used: HashSet<usize> = HashSet::new();
+    let mark = |used: &mut HashSet<usize>, f: &Field| {
         if let Some(i) = fields.iter().position(|x| std::ptr::eq(x, f)) {
-            used.push(i);
+            used.insert(i);
         }
     };
     match item.get("categoryUuid").and_then(Value::as_str).unwrap_or("") {
@@ -166,7 +203,8 @@ fn item_into(item: &Value, tag: &str, entries: &mut Vec<Incoming>, skipped: &mut
                     .iter()
                     .find(|f| f.get("designation").and_then(Value::as_str) == Some(designation))
                     .and_then(|f| f.get("value").and_then(Value::as_str))
-                    .map(str::trim)
+                    // A password is kept exactly as exported, spaces and all.
+                    .map(|v| if designation == "password" { v } else { v.trim() })
                     .filter(|v| !v.is_empty())
                     .map(str::to_string)
             };
@@ -267,18 +305,30 @@ fn item_into(item: &Value, tag: &str, entries: &mut Vec<Incoming>, skipped: &mut
         line(&mut rest, format!("{name}: {value}"));
     }
     let site_taken = made.iter().any(|m| m.kind == "login" || m.kind == "api-key");
-    let mut urls: Vec<String> = overview.get("urls").and_then(Value::as_array).into_iter().flatten().filter_map(|u| u.get("url").and_then(Value::as_str)).map(str::to_string).collect();
-    urls.insert(0, site.clone());
-    urls.retain(|u| !u.is_empty());
-    urls.dedup();
-    for (i, u) in urls.iter().enumerate() {
-        if i == 0 && site_taken {
+    // Distinct addresses in order, at most MOST_URLS: a crafted item can't make this quadratic.
+    let mut seen: HashSet<&str> = HashSet::new();
+    let mut urls: Vec<&str> = Vec::new();
+    let extra = overview.get("urls").and_then(Value::as_array).into_iter().flatten().filter_map(|u| u.get("url").and_then(Value::as_str));
+    let mut cut = false;
+    for u in std::iter::once(site.as_str()).chain(extra) {
+        if u.is_empty() || !seen.insert(u) {
             continue;
         }
-        if urls[..i].contains(u) {
+        if urls.len() >= MOST_URLS {
+            cut = true;
+            break;
+        }
+        urls.push(u);
+    }
+    for (i, u) in urls.iter().enumerate() {
+        // The first is the login's or API key's own `site`, when one took it.
+        if i == 0 && site_taken && *u == site {
             continue;
         }
         line(&mut rest, format!("url: {u}"));
+    }
+    if cut {
+        skipped.push((format!("{title} (addresses)"), format!("it has more than {MOST_URLS} addresses: the rest weren't kept")));
     }
     for (i, f) in fields.iter().enumerate() {
         if used.contains(&i) {
@@ -305,8 +355,24 @@ fn item_into(item: &Value, tag: &str, entries: &mut Vec<Incoming>, skipped: &mut
         skipped.push((title, why.to_string()));
         return;
     }
-    // The vault's name, and the item's own tags.
-    let own: Vec<&str> = overview.get("tags").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect();
+    // The vault's name, and the item's own tags: distinct, and at most MOST_TAGS (a crafted item
+    // can't make adding them quadratic, and an entry holds 50).
+    let mut seen_tags: HashSet<&str> = HashSet::new();
+    let mut own: Vec<&str> = Vec::new();
+    let mut over = false;
+    for t in overview.get("tags").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::trim).filter(|t| !t.is_empty()) {
+        if !seen_tags.insert(t) {
+            continue;
+        }
+        if own.len() >= MOST_TAGS {
+            over = true;
+            break;
+        }
+        own.push(t);
+    }
+    if over {
+        skipped.push((format!("{title} (tags)"), format!("it has more than {MOST_TAGS} tags: the rest weren't kept")));
+    }
     entries.extend(made.into_iter().map(|m| own.iter().fold(m.tag(tag), |m, t| m.tag(t))));
 }
 

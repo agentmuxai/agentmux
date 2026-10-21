@@ -125,7 +125,8 @@ pub fn read(text: &str) -> Result<Imported, ReadError> {
         match item.kind {
             Some(1) => {
                 let l = item.login.as_ref();
-                let password = l.and_then(|l| present(&l.password));
+                // A password is kept exactly as exported, spaces and all.
+                let password = l.and_then(|l| l.password.as_deref()).filter(|p| !p.is_empty());
                 match password {
                     Some(password) => {
                         let mut e = Incoming::new("login", &label).part("password", password);
