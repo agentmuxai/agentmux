@@ -189,7 +189,12 @@ export interface AgentMux {
          *  Another view gets only its section (`{ "warden:section": "kanban" }`; also `vault:`,
          *  `connectors:`, `memory:` and `settings:section`) or, for `browser`, an http(s) `url`;
          *  every other key is dropped. */
-        open(view: string, meta?: Record<string, unknown>, split?: "right" | "down" | "tab"): Promise<{ pane: string }>;
+        open<V extends string>(
+            // A sectioned pane's own name takes the typed overload above, so its sections are checked.
+            view: V & (V extends keyof PaneSections ? never : unknown),
+            meta?: Record<string, unknown>,
+            split?: "right" | "down" | "tab"
+        ): Promise<{ pane: string }>;
     };
     /** Needs `storage`. Per package, at most 5 MB, values up to 1 MB. */
     storage: {

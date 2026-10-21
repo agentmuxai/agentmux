@@ -46,7 +46,7 @@ describe("pane sections", () => {
 
     it("says why a hand-written section can't open, naming the ones that can", () => {
         expect(sectionProblem("test-board", "done")).toBeNull();
-        expect(sectionProblem("old-board", "done")).toBeNull();
+        expect(sectionProblem("old-board", "done")).toBe(`"old-board" is now the test-board pane: use "view": "test-board"`);
         expect(sectionProblem("test-board", "nope")).toBe('the test-board pane has no "nope" section (it has todo, done)');
         expect(sectionProblem("term", "x")).toBe("the term pane has no sections");
         expect(sectionProblem(undefined, "x")).toBe('"section": "x" needs a "view" in its blockdef');
