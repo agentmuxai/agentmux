@@ -1,16 +1,14 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
+// Browser module barrel — its native pane tab manifest. Its code loads with
+// the first Browser pane (browser-instance.tsx).
 
-// Browser module barrel — its native pane tab manifest (and the model).
-
-import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
-import { BrowserViewModel } from "./browser-model";
-import { BrowserViewComponent } from "./browser-view";
+import { lazyPaneTab } from "@/app/block/lazy-pane-tab";
 import { IDENTITY_META_KEY, INCOGNITO_ICON, parseIdentity } from "./browser-identity";
 import { profileById } from "./browser-profiles";
 
 /** The browser as a native pane tab (Pane Tab contract Phase 2c). */
-export const browserPaneTab: PaneTabManifest = {
+export const browserPaneTab = lazyPaneTab({
     apiVersion: 1,
     view: "browser",
     label: "Browser",
@@ -31,15 +29,6 @@ export const browserPaneTab: PaneTabManifest = {
             return undefined;
         },
     },
-    create: (ctx) => {
-        const model = new BrowserViewModel(ctx);
-        return {
-            component: () => <BrowserViewComponent model={model} />,
-            liveTitle: () => ({ text: model.viewName(), placeholder: model.viewNameIsPlaceholder() }),
-            liveFavicon: () => model.viewFaviconUrl(),
-            contextMenu: (browserCtx) => model.getBodyContextMenuItems(browserCtx as never),
-            focus: () => model.giveFocus(),
-            dispose: () => model.dispose(),
-        };
-    },
-};
+    members: ["liveTitle", "liveFavicon", "contextMenu", "focus"],
+    load: () => import("./browser-instance"),
+});
