@@ -45,6 +45,10 @@
     font-size: 0.85em;
 }
 
+.widget-bar-row-problem {
+    color: var(--warning-color);
+}
+
 .widget-bar-row-move {
     display: inline-flex;
     gap: 2px;

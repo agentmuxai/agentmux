@@ -1,21 +1,19 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Toolchain module barrel: the pane's native pane tab manifest.
+// Toolchain module barrel: its native pane tab manifest. Its code loads with
+// the first Toolchain pane (toolchain-instance.tsx).
 
-import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
-import { ToolchainView } from "./toolchain-view";
+import { lazyPaneTab } from "@/app/block/lazy-pane-tab";
 
 /** The toolchain pane as a native pane tab (Pane Tab contract Phase 2c). Its
  *  view holds all its own state; there is no model. */
-export const toolchainPaneTab: PaneTabManifest = {
+export const toolchainPaneTab = lazyPaneTab({
     apiVersion: 1,
     view: "toolchain",
     label: "Toolchain",
     icon: "wrench",
     defaultHue: 210,
-    create: () => ({
-        component: () => <ToolchainView />,
-        liveTitle: () => ({ text: "Toolchain" }),
-    }),
-};
+    members: ["liveTitle"],
+    load: () => import("./toolchain-instance"),
+});

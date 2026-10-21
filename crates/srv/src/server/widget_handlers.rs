@@ -74,6 +74,49 @@ pub struct WidgetInstallResult {
     pub packages: Vec<WidgetPackageInfo>,
 }
 
+/// "Pin this section to the widget bar": the section's widget-bar entry, added to the user's
+/// widgets.json when no entry opens that section yet (pane-sections.ts).
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct WidgetSectionEntryReq {
+    /// The pane's view (`warden`).
+    pub view: String,
+    /// The section, or `<section>/<its section>` (`vault/cards`).
+    pub section: String,
+    pub label: String,
+    /// A Font Awesome name.
+    pub icon: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct WidgetSectionEntryResult {
+    /// The entry's key in widgets.json, which is also its pin id (`section@warden-lan`, or
+    /// `section@warden-lan-2` when the user's file already used that key for something else).
+    pub key: String,
+}
+
+/// The widgets.json key for a section's entry, or why the request can't make one. Names are
+/// lowercase letters, digits and `-`, with at most one `/` in the section.
+pub fn section_entry_key(req: &WidgetSectionEntryReq) -> Result<String, String> {
+    let name = |s: &str| !s.is_empty() && s.len() <= 40 && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+    if !name(&req.view) {
+        return Err(format!("not a view name: {:?}", req.view));
+    }
+    let parts: Vec<&str> = req.section.split('/').collect();
+    if parts.len() > 2 || !parts.iter().all(|p| name(p)) {
+        return Err(format!("not a section: {:?}", req.section));
+    }
+    let label = req.label.trim();
+    if label.is_empty() || label.chars().count() > 60 {
+        return Err("a section entry needs a label of at most 60 characters".to_string());
+    }
+    if !name(&req.icon) {
+        return Err(format!("not an icon name: {:?}", req.icon));
+    }
+    Ok(format!("section@{}-{}", req.view, parts.join("-")))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct WidgetReadFileReq {
@@ -208,6 +251,27 @@ pub fn register_widget_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 super::widget_agent_handlers::publish_requests(&st);
             }
             Ok(packages_result(packages))
+        }
+    });
+
+    // widgets.sectionentry: "Pin this section to the widget bar". Adds the section's entry to
+    // the user's widgets.json and applies it before answering, so the bar can pin it at once.
+    let st = state.clone();
+    engine.register_typed("widgets.sectionentry", move |req: WidgetSectionEntryReq, _ctx| {
+        let st = st.clone();
+        async move {
+            let key = section_entry_key(&req)?;
+            let entry = serde_json::json!({
+                "label": req.label.trim(),
+                "icon": req.icon,
+                "section": req.section,
+                "blockdef": { "meta": { "view": req.view } },
+            });
+            let (config, bus) = (st.config_watcher.clone(), st.event_bus.clone());
+            let key = tokio::task::spawn_blocking(move || crate::backend::user_widgets::add_section_entry(&config, &bus, &key, entry))
+                .await
+                .map_err(|e| e.to_string())??;
+            Ok(WidgetSectionEntryResult { key })
         }
     });
 
@@ -349,6 +413,28 @@ pub(crate) async fn handle_host_widget_approval(
 mod tests {
     use super::*;
     use axum::body::Body;
+
+    #[test]
+    fn a_section_entry_is_keyed_by_its_pane_and_section_and_checked() {
+        let req = |view: &str, section: &str, label: &str, icon: &str| WidgetSectionEntryReq {
+            view: view.into(),
+            section: section.into(),
+            label: label.into(),
+            icon: icon.into(),
+        };
+        assert_eq!(section_entry_key(&req("warden", "lan", "LAN", "network-wired")).unwrap(), "section@warden-lan");
+        assert_eq!(section_entry_key(&req("warden", "vault/cards", "Cards", "credit-card")).unwrap(), "section@warden-vault-cards");
+        for bad in [
+            req("Warden", "lan", "LAN", "x"),
+            req("warden", "a/b/c", "LAN", "x"),
+            req("warden", "../lan", "LAN", "x"),
+            req("warden", "lan", " ", "x"),
+            req("warden", "lan", &"L".repeat(61), "x"),
+            req("warden", "lan", "LAN", "x\" onclick=\""),
+        ] {
+            assert!(section_entry_key(&bad).is_err(), "{bad:?}");
+        }
+    }
     use axum::http::Request;
     use tower::ServiceExt;
 

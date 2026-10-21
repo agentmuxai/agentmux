@@ -6,9 +6,36 @@
  *  (docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §6.3–§6.6). */
 
 import { existsSync } from "node:fs";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { WidgetPackageInfo } from "@/app/store/rpc-api/widgets";
 import { BridgeError, ERR, handleBridgeRequest, originMatches, permissionFor, type BridgeHost, type BridgeState } from "./widget-bridge";
+import { registerPaneTab } from "./pane-tab-registry";
+
+// Two sectioned panes, as their manifests declare them (pane-sections.ts).
+const unregister: (() => void)[] = [];
+beforeAll(() => {
+    for (const [view, ids] of [["warden", ["kanban", "host"]], ["memory", ["global", "skills"]]] as const) {
+        unregister.push(
+            registerPaneTab({
+                apiVersion: 1,
+                view,
+                ...(view === "memory" ? { aliases: ["old-memory"] } : {}),
+                label: view,
+                icon: "x",
+                sections: {
+                    default: ids[0],
+                    items: [
+                        ...ids.map((id) => ({ id, label: id, icon: "x" })),
+                        // A section with sections of its own, like Warden's Vault.
+                        ...(view === "warden" ? [{ id: "vault", label: "Vault", icon: "x", sections: { default: "cards", items: [{ id: "cards", label: "Cards", icon: "x" }] } }] : []),
+                    ],
+                },
+                create: () => ({ component: () => null }),
+            })
+        );
+    }
+});
+afterAll(() => unregister.forEach((u) => u()));
 
 function pkg(over: Partial<WidgetPackageInfo> = {}): WidgetPackageInfo {
     return {
@@ -178,6 +205,71 @@ describe("permissions", () => {
         const granted = host(pkg({ granted: ["panes"] }));
         const s2 = await ready(granted);
         expect("result" in (await handleBridgeRequest(granted, s2, "panes.open", { view: "term" }))).toBe(true);
+    });
+
+    it("never passes a command, a controller or a connection to a pane it opens", async () => {
+        const h = host(pkg({ granted: ["panes"] }));
+        const state = await ready(h);
+        const hostile = {
+            controller: "cmd",
+            cmd: "whoami",
+            "cmd:args": ["/c", "calc"],
+            "cmd:runonstart": true,
+            "cmd:interactive": true,
+            connection: "ssh://attacker",
+            "cmd:cwd": "C:\\",
+        };
+        for (const view of ["term", "agent", "browser", "warden", "ext:other.widget/main", "constructor", "__proto__", "toString"]) {
+            expect("result" in (await handleBridgeRequest(h, state, "panes.open", { view, meta: hostile }))).toBe(true);
+            expect(h.openPane).toHaveBeenLastCalledWith(view, {}, "right");
+        }
+    });
+
+    it("opens another pane on a section, and a browser on a web address only", async () => {
+        const h = host(pkg({ granted: ["panes"] }));
+        const state = await ready(h);
+        await handleBridgeRequest(h, state, "panes.open", { view: "warden", meta: { "warden:section": "kanban", cmd: "x" } });
+        expect(h.openPane).toHaveBeenLastCalledWith("warden", { "warden:section": "kanban" }, "right");
+        await handleBridgeRequest(h, state, "panes.open", { view: "warden", meta: { "warden:section": "vault", "vault:section": "cards" } });
+        expect(h.openPane).toHaveBeenLastCalledWith("warden", { "warden:section": "vault", "vault:section": "cards" }, "right");
+        await handleBridgeRequest(h, state, "panes.open", { view: "warden", meta: { "vault:section": "nope", "vault:request": "r1" } });
+        expect(h.openPane).toHaveBeenLastCalledWith("warden", {}, "right");
+        // Through an old view name, the section would land under a key the pane doesn't read: dropped.
+        await handleBridgeRequest(h, state, "panes.open", { view: "old-memory", meta: { "old-memory:section": "skills", "memory:section": "skills" } });
+        expect(h.openPane).toHaveBeenLastCalledWith("old-memory", {}, "right");
+        // A section the pane doesn't declare is dropped.
+        await handleBridgeRequest(h, state, "panes.open", { view: "warden", meta: { "warden:section": "nope" } });
+        expect(h.openPane).toHaveBeenLastCalledWith("warden", {}, "right");
+        // Another pane's section key does nothing on this one.
+        await handleBridgeRequest(h, state, "panes.open", { view: "memory", meta: { "warden:section": "kanban" } });
+        expect(h.openPane).toHaveBeenLastCalledWith("memory", {}, "right");
+        await handleBridgeRequest(h, state, "panes.open", { view: "browser", meta: { url: "https://example.com/a" } });
+        expect(h.openPane).toHaveBeenLastCalledWith("browser", { url: "https://example.com/a" }, "right");
+        // A large key that is dropped doesn't count against the 64 KB.
+        await handleBridgeRequest(h, state, "panes.open", { view: "browser", meta: { url: "https://example.com/b", state: "x".repeat(70 * 1024) } });
+        expect(h.openPane).toHaveBeenLastCalledWith("browser", { url: "https://example.com/b" }, "right");
+        for (const url of ["file:///C:/Windows/win.ini", "javascript:alert(1)", "agentmux://x", 7]) {
+            await handleBridgeRequest(h, state, "panes.open", { view: "browser", meta: { url } });
+            expect(h.openPane).toHaveBeenLastCalledWith("browser", {}, "right");
+        }
+    });
+
+    it("keeps meta for the widget's own pane under its namespace, where meta.get finds it", async () => {
+        const h = host();
+        const state = await ready(h);
+        await handleBridgeRequest(h, state, "panes.open", { view: "ext:acme.notes/list", meta: { filter: "open", controller: "cmd" }, split: "down" });
+        expect(h.openPane).toHaveBeenLastCalledWith("ext:acme.notes/list", { "widget:acme.notes:filter": "open", "widget:acme.notes:controller": "cmd" }, "down");
+        const big = errorOf(await handleBridgeRequest(h, state, "panes.open", { view: "ext:acme.notes/list", meta: { text: "x".repeat(70 * 1024) } }));
+        expect(big.code).toBe(ERR.LIMIT_EXCEEDED);
+        expect(big.data).toEqual({ limit: "meta" });
+        // The keys meta.set accepts, so the pane can change or delete each one later.
+        for (const key of ["", "k".repeat(201)]) {
+            const bad = errorOf(await handleBridgeRequest(h, state, "panes.open", { view: "ext:acme.notes/list", meta: { [key]: 1 } }));
+            expect(bad.code).toBe(ERR.INVALID_PARAMS);
+        }
+        // Bytes, as meta.set counts them: 30,000 three-byte characters are 90 KB.
+        const wide = errorOf(await handleBridgeRequest(h, state, "panes.open", { view: "ext:acme.notes/list", meta: { text: "€".repeat(30_000) } }));
+        expect(wide.code).toBe(ERR.LIMIT_EXCEEDED);
     });
 
     it("refuses a method whose permission wasn't granted, naming it", async () => {

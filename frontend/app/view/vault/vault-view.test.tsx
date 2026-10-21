@@ -151,6 +151,15 @@ describe("the Vault pane", () => {
         expect(blockMeta()["vault:section"]).toBe("api-keys");
     });
 
+    it("closes an open Show or copy dialog when the Vault stops being shown (another Warden section)", async () => {
+        renderVault();
+        fireEvent.click(await screen.findByRole("button", { name: "Show or copy" }));
+        expect(await screen.findByRole("dialog")).toBeTruthy();
+        // In Warden, leaving the Vault section makes the Vault's host dormant (vault-in-warden.ts).
+        setVisibility("dormant");
+        await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    });
+
     it("tells srv when it is no longer shown", async () => {
         const { unmount } = renderVault();
         const on = { pane: "vault-block", on: true };
@@ -163,16 +172,19 @@ describe("the Vault pane", () => {
     it("sends a quick hide and show in order, one at a time", async () => {
         let release: () => void = () => {};
         const held = new Promise<void>((r) => (release = r));
-        // The first note is slow to answer: the next ones wait for it.
-        vault.mockImplementationOnce(async (op: string) => {
-            if (op === "list") return { entries, problem: null, requests, backend: "keychain" };
-            return {};
-        });
+        const base = vault.getMockImplementation();
         renderVault();
         await waitFor(() => expect(calls("on_screen")).toHaveLength(1));
-        vault.mockImplementationOnce(async () => {
-            await held;
-            return {};
+        // The next note to srv (the hide) is slow to answer: the one after it waits for it. Reading the
+        // list again when the Vault reappears is not a note, and isn't held up.
+        let slow = true;
+        vault.mockImplementation(async (op: string, args?: Record<string, unknown>) => {
+            if (op === "on_screen" && slow) {
+                slow = false;
+                await held;
+                return {};
+            }
+            return base ? base(op, args) : {};
         });
         setVisibility("dormant");
         setVisibility("active");
@@ -182,6 +194,7 @@ describe("the Vault pane", () => {
         expect(calls("on_screen").map((c) => c.on)).toEqual([true, false]);
         release();
         await waitFor(() => expect(calls("on_screen").map((c) => c.on)).toEqual([true, false, true]));
+        vault.mockImplementation(base as never);
     });
 
     it("says what may ask the person until they dismiss it", async () => {

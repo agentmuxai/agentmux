@@ -1,34 +1,19 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Tower module barrel: its native pane tab manifest (and the model).
+// Tower module barrel: its native pane tab manifest. Its code loads with the
+// first Tower pane (tower-instance.tsx).
 
-import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
-import { TowerViewModel } from "./tower-model";
-import { TowerView } from "./tower-view";
+import { lazyPaneTab } from "@/app/block/lazy-pane-tab";
 
 /** Tower, the read-only task manager, as a native pane tab. */
-export const towerPaneTab: PaneTabManifest = {
+export const towerPaneTab = lazyPaneTab({
     apiVersion: 1,
     view: "tower",
     label: "Tower",
     icon: "tower-observation",
     defaultHue: 30,
     capabilities: { noPadding: true },
-    create: (ctx) => {
-        const model = new TowerViewModel(ctx);
-        return {
-            component: () => <TowerView model={model} />,
-            liveTitle: () => ({ text: model.viewName() }),
-            settingsMenu: () => [
-                {
-                    label: "Share this computer's processes with paired devices",
-                    type: "checkbox",
-                    checked: model.sharing(),
-                    click: () => model.setSharing(!model.sharing()),
-                },
-            ],
-            dispose: () => model.dispose(),
-        };
-    },
-};
+    members: ["liveTitle", "settingsMenu"],
+    load: () => import("./tower-instance"),
+});

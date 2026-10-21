@@ -18,6 +18,7 @@
  */
 
 import type { PaneTabDescriptor } from "@/app/element/pane-tab-model";
+import type { PaneSections } from "./pane-sections";
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import type { NodeModel } from "@/layout/index";
 import { createSignal, type Accessor, type JSX } from "solid-js";
@@ -160,6 +161,9 @@ export interface PaneTabManifest {
      *  offered as a widget of its own (Settings doesn't list it). */
     legacyOf?: string;
     capabilities?: PaneTabCapabilities;
+    /** The pane's sections, when it is a row of them; the selected one is in
+     *  meta under `<view>:section` (pane-sections.ts). */
+    sections?: PaneSections;
     /** How a block of this view becomes a tab pill, beyond label and icon. */
     tab?: PaneTabDescriptor;
     /** What this view type contributes to the shared pane chrome while one

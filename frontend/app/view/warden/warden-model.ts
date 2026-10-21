@@ -1,29 +1,15 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { sectionOf } from "@/app/block/pane-sections";
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import { vaultHostIn } from "@/app/view/vault/vault-in-warden";
+import { VaultViewModel } from "@/app/view/vault/vault-model";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { readZoom } from "@/app/store/zoom-factor";
 
-export type WardenSection = "kanban" | "host" | "lan" | "internet" | "audit" | "history";
-
-// Label text only (not icon), hoisted here so viewName can read it without
-// importing from warden-view.tsx, which would reintroduce the circular
-// import warden.tsx exists to avoid. warden-view.tsx's RAIL references this
-// too, so the two can never drift out of sync, like the section labels in
-// connectors.tsx and memory.tsx.
-export const WARDEN_SECTION_LABELS: Record<WardenSection, string> = {
-    kanban: "Kanban",
-    host: "Host",
-    lan: "LAN",
-    internet: "Internet",
-    audit: "Audit",
-    history: "History",
-};
-
-function isWardenSection(v: unknown): v is WardenSection {
-    return typeof v === "string" && Object.prototype.hasOwnProperty.call(WARDEN_SECTION_LABELS, v);
-}
+export { WARDEN_SECTION_LABELS, WARDEN_SECTIONS, type WardenSection } from "./warden-sections";
+import { WARDEN_SECTIONS, WARDEN_SECTION_LABELS, type WardenSection } from "./warden-sections";
 
 /** Warden's state behind its native pane tab (warden.tsx). */
 export class WardenViewModel {
@@ -49,6 +35,8 @@ export class WardenViewModel {
     kanbanOpenAtom: Accessor<string | null>;
     /** The Kanban in one lane per repository (`kanban:lanes` meta). */
     kanbanLanesAtom: Accessor<boolean>;
+    /** The Vault section's own model, on this block (vault-in-warden.ts). */
+    vault: VaultViewModel;
 
     // A native pane tab (Pane Tab contract Phase 2c): built by `create(ctx)`;
     // its memos live in the instance's own root (host rule 8), so they no
@@ -59,8 +47,10 @@ export class WardenViewModel {
         const meta = ctx.meta;
         this.zoomAtom = createMemo<number>(() => readZoom(meta()));
         this.sectionAtom = createMemo<WardenSection>(() => {
-            const s = meta()?.["warden:section"];
-            return isWardenSection(s) ? s : "host";
+            const m = meta();
+            // A block saved as the Vault pane (the `vault` alias) opens on the Vault section.
+            if (m?.view === "vault" && m["warden:section"] === undefined) return "vault";
+            return sectionOf(WARDEN_SECTIONS, "warden", m);
         });
         this.kanbanOpenAtom = createMemo<string | null>(() => {
             const id = meta()?.["kanban:open"];
@@ -70,9 +60,11 @@ export class WardenViewModel {
         const [kanbanNeeds, setKanbanNeeds] = createSignal(0);
         this.kanbanNeeds = kanbanNeeds;
         this.setKanbanNeeds = setKanbanNeeds;
+        this.vault = new VaultViewModel(vaultHostIn(ctx, () => this.sectionAtom() === "vault"));
         this.viewName = createMemo<string>(() => {
             const section = this.sectionAtom();
             const n = kanbanNeeds();
+            if (section === "vault") return `Vault · ${this.vault.viewName()}`;
             return section === "kanban" && n > 0 ? `Kanban · ${n} need${n === 1 ? "s" : ""} you` : WARDEN_SECTION_LABELS[section];
         });
     }

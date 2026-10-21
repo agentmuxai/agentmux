@@ -1,14 +1,13 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Drone module barrel — its native pane tab manifest (and the model).
+// Drone module barrel: its native pane tab manifest. Its code loads with the
+// first Drone pane (drone-instance.tsx).
 
-import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
-import { DroneViewModel } from "./drone-model";
-import { DroneView } from "./drone-view";
+import { lazyPaneTab } from "@/app/block/lazy-pane-tab";
 
 /** Drone as a native pane tab (Pane Tab contract Phase 2c). */
-export const dronePaneTab: PaneTabManifest = {
+export const dronePaneTab = lazyPaneTab({
     apiVersion: 1,
     view: "drone",
     // The Workflows feature was renamed to Drone
@@ -19,12 +18,6 @@ export const dronePaneTab: PaneTabManifest = {
     icon: "diagram-project",
     defaultHue: 240,
     capabilities: { noPadding: true },
-    create: (ctx) => {
-        const model = new DroneViewModel(ctx);
-        return {
-            component: () => <DroneView model={model} />,
-            liveTitle: () => ({ text: model.viewName() }),
-            dispose: () => model.dispose(),
-        };
-    },
-};
+    members: ["liveTitle"],
+    load: () => import("./drone-instance"),
+});

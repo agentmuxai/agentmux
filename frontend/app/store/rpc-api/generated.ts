@@ -449,6 +449,8 @@ import type { WidgetPackagesResult } from "@/types/rpc/WidgetPackagesResult";
 import type { WidgetReadFileReq } from "@/types/rpc/WidgetReadFileReq";
 import type { WidgetReadFileResult } from "@/types/rpc/WidgetReadFileResult";
 import type { WidgetRequestsResult } from "@/types/rpc/WidgetRequestsResult";
+import type { WidgetSectionEntryReq } from "@/types/rpc/WidgetSectionEntryReq";
+import type { WidgetSectionEntryResult } from "@/types/rpc/WidgetSectionEntryResult";
 import type { WidgetSessionReq } from "@/types/rpc/WidgetSessionReq";
 import type { WidgetSessionResult } from "@/types/rpc/WidgetSessionResult";
 import type { WidgetSetEnabledReq } from "@/types/rpc/WidgetSetEnabledReq";
@@ -2520,6 +2522,14 @@ export const GeneratedApi = {
   // command "widgets.rescan"
   WidgetsRescanCommand(client: RpcClient, opts?: RpcOpts): Promise<WidgetPackagesResult> {
     return client.rpcCall("widgets.rescan", {}, opts);
+  },
+  // command "widgets.sectionentry"
+  WidgetsSectionEntryCommand(
+    client: RpcClient,
+    data: WidgetSectionEntryReq,
+    opts?: RpcOpts
+  ): Promise<WidgetSectionEntryResult> {
+    return client.rpcCall("widgets.sectionentry", data, opts);
   },
   // command "widgets.session"
   WidgetsSessionCommand(client: RpcClient, data: WidgetSessionReq, opts?: RpcOpts): Promise<WidgetSessionResult> {

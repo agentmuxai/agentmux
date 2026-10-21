@@ -4,10 +4,9 @@
 
 import { AUTH_KEY_HEADER } from "@/util/sharedconst";
 import { type WebSocket, newWebSocket } from "@/util/wsutil";
-import debug from "debug";
-import { sprintf } from "sprintf-js";
+import { debugLog } from "@/util/debuglog";
 
-const dlog = debug("wave:ws");
+const dlog = debugLog("wave:ws");
 
 const WarnWebSocketSendSize = 1024 * 1024; // 1MB
 const MaxWebSocketSendSize = 5 * 1024 * 1024; // 5MB
@@ -138,7 +137,7 @@ class WSControl {
             timeout = 1;
         }
         if (timeout > 0) {
-            dlog(sprintf("sleeping %ds", timeout));
+            dlog(`sleeping ${timeout}s`);
         }
         setTimeout(() => {
             this.connectNow(String(this.reconnectTimes));

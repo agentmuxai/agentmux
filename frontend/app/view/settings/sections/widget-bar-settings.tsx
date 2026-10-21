@@ -19,6 +19,7 @@ import {
     type WidgetBarEntry,
     type WidgetBarState,
 } from "@/app/window/action-widgets-config";
+import { sectionProblem } from "@/app/block/pane-sections";
 import { atoms } from "@/store/global";
 import { makeIconClass } from "@/util/util";
 import type { SettingsIndexEntry } from "../settings-model";
@@ -73,6 +74,14 @@ function sourceNote(key: string): string | null {
     return m ? `from package ${m[1]}` : null;
 }
 
+/** What's wrong with an entry's `"section"` (widgets.json), or null: a section its pane doesn't
+ *  declare would quietly open the pane's default one. */
+export function sectionNote(widget: WidgetConfigType): string | null {
+    if (!widget.section) return null;
+    const view = widget.blockdef?.meta?.view as string | undefined;
+    return sectionProblem(view, widget.section);
+}
+
 export function WidgetBarSettings(): JSX.Element {
     const settings = (): Record<string, any> => atoms.fullConfigAtom()?.settings ?? {};
     const wmap = (): Record<string, WidgetConfigType> => atoms.fullConfigAtom()?.widgets ?? {};
@@ -104,6 +113,13 @@ export function WidgetBarSettings(): JSX.Element {
                 <Show when={sourceNote(p.entry.key)}>{(note) => <span class="widget-bar-row-note">{note()}</span>}</Show>
                 <Show when={!p.entry.canHide}>
                     <span class="widget-bar-row-note">always available</span>
+                </Show>
+                <Show when={sectionNote(p.entry.widget)}>
+                    {(note) => (
+                        <span class="widget-bar-row-note widget-bar-row-problem" role="note">
+                            ⚠ {note()}
+                        </span>
+                    )}
                 </Show>
             </span>
             <span class="widget-bar-row-move">

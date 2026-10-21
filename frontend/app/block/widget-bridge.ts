@@ -9,6 +9,7 @@
  */
 
 import type { WidgetPackageInfo, WidgetPaneInfo } from "@/app/store/rpc-api/widgets";
+import { isSectionMeta } from "./pane-sections";
 import type { PaneTabHostContext } from "./pane-tab-registry";
 import type { StatusLook, StatusTone } from "./widget-panes";
 
@@ -334,7 +335,14 @@ async function answer(host: BridgeHost, state: BridgeState, method: string, para
         case "panes.open": {
             if (!str(p.view, 200)) return fail(ERR.INVALID_PARAMS, "panes.open needs { view }");
             const split = p.split === "down" || p.split === "tab" ? p.split : "right";
-            const meta = isObj(p.meta) ? p.meta : {};
+            if (isObj(p.meta) && pkg.panes.some((pane) => pane.view === p.view) && Object.keys(p.meta).some((k) => !k || k.length > 200)) {
+                return fail(ERR.INVALID_PARAMS, "meta keys are non-empty strings");
+            }
+            // Measured after filtering: a key another view drops doesn't count.
+            const meta = paneMetaForWidget(pkg, p.view, isObj(p.meta) ? p.meta : {});
+            if (new TextEncoder().encode(JSON.stringify(meta)).length > META_LIMIT_BYTES) {
+                return fail(ERR.LIMIT_EXCEEDED, "a pane's widget meta is limited to 64 KB", { limit: "meta" });
+            }
             if (!host.openPane) return fail(ERR.UNAVAILABLE, "this AgentMux can't open panes from widgets");
             return ok({ pane: await host.openPane(p.view, meta, split) });
         }
@@ -391,6 +399,39 @@ async function answer(host: BridgeHost, state: BridgeState, method: string, para
         default:
             return fail(ERR.METHOD_NOT_FOUND, `unknown method ${method}`);
     }
+}
+
+const isWebUrl = (v: unknown): boolean => {
+    if (!str(v, 4096)) return false;
+    try {
+        const u = new URL(v);
+        return u.protocol === "https:" || u.protocol === "http:";
+    } catch {
+        return false;
+    }
+};
+
+/** Whether a widget may set `key` on a pane of view `view`: the section a sectioned pane opens on
+ *  (one its manifest declares, pane-sections.ts), and a browser's http(s) address. */
+function otherViewAllows(view: string, key: string, value: unknown): boolean {
+    if (view === "browser") return key === "url" && isWebUrl(value);
+    return isSectionMeta(view, key, value);
+}
+
+/**
+ * The meta a pane opened by `panes.open` gets. A pane of the widget's own gets the widget's meta,
+ * under its namespace as `meta.set` writes it. A pane of another kind gets only the keys
+ * `otherViewAllows` allows: everything else (a controller, a command, a connection) is dropped, so
+ * `panes` opens panes and never runs anything.
+ */
+export function paneMetaForWidget(pkg: Pick<WidgetPackageInfo, "id" | "panes">, view: string, meta: Record<string, unknown>): Record<string, unknown> {
+    const out: Record<string, unknown> = {};
+    if (pkg.panes.some((p) => p.view === view)) {
+        for (const [k, v] of Object.entries(meta)) if (v !== null && v !== undefined) out[`widget:${pkg.id}:${k}`] = v;
+        return out;
+    }
+    for (const [k, v] of Object.entries(meta)) if (otherViewAllows(view, k, v)) out[k] = v;
+    return out;
 }
 
 function ownMetaOf(id: string, meta: Record<string, unknown> | null | undefined): Record<string, unknown> {

@@ -1,11 +1,11 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// The Vault pane: the person's secrets, which agents use by name without
+// The Vault, Warden's Vault section (vault-in-warden.ts): the person's secrets, which agents use by name without
 // seeing them (docs/specs/SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §5).
 // A rail of sections like Warden's; agents' requests for new entries on top.
 
-import { createEffect, createSignal, For, on, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js";
 
 import { ModalLayer } from "@/app/element/ModalLayer";
 import { Button, TabbedPane, type TabItem } from "@/app/element/ui";
@@ -13,11 +13,12 @@ import type { VaultActivity } from "@/types/rpc/VaultActivity";
 import type { VaultRequest } from "@/types/rpc/VaultRequest";
 import type { VaultSection } from "@/types/rpc/VaultSection";
 import { VaultEntries } from "./vault-entries";
+import { VaultShown } from "./vault-reveal";
 import { VaultExportDialog } from "./vault-export";
 import { VaultImportDialog } from "./vault-import";
 import { VaultEntryForm, type VaultFormTarget } from "./vault-entry-form";
 import { formatWhen } from "./vault-format";
-import { SECTION_LABELS, vaultKind, type VaultPaneSection } from "./vault-kinds";
+import { VAULT_SECTIONS, vaultKind, type VaultPaneSection } from "./vault-kinds";
 import { vaultPromptNotes } from "./vault-prompts";
 import { openWarden } from "@/app/view/warden/open-warden";
 import { getPlatform } from "@/util/platformutil";
@@ -25,9 +26,9 @@ import type { VaultViewModel } from "./vault-model";
 import {
     declineRequest,
     followVault,
+    holdVaultShown,
     loadActivity,
     loadKept,
-    refreshVault,
     setVaultOnScreen,
     vaultAvailable,
     vaultChangedMs,
@@ -42,15 +43,7 @@ import "./vault-view.scss";
 
 const ENTRY_SECTIONS: VaultSection[] = ["personal", "cards", "api-keys", "logins", "notes"];
 
-const RAIL: TabItem<VaultPaneSection>[] = [
-    { id: "personal", label: SECTION_LABELS.personal, icon: "id-card" },
-    { id: "cards", label: SECTION_LABELS.cards, icon: "credit-card" },
-    { id: "api-keys", label: SECTION_LABELS["api-keys"], icon: "key" },
-    { id: "logins", label: SECTION_LABELS.logins, icon: "right-to-bracket" },
-    { id: "notes", label: SECTION_LABELS.notes, icon: "note-sticky" },
-    { id: "kept", label: SECTION_LABELS.kept, icon: "box-archive" },
-    { id: "activity", label: SECTION_LABELS.activity, icon: "list-check" },
-];
+const RAIL: TabItem<VaultPaneSection>[] = [...VAULT_SECTIONS.items];
 
 const MANAGED_IN: Record<string, string> = {
     accounts: "the Accounts pane",
@@ -226,10 +219,12 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
         setForm({ mode: "new", section: kind?.section ?? "personal", request: r });
     };
 
-    onMount(() => {
-        if (!vaultAvailable()) return;
+    // Only while shown: the list decrypts every entry, which can make the OS ask for the Vault key,
+    // so a Vault that is hidden (another Warden section, another tab) or closed never reads it.
+    createEffect(() => {
+        if (!vaultAvailable() || !model.shown()) return;
         followVault();
-        void refreshVault();
+        onCleanup(holdVaultShown());
     });
 
     // While shown, renew srv's note that a Vault pane is on screen every 10 s
@@ -263,7 +258,9 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
     );
 
     return (
-        // data-agent-hidden: agents' UI captures and queries leave the Vault out.
+        // data-agent-hidden: agents' UI captures and queries leave the Vault out. VaultShown
+        // lets an open Reveal close when the Vault stops being shown.
+        <VaultShown.Provider value={model.shown}>
         <ModalLayer scope="pane">
             <div class="vault-container" data-agent-hidden="vault">
                 <div class="vault-view" style={{ zoom: model.zoomAtom() }}>
@@ -306,6 +303,7 @@ export function VaultView(props: { model: VaultViewModel }): JSX.Element {
                 </div>
             </div>
         </ModalLayer>
+        </VaultShown.Provider>
     );
 }
 

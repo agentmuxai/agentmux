@@ -175,8 +175,9 @@ export function registerDefaultCommands(): void {
         label: "Open Vault",
         category: "Open",
         icon: "lock",
-        // One Vault per tab: focus the one already open.
-        execute: () => openOrFocusPaneByView("vault", { meta: { view: "vault" } }),
+        // Warden's Vault section: switch the Warden already in this tab there.
+        execute: () =>
+            openOrFocusPaneByView("warden", { meta: { view: "warden", "warden:section": "vault" } }, { "warden:section": "vault" }),
     });
     commandRegistry.register({
         id: "open:help",

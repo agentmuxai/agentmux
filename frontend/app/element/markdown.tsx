@@ -141,7 +141,6 @@ import { createEffect, createMemo, createRoot, createSignal, onCleanup, onMount,
 import type { JSX } from "solid-js";
 import { Fragment, jsx, jsxs } from "solid-js/h/jsx-runtime";
 import { unified } from "unified";
-import rehypeHighlight from "rehype-highlight";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import rehypeSlug from "rehype-slug";
@@ -155,8 +154,12 @@ import { rehypeLinkify } from "./rehype-linkify";
 import { Code, CodeBlock } from "./markdown-codeblock";
 import { MarkdownImg, type MarkdownMediaOpts, MuxBlock } from "./markdown-media";
 import { rehypeLocalImageSrc } from "./rehype-local-image-src";
+import { rehypeMarkCodeLang } from "./rehype-mark-code-lang";
 import { Mermaid, MermaidErrorFallback } from "./markdown-mermaid";
 import "./markdown.scss";
+
+/** Any alignment class in a class string (ALIGN_CLASS_REGEX matches one class). */
+const ALIGN_CLASS_REGEX_ANY = /(^|\s)text-(left|center|right)(\s|$)/;
 
 /**
  * `solid-js/h` returns each element as a thunk that builds it on first call
@@ -365,7 +368,10 @@ const Markdown = (props: MarkdownProps) => {
                 <th
                     {...rest}
                     class={cn(
-                        "px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-primary",
+                        "px-3 py-2 text-xs font-semibold uppercase tracking-wide text-primary",
+                        // Left unless the column is aligned (rehype-align-to-class):
+                        // cn no longer drops one of two clashing classes.
+                        !ALIGN_CLASS_REGEX_ANY.test(className ?? "") && "text-left",
                         className,
                     )}
                 >
@@ -605,7 +611,6 @@ const Markdown = (props: MarkdownProps) => {
             ? [
                   rehypeRaw,
                   rehypeLocalImageSrc,
-                  ...(withHighlight ? [rehypeHighlight] : []),
                   rehypeAlignToClass,
                   rehypeLinkify,
                   () =>
@@ -615,9 +620,10 @@ const Markdown = (props: MarkdownProps) => {
                               ...defaultSchema.attributes,
                               span: [
                                   ...(defaultSchema.attributes?.span || []),
-                                  // The syntax highlighter's own classes, plus the
-                                  // semantic colour set agents may use.
-                                  ["className", /^hljs-./, ...AM_SPAN_CLASSES],
+                                  // The semantic colour set agents may use. Code
+                                  // colour comes after the sanitizer (shiki,
+                                  // markdown-codeblock.tsx), not as classes here.
+                                  ["className", ...AM_SPAN_CLASSES],
                               ],
                               th: [
                                   ...(defaultSchema.attributes?.th || []),
@@ -650,6 +656,9 @@ const Markdown = (props: MarkdownProps) => {
                           },
                       }),
                   () => rehypeSlug({ prefix: idPrefix() }),
+                  // After the sanitizer: marks fenced blocks for shiki
+                  // (markdown-codeblock.tsx), unless this render skips colour.
+                  ...(withHighlight ? [rehypeMarkCodeLang] : []),
               ]
             : [];
 

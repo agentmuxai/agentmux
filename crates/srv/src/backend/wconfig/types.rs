@@ -659,8 +659,39 @@ pub struct WidgetConfigType {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub module: String,
 
+    /// The section of a sectioned pane this entry opens on (Warden's `kanban`),
+    /// or `<section>/<its section>` for a section with sections of its own
+    /// (`vault/cards`). `resolve_section` writes it into `blockdef.meta` as
+    /// `<view>:section` (and `<section>:section`), the keys sectioned panes
+    /// read, so whatever opens the blockdef opens that section. The frontend checks the id
+    /// against the sections the pane declares (`pane-sections.ts`) and lists
+    /// an unknown one in Settings ▸ Widgets.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub section: String,
+
     #[serde(rename = "blockdef", default)]
     pub block_def: BlockDef,
+}
+
+impl WidgetConfigType {
+    /// Writes `section` into the blockdef's meta under `<view>:section`, and a
+    /// sub-section under `<section>:section`. Nothing without a section or a view.
+    pub fn resolve_section(&mut self) {
+        if self.section.is_empty() {
+            return;
+        }
+        let Some(view) = self.block_def.meta.get("view").and_then(|v| v.as_str()).map(str::to_owned) else {
+            return;
+        };
+        let (id, sub) = match self.section.split_once('/') {
+            Some((id, sub)) => (id.to_owned(), Some(sub.to_owned())),
+            None => (self.section.clone(), None),
+        };
+        if let Some(sub) = sub {
+            self.block_def.meta.insert(format!("{id}:section"), Value::String(sub));
+        }
+        self.block_def.meta.insert(format!("{view}:section"), Value::String(id));
+    }
 }
 
 /// Terminal color theme.

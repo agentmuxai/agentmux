@@ -1,7 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createSignal } from "solid-js";
+import { createEffect, createSignal, on } from "solid-js";
+
+import { sectionKeyOf, sectionOf, type PaneSections } from "@/app/block/pane-sections";
+import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 
 export type SettingsSection =
     | "appearance"
@@ -46,6 +49,23 @@ export const SETTINGS_SECTION_LABELS: Record<SettingsSection, string> = {
     advanced: "Advanced",
 };
 
+/** Settings' sections, in rail order, as its manifest declares them (pane-sections.ts). */
+export const SETTINGS_SECTIONS: PaneSections<SettingsSection> = {
+    default: "appearance",
+    items: [
+        { id: "appearance", label: SETTINGS_SECTION_LABELS.appearance, icon: "palette" },
+        { id: "window", label: SETTINGS_SECTION_LABELS.window, icon: "table-cells" },
+        { id: "browser", label: SETTINGS_SECTION_LABELS.browser, icon: "globe" },
+        { id: "terminal", label: SETTINGS_SECTION_LABELS.terminal, icon: "terminal" },
+        { id: "sounds", label: SETTINGS_SECTION_LABELS.sounds, icon: "volume-high" },
+        { id: "notifications", label: SETTINGS_SECTION_LABELS.notifications, icon: "bell" },
+        { id: "recording", label: SETTINGS_SECTION_LABELS.recording, icon: "microphone" },
+        { id: "devices", label: SETTINGS_SECTION_LABELS.devices, icon: "mobile-screen" },
+        { id: "widgets", label: SETTINGS_SECTION_LABELS.widgets, icon: "puzzle-piece" },
+        { id: "advanced", label: SETTINGS_SECTION_LABELS.advanced, icon: "sliders" },
+    ],
+};
+
 /** The settings pane's state behind its native pane tab (`settingsPaneTab`,
  *  settings.tsx): the open section and the search query. */
 export class SettingsViewModel {
@@ -60,17 +80,28 @@ export class SettingsViewModel {
     query: () => string;
     setQuery: (q: string) => void;
 
-    /** `initial`: the section to open at, e.g. Browser from a browser
-     *  pane's Manage profiles… (the block's `settings:section`). */
-    constructor(initial?: SettingsSection) {
-        const [section, setSection] = createSignal<SettingsSection>(initial ?? "appearance");
-        this.activeSection = section;
-        this.setSection = setSection;
-        // No blockAtom/meta-persistence here (unlike Connectors/Memory/Warden's
-        // sectionAtom) — SettingsViewModel has never had a blockAtom, and
-        // activeSection is already a plain createSignal read directly, so no
-        // useBlockAtom wrapper is needed either (same as agent-model.ts's
-        // viewName, which reads its own already-tracked signal inline).
+    /** `block`: the pane's meta, which holds the open section under `settings:section` like every
+     *  sectioned pane's, so Browser's Manage profiles… or a widget-bar entry can open it on one, an
+     *  open Settings follows when asked for another, and the section survives a remount. Without it
+     *  (tests), the section is local state. */
+    constructor(block?: Pick<PaneTabHostContext, "meta" | "setMeta">) {
+        if (block) {
+            // Shown at once, then saved: a search result in another section looks for its row
+            // right after switching, before the meta write comes back. A change from outside
+            // (another entry point asking for a section) still lands through the meta.
+            const fromMeta = () => sectionOf(SETTINGS_SECTIONS, "settings", block.meta());
+            const [section, setLocal] = createSignal<SettingsSection>(fromMeta());
+            createEffect(on(fromMeta, setLocal, { defer: true }));
+            this.activeSection = section;
+            this.setSection = (s) => {
+                setLocal(s);
+                void block.setMeta({ [sectionKeyOf("settings")]: s });
+            };
+        } else {
+            const [section, setSection] = createSignal<SettingsSection>(SETTINGS_SECTIONS.default);
+            this.activeSection = section;
+            this.setSection = setSection;
+        }
         this.viewName = () => SETTINGS_SECTION_LABELS[this.activeSection()];
         const [query, setQuery] = createSignal("");
         this.query = query;

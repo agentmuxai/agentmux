@@ -1,0 +1,18 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Shiki-highlighted runs (embedded-highlight.ts) carry both themes' colours as
+// CSS variables; this picks by the theme's polarity, so a theme switch needs no
+// re-highlight. Shared by shell commands (ShellCommand.tsx) and code blocks in
+// markdown (markdown-codeblock.tsx).
+.sh-shiki span {
+    color: var(--shiki-dark);
+    font-style: var(--shiki-dark-font-style);
+    font-weight: var(--shiki-dark-font-weight);
+
+    [data-theme-polarity="light"] & {
+        color: var(--shiki-light);
+        font-style: var(--shiki-light-font-style);
+        font-weight: var(--shiki-light-font-weight);
+    }
+}

@@ -7,7 +7,7 @@ import { Button, TabbedPane, type TabItem } from "@/app/element/ui";
 
 import { fullConfigAtom } from "@/app/store/global";
 import { getApi } from "@/app/store/app-api";
-import { SETTINGS_SECTION_LABELS, type SettingsIndexEntry, type SettingsSection, type SettingsViewModel } from "./settings-model";
+import { SETTINGS_SECTION_LABELS, SETTINGS_SECTIONS, type SettingsIndexEntry, type SettingsSection, type SettingsViewModel } from "./settings-model";
 import { SettingsSearchBar } from "./settings-search-bar";
 import { AppearanceSection } from "./sections/appearance-section";
 import { WindowPanesSection } from "./sections/window-panes-section";
@@ -51,18 +51,7 @@ function ConfigErrorsBanner(): JSX.Element {
 
 // ── Rail ──────────────────────────────────────────────────────────────────────
 
-const RAIL: TabItem<SettingsSection>[] = [
-    { id: "appearance", label: SETTINGS_SECTION_LABELS.appearance, icon: "palette" },
-    { id: "window",     label: SETTINGS_SECTION_LABELS.window,     icon: "table-cells" },
-    { id: "browser",    label: SETTINGS_SECTION_LABELS.browser,    icon: "globe" },
-    { id: "terminal",   label: SETTINGS_SECTION_LABELS.terminal,   icon: "terminal" },
-    { id: "sounds",     label: SETTINGS_SECTION_LABELS.sounds,     icon: "volume-high" },
-    { id: "notifications", label: SETTINGS_SECTION_LABELS.notifications, icon: "bell" },
-    { id: "recording",  label: SETTINGS_SECTION_LABELS.recording,  icon: "microphone" },
-    { id: "devices",    label: SETTINGS_SECTION_LABELS.devices,    icon: "mobile-screen" },
-    { id: "widgets",    label: SETTINGS_SECTION_LABELS.widgets,    icon: "puzzle-piece" },
-    { id: "advanced",   label: SETTINGS_SECTION_LABELS.advanced,   icon: "sliders" },
-];
+const RAIL: TabItem<SettingsSection>[] = [...SETTINGS_SECTIONS.items];
 
 // ── Main view ─────────────────────────────────────────────────────────────────
 

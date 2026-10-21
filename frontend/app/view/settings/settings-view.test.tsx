@@ -58,8 +58,8 @@ vi.mock("./sections/advanced-section", async (importOriginal) => ({
     AdvancedSection: () => <div data-testid="advanced-section" />,
 }));
 
-import { createRoot } from "solid-js";
-import { settingsPaneTab } from "./settings";
+import { createRoot, createSignal } from "solid-js";
+import { create as createSettings } from "./settings-instance";
 import { SettingsView } from "./settings-view";
 import { SettingsViewModel } from "./settings-model";
 
@@ -97,6 +97,21 @@ describe("SettingsView section tabs", () => {
         const panel = screen.getByRole("tabpanel");
         expect(tablist.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
         expect(panel.getAttribute("aria-labelledby")).toBe(screen.getByRole("tab", { name: "Appearance" }).id);
+    });
+
+    it("with a block, switches at once, saves to meta, and follows a section asked for from outside", async () => {
+        const [meta, setMetaSignal] = createSignal<Record<string, unknown>>({ "settings:section": "browser" });
+        let saved: Record<string, unknown> | null = null;
+        // The meta write comes back later, like the real RPC.
+        const block = { meta, setMeta: async (patch: Record<string, unknown>) => void (saved = patch) };
+        const model = createRoot(() => new SettingsViewModel(block as never));
+        expect(model.activeSection()).toBe("browser");
+        model.setSection("widgets");
+        expect(model.activeSection()).toBe("widgets");
+        expect(saved).toEqual({ "settings:section": "widgets" });
+        setMetaSignal({ "settings:section": "terminal" });
+        await Promise.resolve();
+        expect(model.activeSection()).toBe("terminal");
     });
 
     it("clicking a tab switches the visible section", () => {
@@ -231,7 +246,7 @@ describe("Settings pane: the section to open at", () => {
     // profiles… asks for Browser).
     function openWith(meta: Record<string, unknown>): string {
         return createRoot((dispose) => {
-            const inst = settingsPaneTab.create({
+            const inst = createSettings({
                 blockId: "b1",
                 meta: () => meta as MetaType,
                 setMeta: async () => {},

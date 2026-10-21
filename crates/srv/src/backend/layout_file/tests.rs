@@ -661,6 +661,13 @@ fn connectors_and_memory_are_written_with_their_section() {
         (json!({ "view": "knowledge", "memory:section": "bundles", "knowledge:section": "skills" }), "memory", "bundles"),
         // Remotes became a section of Connectors; a block saved before is written as that.
         (json!({ "view": "remotes", "remotes:expand": "db1" }), "connectors", "remotes"),
+        (json!({ "view": "warden", "warden:section": "kanban" }), "warden", "kanban"),
+        (json!({ "view": "settings", "settings:section": "widgets" }), "settings", "widgets"),
+        // The Vault became a section of Warden; a block saved before is written as that.
+        (json!({ "view": "vault", "vault:section": "cards" }), "warden", "vault/cards"),
+        (json!({ "view": "vault" }), "warden", "vault"),
+        // On Warden's Vault section, the Vault's own section goes with it.
+        (json!({ "view": "warden", "warden:section": "vault", "vault:section": "logins" }), "warden", "vault/logins"),
     ] {
         let v = view_from_block(&store, &meta(m), &ctx(false), &mut Vec::new());
         assert_eq!(v.view_type, kind);
@@ -696,6 +703,10 @@ fn connectors_memory_and_old_armory_or_knowledge_entries_open_the_new_panes() {
         (json!({ "type": "armory" }), "connectors", "connectors:section", "accounts"),
         // Files saved before Remotes became a section of Connectors say "remotes".
         (json!({ "type": "remotes" }), "connectors", "connectors:section", "remotes"),
+        (json!({ "type": "warden", "config": { "section": "kanban" } }), "warden", "warden:section", "kanban"),
+        (json!({ "type": "settings", "config": { "section": "browser" } }), "settings", "settings:section", "browser"),
+        // Files saved before the Vault became a section of Warden say "vault".
+        (json!({ "type": "vault" }), "warden", "warden:section", "vault"),
     ] {
         let plan = plan_from_doc(&store, &one_pane(view.clone()), &opts(home.path(), false));
         let m = block_meta(&plan, 0, 0);
@@ -703,6 +714,21 @@ fn connectors_memory_and_old_armory_or_knowledge_entries_open_the_new_panes() {
         assert_eq!(m[key], section, "{view}");
         assert!(!m.contains_key("armory:section"), "{view}");
         assert!(plan.notes.is_empty(), "{:?}", plan.notes);
+    }
+}
+
+#[test]
+fn wardens_vault_section_reopens_on_the_vaults_own_section() {
+    let home = tempfile::tempdir().unwrap();
+    let store = Store::open_in_memory().unwrap();
+    for view in [
+        json!({ "type": "warden", "config": { "section": "vault/cards" } }),
+        // A file saved when the Vault was a pane of its own names only the Vault's section.
+        json!({ "type": "vault", "config": { "section": "cards" } }),
+    ] {
+        let plan = plan_from_doc(&store, &one_pane(view.clone()), &opts(home.path(), false));
+        let m = block_meta(&plan, 0, 0);
+        assert_eq!((m["view"].as_str(), m["warden:section"].as_str(), m["vault:section"].as_str()), (Some("warden"), Some("vault"), Some("cards")), "{view}");
     }
 }
 

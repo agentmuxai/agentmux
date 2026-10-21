@@ -4,9 +4,9 @@
 
 import { handleMuxEvent } from "@/app/store/mps";
 import * as util from "@/util/util";
-import debug from "debug";
+import { debugLog } from "@/util/debuglog";
 
-const dlog = debug("wave:router");
+const dlog = debugLog("wave:router");
 
 const SysRouteName = "sys";
 

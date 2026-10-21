@@ -15,6 +15,8 @@
  * (spec §3.3, §4).
  */
 
+import { ByteLru } from "@/util/byte-lru";
+
 /** A run of body text and the Shiki CSS variables that colour it. */
 export interface ColoredRun {
     text: string;
@@ -26,9 +28,15 @@ const THEMES = { dark: "github-dark-high-contrast", light: "github-light-high-co
 // The same caps as HighlightedCode.
 const CAP_BYTES = 200 * 1024;
 const CAP_LINES = 2000;
-const CACHE_LIMIT = 100;
 
-const cache = new Map<string, ColoredRun[]>();
+// Bounded by bytes, like HighlightedCode's: code blocks in markdown share it
+// with shell commands, and a long conversation has many
+// (SPEC_MARKDOWN_CODE_ON_SHIKI_AND_REDUNDANT_LIBRARIES_2026_10_21.md §5).
+const cache = new ByteLru<ColoredRun[]>(8 * 1024 * 1024, (k, runs) => {
+    let n = k.length * 2;
+    for (const r of runs) n += r.text.length * 2 + (r.style ? 96 : 16);
+    return n;
+});
 
 let shikiModule: typeof import("../shiki-highlighter") | null = null;
 const getShiki = async () => (shikiModule ??= await import("../shiki-highlighter"));
@@ -40,20 +48,11 @@ function key(text: string, lang: string): string {
 /** Already-highlighted runs, or undefined. Refreshes recency. */
 export function cachedRuns(text: string, lang: string): ColoredRun[] | undefined {
     const k = key(text, lang);
-    const hit = cache.get(k);
-    if (hit) {
-        cache.delete(k);
-        cache.set(k, hit);
-    }
-    return hit;
+    return cache.get(k);
 }
 
 function remember(k: string, runs: ColoredRun[]): void {
     cache.set(k, runs);
-    if (cache.size > CACHE_LIMIT) {
-        const oldest = cache.keys().next().value;
-        if (oldest !== undefined) cache.delete(oldest);
-    }
 }
 
 /** Only Shiki's own variables reach the DOM. */

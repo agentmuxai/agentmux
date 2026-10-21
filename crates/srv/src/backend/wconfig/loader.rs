@@ -22,8 +22,9 @@ pub fn build_default_config() -> FullConfigType {
         include_str!("../../config/widgets.json");
 
     match serde_json::from_str::<HashMap<String, WidgetConfigType>>(WIDGETS_JSON) {
-        Ok(widgets) => {
+        Ok(mut widgets) => {
             validate_widget_configs(&widgets);
+            widgets.values_mut().for_each(WidgetConfigType::resolve_section);
             config.widgets = widgets;
         }
         Err(e) => {
@@ -336,6 +337,32 @@ mod tests {
             ),
         ]);
         validate_widget_configs(&widgets);
+    }
+
+    #[test]
+    fn a_section_entry_opens_its_pane_on_that_section() {
+        let config = build_default_config();
+        let kanban = &config.widgets["defwidget@kanban"].block_def.meta;
+        assert_eq!(kanban.get("view").and_then(|v| v.as_str()), Some("warden"));
+        assert_eq!(kanban.get("warden:section").and_then(|v| v.as_str()), Some("kanban"));
+
+        let vault = &config.widgets["defwidget@vault"].block_def.meta;
+        assert_eq!(vault.get("view").and_then(|v| v.as_str()), Some("warden"));
+        assert_eq!(vault.get("warden:section").and_then(|v| v.as_str()), Some("vault"));
+
+        // A section of a section: Warden on its Vault section, on the Vault's Cards.
+        let mut cards: WidgetConfigType = serde_json::from_str(
+            r#"{"label":"Cards","section":"vault/cards","blockdef":{"meta":{"view":"warden"}}}"#,
+        )
+        .unwrap();
+        cards.resolve_section();
+        assert_eq!(cards.block_def.meta.get("warden:section").and_then(|v| v.as_str()), Some("vault"));
+        assert_eq!(cards.block_def.meta.get("vault:section").and_then(|v| v.as_str()), Some("cards"));
+
+        // No view: nothing to key it by, so the meta is left alone.
+        let mut orphan: WidgetConfigType = serde_json::from_str(r#"{"section":"cards"}"#).unwrap();
+        orphan.resolve_section();
+        assert!(orphan.block_def.meta.is_empty());
     }
 
     #[test]
