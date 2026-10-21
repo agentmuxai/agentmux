@@ -192,7 +192,7 @@ describe("permissions", () => {
             connection: "ssh://attacker",
             "cmd:cwd": "C:\\",
         };
-        for (const view of ["term", "agent", "browser", "warden", "ext:other.widget/main"]) {
+        for (const view of ["term", "agent", "browser", "warden", "ext:other.widget/main", "constructor", "__proto__", "toString"]) {
             expect("result" in (await handleBridgeRequest(h, state, "panes.open", { view, meta: hostile }))).toBe(true);
             expect(h.openPane).toHaveBeenLastCalledWith(view, {}, "right");
         }

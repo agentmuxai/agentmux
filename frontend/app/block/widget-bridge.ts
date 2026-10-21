@@ -434,8 +434,9 @@ export function paneMetaForWidget(pkg: Pick<WidgetPackageInfo, "id" | "panes">, 
         for (const [k, v] of Object.entries(meta)) if (v !== null && v !== undefined) out[`widget:${pkg.id}:${k}`] = v;
         return out;
     }
+    // Own keys only: "constructor" or "__proto__" must not reach Object.prototype.
+    if (!Object.hasOwn(OTHER_VIEW_META, view)) return out;
     const allowed = OTHER_VIEW_META[view];
-    if (!allowed) return out;
     for (const [k, v] of Object.entries(meta)) if (allowed(k, v)) out[k] = v;
     return out;
 }
