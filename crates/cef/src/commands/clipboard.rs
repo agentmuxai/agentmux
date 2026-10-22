@@ -183,7 +183,35 @@ pub fn write_secret_text(text: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(target_os = "windows"))]
+/// macOS: the text with the two marks of nspasteboard.org (`ConcealedType`, `TransientType`) that
+/// clipboard history apps and password managers honour by leaving the item out of their history.
+/// Written to the pasteboard in one go, so the marks are there when anything reads the text.
+/// Not run on a Mac by whoever wrote it: type-checked for both Apple targets and nothing more.
+#[cfg(target_os = "macos")]
+pub fn write_secret_text(text: &str) -> Result<(), String> {
+    use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
+    use objc2_foundation::NSString;
+    let pb = NSPasteboard::generalPasteboard();
+    pb.clearContents();
+    // Marks first, then the text, the order the Windows side keeps.
+    for mark in ["org.nspasteboard.ConcealedType", "org.nspasteboard.TransientType"] {
+        pb.setString_forType(&NSString::from_str(""), &NSString::from_str(mark));
+    }
+    let string_type = unsafe { NSPasteboardTypeString };
+    if !pb.setString_forType(&NSString::from_str(text), string_type) {
+        pb.clearContents();
+        return Err("macOS didn't take the secret on the clipboard".into());
+    }
+    SECRET_CHANGE.store(pb.changeCount(), std::sync::atomic::Ordering::SeqCst);
+    Ok(())
+}
+
+/// The pasteboard's change count right after the last secret was put there: a clear only happens
+/// while the count is still this, so a copy made since can't be erased.
+#[cfg(target_os = "macos")]
+static SECRET_CHANGE: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(-1);
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 pub fn write_secret_text(text: &str) -> Result<(), String> {
     write_clipboard_text(text)
 }
@@ -229,7 +257,22 @@ pub fn clear_if_holds(text: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(target_os = "windows"))]
+/// macOS: empties the pasteboard if it still holds `text` and nothing has been copied since the
+/// secret went there (its change count is unchanged).
+#[cfg(target_os = "macos")]
+pub fn clear_if_holds(text: &str) -> Result<(), String> {
+    use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
+    let pb = NSPasteboard::generalPasteboard();
+    if pb.changeCount() != SECRET_CHANGE.load(std::sync::atomic::Ordering::SeqCst) {
+        return Ok(());
+    }
+    if pb.stringForType(unsafe { NSPasteboardTypeString }).is_some_and(|s| s.to_string() == text) {
+        pb.clearContents();
+    }
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 pub fn clear_if_holds(text: &str) -> Result<(), String> {
     if read_clipboard_text()? == text {
         write_clipboard_text("")?;

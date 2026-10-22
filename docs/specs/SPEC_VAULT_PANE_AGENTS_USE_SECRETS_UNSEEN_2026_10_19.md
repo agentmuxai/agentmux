@@ -102,11 +102,11 @@ Each entry also shows its **grants** (§6.4, §7.3) with a revoke button, and it
 ### 5.3 Locked, revealed, captured
 
 - Values are hidden in the pane: it shows each entry's label, plain fields and the main value's last characters (§5.5), never a value. Secret parts are typed into hidden inputs and never sent back to the pane; changing an entry replaces only the parts the person types.
-- **Reveal** and **Copy** (built in P2b) ask the OS to confirm the person each time, through the host: Windows Hello (`UserConsentVerifier`: PIN, fingerprint or face). Touch ID and the desktop's polkit prompt aren't built; there Reveal and Copy are disabled and say so. Nothing is unlocked for a session, so there is nothing to relock: a confirmation covers one Reveal or Copy.
+- **Reveal** and **Copy** (built in P2b) ask the OS to confirm the person each time, through the host: Windows Hello (`UserConsentVerifier`: PIN, fingerprint or face) on Windows, and Touch ID or the account password on macOS (LocalAuthentication's `DeviceOwnerAuthentication`, so a Mac without Touch ID, or with it locked out, falls back to the password). Linux has no prompt that fits (polkit asks for an administrator and needs a policy file installed): there Reveal and Copy are disabled and say so. Nothing is unlocked for a session, so there is nothing to relock: a confirmation covers one Reveal or Copy.
   - **Copy** never brings the value into the page: the host confirms the person, fetches the value from srv as the host, writes it to the clipboard and clears it 30 seconds later if the clipboard still holds it. On Windows it is marked to stay out of the clipboard history and the cloud clipboard (`CanIncludeInClipboardHistory`, `CanUploadToCloudClipboard`) and out of clipboard monitors (`ExcludeClipboardContentFromMonitorProcessing`); if marking fails the copy is cleared and refused.
   - **Reveal** returns the value to the pane, which shows it for 15 seconds and hides it on **Hide**, when the window loses focus and when the dialog closes. Losing focus while a Reveal or Copy is waiting is ignored: the Windows Hello prompt takes focus from the window, and that is expected.
   - The host's `vault_op` relay refuses the `reveal` operation, so a value only comes through `vault_reveal` or `vault_copy`, which confirm the person first. Each use is logged in Activity (who, which entry and part, never the value) and noted on the entry as its last use; a copy is logged once the host reports the clipboard has it (or that it failed), so the trail never says copied when nothing was.
-  - If Windows Hello isn't set up, the error says how to set it up. The account-password fallback listed in §5.7 isn't built yet.
+  - If Windows Hello isn't set up, the error says how to set it up; on a Mac with no password or Touch ID it says so. Windows has no account-password fallback built: Hello is the only way there.
 - **Agents can't capture it** (built in P2a):
   - `UI` `query` and `click` already reach only the caller's own pane, and the Vault's forms and confirmations are drawn inside the Vault pane, so neither reaches it. `UI` `keys` sends only keys from the shortcut table, as key events that type no text.
   - `UI` `screenshot` is clipped to the caller's own pane. A Vault pane magnified or floating over it would be inside the clip, so the host finds every element marked `data-agent-hidden` (the Vault's root) inside the clip just before and just after the capture, and srv blacks those boxes out as it does secret fields (#5089). If the page can't be asked, the screenshot is refused.
@@ -142,7 +142,7 @@ The operator decided on 2026-10-19 that the Vault stays its own pane, and that W
 - **Loaded when first shown.** The section mounts the first time it is selected, so a Warden opened on another section never lists, and never decrypts, the entries.
 - **No zoom of its own:** Warden zooms the whole pane.
 - **Old panes:** migration `m0039_vault_into_warden` moves saved blocks, the session snapshot and the user's widgets.json entries; layout files saying `vault` open Warden's Vault section; Warden's manifest keeps `vault` as an alias, and a block still saved as `vault` opens on the Vault section.
-- **Unchanged:** the `data-agent-hidden` marker and screenshot blackout (§5.3), Reveal and Copy through Windows Hello, every srv rule on who may write.
+- **Unchanged:** the `data-agent-hidden` marker and screenshot blackout (§5.3), Reveal and Copy through the OS confirmation (§5.3), every srv rule on who may write.
 
 ### 5.7 What the person is asked, and when
 
@@ -151,7 +151,7 @@ The operator asked on 2026-10-20 that people know before they're asked. The Vaul
 | When | Windows | macOS | Linux | Since |
 |---|---|---|---|---|
 | Saving, changing or listing entries | nothing | the first time AgentMux uses the Vault key, and again after AgentMux updates: allow AgentMux to use the keychain item (**Always Allow**; Deny leaves the entries unopenable) | if the keyring is locked: its password, once | P2a |
-| Reveal or Copy | Windows Hello (PIN, fingerprint or face); needs Hello set up (an account-password fallback is not built) | Touch ID or the account password (not built; Reveal and Copy are disabled) | the desktop's polkit prompt (not built; disabled) | P2b |
+| Reveal or Copy | Windows Hello (PIN, fingerprint or face); needs Hello set up (an account-password fallback is not built) | Touch ID or the account password (built; compile-checked only, not yet run on a Mac) | nothing (disabled: polkit asks for an administrator) | P2b, #115 |
 | An agent asks for an entry | AgentMux's own prompt in every window: Fill it in, or Not now | the same | the same | P2a |
 | An agent runs a command with an entry | AgentMux's own prompt in every window: the command, where it runs, Allow once, Always for that agent, or Deny | the same | the same | P7 |
 | Importing an encrypted file | the file's own password, typed in the pane | the same | the same | P2c, P5 |
@@ -371,7 +371,7 @@ Fix (built in P1):
 |---|---|---|
 | **P1** | §4 (autocomplete rule, reasons) and §11 (hidden checkboxes). Small, independent, ships first | The triggering form's submitter block and checkbox are filled by the agent with no hand-off |
 | **P2a** | The Vault pane and store (§5): sections, add, change and delete, Activity, "Kept by AgentMux"; agents kept out of it (§5.3); the `Vault` tool's `list` and `request` | The person keeps an SSN, a card and an API key in the Vault; an agent asks for one and gets its id; no agent route returns a value, a tail or a field |
-| **P2b** | Reveal and Copy with OS confirmation and the clipboard clear (§5.3), built for Windows Hello; the macOS and Linux confirmations follow | Reveal asks Windows Hello; a copied value is gone from the clipboard 30 s later |
+| **P2b** | Reveal and Copy with OS confirmation and the clipboard clear (§5.3), built for Windows Hello; macOS (Touch ID or password) followed in #115, Linux has none | Reveal asks Windows Hello; a copied value is gone from the clipboard 30 s later |
 | **P2c** | `.vault` export and import (§8.1, §8.2, §8.5), so there is a backup early | The person exports the Vault, deletes the entries and imports them back |
 | **P3** | Browser fill from the Vault (§6.1 to §6.4, §6.6), taint, grants. Built (§6.7); Activity and grants in Warden (§5.6) follow | An agent fills an SSN fixture field; its result, snapshot, screenshot and transcript have no trace of the value; another origin is asked |
 | **P4** | §6.5: the prompt's value field and **Save to Vault**; `request_value`. Built (§6.8) | A form with an SSN field is done by the agent plus one value typed in the banner |

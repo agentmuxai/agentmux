@@ -100,9 +100,64 @@ fn foreground_own_window() -> Option<isize> {
     (!any.is_null()).then_some(any as isize)
 }
 
-#[cfg(not(target_os = "windows"))]
+/// macOS: Touch ID, or the account password when Touch ID isn't there, isn't set up or is locked out
+/// (LocalAuthentication's `DeviceOwnerAuthentication`). The system draws the prompt; the reply comes
+/// on a thread of its own, so this waits for it, and gives up (as not confirmed) after five minutes.
+/// Not run on a Mac by whoever wrote it: it is type-checked for both Apple targets and nothing more.
+#[cfg(target_os = "macos")]
+pub fn verify_person(message: &str) -> Result<(), String> {
+    use std::sync::mpsc;
+
+    use block2::RcBlock;
+    use objc2::runtime::Bool;
+    use objc2_foundation::{NSError, NSString};
+    use objc2_local_authentication::{LAContext, LAError, LAPolicy};
+
+    /// How long the prompt may stay open before it counts as not confirmed.
+    const WAIT: Duration = Duration::from_secs(5 * 60);
+
+    fn explain(code: isize) -> String {
+        match code {
+            c if c == LAError::UserCancel.0 || c == LAError::SystemCancel.0 || c == LAError::AppCancel.0 => "cancelled".to_string(),
+            c if c == LAError::AuthenticationFailed.0 => "macOS didn't confirm it is you".to_string(),
+            c if c == LAError::PasscodeNotSet.0 => "set a password or Touch ID on this Mac so AgentMux can confirm it is you before it shows a secret".to_string(),
+            c if c == LAError::BiometryLockout.0 => "Touch ID is locked: use your Mac's password".to_string(),
+            _ => "macOS couldn't confirm it is you".to_string(),
+        }
+    }
+
+    let reason = NSString::from_str(message);
+    let (tx, rx) = mpsc::channel::<Result<(), isize>>();
+    let ctx = unsafe { LAContext::new() };
+    if let Err(e) = unsafe { ctx.canEvaluatePolicy_error(LAPolicy::DeviceOwnerAuthentication) } {
+        return Err(explain(e.code()));
+    }
+    let reply = RcBlock::new(move |success: Bool, error: *mut NSError| {
+        let outcome = if success.as_bool() {
+            Ok(())
+        } else if error.is_null() {
+            Err(LAError::AuthenticationFailed.0)
+        } else {
+            Err(unsafe { (*error).code() })
+        };
+        let _ = tx.send(outcome);
+    });
+    unsafe { ctx.evaluatePolicy_localizedReason_reply(LAPolicy::DeviceOwnerAuthentication, &reason, &reply) };
+    match rx.recv_timeout(WAIT) {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(code)) => Err(explain(code)),
+        Err(_) => {
+            unsafe { ctx.invalidate() };
+            Err("macOS didn't confirm it is you in time".to_string())
+        }
+    }
+}
+
+/// Linux has no prompt to build on: polkit asks for an administrator, which the Vault never does, and
+/// needs a policy file installed for an action of AgentMux's own. Reveal and Copy stay off, and say why.
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 pub fn verify_person(_message: &str) -> Result<(), String> {
-    Err("Reveal and Copy need Windows Hello for now: Touch ID and the desktop's prompt aren't built yet".to_string())
+    Err("Reveal and Copy aren't available on this system yet: there is no standard way to confirm it is you without administrator rights, which the Vault never asks for".to_string())
 }
 
 /// The part of the request every Reveal and Copy names.
@@ -264,9 +319,9 @@ mod tests {
         assert!(target(&json!({})).is_err());
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     #[test]
     fn where_nothing_confirms_the_person_nothing_is_shown() {
-        assert!(verify_person("Show it").unwrap_err().contains("Windows Hello"));
+        assert!(verify_person("Show it").unwrap_err().contains("administrator"));
     }
 }

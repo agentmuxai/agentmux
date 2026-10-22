@@ -150,6 +150,14 @@ libc = "0.2"
 # correctness risk in a long-lived background thread.
 core-foundation = "0.9"
 core-graphics = "0.23"
+# The Vault's Reveal and Copy: the Mac's own prompt (Touch ID, or the account password) through
+# LocalAuthentication, and NSPasteboard for the clipboard marks that keep a copied secret out of
+# clipboard histories. Typed bindings, since a block-taking API is where raw objc_msgSend is a risk.
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSError", "NSObject"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPasteboard"] }
+objc2-local-authentication = { version = "0.3", default-features = false, features = ["std", "LAContext", "LAError", "block2"] }
+block2 = "0.6"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Vulkan device enumeration for the startup GPU-tier probe (hardware Vulkan →
