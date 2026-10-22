@@ -61,6 +61,12 @@ describe("searchSettings", () => {
         }
     });
 
+    it("finds the Kanban reminder switch by kanban, backlog and reminder", () => {
+        for (const q of ["kanban", "backlog", "reminder"]) {
+            expect(labels(q)).toContain("Remind idle agents of their backlog");
+        }
+    });
+
     it("lists an exact setting name first", () => {
         expect(labels("Theme")[0]).toBe("Theme");
         expect(labels("model")[0]).toBe("Model");

@@ -20,6 +20,7 @@ import { columnOf, matchesQuery, repoLabel, repoLanes, reviewLimitOf, untrackedA
 import { KanbanDrawer } from "./kanban-drawer";
 import { KanbanModel } from "./kanban-model";
 import { KanbanNewTask } from "./kanban-new-task";
+import { KANBAN_REMINDERS_DESCRIPTION, kanbanRemindersOn, setKanbanReminders } from "./kanban-reminders";
 import type { KanbanAgent, KanbanTask } from "./kanban-types";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
@@ -140,6 +141,15 @@ export const WardenKanbanManager = (props: {
                         ariaLabel="Show untracked work"
                     />
                     Untracked
+                </label>
+                <label class="kanban-toolbar__switch" title={KANBAN_REMINDERS_DESCRIPTION}>
+                    <Switch
+                        checked={kanbanRemindersOn(settingsAtom() as unknown as Record<string, unknown>)}
+                        onChange={setKanbanReminders}
+                        density="compact"
+                        ariaLabel="Remind idle agents of their backlog"
+                    />
+                    Reminders
                 </label>
                 <Button density="compact" tone="accent" icon="plus" onClick={() => setAdding(true)}>
                     New task

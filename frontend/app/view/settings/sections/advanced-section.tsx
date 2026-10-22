@@ -5,6 +5,11 @@ import { TextInput } from "@/app/element/ui";
 import { type JSX } from "solid-js";
 
 import { settingsAtom } from "@/app/store/global";
+import {
+    KANBAN_REMINDERS_DESCRIPTION,
+    KANBAN_REMINDERS_SETTING,
+    kanbanRemindersOn,
+} from "@/app/view/warden-kanban/kanban-reminders";
 import type { SettingsIndexEntry } from "../settings-model";
 import { KeyValueEditor, NumberControl, SectionHeader, set, SettingRow, ToggleControl } from "../settings-controls";
 
@@ -32,6 +37,13 @@ export const ADVANCED_SETTINGS = {
             "Tell an agent when it edits a file another agent on this computer is also changing, naming that agent so it can message them first",
         section: "advanced",
         keywords: ["same file", "conflict", "other agents", "Presence", "agent:overlapnotes"],
+    },
+    kanbanReminders: {
+        id: "advanced.kanban_reminders",
+        label: "Remind idle agents of their backlog",
+        description: KANBAN_REMINDERS_DESCRIPTION,
+        section: "advanced",
+        keywords: ["kanban", "backlog", "reminder", "tasks waiting", "kanban:reminders"],
     },
     sampleInterval: {
         id: "advanced.sysinfo_sample_interval",
@@ -118,6 +130,17 @@ export function AdvancedSection(): JSX.Element {
                     <ToggleControl
                         checked={(s()["agent:overlapnotes"] as boolean) ?? true}
                         onChange={(v) => set("agent:overlapnotes", v)}
+                    />
+                }
+            />
+            <SettingRow
+                id={ADVANCED_SETTINGS.kanbanReminders.id}
+                label={ADVANCED_SETTINGS.kanbanReminders.label}
+                description={ADVANCED_SETTINGS.kanbanReminders.description}
+                control={
+                    <ToggleControl
+                        checked={kanbanRemindersOn(s())}
+                        onChange={(v) => set(KANBAN_REMINDERS_SETTING, v)}
                     />
                 }
             />
