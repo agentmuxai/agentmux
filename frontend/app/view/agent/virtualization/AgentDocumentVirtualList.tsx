@@ -62,7 +62,7 @@ import {
 import { computeLayoutView } from "@/app/store/agent-pane-layout/reducer";
 import { captureOnScreen, restoreOnScreen } from "./keep-on-screen";
 import { useSettleOnShow } from "../scroll/settle-on-show";
-import { useScrolledOffRelease } from "./held-release";
+import { useScrolledOffRelease, type AwayArrivals } from "./held-release";
 import { useScrollMemo } from "./scroll-memo";
 import { inFlowState, ROW_GAP_PX, type ExpansionState } from "@/app/store/agent-pane-layout/types";
 import {
@@ -106,6 +106,8 @@ export interface AgentDocumentVirtualListProps {
     /** Hold a tool expanded after it completes live on screen (ToolBlock calls
      *  this on the active→inactive transition). */
     onHoldNodeOpen?: (id: string) => void;
+    /** Rows that finished or arrived while the pane was hidden: held if on screen once it is shown. */
+    awayArrivals?: AwayArrivals;
     /** Release a held tool once its row has scrolled off the top (latched
      *  collapse). Invoked by the scroll-off scan in `handleScroll`. */
     onReleaseNodeHold?: (id: string) => void;
@@ -1195,6 +1197,8 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         documentState: props.documentState,
         onRelease: (id) => props.onReleaseNodeHold?.(id),
         covered: () => showCoveredNow(),
+        away: props.awayArrivals,
+        onHold: (id) => props.onHoldNodeOpen?.(id),
     });
 
     const handleScrollNow = (): void => {
