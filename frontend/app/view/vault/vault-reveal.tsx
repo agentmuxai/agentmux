@@ -21,12 +21,17 @@ import { copyVaultPart, revealVaultPart } from "./vault-store";
 /** How long a revealed value stays on screen. */
 export const REVEAL_SHOWN_MS = 15_000;
 
-/** Whether Reveal and Copy can run on this OS: only Windows Hello is built. */
+/** Whether Reveal and Copy can run on this OS: Windows Hello and Touch ID are built, Linux has no prompt to use. */
 export function canConfirmPerson(platform: string = getPlatform()): boolean {
-    return platform === "win32";
+    return platform === "win32" || platform === "darwin";
 }
 
-export const CONFIRM_UNAVAILABLE = "Reveal and Copy need Windows Hello for now: Touch ID and the desktop's prompt aren't built yet.";
+/** What confirms the person on this OS, in its own words. */
+function confirmedBy(platform: string): string {
+    return platform === "darwin" ? "Touch ID, or your Mac's password," : "Windows Hello";
+}
+
+export const CONFIRM_UNAVAILABLE = "Reveal and Copy aren't available on this system yet: there is no standard way to confirm it is you without administrator rights, which the Vault never asks for.";
 
 /** Whether the Vault is on screen: its pane, or Warden on its Vault section (vault-in-warden.ts). */
 export const VaultShown = createContext<Accessor<boolean>>(() => true);
@@ -102,7 +107,7 @@ export function VaultRevealDialog(props: { entry: VaultEntryInfo; onClose: () =>
                 title={`Show or copy ${entry.label}`}
                 description={
                     available
-                        ? "Windows Hello confirms it's you each time. A revealed value hides after 15 seconds."
+                        ? `${confirmedBy(getPlatform())} confirms it's you each time. A revealed value hides after 15 seconds.`
                         : CONFIRM_UNAVAILABLE
                 }
             />

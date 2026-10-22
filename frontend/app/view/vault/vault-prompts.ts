@@ -29,8 +29,10 @@ export function vaultPromptNotes(platform: VaultPlatform): string[] {
     }
     if (platform === "win32") {
         notes.push("Reveal and Copy ask Windows Hello (your PIN, fingerprint or face) each time, to confirm it's you. A copied value clears from the clipboard after 30 seconds.");
+    } else if (platform === "darwin") {
+        notes.push("Reveal and Copy ask Touch ID, or your Mac's password, each time, to confirm it's you. A copied value clears from the clipboard after 30 seconds.");
     } else {
-        notes.push("Reveal and Copy need Windows Hello for now; Touch ID and the desktop's prompt aren't built yet.");
+        notes.push("Reveal and Copy aren't available on this system yet: there is no standard way to confirm it's you without administrator rights.");
     }
     notes.push("When an agent wants to fill a form field or run a command with an entry, AgentMux asks you in its own window, showing the site or the command. You can allow it once, always for that site or agent, or deny it.");
     notes.push("The Vault never asks for administrator rights. Agents never see these prompts, and can't answer them.");
