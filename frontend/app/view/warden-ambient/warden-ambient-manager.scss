@@ -1,0 +1,31 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+.warden-ambient-table {
+    .warden-ambient-num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+    }
+
+    th:not(:first-child) {
+        text-align: right;
+    }
+
+    tr[data-state="failing"] td {
+        color: var(--warning-text-color, var(--warning-color));
+    }
+
+    tfoot td {
+        border-bottom: none;
+        opacity: 0.7;
+    }
+}
+
+.warden-ambient-purpose {
+    white-space: nowrap;
+}
+
+.warden-ambient-failing {
+    margin-left: var(--space-2);
+    font-size: var(--text-2xs);
+}
