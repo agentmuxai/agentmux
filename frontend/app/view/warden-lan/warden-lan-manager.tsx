@@ -6,12 +6,12 @@
 // manager. Behavior unchanged, including the known pre-existing bug noted
 // below (out of scope for this restructure).
 
-import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 
 import { authHeaders } from "@/app/store/auth-headers";
 import { getWebServerEndpoint } from "@/util/endpoints";
-import { ageMs, formatAge, WARDEN_REFRESH_MS } from "@/app/view/warden-shared/warden-shared";
+import { ageMs, formatAge, pollWhileVisible, WARDEN_REFRESH_MS } from "@/app/view/warden-shared/warden-shared";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 
@@ -44,7 +44,7 @@ async function fetchLanPeers(): Promise<LanPeer[]> {
     return Array.isArray(data) ? (data as LanPeer[]) : [];
 }
 
-export const WardenLanManager = (): JSX.Element => {
+export const WardenLanManager = (props: { visible?: boolean }): JSX.Element => {
     const [peers, setPeers] = createSignal<LanPeer[]>([]);
     const [loading, setLoading] = createSignal(true);
     const [error, setError] = createSignal<string | null>(null);
@@ -63,11 +63,8 @@ export const WardenLanManager = (): JSX.Element => {
         }
     };
 
-    onMount(() => {
-        void refresh();
-        const dataTimer = window.setInterval(() => void refresh(), WARDEN_REFRESH_MS);
-        onCleanup(() => window.clearInterval(dataTimer));
-    });
+    // Polls only while the section is shown (warden-view.tsx passes `visible`).
+    pollWhileVisible(() => void refresh(), () => props.visible ?? true);
 
     return (
         <div class="warden-manager-body">

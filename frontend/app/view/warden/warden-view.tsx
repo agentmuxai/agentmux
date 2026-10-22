@@ -29,10 +29,20 @@ export function WardenView(props: { model: WardenViewModel }): JSX.Element {
     const setSection = (id: WardenSection) =>
         model.setMeta({ "warden:section": id });
     let viewRef: HTMLDivElement | undefined;
-    const [vaultSeen, setVaultSeen] = createSignal(false);
+    // Sections shown so far. Each mounts the first time it is shown and then stays mounted, so
+    // switching back is instant; a Warden opened from the Kanban or Vault button doesn't start the
+    // Host, LAN and Audit polls, or read the Vault, until those are looked at.
+    const [seen, setSeen] = createSignal<ReadonlySet<WardenSection>>(new Set([section()]));
     createEffect(() => {
-        if (section() === "vault") setVaultSeen(true);
+        const s = section();
+        if (!seen().has(s)) setSeen(new Set([...seen(), s]));
     });
+    const shown = (id: WardenSection) => section() === id;
+    const Lazy = (p: { id: WardenSection; children: JSX.Element }) => (
+        <div class="bundle-manager-pane" classList={{ "is-hidden": !shown(p.id) }}>
+            <Show when={seen().has(p.id)}>{p.children}</Show>
+        </div>
+    );
 
     // Ctrl+scroll and Ctrl/Cmd +/-/0 zoom this pane through the shared handlers
     // (app.tsx, keymodel.ts): the `paneZoom` capability is all it needs.
@@ -47,44 +57,41 @@ export function WardenView(props: { model: WardenViewModel }): JSX.Element {
                     there's room (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §5.4). */}
                 <TabbedPane items={RAIL} value={section()} onChange={setSection} ariaLabel="Warden section" panelClass="bundle-manager-section">
                     {/*
-                     * All sections stay mounted — toggling is instant and
-                     * never re-fetches. Host/LAN/Audit each own their own 5s
-                     * poll loop, unaffected by visibility; History loads when
-                     * first shown and on Refresh.
+                     * Each section mounts the first time it is shown, then stays mounted, so
+                     * switching back is instant. Host, LAN and Audit poll every 5s only while
+                     * shown; Kanban and History load while shown. The Vault mounts on first
+                     * show (listing it decrypts its entries, which can make the OS ask for the
+                     * Vault key) and counts as shown, for its protections, only while selected
+                     * (vault-in-warden.ts).
                      */}
-                    <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "kanban" }}>
+                    <Lazy id="kanban">
                         <WardenKanbanManager
-                            visible={section() === "kanban"}
+                            visible={shown("kanban")}
                             onNeedsCount={model.setKanbanNeeds}
                             openRequest={model.kanbanOpenAtom()}
                             onOpenHandled={() => model.setMeta({ "kanban:open": null })}
                             lanes={model.kanbanLanesAtom()}
                             onLanes={(on) => model.setMeta({ "kanban:lanes": on })}
                         />
-                    </div>
-                    {/* Mounted the first time it is shown: listing the Vault decrypts its entries, which
-                        can make the OS ask for the Vault key, so a Warden opened on another section
-                        never does. Shown, for its protections, only while selected (vault-in-warden.ts). */}
-                    <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "vault" }}>
-                        <Show when={vaultSeen()}>
-                            <VaultView model={model.vault} />
-                        </Show>
-                    </div>
-                    <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "host" }}>
-                        <WardenHostManager />
-                    </div>
-                    <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "lan" }}>
-                        <WardenLanManager />
-                    </div>
-                    <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "internet" }}>
+                    </Lazy>
+                    <Lazy id="vault">
+                        <VaultView model={model.vault} />
+                    </Lazy>
+                    <Lazy id="host">
+                        <WardenHostManager visible={shown("host")} />
+                    </Lazy>
+                    <Lazy id="lan">
+                        <WardenLanManager visible={shown("lan")} />
+                    </Lazy>
+                    <Lazy id="internet">
                         <WardenInternetStub />
-                    </div>
-                    <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "audit" }}>
-                        <WardenAuditManager visible={section() === "audit"} />
-                    </div>
-                    <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "history" }}>
-                        <WardenHistoryManager wardenBlockId={model.blockId} visible={section() === "history"} />
-                    </div>
+                    </Lazy>
+                    <Lazy id="audit">
+                        <WardenAuditManager visible={shown("audit")} />
+                    </Lazy>
+                    <Lazy id="history">
+                        <WardenHistoryManager wardenBlockId={model.blockId} visible={shown("history")} />
+                    </Lazy>
                 </TabbedPane>
             </div>
         </div>
