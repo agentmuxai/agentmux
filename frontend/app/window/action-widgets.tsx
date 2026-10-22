@@ -45,6 +45,7 @@ import { closeHamburgerMenu } from "./hamburger-menu";
 import { PinnedWidgetFlyout } from "./pinned-widget-flyout";
 import { useWidgetBarResponsive } from "./use-widget-bar-responsive";
 import { useWidgetDragReorder } from "./use-widget-drag-reorder";
+import { KanbanNeedsBadge, opensKanban } from "@/app/view/warden-kanban/kanban-needs-badge";
 import "./action-widgets.scss";
 
 // ── ActionWidget ──────────────────────────────────────────────────────────────
@@ -76,6 +77,9 @@ const ActionWidget = (props: {
         >
             <div class="widget-icon text-sm" style={widgetIconStyle(props.widget)}>
                 <i class={makeIconClass(props.widget.icon, true, { defaultIcon: "window-maximize" })}></i>
+                <Show when={opensKanban(props.widget)}>
+                    <KanbanNeedsBadge />
+                </Show>
             </div>
             <Show when={!props.iconOnly && !isBlank(props.widget.label)}>
                 <div class="text-xs whitespace-nowrap">{props.widget.label}</div>

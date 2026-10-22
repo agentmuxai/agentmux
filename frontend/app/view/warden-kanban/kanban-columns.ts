@@ -57,6 +57,11 @@ export function columnOf(t: KanbanTask): ColumnId {
     }
 }
 
+/** How many tasks need the operator: the Warden tab title's count and the widget-bar badge's. */
+export function needsCountOf(tasks: KanbanTask[]): number {
+    return tasks.filter((t) => columnOf(t) === "needs").length;
+}
+
 /** A waiting task's place in its backlog: the operator's rank, else when it was filed (srv's claim order). */
 export function rankOf(t: KanbanTask): number {
     return t.card.rank ?? t.created_at;
