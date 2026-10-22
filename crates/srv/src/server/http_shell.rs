@@ -125,6 +125,8 @@ pub(super) async fn handle_shell_create(
         .as_ref()
         .map(|block| crate::backend::blockcontroller::cmd_env_of(&block.meta))
         .unwrap_or_default();
+    // The agent's current id over a persisted one, as its own spawn has it.
+    crate::server::agent_handlers::identity_env::carry_block_slug_identity_env(&state.mstore, &req.agent_block_id, &mut effective_env);
     let caller_keys: Vec<String> = req.env.iter().flat_map(|e| e.keys().cloned()).collect();
     if let Some(req_env) = req.env {
         effective_env.extend(req_env);

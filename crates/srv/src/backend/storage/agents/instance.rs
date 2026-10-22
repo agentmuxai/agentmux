@@ -593,53 +593,52 @@ impl Store {
     /// "unknown". Same rule and same reasoning as
     /// [`crate::backend::agent_registry_lookup::find_active_record_by_slug`]
     /// (PR #3480), which this mirrors for `db_agents`.
+    ///
+    /// The slug compared is the canonical one ([`canonical_slug`]).
     pub fn instance_get_by_slug(&self, slug: &str) -> Result<Option<AgentInstance>, StoreError> {
         if slug.is_empty() {
             return Ok(None);
         }
+        let shared = self.shared_slugs();
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(&format!(
-            "SELECT {INSTANCE_COLUMNS} FROM db_agents
-             WHERE slug = ?1 AND is_template = 0 AND user_hidden = 0"
-        ))?;
-        let mut matches = stmt
-            .query_map(params![slug], map_instance_row)?
-            .collect::<Result<Vec<_>, _>>()?;
-        if matches.len() > 1 {
+        let ids: Vec<String> =
+            rows_with_canonical_slugs(&conn, "WHERE is_template = 0 AND user_hidden = 0", &shared)?
+                .into_iter()
+                .filter(|r| r.slug == slug)
+                .map(|r| r.id)
+                .collect();
+        if ids.len() > 1 {
             tracing::warn!(
                 slug = %slug,
-                matches = matches.len(),
+                matches = ids.len(),
                 "db_agents slug collision: refusing to resolve an agent by slug alone"
             );
             return Ok(None);
         }
-        Ok(matches.pop())
+        let Some(id) = ids.first() else {
+            return Ok(None);
+        };
+        let mut stmt = conn.prepare(&format!("SELECT {INSTANCE_COLUMNS} FROM db_agents WHERE id = ?1"))?;
+        match stmt.query_row(params![id], map_instance_row) {
+            Ok(a) => Ok(Some(a)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 
     /// Every non-template, non-hidden agent a typed name could mean (identity
-    /// M3, spec §5): exact slug, or `name`/`instance_name` case-insensitively.
-    /// Lists rather than picks — the caller decides what to do with several.
+    /// M3, spec §5): exact (canonical) slug, or `name`/`instance_name`
+    /// ASCII-case-insensitively, as SQLite's `NOCASE` compared them. Lists
+    /// rather than picks — the caller decides what to do with several.
     pub fn agents_matching_name(&self, typed: &str) -> Result<Vec<AgentNameMatch>, StoreError> {
         let typed = typed.trim();
         if typed.is_empty() {
             return Ok(Vec::new());
         }
+        let shared = self.shared_slugs();
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, name, slug, instance_name FROM db_agents
-             WHERE is_template = 0 AND user_hidden = 0
-               AND (slug = ?1 OR name = ?1 COLLATE NOCASE OR instance_name = ?1 COLLATE NOCASE)
-             ORDER BY created_at ASC, id ASC",
-        )?;
-        let rows = stmt.query_map(params![typed], |row| {
-            Ok(AgentNameMatch {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                slug: row.get(2)?,
-                instance_name: row.get(3)?,
-            })
-        })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+        let rows = rows_with_canonical_slugs(&conn, "WHERE is_template = 0 AND user_hidden = 0", &shared)?;
+        Ok(rows.into_iter().filter(|r| answers_to(r, typed)).collect())
     }
 
     /// Every row a name selects, **templates and hidden rows included** — the
@@ -654,37 +653,29 @@ impl Store {
         if name.is_empty() {
             return Ok(Vec::new());
         }
+        let shared = self.shared_slugs();
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, name, slug, instance_name FROM db_agents
-             WHERE slug = ?1 OR name = ?1 COLLATE NOCASE OR instance_name = ?1 COLLATE NOCASE
-             ORDER BY created_at ASC, id ASC",
-        )?;
-        let rows = stmt.query_map(params![name], |row| {
-            Ok(AgentNameMatch {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                slug: row.get(2)?,
-                instance_name: row.get(3)?,
-            })
-        })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+        let rows = rows_with_canonical_slugs(&conn, "", &shared)?;
+        Ok(rows.into_iter().filter(|r| answers_to(r, name)).collect())
     }
 
     /// The names row `id` answers to — the by-id counterpart of
     /// [`Self::agents_matching_name`], for checking a body's actor name
     /// against the calling agent's own row (identity M4a-2, spec §6.5.3).
     /// Any row, template or hidden: the caller's token already names it.
+    /// The slug is the canonical one, so ownership checks agree with spawn.
     pub fn agent_names_by_id(&self, id: &str) -> Result<Option<AgentNameMatch>, StoreError> {
+        let shared = self.shared_slug_of(id);
         let conn = self.conn.lock().unwrap();
         match conn.query_row(
             "SELECT id, name, slug, instance_name FROM db_agents WHERE id = ?1",
             params![id],
             |row| {
+                let local: String = row.get(2)?;
                 Ok(AgentNameMatch {
                     id: row.get(0)?,
                     name: row.get(1)?,
-                    slug: row.get(2)?,
+                    slug: canonical_slug(id, &local, shared.as_deref()),
                     instance_name: row.get(3)?,
                 })
             },
@@ -892,6 +883,7 @@ impl Store {
     /// resurrection path this way rather than by re-adding a legacy-table
     /// delete here).
     pub fn instance_delete(&self, id: &str) -> Result<bool, StoreError> {
+        let shared = self.shared_slugs();
         let rows = {
             let conn = self.conn.lock().unwrap();
             // Refuse a template explicitly, rather than leaning on the
@@ -907,8 +899,8 @@ impl Store {
                 return Ok(false);
             }
             // Identity M4a: read the names before the row goes.
-            tombstone_key_names(&conn, id)?;
-            purge_name_keyed_keys(&conn, id, self.wan_identity().as_deref())?;
+            tombstone_key_names(&conn, id, &shared)?;
+            purge_name_keyed_keys(&conn, id, self.wan_identity().as_deref(), &shared)?;
             let rows =
                 conn.execute("DELETE FROM db_agents WHERE id = ?1 AND is_template = 0", params![id])?;
             // Same dependent purge `agent_def_delete` runs, and

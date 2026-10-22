@@ -49,7 +49,7 @@ pub(crate) use paths::resolve_global_shared_root;
 pub use def_migrate::{migrate_definitions_global_once, DefMigrateStats};
 pub use def_schema::{
     DefContentBlob, DefSkillBlob, DefValidationError, DefinitionRecord, DefinitionRecordV1,
-    DEF_MAX_SUPPORTED_SCHEMA, DEF_MIN_SUPPORTED_SCHEMA,
+    FormerSlug, DEF_MAX_SUPPORTED_SCHEMA, DEF_MIN_SUPPORTED_SCHEMA,
 };
 pub use def_store::{DefStoreError, DefinitionStore};
 pub use leases::{ClaimantInfo, Lease, LeaseError, LeaseHolder, LeaseStore, LEASE_TTL_MS, RENEW_INTERVAL_MS};

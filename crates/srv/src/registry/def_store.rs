@@ -66,7 +66,9 @@ impl DefinitionStore {
 
     /// Insert or update a definition. Preserves unknown top-level + `data`
     /// fields on an existing file (forward-compat); refuses to overwrite a
-    /// corrupt or higher-schema file.
+    /// corrupt or higher-schema file. An existing record's slug and former
+    /// slugs are kept ([`keep_slug_and_former_slugs`]): a rename is not an
+    /// update.
     pub fn upsert(&self, rec: &DefinitionRecord) -> Result<(), DefStoreError> {
         let _g = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
         let path = self.active_path(&rec.data.id);
@@ -239,11 +241,60 @@ fn merge_for_write(
         }
     }
     let mut merged = on_disk;
-    let updates = serde_json::to_value(rec)?;
+    let mut updates = serde_json::to_value(rec)?;
+    keep_slug_and_former_slugs(&merged, &mut updates);
     merge_known(&mut merged, &updates);
     let mut bytes = serde_json::to_vec_pretty(&merged)?;
     bytes.push(b'\n');
     Ok(Some(bytes))
+}
+
+/// A shared definition's slug is never changed by an update
+/// (`SPEC_FORK_SLUG_MIGRATION_2026_10_22.md` P0.2). Every channel and version
+/// keeps its own copy of the slug in its `objects.db`, and the copy a writer
+/// mirrors back may be one this record has moved on from (a former slug), or
+/// a local collision suffix. So a non-empty slug on disk is kept whatever the
+/// update carries, and its `former_slugs` are kept too, with any new ones the
+/// update carries appended. An empty slug on disk takes the update's.
+fn keep_slug_and_former_slugs(on_disk: &Value, updates: &mut Value) {
+    let disk_slug = on_disk
+        .pointer("/data/slug")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty());
+    let disk_former: Vec<Value> = on_disk
+        .pointer("/data/former_slugs")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let Some(data) = updates.get_mut("data").and_then(Value::as_object_mut) else {
+        return;
+    };
+    if let Some(disk_slug) = disk_slug {
+        let incoming = data.get("slug").and_then(Value::as_str).unwrap_or("").to_string();
+        if incoming != disk_slug {
+            let retired = disk_former
+                .iter()
+                .any(|f| f.get("slug").and_then(Value::as_str) == Some(incoming.as_str()));
+            let def_id = data.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+            tracing::warn!(
+                def_id = %def_id,
+                shared_slug = disk_slug,
+                refused_slug = %incoming,
+                refused_is_former = retired,
+                "def registry: an update carried a different slug; the shared record's is kept"
+            );
+            data.insert("slug".to_string(), Value::String(disk_slug.to_string()));
+        }
+    }
+    if !disk_former.is_empty() {
+        let mut all = disk_former;
+        for f in data.get("former_slugs").and_then(Value::as_array).into_iter().flatten() {
+            if !all.iter().any(|g| g.get("slug") == f.get("slug")) {
+                all.push(f.clone());
+            }
+        }
+        data.insert("former_slugs".to_string(), Value::Array(all));
+    }
 }
 
 /// Overwrite `target`'s top-level keys with `updates`' keys, preserving
@@ -305,10 +356,85 @@ mod tests {
                 container_volumes: "[]".to_string(),
                 container_name: String::new(),
                 use_ambient_login: 0,
+                former_slugs: Vec::new(),
                 content: Vec::new(),
                 skills: Vec::new(),
             },
         }
+    }
+
+    fn former(slug: &str, retired_at: i64) -> crate::registry::FormerSlug {
+        crate::registry::FormerSlug { slug: slug.to_string(), retired_at }
+    }
+
+    /// P0.2: a channel whose `objects.db` still holds a slug the shared
+    /// record has retired mirrors an edit back. The edit lands; the slug and
+    /// the former slugs don't change.
+    #[test]
+    fn an_update_cannot_put_back_a_former_slug() {
+        let (_t, s) = store();
+        let mut renamed = rec("aaa", "Loap #3");
+        renamed.data.slug = "loap-3".to_string();
+        renamed.data.former_slugs = vec![former("loap-loap-2-loap-3", 5)];
+        s.upsert(&renamed).unwrap();
+
+        let mut stale = rec("aaa", "Loap #3 (edited)");
+        stale.data.slug = "loap-loap-2-loap-3".to_string();
+        s.upsert(&stale).unwrap();
+
+        let got = s.get("aaa").unwrap().unwrap();
+        assert_eq!(got.data.name, "Loap #3 (edited)", "the edit itself still mirrors");
+        assert_eq!(got.data.slug, "loap-3");
+        assert_eq!(got.data.former_slugs, vec![former("loap-loap-2-loap-3", 5)]);
+    }
+
+    /// Any other slug is refused the same way (a local collision suffix), and
+    /// an empty slug on disk takes the update's.
+    #[test]
+    fn an_update_keeps_the_shared_slug_unless_it_is_empty() {
+        let (_t, s) = store();
+        let mut first = rec("aaa", "Foo");
+        first.data.slug = "foo".to_string();
+        s.upsert(&first).unwrap();
+        let mut suffixed = first.clone();
+        suffixed.data.slug = "foo-2".to_string();
+        s.upsert(&suffixed).unwrap();
+        assert_eq!(s.get("aaa").unwrap().unwrap().data.slug, "foo");
+
+        let mut blank = rec("bbb", "Bar");
+        blank.data.slug = String::new();
+        s.upsert(&blank).unwrap();
+        blank.data.slug = "bar".to_string();
+        s.upsert(&blank).unwrap();
+        assert_eq!(s.get("bbb").unwrap().unwrap().data.slug, "bar");
+    }
+
+    /// Former slugs are never dropped: neither by a writer that doesn't know
+    /// the field (an older build, whose update has none) nor by one carrying
+    /// an older copy of the list; new entries are appended.
+    #[test]
+    fn former_slugs_only_grow() {
+        let (_t, s) = store();
+        let path = s.root().join("aaa.json");
+        let raw = serde_json::json!({
+            "schema_version": 1,
+            "data": {
+                "id": "aaa", "name": "Demo", "provider": "claude", "slug": "c",
+                "former_slugs": [{ "slug": "a", "retired_at": 1 }, { "slug": "b", "retired_at": 2 }]
+            }
+        });
+        std::fs::write(&path, serde_json::to_vec_pretty(&raw).unwrap()).unwrap();
+
+        s.upsert(&rec("aaa", "Renamed")).unwrap();
+        let got = s.get("aaa").unwrap().unwrap();
+        assert_eq!(got.data.former_slugs, vec![former("a", 1), former("b", 2)]);
+
+        let mut partial = got.clone();
+        partial.data.former_slugs = vec![former("a", 1), former("z", 9)];
+        s.upsert(&partial).unwrap();
+        let got = s.get("aaa").unwrap().unwrap();
+        assert_eq!(got.data.former_slugs, vec![former("a", 1), former("b", 2), former("z", 9)]);
+        assert_eq!(got.data.slug, "c");
     }
 
     #[test]

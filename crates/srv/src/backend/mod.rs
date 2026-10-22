@@ -38,6 +38,7 @@ pub mod fleet_source;
 pub mod narrated_events;
 pub mod pending_background_pids;
 pub mod mcp_health;
+pub mod mcp_json_identity;
 pub mod mcp_launch;
 pub mod mcp_observed;
 pub mod mcp_probe;

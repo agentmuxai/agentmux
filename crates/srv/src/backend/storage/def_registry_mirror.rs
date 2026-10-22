@@ -59,6 +59,9 @@ pub(super) fn agent_definition_to_record(
         container_volumes: def.container_volumes.clone(),
         container_name: def.container_name.clone(),
         use_ambient_login: def.use_ambient_login,
+        // Not a column: only the shared record holds them, and `upsert`
+        // keeps the file's (an empty list isn't written).
+        former_slugs: Vec::new(),
         content: content
             .iter()
             .map(|c| DefContentBlob {
@@ -148,7 +151,11 @@ impl Store {
     /// authoritative). No-op when the definition no longer exists.
     ///
     /// `upsert` itself refuses to resurrect a tombstoned id, so a stale
-    /// mirror call for a deleted agent won't un-delete it.
+    /// mirror call for a deleted agent won't un-delete it, and keeps an
+    /// existing record's slug and former slugs, so this channel's copy of the
+    /// slug can't undo a rename (`SPEC_FORK_SLUG_MIGRATION_2026_10_22.md`
+    /// P0.2). The slug read here is already the shared one when a record
+    /// exists (`agent_def_get`).
     pub(super) fn registry_def_upsert(&self, def_id: &str) {
         let Some(reg) = self.shared_def_registry() else {
             return;

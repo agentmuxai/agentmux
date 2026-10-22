@@ -20,10 +20,12 @@ impl Store {
     /// `migrate_promote_template_sessions_v1`): every retry asks
     /// "does the promote-target clone for this template already
     /// exist?" and either reuses it or inserts it.
+    ///
+    /// A local row's slug is the canonical one ([`canonical_slug`]), as in
+    /// `agent_def_list`: the spawn env and the registry mirror read it here.
     pub fn agent_def_get(&self, id: &str) -> Result<Option<AgentDefinition>, StoreError> {
-        let local = self.agent_row_get(id)?;
-        if local.is_some() {
-            return Ok(local);
+        if let Some(local) = self.agent_row_get(id)? {
+            return Ok(Some(self.with_canonical_slug(local)));
         }
         // Not in local SQLite — check the global cross-channel registry.
         // agent_def_list() already overlays this; keep agent_def_get consistent.
@@ -43,10 +45,15 @@ impl Store {
     /// trigger (Codex P2 on #3568).
     pub(crate) fn agent_def_get_strict(&self, id: &str) -> Result<Option<AgentDefinition>, String> {
         if let Some(local) = self.agent_row_get(id).map_err(|e| e.to_string())? {
-            return Ok(Some(local));
+            return Ok(Some(self.with_canonical_slug(local)));
         }
         self.shared_def_get(id)
             .map_err(|e| format!("global definition registry: {e}"))
+    }
+
+    fn with_canonical_slug(&self, mut def: AgentDefinition) -> AgentDefinition {
+        def.slug = canonical_slug(&def.id, &def.slug, self.shared_slug_of(&def.id).as_deref());
+        def
     }
 
     /// The global cross-channel definition for `id`, errors preserved.
@@ -143,6 +150,9 @@ impl Store {
                 // preserves the ADMINISTRATOR'S actual configured choice,
                 // not just avoiding a crash).
                 def.conversation_visibility = existing.conversation_visibility.clone();
+                // The slug the other readers give too (an empty shared slug
+                // keeps the local one).
+                def.slug = canonical_slug(&def.id, &existing.slug, Some(&def.slug));
             }
             by_id.insert(def.id.clone(), def);
         }
@@ -894,14 +904,16 @@ impl Store {
         // deleting their template — deleting `id` here removes only its own
         // row. The JSON registry mirror for the deleted row is covered by
         // `registry_def_retire` below.
+        // Its shared slug and former slugs, read before the record is retired.
+        let shared = self.shared_slugs();
         let (rows, scope) = {
             let conn = self.conn.lock().unwrap();
             // Read BEFORE the DELETE — afterwards there is no row to ask.
             // See `scope_for_row` for what this decides and why.
             let scope = Self::scope_for_row(&conn, id);
             // Identity M4a: also read before the DELETE.
-            tombstone_key_names(&conn, id)?;
-            purge_name_keyed_keys(&conn, id, self.wan_identity().as_deref())?;
+            tombstone_key_names(&conn, id, &shared)?;
+            purge_name_keyed_keys(&conn, id, self.wan_identity().as_deref(), &shared)?;
             let rows = conn.execute("DELETE FROM db_agents WHERE id=?1", params![id])?;
             // Unconditional, same convergence rule as the registry sweep
             // below (codex P2 on PR #3262): if a previous attempt committed
