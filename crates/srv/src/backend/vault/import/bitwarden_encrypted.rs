@@ -32,7 +32,7 @@ use base64::Engine as _;
 use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
 use super::ReadError;
 
@@ -206,11 +206,6 @@ fn unsupported(enc: &str) -> ReadError {
         Some(t) if t.len() == 1 && t != "2" => ReadError::from("this Bitwarden export uses an encryption AgentMux doesn't read yet: export it again unencrypted from Bitwarden"),
         _ => ReadError::from(DAMAGED),
     }
-}
-
-/// Wipes a parsed export's text.
-pub fn wipe(mut s: String) {
-    s.zeroize();
 }
 
 #[cfg(test)]
