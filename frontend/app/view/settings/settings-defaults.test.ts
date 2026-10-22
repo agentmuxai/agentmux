@@ -192,6 +192,8 @@ const FRONTEND_CONSTANTS: Record<string, [string, RegExp]> = {
  * "no limit".
  */
 const UNSET_MEANS: Record<string, [unknown, string, RegExp]> = {
+    // Anything but an explicit false shows the outdated agent id notice.
+    "agent:outdatedidsnotice": [true, "frontend/app/view/settings/fork-slug-notice.ts", /settingsAtom\(\)\?\.\[NOTICE_SETTING\] === false/],
     // Anything but an explicit false keeps turn-scoped tails.
     "agent:turnscopedtail": [
         true,

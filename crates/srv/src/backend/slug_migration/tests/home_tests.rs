@@ -71,6 +71,30 @@ fn restore_mode_puts_the_backup_back_only_while_nothing_changed() {
     assert_eq!(query::<String>(&db, "SELECT description FROM db_agents WHERE id = 'uid-naki'").as_deref(), Some("edited since"), "journal mode keeps later edits");
 }
 
+/// Writes the fixture home to `SLUG_MIGRATION_FIXTURE_OUT`, for a live run of
+/// the real binary against a copy of it (`agentmux-srv migrate-fork-slugs`
+/// with `AGENTMUX_HOME_OVERRIDE`). Run by hand: `cargo test -p agentmux-srv
+/// write_the_fixture_home -- --ignored`.
+#[test]
+#[ignore]
+fn write_the_fixture_home() {
+    let Some(out) = std::env::var_os("SLUG_MIGRATION_FIXTURE_OUT") else { return };
+    let fx = Fx::standard();
+    copy_tree(fx.root(), std::path::Path::new(&out));
+}
+
+fn copy_tree(from: &std::path::Path, to: &std::path::Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap().flatten() {
+        let target = to.join(entry.file_name());
+        if entry.path().is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
 /// The backup holds a `VACUUM INTO` copy of every database and the files a
 /// run changes, each matching the checksum the journal recorded.
 #[test]
