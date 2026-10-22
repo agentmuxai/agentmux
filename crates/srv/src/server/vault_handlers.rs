@@ -236,8 +236,9 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                     Some(m) => Some(serde_json::from_value(m.clone()).map_err(|e| format!("invalid column mapping: {e}"))?),
                     None => None,
                 };
-                // The key file of a KeePass database: its bytes, read by the host, from the person's own pick.
-                let keyfile: Option<zeroize::Zeroizing<Vec<u8>>> = match body.get("keyfile").and_then(Value::as_str).filter(|k| !k.is_empty()) {
+                // The key file of a KeePass database: its bytes, read by the host, from the person's own pick. One that is
+                // present but empty is still a key file (a refused one), never "no key file".
+                let keyfile: Option<zeroize::Zeroizing<Vec<u8>>> = match body.get("keyfile").and_then(Value::as_str) {
                     Some(k) if k.len() > vault::import::MAX_KEY_FILE * 2 => return Err("that key file is too large to be a KeePass key file".into()),
                     Some(k) => {
                         use base64::Engine as _;

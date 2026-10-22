@@ -362,3 +362,19 @@ async fn the_standing_permissions_are_the_hosts_to_read_and_carry_no_value() {
     assert_eq!(s, StatusCode::OK, "{body}");
     assert!(body["data"]["granted"].is_array() && !body.to_string().contains("123-45"), "{body}");
 }
+
+// A key file the host chose but that is empty is refused as a key file, not silently treated as none.
+#[tokio::test]
+async fn an_empty_key_file_is_a_refused_key_file_and_not_no_key_file() {
+    let app = app().await;
+    let host = |body: Value| post("/api/v1/host/vault", &[HOST], body);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("Keyed.kdbx");
+    std::fs::write(&path, include_bytes!("../../backend/vault/import/fixtures/pykeepass_keyfile_only.kdbx")).unwrap();
+    let p = path.to_string_lossy().to_string();
+    let (s, none) = send(&app, host(json!({ "op": "import_inspect", "path": p }))).await;
+    assert_eq!((s, none["data"]["needs_passphrase"].as_bool()), (StatusCode::OK, Some(true)));
+    let (s, empty) = send(&app, host(json!({ "op": "import_inspect", "path": p, "keyfile": "" }))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{empty}");
+    assert!(empty.to_string().contains("key file"), "{empty}");
+}
