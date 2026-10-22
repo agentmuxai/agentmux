@@ -20,6 +20,7 @@
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { replaceProviderModels } from "../providers";
 import { AgentRuntimeDropup } from "./AgentRuntimeDropup";
 
 // The process-runtime report the menu listens to; each test sets it.
@@ -232,6 +233,33 @@ describe("AgentRuntimeDropup — superseded persisted model migration", () => {
 
         await new Promise((r) => setTimeout(r, 20));
         expect(patchRuntime).not.toHaveBeenCalled();
+    });
+
+    // A Codex pane stored on a model its account no longer offers (gpt-5.5 on
+    // 2026-10-22) moves to the account's default once the account's list is
+    // known; before that, nothing is guessed. One test, in this order, because
+    // the overlay is module state.
+    it("moves a Codex pane off a model its account no longer offers, once the account's list is known", async () => {
+        const codexPane = () => (
+            <AgentRuntimeDropup
+                blockId="block-1"
+                blockAtom={() => ({ meta: metaWith("gpt-5.5") }) as any}
+                providerId="codex"
+            />
+        );
+        const first = render(codexPane);
+        await new Promise((r) => setTimeout(r, 20));
+        expect(patchRuntime).not.toHaveBeenCalled();
+        first.unmount();
+
+        replaceProviderModels("codex", [
+            { value: "gpt-6-astra", label: "GPT-6-Astra" },
+            { value: "gpt-5.6-sol", label: "GPT-5.6-Sol" },
+        ]);
+        render(codexPane);
+        await vi.waitFor(() => expect(patchRuntime).toHaveBeenCalled());
+        expect(patchRuntime.mock.calls[0][2]).toEqual({ model: "gpt-6-astra" });
+        expect(patchRuntime.mock.calls[0][4]).toEqual({ migration: true });
     });
 });
 

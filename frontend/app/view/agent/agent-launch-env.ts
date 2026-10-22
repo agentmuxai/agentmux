@@ -232,6 +232,13 @@ export function resolveInitialRuntimeConfig(
  * the process run the definition's. Those flags are taken out of the PANE's copy
  * (`paneFlags`; the definition itself is untouched). With nothing to take out,
  * the flags are returned exactly as the definition has them.
+ *
+ * `modelsKnown: false` says the provider's model list is only the curated
+ * fallback, not what its account offers (Codex before its account's list is
+ * known). Then a pane nobody chose a model for gets none (`model: ""`), so no
+ * `--model` is passed and the CLI picks one its account offers, rather than a
+ * curated id the account may not run.
+ * SPEC_CODEX_OAUTH_IN_CONNECTORS_AND_EMAIL_LABELS_2026_10_22.md §4.
  */
 export function resolveLaunchRuntime(
     overridesModel: string | undefined,
@@ -239,9 +246,12 @@ export function resolveLaunchRuntime(
     providerFlags: unknown,
     remembered: Partial<AgentRuntimeConfig> | undefined,
     forkCarryOver: Partial<AgentRuntimeConfig> | undefined,
+    modelsKnown = true,
 ): { runtimeConfig: AgentRuntimeConfig; paneFlags: string } {
     const carryOver = { ...remembered, ...forkCarryOver };
-    const runtimeConfig = resolveInitialRuntimeConfig(overridesModel, provider.models, providerFlags, carryOver);
+    const resolved = resolveInitialRuntimeConfig(overridesModel, provider.models, providerFlags, carryOver);
+    const chosen = !!(overridesModel || carryOver.model || modelFromFlags(parseProviderFlags(providerFlags)));
+    const runtimeConfig = modelsKnown || chosen ? resolved : { ...resolved, model: "" };
     const stripped = withoutOverriddenFlags(providerFlags, {
         model: !!(overridesModel || carryOver.model),
         // A model that takes no --effort (Haiku) must not keep the definition's

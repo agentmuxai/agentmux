@@ -55,6 +55,7 @@ pub mod cli_notice;
 pub mod startup_files;
 pub mod workdir_fs;
 pub mod model_catalog;
+pub mod codex_models;
 pub mod config_watcher_fs;
 pub mod editor_file_watcher;
 pub mod editor_probe;
