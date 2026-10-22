@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-18
 **Author:** QTest
-**Status:** active — phases 1 to 4 shipped (PRs #5109, #5111, #5112, #5115); the History tab and the palette entry not started.
+**Status:** active — phases 1 to 4 shipped (PRs #5109, #5111, #5112, #5115); the History tab was replaced by Warden → History → Typed; the palette entry is not planned.
 **Origin:** the 0.59.31 → 0.59.32 upgrade lost every pane's ArrowUp history
 (`docs/reports/REPORT_UPGRADE_0_59_32_DOGFOOD_FINDINGS_2026_10_18.md` §2.4). The
 operator asked for "a robust system to track that data over the long term; it
@@ -184,10 +184,19 @@ notes can't leak into it.
   Shift+Delete forgets the selected entry; "Clear history" forgets them all
   after a second click. The composers showing the agent move their ArrowUp
   cursor with what was removed.
-- **A History tab** in the agent's settings or Agent History pane: the list
-  with times, search across all agents, send again, copy. Later; the search
-  covers finding, forgetting and clearing.
-- **Command palette:** "Search input history". Later.
+- **Warden → History → Typed** (replaces the History tab this spec first
+  planned; History lives in Warden, `SPEC_WARDEN_HISTORY_SECTION_2026_10_18.md`):
+  pick an agent and see everything typed to it, newest first, with when,
+  whether it was a slash or shell command, from a Swarm broadcast or from an
+  earlier conversation, and how many times in a row. Search within the agent;
+  **Show older** pages back 200 at a time; **Forget** an entry and **Clear…**
+  an agent's history each ask a second time (the clear names the agent). Only
+  agents that still exist are listed: what was typed to an agent goes when the
+  agent is deleted. srv logs each forget and clear (agent and count, never the
+  text). Not built: search across agents, send again, copy, and a durable
+  audit record of deletions (the Warden History spec's phase 3).
+- **Command palette:** "Search input history". Not planned: Ctrl+R in the
+  composer and Warden → History → Typed cover it.
 
 ### 4.7 Backfill from existing conversations
 
@@ -232,7 +241,7 @@ files `Agents search_history` already reads) and records them with
 |---|---|---|
 | 1 (done) | Tables, append/list/search/delete/clear/draft API, composer reads and writes it, events | The loss the operator reported: ArrowUp and the draft survive restarts and upgrades |
 | 2 (done) | Backfill from past sessions | History starts full |
-| 3 (search done) | Reverse search, the History tab, delete and clear, palette entry | Finding and managing it |
+| 3 (done) | Reverse search, delete and clear in the composer; Warden → History → Typed in place of the History tab | Finding and managing it |
 | 4 (done) | Retention setting, Swarm broadcasts recorded | Completeness |
 
 ## 6. Testing

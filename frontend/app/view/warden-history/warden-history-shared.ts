@@ -60,3 +60,23 @@ export function formatWhen(ms: number): string {
     if (!ms) return "—";
     return new Date(ms).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
+
+/**
+ * The agents the Typed view can show: those still defined. What was typed to
+ * an agent is kept with it and goes when it is deleted (`agents/purge.rs`), so
+ * a deleted agent, whose transcripts the Agents view keeps, has none. Most
+ * recently active first, as `history.agents` gives them.
+ */
+export function typedAgents(agents: HistoryAgent[]): HistoryAgent[] {
+    return agents.filter((a) => !a.deleted);
+}
+
+/** How an entry was typed; a plain message from the composer says nothing. */
+export function typedTags(kind: string, source: string): string[] {
+    const tags: string[] = [];
+    if (kind === "slash") tags.push("slash command");
+    if (kind === "bang") tags.push("shell command");
+    if (source === "swarm") tags.push("from Swarm");
+    if (source === "backfill") tags.push("from an earlier conversation");
+    return tags;
+}
