@@ -9,6 +9,7 @@
 // counted yet" and recounts on first use.
 
 import { PART } from "./analyze.mjs";
+import { deleteFrames } from "./frames.mjs";
 
 const SNAPSHOT = "output.state.json";
 const DERIVED_OF_OUTPUT = ["output.tsidx", "output.idx", SNAPSHOT];
@@ -47,6 +48,7 @@ function counterColumns(db) {
 
 function writeFile(db, zone, name, bytes, now, template) {
     db.prepare("DELETE FROM db_file_data WHERE zoneid = ? AND name = ?").run(zone, name);
+    deleteFrames(db, zone, name);
     const had = db.prepare("SELECT opts, meta, createdts FROM db_wave_file WHERE zoneid = ? AND name = ?").get(zone, name);
     if (had) {
         const counted = counterColumns(db) ? ", gen = NULL, lines = NULL, lines_size = NULL, lines_tail = NULL, lines_modts = NULL, lines_rev = NULL" : "";
@@ -81,6 +83,7 @@ export function rebuildZone(db, zone, bytes, now, template) {
         writeFile(db, zone, "output", bytes, now, template);
         for (const name of DERIVED_OF_OUTPUT) {
             db.prepare("DELETE FROM db_file_data WHERE zoneid = ? AND name = ?").run(zone, name);
+            deleteFrames(db, zone, name);
             db.prepare("DELETE FROM db_wave_file WHERE zoneid = ? AND name = ?").run(zone, name);
         }
         writeFile(db, zone, SNAPSHOT, Buffer.from(overlayFor(bytes)), now, template);
@@ -96,6 +99,7 @@ export function dropFile(db, zone, name) {
     db.exec("BEGIN IMMEDIATE");
     try {
         db.prepare("DELETE FROM db_file_data WHERE zoneid = ? AND name = ?").run(zone, name);
+        deleteFrames(db, zone, name);
         db.prepare("DELETE FROM db_wave_file WHERE zoneid = ? AND name = ?").run(zone, name);
         db.exec("COMMIT");
     } catch (e) {

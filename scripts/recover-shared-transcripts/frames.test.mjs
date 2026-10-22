@@ -1,0 +1,134 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// The tool's frame decoder (lib/frames.mjs) on the test vector the Rust encoder
+// wrote (testdata/frames.json, checked on the Rust side by tests_frame_vector.rs),
+// and the tool's damage scan, rebuild and source reads on a store holding frames.
+// Needs no sqlite3 shell: everything here runs in node:sqlite.
+
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { zstdCompressSync, zstdDecompressSync } from "node:zlib";
+import { afterAll, describe, expect, it } from "vitest";
+import { createFilestore, FRAME_TABLE, PART, putFile, transcript } from "./fixture.mjs";
+import { allDamage, findDamage } from "./lib/analyze.mjs";
+import { decodeDeltas, decodeFrame, partIndex, readFileBytes } from "./lib/frames.mjs";
+import { rebuildZone } from "./lib/rebuild.mjs";
+
+const vector = JSON.parse(readFileSync(new URL("./testdata/frames.json", import.meta.url), "utf8"));
+const asRow = (f) => ({ ...f, check_hash: Buffer.from(f.check_hash, "hex"), data: Buffer.from(f.data, "base64") });
+const [codec1, codec2] = vector.frames.map(asRow);
+
+describe("the frame decoder", () => {
+    it("decodes both codecs of the Rust test vector to the same bytes", () => {
+        expect([codec1.codec, codec2.codec]).toEqual([1, 2]);
+        const a = decodeFrame(codec1);
+        const b = decodeFrame(codec2);
+        expect(a.length).toBe(PART);
+        expect(b.equals(a)).toBe(true);
+        expect(createHash("sha256").update(b).digest("hex")).toBe(vector.frames[1].check_hash);
+        const text = b.toString("utf8");
+        expect(text).toContain('"type":"input_json_delta","partial_json":"{\\"path\\": \\"C:\\\\\\\\src\\\\\\\\0.rs\\", "');
+        expect(text).toContain('"text":"word 1 naïve café — \\"q\\"\\n"');
+        expect(text).toContain('"parent_tool_use_id":"toolu_01ABCdef"');
+        expect(codec2.data.length).toBeLessThan(codec1.data.length);
+    });
+
+    it("refuses a frame that is damaged, the wrong shape or of an unknown codec", () => {
+        const flipped = { ...codec1, data: Buffer.from(codec1.data) };
+        flipped.data[flipped.data.length >> 1] ^= 0x40;
+        expect(() => decodeFrame(flipped)).toThrow();
+        const wrongHash = { ...codec2, check_hash: Buffer.alloc(32) };
+        expect(() => decodeFrame(wrongHash)).toThrow(/hash/);
+        expect(() => decodeFrame({ ...codec1, raw_len: PART - 1 })).toThrow(/shape/);
+        expect(() => decodeFrame({ ...codec1, part_count: 65, raw_len: 65 * PART })).toThrow(/shape/);
+        expect(() => decodeFrame({ ...codec1, codec: 3 })).toThrow(/codec 3/);
+    });
+
+    it("refuses a codec 2 payload cut short anywhere", () => {
+        const payload = zstdDecompressSync(codec2.data);
+        expect(decodeDeltas(payload, PART).equals(decodeFrame(codec1))).toBe(true);
+        const cuts = [...Array(80).keys(), ...Array.from({ length: 40 }, (_, i) => Math.floor((payload.length * (i + 1)) / 41)), payload.length - 1];
+        for (const cut of cuts) expect(() => decodeDeltas(payload.subarray(0, cut), PART), `cut at ${cut}`).toThrow();
+    });
+});
+
+describe("a store holding frames", () => {
+    const dir = mkdtempSync(join(tmpdir(), "recover-frames-"));
+    afterAll(() => rmSync(dir, { recursive: true, force: true }));
+    const raw = decodeFrame(codec2);
+    const tail = transcript("vvv", PART + 50);
+
+    // `agent:vvv:current` output: part 0 a codec 2 frame (the vector), then rows.
+    function store(name, frame = codec2) {
+        const db = createFilestore(join(dir, name, "filestore.db"));
+        db.exec(FRAME_TABLE);
+        putFile(db, "agent:vvv:current", "output", Buffer.concat([raw, tail]), { dropParts: [0] });
+        db.prepare("INSERT INTO db_file_frame (zoneid, name, first_part, part_count, codec, raw_len, check_hash, data) VALUES (?, ?, 0, 1, ?, ?, ?, ?)").run(
+            "agent:vvv:current",
+            "output",
+            frame.codec,
+            frame.raw_len,
+            frame.check_hash,
+            frame.data,
+        );
+        return db;
+    }
+
+    it("reads framed parts as parts: no damage, and the bytes the app reads", () => {
+        const db = store("whole");
+        expect(findDamage(db).damage).toEqual([]);
+        expect(allDamage(db).damage).toEqual([]);
+        expect(partIndex(db, "agent:vvv:current", "output").map((p) => [p.partidx, p.framed])).toEqual([
+            [0, true],
+            [1, false],
+            [2, false],
+        ]);
+        expect(readFileBytes(db, "agent:vvv:current", "output").equals(Buffer.concat([raw, tail]))).toBe(true);
+        db.close();
+    });
+
+    it("finds a frame that doesn't decode", () => {
+        const bad = { ...codec2, data: Buffer.from(codec2.data) };
+        bad.data[10] ^= 0xff;
+        const db = store("bad-frame", bad);
+        expect(findDamage(db).damage).toEqual([]);
+        const found = allDamage(db).damage;
+        expect(found.map((d) => [d.zone, d.kind])).toEqual([["agent:vvv:current", "bad-frame"]]);
+        expect(found[0].partsBytes).toBe(raw.length + tail.length);
+        expect(allDamage(db, { contentScan: false }).damage).toEqual([]);
+        db.close();
+    });
+
+    it("finds a NUL hole inside a frame", () => {
+        const holey = Buffer.from(raw);
+        holey.fill(0, 100, 200);
+        const db = store("nul", { ...codec1, check_hash: createHash("sha256").update(holey).digest(), data: zstdCompressSync(holey) });
+        expect(allDamage(db).damage.map((d) => [d.kind, d.detail])).toEqual([["nul-bytes", "1 part(s) hold NUL bytes, from part 0"]]);
+        db.close();
+    });
+
+    it("finds a gap when a frame is missing", () => {
+        const db = store("gap");
+        db.exec("DELETE FROM db_file_frame");
+        expect(findDamage(db).damage.map((d) => d.kind)).toEqual(["gap"]);
+        db.close();
+    });
+
+    it("a rebuild takes the file's frames with its rows", () => {
+        const db = store("rebuild");
+        const fresh = transcript("new", 2 * PART + 3);
+        rebuildZone(db, "agent:vvv:current", fresh, 5, { opts: "{}", meta: "{}" });
+        expect(db.prepare("SELECT COUNT(*) AS n FROM db_file_frame").get().n).toBe(0);
+        expect(readFileBytes(db, "agent:vvv:current", "output").equals(fresh)).toBe(true);
+        expect(findDamage(db).damage).toEqual([]);
+        db.close();
+    });
+
+    it("the fixture's frame table is the one srv creates", () => {
+        const rust = readFileSync(new URL("../../crates/srv/src/backend/storage/filestore/frames.rs", import.meta.url), "utf8").replace(/\s+/g, " ");
+        expect(rust).toContain(FRAME_TABLE.replace(/\s+/g, " "));
+    });
+});

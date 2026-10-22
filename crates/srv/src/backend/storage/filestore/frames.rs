@@ -572,3 +572,7 @@ impl FileStore {
 #[cfg(test)]
 #[path = "tests_frames.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests_frame_vector.rs"]
+mod tests_vector;

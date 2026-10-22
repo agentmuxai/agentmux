@@ -3,14 +3,24 @@
 
 // What is wrong with a (recovered) filestore: for every file, its parts must run
 // 0..N with no gap and add up to the recorded size. The parts are 64 KB each
-// (`PART_DATA_SIZE` in crates/srv/src/backend/storage/filestore/core.rs).
+// (`PART_DATA_SIZE` in crates/srv/src/backend/storage/filestore/core.rs). A part
+// is a row of `db_file_data` or a part of a compressed frame (lib/frames.mjs).
+
+import { hasFrames, partIndex, scanFrames } from "./frames.mjs";
 
 export const PART = 64 * 1024;
 
-const INVENTORY = `
-WITH parts AS (
-    SELECT zoneid, name, COUNT(*) AS n, MIN(partidx) AS lo, MAX(partidx) AS hi, SUM(LENGTH(data)) AS bytes
-      FROM db_file_data GROUP BY zoneid, name)
+const ROW_PARTS = "SELECT zoneid, name, COUNT(*) AS n, MIN(partidx) AS lo, MAX(partidx) AS hi, SUM(LENGTH(data)) AS bytes FROM db_file_data GROUP BY zoneid, name";
+// A frame's parts count as parts. A part with both a row and a frame is counted twice, so
+// the file shows as damaged: the app never leaves one so.
+const FRAMED_PARTS = `SELECT zoneid, name, SUM(n) AS n, MIN(lo) AS lo, MAX(hi) AS hi, SUM(bytes) AS bytes FROM (
+    ${ROW_PARTS}
+    UNION ALL
+    SELECT zoneid, name, SUM(part_count), MIN(first_part), MAX(first_part + part_count - 1), SUM(raw_len) FROM db_file_frame GROUP BY zoneid, name)
+  GROUP BY zoneid, name`;
+
+const inventory = (framed) => `
+WITH parts AS (${framed ? FRAMED_PARTS : ROW_PARTS})
 SELECT f.zoneid AS zoneid, f.name AS name, f.size AS size, p.n AS n, p.lo AS lo, p.hi AS hi, p.bytes AS bytes
   FROM db_wave_file f LEFT JOIN parts p ON p.zoneid = f.zoneid AND p.name = f.name
 UNION ALL
@@ -18,9 +28,14 @@ SELECT p.zoneid, p.name, NULL, p.n, p.lo, p.hi, p.bytes
   FROM parts p LEFT JOIN db_wave_file f ON f.zoneid = p.zoneid AND f.name = p.name
  WHERE f.zoneid IS NULL`;
 
+/** The bytes a file's parts hold, rows and frames. */
+function storedBytes(db, zone, name) {
+    return partIndex(db, zone, name).reduce((sum, p) => sum + p.len, 0);
+}
+
 /** Missing part-index ranges of one file, and the bytes in its unbroken prefix. */
 function partMap(db, zone, name) {
-    const rows = db.prepare("SELECT partidx, LENGTH(data) AS len FROM db_file_data WHERE zoneid = ? AND name = ? ORDER BY partidx").all(zone, name);
+    const rows = partIndex(db, zone, name);
     const missing = [];
     let next = 0;
     let prefixBytes = 0;
@@ -40,13 +55,14 @@ function partMap(db, zone, name) {
  * Every damaged file: { zone, name, kind, detail, size, partsBytes, prefixBytes }.
  * Kinds: orphan-parts (no file row), no-parts (a size but no parts), gap (a part
  * is missing), tail-missing (the parts end before the recorded size) and
- * size-mismatch (more bytes than the recorded size).
+ * size-mismatch (more bytes than the recorded size). A compressed frame that doesn't decode
+ * is found by [`allDamage`]'s content scan.
  */
 export function findDamage(db) {
     const damage = [];
     let files = 0;
     let zones = new Set();
-    for (const r of db.prepare(INVENTORY).all()) {
+    for (const r of db.prepare(inventory(hasFrames(db))).all()) {
         files++;
         zones.add(r.zoneid);
         const size = r.size === null ? null : Number(r.size);
@@ -72,13 +88,25 @@ export function findDamage(db) {
 /**
  * `output` files with NUL bytes in a part. A transcript is lines of JSON text, so a NUL is a
  * zero-filled hole where a lost page was read back as zeros, which a size check cannot see.
- * Reads every `output` part; skip with --skip-content-scan.
+ * Reads every `output` part, and decodes every `output` frame (pass `frames` from
+ * [`scanFrames`] to reuse a scan); skip with --skip-content-scan.
  */
-export function findNulHoles(db) {
-    return db
+export function findNulHoles(db, frames = scanFrames(db)) {
+    const holes = new Map();
+    for (const r of db
         .prepare("SELECT zoneid, name, MIN(partidx) AS first, COUNT(*) AS n FROM db_file_data WHERE name = 'output' AND instr(data, x'00') > 0 GROUP BY zoneid, name")
-        .all()
-        .map((r) => ({ zone: r.zoneid, name: r.name, first: r.first, parts: r.n }));
+        .all()) {
+        holes.set(`${r.zoneid}\u0000${r.name}`, { zone: r.zoneid, name: r.name, first: Number(r.first), parts: Number(r.n) });
+    }
+    for (const h of frames.nul) {
+        const key = `${h.zone}\u0000${h.name}`;
+        const had = holes.get(key);
+        if (had) {
+            had.parts += h.parts;
+            had.first = Math.min(had.first, h.first);
+        } else holes.set(key, { ...h });
+    }
+    return [...holes.values()];
 }
 
 /** Rows `.recover` could not place: its `lost_and_found` table, if it made one. */
@@ -97,24 +125,29 @@ export function agentOfZone(zone) {
 /** Files the app derives from `output` and rebuilds on demand. */
 export const DERIVED = new Set(["output.tsidx", "output.idx", "output.state.json"]);
 
+/** Add `detail` to the file's damage entry, or make one of `kind`. */
+function note(db, found, zone, name, kind, detail) {
+    const known = found.damage.find((d) => d.zone === zone && d.name === name);
+    if (known) {
+        known.detail += `; ${detail}`;
+        return;
+    }
+    const f = db.prepare("SELECT size FROM db_wave_file WHERE zoneid = ? AND name = ?").get(zone, name);
+    found.damage.push({ zone, name, kind, detail, size: f ? Number(f.size) : null, partsBytes: storedBytes(db, zone, name), prefixBytes: 0 });
+}
+
 /**
  * Everything wrong with a database: the structural damage of [`findDamage`] and, unless
- * `contentScan` is false, the NUL holes of [`findNulHoles`] (added to the file's entry when
- * it already has one).
+ * `contentScan` is false, compressed frames that don't decode and the NUL holes of
+ * [`findNulHoles`] (added to the file's entry when it already has one).
  */
 export function allDamage(db, { contentScan = true } = {}) {
     const found = findDamage(db);
     if (contentScan) {
-        for (const hole of findNulHoles(db)) {
-            const detail = `${hole.parts} part(s) hold NUL bytes, from part ${hole.first}`;
-            const known = found.damage.find((d) => d.zone === hole.zone && d.name === hole.name);
-            if (known) {
-                known.detail += `; ${detail}`;
-                continue;
-            }
-            const f = db.prepare("SELECT size FROM db_wave_file WHERE zoneid = ? AND name = ?").get(hole.zone, hole.name);
-            const bytes = Number(db.prepare("SELECT COALESCE(SUM(LENGTH(data)), 0) AS n FROM db_file_data WHERE zoneid = ? AND name = ?").get(hole.zone, hole.name).n);
-            found.damage.push({ zone: hole.zone, name: hole.name, kind: "nul-bytes", detail, size: f ? Number(f.size) : null, partsBytes: bytes, prefixBytes: 0 });
+        const frames = scanFrames(db, { name: null });
+        for (const b of frames.bad) note(db, found, b.zone, b.name, "bad-frame", `the frame from part ${b.first} doesn't decode (${b.error})`);
+        for (const hole of findNulHoles(db, { nul: frames.nul.filter((h) => h.name === "output") })) {
+            note(db, found, hole.zone, hole.name, "nul-bytes", `${hole.parts} part(s) hold NUL bytes, from part ${hole.first}`);
         }
     }
     return found;
