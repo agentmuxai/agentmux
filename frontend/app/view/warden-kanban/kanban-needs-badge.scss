@@ -9,11 +9,11 @@
     min-width: 14px;
     height: 14px;
     padding: 0 3px;
-    border-radius: 7px;
+    border-radius: var(--radius-full);
     background: var(--warning-color);
     color: var(--main-bg-color);
-    font-size: 9px;
-    font-weight: 700;
+    font-size: var(--text-3xs);
+    font-weight: var(--font-weight-bold);
     line-height: 14px;
     text-align: center;
     pointer-events: none;
