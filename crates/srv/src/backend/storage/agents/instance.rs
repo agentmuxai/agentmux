@@ -646,11 +646,13 @@ impl Store {
         if typed.is_empty() {
             return Ok(Vec::new());
         }
+        // Asked before the lock: it may re-read the store.
+        let maybe_former = self.former_slug_known(typed);
         let shared = self.shared_slugs();
         let conn = self.conn.lock().unwrap();
         let rows = rows_with_canonical_slugs(&conn, "WHERE is_template = 0 AND user_hidden = 0", &shared)?;
         let matched: Vec<AgentNameMatch> = rows.iter().filter(|r| answers_to(r, typed)).cloned().collect();
-        if !matched.is_empty() {
+        if !matched.is_empty() || !maybe_former {
             return Ok(matched);
         }
         let all = rows_with_canonical_slugs(&conn, "", &shared)?;

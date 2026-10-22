@@ -433,6 +433,7 @@ impl Store {
         if let Err(e) = record_former_slugs(&conn, &def.id, &record.data.former_slugs) {
             tracing::warn!(def_id = %def.id, error = %e, "instance_create backfill: former slugs not copied (non-fatal)");
         }
+        self.former_slugs.invalidate();
         for c in &record.data.content {
             if let Err(e) = conn.execute(
                 "INSERT INTO db_agent_content (agent_id, content_type, content, updated_at)

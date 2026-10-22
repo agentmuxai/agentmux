@@ -18,8 +18,14 @@
 //! compare the current slug only (`actor::uid_owns_name`, `self_keys_for`), so
 //! nothing can sign or be served keys under one. And a current slug always
 //! wins: a name that is some agent's slug or live name is never an alias.
+//!
+//! Every message asks whether its sender is a former slug, so the answer for
+//! a name that isn't one costs nothing: [`FormerSlugSet`] holds every former
+//! slug in memory, and only a name in it is looked up in full.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use super::*;
 use crate::registry::FormerSlug;
@@ -37,6 +43,44 @@ pub(in crate::backend::storage) const FORMER_SLUGS_SCHEMA: &str = "
         FOREIGN KEY (agent_uid) REFERENCES db_agents(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_agent_former_slugs_slug ON db_agent_former_slugs(slug);";
+
+/// How long the known set is trusted before it is read again. The shared
+/// definitions change under other processes, which only a re-read sees (the
+/// slug index's stats, no parse unless a file changed); a write through this
+/// store clears the set at once. Former slugs appear only by a migration,
+/// which runs with the agents stopped, so the lag never meets a message.
+const KNOWN_FOR: Duration = Duration::from_secs(2);
+
+/// Every former slug this channel can see, lowercased, from the shared slug
+/// index and this table: a sender or target not in it is no former slug, and
+/// costs no store access.
+#[derive(Default)]
+pub(in crate::backend::storage) struct FormerSlugSet {
+    known: Mutex<Option<(Instant, HashSet<String>)>>,
+    /// Store reads it caused (the set's re-reads and full lookups), for tests.
+    #[cfg(test)]
+    pub(super) reads: std::sync::atomic::AtomicUsize,
+}
+
+impl FormerSlugSet {
+    /// Forget the set, after this process wrote a former slug.
+    pub(in crate::backend::storage) fn invalidate(&self) {
+        *self.known.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    fn read(&self) {
+        #[cfg(test)]
+        self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Age the set past [`KNOWN_FOR`], as time passing would.
+    #[cfg(test)]
+    pub(super) fn expire(&self) {
+        if let Some((at, _)) = self.known.lock().unwrap().as_mut() {
+            *at -= KNOWN_FOR * 2;
+        }
+    }
+}
 
 /// The agent a former slug belongs to, and the slug it goes by now.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,12 +123,45 @@ pub(super) fn former_slug_owner_in(
 }
 
 impl Store {
+    /// Whether `name` may be a former slug: in [`FormerSlugSet`]. No store
+    /// access unless the set is older than [`KNOWN_FOR`] or was cleared.
+    pub fn former_slug_known(&self, name: &str) -> bool {
+        let folded = fold(name);
+        if folded.is_empty() {
+            return false;
+        }
+        if let Some((at, names)) = self.former_slugs.known.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            if at.elapsed() < KNOWN_FOR {
+                return names.contains(&folded);
+            }
+        }
+        self.former_slugs.read();
+        let mut names: HashSet<String> =
+            self.shared_slugs().entries().flat_map(|(_, n)| n.former.iter().map(|f| fold(f))).collect();
+        let local: Result<Vec<String>, StoreError> = (|| {
+            let conn = self.conn.lock().unwrap();
+            let mut stmt = conn.prepare("SELECT slug FROM db_agent_former_slugs")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })();
+        match local {
+            Ok(local) => names.extend(local.iter().map(|s| fold(s))),
+            // Unknown, so not cached: the full lookup decides.
+            Err(_) => return true,
+        }
+        let hit = names.contains(&folded);
+        *self.former_slugs.known.lock().unwrap_or_else(|e| e.into_inner()) = Some((Instant::now(), names));
+        hit
+    }
+
     /// Record `formers` as former slugs of `uid`, lowercased. An existing
     /// entry keeps its `retired_at`; a uid with no row here records nothing
     /// (its shared record still holds them). Returns the rows added.
     pub fn agent_former_slugs_record(&self, uid: &str, formers: &[FormerSlug]) -> Result<usize, StoreError> {
         let conn = self.conn.lock().unwrap();
-        record_former_slugs(&conn, uid, formers)
+        let added = record_former_slugs(&conn, uid, formers);
+        self.former_slugs.invalidate();
+        added
     }
 
     /// This `objects.db`'s former slugs of `uid`, oldest first.
@@ -105,6 +182,7 @@ impl Store {
         for rec in records.iter().filter(|r| !r.data.former_slugs.is_empty()) {
             added += record_former_slugs(&conn, &rec.data.id, &rec.data.former_slugs)?;
         }
+        self.former_slugs.invalidate();
         if added > 0 {
             tracing::info!(added, "former slugs: copied from the shared definitions");
         }
@@ -143,12 +221,13 @@ impl Store {
     /// definition, shared or local, lists it, and nothing has it as a current
     /// slug. For routing only (see the module doc). Reads the shared slug
     /// index (a stat per definition, no parse unless one changed) and this
-    /// table, so callers ask only once a live name has missed.
+    /// table, only for a name in [`FormerSlugSet`]: any other costs nothing.
     pub fn former_slug_owner(&self, name: &str) -> Result<Option<FormerSlugOwner>, StoreError> {
         let folded = fold(name);
-        if folded.is_empty() {
+        if !self.former_slug_known(&folded) {
             return Ok(None);
         }
+        self.former_slugs.read();
         let shared = self.shared_slugs();
         let conn = self.conn.lock().unwrap();
         let rows = rows_with_canonical_slugs(&conn, "", &shared)?;
@@ -170,7 +249,7 @@ impl Store {
     /// reserved.
     pub fn former_slug_reserved(&self, name: &str) -> bool {
         let folded = fold(name);
-        if folded.is_empty() {
+        if !self.former_slug_known(&folded) {
             return false;
         }
         if self.shared_slugs().entries().any(|(_, n)| n.former.iter().any(|f| fold(f) == folded)) {
@@ -219,6 +298,7 @@ impl Store {
             rec.data.slug = new.to_string();
             rec.data.former_slugs.push(former.clone());
             std::fs::write(reg.root().join(format!("{uid}.json")), serde_json::to_vec_pretty(&rec).unwrap()).unwrap();
+            self.former_slugs.invalidate();
         }
         self.test_force_slug(uid, new).unwrap();
         self.agent_former_slugs_record(uid, &[former]).unwrap();

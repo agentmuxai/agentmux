@@ -210,3 +210,70 @@ fn a_shared_only_agents_former_slug_resolves() {
     let owner = store.former_slug_owner("remote-remote-2").unwrap().unwrap();
     assert_eq!((owner.uid.as_str(), owner.slug.as_str()), ("uid-remote", "remote-2"));
 }
+
+fn reads(store: &Store) -> usize {
+    store.former_slugs.reads.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// A sender or target that isn't a former slug costs no store access once
+/// the set is warm, through the store or the handler that asks it on every
+/// message; a former slug is still resolved and refused.
+#[tokio::test]
+async fn a_name_that_is_no_former_slug_never_touches_the_store() {
+    let (_t, store, _defs) = store_with(&[("uid-fast", "Fast", "fast-fast-2"), ("uid-other", "Other", "other")]);
+    store.test_rename_slug("uid-fast", "fast-2", NOW);
+    assert!(store.former_slug_owner("warm-up").unwrap().is_none());
+    let warm = reads(&store);
+    for name in ["github-consumer", "agenty", "other", "fast-2", "slack"] {
+        assert!(store.former_slug_owner(name).unwrap().is_none(), "{name}");
+        assert!(!store.former_slug_reserved(name), "{name}");
+    }
+    let mut h = crate::backend::reactive::handler::Handler::new();
+    h.set_input_sender(Arc::new(|_: &str, _: &[u8]| Ok(())));
+    let resolver_store = store.clone();
+    h.set_former_slug_resolver(Arc::new(move |n: &str| resolver_store.former_slug_owner(n).ok().flatten().map(|o| o.uid)));
+    h.register_agent_full("Other", "block-o", None, 0, Some("other"), Some("uid-other"), "test").unwrap();
+    for source in ["bot-a", "bot-b", "remote-agent"] {
+        let req = crate::backend::reactive::types::InjectionRequest {
+            target_agent: "other".into(),
+            message: "hi".into(),
+            source_agent: Some(source.into()),
+            request_id: Some(format!("req-fast-{source}")),
+            ..Default::default()
+        };
+        assert!(h.inject_message(req).success);
+    }
+    assert_eq!(reads(&store), warm, "no store access for names that are no former slug");
+
+    assert_eq!(store.former_slug_owner("fast-fast-2").unwrap().map(|o| o.uid).as_deref(), Some("uid-fast"));
+    let mut req = crate::backend::reactive::types::InjectionRequest {
+        target_agent: "other".into(),
+        message: "hi".into(),
+        source_agent: Some("fast-fast-2".into()),
+        request_id: Some("req-fast-former".into()),
+        ..Default::default()
+    };
+    req.sig_verified = Some(true);
+    let resp = h.inject_message(req);
+    assert_eq!(resp.requires_stop, Some(true), "a former slug is still refused");
+}
+
+/// The set picks up a former slug written through this store at once, and
+/// one another process wrote to a shared definition once the set is re-read.
+#[test]
+fn the_set_picks_up_new_former_slugs() {
+    let (_t, store, defs) = store_with(&[("uid-p", "P", "p-p-2"), ("uid-q", "Q", "q-q-2")]);
+    assert!(!store.former_slug_known("p-old"));
+    store.agent_former_slugs_record("uid-p", &[FormerSlug { slug: "p-old".into(), retired_at: NOW }]).unwrap();
+    assert!(store.former_slug_known("p-old"), "an in-process write is seen at once");
+
+    assert!(!store.former_slug_known("q-q-2"));
+    let mut rec = defs.get("uid-q").unwrap().unwrap();
+    rec.data.slug = "q-2".into();
+    rec.data.former_slugs = vec![FormerSlug { slug: "q-q-2".into(), retired_at: NOW }];
+    std::fs::write(defs.root().join("uid-q.json"), serde_json::to_vec_pretty(&rec).unwrap()).unwrap();
+    assert!(!store.former_slug_known("q-q-2"), "trusted until it ages");
+    store.former_slugs.expire();
+    assert!(store.former_slug_known("q-q-2"), "another process's write is seen on the re-read");
+    assert_eq!(store.former_slug_owner("q-q-2").unwrap().map(|o| o.slug).as_deref(), Some("q-2"));
+}

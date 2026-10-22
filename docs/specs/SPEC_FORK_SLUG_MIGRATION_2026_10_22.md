@@ -137,7 +137,8 @@ As built:
   target: delivery, the files and transcript lookups, the resolve endpoint and the LAN agent lookup opt in
   (`get_delivery_target`, `lookup_delivery_target`), while `get_agent` and `lookup_by_name`, which authenticate and
   act as an agent, never answer a former slug. It delivers by UID (`reactive/former_slug.rs`, logged once per name per
-  hour). `agents_matching_name` falls back to it when nothing
+  hour). A name is looked up in full only when it is in an in-memory set of every former slug (re-read at most every
+  2 s, cleared by a write through this store), so a sender or target that isn't one costs no store access. `agents_matching_name` falls back to it when nothing
   else matches (from the shared record for an agent with no row here), which covers the resolve endpoint (Tasks, Schedule) and the hold; `agent_defs_for_target` tries it
   after the route name. The miss path looks up the same-host and cross-channel registries under the current slug
   when the former one finds nothing, but forwards the request unchanged, since its signatures cover the target; the
