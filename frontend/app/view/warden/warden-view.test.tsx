@@ -13,16 +13,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setPlatform } from "@/util/platformutil";
 
 vi.mock("@/app/view/warden-host/warden-host-manager", () => ({
-    WardenHostManager: () => <div data-testid="host-manager" />,
+    WardenHostManager: (props: { visible?: boolean }) => <div data-testid="host-manager" data-visible={String(props.visible)} />,
 }));
 vi.mock("@/app/view/warden-lan/warden-lan-manager", () => ({
-    WardenLanManager: () => <div data-testid="lan-manager" />,
+    WardenLanManager: (props: { visible?: boolean }) => <div data-testid="lan-manager" data-visible={String(props.visible)} />,
 }));
 vi.mock("@/app/view/warden-internet/warden-internet-stub", () => ({
     WardenInternetStub: () => <div data-testid="internet-stub" />,
 }));
 vi.mock("@/app/view/warden-audit/warden-audit-manager", () => ({
-    WardenAuditManager: () => <div data-testid="audit-manager" />,
+    WardenAuditManager: (props: { visible?: boolean }) => <div data-testid="audit-manager" data-visible={String(props.visible)} />,
 }));
 vi.mock("@/app/view/warden-kanban/warden-kanban-manager", () => ({
     WardenKanbanManager: (props: { visible: boolean; onNeedsCount?: (n: number) => void }) => {
@@ -128,8 +128,8 @@ describe("WardenView rail", () => {
         expect(screen.getByTestId("host-manager")).toBeInTheDocument();
         const hostPane = screen.getByTestId("host-manager").closest(".bundle-manager-pane");
         expect(hostPane?.classList.contains("is-hidden")).toBe(false);
-        const auditPane = screen.getByTestId("audit-manager").closest(".bundle-manager-pane");
-        expect(auditPane?.classList.contains("is-hidden")).toBe(true);
+        // Not shown yet, so not mounted: its poll hasn't started.
+        expect(screen.queryByTestId("audit-manager")).toBeNull();
         void container;
     });
 
@@ -146,29 +146,44 @@ describe("WardenView rail", () => {
         expect(screen.getByTestId("host-manager")).toBeInTheDocument();
     });
 
-    it("all 6 sections mount simultaneously (keep-mounted pane pattern)", () => {
+    it("mounts each section the first time it is shown, then keeps it mounted", () => {
         renderWarden();
-        expect(screen.getByTestId("kanban-manager")).toBeInTheDocument();
+        // Opened on Host: only Host is mounted, so no other section's poll runs.
         expect(screen.getByTestId("host-manager")).toBeInTheDocument();
-        expect(screen.getByTestId("lan-manager")).toBeInTheDocument();
-        expect(screen.getByTestId("internet-stub")).toBeInTheDocument();
-        expect(screen.getByTestId("audit-manager")).toBeInTheDocument();
-        expect(screen.getByTestId("history-manager")).toBeInTheDocument();
+        for (const id of ["kanban-manager", "lan-manager", "internet-stub", "audit-manager", "history-manager", "vault-view"]) {
+            expect(screen.queryByTestId(id), id).toBeNull();
+        }
+        for (const name of ["Kanban", "LAN", "Internet", "Audit", "History"]) screen.getByRole("tab", { name }).click();
+        for (const id of ["kanban-manager", "host-manager", "lan-manager", "internet-stub", "audit-manager", "history-manager"]) {
+            expect(screen.getByTestId(id), id).toBeInTheDocument();
+        }
+    });
+
+    it("tells Host, LAN and Audit when they are shown, so they poll only then", () => {
+        renderWarden();
+        screen.getByRole("tab", { name: "LAN" }).click();
+        screen.getByRole("tab", { name: "Audit" }).click();
+        expect(screen.getByTestId("host-manager").dataset.visible).toBe("false");
+        expect(screen.getByTestId("lan-manager").dataset.visible).toBe("false");
+        expect(screen.getByTestId("audit-manager").dataset.visible).toBe("true");
+        screen.getByRole("tab", { name: "Host" }).click();
+        expect(screen.getByTestId("host-manager").dataset.visible).toBe("true");
+        expect(screen.getByTestId("audit-manager").dataset.visible).toBe("false");
     });
 
     it("Kanban knows when it is shown, so it only fetches then", () => {
         renderWarden();
-        const kanban = screen.getByTestId("kanban-manager");
-        expect(kanban.dataset.visible).toBe("false");
         screen.getByRole("tab", { name: "Kanban" }).click();
+        const kanban = screen.getByTestId("kanban-manager");
         expect(kanban.dataset.visible).toBe("true");
+        screen.getByRole("tab", { name: "Host" }).click();
+        expect(kanban.dataset.visible).toBe("false");
     });
 
     it("History gets the Warden block and knows when it is shown", () => {
         renderWarden();
-        const history = screen.getByTestId("history-manager");
-        expect(history.dataset.visible).toBe("false");
         screen.getByRole("tab", { name: "History" }).click();
+        const history = screen.getByTestId("history-manager");
         expect(history.dataset.visible).toBe("true");
         expect(history.dataset.block).toBeTruthy();
         expect(history.closest(".bundle-manager-pane")?.classList.contains("is-hidden")).toBe(false);
