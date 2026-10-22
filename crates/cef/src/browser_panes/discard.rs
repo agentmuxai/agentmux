@@ -9,10 +9,11 @@
 //! is a history navigation to the same entry, so the page gets back the state
 //! it last reported: scroll position, form contents.
 //!
-//! A libcef without the patch allocates the stock `_cef_browser_host_t` (592
-//! bytes, without the three appended function pointers), so every call
-//! answers `None` (not supported) and the caller keeps closing and recreating
-//! the pane instead. Same runtime-size guard as `autocomplete`.
+//! A libcef without the patch allocates a `_cef_browser_host_t` that ends
+//! before the three function pointers (584 bytes for our API version, against
+//! 608 with them), so every call answers `None` (not supported) and the caller
+//! keeps closing and recreating the pane instead. Same runtime-size guard as
+//! `autocomplete`.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -50,6 +51,10 @@ impl DiscardOp {
 }
 
 const UI_WAIT: Duration = Duration::from_secs(5);
+
+/// Where the last of the three Discard API fields ends.
+const API_END: usize =
+    std::mem::offset_of!(_cef_browser_host_t, load_if_necessary) + std::mem::size_of::<Option<unsafe extern "C" fn()>>();
 
 type Reply = Arc<Mutex<Option<oneshot::Sender<Option<bool>>>>>;
 
@@ -93,13 +98,12 @@ wrap_task! {
 fn run(host: &BrowserHost, op: DiscardOp) -> Option<bool> {
     let raw: *mut _cef_browser_host_t = ImplBrowserHost::get_raw(host);
     unsafe {
-        // The struct libcef allocated: a stock build's ends before our fields.
-        if (*raw).base.size < std::mem::size_of::<_cef_browser_host_t>() {
-            tracing::info!(
-                runtime_size = (*raw).base.size,
-                binding_size = std::mem::size_of::<_cef_browser_host_t>(),
-                "[discard] libcef has no Discard API (stock build)"
-            );
+        // The struct libcef allocated for our API version: a stock build's
+        // ends before our fields. Not the binding's whole size: that counts
+        // the experimental set_ax_viewport_collapse after them, which libcef
+        // leaves out for a 15400 client (608 bytes against 616).
+        if (*raw).base.size < API_END {
+            tracing::info!(runtime_size = (*raw).base.size, "[discard] libcef has no Discard API (stock build)");
             return None;
         }
         match op {
