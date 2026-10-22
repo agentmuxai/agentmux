@@ -145,7 +145,8 @@ As built:
   `self/keys` already compared the current slug only.
 - **LAN.** `GET /agentmux/reactive/agent?id=<former slug>` answers with `current_name` and the key filed under the
   current name, only when that name is the agent's alone; never a key left under the former slug. A peer that reads
-  `current_name` caches the key under the current name and counts a signature claiming the former slug as failed.
+  a valid `current_name` counts a signature claiming the former slug as failed and caches nothing from that answer,
+  under either name: it learns the current name's key only from a lookup of that name, pinned as usual.
 - **Reservation.** `resolve_slug_collision` also counts this channel's copy of the former slugs (PR 1 added the shared
   ones); a fork number whose name or fork slug is a former slug is skipped; `agent_def_find_or_insert` matches a former
   slug to its agent.

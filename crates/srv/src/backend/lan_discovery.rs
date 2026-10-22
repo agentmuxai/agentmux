@@ -1483,19 +1483,21 @@ pub(crate) enum LanPubkeyLookup {
     /// treat this conservatively (as a failure), never as "nothing to
     /// check."
     RateLimited,
-    /// The peer says this name is a slug its agent was renamed from, and
-    /// that it now goes by the name given (`current_name`;
+    /// No peer has a key for this name, and one says it is a slug its agent
+    /// was renamed from, now going by the name given (`current_name`;
     /// `SPEC_FORK_SLUG_MIGRATION_2026_10_22.md` Phase 1). A former slug never
-    /// signs, so a signature claiming it is a failure. The key, if any, is
-    /// cached under the current name, the one its pin is taken under.
+    /// signs, so a signature claiming it is a failure. Nothing from that
+    /// answer is cached, under either name: the current name's key is found
+    /// by a lookup of its own, under the usual pinning.
     Renamed(String),
 }
 
 /// The name a peer's answer says `agent_id` now goes by (`current_name`), when
-/// it names a different one.
+/// it is a valid agent id other than `agent_id`. Only ever reported, never
+/// trusted: no key is cached under it.
 fn renamed_to(agent_id: &str, body: &serde_json::Value) -> Option<String> {
     let current = body.get("current_name")?.as_str()?.trim();
-    (!current.is_empty() && !current.eq_ignore_ascii_case(agent_id)).then(|| current.to_string())
+    (agentmux_common::slug::is_agent_id(current) && !current.eq_ignore_ascii_case(agent_id)).then(|| current.to_string())
 }
 
 /// Minimal token bucket, refilled once per second — same shape as
@@ -1696,31 +1698,39 @@ impl LanDiscoveryController {
         // rule differs: a 2xx whose body has no `lan_public_key` means that
         // peer hosts the agent but hasn't minted a key, so we must keep
         // consuming the stream rather than stopping at the first 2xx.
-        let peers = self.get_instances();
+        self.pubkey_from_peers(&self.get_instances(), agent_id, http).await
+    }
+
+    /// [`Self::find_agent_lan_pubkey`]'s fan-out over `peers`. A key is only
+    /// ever cached under the name asked for.
+    async fn pubkey_from_peers(&self, peers: &[LanInstance], agent_id: &str, http: &reqwest::Client) -> LanPubkeyLookup {
+        let mut renamed = None;
         {
             use futures_util::StreamExt as _;
-            let mut inflight = query_peers_concurrently(&peers, agent_id, http);
+            let mut inflight = query_peers_concurrently(peers, agent_id, http);
             while let Some((peer_url, _auth_key, result)) = inflight.next().await {
                 let Ok(resp) = result else { continue };
                 if !resp.status().is_success() {
                     continue;
                 }
                 let Ok(body) = resp.json::<serde_json::Value>().await else { continue };
+                // A former slug: noted, and its key ignored. Another peer
+                // may still answer for the name itself.
+                if let Some(current) = renamed_to(agent_id, &body) {
+                    renamed = Some(current);
+                    continue;
+                }
                 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-                let renamed = renamed_to(agent_id, &body);
-                let pubkey = body.get("lan_public_key").and_then(|v| v.as_str()).and_then(|k| BASE64.decode(k).ok());
-                let Some(pubkey_bytes) = pubkey else {
-                    match renamed {
-                        Some(current) => return LanPubkeyLookup::Renamed(current),
-                        None => continue, // this peer has the agent but no LAN key minted for it yet
-                    }
+                let Some(pubkey_b64) = body.get("lan_public_key").and_then(|v| v.as_str()) else {
+                    continue; // this peer has the agent but no LAN key minted for it yet
                 };
+                let Ok(pubkey_bytes) = BASE64.decode(pubkey_b64) else { continue };
                 tracing::debug!(agent_id, peer_url = %peer_url, "LAN agent pubkey found on peer");
                 let uid = body.get("uid").and_then(|v| v.as_str()).filter(|u| !u.is_empty());
                 let uid_key = body.get("uid_public_key").and_then(|v| v.as_str()).and_then(|k| BASE64.decode(k).ok());
                 if let Ok(mut cache) = self.pubkey_cache.write() {
                     cache.insert(
-                        renamed.clone().unwrap_or_else(|| agent_id.to_string()),
+                        agent_id.to_string(),
                         LanPubkeyCacheEntry {
                             public_key: Some(pubkey_bytes.clone()),
                             uid_key: uid.zip(uid_key).map(|(u, k)| (u.to_string(), k)),
@@ -1730,13 +1740,13 @@ impl LanDiscoveryController {
                     );
                 }
                 // Dropping `inflight` here cancels the remaining requests.
-                return match renamed {
-                    Some(current) => LanPubkeyLookup::Renamed(current),
-                    None => LanPubkeyLookup::Found(pubkey_bytes),
-                };
+                return LanPubkeyLookup::Found(pubkey_bytes);
             }
         }
-
+        // Not cached: a repeat lookup asks again (rate-limited).
+        if let Some(current) = renamed {
+            return LanPubkeyLookup::Renamed(current);
+        }
         if let Ok(mut cache) = self.pubkey_cache.write() {
             cache.insert(
                 agent_id.to_string(),
@@ -2944,31 +2954,8 @@ mod handle_event_tests {
 }
 
 #[cfg(test)]
-mod lookup_rate_limiter_tests {
-    use super::LookupRateLimiter;
-
-    #[test]
-    fn allows_up_to_max_tokens_per_window() {
-        let mut limiter = LookupRateLimiter::new(3);
-        assert!(limiter.check());
-        assert!(limiter.check());
-        assert!(limiter.check());
-        assert!(!limiter.check(), "a 4th check within the same second must be denied");
-    }
-
-    #[test]
-    fn refills_after_the_window_elapses() {
-        let mut limiter = LookupRateLimiter::new(1);
-        assert!(limiter.check());
-        assert!(!limiter.check());
-        // Simulate the refill window having passed rather than sleeping in
-        // a test — same approach as the existing RATE_LIMIT_MAX tests use
-        // conceptually, just directly on the struct field since this type
-        // has no injectable clock.
-        limiter.last_refill -= std::time::Duration::from_secs(2);
-        assert!(limiter.check(), "must refill once a full second has elapsed");
-    }
-}
+#[path = "lan_discovery_rate_limiter_tests.rs"]
+mod lookup_rate_limiter_tests;
 
 #[cfg(test)]
 #[path = "lan_discovery_peer_fanout_tests.rs"]
