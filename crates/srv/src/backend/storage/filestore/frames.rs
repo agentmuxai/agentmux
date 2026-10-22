@@ -16,10 +16,6 @@
 //! `db_file_data` bump it for any deleted or filled-in part), so the counter
 //! doesn't recount a file whose bytes didn't change.
 
-// The writing side (`frame_parts`, `encode`) is called by tests until the
-// framer (spec §5.1) lands; the reading side is live.
-#![cfg_attr(not(test), allow(dead_code))]
-
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock, Mutex};
 
@@ -552,6 +548,8 @@ impl FileStore {
     }
 
     /// Turn every frame of a file back into part rows; the number undone.
+    /// For `decompress` (spec §5.4), which comes with the recovery tool.
+    #[cfg_attr(not(test), allow(dead_code))]
     #[track_caller]
     pub(crate) fn unframe_file(&self, zone_id: &str, name: &str) -> Result<usize, StoreError> {
         let out = self.write_txn(|tx| unframe(tx, zone_id, name, 0, i32::MAX - MAX_FRAME_PARTS))?;
@@ -559,7 +557,32 @@ impl FileStore {
         Ok(out)
     }
 
-    /// The bytes a file's frames hold and take: `(logical, stored, frames)`.
+    /// Where a file's frames start (part indices).
+    pub(crate) fn frame_starts(&self, zone_id: &str, name: &str) -> Result<HashSet<i32>, StoreError> {
+        self.read_conn(|conn| {
+            let mut stmt = conn.prepare_cached("SELECT first_part FROM db_file_frame WHERE zoneid = ?1 AND name = ?2")?;
+            let rows = stmt.query_map(params![zone_id, name], |r| r.get::<_, i32>(0))?;
+            Ok(rows.collect::<Result<_, _>>()?)
+        })
+    }
+
+    /// Stamp the store `GLOBAL_TRANSCRIPT_STORE_FRAMES_VERSION` (never lowering a
+    /// higher one): from here on a build that can't read frames refuses it.
+    /// The framer calls this before its first frame.
+    pub(crate) fn stamp_frames_version(&self) -> Result<(), StoreError> {
+        self.write_txn(|tx| {
+            let found: i64 = tx.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+            let want = super::core::GLOBAL_TRANSCRIPT_STORE_FRAMES_VERSION;
+            if found < want {
+                tx.execute_batch(&format!("PRAGMA user_version = {want};"))?;
+            }
+            Ok(())
+        })
+    }
+
+    /// The bytes the store's frames hold and take: `(logical, stored, frames)`.
+    /// For the Storage numbers (spec §7), which come with the recovery tool.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn frame_totals(&self) -> Result<(i64, i64, i64), StoreError> {
         self.read_conn(|conn| {
             Ok(conn.query_row(
@@ -574,3 +597,7 @@ impl FileStore {
 #[cfg(test)]
 #[path = "tests_frames.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests_frame_vector.rs"]
+mod tests_vector;

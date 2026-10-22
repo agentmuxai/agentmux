@@ -14,6 +14,7 @@ describe("summarizeAmbientOutcomes", () => {
         expect(s.rows.map((r) => r.name)).toEqual(["Session titles", "Session titles (recovery)", "Prompt suggestions"]);
         expect(s.rows[0].text).toBe("10 accepted · 30 kept · 1 refused · 4 skipped");
         expect(s.rows[1].text).toBe("2 accepted · 0 kept · 1 refused · 3 skipped · 1 failed");
+        expect(s.rows[1].counts).toEqual({ accepted: 2, kept: 0, refused: 1, skipped: 3, failed: 1 });
         expect(s.rows[1].detail).toContain("rejected:refusal: 1");
         expect(s.total).toBe(45 + 7 + 99);
         expect(s.unhealthyCount).toBe(0);

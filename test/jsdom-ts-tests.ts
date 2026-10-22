@@ -119,7 +119,6 @@ export const JSDOM_TS_TESTS = [
     "frontend/app/view/swarm/swarm-model-backlog.test.ts",
     "frontend/app/view/swarm/swarm-model.test.ts",
     "frontend/app/view/swarm/swarm-row-colors.test.ts",
-    "frontend/app/view/swarm/swarm-stats.test.ts",
     "frontend/app/view/swarm/swarm-view.test.ts",
     "frontend/app/view/sysinfo/sysinfo-model.test.ts",
     "frontend/app/view/term/termutil.test.ts",

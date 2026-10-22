@@ -655,6 +655,16 @@
           "default": 30,
           "description": "How many minutes \"Allow for a while\" lasts when you allow an agent to control an app."
         },
+        "agent:transcriptframes": {
+          "type": "boolean",
+          "default": false,
+          "description": "Compress the finished parts of agent transcripts in the global transcript store, 1 MiB at a time (about 6x smaller). Only parts at least 8 MiB from a transcript's end and received over a day ago; nothing a reader sees changes. Waits while an AgentMux build that can't read compressed history runs on this machine. See docs/specs/SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21.md."
+        },
+        "agent:transcriptdeltas": {
+          "type": "boolean",
+          "default": true,
+          "description": "With agent:transcriptframes on, also store each streamed reply's text once instead of once per streaming line (about 11% smaller again). Off: compression alone. See docs/specs/SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21.md §8."
+        },
         "agent:askquestiontimeoutms": {
           "type": "integer",
           "minimum": 1000,

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * "Select all" and Stats reachability and the broadcast/stop button conflict,
+ * "Select all" reachability and the broadcast/stop button conflict,
  * pinned through the actual `FleetToolbar` component.
  */
 
@@ -21,21 +21,16 @@ vi.mock("@/app/store/contextmenu", () => ({
 
 import { FleetToolbar } from "./swarm-fleet-toolbar";
 import type { SwarmViewModel } from "./swarm-model";
-import type { AmbientOutcomes } from "@/app/store/ambient-outcomes";
 
 afterEach(() => cleanup());
 
-function modelStub(initialSelected: string[] = [], outcomes: AmbientOutcomes | null = null) {
+function modelStub(initialSelected: string[] = []) {
     const [selected, setSelected] = createSignal<Set<string>>(new Set(initialSelected));
-    const [statsOpen, setStatsOpen] = createSignal(false);
     const [inFlight] = createSignal(false);
 
     const model = {
         selectedBlockIdsAtom: selected,
         otherInstancesAtom: () => null,
-        ambientOutcomesAtom: () => outcomes,
-        statsOpenAtom: statsOpen,
-        toggleStats: vi.fn(() => setStatsOpen(!statsOpen())),
         fleetActionInFlightAtom: inFlight,
         selectAll: vi.fn((ids: string[]) => setSelected(new Set(ids))),
         clearSelection: vi.fn(() => setSelected(new Set<string>())),
@@ -75,39 +70,18 @@ describe("FleetToolbar — select all", () => {
         expect(model.clearSelection).toHaveBeenCalled();
     });
 
-    it("does not render when there are no agents, no selection and no stats", () => {
+    it("does not render when there are no agents and no selection", () => {
         const model = modelStub([]);
         const { container } = render(() => <FleetToolbar model={model} allBlockIds={() => []} />);
         expect(container.querySelector(".swarm-fleet-toolbar")).toBeNull();
     });
 });
 
-describe("FleetToolbar — Stats", () => {
-    it("has no Groups button any more", () => {
+describe("FleetToolbar — no Groups or Stats", () => {
+    // The Stats panel moved to Warden's Ambient section (warden-ambient-manager.tsx).
+    it("has neither a Groups nor a Stats button", () => {
         const { queryByText } = render(() => <FleetToolbar model={modelStub(["a"])} allBlockIds={() => ["a"]} />);
         expect(queryByText(/Groups/)).toBeNull();
-    });
-
-    it("shows Stats once there are counts, even with no agents here, and toggles the panel", () => {
-        const model = modelStub([], { activity_summary: { accepted: 3 } });
-        const { getByText, container } = render(() => <FleetToolbar model={model} allBlockIds={() => []} />);
-        const stats = getByText("Stats").closest("button")!;
-        expect(stats.getAttribute("aria-expanded")).toBe("false");
-        fireEvent.click(stats);
-        expect(model.toggleStats).toHaveBeenCalled();
-        expect(stats.getAttribute("aria-expanded")).toBe("true");
-        expect(stats.getAttribute("aria-pressed")).toBe("true");
-        expect(container.querySelector(".swarm-stats-failing")).toBeNull();
-    });
-
-    it("says how many kinds of call are failing", () => {
-        const model = modelStub([], { activity_summary_pushed: { accepted: 1, cli_failed: 4 } });
-        const { getByText } = render(() => <FleetToolbar model={model} allBlockIds={() => []} />);
-        expect(getByText("1 failing")).not.toBeNull();
-    });
-
-    it("has no Stats button before any call has ended", () => {
-        const { queryByText } = render(() => <FleetToolbar model={modelStub(["a"], {})} allBlockIds={() => ["a"]} />);
         expect(queryByText("Stats")).toBeNull();
     });
 });
