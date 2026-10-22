@@ -184,6 +184,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         async move {
             let agent = s.mstore.input_history_delete(cmd.id).map_err(|e| format!("agent.input-history-delete: {e}"))?;
             if let Some(agent) = &agent {
+                // Forgetting is deliberate (the UI asks twice): the log says it happened, never what was typed.
+                tracing::info!(agent_id = %agent, entry_id = cmd.id, "input history: an entry was forgotten");
                 changed(&s, agent, "history");
             }
             Ok(InputHistoryRemovedResult { removed: u32::from(agent.is_some()) })
@@ -196,6 +198,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         async move {
             let removed = s.mstore.input_history_clear(&cmd.agent_id).map_err(|e| format!("agent.input-history-clear: {e}"))?;
             if removed > 0 {
+                tracing::info!(agent_id = %cmd.agent_id, entries = removed, "input history: an agent's history was cleared");
                 changed(&s, &cmd.agent_id, "history");
             }
             Ok(InputHistoryRemovedResult { removed: removed as u32 })

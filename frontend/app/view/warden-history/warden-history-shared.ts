@@ -60,3 +60,32 @@ export function formatWhen(ms: number): string {
     if (!ms) return "—";
     return new Date(ms).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
+
+/** An agent the Typed view can show. */
+export interface TypedAgent {
+    id: string;
+    name: string;
+}
+
+/**
+ * The agents the Typed view lists: every agent still defined, by name. Not
+ * `history.agents`, which lists the owners of transcripts: an agent whose first
+ * send failed has typed history and no transcript. What was typed to an agent
+ * is kept with it and goes when it is deleted (`agents/purge.rs`), so a deleted
+ * agent, whose transcripts the Agents view keeps, has none.
+ */
+export function typedAgents(defs: { id: string; name: string }[]): TypedAgent[] {
+    return defs
+        .map((d) => ({ id: d.id, name: d.name || d.id.slice(0, 8) }))
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || a.id.localeCompare(b.id));
+}
+
+/** How an entry was typed; a plain message from the composer says nothing. */
+export function typedTags(kind: string, source: string): string[] {
+    const tags: string[] = [];
+    if (kind === "slash") tags.push("slash command");
+    if (kind === "bang") tags.push("shell command");
+    if (source === "swarm") tags.push("from Swarm");
+    if (source === "backfill") tags.push("from an earlier conversation");
+    return tags;
+}
