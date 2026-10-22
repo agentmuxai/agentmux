@@ -89,7 +89,11 @@ pub fn config_for(provider: &str) -> Option<ServiceOAuthConfig> {
             token_url: "https://oauth2.googleapis.com/token",
             device_url: None,
             scopes: &["openid", "email", "profile"],
-            requires_secret: false,
+            // Google's token endpoint refuses a Desktop client's code exchange
+            // and refresh without its secret. That secret isn't confidential
+            // (RFC 8252 §8.5; spec §3.1), but it's required, so AgentMux's own
+            // client must ship its secret too once it's provisioned.
+            requires_secret: true,
             // A refresh token is returned only with `access_type=offline`,
             // and again on a later consent only with `prompt=consent`;
             // `include_granted_scopes` makes each new token cover every scope
@@ -370,7 +374,9 @@ pub fn resolve_client(
             cfg.provider
         ));
     };
-    if cfg.requires_secret && client.client_secret.is_none() {
+    // The user's own client must bring its secret. The built-in one has no
+    // secret field yet: it gets one when AgentMux's client is provisioned.
+    if cfg.requires_secret && client.mode != ClientMode::Builtin && client.client_secret.is_none() {
         return Err(format!(
             "{} requires a client secret — register your own OAuth app and \
              supply its client id + secret (BYO).",

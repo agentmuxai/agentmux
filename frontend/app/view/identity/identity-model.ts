@@ -21,7 +21,8 @@ import { WpsEvent } from "@/app/store/mps-events";
 
 export type AccountProvider = "github" | "openai" | "aws" | "anthropic" | "google" | "slack" | "custom" | "agentmux";
 export type AccountKind = "pat" | "role" | "api_key" | "env_ref" | "oauth";
-export type AccountStatus = "valid" | "expired" | "invalid" | "unknown" | "checking";
+/** `needs_reauth`: the provider refused a refresh (`invalid_grant`); the user must reconnect. */
+export type AccountStatus = "valid" | "expired" | "invalid" | "unknown" | "checking" | "needs_reauth";
 export type IdentityTab = "accounts" | "assignments";
 
 export interface SecretRef {
@@ -64,6 +65,10 @@ export interface AccountContext {
     anthropic_model_count?: number;
     slack_team?: string;
     slack_user?: string;
+    // Service OAuth (srv's oauth_client.rs): the scopes the provider granted,
+    // and the client the account was connected with. Never a secret.
+    granted_scopes?: string[];
+    oauth_client?: { mode: "builtin" | "byo" | "workspace"; client_id?: string };
 }
 
 export interface Account {
@@ -150,6 +155,31 @@ export interface DeleteCleanupReport {
     historyPath?: string;
 }
 
+/** Revoking an OAuth grant at the provider before the delete (`deleteidentityaccount`'s `revoke`). */
+export interface DeleteRevokeReport {
+    outcome: "revoked" | "failed";
+    detail?: string;
+}
+
+/** An account whose delete signs out at the provider first: connected with
+ *  service OAuth, its tokens in the keychain (srv revokes Google's). */
+export function revokesOnDelete(a: Pick<Account, "kind" | "secret_ref">): boolean {
+    return a.kind === "oauth" && a.secret_ref?.backend === "keychain";
+}
+
+/** A delete kept the account because signing out at the provider failed. */
+export interface RevokeFailure {
+    account: Account;
+    detail: string;
+}
+
+/** What the notice says when signing out failed and the account was kept. */
+export function revokeFailureText(f: RevokeFailure): string {
+    const provider = PROVIDER_LABELS[brandForProvider(f.account.provider)] ?? f.account.provider;
+    const detail = f.detail.replace(/[.\s]+$/, "") || "unknown error";
+    return `Couldn't sign out of ${provider}: ${detail}. Try again, or remove it from AgentMux only.`;
+}
+
 /**
  * The notice shown after a delete, or null when the row disappearing is
  * feedback enough (SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04.md
@@ -160,9 +190,16 @@ export function deleteResultNotice(result: {
     deleted: boolean;
     affectedAgents?: string[];
     cleanup?: DeleteCleanupReport | null;
+    revoke?: DeleteRevokeReport | null;
 }): string | null {
     if (!result.deleted) return "This account was already removed.";
     const parts: string[] = [];
+    // Removed without signing out (Remove anyway): the grant may live on.
+    if (result.revoke?.outcome === "failed") {
+        parts.push(
+            "Removed from AgentMux only. Its access may still be listed in your account's security settings at the provider; remove it there.",
+        );
+    }
     const cleanup = result.cleanup;
     if (cleanup?.outcome === "failed") {
         parts.push(
@@ -527,6 +564,29 @@ export class IdentityViewModel implements ViewModel {
         this.setDeleteNotice(null);
     };
 
+    // A delete that kept the account because signing out at the provider
+    // failed (spec SPEC_GOOGLE_CONNECTORS_GMAIL_CALENDAR_DRIVE_2026_10_14.md
+    // §7 "Disconnect"): the notice offers Try again and Remove anyway.
+    private _revokeFailure = createSignal<RevokeFailure | null>(null);
+    revokeFailureAtom: Accessor<RevokeFailure | null> = this._revokeFailure[0];
+    private setRevokeFailure: Setter<RevokeFailure | null> = this._revokeFailure[1];
+
+    dismissRevokeFailure = (): void => {
+        this.setRevokeFailure(null);
+    };
+
+    /** Try signing out at the provider again, then delete. */
+    retryRevoke = async (): Promise<void> => {
+        const f = this.revokeFailureAtom();
+        if (f) await this.deleteAccount(f.account.id, accountLabel(f.account), { account: f.account, requireRevoke: true });
+    };
+
+    /** Delete without signing out at the provider. */
+    removeWithoutRevoke = async (): Promise<void> => {
+        const f = this.revokeFailureAtom();
+        if (f) await this.deleteAccount(f.account.id, accountLabel(f.account), { account: f.account, requireRevoke: false });
+    };
+
     /** Surface a transient notice in the Accounts tab's banner row (the
      *  same dismissible UI the delete disclosure uses). Added for the
      *  Bind-to-Agent menu's failure feedback (reagentx P1 on #2485) —
@@ -655,15 +715,39 @@ export class IdentityViewModel implements ViewModel {
             this.cancelForm();
         }
         try {
-            await this.deleteAccount(account.id, accountLabel(account));
+            await this.deleteAccount(account.id, accountLabel(account), {
+                account,
+                requireRevoke: revokesOnDelete(account),
+            });
         } finally {
             this.setPendingDelete(null);
         }
     };
 
-    deleteAccount = async (id: string, label?: string): Promise<void> => {
+    /**
+     * Delete an account. `requireRevoke` keeps it when signing out at the
+     * provider fails, and `account` is what the Try again / Remove anyway
+     * notice then acts on.
+     */
+    deleteAccount = async (
+        id: string,
+        label?: string,
+        opts?: { account?: Account; requireRevoke?: boolean },
+    ): Promise<void> => {
         try {
-            const result = await RpcApi.DeleteIdentityAccountCommand(TabRpcClient, { id });
+            const result = await RpcApi.DeleteIdentityAccountCommand(
+                TabRpcClient,
+                opts?.requireRevoke ? { id, require_revoke: true } : { id },
+            );
+            if (result && !result.deleted && result.revoke?.outcome === "failed") {
+                const account = opts?.account ?? this.accountsAtom().find((a) => a.id === id);
+                if (account) {
+                    this.setDeleteNotice(null);
+                    this.setRevokeFailure({ account, detail: result.revoke.detail ?? "unknown error" });
+                    return;
+                }
+            }
+            this.setRevokeFailure(null);
             // Layer-4 disclosure (spec §4) plus the cleanup outcome. null
             // (nothing to say) also clears any stale notice from a
             // previous delete.

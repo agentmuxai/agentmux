@@ -72,4 +72,34 @@
         color: var(--secondary-text-color);
         font-style: italic;
     }
+
+    // The Cloud console steps for making a BYO client.
+    .oauth-steps {
+        margin: 0;
+        padding-left: var(--space-4);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-0-5);
+    }
+
+    // "Using your saved client <id> [Your own client]".
+    .oauth-saved-client {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--space-1);
+        font-size: var(--text-xs);
+        color: var(--secondary-text-color);
+    }
+
+    .oauth-client-id {
+        font-family: var(--font-mono);
+        color: var(--main-text-color);
+        overflow-wrap: anywhere;
+    }
+
+    .oauth-error-title {
+        font-weight: 600;
+        margin-bottom: var(--space-0-5);
+    }
 }

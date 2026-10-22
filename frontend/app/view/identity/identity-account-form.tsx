@@ -15,6 +15,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { OAuthConnectPanel } from "@/app/view/accounts/OAuthConnectPanel";
 import { supportsOAuth } from "@/app/view/accounts/oauth-catalog";
+import { isServiceOAuthAccount, reconnectScopes } from "@/app/view/accounts/oauth-account-state";
 import "./identity-view.scss";
 import "@/app/view/accounts/oauth-connect.scss";
 import { Button, IconButton } from "@/app/element/ui";
@@ -85,6 +86,12 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
     // For an existing keychain account, start locked (masked) until Replace.
     const [keyReplacing, setKeyReplacing] = createSignal(!editingIsKeychain);
     const validationEndpoint = (): string | undefined => KEY_VALIDATION_ENDPOINT[provider()];
+    // The account being edited, when it was connected with service OAuth
+    // here: its OAuth path re-authorizes it.
+    const reauthTarget = (): Account | null => {
+        const e = editing();
+        return e && e.provider === provider() && isServiceOAuthAccount(e) ? e : null;
+    };
 
     // Non-rendered context keys: not editable in the form, so they must be
     // carried across an edit rather than dropped. Everything else is rebuilt
@@ -309,11 +316,16 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
 
                     {/* OAuth (browser login) replaces the secret/key sections —
                         on success the backend creates the keychain-backed account
-                        itself, so this form's secret-ref + Save path is skipped. */}
+                        itself, so this form's secret-ref + Save path is skipped.
+                        Editing an account connected that way authorizes it
+                        again rather than making a second one. */}
                     <Show when={kind() === "oauth"}>
                         <OAuthConnectPanel
                             provider={provider()}
                             name={name}
+                            accountId={reauthTarget()?.id}
+                            scopes={reauthTarget() ? reconnectScopes(reauthTarget()!) : undefined}
+                            clientIdHint={reauthTarget()?.context.oauth_client?.client_id}
                             onConnected={() => model.cancelForm()}
                         />
                     </Show>
