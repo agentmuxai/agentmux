@@ -448,3 +448,11 @@ fn a_saved_client_round_trips_as_json() {
     let back: SavedClient = serde_json::from_str(&json).unwrap();
     assert_eq!((back.client_id.as_str(), back.mode), ("cid", ClientMode::Workspace));
 }
+
+#[test]
+fn a_reply_never_prints_its_body() {
+    let reply = HttpReply { status: 200, body: serde_json::json!({ "access_token": "ya29.secret", "refresh_token": "1//secret" }) };
+    let shown = format!("{reply:?}");
+    assert!(shown.contains("200"));
+    assert!(!shown.contains("secret"));
+}
