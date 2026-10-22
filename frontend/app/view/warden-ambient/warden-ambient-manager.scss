@@ -12,7 +12,7 @@
     }
 
     tr[data-state="failing"] td {
-        color: var(--warning-text-color, var(--warning-color));
+        color: var(--warning-text-color);
     }
 
     tfoot td {
