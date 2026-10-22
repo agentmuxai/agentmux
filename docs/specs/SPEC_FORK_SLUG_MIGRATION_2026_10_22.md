@@ -285,7 +285,10 @@ As built (`crates/srv/src/backend/slug_migration/`):
   - a finish, with the fingerprints restore mode compares.
 
   A resume reuses the recorded before-image and `retired_at`, so a step that stopped halfway finishes the same way.
-  An apply resumes the latest unfinished run, after re-checking the preconditions.
+  An apply resumes the latest unfinished run, after re-checking the preconditions. Each record is synced (the
+  file, and the folder when the journal is created) before the step it allows runs. A last record cut short by a
+  crash is discarded on open and cut off the file, and an append onto a file that doesn't end in a newline starts
+  a new line first, so a torn write never merges with the next record.
 - **Steps.**
   - S1 rewrites the record's raw JSON under `with_record_locked` (`LockedRecord::replace_raw`, the one write that
     may change a non-empty slug). The former slug is stored lowercased, with the run's `retired_at`.

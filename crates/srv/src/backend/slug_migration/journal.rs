@@ -85,21 +85,38 @@ impl Journal {
     pub fn create(dir: &Path, started_at: i64, retired_at: i64, plan: ForkSlugPlan, backups: Vec<BackupEntry>) -> Result<Journal, String> {
         let mut j = Journal { path: dir.join(JOURNAL_FILE), records: Vec::new() };
         j.append(Record::Header { version: VERSION, started_at, retired_at, plan, backups })?;
+        // The file's directory entry is durable too, not only its bytes.
+        sync_dir(dir);
         Ok(j)
     }
 
-    /// The journal at `path`. A last line cut short by a crash is dropped: it
-    /// was never acted on, since a record is written before what it allows.
+    /// The journal at `path`. A last record cut short by a crash (no newline
+    /// after it, or one that doesn't parse) was never acted on, since a record
+    /// is written before what it allows: it is discarded, and the file cut
+    /// back to the end of its last complete line, so the next record starts on
+    /// a line of its own. A complete record missing only its newline is kept.
+    /// Any other line that doesn't parse is an error.
     pub fn open(path: &Path) -> Result<Journal, String> {
-        let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+        let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let mut keep = bytes.len();
+        // The last line, and where it starts.
+        let body = bytes.strip_suffix(b"\n").unwrap_or(&bytes);
+        let start = body.iter().rposition(|b| *b == b'\n').map_or(0, |i| i + 1);
+        let last = &body[start..];
+        if !last.iter().all(u8::is_ascii_whitespace) && serde_json::from_slice::<Record>(last).is_err() {
+            keep = start;
+            tracing::warn!(journal = %path.display(), discarded = last.len(), "fork slug migration: discarded a torn last journal record");
+        }
+        if keep < bytes.len() {
+            let f = std::fs::OpenOptions::new().write(true).open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+            f.set_len(keep as u64).map_err(|e| format!("{}: {e}", path.display()))?;
+            f.sync_all().map_err(|e| format!("{}: {e}", path.display()))?;
+        }
+        let text = String::from_utf8_lossy(&bytes[..keep]);
         let mut records = Vec::new();
-        for (i, line) in lines.iter().enumerate() {
-            match serde_json::from_str::<Record>(line) {
-                Ok(r) => records.push(r),
-                Err(_) if i + 1 == lines.len() => break,
-                Err(e) => return Err(format!("{} line {}: {e}", path.display(), i + 1)),
-            }
+        for (i, line) in text.lines().enumerate().filter(|(_, l)| !l.trim().is_empty()) {
+            let record = serde_json::from_str::<Record>(line).map_err(|e| format!("{} line {}: {e}", path.display(), i + 1))?;
+            records.push(record);
         }
         match records.first() {
             Some(Record::Header { version, .. }) if *version <= VERSION => {}
@@ -112,17 +129,27 @@ impl Journal {
         self.path.parent().map(Path::to_path_buf).unwrap_or_default()
     }
 
-    /// Append `record` and sync it to disk before returning.
+    /// Append `record` on a line of its own and sync it to disk before
+    /// returning: the step it allows runs only once it is durable. A file
+    /// that doesn't end in a newline (a record written without one) gets
+    /// one first, so two records never share a line.
     pub fn append(&mut self, record: Record) -> Result<(), String> {
+        use std::io::{Read, Seek, SeekFrom};
+        let err = |e: std::io::Error| format!("{}: {e}", self.path.display());
         let mut line = serde_json::to_string(&record).map_err(|e| e.to_string())?;
         line.push('\n');
-        let mut f = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)
-            .map_err(|e| format!("{}: {e}", self.path.display()))?;
-        f.write_all(line.as_bytes()).map_err(|e| format!("{}: {e}", self.path.display()))?;
-        f.sync_data().map_err(|e| format!("{}: {e}", self.path.display()))?;
+        let mut f = std::fs::OpenOptions::new().create(true).read(true).append(true).open(&self.path).map_err(err)?;
+        let len = f.metadata().map_err(err)?.len();
+        if len > 0 {
+            let mut last = [0u8; 1];
+            f.seek(SeekFrom::Start(len - 1)).map_err(err)?;
+            f.read_exact(&mut last).map_err(err)?;
+            if last[0] != b'\n' {
+                line.insert(0, '\n');
+            }
+        }
+        f.write_all(line.as_bytes()).map_err(err)?;
+        f.sync_all().map_err(err)?;
         self.records.push(record);
         Ok(())
     }
@@ -204,6 +231,19 @@ impl Journal {
         }
     }
 }
+
+/// Sync a directory, so a file just created in it survives a power loss.
+/// Windows makes a new directory entry durable with the file itself; there is
+/// no directory handle to sync there.
+#[cfg(unix)]
+fn sync_dir(dir: &Path) {
+    if let Ok(d) = std::fs::File::open(dir) {
+        let _ = d.sync_all();
+    }
+}
+
+#[cfg(not(unix))]
+fn sync_dir(_dir: &Path) {}
 
 /// Every run's journal under `backups`, newest first.
 pub fn journals(backups: &Path) -> Vec<PathBuf> {
