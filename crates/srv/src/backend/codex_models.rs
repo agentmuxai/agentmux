@@ -13,6 +13,8 @@ use crate::backend::model_catalog::CatalogModel;
 
 /// The cache file's name in a Codex config dir.
 pub const MODELS_CACHE_FILE: &str = "models_cache.json";
+/// What `codex login` writes in a Codex config dir.
+const AUTH_FILE: &str = "auth.json";
 
 #[derive(serde::Deserialize)]
 struct Cache {
@@ -60,14 +62,22 @@ fn parse(contents: &str) -> Option<(String, Vec<CatalogModel>)> {
 /// list would let a pane bound to another account (a different plan) pick a
 /// model it can't run. Empty when no account has a list yet (a fresh sign-in
 /// before its first turn) or the lists share nothing; the frontend then keeps
-/// its curated list.
+/// its curated list. A signed-in account (an `auth.json`) without a list yet
+/// makes the common list unknown too: the others' list might not suit it.
+/// Directories with neither (another provider's account) are ignored.
 pub fn models_every_account_lists(dirs: impl IntoIterator<Item = PathBuf>) -> Vec<CatalogModel> {
-    let mut lists: Vec<(String, Vec<CatalogModel>)> = dirs
-        .into_iter()
-        .filter_map(|d| std::fs::read_to_string(d.join(MODELS_CACHE_FILE)).ok())
-        .filter_map(|s| parse(&s))
-        .filter(|(_, models)| !models.is_empty())
-        .collect();
+    let mut lists: Vec<(String, Vec<CatalogModel>)> = Vec::new();
+    for d in dirs {
+        let list = std::fs::read_to_string(d.join(MODELS_CACHE_FILE))
+            .ok()
+            .and_then(|s| parse(&s))
+            .filter(|(_, models)| !models.is_empty());
+        match list {
+            Some(l) => lists.push(l),
+            None if d.join(AUTH_FILE).is_file() => return Vec::new(),
+            None => {}
+        }
+    }
     // RFC 3339 timestamps from the same CLI compare correctly as text.
     lists.sort_by(|a, b| b.0.cmp(&a.0));
     let Some(((_, newest), others)) = lists.split_first() else {
@@ -160,6 +170,21 @@ mod tests {
         assert_eq!(ids(models_every_account_lists([plus.clone(), none, pro.clone()])), ["gpt-6-astra", "gpt-5.6-sol"]);
         // One account: its own list.
         assert_eq!(ids(models_every_account_lists([pro])), ["gpt-6-pro", "gpt-6-astra", "gpt-5.6-sol"]);
+    }
+
+    #[test]
+    fn a_signed_in_account_without_a_list_yet_makes_the_common_list_unknown() {
+        let root = tempfile::tempdir().unwrap();
+        let (old, fresh, other) = (root.path().join("a"), root.path().join("b"), root.path().join("c"));
+        for d in [&old, &fresh, &other] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        std::fs::write(old.join(MODELS_CACHE_FILE), cache("2026-10-22T00:00:00Z", &[("gpt-6-pro", "list", 1)])).unwrap();
+        // `other` has neither file: not a Codex sign-in, ignored.
+        assert_eq!(models_every_account_lists([old.clone(), fresh.clone(), other]).len(), 1);
+        // `fresh` signed in but hasn't run a turn: its models are unknown.
+        std::fs::write(fresh.join(AUTH_FILE), "{}").unwrap();
+        assert!(models_every_account_lists([old, fresh]).is_empty());
     }
 
     #[test]

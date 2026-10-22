@@ -251,6 +251,20 @@ fn flag_value<'a>(flags: &'a [String], names: &[&str]) -> Option<&'a str> {
     found
 }
 
+/// `args` without any `--model` / `-m` (and its value) or `--model=…`.
+fn without_model_flags(args: Vec<String>) -> Vec<String> {
+    let mut out = Vec::with_capacity(args.len());
+    let mut it = args.into_iter();
+    while let Some(a) = it.next() {
+        if a == "--model" || a == "-m" {
+            it.next();
+        } else if !a.starts_with("--model=") {
+            out.push(a);
+        }
+    }
+    out
+}
+
 /// `base` without any of [`OWNED_FLAGS`] (and their values).
 fn without_owned_flags(base: Vec<String>) -> Vec<String> {
     let mut out = Vec::with_capacity(base.len());
@@ -549,7 +563,24 @@ fn with_runtime_flags_listed(meta: &MetaMapType, args: Vec<String>, listed: &[St
             .map(str::to_string)
     };
 
-    let have_model = flag_value(&args, &["--model", "-m"]).map(str::to_string);
+    let mut args = args;
+    let mut have_model = flag_value(&args, &["--model", "-m"]).map(str::to_string);
+    // A Codex model already in the stored argv (an older pane's `--model
+    // gpt-5.5`) that no account lists any more is dropped and chosen again
+    // below, unless it is the agent definition's own choice.
+    if provider_id == "codex" && !listed.is_empty() {
+        let definition_flags: Vec<String> = crate::backend::obj::meta_get_string(meta, "agent:provider_flags", "")
+            .split_whitespace()
+            .map(str::to_string)
+            .collect();
+        let definition_model = flag_value(&definition_flags, &["--model", "-m"]);
+        if let Some(m) = have_model.as_deref() {
+            if !listed.iter().any(|l| l == m) && definition_model != Some(m) {
+                args = without_model_flags(args);
+                have_model = None;
+            }
+        }
+    }
     let have_effort = flag_value(&args, &["--effort"]).is_some();
     let model = have_model.clone().unwrap_or_else(|| {
         runtime("model")
@@ -1225,6 +1256,15 @@ mod tests {
         };
         assert_eq!(run("gpt-6-astra").as_deref(), Some("gpt-6-astra"), "a listed pick is kept");
         assert_eq!(run("gpt-5.5").as_deref(), Some("gpt-7-nova"), "a retired one is replaced");
+
+        // Already in the stored argv (an older pane): replaced too, once, and
+        // the stdin marker stays last; but the definition's own model is kept.
+        let mut meta = meta_with("codex", Some(json!({ "model": "gpt-5.5" })));
+        let out = with_runtime_flags_listed(&meta, s(&["exec", "--model", "gpt-5.5", "-"]), &listed);
+        assert_eq!(out, s(&["exec", "--model", "gpt-7-nova", "-"]));
+        meta.insert("agent:provider_flags".to_string(), json!("--model gpt-5.5"));
+        let out = with_runtime_flags_listed(&meta, s(&["exec", "-", "--model", "gpt-5.5"]), &listed);
+        assert_eq!(after(&out, "--model").as_deref(), Some("gpt-5.5"), "the definition's choice");
     }
 
     #[test]
