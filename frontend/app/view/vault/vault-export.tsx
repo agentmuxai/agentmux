@@ -45,6 +45,8 @@ export function VaultExportDialog(props: { onClose: () => void }): JSX.Element {
     const [busy, setBusy] = createSignal(false);
     const [error, setError] = createSignal<string | null>(null);
     const [done, setDone] = createSignal<{ count: number; file_name: string } | null>(null);
+    // An AgentMux `.vault` file, or a KeePass database to take to another manager.
+    const [format, setFormat] = createSignal<"vault" | "kdbx">("vault");
 
     const groups = createMemo(() =>
         ORDER.map((section) => ({ section, entries: entries().filter((e) => e.section === section) })).filter((g) => g.entries.length > 0)
@@ -78,7 +80,7 @@ export function VaultExportDialog(props: { onClose: () => void }): JSX.Element {
         try {
             const all = selected().length === entries().length;
             const today = new Date().toISOString().slice(0, 10);
-            const res = await exportVault({ ids: all ? undefined : selected().map((e) => e.id), passphrase: pass(), defaultName: `agentmux-${today}` });
+            const res = await exportVault({ ids: all ? undefined : selected().map((e) => e.id), passphrase: pass(), defaultName: `agentmux-${today}`, format: format() });
             if (res) {
                 setDone(res);
                 setPass("");
@@ -106,13 +108,32 @@ export function VaultExportDialog(props: { onClose: () => void }): JSX.Element {
                                 Saved {done()!.count} {done()!.count === 1 ? "entry" : "entries"} to <strong>{done()!.file_name}</strong>.
                             </p>
                             <p class="warden-manager-dim">
-                                {"Keep the passphrase somewhere safe: nothing can recover the file without it. It's an age file, so `age -d "}
-                                {done()!.file_name}
-                                {"` opens it without AgentMux."}
+                                <Show
+                                    when={format() === "kdbx"}
+                                    fallback={
+                                        <>
+                                            {"Keep the passphrase somewhere safe: nothing can recover the file without it. It's an age file, so `age -d "}
+                                            {done()!.file_name}
+                                            {"` opens it without AgentMux."}
+                                        </>
+                                    }
+                                >
+                                    {"Open it in KeePassXC, KeePassDX or Strongbox with that password. Keep the password somewhere safe: nothing can recover the file without it. It is a KDBX 4.1 file, so a KeePass app from before 2022 can't open it."}
+                                </Show>
                             </p>
                         </div>
                     }
                 >
+                    <div class="vault-export-format" role="radiogroup" aria-label="File format">
+                        <label class="vault-check">
+                            <input type="radio" name="vault-export-format" checked={format() === "vault"} onChange={() => setFormat("vault")} />
+                            <strong>AgentMux Vault file</strong> <span class="warden-manager-dim">(.vault, recommended: every kind, part and detail)</span>
+                        </label>
+                        <label class="vault-check">
+                            <input type="radio" name="vault-export-format" checked={format() === "kdbx"} onChange={() => setFormat("kdbx")} />
+                            <strong>KeePass database</strong> <span class="warden-manager-dim">(.kdbx, to open in KeePassXC, KeePassDX or Strongbox)</span>
+                        </label>
+                    </div>
                     <div class="vault-export-entries" role="group" aria-label="What to export">
                         <For each={groups()}>
                             {(g) => (

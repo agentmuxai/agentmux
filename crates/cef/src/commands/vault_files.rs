@@ -32,10 +32,10 @@ fn key_file_for(pick_id: &str) -> Option<PathBuf> {
 }
 
 /// A file name the save dialog may suggest: letters, digits, `.`, `_` and `-`.
-fn suggested_name(raw: &str) -> String {
+fn suggested_name(raw: &str, extension: &str) -> String {
     let clean: String = raw.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')).take(80).collect();
-    let stem = clean.trim_end_matches(".vault").trim_matches('.');
-    format!("{}.vault", if stem.is_empty() { "agentmux" } else { stem })
+    let stem = clean.trim_end_matches(".vault").trim_end_matches(".kdbx").trim_matches('.');
+    format!("{}.{extension}", if stem.is_empty() { "agentmux" } else { stem })
 }
 
 /// Relays one Vault operation to srv, as the host.
@@ -51,22 +51,28 @@ async fn relay(state: &Arc<AppState>, body: Value) -> Result<Value, String> {
 /// `vault_export`: ask where to save, then have srv write the encrypted file there.
 /// Answers `{ cancelled: true }` if the person closes the dialog.
 pub async fn export(state: &Arc<AppState>, args: &Value) -> Result<Value, String> {
-    let name = suggested_name(args.get("default_name").and_then(Value::as_str).unwrap_or(""));
+    // A `.vault` file, or a KeePass database.
+    let (format, extension, filter) = match args.get("format").and_then(Value::as_str) {
+        Some("kdbx") => ("kdbx", "kdbx", "KeePass database"),
+        _ => ("vault", "vault", "AgentMux Vault"),
+    };
+    let name = suggested_name(args.get("default_name").and_then(Value::as_str).unwrap_or(""), extension);
     let path = tokio::task::spawn_blocking(move || {
         let _guard = super::platform::host_dialog_guard();
-        rfd::FileDialog::new().set_title("Export the Vault").set_file_name(name).add_filter("AgentMux Vault", &["vault"]).save_file()
+        rfd::FileDialog::new().set_title("Export the Vault").set_file_name(name).add_filter(filter, &[extension]).save_file()
     })
     .await
     .map_err(|e| format!("vault_export: {e}"))?;
     let Some(mut path) = path else { return Ok(json!({ "cancelled": true })) };
     if path.extension().is_none() {
-        path.set_extension("vault");
+        path.set_extension(extension);
     }
     tracing::info!("[vault] export to a file the person chose");
     relay(
         state,
         json!({
             "op": "export",
+            "format": format,
             "path": path.to_string_lossy(),
             "ids": args.get("ids"),
             "passphrase": args.get("passphrase").and_then(Value::as_str).unwrap_or(""),
@@ -252,10 +258,13 @@ mod tests {
 
     #[test]
     fn a_suggested_file_name_is_plain_and_ends_in_vault() {
-        assert_eq!(suggested_name("agentmux-2026-10-20"), "agentmux-2026-10-20.vault");
-        assert_eq!(suggested_name("../../evil name.vault"), "evilname.vault");
-        assert_eq!(suggested_name(""), "agentmux.vault");
-        assert_eq!(suggested_name("a/b\\c:d"), "abcd.vault");
-        assert!(suggested_name(&"x".repeat(500)).len() <= 86);
+        assert_eq!(suggested_name("agentmux-2026-10-20", "vault"), "agentmux-2026-10-20.vault");
+        assert_eq!(suggested_name("../../evil name.vault", "vault"), "evilname.vault");
+        assert_eq!(suggested_name("", "vault"), "agentmux.vault");
+        assert_eq!(suggested_name("a/b\\c:d", "vault"), "abcd.vault");
+        // A KeePass database takes `.kdbx`, and drops either extension it was already given.
+        assert_eq!(suggested_name("agentmux-2026-10-20", "kdbx"), "agentmux-2026-10-20.kdbx");
+        assert_eq!(suggested_name("backup.vault", "kdbx"), "backup.kdbx");
+        assert!(suggested_name(&"x".repeat(500), "vault").len() <= 86);
     }
 }

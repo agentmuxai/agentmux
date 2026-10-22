@@ -95,7 +95,8 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 # text from DOCX/PPTX/ODT (quick-xml over the zip parts), spreadsheets
 # (calamine), PDF page count (lopdf). All pure Rust.
 quick-xml = "0.39"
-keepass = { version = "0.17", default-features = false }
+keepass = { version = "0.17", default-features = false, features = ["save_kdbx4"] }
+argon2 = { package = "rust-argon2", version = "3.0" }
 calamine = { version = "0.36", default-features = false }
 lopdf = { version = "0.45", default-features = false }
 hex = "0.4"
@@ -202,8 +203,6 @@ windows-sys = { version = "0.59", features = [
 winres = "0.1"
 
 [dev-dependencies]
-keepass = { version = "0.17", default-features = false, features = ["save_kdbx4"] }
-argon2 = { package = "rust-argon2", version = "3.0" }
 # A paused, auto-advancing clock for tests that only wait on tokio time
 # (`#[tokio::test(start_paused = true)]`). Dev-only: never in a release build.
 tokio = { version = "1", features = ["test-util"] }

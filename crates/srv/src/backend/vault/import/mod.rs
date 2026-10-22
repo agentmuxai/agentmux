@@ -17,7 +17,7 @@
 mod bitwarden;
 mod env;
 mod kdbx;
-pub use kdbx::MAX_KEY_FILE;
+pub use kdbx::{MAX_ARGON_ITERATIONS, MAX_ARGON_MEMORY, MAX_ARGON_PARALLELISM, MAX_KEY_FILE};
 mod logins;
 mod onepux;
 
