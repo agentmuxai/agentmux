@@ -1,6 +1,6 @@
 # Spec: the Kanban's backlog reminder off by default, with a setting to turn it on
 
-**Status:** proposed
+**Status:** active — implemented in #5322.
 **Date:** 2026-10-22
 **Author:** AgentA@Area54, at the operator's request
 **Verified against:** `agentmux` `main` @ `cc46a8c21` (2026-10-22), by reading code, and live on 0.59.38.
