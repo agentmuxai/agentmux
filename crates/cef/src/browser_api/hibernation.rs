@@ -65,6 +65,25 @@ pub async fn check(state: &Arc<AppState>, block_id: &str) -> Result<Value, Strin
     }))
 }
 
+/// Freeze the pane's page (`Page.setWebLifecycleState` frozen: no script, no
+/// timers, its state kept) or let it run again. The window freezes a pane hidden
+/// for a while and thaws it when shown; any other CDP call thaws it too
+/// (`cdp::CdpSession::call`), so an agent's action never waits on it. False
+/// when the pane has no page.
+pub async fn set_frozen(state: &Arc<AppState>, block_id: &str, frozen: bool) -> Result<Value, String> {
+    let Some(label) = state.live_browser_pane_label(block_id) else {
+        return Ok(json!(false));
+    };
+    let Some(browser_id) = state.get_browser(&label).map(|b| b.identifier()) else {
+        return Ok(json!(false));
+    };
+    let mut cdp = CdpSession::attach(state, &label);
+    let state_name = if frozen { "frozen" } else { "active" };
+    cdp.call(super::cdp::LIFECYCLE_METHOD, json!({ "state": state_name })).await?;
+    super::cdp::note_frozen(browser_id, frozen);
+    Ok(json!(true))
+}
+
 /// Whether the page's `window` has a `beforeunload` listener (added with
 /// `addEventListener` or as `onbeforeunload`). Unknown counts as yes: a check
 /// that couldn't run must keep the pane awake.

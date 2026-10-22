@@ -258,6 +258,9 @@ declare global {
         /** What the pane's page is doing that a hibernation would lose
          *  (browser_api/hibernation.rs). Absent on hosts without it. */
         hibernationCheck?(blockId: string): Promise<BrowserHibernationCheck>;
+        /** Freeze the pane's page (no script, no timers) or let it run again
+         *  (browser_api/hibernation.rs). False when it has no page. */
+        setFrozen?(blockId: string, frozen: boolean): Promise<boolean>;
         /** The host's memory pressure level (memory_pressure.rs). */
         memoryPressure?(): Promise<"normal" | "warn" | "critical">;
         /** Bring a popup window a pane's page opened (`popup-…`) to the front. */

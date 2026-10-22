@@ -588,6 +588,12 @@ async fn route_command(
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
             crate::browser_api::hibernation::check(state, block_id).await
         }
+        "browser_pane_set_frozen" => {
+            // Freeze a hidden pane's page or let it run again (browser_api::hibernation).
+            let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
+            let frozen = args.get("frozen").and_then(|v| v.as_bool()).unwrap_or(false);
+            crate::browser_api::hibernation::set_frozen(state, block_id, frozen).await
+        }
         "memory_pressure_level" => Ok(serde_json::json!(crate::memory_pressure::current_level().as_str())),
         "browser_pane_close" => {
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");

@@ -30,6 +30,7 @@ import {
     hibernationEnabled,
     HOVER_WAKE_GIVE_UP_MS,
     isCapturing,
+    freezeAwakeReason,
     isLaunchMount,
     isOverdue,
     NOT_KEPT_TEXT,
@@ -348,9 +349,14 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             { defer: true },
         ),
     );
+    // A hidden pane awake for a while is frozen: its page runs no script and
+    // no timers until it is shown again (an agent's call thaws it in the host).
+    let frozen = false;
     const tryHibernate = async (reason: SleepReason): Promise<string | null> => {
         if (sleeping()) return "already asleep";
         if (visible()) return "visible";
+        // The page check is a CDP call, which thaws a frozen page in the host.
+        frozen = false;
         const declined =
             awakeReason(facts(), Date.now(), getSettingsKeyAtom("browser:keepawakesites")()) ??
             pageAwakeReason(await getApi().browserPanes.hibernationCheck?.(model.blockId).catch(() => null));
@@ -363,6 +369,37 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
         await model.hibernate(reason);
         return null;
     };
+    const thaw = (why: string) => {
+        if (!frozen) return;
+        frozen = false;
+        diag(`[hibernate] thaw why=${why}`);
+        void getApi().browserPanes.setFrozen?.(model.blockId, false).catch(() => {});
+    };
+    const tryFreeze = async (): Promise<string | null> => {
+        if (frozen) return "already frozen";
+        if (sleeping() || visible()) return sleeping() ? "asleep" : "visible";
+        const declined =
+            awakeReason(facts(), Date.now(), getSettingsKeyAtom("browser:keepawakesites")()) ??
+            freezeAwakeReason(await getApi().browserPanes.hibernationCheck?.(model.blockId).catch(() => null));
+        if (declined != null) return declined;
+        if (visible() || sleeping()) return visible() ? "visible" : "asleep";
+        if (!(await getApi().browserPanes.setFrozen?.(model.blockId, true).catch(() => false))) return "can't freeze";
+        // Shown while the call was out: thaw at once.
+        frozen = true;
+        if (visible()) thaw("show");
+        else diag(`[hibernate] frozen`);
+        return null;
+    };
+    createEffect(
+        on(visible, (v) => {
+            if (v) thaw("show");
+        }),
+    );
+    createEffect(
+        on(prewakeTabId, (t) => {
+            if (t != null && t === tabId) thaw("intent");
+        }),
+    );
     onCleanup(
         registerHibernatablePane({
             blockId: model.blockId,
@@ -371,6 +408,8 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             hiddenSince: () => hiddenSince,
             tryHibernate,
             wake,
+            isFrozen: () => frozen,
+            tryFreeze,
         }),
     );
 
