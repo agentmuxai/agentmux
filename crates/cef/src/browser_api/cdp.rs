@@ -364,11 +364,29 @@ wrap_task! {
     }
 }
 
+/// The CDP method that freezes a page and lets it run again.
+pub(crate) const LIFECYCLE_METHOD: &str = "Page.setWebLifecycleState";
+
+/// Browsers whose page the window froze (`browser_api::hibernation::set_frozen`),
+/// by browser id. A frozen page runs no script, so any other call thaws it
+/// first: an agent's action must not hang on a pane the person isn't looking at.
+static FROZEN: LazyLock<Mutex<HashSet<i32>>> = LazyLock::new(Default::default);
+
+pub(crate) fn note_frozen(browser_id: i32, frozen: bool) {
+    let mut set = FROZEN.lock();
+    if frozen {
+        set.insert(browser_id);
+    } else {
+        set.remove(&browser_id);
+    }
+}
+
 fn release_browser(browser_id: i32, reason: &str) {
     OBSERVERS.with(|observers| {
         observers.borrow_mut().remove(&browser_id);
     });
     ATTACHED.lock().forget_browser(browser_id);
+    FROZEN.lock().remove(&browser_id);
     PENDING.lock().fail_browser(browser_id, reason);
 }
 
@@ -466,6 +484,11 @@ impl CdpSession {
             };
             browser.identifier()
         };
+        if method != LIFECYCLE_METHOD && FROZEN.lock().remove(&browser_id) {
+            tracing::info!(label = %self.label, method, "[hibernate] thawing a frozen page for a call");
+            let mut page = CdpSession::attach(&self.state, &self.label);
+            let _ = Box::pin(page.call(LIFECYCLE_METHOD, json!({ "state": "active" }))).await;
+        }
         let (id, rx) = PENDING.lock().register(browser_id, method);
         let mut message = json!({ "id": id, "method": method, "params": params });
         if let Some(session) = &self.session {

@@ -261,6 +261,9 @@ declare global {
          *  again (browser_panes/discard.rs). `supported: false` on a libcef
          *  without the Discard API: the caller closes and recreates instead. */
         discard?(blockId: string, op: "discard" | "is_discarded" | "load"): Promise<{ supported: boolean; ok: boolean }>;
+        /** Freeze the pane's page (no script, no timers) or let it run again
+         *  (browser_api/hibernation.rs). False when it has no page. */
+        setFrozen?(blockId: string, frozen: boolean): Promise<boolean>;
         /** The host's memory pressure level (memory_pressure.rs). */
         memoryPressure?(): Promise<"normal" | "warn" | "critical">;
         /** Bring a popup window a pane's page opened (`popup-…`) to the front. */

@@ -10,12 +10,15 @@ import {
     afterDiscard,
     awakeReason,
     etaLabel,
+    FREEZE_PER_TICK,
+    freezeAwakeReason,
     hibernateAfterMs,
     hibernateHiddenBrowserPanes,
     hoverTabPill,
     isLocalAddress,
     isOverdue,
     leaveTabPill,
+    normalizeKeepAwakeSite,
     pageAwakeReason,
     policyTick,
     pressTabPill,
@@ -258,5 +261,80 @@ describe("afterDiscard", () => {
         expect(afterDiscard({ supported: true, ok: true }, false)).toBe("load");
         expect(afterDiscard({ supported: true, ok: false }, false)).toBe("nothing");
         expect(afterDiscard(undefined, false)).toBe("nothing");
+    });
+});
+
+describe("normalizeKeepAwakeSite", () => {
+    it("keeps a host, which covers its subdomains", () => {
+        expect(normalizeKeepAwakeSite("  Example.COM ")).toBe("example.com");
+        expect(siteKeptAwake("https://mail.example.com/inbox", [normalizeKeepAwakeSite("example.com")])).toBe(true);
+    });
+    it("cuts a pasted address to its host, and keeps an origin when a scheme is given", () => {
+        expect(normalizeKeepAwakeSite("example.com/path?q=1")).toBe("example.com");
+        expect(normalizeKeepAwakeSite("https://App.example.com:8443/x")).toBe("https://app.example.com:8443");
+        expect(siteKeptAwake("https://app.example.com:8443/y", [normalizeKeepAwakeSite("https://app.example.com:8443/x")])).toBe(true);
+        expect(siteKeptAwake("https://other.example.com/", [normalizeKeepAwakeSite("https://app.example.com:8443/x")])).toBe(false);
+    });
+    it("refuses what names no site", () => {
+        expect(normalizeKeepAwakeSite("")).toBeNull();
+        expect(normalizeKeepAwakeSite("hello")).toBeNull();
+        expect(normalizeKeepAwakeSite("data:text/html,hi")).toBeNull();
+        expect(normalizeKeepAwakeSite("localhost")).toBe("localhost");
+    });
+});
+
+describe("freezing hidden panes", () => {
+    it("freezes panes hidden 5 minutes that aren't asleep or frozen, those that declined to sleep too", async () => {
+        settings["browser:hibernate"] = true;
+        const now = 10 * 60 * 60_000;
+        const frozeCalls: string[] = [];
+        const pane = (id: string, minutesAgo: number, opts: { frozen?: boolean; declineSleep?: boolean } = {}) => ({
+            blockId: id,
+            isVisible: () => false,
+            isAsleep: () => false,
+            hiddenSince: () => now - minutesAgo * 60_000,
+            tryHibernate: async () => (opts.declineSleep ? "an agent is driving it" : null),
+            wake: () => {},
+            isFrozen: () => !!opts.frozen,
+            tryFreeze: async () => {
+                frozeCalls.push(id);
+                return null;
+            },
+        });
+        const offs = [
+            pane("short", 3),
+            pane("due-freeze", 6),
+            pane("already", 8, { frozen: true }),
+            pane("kept-awake", 45, { declineSleep: true }),
+        ].map(registerHibernatablePane);
+        const slept = await policyTick(now, async () => "normal");
+        expect(slept).toEqual([]);
+        expect(frozeCalls).toEqual(["kept-awake", "due-freeze"]);
+        offs.forEach((off) => off());
+    });
+
+    it("freezes at most FREEZE_PER_TICK panes a tick, and only for what a frozen page would break", async () => {
+        settings["browser:hibernate"] = true;
+        const now = 10 * 60 * 60_000;
+        let n = 0;
+        const offs = Array.from({ length: FREEZE_PER_TICK + 2 }, (_, i) => ({
+            blockId: `p${i}`,
+            isVisible: () => false,
+            isAsleep: () => false,
+            hiddenSince: () => now - 10 * 60_000,
+            tryHibernate: async () => "kept",
+            wake: () => {},
+            isFrozen: () => false,
+            tryFreeze: async () => {
+                n++;
+                return null;
+            },
+        })).map(registerHibernatablePane);
+        await policyTick(now, async () => "normal");
+        expect(n).toBe(FREEZE_PER_TICK);
+        offs.forEach((off) => off());
+        expect(freezeAwakeReason({ live: true, edited: true, beforeunload: true })).toBeNull();
+        expect(freezeAwakeReason({ live: true, media: true })).toBe("playing media");
+        expect(freezeAwakeReason({ live: true, devtools: true })).toBe("DevTools open");
     });
 });
