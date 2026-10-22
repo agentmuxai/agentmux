@@ -14,6 +14,7 @@ pub(super) use super::rate_limiter::RateLimiter;
 #[path = "former_slug.rs"]
 mod former_slug;
 pub use former_slug::FormerSlugResolver;
+pub(crate) use former_slug::refuse_former_slug_sender;
 
 // ---- Handler ----
 
@@ -591,13 +592,7 @@ impl Handler {
         let key = target.to_lowercase();
         let blocks = self.name_to_blocks.get(&key).cloned().unwrap_or_default();
         if blocks.is_empty() {
-            return match self.former_slug_block(&key) {
-                Some((block, uid)) => {
-                    former_slug::note_delivery(target, &uid);
-                    TargetResolution::FormerSlug { block, uid }
-                }
-                None => TargetResolution::NotFound,
-            };
+            return self.former_slug_target(&key, target);
         }
         let live: Vec<String> = if blocks.len() == 1 {
             blocks
@@ -860,6 +855,7 @@ impl Handler {
             req.reagent_verified = Some(false);
         }
 
+        self.refuse_former_slug_sender(&mut req); // never speaks, on any path (`former_slug.rs`)
         // Generate request ID if missing
         if req.request_id.is_none() || req.request_id.as_deref() == Some("") {
             req.request_id = Some(uuid::Uuid::new_v4().to_string());

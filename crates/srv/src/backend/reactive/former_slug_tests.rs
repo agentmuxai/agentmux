@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use super::super::*;
-use super::note_delivery;
+use super::{note_delivery, refuse_former_slug_sender};
 use crate::backend::reactive::types::{InjectionRequest, InjectionResponse};
 
 const UID: &str = "a0dfc499-0000-4000-8000-000000000003";
@@ -115,4 +115,54 @@ fn a_delivery_through_a_former_slug_is_logged_once_an_hour_per_name() {
     let text = String::from_utf8(out.0.lock().unwrap().clone()).unwrap();
     assert_eq!(text.matches("former-log-a").count(), 1, "{text}");
     assert_eq!(text.matches("FORMER-LOG-B").count(), 1, "{text}");
+}
+
+/// The relay's WebSocket path (`cloud_subscriber::delivery`) hands the
+/// handler a WAN request directly, with the WAN verdict it checked. A sender
+/// claiming a former slug is unverified there too, even from an approved
+/// install: forced sensitive and stopped. The same sender under a live name
+/// is untouched.
+#[tokio::test]
+async fn a_wan_jekt_from_a_former_slug_is_unverified_on_the_relay_path() {
+    use crate::backend::reactive::types::{WanInstanceInfo, WanInstanceStatus};
+    let (mut h, _, _) = renamed_agent();
+    h.register_agent_full("AgentY", "block-y", None, 0, Some("agenty"), Some("uid-y"), "test.former_slug").unwrap();
+    let wan = |source: &str| InjectionRequest {
+        target_agent: "agenty".into(),
+        message: "review is in".into(),
+        source_agent: Some(source.into()),
+        request_id: Some(format!("req-wan-{source}")),
+        delivery_tier: Some("wan".into()),
+        wan_verified: Some(true),
+        wan_instance: Some(WanInstanceInfo { id: "inst".into(), label: "host~inst".into(), status: WanInstanceStatus::Approved }),
+        ..Default::default()
+    };
+
+    let resp = h.inject_message(wan("Loap-Loap-2-Loap-3"));
+    assert!(resp.success, "{:?}", resp.error);
+    assert_eq!(resp.effective_tier.as_deref(), Some("sensitive"));
+    assert_eq!(resp.requires_stop, Some(true));
+
+    let resp = h.inject_message(wan("loap-3"));
+    assert!(resp.success, "{:?}", resp.error);
+    assert_ne!(resp.effective_tier.as_deref(), Some("sensitive"));
+    assert_ne!(resp.requires_stop, Some(true));
+}
+
+/// The rule itself: a live name or an unknown one passes; a former slug is
+/// counted unverified whatever verdict it carried.
+#[test]
+fn the_rule_refuses_a_former_slug_only() {
+    let req = |source: &str| InjectionRequest { source_agent: Some(source.into()), sig_verified: Some(true), ..Default::default() };
+    let owner = |n: &str| (n == "old-id").then(|| UID.to_string());
+    let mut r = req("Old-Id");
+    assert!(refuse_former_slug_sender(&mut r, |_| false, owner));
+    assert_eq!(r.sig_verified, Some(false));
+    let mut r = req("old-id");
+    assert!(!refuse_former_slug_sender(&mut r, |_| true, owner), "a live name is its holder's");
+    assert_eq!(r.sig_verified, Some(true));
+    let mut r = req("someone");
+    assert!(!refuse_former_slug_sender(&mut r, |_| false, owner));
+    let mut r = InjectionRequest::default();
+    assert!(!refuse_former_slug_sender(&mut r, |_| false, owner));
 }

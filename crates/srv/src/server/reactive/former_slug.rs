@@ -53,22 +53,16 @@ pub(super) fn may_evict(found_as: &str, req: &InjectionRequest) -> bool {
     found_as == req.target_agent
 }
 
-/// A former slug never speaks (Phase 1, "identity is not aliased"): a
-/// message whose sender claims one is counted unverified, as one whose
-/// signature failed is — whether or not a key was left under the name, and
-/// whatever it was signed with. `true` when it refused the claim.
-pub(super) fn refuse_former_sender(state: &AppState, req: &mut InjectionRequest, claimed: &str) -> bool {
-    let Some(owner) = owner(state, claimed) else {
-        return false;
-    };
-    tracing::warn!(
-        claimed,
-        uid = %owner.uid,
-        current = %owner.slug,
-        "jekt claims a slug its agent was renamed from; a former slug can't sign, counting it unverified"
-    );
-    req.sig_verified = Some(false);
-    true
+/// A former slug never speaks (Phase 1, "identity is not aliased"): the
+/// handler's rule (`refuse_former_slug_sender`), which every delivery also
+/// passes through, applied here while verifying so a forwarded request
+/// carries the verdict too. `true` when it refused the claim.
+pub(super) fn refuse_former_sender(state: &AppState, req: &mut InjectionRequest) -> bool {
+    crate::backend::reactive::handler::refuse_former_slug_sender(
+        req,
+        |name| state.reactive_handler.has_live_name(name),
+        |name| state.mstore.former_slug_owner(name).ok().flatten().map(|o| o.uid),
+    )
 }
 
 /// `GET /agentmux/reactive/agent?id=` for a former slug: the agent's current

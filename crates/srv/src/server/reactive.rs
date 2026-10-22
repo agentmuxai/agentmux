@@ -234,7 +234,7 @@ pub(super) fn verify_jekt_signature(state: &AppState, req: &mut InjectionRequest
         req.sig_verified = Some(true); // identity M4d-4
         return;
     }
-    if former_slug::refuse_former_sender(state, req, &claimed) {
+    if former_slug::refuse_former_sender(state, req) {
         return;
     }
     let Ok(Some(key)) = state.mstore.agent_jekt_key_load(&claimed) else {

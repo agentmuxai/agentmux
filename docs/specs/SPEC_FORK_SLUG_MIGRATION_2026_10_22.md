@@ -135,9 +135,10 @@ As built:
   when the former one finds nothing, but forwards the request unchanged, since its signatures cover the target; the
   receiving instance resolves the former slug itself. An entry found that way is never evicted on a failed forward.
 - **Identity.** A jekt whose sender claims a former slug is counted unverified (`sig_verified = false`, so it is
-  forced sensitive with `ESCALATE=required`), signed or not, on every path that runs `verify_jekt_signature`
-  (whatever its tier). Nothing else changed: the ownership checks and `self/keys` already compare the current slug
-  only.
+  forced sensitive with `ESCALATE=required`), signed or not, whatever its tier. One rule
+  (`refuse_former_slug_sender`) holds it: the handler applies it to every message it delivers, so no delivery path can
+  skip it, and `verify_jekt_signature` applies it before a request is forwarded. Nothing else changed: the ownership
+  checks and `self/keys` already compare the current slug only.
 - **LAN.** `GET /agentmux/reactive/agent?id=<former slug>` answers with `current_name` and the key filed under the
   current name, only when that name is the agent's alone; never a key left under the former slug. A peer that reads
   `current_name` caches the key under the current name and counts a signature claiming the former slug as failed.
@@ -147,8 +148,6 @@ As built:
 - **MuxBus.** The name directory holds each former slug, ranked below slugs and route names, while its `retired_at`
   is under 30 days old; an unknown time (0) is not held. After that, the next directory leaves it out and the lease
   tick drops the subscription as orphaned.
-- **Not covered:** a WAN jekt delivered over the relay's WebSocket (`sync_agent_reactive`) doesn't run that check.
-  Its signature is checked against the key the sending install published under the name, which Phase 2 retires (S4).
 
 ### Phase 2, migrate: an explicit, journaled operation (one PR)
 
