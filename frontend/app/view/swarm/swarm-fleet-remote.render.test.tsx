@@ -54,8 +54,6 @@ function modelStub(selectedKeys: string[]) {
         selectedBlockIdsAtom: selected,
         otherInstancesAtom: () => others,
         fleetTargets: () => known,
-        ambientOutcomesAtom: () => null,
-        statsOpenAtom: () => false,
         fleetActionInFlightAtom: () => false,
         selectAll: vi.fn(),
         clearSelection: vi.fn(),

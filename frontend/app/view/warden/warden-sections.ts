@@ -6,7 +6,7 @@
 import type { PaneSections } from "@/app/block/pane-sections";
 import { VAULT_SECTIONS } from "@/app/view/vault/vault-kinds";
 
-export type WardenSection = "kanban" | "vault" | "host" | "lan" | "internet" | "audit" | "history";
+export type WardenSection = "kanban" | "vault" | "host" | "lan" | "internet" | "audit" | "history" | "ambient";
 
 // Label text only (not icon), hoisted here so viewName can read it without
 // importing from warden-view.tsx, which would reintroduce the circular
@@ -21,6 +21,7 @@ export const WARDEN_SECTION_LABELS: Record<WardenSection, string> = {
     internet: "Internet",
     audit: "Audit",
     history: "History",
+    ambient: "Ambient",
 };
 
 /** Warden's sections, in rail order, as its manifest declares them (pane-sections.ts). */
@@ -35,5 +36,7 @@ export const WARDEN_SECTIONS: PaneSections<WardenSection> = {
         { id: "internet", label: WARDEN_SECTION_LABELS.internet, icon: "globe" },
         { id: "audit", label: WARDEN_SECTION_LABELS.audit, icon: "list-check" },
         { id: "history", label: WARDEN_SECTION_LABELS.history, icon: "clock-rotate-left" },
+        // AgentMux's own model calls, which write the agents' lines (warden-ambient-manager.tsx).
+        { id: "ambient", label: WARDEN_SECTION_LABELS.ambient, icon: "wand-magic-sparkles" },
     ],
 };

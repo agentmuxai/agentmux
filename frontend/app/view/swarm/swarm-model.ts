@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { RpcApi, type BackgroundTaskView, type FleetActionResult, type FleetStagePlan } from "@/app/store/rpc-api";
-import type { AmbientOutcomes } from "@/app/store/ambient-outcomes";
 import {
     localFleetTargets,
     EMPTY_FLEET_RESULT,
@@ -997,15 +996,6 @@ export class SwarmViewModel {
     fleetActionInFlightAtom: Accessor<boolean> = this._fleetActionInFlight[0];
     private setFleetActionInFlight: Setter<boolean> = this._fleetActionInFlight[1];
 
-    // The toolbar's Stats panel: outcomes of AgentMux's own model calls since
-    // srv started (ambient.outcomes; SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md 5.8).
-    private _ambientOutcomes = createSignal<AmbientOutcomes | null>(null);
-    ambientOutcomesAtom: Accessor<AmbientOutcomes | null> = this._ambientOutcomes[0];
-    private setAmbientOutcomes: Setter<AmbientOutcomes | null> = this._ambientOutcomes[1];
-    private _statsOpen = createSignal<boolean>(false);
-    statsOpenAtom: Accessor<boolean> = this._statsOpen[0];
-    private setStatsOpen: Setter<boolean> = this._statsOpen[1];
-
     private _loading = createSignal<boolean>(true);
     loadingAtom: Accessor<boolean> = this._loading[0];
     private setLoading: Setter<boolean> = this._loading[1];
@@ -1302,7 +1292,6 @@ export class SwarmViewModel {
         this.trackedBlocksPollTimer = setInterval(() => {
             void this.loadTrackedBlocks();
             void this.loadOtherInstances();
-            void this.loadAmbientOutcomes();
         }, SwarmViewModel.TRACKED_BLOCKS_POLL_MS);
 
         // term:osc_title / term:ambient_summary meta changes — force re-read
@@ -1320,7 +1309,6 @@ export class SwarmViewModel {
                 this.loadDispatches(),
                 this.loadShells(),
                 this.loadCrons(),
-                this.loadAmbientOutcomes(),
                 this.loadBackgroundTasks(),
                 this.loadOtherInstances(),
             ]);
@@ -1681,20 +1669,6 @@ export class SwarmViewModel {
 
     dismissFleetResult(): void {
         this.setLastFleetResult(null);
-    }
-
-    /** An older srv without `ambient.outcomes` leaves the Stats panel empty. */
-    async loadAmbientOutcomes(): Promise<void> {
-        try {
-            this.setAmbientOutcomes((await RpcApi.AmbientOutcomesCommand(TabRpcClient, {})) ?? null);
-        } catch {
-            // keep the last counts
-        }
-    }
-
-    toggleStats(): void {
-        this.setStatsOpen(!this.statsOpenAtom());
-        if (this.statsOpenAtom()) void this.loadAmbientOutcomes();
     }
 
     /** Retire (dismiss) a row — `rowKey` is `subagentRowKey(agent_id)` for

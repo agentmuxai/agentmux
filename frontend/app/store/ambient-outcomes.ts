@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The Swarm toolbar's Stats panel (swarm-stats.tsx): how AgentMux's own model
- * calls (session titles, names, prompt suggestions, narration) have gone since srv started,
- * from `ambient.outcomes` (crates/srv/src/ambient/outcome.rs), so "the swarm
- * has been blank for an hour" is visible without copying a database.
+ * Warden's Ambient section (warden-ambient-manager.tsx): how AgentMux's own
+ * model calls (session titles, names, prompt suggestions, narration) have gone
+ * since srv started, from `ambient.outcomes` (crates/srv/src/ambient/outcome.rs),
+ * so "the swarm has been blank for an hour" is visible without copying a database.
  * docs/specs/SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md section 5.8.
  */
 
@@ -27,11 +27,11 @@ const PURPOSE_NAMES: ReadonlyArray<readonly [purpose: string, name: string]> = [
     ["supervisor_verdict", "Supervisor verdicts"],
 ];
 
-type Bucket = "accepted" | "kept" | "refused" | "skipped" | "failed";
+export type AmbientBucket = "accepted" | "kept" | "refused" | "skipped" | "failed";
 
 /** Which bucket an outcome label counts toward; `null` for a label this build
  *  doesn't know, which still counts toward the total and shows in the hover. */
-function bucketOf(label: string): Bucket | null {
+function bucketOf(label: string): AmbientBucket | null {
     if (label === "accepted") return "accepted";
     // `skipped` is the model's SKIP: like `kept`, a healthy "nothing to write".
     if (label === "kept" || label === "skipped") return "kept";
@@ -49,6 +49,8 @@ export interface AmbientPurposeRow {
      *  candidate the validator took, not a change: the pane may still keep the
      *  old title as a rewording, and recovery may lose a race (#4243). */
     text: string;
+    /** The same counts by bucket. A label this build doesn't know is in `total` only. */
+    counts: Record<AmbientBucket, number>;
     /** Every outcome label and its count, one per line, for the hover. */
     detail: string;
     total: number;
@@ -76,7 +78,7 @@ export function summarizeAmbientOutcomes(outcomes: AmbientOutcomes | null | unde
     for (const [purpose, name] of [...PURPOSE_NAMES, ...extra]) {
         const by = outcomes[purpose];
         if (!by) continue;
-        const n: Record<Bucket, number> = { accepted: 0, kept: 0, refused: 0, skipped: 0, failed: 0 };
+        const n: Record<AmbientBucket, number> = { accepted: 0, kept: 0, refused: 0, skipped: 0, failed: 0 };
         let total = 0;
         const lines: string[] = [];
         for (const [label, count] of Object.entries(by).sort(([a], [b]) => a.localeCompare(b))) {
@@ -95,6 +97,7 @@ export function summarizeAmbientOutcomes(outcomes: AmbientOutcomes | null | unde
             purpose,
             name,
             text: parts.join(" · "),
+            counts: n,
             detail: lines.join("\n"),
             total,
             unhealthy: bad > 0 && bad > n.accepted + n.kept,
