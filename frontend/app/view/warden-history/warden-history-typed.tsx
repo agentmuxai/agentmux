@@ -11,9 +11,9 @@ import { createEffect, createMemo, createSignal, For, on, onCleanup, Show, type 
 import { Button, FilterInput, Select } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import type { HistoryAgent } from "@/types/rpc/HistoryAgent";
+import { clearInputHistory, forgetInputHistoryEntry } from "@/app/view/agent/agent-input-history";
 import type { InputHistoryItem } from "@/types/rpc/InputHistoryItem";
-import { formatWhen, typedAgents, typedTags } from "./warden-history-shared";
+import { formatWhen, typedAgents, typedTags, type TypedAgent } from "./warden-history-shared";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./warden-history.scss";
@@ -24,7 +24,7 @@ const PAGE = 200;
 const SEARCH_DELAY_MS = 250;
 
 export const WardenHistoryTyped = (props: { visible: boolean }): JSX.Element => {
-    const [agents, setAgents] = createSignal<HistoryAgent[] | null>(null);
+    const [agents, setAgents] = createSignal<TypedAgent[] | null>(null);
     const [agentId, setAgentId] = createSignal("");
     const [query, setQuery] = createSignal("");
     const [entries, setEntries] = createSignal<InputHistoryItem[]>([]);
@@ -37,15 +37,16 @@ export const WardenHistoryTyped = (props: { visible: boolean }): JSX.Element => 
     // A read overtaken by another (another agent, another search) must not land.
     let readSeq = 0;
 
-    const list = createMemo(() => typedAgents(agents() ?? []));
-    const agentName = () => list().find((a) => a.definition_id === agentId())?.name || agentId().slice(0, 8);
+    const list = createMemo(() => agents() ?? []);
+    const agentName = () => list().find((a) => a.id === agentId())?.name || agentId().slice(0, 8);
 
     const loadAgents = async () => {
         try {
-            const res = await RpcApi.HistoryAgentsCommand(TabRpcClient, {});
-            setAgents(res.agents);
-            const ids = typedAgents(res.agents).map((a) => a.definition_id);
-            if (!ids.includes(agentId())) setAgentId(ids[0] ?? "");
+            // Hidden agents too: what was typed to them is still kept.
+            const defs = await RpcApi.ListAgentDefinitionsCommand(TabRpcClient, { include_hidden: true });
+            const found = typedAgents(defs);
+            setAgents(found);
+            if (!found.some((a) => a.id === agentId())) setAgentId(found[0]?.id ?? "");
             setError(null);
         } catch (e) {
             // Not "Loading…" under the error: Refresh tries again.
@@ -97,25 +98,33 @@ export const WardenHistoryTyped = (props: { visible: boolean }): JSX.Element => 
         })
     );
 
+    // Through the composers' shared cache (agent-input-history.ts), not the RPC
+    // alone: an open composer would otherwise still recall, and resend, what was
+    // forgotten. The agent is the one asked about, not the one shown when the
+    // answer comes back.
     const forget = async (item: InputHistoryItem) => {
+        const target = agentId();
         setConfirmId(null);
         try {
-            await RpcApi.AgentInputHistoryDeleteCommand(TabRpcClient, { id: item.id });
+            await forgetInputHistoryEntry(target, item.id);
+            if (agentId() !== target) return;
             setEntries(entries().filter((e) => e.id !== item.id));
             setError(null);
         } catch (e) {
-            setError(String(e));
+            if (agentId() === target) setError(String(e));
         }
     };
     const clearAll = async () => {
+        const target = agentId();
         setConfirmClear(false);
         try {
-            await RpcApi.AgentInputHistoryClearCommand(TabRpcClient, { agent_id: agentId() });
+            await clearInputHistory(target);
+            if (agentId() !== target) return;
             setEntries([]);
             setMore(false);
             setError(null);
         } catch (e) {
-            setError(String(e));
+            if (agentId() === target) setError(String(e));
         }
     };
 
@@ -131,7 +140,7 @@ export const WardenHistoryTyped = (props: { visible: boolean }): JSX.Element => 
                     value={agentId()}
                     onChange={setAgentId}
                     disabled={list().length === 0}
-                    options={list().map((a) => ({ value: a.definition_id, label: a.name || a.definition_id.slice(0, 8) }))}
+                    options={list().map((a) => ({ value: a.id, label: a.name }))}
                 />
                 <FilterInput value={query()} onInput={setQuery} placeholder="Search what was typed" />
                 <Button

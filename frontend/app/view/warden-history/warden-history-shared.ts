@@ -61,14 +61,23 @@ export function formatWhen(ms: number): string {
     return new Date(ms).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
+/** An agent the Typed view can show. */
+export interface TypedAgent {
+    id: string;
+    name: string;
+}
+
 /**
- * The agents the Typed view can show: those still defined. What was typed to
- * an agent is kept with it and goes when it is deleted (`agents/purge.rs`), so
- * a deleted agent, whose transcripts the Agents view keeps, has none. Most
- * recently active first, as `history.agents` gives them.
+ * The agents the Typed view lists: every agent still defined, by name. Not
+ * `history.agents`, which lists the owners of transcripts: an agent whose first
+ * send failed has typed history and no transcript. What was typed to an agent
+ * is kept with it and goes when it is deleted (`agents/purge.rs`), so a deleted
+ * agent, whose transcripts the Agents view keeps, has none.
  */
-export function typedAgents(agents: HistoryAgent[]): HistoryAgent[] {
-    return agents.filter((a) => !a.deleted);
+export function typedAgents(defs: { id: string; name: string }[]): TypedAgent[] {
+    return defs
+        .map((d) => ({ id: d.id, name: d.name || d.id.slice(0, 8) }))
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || a.id.localeCompare(b.id));
 }
 
 /** How an entry was typed; a plain message from the composer says nothing. */

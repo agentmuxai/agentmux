@@ -55,9 +55,17 @@ describe("historyTotals", () => {
 
 
 describe("typedAgents", () => {
-    it("drops deleted agents, whose typed history goes with them, and keeps the order", () => {
-        const list = [agent("b"), agent("gone", { deleted: true }), agent("a")];
-        expect(typedAgents(list).map((a) => a.definition_id)).toEqual(["b", "a"]);
+    it("lists every defined agent by name, case-insensitively, falling back to the id", () => {
+        const defs = [
+            { id: "id-b", name: "beta" },
+            { id: "id-a", name: "Alpha" },
+            { id: "12345678-aaaa", name: "" },
+        ];
+        expect(typedAgents(defs)).toEqual([
+            { id: "12345678-aaaa", name: "12345678" },
+            { id: "id-a", name: "Alpha" },
+            { id: "id-b", name: "beta" },
+        ]);
     });
 });
 
