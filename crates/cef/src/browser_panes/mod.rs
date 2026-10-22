@@ -51,6 +51,7 @@ mod autocomplete;
 pub(crate) mod bounds;
 mod clip;
 mod close;
+pub(crate) mod discard;
 pub(crate) mod media_grants;
 pub(crate) mod media_prompt;
 mod navigation;
