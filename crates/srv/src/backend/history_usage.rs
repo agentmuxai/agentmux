@@ -127,23 +127,26 @@ pub fn compute(
         stores,
         agents: largest_agents(transcripts, name_of),
         computed_at_ms: now_ms,
-        compression: transcripts.map(compression),
+        compression: transcripts.map(|t| compression(t, roots.transcripts_db.parent())),
     }
 }
 
-/// The shared store's frames: one sum over the frame table.
-fn compression(transcripts: &FileStore) -> HistoryCompression {
+/// The shared store's frames: one sum over the frame table. What compression
+/// waits for is checked here, the way the framer checks it, because only the
+/// srv that owns the store runs the framer and any srv may answer this.
+fn compression(transcripts: &FileStore, store_dir: Option<&Path>) -> HistoryCompression {
     use crate::backend::transcript::framer;
     let (logical, stored, frames) = transcripts.frame_totals().unwrap_or_else(|e| {
         tracing::warn!(error = %e, "history.usage: couldn't sum the transcript store's frames");
         (0, 0, 0)
     });
+    let enabled = framer::enabled();
     HistoryCompression {
-        enabled: framer::enabled(),
+        enabled,
         frames: frames.max(0) as u64,
         logical_bytes: logical.max(0) as u64,
         stored_bytes: stored.max(0) as u64,
-        waiting: framer::waiting(),
+        waiting: if enabled { store_dir.and_then(framer::who_blocks) } else { None },
     }
 }
 
