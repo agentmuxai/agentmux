@@ -631,6 +631,16 @@
           "default": false,
           "description": "Write a defined agent's transcript to the agent's own zone in the global transcript store only, not also to the block's own store. Halves what AgentMux writes to disk while agents run (measured: srv bytes written -50%, srv CPU -43%). Quick-launch panes and writers that have lost the agent lease keep their own copy. Off until it has been through a soak. See docs/specs/SPEC_AGENT_TRANSCRIPT_SINGLE_COPY_2026_10_19.md."
         },
+        "agent:transcriptframes": {
+          "type": "boolean",
+          "default": false,
+          "description": "Compress the finished parts of agent transcripts in the global transcript store, 1 MiB at a time (about 6x smaller). Only parts at least 8 MiB from a transcript's end and received over a day ago; nothing a reader sees changes. Waits while an AgentMux build that can't read compressed history runs on this machine. See docs/specs/SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21.md."
+        },
+        "agent:transcriptdeltas": {
+          "type": "boolean",
+          "default": true,
+          "description": "With agent:transcriptframes on, also store each streamed reply's text once instead of once per streaming line (about 11% smaller again). Off: compression alone. See docs/specs/SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21.md §8."
+        },
         "agent:askquestiontimeoutms": {
           "type": "integer",
           "minimum": 1000,

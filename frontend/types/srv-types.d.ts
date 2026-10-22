@@ -1141,6 +1141,8 @@ declare global {
         "kanban:reminders"?: boolean;
         "agent:mcpselfheal"?: boolean;
         "agent:transcriptsinglecopy"?: boolean;
+        "agent:transcriptframes"?: boolean;
+        "agent:transcriptdeltas"?: boolean;
         "agent:turnscopedtail"?: boolean;
         "agent:onewayflow"?: boolean;
         "agent:followcontroller"?: boolean;
