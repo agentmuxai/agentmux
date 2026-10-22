@@ -1,5 +1,39 @@
 # AgentMux Version History
 
+## 0.59.38 — 2026-10-21
+
+- Each window starts with a smaller frontend: Settings, Vault, Warden, Toolchain, Tower, Drone, Connectors, Memory, the Editor (with CodeMirror), Hangar, Browser and Swarm load with their first pane, about 140 ms less work per window start.
+- Widgets: a pane a widget opens gets only the meta it may set (its own, a section, or a browser address); anything else is dropped
+- The Vault says, in its own words, when macOS won't let this AgentMux build read the Vault key, instead of advising to save it again
+- Agents can run a command with a Vault entry and get its output back, cleaned of the value (Terminal run with secrets, without background)
+- Panes with sections (Warden, Vault, Connectors, Memory, Settings) now declare them; a widget-bar entry can name a section with "section", and Settings ▸ Widgets flags one the pane doesn't have
+- Swarm shows how long ago each agent last produced output ("3m ago", "just now") beside its name, with the exact time on hover
+- The Vault moved into Warden: it is Warden's Vault section, opened from the same Vault button; saved Vault panes, pins and layouts follow it there
+- tests: the CLI-lookup test compares folders by their canonical path, so Windows' short temp path (C:\Users\RUNNER~1) no longer fails the nightly
+- A pane's header menu can pin the section it shows to the widget bar, like Kanban: Warden's LAN, the Vault's Cards, Memory's Skills
+- Code blocks in agent replies and markdown previews are coloured by shiki, like tool blocks: the same colours everywhere, with a light version in light themes. highlight.js is gone from every window's startup.
+- Six small frontend libraries are gone (tailwind-merge, rxjs, debug, colord, sprintf-js, base64-js) and the drag preview's image library loads on first use: a smaller startup bundle and fewer packages to keep current.
+- The Vault no longer re-reads its entries while it is hidden or closed, so an agent request can't make the OS ask for the Vault key
+- docs(analysis): the 2026-10-20 dead-code and tree-shaking audit, and the RCA of a slow manual compaction after a model switch
+- Kanban: Backlog cards no longer draw over each other when the Backlog is longer than its column; it scrolls instead.
+- Tower has a Panes view: each window, its tabs and panes with what they cost. Agents and terminals show their processes, browser panes every renderer their page runs in (cross-site frames included, a shared one counted once), sleeping panes say so, and the window's own renderer carries the panes drawn in it.
+- The last OverlayScrollbars use (a question dialog's text) now scrolls with a native scrollbar like everything else, and the library is gone from every window's startup (about 42 KB).
+- The Vault's KeePass import tells a wrong password from a layout it can't read, and keeps a Bitwarden CSV secure note
+- Agent History's header now says when the rows on screen were received (for example "Oct 14, 3:39 PM – Oct 15, 9:58 PM") next to the transcript line numbers
+- Warden shows only the selected section again; every section was drawn at once, one under another, until a Connectors or Memory pane had been opened
+- The Vault opens a KeePass database that needs a key file (alone or with its password), chosen in AgentMux's own file window
+- Fixed: under AGENTMUX_HOME_OVERRIDE (the memory lab, tests), a fresh install never started because the launcher's data-update step migrated a different folder than srv opens; srv's own log under an override also went to the real home.
+- The Vault exports to a KeePass database (.kdbx) you can open in KeePassXC, KeePassDX or Strongbox, as well as its own .vault file
+- Browser panes on a tab you aren't looking at are now marked hidden to the page, so they stop animating and their timers slow down like a background Chrome tab (needs the next CEF build)
+- Vault: Reveal and Copy now work on macOS, confirmed with Touch ID or your Mac's password, and a copied secret is kept out of clipboard history apps. On Linux they stay off, with a clear reason.
+- Warden loads each section the first time you open it, and Host, LAN and Audit refresh only while shown, so opening Kanban or the Vault no longer starts every section's polling
+- The widget-bar Kanban button shows how many tasks need you, the same count as the Warden tab title
+- Vault: export everything as an unencrypted CSV (Bitwarden's layout, which most managers import) or JSON, for taking your secrets to another manager. You choose where it is saved, type a word to confirm, and Windows Hello or Touch ID confirms it is you; AgentMux can import the JSON back.
+- A Google account connected with your own OAuth client now stays connected: AgentMux asks Google for offline access and refreshes the token itself (marking the account as needing a reconnect when Google drops the grant), records the account's email and the permissions Google granted, can add permissions to an account already connected, revokes the grant at Google when you remove the account, and remembers your OAuth client so you enter it once. An OAuth-connected GitHub account now gives agents its token instead of the stored JSON.
+- Vault: every import reader is now tested against thousands of deliberately damaged files in each run, to make sure a crafted export can't crash or hang AgentMux.
+- Vault: the Kept by AgentMux section now lists the sign-ins browser panes save for sites that ask for a user name and password (site and masked user name, never the password).
+- Connecting Google in Connectors → Accounts reuses your saved OAuth client (or asks for it once, with the Google Cloud steps), and the account's card shows its email, which client it uses, Connected / Reconnect needed / Blocked by your organization, which permissions weren't granted, and a Reconnect button; removing it signs out of Google first and, if that fails, offers Try again or Remove anyway.
+
 ## 0.59.37 — 2026-10-21
 
 - The mouse side buttons walk back and forward through the panes you selected, across tabs, with the caret following; Ctrl plus a side button is page back and forward over a browser pane
