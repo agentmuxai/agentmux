@@ -186,7 +186,7 @@ export type Duplicates = "skip" | "replace" | "keep_both";
 
 /** Where an import is: the file needs its passphrase, or is read and described. */
 export type ImportStep =
-    | { kind: "needs_passphrase"; pickId: string; fileName: string }
+    | { kind: "needs_passphrase"; pickId: string; fileName: string; keyFileName: string | null }
     /** A CSV no reader knows: the person says which column is which. */
     | { kind: "needs_mapping"; pickId: string; fileName: string; columns: string[]; rows: number }
     | { kind: "preview"; pickId: string; preview: ImportPreview; syncedFolder: string | null };
@@ -202,11 +202,13 @@ export interface CsvMapping {
 
 /** Asks the host which file (no `pickId`) or reads the same one again with its
  *  passphrase. `null` if the person closed the file dialog. */
-export async function pickImport(pickId?: string, passphrase?: string, mapping?: CsvMapping): Promise<ImportStep | null> {
+export async function pickImport(pickId?: string, passphrase?: string, mapping?: CsvMapping, keyFile?: "choose" | "clear"): Promise<ImportStep | null> {
     const relay = getApi()?.approvals?.vaultImport;
     if (!relay) throw new Error("Import needs the AgentMux desktop app.");
-    const res = (await relay({ pick_id: pickId, passphrase, mapping })) as {
+    const res = (await relay({ pick_id: pickId, passphrase, mapping, choose_key_file: keyFile === "choose" || undefined, clear_key_file: keyFile === "clear" || undefined })) as {
         cancelled?: boolean;
+        /** The key file the person chose for a KeePass database, by name only. */
+        key_file_name?: string | null;
         needs_passphrase?: boolean;
         needs_mapping?: MappingNeeded;
         preview?: ImportPreview;
@@ -215,7 +217,7 @@ export async function pickImport(pickId?: string, passphrase?: string, mapping?:
         file_name: string;
     };
     if (res?.cancelled) return null;
-    if (res.needs_passphrase) return { kind: "needs_passphrase", pickId: res.pick_id, fileName: res.file_name };
+    if (res.needs_passphrase) return { kind: "needs_passphrase", pickId: res.pick_id, fileName: res.file_name, keyFileName: res.key_file_name ?? null };
     if (res.needs_mapping) return { kind: "needs_mapping", pickId: res.pick_id, fileName: res.file_name, columns: res.needs_mapping.columns, rows: res.needs_mapping.rows };
     if (!res.preview) throw new Error("AgentMux sent no preview of the file.");
     return { kind: "preview", pickId: res.pick_id, preview: res.preview, syncedFolder: res.synced_folder ?? null };

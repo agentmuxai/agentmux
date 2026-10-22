@@ -236,7 +236,16 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                     Some(m) => Some(serde_json::from_value(m.clone()).map_err(|e| format!("invalid column mapping: {e}"))?),
                     None => None,
                 };
-                match vault::transfer::inspect_with(&store, &path, pass, mapping.as_ref()) {
+                // The key file of a KeePass database: its bytes, read by the host, from the person's own pick.
+                let keyfile: Option<zeroize::Zeroizing<Vec<u8>>> = match body.get("keyfile").and_then(Value::as_str).filter(|k| !k.is_empty()) {
+                    Some(k) if k.len() > vault::import::MAX_KEY_FILE * 2 => return Err("that key file is too large to be a KeePass key file".into()),
+                    Some(k) => {
+                        use base64::Engine as _;
+                        Some(zeroize::Zeroizing::new(base64::engine::general_purpose::STANDARD.decode(k).map_err(|_| "the key file wasn't passed on intact".to_string())?))
+                    }
+                    None => None,
+                };
+                match vault::transfer::inspect_keyed(&store, &path, pass, mapping.as_ref(), keyfile.as_deref().map(|k| k.as_slice())) {
                     Ok(preview) => Ok((json!({ "preview": preview }), false)),
                     Err(vault::transfer::InspectError::NeedsPassphrase) => Ok((json!({ "needs_passphrase": true }), false)),
                     Err(vault::transfer::InspectError::NeedsMapping(m)) => Ok((json!({ "needs_mapping": m }), false)),

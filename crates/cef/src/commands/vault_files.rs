@@ -19,6 +19,17 @@ use crate::state::AppState;
 /// The file the person last picked to import, by the id the page was given.
 /// The page then names the id, never the path, to unlock or inspect it again.
 static PICKED: Mutex<Option<(String, PathBuf)>> = Mutex::new(None);
+/// The key file the person chose for the database in `PICKED` (a KeePass database may need one as
+/// well as, or instead of, its password), by the same id. Only its path is held: the bytes are read
+/// when srv is asked, and go to srv only.
+static KEY_PICKED: Mutex<Option<(String, PathBuf)>> = Mutex::new(None);
+/// The most a key file may be (srv refuses more).
+const MAX_KEY_FILE: u64 = 1024 * 1024;
+
+fn key_file_for(pick_id: &str) -> Option<PathBuf> {
+    let held = KEY_PICKED.lock().unwrap_or_else(|e| e.into_inner());
+    held.as_ref().filter(|(id, _)| id == pick_id).map(|(_, p)| p.clone())
+}
 
 /// A file name the save dialog may suggest: letters, digits, `.`, `_` and `-`.
 fn suggested_name(raw: &str) -> String {
@@ -86,6 +97,8 @@ pub async fn import(state: &Arc<AppState>, args: &Value) -> Result<Value, String
         let Some(path) = picked else { return Ok(json!({ "cancelled": true })) };
         let id = uuid::Uuid::new_v4().to_string();
         *PICKED.lock().unwrap_or_else(|e| e.into_inner()) = Some((id.clone(), path.clone()));
+        // A new file starts with no key file.
+        *KEY_PICKED.lock().unwrap_or_else(|e| e.into_inner()) = None;
         tracing::info!("[vault] import of a file the person chose");
         (id, path)
     } else {
@@ -96,6 +109,50 @@ pub async fn import(state: &Arc<AppState>, args: &Value) -> Result<Value, String
         }
     };
     let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    // The key file: chosen or removed here, in the host's own dialog, never by the page or an agent.
+    let flag = |k: &str| args.get(k).and_then(Value::as_bool) == Some(true);
+    if flag("clear_key_file") {
+        *KEY_PICKED.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+    if flag("choose_key_file") {
+        let picked = tokio::task::spawn_blocking(|| {
+            let _guard = super::platform::host_dialog_guard();
+            rfd::FileDialog::new()
+                .set_title("Choose the database's key file")
+                .add_filter("KeePass key files", &["keyx", "key"])
+                .add_filter("All files", &["*"])
+                .pick_file()
+        })
+        .await
+        .map_err(|e| format!("vault_import: {e}"))?;
+        if let Some(key) = picked {
+            *KEY_PICKED.lock().unwrap_or_else(|e| e.into_inner()) = Some((pick_id.clone(), key));
+            tracing::info!("[vault] a key file the person chose for an import");
+        }
+    }
+    let key_path = key_file_for(&pick_id);
+    let key_file_name = key_path.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned());
+    if flag("choose_key_file") || flag("clear_key_file") {
+        // Only the choice changed: back to the password step, with the key file's name.
+        return Ok(json!({ "pick_id": pick_id, "file_name": file_name, "needs_passphrase": true, "key_file_name": key_file_name }));
+    }
+    let keyfile = match &key_path {
+        Some(p) => {
+            let p = p.clone();
+            let bytes = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, String> {
+                let meta = std::fs::metadata(&p).map_err(|e| format!("couldn't read the key file: {e}"))?;
+                if meta.len() > MAX_KEY_FILE {
+                    return Err("that key file is too large to be a KeePass key file".into());
+                }
+                std::fs::read(&p).map_err(|e| format!("couldn't read the key file: {e}"))
+            })
+            .await
+            .map_err(|e| format!("vault_import: {e}"))??;
+            use base64::Engine as _;
+            Some(base64::engine::general_purpose::STANDARD.encode(bytes))
+        }
+        None => None,
+    };
     let mut answer = relay(
         state,
         json!({
@@ -103,12 +160,14 @@ pub async fn import(state: &Arc<AppState>, args: &Value) -> Result<Value, String
             "path": path.to_string_lossy(),
             "passphrase": args.get("passphrase").and_then(Value::as_str),
             "mapping": args.get("mapping"),
+            "keyfile": keyfile,
         }),
     )
     .await?;
     if let Some(o) = answer.as_object_mut() {
         o.insert("pick_id".into(), json!(pick_id));
         o.insert("file_name".into(), json!(file_name));
+        o.insert("key_file_name".into(), json!(key_file_name));
         // A copy may already be in the cloud, and in the service's file history.
         o.insert("synced_folder".into(), json!(synced_folder(&path)));
     }

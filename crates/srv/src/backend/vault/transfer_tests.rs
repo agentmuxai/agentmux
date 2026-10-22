@@ -497,3 +497,17 @@ fn a_keepass_database_asks_for_its_password_then_previews_and_is_not_called_a_pl
     let result = commit(&s, &preview.token, Duplicates::Skip).unwrap();
     assert_eq!(result.added, 1);
 }
+
+#[test]
+fn a_keepass_database_that_has_only_a_key_file_is_previewed_with_it() {
+    let s = store();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("Keyed.kdbx");
+    std::fs::write(&path, include_bytes!("import/fixtures/pykeepass_keyfile_only.kdbx")).unwrap();
+    let key: &[u8] = include_bytes!("import/fixtures/livekey.keyx");
+    assert!(matches!(inspect(&s, &path, None).unwrap_err(), InspectError::NeedsPassphrase));
+    let preview = inspect_keyed(&s, &path, None, None, Some(key)).unwrap();
+    assert_eq!((preview.source, preview.total, preview.plaintext_file), (Source::KeePass, 2, false), "the login and its note");
+    let wrong = inspect_keyed(&s, &path, None, None, Some(b"not the key")).unwrap_err();
+    assert!(matches!(&wrong, InspectError::Other(m) if m.contains("didn't open")));
+}

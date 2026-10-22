@@ -5,6 +5,11 @@ use super::*;
 use keepass::config::{DatabaseConfig, KdfConfig};
 use keepass::db::Value;
 
+/// Most tests open a database by its password alone.
+fn read(bytes: &[u8], passphrase: &str) -> Result<Imported, ReadError> {
+    super::read(bytes, passphrase, None)
+}
+
 /// A database as KeePassXC would save it, with a cheap key derivation.
 fn database(kdf: KdfConfig) -> Database {
     let mut config = DatabaseConfig::default();
@@ -243,4 +248,58 @@ fn a_wrong_password_is_called_wrong_and_a_layout_the_reader_cannot_parse_is_said
         Ok(_) => {} // a newer keepass crate may read it: then it must simply work
         Err(_) => panic!("unexpected"),
     }
+}
+
+// ── Key files ───────────────────────────────────────────────────────────────
+// Written by pykeepass with a KeePass XML key file: one by its password and the key file, one by the
+// key file alone. Password "correct horse battery".
+const WITH_KEYFILE: &[u8] = include_bytes!("fixtures/pykeepass_password_and_keyfile.kdbx");
+const KEYFILE_ONLY: &[u8] = include_bytes!("fixtures/pykeepass_keyfile_only.kdbx");
+const KEYFILE: &[u8] = include_bytes!("fixtures/livekey.keyx");
+
+fn err_of(r: Result<Imported, ReadError>) -> String {
+    match r {
+        Err(ReadError::Other(e)) => e,
+        Err(ReadError::NeedsPassphrase) => "needs a password".to_string(),
+        Err(_) => "other".to_string(),
+        Ok(_) => "opened".to_string(),
+    }
+}
+
+#[test]
+fn a_database_that_needs_its_key_file_opens_with_it_and_says_so_without_it() {
+    let i = match super::read(WITH_KEYFILE, "correct horse battery", Some(KEYFILE)) {
+        Ok(i) => i,
+        Err(ReadError::Other(e)) => panic!("{e}"),
+        Err(_) => panic!("unexpected"),
+    };
+    let login = i.entries.iter().find(|e| e.label == "Keyed example").expect("read");
+    assert_eq!((login.kind.as_str(), login.parts["password"].as_str()), ("login", "hunter2-keyed"));
+    // Without it, the password alone is wrong, and the message points at the key file.
+    let without = err_of(super::read(WITH_KEYFILE, "correct horse battery", None));
+    assert!(without.contains("didn't open") && without.contains("key file"), "{without}");
+    // A different key file, or a wrong password with the right one, is refused without a hint to look elsewhere.
+    let other_key = KEYFILE.iter().map(|b| if *b == b'a' { b'b' } else { *b }).collect::<Vec<u8>>();
+    let wrong_key = err_of(super::read(WITH_KEYFILE, "correct horse battery", Some(&other_key)));
+    assert!(wrong_key.contains("password and key file didn't open"), "{wrong_key}");
+    let wrong_pw = err_of(super::read(WITH_KEYFILE, "wrong", Some(KEYFILE)));
+    assert!(wrong_pw.contains("password and key file didn't open"), "{wrong_pw}");
+}
+
+#[test]
+fn a_database_with_only_a_key_file_opens_with_no_password() {
+    assert!(super::read(KEYFILE_ONLY, "", Some(KEYFILE)).is_ok(), "key file alone");
+    // Nothing at all asks for a password first.
+    assert_eq!(err_of(super::read(KEYFILE_ONLY, "", None)), "needs a password");
+    // A password that isn't part of it fails.
+    assert!(err_of(super::read(KEYFILE_ONLY, "extra", Some(KEYFILE))).contains("didn't open"));
+}
+
+#[test]
+fn a_file_that_is_not_a_key_file_or_is_huge_is_refused() {
+    let big = vec![b'x'; MAX_KEY_FILE + 1];
+    assert!(err_of(super::read(WITH_KEYFILE, "correct horse battery", Some(&big))).contains("too large"));
+    // KeePass reads any other file as a raw key; an empty one is the only thing it can't use.
+    let empty = err_of(super::read(WITH_KEYFILE, "correct horse battery", Some(b"")));
+    assert!(empty.contains("key file"), "{empty}");
 }

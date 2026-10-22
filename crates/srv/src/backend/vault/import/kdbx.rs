@@ -174,19 +174,38 @@ fn kind_of_field(name: &str) -> Option<(&'static str, &'static str)> {
     }
 }
 
-pub fn read(bytes: &[u8], passphrase: &str) -> Result<Imported, ReadError> {
+/// The most a key file may be: KeePass's own are a few hundred bytes (an XML file, or 32 random ones).
+pub const MAX_KEY_FILE: usize = 1024 * 1024;
+
+pub fn read(bytes: &[u8], passphrase: &str, keyfile: Option<&[u8]>) -> Result<Imported, ReadError> {
     check_header(bytes)?;
-    if passphrase.is_empty() {
+    if passphrase.is_empty() && keyfile.is_none() {
         return Err(ReadError::NeedsPassphrase);
     }
-    let db = Database::parse(bytes, DatabaseKey::new().with_password(passphrase)).map_err(|e| {
+    // A database may be opened by its password, its key file, or both.
+    let mut key = DatabaseKey::new();
+    if !passphrase.is_empty() {
+        key = key.with_password(passphrase);
+    }
+    if let Some(file) = keyfile {
+        if file.len() > MAX_KEY_FILE {
+            return Err("that key file is too large to be a KeePass key file".into());
+        }
+        key = key.with_keyfile(&mut std::io::Cursor::new(file)).map_err(|_| ReadError::from("that isn't a KeePass key file"))?;
+    }
+    let (what, wrong) = match keyfile {
+        Some(_) => ("that password and key file", "the password or the key file is wrong"),
+        None => ("that password", "the password is wrong, or the database also needs a key file: choose it too"),
+    };
+    let db = Database::parse(bytes, key).map_err(|e| {
         use keepass::db::DatabaseOpenError as E;
         match e {
-            E::Key(keepass::error::DatabaseKeyError::IncorrectKey) => ReadError::from("that password didn't open the database (a database that also needs a key file can't be opened here yet)"),
-            E::Key(_) => ReadError::from("that password didn't open the database"),
+            E::Key(keepass::error::DatabaseKeyError::IncorrectKey) => ReadError::from(format!("{what} didn't open the database ({wrong})")),
+            E::Key(keepass::error::DatabaseKeyError::InvalidKeyFile | keepass::error::DatabaseKeyError::Xml(_)) => ReadError::from("that isn't a KeePass key file"),
+            E::Key(_) => ReadError::from(format!("{what} didn't open the database")),
             // A KDBX 3 file has no check of the key before it decrypts: a wrong password comes out as
             // garbage that fails to unpad, the same as a damaged file does.
-            E::Cryptography(_) => ReadError::from("that password didn't open the database, or the file is damaged"),
+            E::Cryptography(_) => ReadError::from(format!("{what} didn't open the database, or the file is damaged")),
             // The XML inside didn't parse. The crate's detail can quote the file, so it is not passed on.
             E::Format(_) => ReadError::from(
                 "this KeePass database couldn't be read: it is damaged, or was written by a tool that lays its entries out differently from KeePass (files from KeePass and KeePassXC read fine)",

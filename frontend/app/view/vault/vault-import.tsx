@@ -78,6 +78,13 @@ export function VaultImportDialog(props: { onClose: () => void }): JSX.Element {
         setPass("");
         return run(() => pickImport(s.pickId, typed));
     };
+    // A KeePass database may need a key file as well as, or instead of, its password: the host
+    // asks which in its own window, and only the file's name comes back here.
+    const keyFile = (what: "choose" | "clear") => {
+        const s = step();
+        if (s?.kind !== "needs_passphrase") return;
+        return run(() => pickImport(s.pickId, undefined, undefined, what));
+    };
 
     const map = () => {
         const s = step();
@@ -167,6 +174,26 @@ export function VaultImportDialog(props: { onClose: () => void }): JSX.Element {
                             </Field>
                             <input type="submit" hidden />
                         </form>
+                        <div class="vault-keyfile">
+                            <span class="warden-manager-dim">A KeePass database can also need a key file.</span>{" "}
+                            <Show
+                                when={(step() as Extract<ImportStep, { kind: "needs_passphrase" }>).keyFileName}
+                                fallback={
+                                    <Button density="compact" disabled={busy()} onClick={() => void keyFile("choose")}>
+                                        Choose a key file…
+                                    </Button>
+                                }
+                            >
+                                {(name) => (
+                                    <>
+                                        <span class="warden-manager-mono">{name()}</span>{" "}
+                                        <Button density="compact" disabled={busy()} onClick={() => void keyFile("clear")}>
+                                            Remove
+                                        </Button>
+                                    </>
+                                )}
+                            </Show>
+                        </div>
                     </Show>
                     <Show when={step()?.kind === "needs_mapping" ? (step() as Extract<ImportStep, { kind: "needs_mapping" }>) : null}>
                         {(s) => (
@@ -263,7 +290,12 @@ export function VaultImportDialog(props: { onClose: () => void }): JSX.Element {
                     </Button>
                 </Show>
                 <Show when={!result() && step()?.kind === "needs_passphrase"}>
-                    <Button tone="accent" busy={busy()} disabled={!pass()} onClick={() => void unlock()}>
+                    <Button
+                        tone="accent"
+                        busy={busy()}
+                        disabled={!pass() && !(step() as Extract<ImportStep, { kind: "needs_passphrase" }>).keyFileName}
+                        onClick={() => void unlock()}
+                    >
                         Open file
                     </Button>
                 </Show>
