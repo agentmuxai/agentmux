@@ -12,10 +12,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { zstdCompressSync, zstdDecompressSync } from "node:zlib";
 import { afterAll, describe, expect, it } from "vitest";
-import { createFilestore, FRAME_TABLE, PART, putFile, transcript } from "./fixture.mjs";
+import { createChannel, createFilestore, FRAME_TABLE, PART, putFile, transcript } from "./fixture.mjs";
 import { allDamage, findDamage } from "./lib/analyze.mjs";
 import { decodeDeltas, decodeFrame, partIndex, readFileBytes } from "./lib/frames.mjs";
 import { rebuildZone } from "./lib/rebuild.mjs";
+import { findSources, readSource } from "./lib/sources.mjs";
+import { DatabaseSync } from "node:sqlite";
 
 const vector = JSON.parse(readFileSync(new URL("./testdata/frames.json", import.meta.url), "utf8"));
 const asRow = (f) => ({ ...f, check_hash: Buffer.from(f.check_hash, "hex"), data: Buffer.from(f.data, "base64") });
@@ -168,6 +170,29 @@ describe("a store holding frames", () => {
         expect(readFileBytes(db, "agent:vvv:current", "output").equals(fresh)).toBe(true);
         expect(findDamage(db).damage).toEqual([]);
         db.close();
+    });
+
+    it("a per-channel copy holding frames is checked frame by frame and read decoded", () => {
+        const home = join(dir, "home");
+        const frameIn = (data, oid, frame) => {
+            const db = new DatabaseSync(join(data, "db", "filestore.db"));
+            db.exec(FRAME_TABLE);
+            db.prepare("INSERT INTO db_file_frame (zoneid, name, first_part, part_count, codec, raw_len, check_hash, data) VALUES (?, 'output', 0, 1, ?, ?, ?, ?)").run(
+                oid, frame.codec, frame.raw_len, frame.check_hash, frame.data);
+            db.close();
+        };
+        const output = Buffer.concat([raw, tail]);
+        const good = createChannel(home, "stable", "1.0.0", [{ oid: "blk-good", meta: { agentId: "ok" }, output, dropParts: [0] }]);
+        frameIn(good, "blk-good", codec2);
+        const bad = { ...codec2, data: Buffer.from(codec2.data) };
+        bad.data[10] ^= 0xff;
+        const broken = createChannel(home, "stable", "2.0.0", [{ oid: "blk-bad", meta: { agentId: "ok" }, output: Buffer.concat([output, Buffer.from("more\n")]), dropParts: [0] }]);
+        frameIn(broken, "blk-bad", bad);
+        const { byAgent } = findSources(home, new Set(["ok"]));
+        const found = byAgent.get("ok");
+        expect(found.candidates.map((c) => [c.blockOid, c.whole]).sort()).toEqual([["blk-bad", false], ["blk-good", true]]);
+        expect(found.best.blockOid).toBe("blk-good");
+        expect(readSource(found.best).equals(output)).toBe(true);
     });
 
     it("the fixture's frame table is the one srv creates", () => {

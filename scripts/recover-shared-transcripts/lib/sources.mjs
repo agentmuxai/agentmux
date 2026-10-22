@@ -10,7 +10,7 @@
 
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { framesOf, partIndex, readFileBytes } from "./frames.mjs";
+import { partIndex, readFileBytes, scanFrames } from "./frames.mjs";
 import { open } from "./sqlite.mjs";
 
 const subdirs = (dir) => {
@@ -72,8 +72,10 @@ function outputState(db, zone, contentScan) {
     let whole = parts.length > 0 && parts.every((p, i) => p.partidx === i) && bytes === Number(f.size);
     if (whole && contentScan) {
         whole = db.prepare("SELECT COUNT(*) AS n FROM db_file_data WHERE zoneid = ? AND name = 'output' AND instr(data, x'00') > 0").get(zone).n === 0;
-        if (whole && framesOf(db, zone, "output").length) {
-            whole = readFileBytesOrNull(db, zone)?.includes(0) === false;
+        if (whole) {
+            // Frame by frame: a candidate is never assembled in memory just to be checked.
+            const frames = scanFrames(db, { zone, name: "output" });
+            whole = frames.bad.length === 0 && frames.nul.length === 0;
         }
     }
     return { size: Number(f.size), whole };
@@ -119,15 +121,6 @@ export function findSources(home, want, { contentScan = true } = {}) {
         }
     }
     return { dataDirsScanned: dataDirs.length, byAgent: found };
-}
-
-/** A zone's `output`, or null when a frame of it doesn't decode. */
-function readFileBytesOrNull(db, zone) {
-    try {
-        return readFileBytes(db, zone, "output");
-    } catch {
-        return null;
-    }
 }
 
 /** The bytes of a chosen copy (its parts in order, frames decoded). */

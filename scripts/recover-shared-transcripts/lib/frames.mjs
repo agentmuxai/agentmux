@@ -196,15 +196,26 @@ export function readFileBytes(db, zone, name) {
  * { bad: [{ zone, name, first, error }], nul: [{ zone, name, first, parts }] }. A frame that
  * doesn't decode is damage the app reads as blank; one holding a NUL byte is a hole. Only
  * the parts with no row count: the app reads a part's row, not its frame. A frame of a shape
- * srv never writes is left to `findDamage`.
+ * srv never writes is left to `findDamage`. With `zone`, only that zone's file. One frame is
+ * decoded at a time, so a file of any size is scanned in bounded memory.
  */
-export function scanFrames(db, { name = "output" } = {}) {
+export function scanFrames(db, { name = "output", zone = null } = {}) {
     const bad = [];
     const nul = new Map();
     if (!hasFrames(db)) return { bad, nul: [] };
-    const where = name === null ? "" : "WHERE name = ?";
+    const conds = [];
+    const args = [];
+    if (zone !== null) {
+        conds.push("zoneid = ?");
+        args.push(zone);
+    }
+    if (name !== null) {
+        conds.push("name = ?");
+        args.push(name);
+    }
+    const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
     const rows = db.prepare(`SELECT zoneid, name, first_part, part_count, codec, raw_len, check_hash, data FROM db_file_frame ${where} ORDER BY zoneid, name, first_part`);
-    for (const f of name === null ? rows.iterate() : rows.iterate(name)) {
+    for (const f of rows.iterate(...args)) {
         if (!wellShaped(f)) continue;
         const first = Number(f.first_part);
         const count = Number(f.part_count);
