@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Which Kanban task each agent pane holds, for other views (the Swarm's rows) to show and link to
-// (SPEC_WARDEN_KANBAN_2026_10_20.md §6.14). One shared copy of the board, fetched while any chip is
-// mounted: on `workqueue:changed` and every 30 s.
+// (SPEC_WARDEN_KANBAN_2026_10_20.md §6.14), and how many tasks need the operator, for the widget-bar
+// Kanban button's badge (§6.13). One shared copy of the board, fetched while any chip or badge is
+// mounted: on `workqueue:changed` and every 30 s (an agent of another AgentMux on this computer moves
+// tasks without an event reaching this one).
 
 import { createSignal, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 
@@ -14,6 +16,7 @@ import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 
+import { needsCountOf } from "./kanban-columns";
 import type { KanbanBoard } from "./kanban-types";
 
 import "./kanban-held.scss";
@@ -56,6 +59,7 @@ export function heldByBlock(board: KanbanBoard): Map<string, HeldTask> {
 }
 
 const [held, setHeld] = createSignal<Map<string, HeldTask>>(new Map());
+const [needs, setNeeds] = createSignal(0);
 let users = 0;
 let unsub: (() => void) | null = null;
 let poll: ReturnType<typeof setInterval> | null = null;
@@ -63,7 +67,9 @@ let debounce: ReturnType<typeof setTimeout> | null = null;
 
 async function refresh(): Promise<void> {
     try {
-        setHeld(heldByBlock(await RpcApi.KanbanListCommand(TabRpcClient, {})));
+        const board = await RpcApi.KanbanListCommand(TabRpcClient, {});
+        setHeld(heldByBlock(board));
+        setNeeds(needsCountOf(board.tasks));
     } catch {
         // An older srv, or none yet: no chips.
     }
@@ -86,13 +92,25 @@ function stop(): void {
     poll = debounce = null;
 }
 
-/** The task this agent pane holds, kept current while the caller is mounted. */
-export function useHeldTask(blockId: () => string): Accessor<HeldTask | null> {
+/** Keeps the shared board current while the calling component is mounted. */
+function follow(): void {
     if (users++ === 0) start();
     onCleanup(() => {
         if (--users === 0) stop();
     });
+}
+
+/** The task this agent pane holds, kept current while the caller is mounted. */
+export function useHeldTask(blockId: () => string): Accessor<HeldTask | null> {
+    follow();
     return () => held().get(blockId()) ?? null;
+}
+
+/** How many tasks need the operator (the same count as the Warden tab title), kept current while the
+ *  caller is mounted. */
+export function useKanbanNeeds(): Accessor<number> {
+    follow();
+    return needs;
 }
 
 /** Open the Kanban (this tab's Warden, or a new one) with this task's drawer open. */

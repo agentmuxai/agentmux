@@ -160,6 +160,14 @@ mod tests {
         }
     }
 
+    /// Spec D2: srv holds Google tokens and makes the calls itself; nothing
+    /// for a Google (or Slack) account is ever put in an agent's environment.
+    #[test]
+    fn google_and_slack_inject_nothing() {
+        assert_eq!(provider_class("google"), None);
+        assert_eq!(provider_class("slack"), None);
+    }
+
     #[test]
     fn provider_class_resolves_aliases_to_the_same_result_as_canonical() {
         // reagent P1 on #2263: provider_class used to match only canonical

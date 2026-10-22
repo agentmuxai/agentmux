@@ -134,11 +134,7 @@ pub(super) async fn handle_shell_create(
         effective_env.extend(i.env);
         Arc::new(i.scrubber)
     });
-    // After the caller's overrides: a command run on an agent's behalf gets the
-    // same plain-`gh` guard as the agent itself, and `req.env` can't lift it.
-    // Nor can it hand that command the account's cloud login.
-    crate::backend::gh_guard::apply_gh_guard(&mut effective_env);
-    crate::backend::account_login_guard::strip_account_login(&mut effective_env);
+    reserve_agent_env(&state.mstore, &req.agent_block_id, &mut effective_env);
     // WSL passes on only what WSLENV names: the caller's own variables and the
     // gh guard, never the rest of the agent's env.
     let cwd_there = effective_cwd.as_deref().unwrap_or_default();
@@ -146,13 +142,8 @@ pub(super) async fn handle_shell_create(
     let launch = match &target {
         AgentTarget::Local => None,
         AgentTarget::Wsl(distro) => {
-            effective_env.insert(
-                "WSLENV".to_string(),
-                crate::backend::remote::wsl::wslenv_with(
-                    &std::env::var("WSLENV").unwrap_or_default(),
-                    caller_keys.iter().map(String::as_str),
-                ),
-            );
+            let wslenv = shell_wslenv(&std::env::var("WSLENV").unwrap_or_default(), &caller_keys, &effective_env);
+            effective_env.insert("WSLENV".to_string(), wslenv);
             let args = crate::backend::remote::wsl::launch(distro, &req.cmd, &[], cwd_there).args;
             Some(("wsl.exe".to_string(), args))
         }
@@ -642,6 +633,85 @@ pub(super) fn connection_conflict(
          or open it with connection '{running_on}' to use it"
     );
     Some((StatusCode::CONFLICT, Json(json!({ "error": error }))).into_response())
+}
+
+/// The values a Shell command's env takes from the server, applied after
+/// the request's `env` and the injected secrets so neither can set them: the
+/// agent's current identity over a persisted or requested one, as its own
+/// spawn has it (`identity_env`), the plain-`gh` guard the agent itself gets,
+/// and no account cloud login.
+fn reserve_agent_env(
+    mstore: &crate::backend::storage::store::Store,
+    agent_block_id: &str,
+    env: &mut std::collections::HashMap<String, String>,
+) {
+    crate::server::agent_handlers::identity_env::carry_block_slug_identity_env(mstore, agent_block_id, env);
+    crate::backend::gh_guard::apply_gh_guard(env);
+    crate::backend::account_login_guard::strip_account_login(env);
+}
+
+/// `WSLENV` for a Shell command in a distro: the caller's own variables and
+/// the reserved identity [`reserve_agent_env`] set, so the command names the
+/// agent there as it would on Windows (`wsl::AGENT_IDENTITY_ENV`).
+fn shell_wslenv(existing: &str, caller_keys: &[String], env: &std::collections::HashMap<String, String>) -> String {
+    let identity = crate::backend::remote::wsl::AGENT_IDENTITY_ENV.into_iter().filter(|k| env.contains_key(*k));
+    crate::backend::remote::wsl::wslenv_with(existing, caller_keys.iter().map(String::as_str).chain(identity))
+}
+
+#[cfg(test)]
+mod reserved_env_tests {
+    /// The reserved identity crosses into a distro beside the caller's own
+    /// variables; `GH_CONFIG_DIR` as a translated path; a key the env lacks
+    /// isn't listed.
+    #[test]
+    fn the_reserved_identity_crosses_into_wsl() {
+        let env: std::collections::HashMap<String, String> =
+            ["AGENTMUX_AGENT_ID", "AGENTMUX_AGENT_SLUG", "MUXBUS_AGENT_ID", "GIT_AUTHOR_EMAIL"]
+                .into_iter()
+                .map(|k| (k.to_string(), "loap-3".to_string()))
+                .collect();
+        let wslenv = super::shell_wslenv("", &["MY_VAR".to_string()], &env);
+        let names: Vec<&str> = wslenv.split(':').collect();
+        for key in ["MY_VAR", "AGENTMUX_AGENT_ID", "AGENTMUX_AGENT_SLUG", "MUXBUS_AGENT_ID", "GIT_AUTHOR_EMAIL", "GH_CONFIG_DIR/p"] {
+            assert!(names.contains(&key), "{key} in {wslenv}");
+        }
+        assert!(!names.contains(&"GIT_COMMITTER_NAME"), "{wslenv}");
+        assert!(!wslenv.contains("AGENTMUX_AUTH_KEY"), "{wslenv}");
+    }
+
+    /// A request carrying the agent's old id (and its slug, MuxBus id, git
+    /// email) ends with the definition's: the reserved values are applied
+    /// last.
+    #[test]
+    fn a_request_env_cannot_put_back_an_old_identity() {
+        use crate::backend::storage::store::Store;
+        let store = Store::open_in_memory().unwrap();
+        let mut def = crate::backend::storage::agents::test_agent_def("uid-shell", "Loap #3", "claude", "host", 1, "");
+        def.slug = "loap-3".to_string();
+        store.agent_def_insert(&mut def).unwrap();
+        let mut meta = crate::backend::obj::MetaMapType::new();
+        meta.insert("view".to_string(), serde_json::json!("agent"));
+        meta.insert("agentId".to_string(), serde_json::json!("uid-shell"));
+        let mut block = crate::backend::obj::Block { oid: "block-shell".to_string(), meta, ..Default::default() };
+        store.insert(&mut block).unwrap();
+
+        let old = "loap-loap-2-loap-3";
+        let mut env: std::collections::HashMap<String, String> = [
+            ("AGENTMUX_AGENT_ID", old),
+            ("AGENTMUX_AGENT_SLUG", old),
+            ("MUXBUS_AGENT_ID", old),
+            ("GIT_AUTHOR_EMAIL", "loap-loap-2-loap-3@agents.local"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        super::reserve_agent_env(&store, "block-shell", &mut env);
+        for key in ["AGENTMUX_AGENT_ID", "AGENTMUX_AGENT_SLUG", "MUXBUS_AGENT_ID"] {
+            assert_eq!(env[key], "loap-3", "{key}");
+        }
+        assert_eq!(env["GIT_AUTHOR_EMAIL"], "loap-3@agents.local");
+        assert!(env["GH_CONFIG_DIR"].ends_with("gh-loap-3"));
+    }
 }
 
 #[cfg(test)]

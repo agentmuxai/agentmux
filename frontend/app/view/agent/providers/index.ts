@@ -11,4 +11,4 @@ export type { ProviderModel, ProviderDefinition } from "./types";
 
 export { PROVIDERS, resolveProviderAlias } from "./catalog";
 
-export { setProviderModels, getProvider, getProviderList, familyKey } from "./model-overlay";
+export { setProviderModels, replaceProviderModels, isAccountListed, getProvider, getProviderList, familyKey } from "./model-overlay";

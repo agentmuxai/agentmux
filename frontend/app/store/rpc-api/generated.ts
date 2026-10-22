@@ -7,6 +7,8 @@
 
 import type { AccountKeyVerifyResult } from "@/types/rpc/AccountKeyVerifyResult";
 import type { AccountOAuthCancelResult } from "@/types/rpc/AccountOAuthCancelResult";
+import type { AccountOAuthClientClearResult } from "@/types/rpc/AccountOAuthClientClearResult";
+import type { AccountOAuthClientInfo } from "@/types/rpc/AccountOAuthClientInfo";
 import type { AccountOAuthStartResult } from "@/types/rpc/AccountOAuthStartResult";
 import type { AckResp } from "@/types/rpc/AckResp";
 import type { ActivitySummaryResult } from "@/types/rpc/ActivitySummaryResult";
@@ -356,6 +358,7 @@ import type { NotifyFocusParams } from "@/types/rpc/NotifyFocusParams";
 import type { NotifyOk } from "@/types/rpc/NotifyOk";
 import type { NotifyTakeActivationParams } from "@/types/rpc/NotifyTakeActivationParams";
 import type { NotifyTakeActivationResult } from "@/types/rpc/NotifyTakeActivationResult";
+import type { OAuthClientReq } from "@/types/rpc/OAuthClientReq";
 import type { OAuthSessionReq } from "@/types/rpc/OAuthSessionReq";
 import type { OpenInShellReq } from "@/types/rpc/OpenInShellReq";
 import type { OtherBuildLayoutsResult } from "@/types/rpc/OtherBuildLayoutsResult";
@@ -482,6 +485,22 @@ export const GeneratedApi = {
   ): Promise<AccountOAuthCancelResult> {
     return client.rpcCall("account.oauth.cancel", data, opts);
   },
+  // command "account.oauth.client.clear"
+  AccountOAuthClientClearCommand(
+    client: RpcClient,
+    data: OAuthClientReq,
+    opts?: RpcOpts
+  ): Promise<AccountOAuthClientClearResult> {
+    return client.rpcCall("account.oauth.client.clear", data, opts);
+  },
+  // command "account.oauth.client.get"
+  AccountOAuthClientGetCommand(
+    client: RpcClient,
+    data: OAuthClientReq,
+    opts?: RpcOpts
+  ): Promise<AccountOAuthClientInfo> {
+    return client.rpcCall("account.oauth.client.get", data, opts);
+  },
   // command "account.oauth.poll"
   AccountOAuthPollCommand(
     client: RpcClient,
@@ -493,7 +512,16 @@ export const GeneratedApi = {
   // command "account.oauth.start"
   AccountOAuthStartCommand(
     client: RpcClient,
-    data: { provider: string; name: string; clientId?: string; clientSecret?: string },
+    data: {
+      provider: string;
+      name?: string;
+      clientId?: string;
+      clientSecret?: string;
+      clientMode?: "byo" | "workspace";
+      saveClient?: boolean;
+      scopes?: string[];
+      accountId?: string;
+    },
     opts?: RpcOpts
   ): Promise<AccountOAuthStartResult> {
     return client.rpcCall("account.oauth.start", data, opts);

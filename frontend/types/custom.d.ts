@@ -175,7 +175,7 @@ declare global {
         /** Export the Vault to a `.vault` file: the host asks where to save, then srv
          *  writes it encrypted to `passphrase`. Answers `{ count, file_name }`, or
          *  `{ cancelled: true }`. */
-        vaultExport?(args: { ids?: string[]; passphrase: string; default_name: string; format?: "vault" | "kdbx" }): Promise<unknown>;
+        vaultExport?(args: { ids?: string[]; passphrase?: string; default_name?: string; format?: "vault" | "kdbx" | "csv" | "json"; pick_id?: string; confirmed?: boolean; cancel?: boolean }): Promise<unknown>;
         /** Import from a `.vault` file: with no `pick_id` the host asks which file;
          *  with one it reads the same file again with `passphrase`. */
         vaultImport?(args: { pick_id?: string; passphrase?: string; mapping?: unknown; choose_key_file?: boolean; clear_key_file?: boolean }): Promise<unknown>;
@@ -223,6 +223,15 @@ declare global {
         n: number;
     };
 
+    /** A page's state for the hibernation check: `live: false` when it has no page. */
+    type BrowserHibernationCheck = {
+        live: boolean;
+        media?: boolean;
+        edited?: boolean;
+        beforeunload?: boolean;
+        devtools?: boolean;
+    };
+
     type BrowserPaneHostApi = {
         /** `opts.allowedOrigins`: the pane's site list (`browser:allowed_origins`), so the
          *  host has it before the first load (SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md §6).
@@ -245,6 +254,11 @@ declare global {
          *  `supported: false` on a libcef without the API. `searchSuggestions`:
          *  also ask the default search engine (`browser:searchsuggestions`). */
         autocomplete?(blockId: string, text: string, searchSuggestions: boolean): Promise<BrowserAutocompleteResult>;
+        /** What the pane's page is doing that a hibernation would lose
+         *  (browser_api/hibernation.rs). Absent on hosts without it. */
+        hibernationCheck?(blockId: string): Promise<BrowserHibernationCheck>;
+        /** The host's memory pressure level (memory_pressure.rs). */
+        memoryPressure?(): Promise<"normal" | "warn" | "critical">;
         /** Bring a popup window a pane's page opened (`popup-…`) to the front. */
         showPopup(popupId: string): Promise<void>;
         /** Close a popup window a pane's page opened. */

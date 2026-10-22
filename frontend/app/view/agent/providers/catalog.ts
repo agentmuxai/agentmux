@@ -216,12 +216,17 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         sessionIdField: "thread_id",
         controllerType: "subprocess",
         systemPrereqs: [NODE_PREREQ, NPM_PREREQ],
-        // Verify ChatGPT-account availability when bumping the codex CLI pin.
+        // Only a fallback: once a Codex account has run, the menu shows the
+        // models that account offers, from the list its CLI caches
+        // (`providers.models`, `replaceProviderModels`). These are that list as
+        // a ChatGPT account had it on 2026-10-22, when OpenAI had retired every
+        // id this catalog offered before (gpt-5.5, gpt-5.4, gpt-5.1-codex-max,
+        // gpt-5.3-codex).
         models: [
-            { value: "gpt-5.5", label: "GPT-5.5", default: true, description: "Current codex frontier" },
-            { value: "gpt-5.4", label: "GPT-5.4", description: "Prior frontier" },
-            { value: "gpt-5.1-codex-max", label: "GPT-5.1-Codex-Max", description: "Codex-tuned, long-horizon" },
-            { value: "gpt-5.3-codex", label: "GPT-5.3-Codex", description: "Codex-tuned" },
+            { value: "gpt-6-astra", label: "GPT-6-Astra", default: true, description: "Frontier intelligence for the most demanding work" },
+            { value: "gpt-5.6-sol", label: "GPT-5.6-Sol", description: "Older generation workhorse" },
+            { value: "gpt-5.6-terra", label: "GPT-5.6-Terra", description: "Older, balanced" },
+            { value: "gpt-5.6-luna", label: "GPT-5.6-Luna", description: "Older, fast and efficient" },
         ],
     },
     // muxcode — AgentMux's first-party agentic coding CLI.

@@ -25,6 +25,14 @@ pub struct CommandGetIdentityAccountData {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandDeleteIdentityAccountData {
     pub id: String,
+    /// For an OAuth account whose grant is revoked at the provider before it
+    /// is deleted (Google): when true, a revoke that fails leaves the account
+    /// in place (`deleted: false`), so the user can retry while the token is
+    /// still there. When false (the default) the account is deleted anyway
+    /// and the failure is reported in the result's `revoke`.
+    #[serde(default)]
+    #[ts(as = "Option<bool>", optional)]
+    pub require_revoke: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]

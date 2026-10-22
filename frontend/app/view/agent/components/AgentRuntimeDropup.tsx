@@ -37,7 +37,8 @@ import { AnchoredPopover } from "@/app/element/anchored-popover";
 import { IconButton } from "@/app/element/ui";
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { getRuntimeConfig } from "../buildRuntimeArgs";
-import { familyKey, getProvider, type ProviderModel } from "../providers";
+import { familyKey, getProvider, isAccountListed, type ProviderModel } from "../providers";
+import { refreshCodexModels } from "../providers/codex-models-refresh";
 import { runningModelNote } from "../resolved-model";
 import { compareRuntime, useProcessRuntime, type AxisDrift, type RuntimeAgreement } from "../process-runtime";
 import { patchRuntime } from "../runtime-apply";
@@ -138,6 +139,14 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
     // What the process was actually spawned with, against what is selected. The
     // label above shows the selection; this says when the agent is NOT running it.
     const processRuntime = useProcessRuntime(props.blockId);
+    // Codex's model list comes from its account's cache, which a fresh sign-in
+    // only gets on its first turn: fetch it again (throttled) as a Codex
+    // process starts, and when this menu opens.
+    const isCodex = () => getProvider(props.providerId)?.id === "codex";
+    createEffect(() => {
+        processRuntime();
+        if (isCodex()) refreshCodexModels();
+    });
     const agreement = createMemo(() => {
         const meta = props.blockAtom()?.meta;
         return compareRuntime(
@@ -217,11 +226,17 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
         const current = runtime().model;
         if (!current || opts.length === 0) return;
         if (opts.some((o) => o.value === current)) return;
-        const replacement = opts.find((o) => familyKey(o.value) === familyKey(current));
+        // From the account's own list (Codex), a model not on it is one the
+        // account can't run any more: move to the list's default.
+        const replacement =
+            opts.find((o) => familyKey(o.value) === familyKey(current)) ??
+            (isAccountListed(props.providerId) ? (opts.find((o) => o.default) ?? opts[0]) : undefined);
         if (replacement) void migrateModel(replacement.value);
     });
 
-    const modelLabel = (value: string): string => modelOptions().find((o) => o.value === value)?.label ?? value;
+    // "" is no model named: the CLI picks (Codex before its account's list is known).
+    const modelLabel = (value: string): string =>
+        modelOptions().find((o) => o.value === value)?.label ?? (value === "" ? "CLI default" : value);
     const effortLabel = (value: string): string => EFFORT_OPTIONS.find((o) => o.value === value)?.label ?? value;
     const modeLabel = (value: string): string => MODE_OPTIONS.find((o) => o.value === value)?.label ?? value;
 
@@ -420,6 +435,7 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
         // (possibly zoomed) CSS pixels, with fractions, so setting it back changes nothing.
         const w = referenceEl ? parseFloat(getComputedStyle(referenceEl).width) : NaN;
         setHeldWidth(Number.isFinite(w) && w > 0 ? w : null);
+        if (isCodex()) refreshCodexModels();
         setOpen(true);
     };
 

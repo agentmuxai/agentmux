@@ -49,6 +49,7 @@ const MANAGED_IN: Record<string, string> = {
     accounts: "the Accounts pane",
     muxbus: "Settings, under cloud messages",
     tower: "Tower",
+    browser: "The browser pane that asked for it",
 };
 
 function VaultRequests(props: { onFill: (r: VaultRequest) => void }): JSX.Element {
@@ -147,7 +148,9 @@ function VaultKept(props: { visible: boolean }): JSX.Element {
                     </tbody>
                 </table>
             </Show>
-            <p class="warden-manager-footnote">{"Sign-ins saved by browser panes aren't listed here yet."}</p>
+            <p class="warden-manager-footnote">
+                {"Only sign-ins a browser pane saves from now on are listed: the keychain can't be listed, so earlier ones aren't. The sessions a browser profile keeps for websites you signed in to (cookies) are not here: they belong to the profile."}
+            </p>
         </div>
     );
 }

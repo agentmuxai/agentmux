@@ -6,10 +6,10 @@
 // (it was never Host-specific — every jekt, from any
 // tier, lands here), plus fleet and pane actions (with their `reason`).
 
-import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 
-import { ageMs, formatAge, WARDEN_REFRESH_MS } from "@/app/view/warden-shared/warden-shared";
+import { ageMs, formatAge, pollWhileVisible, WARDEN_REFRESH_MS } from "@/app/view/warden-shared/warden-shared";
 import { WardenSecrets } from "@/app/view/vault/vault-warden";
 import { fetchWardenAudit, WARDEN_AUDIT_LIMIT, type AuditEntry } from "./warden-audit-shared";
 
@@ -35,11 +35,8 @@ export const WardenAuditManager = (props: { visible?: boolean }): JSX.Element =>
         }
     };
 
-    onMount(() => {
-        void refresh();
-        const dataTimer = window.setInterval(() => void refresh(), WARDEN_REFRESH_MS);
-        onCleanup(() => window.clearInterval(dataTimer));
-    });
+    // Polls only while the section is shown (warden-view.tsx passes `visible`).
+    pollWhileVisible(() => void refresh(), () => props.visible ?? true);
 
     return (
         <div class="warden-manager-body">

@@ -13,6 +13,7 @@ pub mod import;
 pub mod kdbx_export;
 pub mod kdbx_names;
 pub mod kinds;
+pub mod plain_export;
 pub mod requests;
 pub mod scrub;
 pub mod seal;

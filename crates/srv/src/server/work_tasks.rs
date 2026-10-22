@@ -7,6 +7,9 @@
 //!   POST /agentmux/work/:id/update   — a progress note, a checklist, links
 //!   POST /agentmux/work/:id/ask      — a question for the operator (blocked)
 //!   POST /agentmux/work/:id/submit   — hand it in (review, or done)
+//!   POST /agentmux/work/:id/hold     — put a waiting task on hold, or pause
+//!                                      one's own (any agent)
+//!   POST /agentmux/work/:id/unhold   — take a held task off hold (any agent)
 //!
 //! And what srv adds to every task an agent touches: its card (number,
 //! repository, who asked), its history, the next task waiting for the agent
@@ -24,7 +27,7 @@ use agentmux_common::time::now_ms;
 use crate::backend::kanban::prs::{link_if_from, pr_in_text};
 use crate::backend::reactive::types::AgentRegistration;
 use crate::backend::storage::work_board::{requested, BoardTask, CardUpdate, ChecklistItem, NewCard, WorkEvent};
-use crate::backend::storage::work_queue::{work_state, WorkItem};
+use crate::backend::storage::work_queue::{work_state, ClaimFilter, WorkItem};
 
 use super::caller::Caller;
 use super::AppState;
@@ -410,6 +413,198 @@ pub(super) async fn handle_work_submit(
     }
     let id = resolve_id(&state, &id);
     finish(&state, caller, &id, &req.agent_id, req.attempt, &result, Some(card_update(&req))).await
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct HoldRequest {
+    pub agent_id: String,
+    /// `hold` on a task the caller is working on: the attempt from its claim.
+    #[serde(default)]
+    pub attempt: Option<i64>,
+    #[serde(default)]
+    pub reason: String,
+}
+
+/// A task as an agent's answer names it: `#12`, else its id.
+fn name_of(state: &AppState, id: &str) -> String {
+    match state.identity_store.work_card_ensure(id, now_ms()) {
+        Ok(n) => format!("#{n}"),
+        Err(_) => id.to_string(),
+    }
+}
+
+/// Who a waiting task is for, as an answer says it.
+fn waiting_for(item: &WorkItem) -> String {
+    if !item.target_agent.is_empty() {
+        item.target_agent.clone()
+    } else if !item.target_group.is_empty() {
+        format!("group {}", item.target_group)
+    } else {
+        "anyone".into()
+    }
+}
+
+/// A hold's reason shows on the shared Kanban: one that looks like a
+/// credential or a destructive command is refused, before anything moves.
+fn sensitive_reason(reason: &str) -> Option<(StatusCode, Json<Value>)> {
+    crate::backend::reactive::sanitize::is_sensitive_message(reason).then(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "ok": false, "error": "the reason looks like it holds a credential or a destructive command; leave that out of it" })),
+        )
+    })
+}
+
+fn refused(text: String) -> (StatusCode, Json<Value>) {
+    (StatusCode::CONFLICT, Json(json!({ "ok": false, "error": text })))
+}
+
+fn moved(state: &AppState, id: &str, to: &str, changed: bool) -> (StatusCode, Json<Value>) {
+    let item = state.identity_store.work_queue_get(id).ok().flatten();
+    (
+        StatusCode::OK,
+        Json(json!({
+            "ok": true,
+            "state": to,
+            "changed": changed,
+            "name": name_of(state, id),
+            "for": item.as_ref().map(waiting_for).unwrap_or_default(),
+        })),
+    )
+}
+
+/// `POST /agentmux/work/:id/hold`: any agent puts a waiting task on hold, so
+/// no one takes it until it is taken off hold; the holder of a claimed task
+/// pauses it, with its `attempt`
+/// (SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md §3.1, §3.2).
+pub(super) async fn handle_work_hold(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    caller: Option<axum::Extension<Caller>>,
+    Json(req): Json<HoldRequest>,
+) -> (StatusCode, Json<Value>) {
+    let caller = caller.as_deref();
+    if req.agent_id.trim().is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "agent_id is required" })));
+    }
+    let id = resolve_id(&state, &id);
+    let Ok(Some(item)) = state.identity_store.work_queue_get(&id) else {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": format!("no task {id}") })));
+    };
+    let reason = clean(&req.reason);
+    if let Some(r) = sensitive_reason(&reason) {
+        return r;
+    }
+    let now = now_ms();
+    let name = name_of(&state, &id);
+    match item.state.as_str() {
+        work_state::HELD => moved(&state, &id, work_state::HELD, false),
+        work_state::OPEN => match state.identity_store.work_hold(&id, now) {
+            Ok(Some(m)) => {
+                record(&state, &id, &req.agent_id, "agent", "held", &m.from, &m.to, &reason);
+                super::work_queue::publish_changed(&state);
+                moved(&state, &id, work_state::HELD, true)
+            }
+            Ok(None) => refused(format!("{name} moved meanwhile; look at it again with Tasks list")),
+            Err(e) => failed(e),
+        },
+        work_state::CLAIMED => {
+            let uid = holder_uid(caller);
+            let Some(attempt) = req.attempt.filter(|&a| holds(&item, &req.agent_id, uid, a)) else {
+                let who = if item.claimed_by.is_empty() { "another agent".to_string() } else { item.claimed_by.clone() };
+                return refused(format!(
+                    "{name} is being worked on by {who}: only its holder can put it on hold (with its attempt); message them"
+                ));
+            };
+            match state.identity_store.work_hold_own(&id, &req.agent_id, uid, attempt, now) {
+                Ok(Some(_)) => {
+                    record(&state, &id, &req.agent_id, "agent", "held", work_state::CLAIMED, work_state::HELD, &reason);
+                    super::work_queue::publish_changed(&state);
+                    moved(&state, &id, work_state::HELD, true)
+                }
+                Ok(None) => conflict(),
+                Err(e) => failed(e),
+            }
+        }
+        work_state::BLOCKED => refused(format!(
+            "{name} waits on the operator's answer to its question; that is already its pause"
+        )),
+        other => refused(format!(
+            "{name} is {other}: only a waiting task, or one you are working on, can be put on hold"
+        )),
+    }
+}
+
+/// `POST /agentmux/work/:id/unhold`: any agent takes a held task off hold; it
+/// waits again for whoever it is for (§3.1).
+pub(super) async fn handle_work_unhold(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<HoldRequest>,
+) -> (StatusCode, Json<Value>) {
+    if req.agent_id.trim().is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "agent_id is required" })));
+    }
+    let id = resolve_id(&state, &id);
+    let Ok(Some(item)) = state.identity_store.work_queue_get(&id) else {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": format!("no task {id}") })));
+    };
+    let reason = clean(&req.reason);
+    if let Some(r) = sensitive_reason(&reason) {
+        return r;
+    }
+    let name = name_of(&state, &id);
+    match item.state.as_str() {
+        work_state::OPEN => moved(&state, &id, work_state::OPEN, false),
+        work_state::HELD => match state.identity_store.work_unhold(&id, now_ms()) {
+            Ok(Some(m)) => {
+                record(&state, &id, &req.agent_id, "agent", "unheld", &m.from, &m.to, &reason);
+                super::work_queue::publish_changed(&state);
+                moved(&state, &id, work_state::OPEN, true)
+            }
+            Ok(None) => refused(format!("{name} moved meanwhile; look at it again with Tasks list")),
+            Err(e) => failed(e),
+        },
+        other => refused(format!("{name} is {other}, not on hold")),
+    }
+}
+
+/// Why a named claim (`claim` with `id`) took nothing: the first rule the task
+/// fails, in words the agent can act on.
+pub(super) fn why_not_claimed(state: &AppState, id: &str, filter: &ClaimFilter, now: i64) -> String {
+    let (agent_id, agent_uid, groups) = (filter.agent_id.as_str(), filter.agent_uid.as_str(), &filter.groups);
+    let Ok(Some(item)) = state.identity_store.work_queue_get(id) else {
+        return format!("there is no task {id}");
+    };
+    let name = name_of(state, id);
+    if item.state != work_state::OPEN && item.state != work_state::HELD {
+        let who = if item.claimed_by.is_empty() { String::new() } else { format!(" (by {})", item.claimed_by) };
+        return format!("{name} is {}{who}, not waiting", item.state);
+    }
+    let mine = if !item.target_agent_uid.is_empty() {
+        item.target_agent_uid == agent_uid
+    } else {
+        item.target_agent.is_empty() || item.target_agent == agent_id
+    };
+    if !mine {
+        return format!("{name} is for {}, not you", waiting_for(&item));
+    }
+    if !item.target_group.is_empty() && !groups.contains(&item.target_group) {
+        return format!("{name} is for group {}, which you aren't in", item.target_group);
+    }
+    if let Some(kind) = filter.kind.as_deref().filter(|k| !k.is_empty() && *k != item.kind) {
+        return format!("{name} is not of kind {kind}");
+    }
+    if let Some(after) = state.identity_store.work_deps_of(id).unwrap_or_default().into_iter().find(|a| !a.finished()) {
+        return format!("{name} starts after #{} \"{}\", which is {}", after.num, after.title, after.state);
+    }
+    if item.attempts >= item.max_attempts {
+        return format!("{name} has used all {} of its attempts", item.max_attempts);
+    }
+    if item.not_before.is_some_and(|t| t > now) {
+        return format!("{name} can't be taken yet: its start time hasn't come");
+    }
+    format!("{name} moved meanwhile; look at it again with Tasks list")
 }
 
 /// Finish a claimed task, for `complete` and `submit`: to Review when it needs

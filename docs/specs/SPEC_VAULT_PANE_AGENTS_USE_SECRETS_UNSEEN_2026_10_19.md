@@ -97,16 +97,18 @@ A new view, `vault`, with a manifest in the block registry, a `lock` icon, opene
 | **Kept by AgentMux** | read-only list of what `secret_store` already holds (provider account keys, MuxBus, browser Basic-Auth logins) | label, where it is managed; a link to that pane. No values (§13 question 5) |
 | **Activity** | — | every use: entry, agent, where (origin or command), when, allowed or denied |
 
+(The browser Basic-Auth logins are the sign-ins a browser pane saves when a site asks for a user name and password. Their passwords sit in the keychain under a hash of the site, which can be neither listed nor turned back into a site, so the list comes from a row `credential.Save` writes beside the keychain item (`db_browser_signins`: site, realm, masked user name; no secret) and `credential.Delete` removes. Sign-ins saved before that row existed are not listed; the pane's footnote says so. A browser profile's cookies are not in the Vault.)
+
 Each entry also shows its **grants** (§6.4, §7.3) with a revoke button, and its last use.
 
 ### 5.3 Locked, revealed, captured
 
 - Values are hidden in the pane: it shows each entry's label, plain fields and the main value's last characters (§5.5), never a value. Secret parts are typed into hidden inputs and never sent back to the pane; changing an entry replaces only the parts the person types.
-- **Reveal** and **Copy** (built in P2b) ask the OS to confirm the person each time, through the host: Windows Hello (`UserConsentVerifier`: PIN, fingerprint or face). Touch ID and the desktop's polkit prompt aren't built; there Reveal and Copy are disabled and say so. Nothing is unlocked for a session, so there is nothing to relock: a confirmation covers one Reveal or Copy.
+- **Reveal** and **Copy** (built in P2b) ask the OS to confirm the person each time, through the host: Windows Hello (`UserConsentVerifier`: PIN, fingerprint or face) on Windows, and Touch ID or the account password on macOS (LocalAuthentication's `DeviceOwnerAuthentication`, so a Mac without Touch ID, or with it locked out, falls back to the password). Linux has no prompt that fits (polkit asks for an administrator and needs a policy file installed): there Reveal and Copy are disabled and say so. Nothing is unlocked for a session, so there is nothing to relock: a confirmation covers one Reveal or Copy.
   - **Copy** never brings the value into the page: the host confirms the person, fetches the value from srv as the host, writes it to the clipboard and clears it 30 seconds later if the clipboard still holds it. On Windows it is marked to stay out of the clipboard history and the cloud clipboard (`CanIncludeInClipboardHistory`, `CanUploadToCloudClipboard`) and out of clipboard monitors (`ExcludeClipboardContentFromMonitorProcessing`); if marking fails the copy is cleared and refused.
   - **Reveal** returns the value to the pane, which shows it for 15 seconds and hides it on **Hide**, when the window loses focus and when the dialog closes. Losing focus while a Reveal or Copy is waiting is ignored: the Windows Hello prompt takes focus from the window, and that is expected.
   - The host's `vault_op` relay refuses the `reveal` operation, so a value only comes through `vault_reveal` or `vault_copy`, which confirm the person first. Each use is logged in Activity (who, which entry and part, never the value) and noted on the entry as its last use; a copy is logged once the host reports the clipboard has it (or that it failed), so the trail never says copied when nothing was.
-  - If Windows Hello isn't set up, the error says how to set it up. The account-password fallback listed in §5.7 isn't built yet.
+  - If Windows Hello isn't set up, the error says how to set it up; on a Mac with no password or Touch ID it says so. Windows has no account-password fallback built: Hello is the only way there.
 - **Agents can't capture it** (built in P2a):
   - `UI` `query` and `click` already reach only the caller's own pane, and the Vault's forms and confirmations are drawn inside the Vault pane, so neither reaches it. `UI` `keys` sends only keys from the shortcut table, as key events that type no text.
   - `UI` `screenshot` is clipped to the caller's own pane. A Vault pane magnified or floating over it would be inside the clip, so the host finds every element marked `data-agent-hidden` (the Vault's root) inside the clip just before and just after the capture, and srv blacks those boxes out as it does secret fields (#5089). If the page can't be asked, the screenshot is refused.
@@ -142,7 +144,7 @@ The operator decided on 2026-10-19 that the Vault stays its own pane, and that W
 - **Loaded when first shown.** The section mounts the first time it is selected, so a Warden opened on another section never lists, and never decrypts, the entries.
 - **No zoom of its own:** Warden zooms the whole pane.
 - **Old panes:** migration `m0039_vault_into_warden` moves saved blocks, the session snapshot and the user's widgets.json entries; layout files saying `vault` open Warden's Vault section; Warden's manifest keeps `vault` as an alias, and a block still saved as `vault` opens on the Vault section.
-- **Unchanged:** the `data-agent-hidden` marker and screenshot blackout (§5.3), Reveal and Copy through Windows Hello, every srv rule on who may write.
+- **Unchanged:** the `data-agent-hidden` marker and screenshot blackout (§5.3), Reveal and Copy through the OS confirmation (§5.3), every srv rule on who may write.
 
 ### 5.7 What the person is asked, and when
 
@@ -151,7 +153,7 @@ The operator asked on 2026-10-20 that people know before they're asked. The Vaul
 | When | Windows | macOS | Linux | Since |
 |---|---|---|---|---|
 | Saving, changing or listing entries | nothing | the first time AgentMux uses the Vault key, and again after AgentMux updates: allow AgentMux to use the keychain item (**Always Allow**; Deny leaves the entries unopenable) | if the keyring is locked: its password, once | P2a |
-| Reveal or Copy | Windows Hello (PIN, fingerprint or face); needs Hello set up (an account-password fallback is not built) | Touch ID or the account password (not built; Reveal and Copy are disabled) | the desktop's polkit prompt (not built; disabled) | P2b |
+| Reveal or Copy | Windows Hello (PIN, fingerprint or face); needs Hello set up (an account-password fallback is not built) | Touch ID or the account password (built; compile-checked only, not yet run on a Mac) | nothing (disabled: polkit asks for an administrator) | P2b, #115 |
 | An agent asks for an entry | AgentMux's own prompt in every window: Fill it in, or Not now | the same | the same | P2a |
 | An agent runs a command with an entry | AgentMux's own prompt in every window: the command, where it runs, Allow once, Always for that agent, or Deny | the same | the same | P7 |
 | Importing an encrypted file | the file's own password, typed in the pane | the same | the same | P2c, P5 |
@@ -243,6 +245,13 @@ The first use of an entry by an agent asks in AgentMux's own prompt, in every wi
 
 Host commands first. `connection` to WSL or SSH is refused with a Vault secret until a later phase decides how a value crosses to that host (SSH `SendEnv` needs the server's `AcceptEnv`; writing it to a remote file is worse).
 
+**Proposal for the operator (2026-10-22, #123), not built.** What each route costs, from the code:
+
+- **WSL: yes, through `WSLENV`.** srv already starts a WSL job as `wsl.exe` and lists the caller's own variables in `WSLENV` so they cross (`http_shell.rs`, `backend/remote/wsl.rs`). The injected names are added to the environment after that list is made, which is the only reason they don't cross today. The change is to list them too, lift the refusal for WSL, and have the approval prompt name the distro beside the folder. The value then lives in the environment of the Windows `wsl.exe` and of the Linux process, as a local command's does; it is never put in an argument (so not in `ps`) or a file. Scrubbing, grants and Activity are unchanged. To check in the build: that a value of several lines (a private key) crosses intact. Small.
+- **SSH: not through `SendEnv`; through stdin, after a per-host approval.** `SendEnv` works only if the server's `AcceptEnv` lists the name, which by default it does for `LANG` and `LC_*` alone, so it would fail on almost every host. A value on the command line (`NAME=value cmd`) would sit in the remote `ps` output and shell history; a remote file is worse. What can work: the ssh command runs a fixed remote prelude that reads one base64 line per secret from its standard input, exports it, and `exec`s the approved command, so no value is in any argument on either machine. It needs a POSIX shell and `base64` there, and the command's own stdin is the pipe (agents' `run` isn't interactive). The new risk is **where** a secret goes: an agent could send a card number to any host the person's SSH config reaches. So the grant gains a host (`command:<agent>:<part>@<host>`), the first use for each host asks with the host named, and "Always" is for that host. What can't be removed: the remote user's other processes, and root there, can read the process environment; the person is trusting the host, as they do by running anything on it. Medium.
+- **Recommendation:** build WSL now. Build SSH only if the operator wants agents running credentialed commands on remote hosts, with the per-host approval above; until then SSH stays refused and says why.
+
+
 ## 8. Import and export
 
 The Vault is a full secret manager, not only a store for agents, so the person can move secrets in and out of it.
@@ -264,7 +273,10 @@ Only the person, from the Vault pane (**Import…** and **Export…** in its hea
 ### 8.3 Export to other formats
 
 - **KeePass `.kdbx` (KDBX 4)**, protected by a passphrase (**built in P5e**; a key file for the export is not built), so the person can open their Vault in KeePassXC, KeePassDX or Strongbox. The export dialog offers it beside the `.vault` file; the host's save dialog and srv's path-only rule are the same. A login is a login (title, user name, password, address, notes, its one-time-code seed as the `otp` address KeePassXC reads); a note is an entry whose notes are its text; every other kind is an entry whose secret is a **protected custom field named for it** (`SSN`, `Taxpayer ID`, `Passport number`, `Card number` with `Expiry`, `CVC` and `Cardholder`, `Account number` with `Routing number`, `API key`, …: `backend/vault/kdbx_names.rs`) and whose plain details (an owner, a bank, an expiry) are unprotected custom fields; tags become KeePass tags and groups (the first tag, `A/B`, is the group `A` > `B`). The importer reads the same names, so a Vault leaves and comes back as the same entries (a typed entry's plain notes come back as a sealed note beside it). The key stretching is KeePassXC's own default (Argon2d, 64 MiB, 10 iterations). The crate writes **KDBX 4.1**, which KeePassXC 2.7, KeePass 2.48, KeePassDX and Strongbox open and older apps do not; the file was read back, with every entry, group, tag, field and the one-time-code address, by pykeepass (an independent implementation), and not yet opened by hand in KeePassXC itself.
-- **Plain CSV or JSON:** only behind a warning that the file will hold every secret unencrypted (§13 question 7).
+- **Plain CSV or JSON** (built, #108; §13 question 7): for a person leaving for another manager, behind these steps, in this order. (1) The person picks **CSV, unencrypted** or **JSON, unencrypted** in the export dialog, which says the file holds every secret and what to do with it. (2) The host asks where to save, in its native dialog, and tells the page the folder and file name, and the cloud service if the folder is synced (as for imports, §8.6), before anything is written. (3) The person types `export`. (4) The OS confirms them as it does for Reveal (Windows Hello, Touch ID or the Mac's password; on Linux, which has no such prompt, the export is refused before the dialog opens, and `.vault` and `.kdbx` stay the way out). (5) srv writes the file to exactly the path chosen in step 2, which the host holds by id; the file is created readable by its owner alone where the OS has such a thing, appears whole or not at all, and the bytes are wiped. Activity records `exported <file>` with the count and that it was unencrypted, never a value. No agent can start it: it is a host command, and srv's `export` operation is host-only.
+  - **CSV** uses Bitwarden's columns (`folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp`), which nearly every manager imports. A login is a row, its password exactly as stored. Every other kind is a secure-note row whose text lists its parts and details by the names of the KeePass export (`SSN: 123-45-6789`), then its notes: a login-shaped layout has nowhere else to put a card or an identity. AgentMux's own reader takes the logins and notes back.
+  - **JSON** is the `.vault` file's contents unencrypted (`docs/api/VAULT_FILE_FORMAT.md`): every kind, part, detail and tag. AgentMux imports it back (`import/mod.rs`, `read_own_json`), flagged as a plaintext file so the pane offers to delete it.
+  - A spreadsheet changes values it takes for numbers or formulas, so the dialog says not to open and save a CSV in one. The values are written as they are; nothing is escaped.
 
 ### 8.4 Import: sources
 
@@ -325,7 +337,15 @@ Most services export plaintext CSV or JSON: every secret readable by anything th
 
 ### 8.7 Parsers are attack surface
 
-An import file can be crafted. Parsers run in srv with size caps (64 MiB file, 100 000 entries, 1 MiB per value) and limits on zip expansion, and are fuzzed (`cargo fuzz` targets for KDBX, the `.1pux` and Proton zips, JSON and CSV). Argon2 parameters in a `.kdbx` file are capped (memory 1 GiB, iterations 100) so a file can't hang srv; a file over the cap is refused with that reason.
+An import file can be crafted. Parsers run in srv with size caps (64 MiB file, 100 000 entries, 1 MiB per value) and limits on zip expansion, and are fuzzed. **Built (#108):** `backend/vault/import/fuzz_tests.rs` is a mutation fuzzer that runs with `cargo test`. It takes a real file of each format (the KeePass fixtures, and an export of LastPass, Bitwarden JSON and CSV, a browser CSV, a `.env`, AgentMux's own JSON, and a `.1pux`), damages it the ways a fuzzer does (flipped, overwritten, cut, repeated and spliced bytes; runaway nesting and numbers), and feeds it to `read_keyed` under every file name a file can arrive under, and to the KeePass header check. A panic, or a read over ten seconds, fails the test with the seed and the input to replay. The same seed always makes the same input; `VAULT_FUZZ_ITERS`, `VAULT_FUZZ_KDBX_EVERY` and `VAULT_FUZZ_SEED` turn the same test into a long run:
+
+```bash
+VAULT_FUZZ_ITERS=200000 VAULT_FUZZ_KDBX_EVERY=1000000 cargo test -p agentmux-srv fuzz_tests::no_reader --release -- --nocapture
+```
+
+It is not coverage-guided, and it is not `cargo-fuzz`: the readers live in the `agentmux-srv` binary crate, which a `cargo-fuzz` target cannot link against. Moving the importers into a library crate would allow real `cargo-fuzz` targets (still open). A damaged database is only header-checked on most runs, because reading one stretches a password (seconds in a debug build); its exemption from the ten-second limit is that a header may ask, within the caps, for a gigabyte and a hundred rounds.
+
+Argon2 parameters in a `.kdbx` file are capped (memory 1 GiB, iterations 100) so a file can't hang srv; a file over the cap is refused with that reason.
 
 ## 9. Security
 
@@ -372,7 +392,7 @@ Fix (built in P1):
 |---|---|---|
 | **P1** | §4 (autocomplete rule, reasons) and §11 (hidden checkboxes). Small, independent, ships first | The triggering form's submitter block and checkbox are filled by the agent with no hand-off |
 | **P2a** | The Vault pane and store (§5): sections, add, change and delete, Activity, "Kept by AgentMux"; agents kept out of it (§5.3); the `Vault` tool's `list` and `request` | The person keeps an SSN, a card and an API key in the Vault; an agent asks for one and gets its id; no agent route returns a value, a tail or a field |
-| **P2b** | Reveal and Copy with OS confirmation and the clipboard clear (§5.3), built for Windows Hello; the macOS and Linux confirmations follow | Reveal asks Windows Hello; a copied value is gone from the clipboard 30 s later |
+| **P2b** | Reveal and Copy with OS confirmation and the clipboard clear (§5.3), built for Windows Hello; macOS (Touch ID or password) followed in #115, Linux has none | Reveal asks Windows Hello; a copied value is gone from the clipboard 30 s later |
 | **P2c** | `.vault` export and import (§8.1, §8.2, §8.5), so there is a backup early | The person exports the Vault, deletes the entries and imports them back |
 | **P3** | Browser fill from the Vault (§6.1 to §6.4, §6.6), taint, grants. Built (§6.7); Activity and grants in Warden (§5.6) follow | An agent fills an SSN fixture field; its result, snapshot, screenshot and transcript have no trace of the value; another origin is asked |
 | **P4** | §6.5: the prompt's value field and **Save to Vault**; `request_value`. Built (§6.8) | A form with an SSN field is done by the agent plus one value typed in the banner |

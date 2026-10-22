@@ -159,7 +159,7 @@ The canonical list is [`crates/srv/src/config/widgets.json`](crates/srv/src/conf
 | Widget | Icon | View | What it is |
 |--------|------|------|-------------|
 | **Drone** | diagram-project | `drone` | Visual DAG-of-blocks engine |
-| **Warden** | shield-halved | `warden` | Oversight of agents: Kanban, the Vault, AgentMux instances across Host / LAN / Internet, an audit trail and History |
+| **Warden** | shield-halved | `warden` | Oversight of agents: Kanban, the Vault, AgentMux instances across Host / LAN / Internet, an audit trail, History, and how AgentMux's own model calls are doing (Ambient) |
 | **Vault** | lock | `warden` | Warden opened on its Vault section: your secrets, which agents use without seeing them |
 | **Media** | photo-film | `media` | Images and video, updated live as the file changes on disk |
 | **Toolchain** | wrench | `toolchain` | Node, npm, Git, Docker, provider CLIs and installed widgets |
@@ -170,7 +170,7 @@ Right-click a widget to pin or unpin it. As the title bar narrows, the widget ba
 
 ### Sections
 
-Some panes are a row of sections: **Warden** (Kanban, Vault, Host, LAN, Internet, Audit, History), **Connectors** (Accounts, MCP servers, Remotes), **Memory** (Global, Personal, Skills, Bundles) and **Settings**. A widget-bar entry can open one of them on a given section: Kanban and Vault are Warden entries of this kind. To add your own, right-click the pane's header and choose **Pin “LAN” to bar** (on Warden's Vault section you can pin the Vault's own section too), or add an entry to your `widgets.json`, next to `settings.json`:
+Some panes are a row of sections: **Warden** (Kanban, Vault, Host, LAN, Internet, Audit, History, Ambient), **Connectors** (Accounts, MCP servers, Remotes), **Memory** (Global, Personal, Skills, Bundles) and **Settings**. A widget-bar entry can open one of them on a given section: Kanban and Vault are Warden entries of this kind. To add your own, right-click the pane's header and choose **Pin “LAN” to bar** (on Warden's Vault section you can pin the Vault's own section too), or add an entry to your `widgets.json`, next to `settings.json`:
 
 ```json
 {

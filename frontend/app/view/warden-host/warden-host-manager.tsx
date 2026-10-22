@@ -8,13 +8,13 @@
 // that used to render below this table now lives in its own "Audit"
 // section (warden-audit-manager.tsx) instead of being bolted on here.
 
-import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import { IconButton } from "@/app/element/ui";
 
 import { authHeaders } from "@/app/store/auth-headers";
 import { getWebServerEndpoint } from "@/util/endpoints";
-import { ageMs, formatAge, WARDEN_REFRESH_MS } from "@/app/view/warden-shared/warden-shared";
+import { ageMs, formatAge, pollWhileVisible, WARDEN_REFRESH_MS } from "@/app/view/warden-shared/warden-shared";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./warden-host-manager.scss";
@@ -73,7 +73,7 @@ function agentState(agent: HostAgent, now: number): "active" | "idle" {
     return ageMs(agent.last_seen, now) < ACTIVE_THRESHOLD_MS ? "active" : "idle";
 }
 
-export const WardenHostManager = (): JSX.Element => {
+export const WardenHostManager = (props: { visible?: boolean }): JSX.Element => {
     const [agents, setAgents] = createSignal<HostAgent[]>([]);
     const [error, setError] = createSignal<string | null>(null);
     const [loading, setLoading] = createSignal(true);
@@ -105,11 +105,8 @@ export const WardenHostManager = (): JSX.Element => {
         }
     };
 
-    onMount(() => {
-        void refresh();
-        const dataTimer = window.setInterval(() => void refresh(), WARDEN_REFRESH_MS);
-        onCleanup(() => window.clearInterval(dataTimer));
-    });
+    // Polls only while the section is shown (warden-view.tsx passes `visible`).
+    pollWhileVisible(() => void refresh(), () => props.visible ?? true);
 
     return (
         <div class="warden-manager-body">

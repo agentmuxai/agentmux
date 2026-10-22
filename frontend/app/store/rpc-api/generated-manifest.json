@@ -11,6 +11,14 @@
             "method": "AccountOAuthCancelCommand"
         },
         {
+            "command": "account.oauth.client.clear",
+            "method": "AccountOAuthClientClearCommand"
+        },
+        {
+            "command": "account.oauth.client.get",
+            "method": "AccountOAuthClientGetCommand"
+        },
+        {
             "command": "account.oauth.poll",
             "method": "AccountOAuthPollCommand",
             "returns": "import(\"@/app/store/rpc-api/types\").OAuthFlowStatus"
@@ -18,7 +26,7 @@
         {
             "command": "account.oauth.start",
             "method": "AccountOAuthStartCommand",
-            "dataType": "{ provider: string; name: string; clientId?: string; clientSecret?: string }"
+            "dataType": "{ provider: string; name?: string; clientId?: string; clientSecret?: string; clientMode?: \"byo\" | \"workspace\"; saveClient?: boolean; scopes?: string[]; accountId?: string }"
         },
         {
             "command": "session:activity_summary",

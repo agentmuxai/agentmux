@@ -33,7 +33,7 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 let RpcApi: typeof import("@/app/store/rpc-api").RpcApi;
 
-import { OLDER_PAGE_LINES, RESTORE_WINDOW_LINES, seedContextFromHistory, useHistoryPagination } from "./useHistoryPagination";
+import { HISTORY_RETRY_MS, isRetriableHistoryError, OLDER_PAGE_LINES, RESTORE_WINDOW_LINES, seedContextFromHistory, useHistoryPagination } from "./useHistoryPagination";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 
 const makeMockModel = (): AgentPaneModel & {
@@ -563,5 +563,69 @@ describe("seedContextFromHistory", () => {
             reportedContextWindows: {},
         });
         expect(sent).toEqual([{ type: "ReconcileContextFromHistory", tokens: 5, model: null, at: null, reportedWindows: null }]);
+    });
+});
+
+
+describe("useHistoryPagination: a history read srv can't serve yet", () => {
+    const mount = (model: ReturnType<typeof makeMockModel>) =>
+        createRoot((d) => {
+            dispose = d;
+            useHistoryPagination({ blockId: "blk-1", model, outputFormat: () => "claude-stream-json", log: () => {} });
+        });
+    const kinds = (model: ReturnType<typeof makeMockModel>) =>
+        model.paneEvents.map((e) => e.type).filter((t) => t === "InitReady" || t === "InitFailed");
+
+    it("knows which failures are worth another try", () => {
+        expect(isRetriableHistoryError("blockfile:read_range: the transcript index for b1 is unavailable right now; retry")).toBe(true);
+        expect(isRetriableHistoryError("rpc timed out after 15000 ms")).toBe(true);
+        expect(isRetriableHistoryError("no such block")).toBe(false);
+    });
+
+    it("tries again after a 'retry' answer and loads the history", async () => {
+        vi.useFakeTimers();
+        try {
+            vi.mocked(RpcApi.BlockfileLineCountCommand).mockResolvedValue({ count: 2 } as any);
+            vi.mocked(RpcApi.BlockfileReadRangeCommand)
+                .mockRejectedValueOnce(new Error("the transcript index for blk-1 is unavailable right now; retry"))
+                .mockResolvedValue({ lines: ['{"type":"user","message":{"content":"hi"}}'], total: 2 } as any);
+            const model = makeMockModel();
+            mount(model);
+            await vi.advanceTimersByTimeAsync(0);
+            expect(kinds(model)).toEqual([]);
+            await vi.advanceTimersByTimeAsync(HISTORY_RETRY_MS[0]);
+            expect(RpcApi.BlockfileReadRangeCommand).toHaveBeenCalledTimes(2);
+            expect(kinds(model)).toEqual(["InitReady"]);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("gives up after its tries and reports the failure, so the pane can say so", async () => {
+        vi.useFakeTimers();
+        try {
+            vi.mocked(RpcApi.BlockfileLineCountCommand).mockResolvedValue({ count: 2 } as any);
+            vi.mocked(RpcApi.BlockfileReadRangeCommand).mockRejectedValue(new Error("unavailable right now; retry"));
+            const model = makeMockModel();
+            mount(model);
+            for (const wait of HISTORY_RETRY_MS) await vi.advanceTimersByTimeAsync(wait);
+            await vi.advanceTimersByTimeAsync(0);
+            expect(RpcApi.BlockfileReadRangeCommand).toHaveBeenCalledTimes(HISTORY_RETRY_MS.length + 1);
+            expect(kinds(model)).toEqual(["InitFailed"]);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("reports a failure that isn't worth retrying at once", async () => {
+        vi.mocked(RpcApi.BlockfileLineCountCommand).mockResolvedValue({ count: 2 } as any);
+        vi.mocked(RpcApi.BlockfileReadRangeCommand).mockRejectedValue(new Error("no such block"));
+        const model = makeMockModel();
+        mount(model);
+        await flushMicrotasks();
+        await flushMicrotasks();
+        await flushMicrotasks();
+        expect(RpcApi.BlockfileReadRangeCommand).toHaveBeenCalledTimes(1);
+        expect(kinds(model)).toEqual(["InitFailed"]);
     });
 });

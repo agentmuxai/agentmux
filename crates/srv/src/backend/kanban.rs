@@ -6,8 +6,9 @@
 //! - **The reminder** (§6.5): an agent idle for [`IDLE_MS`] with tasks waiting
 //!   for it in its backlog gets one `[AgentMux]` note naming them, once per
 //!   idle period, so the operator's "do this when you're done" requests get
-//!   done without the operator coming back. Off with `kanban:reminders`
-//!   false, or for one agent with its block's `kanban:continue` false.
+//!   done without the operator coming back. Off unless the operator turns
+//!   it on (`kanban:reminders`, in Settings and the Kanban's toolbar), and
+//!   never for an agent whose block has `kanban:continue` false.
 //! - **The PR link** (§6.8): an agent opening a PR while it holds exactly one
 //!   task gets that task's branch set, and the PR itself once GitHub lists it
 //!   ([`prs`]).
@@ -28,7 +29,8 @@ use crate::backend::storage::work_board::{BoardTask, CardUpdate, WorkEvent};
 use crate::backend::wconfig::ConfigState;
 use crate::backend::work_facts::overlap_notes::NewPr;
 
-/// The setting that turns reminders off for this install (default on).
+/// The setting that turns reminders on for this install (default off;
+/// SPEC_KANBAN_REMINDER_OFF_BY_DEFAULT_2026_10_22.md).
 pub const SETTING_REMINDERS: &str = "kanban:reminders";
 /// Block meta: `false` stops this agent going on through its backlog: no
 /// reminder, and finishing a task names no next one.
@@ -79,9 +81,9 @@ fn record(identity: &Store, work_id: &str, actor: &str, kind: &str, body: &str) 
     }
 }
 
-/// Whether reminders are on (`kanban:reminders`, default on).
+/// Whether reminders are on (`kanban:reminders`, default off).
 pub fn reminders_enabled(extra: &HashMap<String, serde_json::Value>) -> bool {
-    extra.get(SETTING_REMINDERS).and_then(|v| v.as_bool()).unwrap_or(true)
+    extra.get(SETTING_REMINDERS).and_then(|v| v.as_bool()).unwrap_or(false)
 }
 
 /// Whether this block goes on through its backlog (`kanban:continue`,
@@ -340,10 +342,12 @@ mod tests {
     }
 
     #[test]
-    fn reminders_are_on_unless_turned_off() {
-        assert!(reminders_enabled(&HashMap::new()));
+    fn reminders_are_off_unless_turned_on() {
+        assert!(!reminders_enabled(&HashMap::new()));
         let off = HashMap::from([(SETTING_REMINDERS.to_string(), serde_json::json!(false))]);
         assert!(!reminders_enabled(&off));
+        let on = HashMap::from([(SETTING_REMINDERS.to_string(), serde_json::json!(true))]);
+        assert!(reminders_enabled(&on));
     }
 
     #[test]

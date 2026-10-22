@@ -98,8 +98,16 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let refs = d.get("refs").and_then(|v| v.as_u64()).unwrap_or(0);
             let text = d.get("snapshot").and_then(|v| v.as_str()).unwrap_or("");
             let popups = popups_note(d.get("popups"));
+            // The pane was hibernated and woke for this call: its page reloaded
+            // (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md §8).
+            let woke = if d.get("woke_from_sleep").and_then(|v| v.as_bool()) == Some(true) {
+                "This pane was asleep to save memory and has just been woken: its page reloaded, so anything \
+                 typed into it before, its scroll position and its back/forward history are gone.\n"
+            } else {
+                ""
+            };
             Ok(format!(
-                "Page {url} ({refs} references). Act on an element with Browser's click, fill, \
+                "{woke}Page {url} ({refs} references). Act on an element with Browser's click, fill, \
                  select or check action and its [ref=…]. References last until the next snapshot \
                  or navigation.\n\
                  {popups}\

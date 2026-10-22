@@ -70,6 +70,9 @@ export const cefBrowserPanes: BrowserPaneHostApi = {
     reload: async (blockId) => {
         await invokeCommand("browser_pane_reload", { block_id: blockId });
     },
+    hibernationCheck: (blockId) =>
+        invokeCommand<BrowserHibernationCheck>("browser_pane_hibernation_check", { block_id: blockId }),
+    memoryPressure: () => invokeCommand<"normal" | "warn" | "critical">("memory_pressure_level", {}),
     focus: async (blockId) => {
         await selectInput(ownWindowLabel(), blockId);
     },

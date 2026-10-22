@@ -77,6 +77,16 @@ fn kept(state: &AppState) -> Vec<Value> {
         let label = if email.is_empty() { "MuxBus sign-in".to_string() } else { format!("MuxBus sign-in ({email})") };
         out.push(json!({ "label": label, "what": "cloud messages sign-in", "managed_in": "muxbus" }));
     }
+    // Sign-ins a browser pane saved for a site that asked for a user name and password. Only the
+    // ones saved since the Vault began noting them: the keychain can't be listed.
+    if let Ok(signins) = state.identity_store.browser_signins() {
+        for (origin, realm, is_proxy, username) in signins {
+            let site = if realm.is_empty() { origin } else { format!("{origin} ({realm})") };
+            let who = if username.is_empty() { String::new() } else { format!(" for {username}") };
+            let what = if is_proxy { format!("proxy sign-in{who} saved by a browser pane") } else { format!("sign-in{who} saved by a browser pane") };
+            out.push(json!({ "label": site, "what": what, "managed_in": "browser" }));
+        }
+    }
     for p in crate::backend::tower_peers::Peers::global().list() {
         out.push(json!({ "label": p.hostname, "what": "paired Tower computer's token", "managed_in": "tower" }));
     }
@@ -229,6 +239,8 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                 let out = match body.get("format").and_then(Value::as_str).unwrap_or("vault") {
                     "kdbx" => vault::kdbx_export::export(&store, ids.as_deref(), &pass, &path)?,
                     "vault" => vault::transfer::export(&store, ids.as_deref(), &pass, &path)?,
+                    // Unencrypted, for another manager. The host asked the person and the OS first.
+                    plain @ ("csv" | "json") => vault::plain_export::export(&store, ids.as_deref(), plain, &path)?,
                     other => return Err(format!("unknown export format {other:?}")),
                 };
                 Ok((json!({ "count": out.count, "file_name": out.file_name }), true))

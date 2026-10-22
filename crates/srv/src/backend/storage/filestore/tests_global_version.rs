@@ -81,6 +81,30 @@ fn a_store_from_a_later_build_is_refused_too() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("filestore.db");
     drop(FileStore::open_global_transcripts(&path).unwrap());
-    set_user_version(&path, GLOBAL_TRANSCRIPT_STORE_VERSION + 1);
+    // Past the newest format this build reads (frames, 3).
+    set_user_version(&path, super::core::GLOBAL_TRANSCRIPT_STORE_FRAMES_VERSION + 1);
     assert!(matches!(FileStore::open_global_transcripts(&path), Err(StoreError::SchemaTooNew { .. })));
+}
+
+/// A build that reads frames accepts a store the framer stamped 3, and an
+/// ordinary open neither raises a store to 3 nor lowers one from 3: starting
+/// this build mustn't lock older builds out, and must keep them out once
+/// frames exist (SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21.md §3).
+#[test]
+fn the_frames_version_is_accepted_but_only_the_framer_writes_it() {
+    use super::core::GLOBAL_TRANSCRIPT_STORE_FRAMES_VERSION;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("global.db");
+    drop(FileStore::open_global_transcripts(&path).unwrap());
+    assert_eq!(user_version(&path), GLOBAL_TRANSCRIPT_STORE_VERSION, "an ordinary open stamps 2");
+
+    set_user_version(&path, GLOBAL_TRANSCRIPT_STORE_FRAMES_VERSION);
+    let fs = FileStore::open_global_transcripts(&path).expect("a store with frames opens");
+    put(&fs, b"{\"a\":1}\n");
+    assert_eq!(read(&fs), b"{\"a\":1}\n");
+    drop(fs);
+    assert_eq!(user_version(&path), GLOBAL_TRANSCRIPT_STORE_FRAMES_VERSION, "and keeps its 3");
+
+    set_user_version(&path, GLOBAL_TRANSCRIPT_STORE_FRAMES_VERSION + 1);
+    assert!(matches!(FileStore::open_global_transcripts(&path), Err(StoreError::SchemaTooNew { .. })), "a newer format is refused");
 }

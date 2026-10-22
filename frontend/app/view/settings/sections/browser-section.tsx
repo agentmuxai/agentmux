@@ -20,7 +20,7 @@ import {
 import { ProfileBadge } from "@/app/view/browser/browser-profile-menu";
 import type { SettingsIndexEntry } from "../settings-model";
 import { settingsAtom } from "@/app/store/global";
-import { SectionHeader, set, SettingRow, ToggleControl } from "../settings-controls";
+import { NumberControl, SectionHeader, set, SettingRow, ToggleControl } from "../settings-controls";
 
 export const BROWSER_SETTINGS = {
     profiles: {
@@ -38,6 +38,21 @@ export const BROWSER_SETTINGS = {
             "The address bar also asks your search engine for suggestions as you type, as Chrome does, which sends it what you type before you press Enter. Incognito tabs never ask, as in Chrome. Turn it off to keep suggestions to this computer (your history and the addresses you typed).",
         section: "browser",
         keywords: ["autocomplete", "suggestions", "address bar", "omnibox", "google", "search", "privacy", "browser:searchsuggestions"],
+    },
+    hibernate: {
+        id: "browser.hibernate",
+        label: "Hibernate hidden browser panes",
+        description:
+            "A browser pane out of sight for a while goes to sleep: its page closes to free its memory, often 100 to 200 MB, and loads again when you're about to look at it, with a note while it restores. Never a pane an agent is using, one playing or capturing media, one with something typed into it, or a local dev server. Its back/forward history and scroll position don't come back yet.",
+        section: "browser",
+        keywords: ["hibernate", "sleep", "sleeping", "memory", "discard", "tabs", "browser:hibernate"],
+    },
+    hibernateAfter: {
+        id: "browser.hibernate_after",
+        label: "Minutes hidden before it sleeps",
+        description: "Sooner when the computer is low on memory: 5 minutes, then 1.",
+        section: "browser",
+        keywords: ["hibernate", "sleep", "minutes", "delay", "browser:hibernateafter"],
     },
 } satisfies Record<string, SettingsIndexEntry>;
 
@@ -153,6 +168,35 @@ export function BrowserSection(): JSX.Element {
                     />
                 }
             />
+            <SettingRow
+                id={BROWSER_SETTINGS.hibernate.id}
+                label={BROWSER_SETTINGS.hibernate.label}
+                description={BROWSER_SETTINGS.hibernate.description}
+                control={
+                    <ToggleControl
+                        checked={s()["browser:hibernate"] !== false}
+                        onChange={(v) => set("browser:hibernate", v)}
+                    />
+                }
+            />
+            <Show when={s()["browser:hibernate"] !== false}>
+                <SettingRow
+                    indent
+                    id={BROWSER_SETTINGS.hibernateAfter.id}
+                    label={BROWSER_SETTINGS.hibernateAfter.label}
+                    description={BROWSER_SETTINGS.hibernateAfter.description}
+                    control={
+                        <NumberControl
+                            min={1}
+                            max={1440}
+                            step={5}
+                            parse="int"
+                            value={s()["browser:hibernateafter"] ?? 30}
+                            onChange={(v) => set("browser:hibernateafter", v)}
+                        />
+                    }
+                />
+            </Show>
             <SectionHeader label={BROWSER_SETTINGS.profiles.label} />
             <div id={`setting-${BROWSER_SETTINGS.profiles.id}`} class="setting-row">
                 <div class="setting-devices-description">{BROWSER_SETTINGS.profiles.description}</div>

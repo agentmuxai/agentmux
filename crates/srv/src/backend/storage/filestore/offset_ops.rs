@@ -83,6 +83,8 @@ impl FileStore {
             let start_part = (actual_offset / pds) as i32;
             let end_part = ((actual_offset + actual_data.len() as i64 - 1) / pds) as i32;
             let mut data_pos = 0usize;
+            // A write into compressed parts writes into rows (frames.rs).
+            super::frames::unframe(tx, zone_id, name, start_part, end_part)?;
 
             for part_idx in start_part..=end_part {
                 let part_start = part_idx as i64 * pds;

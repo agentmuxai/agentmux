@@ -234,6 +234,11 @@ pub const COMMAND_ACCOUNT_KEY_VERIFY: &str = "account.key.verify";
 pub const COMMAND_ACCOUNT_OAUTH_START: &str = "account.oauth.start";
 pub const COMMAND_ACCOUNT_OAUTH_POLL: &str = "account.oauth.poll";
 pub const COMMAND_ACCOUNT_OAUTH_CANCEL: &str = "account.oauth.cancel";
+/// The user's own OAuth client saved for a provider (D8 of
+/// docs/specs/SPEC_GOOGLE_CONNECTORS_GMAIL_CALENDAR_DRIVE_2026_10_14.md):
+/// whether one is saved, and forgetting it. Never returns the secret.
+pub const COMMAND_ACCOUNT_OAUTH_CLIENT_GET: &str = "account.oauth.client.get";
+pub const COMMAND_ACCOUNT_OAUTH_CLIENT_CLEAR: &str = "account.oauth.client.clear";
 
 // Agent ↔ Identity junction
 pub const COMMAND_LINK_AGENT_IDENTITY: &str = "linkagentidentity";

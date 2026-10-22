@@ -15,6 +15,8 @@ mod checkpointer;
 mod copy;
 mod core;
 mod counter;
+mod deltas;
+mod frames;
 mod ijson;
 mod lines;
 mod off_worker;
@@ -36,6 +38,8 @@ mod tests_atomic;
 mod tests_copy;
 #[cfg(test)]
 mod tests_counter;
+#[cfg(test)]
+mod tests_lost_parts;
 #[cfg(test)]
 mod tests_replace;
 #[cfg(test)]

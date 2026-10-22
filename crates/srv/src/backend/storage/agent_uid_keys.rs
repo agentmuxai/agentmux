@@ -8,7 +8,10 @@
 //! A name-keyed key is copied to a UID only on evidence that the agent owns
 //! it: the name is the row's slug, no other row holds that slug (folded),
 //! the key is no older than the row, and the name is not a deleted agent's
-//! (`db_agent_key_tombstones`). Otherwise the UID gets a fresh keypair. The
+//! (`db_agent_key_tombstones`) nor any agent's former slug. The slug, and the
+//! slugs other agents hold, are the canonical ones (`agents::canonical_slug`,
+//! `SPEC_FORK_SLUG_MIGRATION_2026_10_22.md` P0.1): a row whose shared record
+//! was renamed takes nothing filed under its old name. Otherwise the UID gets a fresh keypair. The
 //! v1 signatures keep using the name-keyed keys until M5; a UID key signs
 //! only the v2 signatures (M4d-6), so neither outcome changes what peers
 //! verify today.
@@ -17,6 +20,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use rusqlite::{params, OptionalExtension};
 
 use super::agent_lan_keys::random_seed_bytes;
+use super::agents::SharedSlugs;
 use super::error::StoreError;
 use super::store::Store;
 use agentmux_common::time::now_secs;
@@ -58,6 +62,9 @@ pub enum FreshReason {
     KeyOlderThanRow,
     /// The name is a deleted agent's.
     Tombstoned,
+    /// The name is a slug some agent was renamed away from: its keys are the
+    /// old identity's, rotated rather than carried (spec §9 decision 2).
+    FormerSlug,
 }
 
 impl UidKeyOrigin {
@@ -70,6 +77,7 @@ impl UidKeyOrigin {
             UidKeyOrigin::Fresh(FreshReason::RowUndated) => Some("m4d.key_fresh.row_undated"),
             UidKeyOrigin::Fresh(FreshReason::KeyOlderThanRow) => Some("m4d.key_fresh.key_older_than_row"),
             UidKeyOrigin::Fresh(FreshReason::Tombstoned) => Some("m4d.key_fresh.tombstoned"),
+            UidKeyOrigin::Fresh(FreshReason::FormerSlug) => Some("m4d.key_fresh.former_slug"),
         }
     }
 }
@@ -119,17 +127,25 @@ impl Store {
         if uid.is_empty() {
             return Ok(None);
         }
+        // Read before the lock: file I/O (the cached shared slug index).
+        let shared = self.shared_slugs();
         let conn = self.conn.lock().unwrap();
         let row = conn
             .query_row(
                 "SELECT slug, created_at FROM db_agents WHERE id = ?1",
                 params![uid],
-                |r| Ok(Row { slug: r.get::<_, Option<String>>(0)?.unwrap_or_default(), created_at_ms: r.get::<_, Option<i64>>(1)?.unwrap_or(0) }),
+                |r| {
+                    let local = r.get::<_, Option<String>>(0)?.unwrap_or_default();
+                    Ok(Row {
+                        slug: super::agents::canonical_slug(uid, &local, shared.slug(uid)),
+                        created_at_ms: r.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                    })
+                },
             )
             .optional()?;
         let Some(row) = row else { return Ok(None) };
-        let (lan, lan_origin) = ensure_tier(&conn, Tier::Lan, uid, &row)?;
-        let (wan, wan_origin) = ensure_tier(&conn, Tier::Wan, uid, &row)?;
+        let (lan, lan_origin) = ensure_tier(&conn, Tier::Lan, uid, &row, &shared)?;
+        let (wan, wan_origin) = ensure_tier(&conn, Tier::Wan, uid, &row, &shared)?;
         drop(conn);
         for origin in [lan_origin, wan_origin] {
             if let Some(counter) = origin.counter() {
@@ -159,11 +175,11 @@ fn load_uid_key(conn: &rusqlite::Connection, tier: Tier, uid: &str) -> rusqlite:
 
 /// One tier: the existing UID key, else a copy of the name-keyed key when the
 /// evidence holds, else a fresh one. Runs under the caller's lock.
-fn ensure_tier(conn: &rusqlite::Connection, tier: Tier, uid: &str, row: &Row) -> Result<(UidKeypair, UidKeyOrigin), StoreError> {
+fn ensure_tier(conn: &rusqlite::Connection, tier: Tier, uid: &str, row: &Row, shared: &SharedSlugs) -> Result<(UidKeypair, UidKeyOrigin), StoreError> {
     if let Some(existing) = load_uid_key(conn, tier, uid)? {
         return Ok((existing, UidKeyOrigin::Existing));
     }
-    let (pair, copied_from, origin) = match copyable_name_key(conn, tier, row)? {
+    let (pair, copied_from, origin) = match copyable_name_key(conn, tier, row, shared)? {
         Ok((pair, name)) => (pair, name, UidKeyOrigin::Copied),
         Err(reason) => {
             let (public, private) = tier.generate();
@@ -182,10 +198,18 @@ fn ensure_tier(conn: &rusqlite::Connection, tier: Tier, uid: &str, row: &Row) ->
 }
 
 /// The name-keyed key the UID may take, and its name, or why not.
-fn copyable_name_key(conn: &rusqlite::Connection, tier: Tier, row: &Row) -> Result<Result<(UidKeypair, String), FreshReason>, StoreError> {
+fn copyable_name_key(
+    conn: &rusqlite::Connection,
+    tier: Tier,
+    row: &Row,
+    shared: &SharedSlugs,
+) -> Result<Result<(UidKeypair, String), FreshReason>, StoreError> {
     let slug = row.slug.trim().to_lowercase();
     if slug.is_empty() {
         return Ok(Err(FreshReason::NoNameKey));
+    }
+    if shared.is_former(&slug) {
+        return Ok(Err(FreshReason::FormerSlug));
     }
     let key = conn
         .query_row(
@@ -200,7 +224,7 @@ fn copyable_name_key(conn: &rusqlite::Connection, tier: Tier, row: &Row) -> Resu
     // Folded in Rust as the key tables fold, never with SQLite's ASCII-only
     // lower(): "Ä" and "ä" would each count as the only holder and both
     // take one private key.
-    let holders = slug_holders_folded(conn, &slug)?;
+    let holders = slug_holders_folded(conn, &slug, shared)?;
     if holders != 1 {
         return Ok(Err(FreshReason::SlugShared));
     }
@@ -222,18 +246,18 @@ fn copyable_name_key(conn: &rusqlite::Connection, tier: Tier, row: &Row) -> Resu
     Ok(Ok((pair, slug)))
 }
 
-/// How many rows hold `folded` as their slug, trimmed and folded with Rust's
-/// Unicode-aware `to_lowercase` (the key tables' folding).
-pub(super) fn slug_holders_folded(conn: &rusqlite::Connection, folded: &str) -> Result<usize, StoreError> {
-    let mut stmt = conn.prepare("SELECT slug FROM db_agents WHERE slug IS NOT NULL AND slug <> ''")?;
-    let slugs = stmt.query_map([], |r| r.get::<_, String>(0))?;
-    let mut n = 0;
-    for slug in slugs {
-        if slug?.trim().to_lowercase() == folded {
-            n += 1;
-        }
-    }
-    Ok(n)
+/// How many agents hold `folded` as their slug, trimmed and folded with
+/// Rust's Unicode-aware `to_lowercase` (the key tables' folding): this
+/// channel's rows by their canonical slug, and the shared definitions, which
+/// include agents this channel has no row for.
+pub(super) fn slug_holders_folded(conn: &rusqlite::Connection, folded: &str, shared: &SharedSlugs) -> Result<usize, StoreError> {
+    let mut ids: std::collections::HashSet<String> = super::agents::rows_with_canonical_slugs(conn, "", shared)?
+        .into_iter()
+        .filter(|r| !r.slug.trim().is_empty() && r.slug.trim().to_lowercase() == folded)
+        .map(|r| r.id)
+        .collect();
+    ids.extend(shared.ids_with_slug(folded).map(str::to_string));
+    Ok(ids.len())
 }
 
 #[cfg(test)]
