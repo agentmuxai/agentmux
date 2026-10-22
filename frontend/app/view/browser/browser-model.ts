@@ -1055,6 +1055,14 @@ export class BrowserViewModel {
         return this.ctx.setMeta({ [SLEEP_META_KEY]: { ...sleep, kept: true } });
     }
 
+    /** A sleep record from before this pane's page existed (an app restart, a
+     *  window reload): the discarded page is gone, so nothing is kept. */
+    clearStaleSleepKept(): Promise<void> {
+        const sleep = this.sleepAtom();
+        if (!sleep?.kept) return Promise.resolve();
+        return this.ctx.setMeta({ [SLEEP_META_KEY]: { ...sleep, kept: false } });
+    }
+
     /** The page has loaded again after a wake: the pane is awake. */
     endSleep(loadMs: number | undefined): Promise<void> {
         return this.ctx.setMeta({

@@ -320,8 +320,19 @@ export function usePaneRectSync(params: {
     // place instead: its renderer ends, the browser and its back/forward
     // history stay, and loading it again brings back its scroll position and
     // form contents. An engine without it, or a discard it refuses, closes.
+    // One sleep at a time: a wake and a sleep again during the park below
+    // must not start a second discard (it would be refused and close the page).
+    let sleepInFlight = false;
     const sleepNative = async () => {
-        if (!paneCreated() || discarded) return;
+        if (!paneCreated() || discarded || sleepInFlight) return;
+        sleepInFlight = true;
+        try {
+            await sleepNativeOnce();
+        } finally {
+            sleepInFlight = false;
+        }
+    };
+    const sleepNativeOnce = async () => {
         // A hidden pane is laid out at 0x0, where its page reflows into a
         // 14 px column and scrolls far down to keep its place; a discard then
         // keeps that offset, and the page comes back far down. Park it

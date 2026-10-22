@@ -255,6 +255,9 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
         void model.hibernate("launch").catch(() => setLaunchAsleep(false));
     }
     const sleeping = () => model.sleepAtom() != null || launchAsleep();
+    // A pane that mounts asleep has no page yet: a "kept" record is from a page
+    // discarded before a restart or reload, which is gone.
+    if (model.sleepAtom()?.kept) void model.clearStaleSleepKept().catch(() => {});
     createEffect(() => {
         if (model.sleepAtom() != null && launchAsleep()) setLaunchAsleep(false);
     });
