@@ -205,6 +205,22 @@ fn a_damaged_frame_reads_as_blank_and_the_rest_as_written() {
 }
 
 #[test]
+fn a_frame_damaged_after_it_was_cached_is_still_damaged() {
+    for (column, value) in [("part_count", 17i64), ("raw_len", 16 * P as i64 + 1), ("codec", CODEC_DELTAS)] {
+        let (fs, data) = framed_store();
+        // Read once, so both frames are in the decode cache.
+        assert_eq!(fs.read_file(Z, N).unwrap().unwrap(), data);
+        fs.lock_conn()
+            .execute(&format!("UPDATE db_file_frame SET {column} = ?1 WHERE zoneid = ?2 AND first_part = 16"), params![value, Z])
+            .unwrap();
+        // No panic, and the frame reads as damaged, not from the cache.
+        let got = fs.read_file(Z, N).unwrap().unwrap();
+        assert_eq!(&got[..16 * P], &data[..16 * P], "{column}");
+        assert!(got[16 * P..32 * P].iter().all(|&b| b == b' '), "{column}");
+    }
+}
+
+#[test]
 fn framing_skips_what_it_must_not_touch() {
     let fs = mem();
     let data = transcript(20 * P + 10, 5);

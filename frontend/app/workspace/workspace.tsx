@@ -13,6 +13,7 @@ import { shouldReduceMotion } from "@/app/motion/motion";
 import { atoms } from "@/store/global";
 import {
     WindowTabDisplayedProvider,
+    WindowTabIdProvider,
     keepInactiveTabsLaidOut,
     resolveDisplayedTabId,
     tabContainerVisibility,
@@ -401,9 +402,11 @@ function WorkspaceElem(): JSX.Element {
                                     data-window-tab-hidden={tid === displayTabId() ? undefined : ""}
                                 >
                                     <WindowTabDisplayedProvider value={() => tid === displayTabId()}>
-                                        <ErrorBoundary>
-                                            <TabContent tabId={tid} />
-                                        </ErrorBoundary>
+                                        <WindowTabIdProvider value={tid}>
+                                            <ErrorBoundary>
+                                                <TabContent tabId={tid} />
+                                            </ErrorBoundary>
+                                        </WindowTabIdProvider>
                                     </WindowTabDisplayedProvider>
                                 </div>
                                 );

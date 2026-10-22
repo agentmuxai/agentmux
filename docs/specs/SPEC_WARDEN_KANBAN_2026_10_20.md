@@ -1,6 +1,6 @@
 # Spec: a Kanban section in Warden, where agents keep their work current and the operator follows it
 
-**Status:** active. srv and MCP (the task model, the agents' `Tasks` actions, the reminder, the operator's RPCs) in #5231; the Warden Kanban section, its palette command and widget-bar button in #5235. The Swarm's task chip (§6.14) and Codex plans as checklists (§6.12) in #5248. Phase 4 (§9): a merged PR closes its task and the PR is found without the agent naming it (§6.9, D5) in #5256; tasks that start after others (§6.15) in #5259; lanes by repository (§6.11) and Review's soft limit (D6) in #5260; a `tasks:read` permission for sandboxed widgets in #5262; the Needs-you badge on the widget-bar Kanban button (§6.13) in its own PR (2026-10-21); the rest remains.
+**Status:** active. srv and MCP (the task model, the agents' `Tasks` actions, the reminder, the operator's RPCs) in #5231; the Warden Kanban section, its palette command and widget-bar button in #5235. The Swarm's task chip (§6.14) and Codex plans as checklists (§6.12) in #5248. Phase 4 (§9): a merged PR closes its task and the PR is found without the agent naming it (§6.9, D5) in #5256; tasks that start after others (§6.15) in #5259; lanes by repository (§6.11) and Review's soft limit (D6) in #5260; a `tasks:read` permission for sandboxed widgets in #5262; the Needs-you badge on the widget-bar Kanban button (§6.13) in its own PR (2026-10-21); agents hold and unhold tasks and claim one by number (§6.4, §6.12) per `SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md`; the rest remains.
 **Date:** 2026-10-20
 **Author:** Loap-3@narko, at the operator's request
 **Verified against:** `agentmux` `main` @ `30daa7c28` (2026-10-20), by reading code. The survey of other products in §3 is from public sources read the same day (§12).
@@ -141,7 +141,7 @@ The queue's states, plus three. Each maps onto A2A's task states, so a bridge la
 | State | Meaning | Claimable | A2A |
 |---|---|---|---|
 | `open` | Waiting to be started: by the agent it is for (`target_agent`), or by any eligible agent when it is for no one | yes | submitted |
-| `held` *(new)* | Waiting, and not to be started until the operator says so | no | submitted |
+| `held` *(new)* | Waiting, and not to be started until it is taken off hold (by the operator or an agent) | no | submitted |
 | `claimed` | An agent holds it under a lease | no | working |
 | `blocked` *(new)* | Its holder asked a question; the lease is paused, the holder keeps it | no | input-required |
 | `review` *(new)* | Handed in; waiting for a person | no | completed, not yet accepted |
@@ -174,7 +174,9 @@ Each card in Needs you says why, in its first line: "asks: …", "question waiti
 | new → Backlog, for itself | agent | `Tasks` `enqueue` with `for: "me"`: the operator asked it for something it will do after its current work (§6.5). **The main way the backlog fills.** |
 | new → Backlog, for another agent or anyone | agent | `Tasks` `enqueue` (as today) |
 | new → Backlog | operator | New task (title, prompt, optional agent, repo, kind, priority, "On hold") |
-| within Backlog: reorder, move to another agent or to Anyone, hold, unhold | operator | drag, or the card's menu |
+| within Backlog: reorder, move to another agent or to Anyone | operator | drag, or the card's menu |
+| within Backlog: hold, unhold | operator or any agent | the card's menu; `Tasks` `hold` / `unhold` (`SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md`) |
+| In progress → Backlog, on hold | agent (its holder) | `Tasks` `hold` with its attempt: a pause, which uses no attempt |
 | Backlog → In progress | agent | `claim` (as today): its own tasks first, then Anyone's |
 | Backlog → In progress | operator | **Start on…**: pick an agent (or "new worker"); §6.8 |
 | In progress → Needs you | agent | `ask` (new): a question; the task becomes `blocked` |
@@ -203,7 +205,7 @@ This is how the operator works, and the backlog's main source: ask the nearest a
 **What srv adds, because the agent can't be trusted to remember or to say who asked:**
 - **Who asked.** srv knows what started the agent's current turn (the turn ledger's trigger: the operator's message, another agent's, a schedule, a task). A task filed during a turn the operator started is marked **requested by you, via Loap-3**, and srv keeps the operator's own words from that turn (the pane's last prompt) on the card beside the agent's summary of them. The agent can't set this field; a task filed during a turn another agent started is marked as that agent's.
 - **When a send-back arrives mid-task.** A task the operator sends back from Review goes to the front of that agent's backlog, and the comment reaches it as the operator's message. The agent finishes the step it is on, hands back or pauses its current task (`release` with "paused for #12's send-back", which keeps it its own), and takes the send-back first. Corrections to finished work come before new work.
-- **Stopping it.** The operator stops an agent going on by putting its remaining tasks on hold, moving them, or switching continuing off for that agent; the next `submit` then answers with nothing to take.
+- **Stopping it.** The operator stops an agent going on by moving its remaining tasks, cancelling them, or switching continuing off for that agent; the next `submit` then answers with nothing to take. A hold also keeps a task from being taken, but any agent can lift it (`SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md` §3.4).
 - **The reminder**, for an agent that went idle without finishing through the board (its current work wasn't a task, or it was started by hand). When an agent with tasks waiting for it has been idle for a while (default 2 minutes; no question pending, no turn in progress), srv sends it one system note: `[AgentMux] You have 2 tasks waiting in your backlog: #12 "Write a spec for X" (requested by the operator at 14:02), #15 "…". Take the next with Tasks claim when you're ready.` One note per idle period; none while it's busy; none if the operator has put the task on hold or moved it. The agent then claims it and works, so the request gets done after the current work without the operator having to come back. It is off unless the operator turns it on (the setting `kanban:reminders`, in Settings › Advanced and the Kanban's toolbar; `SPEC_KANBAN_REMINDER_OFF_BY_DEFAULT_2026_10_22.md`), and never sent to an agent whose block has `kanban:continue: false`, which also stops finishing a task from naming the next (D7). (A reminder that waits while the operator is typing in that pane is not built: srv has no cheap signal for it.)
 - **The order** within an agent's backlog is the order filed, unless the operator drags them.
 
@@ -275,8 +277,11 @@ The `Tasks` tool keeps its six actions and gains three, all on a claimed task (`
 | `update` | `note?`, `checklist?` (`[{text, status: pending\|in_progress\|completed}]`, replaced whole), `links?` (`{pr?, branch?, url?}`) | A history row; counts as a heartbeat |
 | `ask` | `question` | `blocked`; the question shows on the card in Needs you |
 | `submit` | `result`, `links?` | `review` (or `done` for a task that needs no review). The answer names the agent's next waiting task, if any (§6.5) |
+| `hold`, `unhold` | `id`, `reason?`, `attempt?` | Any agent, on any waiting task; its holder pauses a claimed one with `attempt`. `SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md` |
 
-`enqueue` gains `for: "me"` (the task waits for the caller; shorthand for `target_agent` set to itself), `repo` (default: the caller's repository from its working folder), `hold` (on hold until the operator releases it) and `review` (whether a person must accept it; default from who asked, §6.4). Its answer gives the task number to quote back to the operator. srv sets who asked from the turn (§6.5); the caller can't.
+`claim` takes an optional `id`: that task and no other, open or held (claiming it lifts the hold), by the same eligibility rules.
+
+`enqueue` gains `for: "me"` (the task waits for the caller; shorthand for `target_agent` set to itself), `repo` (default: the caller's repository from its working folder), `hold` (on hold until it is taken off hold) and `review` (whether a person must accept it; default from who asked, §6.4). Its answer gives the task number to quote back to the operator. srv sets who asked from the turn (§6.5); the caller can't.
 
 The operator-config guidance (`crates/srv/operator-config-seed.json`) gets a short entry, aimed at few calls per task: when the operator asks for something while you're in the middle of other work, and it isn't urgent or tiny, file it for yourself (`enqueue` `for: "me"`, the request as a standalone prompt), say its number, and finish what you were doing; when you've finished, `claim` your next task; claim (or be started on) a task before larger work an operator asked for; `update` at milestones only; `ask` instead of waiting silently on something only the operator can decide; `submit` with the PR when done. A task's checklist is optional; an agent whose CLI keeps a todo list shows it anyway (§6.7).
 
@@ -284,7 +289,7 @@ The operator-config guidance (`crates/srv/operator-config-seed.json`) gets a sho
 
 ### 6.13 Trust
 
-- **Operator-only moves** (Accept, Cancel, Send back, Answer, Start, moves from Backlog) are websocket RPCs from the UI. No HTTP route an agent's MCP can reach performs them. `DELETE /agentmux/work/:id`, which cancelled without checking who asked, now refuses a call carrying an agent's token.
+- **Operator-only moves** (Accept, Cancel, Send back, Answer, Start, Retry, reordering and moving tasks between agents) are websocket RPCs from the UI. Hold and unhold are not operator-only: any agent can do them (`SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md`). No HTTP route an agent's MCP can reach performs them. `DELETE /agentmux/work/:id`, which cancelled without checking who asked, now refuses a call carrying an agent's token.
 - **An agent can't accept its own work**: `submit` stops at Review for a task that needs review.
 - **A task's prompt is a prompt.** Agent-created tasks are marked with their creator on the card and in the drawer. When the operator starts an agent-created task, the prompt is delivered quoted, with its creator named (§6.8), so the operator's click endorses "do this task", not the raw text as the operator's own words. The claimer's own confirmation rules still apply to what the prompt asks (as the `Tasks` tool's description says today).
 - **Card text is text**: titles, notes and questions render as plain text (or the app's sanitised markdown), never HTML.
