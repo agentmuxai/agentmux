@@ -251,6 +251,7 @@ impl Store {
         agent: &mut AgentDefinition,
         updated_at_override: Option<i64>,
     ) -> Result<(), StoreError> {
+        let shared = self.shared_slugs();
         let conn = self.conn.lock().unwrap();
         let base = if agent.slug.is_empty() {
             derive_slug(&agent.name)
@@ -261,7 +262,7 @@ impl Store {
         // table surfaces definition slugs and template-instance projections
         // alike, so a collision against an instance-derived row is caught here
         // too. Shared with `instance_create` so the two cannot drift.
-        agent.slug = resolve_slug_collision(&conn, &base)?;
+        agent.slug = resolve_slug_collision(&conn, &base, &agent.id, &shared)?;
         let stamped_updated_at = updated_at_override.unwrap_or(agent.created_at);
         let is_template = if agent.is_seeded == 1 { 1_i64 } else { 0_i64 };
         let parent_template_id = if agent.is_seeded == 1 { String::new() } else { agent.parent_id.clone() };
@@ -433,6 +434,7 @@ impl Store {
     ) -> Result<Option<AgentDefinition>, StoreError> {
         let name_lower = agent.name.trim().to_lowercase();
         let derived_slug = derive_slug(agent.name.trim());
+        let shared = self.shared_slugs();
 
         {
             let conn = self.conn.lock().unwrap();
@@ -468,7 +470,7 @@ impl Store {
                 agent.slug.clone()
             };
             // The shared resolver: case-insensitive, like the key tables.
-            agent.slug = super::name_keys::resolve_slug_collision(&conn, &base)?;
+            agent.slug = super::name_keys::resolve_slug_collision(&conn, &base, &agent.id, &shared)?;
             let is_template = if agent.is_seeded == 1 { 1_i64 } else { 0_i64 };
             let parent_template_id = if agent.is_seeded == 1 { String::new() } else { agent.parent_id.clone() };
             conn.execute(

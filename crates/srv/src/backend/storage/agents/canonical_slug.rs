@@ -309,6 +309,40 @@ mod tests {
         assert!(store.agent_jekt_key_load("naki-naki-2").unwrap().is_some(), "the other agent's slug keeps its key");
     }
 
+    /// A new agent can't take a slug the shared definitions hold: another
+    /// agent's current slug that this channel's row hasn't caught up with,
+    /// or a former slug. A cross-channel backfill keeps its own slug.
+    #[test]
+    fn a_new_slug_avoids_shared_current_and_former_slugs() {
+        let uid = "uid-p01-reserve";
+        let (_tmp, store, defs) = diverged(uid, "loap-loap-2", "loap-2");
+        let mut rec = defs.get(uid).unwrap().unwrap();
+        rec.data.former_slugs.push(FormerSlug { slug: "loap-ancient".to_string(), retired_at: 2 });
+        std::fs::write(defs.root().join(format!("{uid}.json")), serde_json::to_vec_pretty(&rec).unwrap()).unwrap();
+
+        for (id, base, want) in [("uid-new-a", "loap-2", "loap-2-2"), ("uid-new-b", "Loap-Ancient", "Loap-Ancient-2")] {
+            let mut def = test_agent_def(id, "New", "claude", "host", 1, "");
+            def.slug = base.to_string();
+            store.agent_def_insert(&mut def).unwrap();
+            assert_eq!(def.slug, want);
+        }
+        assert_eq!(store.instance_get_by_slug("loap-2").unwrap().map(|i| i.id).as_deref(), Some(uid), "still one owner");
+
+        let remote = crate::registry::DefinitionRecord {
+            schema_version: crate::registry::DEF_MAX_SUPPORTED_SCHEMA,
+            data: crate::registry::DefinitionRecordV1 {
+                id: "uid-remote".to_string(),
+                slug: "remote-slug".to_string(),
+                name: "Remote".to_string(),
+                provider: "claude".to_string(),
+                ..Default::default()
+            },
+        };
+        defs.upsert(&remote).unwrap();
+        assert!(store.agent_row_ensure_local("uid-remote").unwrap());
+        assert_eq!(store.agent_row_get("uid-remote").unwrap().unwrap().slug, "remote-slug");
+    }
+
     /// P0.2 at the store: an edit from the channel holding the old slug
     /// mirrors, and leaves the shared slug where the rename put it.
     #[test]

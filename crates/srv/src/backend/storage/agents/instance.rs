@@ -201,6 +201,7 @@ impl Store {
         } else {
             inst.id.clone()
         };
+        let shared = self.shared_slugs();
         {
             let conn = self.conn.lock().unwrap();
             let now_ms = Self::monotonic_updated_at(&conn, inst.created_at);
@@ -219,7 +220,7 @@ impl Store {
                 // only by handing `instance_create` a seeded template id
                 // directly — this closes the function's contract rather than an
                 // observed fault (§2.5.2).
-                let launch_slug = resolve_slug_collision(&conn, &def.slug)?;
+                let launch_slug = resolve_slug_collision(&conn, &def.slug, &inst.id, &shared)?;
                 conn.execute(
                     "INSERT INTO db_agents (
                         id, name, icon, description,
@@ -551,6 +552,14 @@ impl Store {
     pub(crate) fn test_break_agents_table(&self) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         conn.execute_batch("DROP TABLE db_agents")?;
+        Ok(())
+    }
+
+    /// Make every name-keyed signing key ensure fail (host and LAN).
+    #[cfg(test)]
+    pub(crate) fn test_break_name_key_tables(&self) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch("DROP TABLE db_agent_jekt_keys; DROP TABLE db_agent_lan_keys")?;
         Ok(())
     }
 

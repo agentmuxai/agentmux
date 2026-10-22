@@ -28,7 +28,7 @@ pub struct AgentNameMatch {
 /// have to be one critical section, or two concurrent inserts race to the
 /// same candidate.
 ///
-/// There is deliberately no "exclude this row id" option. It looks necessary
+/// There is deliberately no option to exclude a local row by id. It looks necessary
 /// for `instance_create`'s `ON CONFLICT(id) DO UPDATE` path — a row
 /// re-resolving its own slug would otherwise collide with itself — but that
 /// clause does not assign `slug` at all, so on the conflict path the computed
@@ -36,7 +36,18 @@ pub struct AgentNameMatch {
 /// #3514). On the insert path the row does not exist yet, so there is nothing
 /// to exclude either. If `slug` is ever added to that `DO UPDATE SET`, this
 /// becomes real and needs revisiting.
-pub(super) fn resolve_slug_collision(conn: &rusqlite::Connection, base: &str) -> rusqlite::Result<String> {
+///
+/// A slug the shared definitions hold is taken too (`shared`, read before the
+/// lock): every other agent's current slug, which may not have reached this
+/// channel's row yet, and every former slug, which is never handed out again
+/// (`SPEC_FORK_SLUG_MIGRATION_2026_10_22.md` §4). `own_id` is the row being
+/// inserted, whose own shared record (a cross-channel backfill) doesn't count.
+pub(super) fn resolve_slug_collision(
+    conn: &rusqlite::Connection,
+    base: &str,
+    own_id: &str,
+    shared: &SharedSlugs,
+) -> rusqlite::Result<String> {
     let mut candidate = base.to_string();
     let mut n: u32 = 2;
     loop {
@@ -48,7 +59,8 @@ pub(super) fn resolve_slug_collision(conn: &rusqlite::Connection, base: &str) ->
             params![candidate],
             |row| row.get(0),
         )?;
-        if count == 0 {
+        let held = |s: &String| s.eq_ignore_ascii_case(&candidate);
+        if count == 0 && !shared.others(own_id).any(|names| held(&names.slug) || names.former.iter().any(held)) {
             return Ok(candidate);
         }
         // Trimmed so the suffixed slug stays a valid agent id (at most 64
