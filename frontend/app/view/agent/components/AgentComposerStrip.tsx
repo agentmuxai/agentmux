@@ -684,10 +684,8 @@ interface AgentComposerStripProps {
     compacting?: CompactionState | null;
     /**
      * Manually trigger compaction now, instead of waiting for the CLI's
-     * own auto-compact threshold. For Claude and Codex. For Codex, srv
-     * catches the same "/compact" and compacts the thread through a
-     * short-lived `codex app-server` instead of starting a turn
-     * (subprocess/codex_compact.rs). For Claude it sends the
+     * own auto-compact threshold. Claude and Codex (srv compacts a Codex
+     * thread on "/compact", subprocess/codex_compact.rs). Sends the
      * literal text "/compact" through the normal send-message path
      * (agent-view.tsx's handleSendMessage), which the CLI's persistent
      * stream-json stdin protocol recognizes as its real /compact command
@@ -711,10 +709,8 @@ interface AgentComposerStripProps {
 // ── Component ──────────────────────────────────────────────────────────────
 
 export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element => {
-    // Show the Mode · Model · Effort controls for Claude and Codex agents. Codex's are
-    // its own: its account's models, each model's effort levels and its sandbox modes
-    // (runtime-capabilities.ts). Others (gemini/kimi) have different model
-    // enumerations, and buildRuntimeArgs drops effort for them — spec §1.3.
+    // Mode · Model · Effort for Claude and Codex (Codex's own models, levels and sandbox
+    // modes, runtime-capabilities.ts). Others have their own model lists — spec §1.3.
     const showControls = () => props.blockAtom != null && (props.providerId === "claude" || props.providerId === "codex");
 
     // Context text color based on proximity to compaction threshold.
@@ -774,14 +770,11 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     // been verified against — see onCompact's doc comment), only once
     // there's something to compact, and not while a turn is already in
     // flight or a compaction is already running.
-    // Codex: `/compact` makes srv compact the thread through a short-lived
-    // `codex app-server` (thread/compact/start), which needs a thread: the
-    // session's id, once a turn has run. Codex reports no context reading.
+    // Codex reports no context reading; compacting needs its thread (the session id).
     const canCompact = (): boolean => {
         if (props.onCompact == null || props.loading || props.compacting) return false;
-        if (props.providerId === "claude") return ctxText() != null;
         if (props.providerId === "codex") return !!props.blockAtom?.()?.meta?.["agent:sessionid"];
-        return false;
+        return props.providerId === "claude" && ctxText() != null;
     };
 
     // Dynamic left/right pooling — see the file-header comment for why a
