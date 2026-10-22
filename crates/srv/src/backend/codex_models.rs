@@ -90,6 +90,28 @@ pub fn codex_dirs(identities_dir: &Path, shared_provider_dir: PathBuf, auth_dir_
     dirs
 }
 
+/// The ids every Codex account on this install lists, in order: what a pane
+/// srv opens itself (`agent.open`) may start on. Empty when no account has a
+/// list yet, when data paths can't be resolved, and always in tests, so a test
+/// never reads this machine's real accounts.
+pub fn installed_common_model_ids() -> Vec<String> {
+    #[cfg(test)]
+    {
+        Vec::new()
+    }
+    #[cfg(not(test))]
+    {
+        let Some(paths) = agentmux_common::DataPaths::from_env() else {
+            return Vec::new();
+        };
+        let Some(provider) = crate::backend::providers::get_provider("codex") else {
+            return Vec::new();
+        };
+        let dirs = codex_dirs(&paths.identities_dir(), paths.provider_auth_dir(provider.auth_dir_name), provider.auth_dir_name);
+        models_every_account_lists(dirs).into_iter().map(|m| m.id).collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

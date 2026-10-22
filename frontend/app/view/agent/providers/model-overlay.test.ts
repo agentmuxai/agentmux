@@ -119,6 +119,14 @@ describe("replaceProviderModels (Codex: the account's own list)", () => {
         expect(codex()).toBe(curated);
         expect(overlay.isAccountListed("codex")).toBe(false);
     });
+
+    it("goes back to the curated list when the accounts' lists stop sharing anything", () => {
+        const curated = codex().map((m) => m.value);
+        overlay.replaceProviderModels("codex", apiModels(["gpt-7-nova", "GPT-7-Nova"]));
+        overlay.replaceProviderModels("codex", []);
+        expect(codex().map((m) => m.value)).toEqual(curated);
+        expect(overlay.isAccountListed("codex")).toBe(false);
+    });
 });
 
 describe("curated catalog", () => {
