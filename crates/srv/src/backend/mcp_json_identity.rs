@@ -102,7 +102,7 @@ pub(crate) fn realign_workspace_mcp_json(
     };
     let (patched, previous) = match set_agent_id(&content, slug) {
         Some((patched, previous)) => (patched, Some(previous)),
-        None if names_without_keys(&content, slug) => (content.clone(), None),
+        None if names_missing_a_key(&content, slug) => (content.clone(), None),
         None => return,
     };
     // Never written without the new name's keys: a later spawn would find the
@@ -126,13 +126,13 @@ pub(crate) fn realign_workspace_mcp_json(
     }
 }
 
-/// `content`'s agentmux entry names `slug` but carries neither signing key.
-fn names_without_keys(content: &str, slug: &str) -> bool {
+/// `content`'s agentmux entry names `slug` but lacks a signing key: either
+/// one, so a realignment that got only one of them is retried.
+fn names_missing_a_key(content: &str, slug: &str) -> bool {
     let Ok(json) = serde_json::from_str::<Value>(content) else { return false };
     let Some(env) = json.pointer("/mcpServers/agentmux/env") else { return false };
     env.get("AGENTMUX_AGENT_ID").and_then(Value::as_str) == Some(slug)
-        && env.get("AGENTMUX_JEKT_KEY").is_none()
-        && env.get("AGENTMUX_LAN_KEY").is_none()
+        && (env.get("AGENTMUX_JEKT_KEY").is_none() || env.get("AGENTMUX_LAN_KEY").is_none())
 }
 
 #[cfg(test)]
@@ -225,6 +225,13 @@ mod tests {
         std::fs::write(&file, stripped).unwrap();
         realign_workspace_mcp_json(&store, &work_dir, "host", "loap-3");
         assert!(file_id_and_key(&file).1.is_some(), "a matching id with no keys gets them");
+
+        let mut one_key: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        one_key["mcpServers"]["agentmux"]["env"].as_object_mut().unwrap().remove("AGENTMUX_LAN_KEY");
+        std::fs::write(&file, one_key.to_string()).unwrap();
+        realign_workspace_mcp_json(&store, &work_dir, "host", "loap-3");
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert!(v.pointer("/mcpServers/agentmux/env/AGENTMUX_LAN_KEY").is_some(), "a matching id with one key gets the other");
     }
 
     /// No lock, no rewrite: a `.claude` that is a file makes the lock
