@@ -86,6 +86,18 @@ impl RefTables {
         self.lock().1.get(block_id).map(|(_, t)| t.clone())
     }
 
+    /// Forget the references of a pane whose page is gone (closed, or put to sleep). A
+    /// reference is a DevTools node id, which a new page in a new renderer process numbers from
+    /// the start again: kept, an old `e5` would name whatever element has that number on the
+    /// reloaded page, and a fill or a click would land in the wrong field. The find counter stays,
+    /// so an earlier find's `n1e3` still never names another element.
+    pub(crate) fn forget(&self, block_id: &str) {
+        let mut g = self.lock();
+        if let Some((_, old)) = g.1.remove(block_id) {
+            Self::put_locked(&mut g, block_id, RefTable { finds: old.finds, ..RefTable::default() });
+        }
+    }
+
     /// The prefix for the next find's references on this pane, `n{k}`.
     /// Counted under one lock, so two finds at once can't share one.
     fn next_find_prefix(&self, block_id: &str) -> String {
@@ -1195,6 +1207,21 @@ pub(super) fn redact_secret(mut after: Value, facts: &DomFacts) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pane_whose_page_is_gone_keeps_no_references_but_keeps_counting_finds() {
+        let tables = RefTables::default();
+        let table = RefTable { url: "https://example.com/".into(), refs: HashMap::from([("e5".to_string(), 42)]), finds: 2, ..RefTable::default() };
+        tables.put("pane", table);
+        assert_eq!(tables.get("pane").unwrap().refs.get("e5"), Some(&42));
+        tables.forget("pane");
+        let after = tables.get("pane").unwrap();
+        assert!(after.refs.is_empty() && after.frames.is_empty() && after.url.is_empty());
+        assert_eq!(tables.next_find_prefix("pane"), "n3", "an earlier find's references are never reused");
+        // A pane that never had a table doesn't get one.
+        tables.forget("other");
+        assert!(tables.get("other").is_none());
+    }
 
     fn facts(tag: &str, attrs: &[(&str, &str)]) -> DomFacts {
         DomFacts { local_name: tag.into(), attrs: attrs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(), label: String::new() }
