@@ -117,6 +117,18 @@ describe("a store holding frames", () => {
         db.close();
     });
 
+    it("a frame with a part count srv never writes is damage, found without decoding it", () => {
+        const db = store("wild-count");
+        db.exec("UPDATE db_file_frame SET part_count = 2000000000, raw_len = 2000000000 * 65536");
+        const found = findDamage(db).damage;
+        expect(found.map((d) => d.kind)).toEqual(["gap"]);
+        expect(found[0].detail).toMatch(/the frame from part 0 has a shape srv never writes \(2000000000 parts/);
+        expect(partIndex(db, "agent:vvv:current", "output").map((p) => p.partidx)).toEqual([1, 2]);
+        db.exec("UPDATE db_file_frame SET part_count = -5");
+        expect(findDamage(db).damage[0].detail).toMatch(/-5 parts/);
+        db.close();
+    });
+
     it("a part with a row and a frame is the row, and the file is whole", () => {
         const db = store("row-and-frame");
         // A build that knows nothing of frames wrote part 0 again: the row wins.

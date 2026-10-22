@@ -6,7 +6,7 @@
 // (`PART_DATA_SIZE` in crates/srv/src/backend/storage/filestore/core.rs). A part
 // is a row of `db_file_data` or a part of a compressed frame (lib/frames.mjs).
 
-import { hasFrames, partIndex, scanFrames } from "./frames.mjs";
+import { hasFrames, partIndex, scanFrames, wellShaped } from "./frames.mjs";
 
 export const PART = 64 * 1024;
 
@@ -14,8 +14,11 @@ const ROW_PARTS = "SELECT zoneid, name, COUNT(*) AS n, MIN(partidx) AS lo, MAX(p
 // A frame's parts count as parts, each once: a part that has a row as well is the row, as
 // the app reads it (frames.rs: a row always wins; a build that knows nothing of frames may
 // write one into a framed part). This is `partIndex` in SQL, for every file at once.
+// A frame of a shape srv never writes (other than 1 to 64 whole parts) covers no parts, so a
+// salvaged row with a wild count can't make this run away; `findDamage` reports it.
 const FRAMED_PARTS = `frame_parts(zoneid, name, partidx, k, cnt) AS (
     SELECT zoneid, name, first_part, 1, part_count FROM db_file_frame
+     WHERE part_count BETWEEN 1 AND 64 AND raw_len = part_count * ${64 * 1024}
     UNION ALL
     SELECT zoneid, name, partidx + 1, k + 1, cnt FROM frame_parts WHERE k < cnt),
 all_parts AS (
@@ -61,8 +64,8 @@ function partMap(db, zone, name) {
  * Every damaged file: { zone, name, kind, detail, size, partsBytes, prefixBytes }.
  * Kinds: orphan-parts (no file row), no-parts (a size but no parts), gap (a part
  * is missing), tail-missing (the parts end before the recorded size) and
- * size-mismatch (more bytes than the recorded size). A compressed frame that doesn't decode
- * is found by [`allDamage`]'s content scan.
+ * size-mismatch (more bytes than the recorded size), and bad-frame for a compressed frame of a
+ * shape srv never writes. A frame that doesn't decode is found by [`allDamage`]'s content scan.
  */
 export function findDamage(db) {
     const damage = [];
@@ -88,7 +91,13 @@ export function findDamage(db) {
             damage.push({ ...base, kind: "size-mismatch", detail: `parts hold ${partsBytes} bytes, size says ${size}`, prefixBytes: partsBytes });
         }
     }
-    return { damage, files, zones: zones.size };
+    const found = { damage, files, zones: zones.size };
+    if (hasFrames(db)) {
+        for (const f of db.prepare("SELECT zoneid, name, first_part, part_count, raw_len FROM db_file_frame").iterate()) {
+            if (!wellShaped(f)) note(db, found, f.zoneid, f.name, "bad-frame", `the frame from part ${f.first_part} has a shape srv never writes (${f.part_count} parts, ${f.raw_len} bytes)`);
+        }
+    }
+    return found;
 }
 
 /**

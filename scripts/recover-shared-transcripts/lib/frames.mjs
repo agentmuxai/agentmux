@@ -18,6 +18,12 @@ const CODEC_DELTAS = 2;
 // The most a codec 2 payload may exceed its frame by (frames.rs DELTAS_SLACK).
 const DELTAS_SLACK = 64 * 1024;
 
+/** Whether a frame row has a shape srv can write: 1 to 64 whole parts. */
+export function wellShaped(f) {
+    const count = Number(f.part_count);
+    return Number.isInteger(count) && count >= 1 && count <= MAX_FRAME_PARTS && Number(f.raw_len) === count * PART;
+}
+
 /** Whether the database has the frame table (a store from before frames doesn't). */
 export function hasFrames(db) {
     return !!db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'db_file_frame'").get();
@@ -118,7 +124,7 @@ export function decodeFrame(f) {
     const rawLen = Number(f.raw_len);
     const count = Number(f.part_count);
     const where = `frame at part ${f.first_part}`;
-    if (count < 1 || count > MAX_FRAME_PARTS || rawLen !== count * PART) throw new Error(`${where} has a bad shape`);
+    if (!wellShaped(f)) throw new Error(`${where} has a bad shape`);
     const data = Buffer.from(f.data);
     let raw;
     const codec = Number(f.codec);
@@ -132,7 +138,8 @@ export function decodeFrame(f) {
 
 /**
  * A file's parts, rows and frames together: [{ partidx, len, framed }] in order. A part with a
- * row is the row, as the app reads it. Parts of a frame are listed without decoding it.
+ * row is the row, as the app reads it. Parts of a frame are listed without decoding it; a
+ * frame of a shape srv never writes covers none (`findDamage` reports it).
  */
 export function partIndex(db, zone, name) {
     const parts = new Map();
@@ -140,6 +147,7 @@ export function partIndex(db, zone, name) {
         parts.set(Number(r.partidx), { partidx: Number(r.partidx), len: Number(r.len), framed: false });
     }
     for (const f of framesOf(db, zone, name)) {
+        if (!wellShaped(f)) continue;
         for (let i = 0; i < Number(f.part_count); i++) {
             const idx = Number(f.first_part) + i;
             if (!parts.has(idx)) parts.set(idx, { partidx: idx, len: PART, framed: true });
