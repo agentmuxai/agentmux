@@ -125,18 +125,21 @@ pub fn spawn_wal_checkpoint_loop(
     });
 }
 
-/// One srv on the machine looks after the shared transcript store: the owner
-/// of `filestore.db.owner` ([`TruncateOwner`]).
+/// Looking after the shared transcript store.
 ///
-/// - **Its WAL is cut back**: a first look two minutes after start, then every
-///   half hour. The PASSIVE checkpoints (`filestore/checkpointer.rs`) keep the
-///   WAL's content copied back; this gives the disk back and starts the log
-///   afresh. The TRUNCATE runs on its own connection, so this srv's appends
-///   don't wait behind it.
-/// - **Its finished transcripts are compressed** (`transcript::framer`), when
-///   `agent:transcriptframes` is on: a pass of at most
-///   [`framer::PASS_FRAMES`] frames each minute, or every few seconds while
-///   there is work.
+/// - **Its WAL is cut back** by one srv on the machine, the owner of
+///   `filestore.db.owner` ([`TruncateOwner`]): a first look two minutes after
+///   start, then every half hour. The PASSIVE checkpoints
+///   (`filestore/checkpointer.rs`) keep the WAL's content copied back; this
+///   gives the disk back and starts the log afresh. The TRUNCATE runs on its
+///   own connection, so this srv's appends don't wait behind it.
+/// - **Its finished transcripts are compressed** (`transcript::framer`) by
+///   every srv whose own `agent:transcriptframes` is on, owner or not:
+///   settings are per channel, so the owner's alone can't speak for the
+///   machine. Each frame is written in one transaction that checks its parts
+///   first, so two srvs framing at once never conflict; the later one finds
+///   the parts framed. A pass of at most [`framer::PASS_FRAMES`] frames each
+///   minute, or every few seconds while there is work.
 pub fn spawn_global_transcripts_truncate_loop(token: tokio_util::sync::CancellationToken, store: Option<Arc<FileStore>>) {
     use crate::backend::transcript::framer;
     let Some(store) = store else { return };
@@ -154,10 +157,7 @@ pub fn spawn_global_transcripts_truncate_loop(token: tokio_util::sync::Cancellat
                 _ = token.cancelled() => break,
             }
             wait = std::time::Duration::from_secs(60);
-            if !owner.is_owner() {
-                continue;
-            }
-            if last_truncate.is_none_or(|t| t.elapsed() >= TRUNCATE_EVERY) {
+            if owner.is_owner() && last_truncate.is_none_or(|t| t.elapsed() >= TRUNCATE_EVERY) {
                 last_truncate = Some(std::time::Instant::now());
                 let store = Arc::clone(&store);
                 match tokio::task::spawn_blocking(move || store.checkpoint_truncate_apart()).await {
