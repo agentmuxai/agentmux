@@ -210,6 +210,10 @@ pub(super) struct ClaimRequest {
     pub groups: Vec<String>,
     #[serde(default)]
     pub lease_ms: Option<i64>,
+    /// Claim this task (its number or id) and no other: open, or held, which
+    /// lifts the hold (SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md §3.3).
+    #[serde(default)]
+    pub id: Option<String>,
 }
 
 /// An Unattributed claimer's UID: carried, else its block's row, else `""`
@@ -301,6 +305,29 @@ pub(super) async fn handle_work_claim(
         groups: req.groups.clone(),
     };
     let lease = req.lease_ms.filter(|&n| n > 0).unwrap_or(DEFAULT_LEASE_MS);
+
+    if let Some(named) = req.id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        let id = super::work_tasks::resolve_id(&state, named);
+        return match state.identity_store.work_claim_one(&id, &filter, now, lease) {
+            Ok(Some((item, from))) => {
+                let num = state.identity_store.work_card_ensure(&item.id, now).ok();
+                if from == crate::backend::storage::work_queue::work_state::HELD {
+                    super::work_tasks::record(&state, &item.id, &item.claimed_by, "agent", "unheld", "held", "open", "claimed by name");
+                }
+                super::work_tasks::record(&state, &item.id, &item.claimed_by, "agent", "claimed", "open", "claimed", "");
+                publish_changed(&state);
+                (
+                    StatusCode::OK,
+                    Json(json!({ "claimed": true, "attempt": item.attempts, "num": num, "item": item })),
+                )
+            }
+            Ok(None) => {
+                let why = super::work_tasks::why_not_claimed(&state, &id, &filter.agent_id, &filter.agent_uid, now);
+                (StatusCode::OK, Json(json!({ "claimed": false, "why": why })))
+            }
+            Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("claim failed: {e}")),
+        };
+    }
 
     match state.identity_store.work_queue_claim(&filter, now, lease) {
         Ok(Some(item)) => {

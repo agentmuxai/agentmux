@@ -9,7 +9,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
     match name {
         // ── Muxqueue ────────────────────────────────────────────────────
-        // All six post/get to /agentmux/work* on the local srv, same auth
+        // All post/get to /agentmux/work* on the local srv, same auth
         // header as the cron arms below.
         "WorkEnqueue" => {
             require_agent_env(local_url, auth_key, block_id)?;
@@ -88,8 +88,11 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             // UID from this block's row, and counts the fallback.
             let self_uid = std::env::var("AGENTMUX_AGENT_UID").ok().filter(|s| !s.is_empty()).unwrap_or_default();
 
+            // `id`: this task and no other (SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md §3.3).
+            let named = if arguments.get("id").is_some() { Some(task_id(arguments)?) } else { None };
             let url = format!("{}/agentmux/work/claim", local_url.trim_end_matches('/'));
             let body = serde_json::json!({
+                "id": named,
                 "agent_id": self_id,
                 "agent_uid": self_uid,
                 // Identity M3: when no UID is carried, srv takes it from the
@@ -114,11 +117,37 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             }
             let v: Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
             if !v.get("claimed").and_then(|x| x.as_bool()).unwrap_or(false) {
-                return Ok("No work available on the queue right now.".to_string());
+                return Ok(match (named, v.get("why").and_then(|w| w.as_str())) {
+                    (Some(_), Some(why)) => format!("Not claimed: {why}."),
+                    (Some(n), None) => format!("Not claimed: task {n} isn't waiting for you."),
+                    _ => "No work available on the queue right now.".to_string(),
+                });
             }
             let attempt = v.get("attempt").and_then(|x| x.as_i64()).unwrap_or(0);
             let item = v.get("item").cloned().unwrap_or(serde_json::json!({}));
             let id = item.get("id").and_then(|x| x.as_str()).unwrap_or("");
+            // An older srv ignores `id` and hands out the next task: give that
+            // one straight back rather than start on work nobody asked for.
+            if let Some(n) = named {
+                let num = v.get("num").and_then(|x| x.as_i64()).map(|x| x.to_string());
+                if id != n && num.as_deref() != Some(n) {
+                    let release = format!("{}/agentmux/work/{}/release", local_url.trim_end_matches('/'), id);
+                    let _ = client
+                        .post(&release)
+                        .header(AUTH_KEY_HEADER, auth_key)
+                        .json(&serde_json::json!({
+                            "agent_id": self_id,
+                            "attempt": attempt,
+                            "result": "Claimed by mistake: this AgentMux can't claim a task by id yet. Back to the queue untouched.",
+                        }))
+                        .send()
+                        .await;
+                    anyhow::bail!(
+                        "This AgentMux can't claim a task by id yet: it handed out {} instead, which was released                          again. Claim without id, or ask the operator to start task {n} on you.",
+                        task_name(&v, id)
+                    );
+                }
+            }
             let name = task_name(&v, id);
             let title = item.get("title").and_then(|x| x.as_str()).unwrap_or("");
             let payload = item.get("payload").and_then(|x| x.as_str()).unwrap_or("");
@@ -282,6 +311,32 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 }
             })
         }
+        "WorkHold" | "WorkUnhold" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("AGENTMUX_AGENT_ID is not set"))?;
+            let id = task_id(arguments)?;
+            let segment = if name == "WorkHold" { "hold" } else { "unhold" };
+            let url = format!("{}/agentmux/work/{}/{}", local_url.trim_end_matches('/'), id, segment);
+            let body = serde_json::json!({
+                "agent_id": self_id,
+                "attempt": arguments.get("attempt").and_then(|v| v.as_i64()),
+                "reason": arguments.get("reason").and_then(|v| v.as_str()).unwrap_or(""),
+            });
+            let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
+                .map_err(|e| anyhow::anyhow!("work {segment} request failed: {e}"))?;
+            let status = resp.status();
+            let reply = resp.text().await.unwrap_or_default();
+            let v: Value = serde_json::from_str(&reply).unwrap_or(serde_json::json!({}));
+            if status == reqwest::StatusCode::NOT_FOUND && v.get("error").is_none() {
+                anyhow::bail!("This AgentMux can't {segment} tasks yet; ask the operator to do it in the Kanban.");
+            }
+            if !status.is_success() {
+                let why = v.get("error").and_then(|e| e.as_str()).map(str::to_string).unwrap_or(reply);
+                anyhow::bail!("Tasks {segment}: {why}");
+            }
+            Ok(hold_text(id, segment, &v))
+        }
         "WorkList" => {
             require_agent_env(local_url, auth_key, block_id)?;
             let url = format!("{}/agentmux/work", local_url.trim_end_matches('/'));
@@ -358,6 +413,19 @@ fn task_name(v: &Value, id: &str) -> String {
     }
 }
 
+/// The answer to `hold` or `unhold`: where the task is now.
+fn hold_text(id: &str, segment: &str, v: &Value) -> String {
+    let name = v.get("name").and_then(|n| n.as_str()).filter(|n| !n.is_empty()).unwrap_or(id);
+    let changed = v.get("changed").and_then(|c| c.as_bool()).unwrap_or(true);
+    let who = v.get("for").and_then(|f| f.as_str()).filter(|f| !f.is_empty()).unwrap_or("anyone");
+    match (segment, changed) {
+        ("hold", true) => format!("Task {name} is on hold: no one takes it until it is taken off hold (Tasks unhold)."),
+        ("hold", false) => format!("Task {name} was already on hold."),
+        (_, true) => format!("Task {name} is off hold and waiting for {who}. To take it now: Tasks claim with id {name}."),
+        _ => format!("Task {name} wasn't on hold; it is waiting for {who}."),
+    }
+}
+
 /// The answer to finishing a task (`complete`, `submit`): where it went, and
 /// the next task waiting for the caller, which it takes now (Kanban §6.5: an
 /// agent goes on through its backlog).
@@ -404,5 +472,16 @@ mod tests {
         assert_eq!(task_id(&serde_json::json!({"id": "7f3a-b2"})).unwrap(), "7f3a-b2");
         assert!(task_id(&serde_json::json!({"id": "12/../x"})).is_err());
         assert!(task_id(&serde_json::json!({"id": "#"})).is_err());
+    }
+
+    #[test]
+    fn hold_and_unhold_say_where_the_task_is_now() {
+        let v = serde_json::json!({"name": "#12", "changed": true, "for": "Loap-3"});
+        assert!(hold_text("12", "hold", &v).starts_with("Task #12 is on hold"));
+        let off = hold_text("12", "unhold", &v);
+        assert!(off.contains("waiting for Loap-3") && off.contains("claim with id #12"), "{off}");
+        let same = serde_json::json!({"name": "#12", "changed": false, "for": ""});
+        assert_eq!(hold_text("12", "hold", &same), "Task #12 was already on hold.");
+        assert!(hold_text("12", "unhold", &same).ends_with("waiting for anyone."));
     }
 }
