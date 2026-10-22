@@ -26,7 +26,7 @@ use super::*;
 
 /// `local` unless `shared` is a non-empty slug, which wins. Logs (once) when
 /// both are set and differ.
-pub(super) fn canonical_slug(uid: &str, local: &str, shared: Option<&str>) -> String {
+pub(in crate::backend::storage) fn canonical_slug(uid: &str, local: &str, shared: Option<&str>) -> String {
     let Some(shared) = shared.filter(|s| !s.trim().is_empty()) else {
         return local.to_string();
     };
@@ -75,11 +75,22 @@ impl SharedSlugs {
     pub fn others<'a>(&'a self, uid: &'a str) -> impl Iterator<Item = &'a SharedNames> + 'a {
         self.0.iter().filter(move |(id, _)| id.as_str() != uid).map(|(_, n)| n)
     }
+
+    /// The uids whose shared slug is `folded` (trimmed and lowercased, as the
+    /// key tables fold).
+    pub fn ids_with_slug<'a>(&'a self, folded: &'a str) -> impl Iterator<Item = &'a str> + 'a {
+        self.0.iter().filter(move |(_, n)| n.slug.trim().to_lowercase() == folded).map(|(id, _)| id.as_str())
+    }
+
+    /// Whether any shared definition lists `folded` among its former slugs.
+    pub fn is_former(&self, folded: &str) -> bool {
+        self.0.values().any(|n| n.former.iter().any(|f| f.trim().to_lowercase() == folded))
+    }
 }
 
 /// Rows `filter` selects (a `WHERE …` clause, or empty), oldest first, each
 /// with its canonical slug. `NULL` slugs and instance names read as empty.
-pub(super) fn rows_with_canonical_slugs(
+pub(in crate::backend::storage) fn rows_with_canonical_slugs(
     conn: &rusqlite::Connection,
     filter: &str,
     shared: &SharedSlugs,
@@ -321,6 +332,50 @@ mod tests {
             for name in names {
                 assert!(tombstones.contains(&(name.to_string(), uid.to_string())), "{name}: {tombstones:?}");
             }
+        }
+    }
+
+    /// `agent.define` finds an existing agent by its canonical slug, not by a
+    /// stale local one, so it doesn't mint a second agent beside it.
+    #[test]
+    fn define_finds_an_agent_by_its_canonical_slug() {
+        let uid = "uid-p01-define";
+        let (_tmp, store, _defs) = diverged(uid, "loap-loap-2-loap-3", "loap-3");
+        let mut asked = test_agent_def("uid-p01-define-new", "Loap 3", "claude", "host", 2, "");
+        asked.slug = String::new();
+        let found = store.agent_def_find_or_insert(&mut asked).unwrap().expect("the existing agent");
+        assert_eq!((found.id.as_str(), found.slug.as_str()), (uid, "loap-3"));
+        assert!(store.agent_row_get("uid-p01-define-new").unwrap().is_none(), "nothing inserted");
+    }
+
+    /// With no local row (an agent only the shared registry knows here, or a
+    /// retry after an earlier attempt deleted the row and failed before
+    /// retiring the record), a delete still purges and tombstones every slug
+    /// the shared record holds. Both states look the same from here (an
+    /// active record, no row); each runs through one of the delete paths.
+    #[test]
+    fn delete_purges_shared_names_without_a_local_row() {
+        for (uid, retry) in [("uid-p04-shared-only", false), ("uid-p04-retry", true)] {
+            let (_tmp, store, defs) = diverged(uid, "naki-naki-2", "naki-2");
+            store.conn.lock().unwrap().execute("DELETE FROM db_agents WHERE id = ?1", params![uid]).unwrap();
+            let (_wan_dir, wan) = crate::backend::storage::wan_identity::attach_temp_wan_identity(&store);
+            for name in ["naki-2", "naki-naki-2"] {
+                store.agent_jekt_key_ensure(name).unwrap();
+                store.agent_lan_key_ensure(name).unwrap();
+                wan.agent_key_ensure(name, None).unwrap();
+            }
+            if retry { store.instance_delete(uid).unwrap() } else { store.agent_def_delete(uid).unwrap() };
+            let tombstones = {
+                let conn = store.conn.lock().unwrap();
+                crate::backend::storage::agents::key_tombstones_for_tests(&conn)
+            };
+            for name in ["naki-2", "naki-naki-2"] {
+                assert!(store.agent_jekt_key_load(name).unwrap().is_none(), "{uid}: {name}");
+                assert!(store.agent_lan_key_load(name).unwrap().is_none(), "{uid}: {name}");
+                assert!(wan.agent_key_load(name).unwrap().is_none(), "{uid}: {name}");
+                assert!(tombstones.contains(&(name.to_string(), uid.to_string())), "{uid}: {name}: {tombstones:?}");
+            }
+            assert!(!defs.exists(uid), "the record is retired");
         }
     }
 

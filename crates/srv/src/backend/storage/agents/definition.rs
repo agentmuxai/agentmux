@@ -445,23 +445,25 @@ impl Store {
             // `db_agent_definitions` counterpart) — same as before this
             // read moved to `db_agents`, since the legacy table never held
             // launch rows to exclude in the first place.
+            // A name match first, then a slug match, where the slug is the
+            // canonical one every other reader gives ([`canonical_slug`]).
+            // Names compare as SQLite's `lower(trim(name))` did: ASCII only.
             let mut stmt = conn.prepare(&format!(
-                "{AGENT_DEFINITION_SELECT}
-                 WHERE (lower(trim(name)) = ?1 OR slug = ?2 COLLATE NOCASE)
-                   AND is_seeded = 0
-                 ORDER BY CASE WHEN lower(trim(name)) = ?1 THEN 0 ELSE 1 END
-                 LIMIT 1"
+                "{AGENT_DEFINITION_SELECT} WHERE is_seeded = 0 ORDER BY created_at ASC, id ASC"
             ))?;
-            let mut rows = stmt.query_map(
-                params![name_lower, derived_slug],
-                map_agent_definition_row,
-            )?;
-            if let Some(row) = rows.next() {
-                return Ok(Some(row?));
-            }
+            let rows = stmt.query_map([], map_agent_definition_row)?.collect::<Result<Vec<_>, _>>()?;
             // Drop borrows on `conn` before proceeding to the insert.
-            drop(rows);
             drop(stmt);
+            let canonical = |d: &AgentDefinition| canonical_slug(&d.id, &d.slug, shared.slug(&d.id));
+            let found = rows
+                .iter()
+                .find(|d| d.name.trim_matches(' ').to_ascii_lowercase() == name_lower)
+                .or_else(|| rows.iter().find(|d| canonical(d).eq_ignore_ascii_case(&derived_slug)));
+            if let Some(def) = found {
+                let mut def = def.clone();
+                def.slug = canonical(&def);
+                return Ok(Some(def));
+            }
 
             // Not found — insert under the same lock.
             let base = if agent.slug.is_empty() {

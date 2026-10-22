@@ -108,26 +108,16 @@ pub(super) fn resolve_slug_collision(
 /// name-keyed signing keys may sit under — in `db_agent_key_tombstones`,
 /// before its row is deleted (identity M4a, spec §6.5.4). A template row is
 /// skipped: templates are never deleted through here as agents, and their
-/// names are shared by design. Idempotent; a missing row records nothing.
-/// `shared` adds the slug and former slugs its shared definition holds
-/// ([`deleted_agent_key_names`]).
+/// names are shared by design. Idempotent. `shared` adds the slug and former
+/// slugs its shared definition holds ([`deleted_agent_key_names`]); with no
+/// row (an agent only the shared registry knows, or a retry after the row
+/// went) those are the names ([`deleting_row_names`]).
 pub(super) fn tombstone_key_names(
     conn: &rusqlite::Connection,
     id: &str,
     shared: &SharedSlugs,
 ) -> Result<(), StoreError> {
-    let names: Option<(String, String, String)> = conn
-        .query_row(
-            "SELECT slug, name, COALESCE(instance_name, '') FROM db_agents WHERE id = ?1 AND is_template = 0",
-            params![id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )
-        .map(Some)
-        .or_else(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => Ok(None),
-            e => Err(e),
-        })?;
-    let Some((slug, name, instance_name)) = names else {
+    let Some((slug, name, instance_name)) = deleting_row_names(conn, id)? else {
         return Ok(());
     };
     let now = agentmux_common::time::now_secs();
@@ -177,18 +167,7 @@ pub(super) fn purge_name_keyed_keys(
     wan: Option<&super::super::wan_identity::WanIdentityStore>,
     shared: &SharedSlugs,
 ) -> Result<usize, StoreError> {
-    let names: Option<(String, String, String)> = conn
-        .query_row(
-            "SELECT slug, name, COALESCE(instance_name, '') FROM db_agents WHERE id = ?1 AND is_template = 0",
-            params![id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )
-        .map(Some)
-        .or_else(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => Ok(None),
-            e => Err(e),
-        })?;
-    let Some((slug, name, instance_name)) = names else {
+    let Some((slug, name, instance_name)) = deleting_row_names(conn, id)? else {
         return Ok(0);
     };
     let mut removed = 0;
@@ -266,6 +245,26 @@ pub(super) fn deleted_agent_key_names(
         std::iter::once(&own.slug).chain(&own.former).for_each(|s| push(s.trim().to_lowercase()));
     }
     Ok(names)
+}
+
+/// The names on `id`'s row, read for its delete before the row goes. `None`
+/// for a template, which is never deleted as an agent. A row that isn't
+/// there reads as no names, not as nothing to do: the agent may exist only in
+/// the shared registry, or an earlier attempt may have deleted the row and
+/// failed before retiring the shared record, and the slugs that record holds
+/// still need purging and tombstoning (P0.4).
+fn deleting_row_names(conn: &rusqlite::Connection, id: &str) -> Result<Option<(String, String, String)>, StoreError> {
+    let row = conn.query_row(
+        "SELECT is_template, COALESCE(slug, ''), name, COALESCE(instance_name, '') FROM db_agents WHERE id = ?1",
+        params![id],
+        |r| Ok((r.get::<_, i64>(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+    );
+    match row {
+        Ok((template, ..)) if template != 0 => Ok(None),
+        Ok((_, slug, name, instance_name)) => Ok(Some((slug, name, instance_name))),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(Some(Default::default())),
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// `agent.open`'s id for a definition with no slug (`agent_open.rs`).
