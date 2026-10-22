@@ -30,6 +30,7 @@ import {
     hibernationEnabled,
     HOVER_WAKE_GIVE_UP_MS,
     isCapturing,
+    engineSupportsFreeze,
     freezeAwakeReason,
     isLaunchMount,
     isOverdue,
@@ -400,6 +401,8 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
     const tryFreeze = async (): Promise<string | null> => {
         if (frozen) return "already frozen";
         if (sleeping() || visible()) return sleeping() ? "asleep" : "visible";
+        if (!(await engineSupportsFreeze(() => getApi().browserPanes.discard?.(model.blockId, "is_discarded") ?? Promise.resolve(null))))
+            return "this browser engine can't show a frozen page again";
         const declined =
             awakeReason(facts(), Date.now(), getSettingsKeyAtom("browser:keepawakesites")()) ??
             freezeAwakeReason(await getApi().browserPanes.hibernationCheck?.(model.blockId).catch(() => null));

@@ -10,6 +10,7 @@ import {
     afterDiscard,
     wakeEndsNow,
     awakeReason,
+    engineSupportsFreeze,
     etaLabel,
     FREEZE_PER_TICK,
     freezeAwakeReason,
@@ -350,5 +351,18 @@ describe("freezing hidden panes", () => {
         expect(freezeAwakeReason({ live: true, edited: true, beforeunload: true })).toBeNull();
         expect(freezeAwakeReason({ live: true, media: true })).toBe("playing media");
         expect(freezeAwakeReason({ live: true, devtools: true })).toBe("DevTools open");
+    });
+});
+
+describe("engineSupportsFreeze", () => {
+    it("asks once, and says yes only for an engine with the Discard API", async () => {
+        let asked = 0;
+        const ask = async () => {
+            asked++;
+            return { supported: true, ok: false };
+        };
+        expect(await engineSupportsFreeze(ask)).toBe(true);
+        expect(await engineSupportsFreeze(ask)).toBe(true);
+        expect(asked).toBe(1);
     });
 });
