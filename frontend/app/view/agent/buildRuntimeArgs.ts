@@ -10,7 +10,7 @@
 
 import type { AgentRuntimeConfig, PermissionMode } from "./types";
 import { DEFAULT_RUNTIME_CONFIG } from "./types";
-import { getProvider } from "./providers";
+import { getProvider, isAccountListed } from "./providers";
 import { effectiveModel, effortApplies, modelTakesEffort } from "./runtime-capabilities";
 import { selectLaunchArgs, withoutOverriddenFlags, withProviderFlags, type LaunchArgsProvider } from "./launch-args";
 
@@ -191,8 +191,12 @@ export function buildRuntimeArgs(
         const codexModels = getProvider("codex")?.models ?? [];
         const picked = codexModels.find((m) => m.value === config.model)?.value;
         const fallback = codexModels.find((m) => m.default)?.value ?? CODEX_DEFAULT_MODEL;
+        // No model chosen while the account's list is unknown (a fresh sign-in
+        // before its first turn): pass none, and the CLI picks one the account
+        // offers (resolveLaunchRuntime's `modelsKnown`).
+        const model = picked ?? (config.model === "" && !isAccountListed("codex") ? undefined : fallback);
         const promptPositional = args[args.length - 1] === "-" ? args.pop()! : null;
-        args.push("--model", picked ?? fallback);
+        if (model) args.push("--model", model);
         if (promptPositional !== null) args.push(promptPositional);
     }
 

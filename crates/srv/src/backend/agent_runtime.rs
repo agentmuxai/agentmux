@@ -432,11 +432,17 @@ fn account_listed_models(provider_id: &str) -> Vec<String> {
 }
 
 /// The model a pane starts on: the first its accounts list, when known, else
-/// the catalog default (`default_model_for`). `None` for a provider whose model
-/// the runtime menu does not wire.
+/// the catalog default (`default_model_for`). For Codex an unknown list (a
+/// fresh sign-in before its first turn) gives `""`: no `--model`, so the CLI
+/// picks one the account offers rather than a catalog id it may not run.
+/// `None` for a provider whose model the runtime menu does not wire.
 fn launch_default_model(provider_id: &str, listed: &[String]) -> Option<String> {
     let catalog = default_model_for(provider_id)?;
-    Some(listed.first().cloned().unwrap_or_else(|| catalog.to_string()))
+    Some(match listed.first() {
+        Some(first) => first.clone(),
+        None if provider_id == "codex" => String::new(),
+        None => catalog.to_string(),
+    })
 }
 
 /// Build `cmd:args` and `agent:runtime` for a freshly opened pane.
@@ -492,7 +498,7 @@ pub(crate) fn seed_launch(
             }
         }
         "codex" | "antigravity" => {
-            if flag_model.is_none() {
+            if flag_model.is_none() && !model.is_empty() {
                 cli_args.extend(["--model".to_string(), model.clone()]);
             }
         }
@@ -608,7 +614,7 @@ fn with_runtime_flags_listed(meta: &MetaMapType, args: Vec<String>, listed: &[St
             }
         }
         "codex" => {
-            if have_model.is_none() {
+            if have_model.is_none() && !model.is_empty() {
                 // The stdin marker `-` must end up last even when the stored
                 // argv has flags after it (provider_flags were appended past it).
                 let marker = out.iter().rposition(|a| a == "-").map(|i| out.remove(i));
@@ -923,7 +929,8 @@ mod tests {
                     "--model" => out.cli_args.get(i + 1).cloned(),
                     _ => a.strip_prefix("--model=").map(str::to_string),
                 })
-                .unwrap();
+                // Codex with no known account list names none: runtime "".
+                .unwrap_or_default();
             assert_eq!(rt["model"], in_args, "{provider} {flags:?}");
         }
     }
@@ -1035,7 +1042,7 @@ mod tests {
 
     #[test]
     fn codex_keeps_its_stdin_marker_last() {
-        let out = seed_launch("codex", s(&["exec", "--json", "-"]), "");
+        let out = seed_launch("codex", s(&["exec", "--json", "-"]), "--model gpt-6-astra");
         assert_eq!(
             out.cli_args,
             s(&["exec", "--json", "--model", "gpt-6-astra", "-"])
@@ -1231,12 +1238,12 @@ mod tests {
     fn a_claude_model_stored_on_a_codex_pane_never_reaches_codex() {
         for stale in ["opus", "sonnet", "haiku", "claude-sonnet-5-5"] {
             let meta = meta_with("codex", Some(json!({ "model": stale })));
+            // No account list in tests: the CLI picks, so no `--model` at all.
             let out = with_runtime_flags(&meta, s(&["exec", "-"]));
-            assert_eq!(
-                after(&out, "--model").as_deref(),
-                Some("gpt-6-astra"),
-                "{stale}"
-            );
+            assert_eq!(out, s(&["exec", "-"]), "{stale}");
+            let listed = s(&["gpt-6-astra"]);
+            let out = with_runtime_flags_listed(&meta, s(&["exec", "-"]), &listed);
+            assert_eq!(after(&out, "--model").as_deref(), Some("gpt-6-astra"), "{stale}");
         }
     }
 
@@ -1247,7 +1254,8 @@ mod tests {
     fn a_codex_pane_starts_on_and_keeps_to_what_its_accounts_list() {
         let listed = s(&["gpt-7-nova", "gpt-6-astra"]);
         assert_eq!(launch_default_model("codex", &listed).as_deref(), Some("gpt-7-nova"));
-        assert_eq!(launch_default_model("codex", &[]).as_deref(), Some("gpt-6-astra"), "no list yet: the catalog's");
+        assert_eq!(launch_default_model("codex", &[]).as_deref(), Some(""), "no list yet: none, the CLI picks");
+        assert_eq!(seed_launch("codex", s(&["exec", "-"]), "").cli_args, s(&["exec", "-"]));
         assert_eq!(launch_default_model("aider", &listed), None, "a provider the menu doesn't wire");
 
         let run = |model: &str| {

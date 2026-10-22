@@ -11,7 +11,7 @@ import { atoms, getApi, MOS } from "@/app/store/global";
 import { agentModels } from "./agent-models";
 import { buildAgentPaneIcon } from "./components/AgentPaneIcon";
 import { useAgentDefinitions } from "./components/AgentPicker";
-import { getProvider, PROVIDERS, resolveProviderAlias } from "./providers";
+import { getProvider, isAccountListed, PROVIDERS, resolveProviderAlias } from "./providers";
 import { resolveVendorEnvOverride } from "./providers/vendor-env";
 import { Logger } from "@/util/logger";
 import { translateError } from "@/app/errors/translate";
@@ -552,6 +552,7 @@ export class AgentViewModel {
             agent.provider_flags,
             remembered,
             overrides?.carryOverRuntime,
+            provider.id !== "codex" || isAccountListed("codex"),
         );
         const cliArgs = buildPaneArgs(provider, agentMode, runtimeConfig, paneFlags);
         // In-pane tabs, Phase 4 — see LaunchOverrides.forkSession's own doc

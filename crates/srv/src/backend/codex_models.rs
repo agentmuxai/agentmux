@@ -90,6 +90,19 @@ pub fn models_every_account_lists(dirs: impl IntoIterator<Item = PathBuf>) -> Ve
         .collect()
 }
 
+/// A sign-in is starting in this Codex config dir: drop its cached model list.
+/// A reconnect may be another ChatGPT account or plan, and the old list would
+/// otherwise stand for it until the CLI fetches a new one; without it the
+/// account's models are unknown, so a pane passes no `--model` and the CLI
+/// picks one the account offers.
+pub fn forget_models_on_sign_in(dir: &Path) {
+    match std::fs::remove_file(dir.join(MODELS_CACHE_FILE)) {
+        Ok(()) => tracing::info!(target: "identity", dir = %dir.display(), "codex sign-in: dropped the old model list"),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => tracing::warn!(target: "identity", dir = %dir.display(), error = %e, "codex sign-in: could not drop the old model list"),
+    }
+}
+
 /// Every Codex config dir AgentMux manages: each account's
 /// `<identities>/<account>/<auth_dir_name>` and the shared provider dir.
 pub fn codex_dirs(identities_dir: &Path, shared_provider_dir: PathBuf, auth_dir_name: &str) -> Vec<PathBuf> {
@@ -185,6 +198,18 @@ mod tests {
         // `fresh` signed in but hasn't run a turn: its models are unknown.
         std::fs::write(fresh.join(AUTH_FILE), "{}").unwrap();
         assert!(models_every_account_lists([old, fresh]).is_empty());
+    }
+
+    #[test]
+    fn a_sign_in_forgets_the_old_list() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join(MODELS_CACHE_FILE), cache("2026-10-22T00:00:00Z", &[("gpt-6-pro", "list", 1)])).unwrap();
+        std::fs::write(root.path().join(AUTH_FILE), "{}").unwrap();
+        forget_models_on_sign_in(root.path());
+        assert!(!root.path().join(MODELS_CACHE_FILE).exists());
+        assert!(root.path().join(AUTH_FILE).exists(), "only the list goes");
+        forget_models_on_sign_in(root.path()); // nothing left: no error
+        assert!(models_every_account_lists([root.path().to_path_buf()]).is_empty(), "unknown until the CLI fetches it again");
     }
 
     #[test]

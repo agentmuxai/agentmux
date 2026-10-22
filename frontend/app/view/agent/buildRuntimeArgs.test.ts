@@ -84,6 +84,12 @@ describe("buildRuntimeArgs", () => {
             const out = buildRuntimeArgs(CODEX_BASE, cfg({ model: "gpt-5.5" }), "codex");
             expect(out[out.indexOf("--model") + 1]).toBe("gpt-6-astra");
         });
+
+        it("names no model when none was chosen and the account's list is unknown: the CLI picks", () => {
+            const out = buildRuntimeArgs(CODEX_BASE, cfg({ model: "" }), "codex");
+            expect(out).not.toContain("--model");
+            expect(out[out.length - 1]).toBe("-");
+        });
     });
 
     describe("claude (unchanged)", () => {

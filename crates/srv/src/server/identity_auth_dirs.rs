@@ -316,6 +316,9 @@ pub(crate) fn compute_and_ensure_account_dir(
         return (account_id, None);
     }
     link_history_if_isolated(&paths, &dir, provider, &account_id, "auth.start (direct-account)");
+    if provider.id == "codex" {
+        crate::backend::codex_models::forget_models_on_sign_in(&dir);
+    }
     let dir_str = dir.to_string_lossy().to_string();
     auth_env.insert(provider.auth_config_dir_env_var.to_string(), dir_str.clone());
     tracing::info!(

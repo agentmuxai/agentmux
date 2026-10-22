@@ -234,7 +234,9 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
         if (replacement) void migrateModel(replacement.value);
     });
 
-    const modelLabel = (value: string): string => modelOptions().find((o) => o.value === value)?.label ?? value;
+    // "" is no model named: the CLI picks (Codex before its account's list is known).
+    const modelLabel = (value: string): string =>
+        modelOptions().find((o) => o.value === value)?.label ?? (value === "" ? "CLI default" : value);
     const effortLabel = (value: string): string => EFFORT_OPTIONS.find((o) => o.value === value)?.label ?? value;
     const modeLabel = (value: string): string => MODE_OPTIONS.find((o) => o.value === value)?.label ?? value;
 

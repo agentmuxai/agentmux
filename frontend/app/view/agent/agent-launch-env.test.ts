@@ -505,4 +505,16 @@ describe("resolveLaunchRuntime — what the agent remembers sits between a fork 
         expect(r.runtimeConfig.permissionMode).toBe("plan");
         expect(r.paneFlags).toBe("--add-dir /x");
     });
+
+    // Codex before its account's list is known (SPEC_CODEX_OAUTH_IN_CONNECTORS_AND_EMAIL_LABELS_2026_10_22.md §4).
+    it("names no model while the provider's list is unknown and nobody chose one, so the CLI picks", () => {
+        const codex = { id: "codex", models: [{ value: "gpt-6-astra", label: "GPT-6-Astra", default: true }] } as any;
+        expect(launchEnv.resolveLaunchRuntime(undefined, codex, "", undefined, undefined, false).runtimeConfig.model).toBe("");
+        // A model chosen anywhere still holds.
+        expect(launchEnv.resolveLaunchRuntime("gpt-6-astra", codex, "", undefined, undefined, false).runtimeConfig.model).toBe("gpt-6-astra");
+        expect(launchEnv.resolveLaunchRuntime(undefined, codex, "-m gpt-6-astra", undefined, undefined, false).runtimeConfig.model).toBe("gpt-6-astra");
+        expect(launchEnv.resolveLaunchRuntime(undefined, codex, "", { model: "gpt-6-astra" }, undefined, false).runtimeConfig.model).toBe("gpt-6-astra");
+        // Known: the list's default, as before.
+        expect(launchEnv.resolveLaunchRuntime(undefined, codex, "", undefined, undefined, true).runtimeConfig.model).toBe("gpt-6-astra");
+    });
 });
