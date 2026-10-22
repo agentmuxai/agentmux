@@ -75,6 +75,10 @@ fn a_line_that_is_not_exactly_the_template_stays_as_it_was() {
         base.replace("\"text_delta\",\"text\"", "\"thinking_delta\",\"thinking\""),
         // A leading zero in the index.
         base.replace("\"index\":0", "\"index\":00"),
+        // A 36-byte uuid with a fifth dash (an odd number of digits), or with
+        // its dashes elsewhere.
+        base.replace(&uuid(1), &format!("{}-", &uuid(1)[..35])),
+        base.replace(&uuid(1), &format!("{}-{}", &uuid(1)[..7], &uuid(1)[8..])),
         // No newline at the end.
         base.trim_end().to_string(),
     ];
@@ -84,6 +88,25 @@ fn a_line_that_is_not_exactly_the_template_stays_as_it_was() {
         let (payload, stats) = encode(raw.as_bytes()).unwrap();
         assert_eq!(stats.lines, 1, "only the exact line is taken: {v}");
         assert_eq!(decode(&payload, raw.len()).unwrap(), raw.as_bytes());
+    }
+}
+
+#[test]
+fn a_uuid_is_taken_only_in_its_canonical_form() {
+    let u = uuid(7);
+    let bytes = parse_uuid(u.as_bytes()).unwrap();
+    let mut back = Vec::new();
+    push_uuid(&mut back, &bytes);
+    assert_eq!(back, u.as_bytes());
+    for bad in [
+        format!("{}-", &u[..35]),
+        format!("{}-{}", &u[..7], &u[8..]),
+        format!("{}0", &u[..35]).replacen('-', "0", 1),
+        u.to_uppercase(),
+        u.replace('-', ""),
+        format!("{}x", &u[..35]),
+    ] {
+        assert_eq!(parse_uuid(bad.as_bytes()), None, "{bad}");
     }
 }
 
