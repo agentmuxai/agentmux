@@ -191,24 +191,33 @@ pub fn write_secret_text(text: &str) -> Result<(), String> {
 pub fn write_secret_text(text: &str) -> Result<(), String> {
     use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
     use objc2_foundation::NSString;
-    let pb = NSPasteboard::generalPasteboard();
-    // The change count this clear gave the pasteboard: while it is still the count, nobody else has
-    // taken the pasteboard since, and what is on it is ours to clear again.
-    let mine = pb.clearContents();
-    let string_type = unsafe { NSPasteboardTypeString };
-    // Marks first, then the text, the order the Windows side keeps; a mark that doesn't take refuses the copy.
-    let marked = ["org.nspasteboard.ConcealedType", "org.nspasteboard.TransientType"]
-        .iter()
-        .all(|mark| pb.setString_forType(&NSString::from_str(""), &NSString::from_str(mark)));
-    if !(marked && pb.setString_forType(&NSString::from_str(text), string_type)) {
+    // The pasteboard server raises an Objective-C exception when it can't be reached; one that
+    // crosses into Rust aborts the whole host, so the writes run inside `catch`.
+    let wrote = objc2::exception::catch(std::panic::AssertUnwindSafe(|| {
+        let pb = NSPasteboard::generalPasteboard();
+        // The change count this clear gave the pasteboard: while it is still the count, nobody else
+        // has taken the pasteboard since, and what is on it is ours to clear again.
+        let mine = pb.clearContents();
+        let string_type = unsafe { NSPasteboardTypeString };
+        // Marks first, then the text, the order the Windows side keeps; a mark that doesn't take refuses the copy.
+        let marked = ["org.nspasteboard.ConcealedType", "org.nspasteboard.TransientType"]
+            .iter()
+            .all(|mark| pb.setString_forType(&NSString::from_str(""), &NSString::from_str(mark)));
+        if marked && pb.setString_forType(&NSString::from_str(text), string_type) {
+            SECRET_CHANGE.store(pb.changeCount(), std::sync::atomic::Ordering::SeqCst);
+            return true;
+        }
         // A write refused because another app took the pasteboard must not clear what that app put there.
         if pb.changeCount() == mine {
             pb.clearContents();
         }
-        return Err("macOS didn't take the secret on the clipboard privately".into());
+        false
+    }));
+    match wrote {
+        Ok(true) => Ok(()),
+        Ok(false) => Err("macOS didn't take the secret on the clipboard privately".into()),
+        Err(_) => Err("macOS couldn't reach the clipboard".into()),
     }
-    SECRET_CHANGE.store(pb.changeCount(), std::sync::atomic::Ordering::SeqCst);
-    Ok(())
 }
 
 /// The pasteboard's change count right after the last secret was put there: a clear only happens
@@ -267,17 +276,19 @@ pub fn clear_if_holds(text: &str) -> Result<(), String> {
 #[cfg(target_os = "macos")]
 pub fn clear_if_holds(text: &str) -> Result<(), String> {
     use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
-    let pb = NSPasteboard::generalPasteboard();
-    let saved = SECRET_CHANGE.load(std::sync::atomic::Ordering::SeqCst);
-    if pb.changeCount() != saved {
-        return Ok(());
-    }
-    let holds = pb.stringForType(unsafe { NSPasteboardTypeString }).is_some_and(|s| s.to_string() == text);
-    // Checked again just before clearing: something copied while the text was being compared must stay.
-    if holds && pb.changeCount() == saved {
-        pb.clearContents();
-    }
-    Ok(())
+    objc2::exception::catch(std::panic::AssertUnwindSafe(|| {
+        let pb = NSPasteboard::generalPasteboard();
+        let saved = SECRET_CHANGE.load(std::sync::atomic::Ordering::SeqCst);
+        if pb.changeCount() != saved {
+            return;
+        }
+        let holds = pb.stringForType(unsafe { NSPasteboardTypeString }).is_some_and(|s| s.to_string() == text);
+        // Checked again just before clearing: something copied while the text was being compared must stay.
+        if holds && pb.changeCount() == saved {
+            pb.clearContents();
+        }
+    }))
+    .map_err(|_| "macOS couldn't reach the clipboard".to_string())
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]

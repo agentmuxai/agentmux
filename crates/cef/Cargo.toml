@@ -153,7 +153,7 @@ core-graphics = "0.23"
 # The Vault's Reveal and Copy: the Mac's own prompt (Touch ID, or the account password) through
 # LocalAuthentication, and NSPasteboard for the clipboard marks that keep a copied secret out of
 # clipboard histories. Typed bindings, since a block-taking API is where raw objc_msgSend is a risk.
-objc2 = "0.6"
+objc2 = { version = "0.6", features = ["exception"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSError", "NSObject"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPasteboard"] }
 objc2-local-authentication = { version = "0.3", default-features = false, features = ["std", "LAContext", "LAError", "block2"] }
