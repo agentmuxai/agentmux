@@ -24,6 +24,7 @@ pub fn load_config() -> config::Config {
             .or_else(|| std::env::var_os("AGENTMUX_DATA_DIR").filter(|s| !s.is_empty()).map(std::path::PathBuf::from))
             .or_else(|| std::env::var_os("AGENTMUX_DATA_HOME").map(std::path::PathBuf::from))
             .unwrap_or_else(|| std::path::PathBuf::from(base::get_mux_data_dir()));
+        let data_dir = migrate_data_dir(data_dir);
         let code = migrations::run_migrate_command(&data_dir, *dry_run, *list, *verify, *prepare);
         std::process::exit(code);
     }
@@ -42,6 +43,20 @@ pub fn load_config() -> config::Config {
     crate::backend::reactive::registry::init_local_auth_key(&config.auth_key);
 
     config
+}
+
+/// The data folder `migrate` works on: the one the daemon opens given the same
+/// environment. The daemon turns its data folder into `AGENTMUX_DATA_HOME` and
+/// opens `base::get_mux_db_dir()`, which resolves through `agentmux_root()`,
+/// where `AGENTMUX_HOME_OVERRIDE` comes first. Without the same resolution, the
+/// launcher's `migrate --prepare` under a home override migrated the version's
+/// folder while srv's boot check read `<override>/db`, and srv never started
+/// (Korp@narko, after #5252).
+fn migrate_data_dir(requested: std::path::PathBuf) -> std::path::PathBuf {
+    if !requested.as_os_str().is_empty() {
+        std::env::set_var("AGENTMUX_DATA_HOME", &requested);
+    }
+    base::get_mux_data_dir()
 }
 
 /// Output of [`open_stores_and_migrate`] — every store/log handle the rest
@@ -683,5 +698,54 @@ fn prepare_in_process(mux_data_dir: &std::path::Path, db_dir: &std::path::Path, 
             eprintln!("{}", agentmux_common::srv_stderr::migration_failed_line(&e));
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Sets env vars for one test and puts them back after.
+    struct EnvRestore(Vec<(&'static str, Option<std::ffi::OsString>)>);
+    impl EnvRestore {
+        fn set(vars: &[(&'static str, Option<&std::path::Path>)]) -> Self {
+            let saved = vars.iter().map(|(k, _)| (*k, std::env::var_os(k))).collect();
+            for (k, v) in vars {
+                match v {
+                    Some(v) => std::env::set_var(k, v),
+                    None => std::env::remove_var(k),
+                }
+            }
+            EnvRestore(saved)
+        }
+    }
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            for (k, v) in &self.0 {
+                match v {
+                    Some(v) => std::env::set_var(k, v),
+                    None => std::env::remove_var(k),
+                }
+            }
+        }
+    }
+
+    /// `migrate` works on the folder whose `db/` the daemon opens, so the
+    /// launcher's `migrate --prepare` prepares what srv's boot check reads.
+    #[test]
+    fn migrate_works_on_the_daemons_data_folder_with_and_without_a_home_override() {
+        let _guard = crate::test_support::ISOLATED_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let root = tempfile::tempdir().unwrap();
+        let version_dir = root.path().join("channels").join("x").join("versions").join("1.0.0").join("data");
+
+        // No override: the folder asked for, as before.
+        let _env = EnvRestore::set(&[("AGENTMUX_HOME_OVERRIDE", None), ("AGENTMUX_DATA_HOME", None)]);
+        assert_eq!(migrate_data_dir(version_dir.clone()), version_dir);
+        assert_eq!(base::get_mux_db_dir(), version_dir.join("db"), "the daemon's db folder");
+
+        // A home override: the daemon opens <override>/db, so migrate must too.
+        let _env = EnvRestore::set(&[("AGENTMUX_HOME_OVERRIDE", Some(root.path())), ("AGENTMUX_DATA_HOME", None)]);
+        assert_eq!(migrate_data_dir(version_dir.clone()), root.path());
+        assert_eq!(migrate_data_dir(version_dir).join("db"), base::get_mux_db_dir());
     }
 }

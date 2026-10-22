@@ -47,9 +47,10 @@ pub fn init_logging() -> tracing_appender::non_blocking::WorkerGuard {
         .filter(|s| !s.is_empty())
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| {
-            dirs::home_dir()
-                .unwrap_or_default()
-                .join(".agentmux")
+            // The same root as the data (`AGENTMUX_HOME_OVERRIDE` first), so a
+            // run under a home override doesn't log into the real home.
+            agentmux_common::data_paths::agentmux_root()
+                .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".agentmux"))
                 .join("logs")
         });
     let _ = std::fs::create_dir_all(&log_dir);
