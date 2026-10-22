@@ -473,6 +473,15 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             sawLoading = model.loadingAtom();
         }),
     );
+    // A page discarded in place still exists: its wake is a load of that page,
+    // timed from the wake's start like a new one.
+    createEffect(
+        on(wakeRequested, (requested) => {
+            if (!requested || !rectSync.paneCreated()) return;
+            loadClockFrom = wakeStartedAt();
+            sawLoading = false;
+        }),
+    );
     createEffect(
         on(model.loadingAtom, (loading) => {
             if (!loadClockFrom) return;

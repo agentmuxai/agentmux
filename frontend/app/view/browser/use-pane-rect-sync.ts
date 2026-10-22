@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createEffect, createSignal, on, onCleanup, onMount, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, on, onCleanup, onMount, type Accessor } from "solid-js";
 import { getApi } from "@/app/store/app-api";
 import { FLOATER_EDGE_RESIZE_BORDER } from "@/app/workspace/floater-resize";
 import { registerPaneRect, unregisterPaneRect } from "@/app/platform/pane-rect-registry";
@@ -11,6 +11,11 @@ import { focusManager } from "@/app/store/focusManager";
 import type { BrowserViewModel } from "./browser-model";
 import { afterDiscard } from "./hibernation";
 import { paneRectBatcher } from "./pane-rect-batcher";
+
+/** How long a hidden pane parked at its real size settles before a discard:
+ *  Chromium reports a page's scroll position to the browser about a second
+ *  after it changes. */
+const DISCARD_SETTLE_MS = 1500;
 
 /** CSS px the native page stops short of the pane's bottom while a splitter is
  *  dragged, so the pane size badge (bottom-left, `pane-size-badge.scss`: 8px
@@ -78,7 +83,9 @@ export function usePaneRectSync(params: {
     asleep?: Accessor<boolean>;
 }): PaneRectSync {
     const { model, placeholderRef, windowLabel, diag } = params;
-    const asleep = params.asleep ?? (() => false);
+    // A memo, so the sleep effect below runs when the pane goes to sleep or
+    // wakes, not each time the sleep record is rewritten (marking it kept).
+    const asleep = createMemo(params.asleep ?? (() => false));
     // The tab's one visibility signal (Pane Tab contract Phase 3): the native
     // page is collapsed whenever the tab isn't "active".
     const visibility = usePaneTabVisibility(model.blockId);
@@ -92,6 +99,10 @@ export function usePaneRectSync(params: {
     // safety-net interval fired browser_pane_resize 5x/sec even when the
     // pane was steady, visible as a 200ms DOM blink on every tick.
     let lastSentRect: PaneRect | null = null;
+    // The last rect the page was laid out at with a real size, and whether it
+    // is parked offscreen at that size for a discard (sync holds off).
+    let lastRealRect: PaneRect | null = null;
+    let parkedForDiscard = false;
     // SolidJS signal — must be reactive so <Show when={!paneCreated()}> re-runs
     // when the pane is created and hides the empty-state placeholder.
     const [paneCreated, setPaneCreated] = createSignal(false);
@@ -138,7 +149,7 @@ export function usePaneRectSync(params: {
     };
 
     const syncPosition = () => {
-        if (!placeholderRef() || !paneCreated() || model.closed) return;
+        if (!placeholderRef() || !paneCreated() || model.closed || parkedForDiscard) return;
         // Collapse whenever the tab isn't visible (`usePaneTabVisibility`):
         // its window tab isn't displayed, or it's a kept-alive tab that isn't
         // its pane's active one. The placeholder's rect can't tell:
@@ -170,6 +181,7 @@ export function usePaneRectSync(params: {
             return;
         }
         lastSentRect = rect;
+        if (rect.width > 0 && rect.height > 0) lastRealRect = rect;
         rects.set(model.blockId, rect);
         // Keep the overlay-clip short-circuit registry in sync with the
         // host's actual HWND rect. Cheap (two property reads + a Map write).
@@ -287,12 +299,15 @@ export function usePaneRectSync(params: {
         if (url && !asleep()) createPane(url);
     });
 
-    // Hibernation: going to sleep closes the native page (its renderer ends);
-    // waking creates it again from the pane's address, with its jar.
+    // Hibernation: going to sleep discards the native page in place, or closes
+    // it (its renderer ends); waking loads it again, or creates it from the
+    // pane's address, with its jar. True while the page is discarded in place.
+    let discarded = false;
     const closeNative = (why: string) => {
         if (!paneCreated()) return;
         diag(`close-native why=${why}`);
         unregisterPaneRect(model.blockId);
+        discarded = false;
         if (releaseNativePane(model.blockId, ownerToken)) {
             rects.forget(model.blockId);
             getApi().browserPanes.close(model.blockId, windowLabel).catch(() => {});
@@ -305,10 +320,28 @@ export function usePaneRectSync(params: {
     // place instead: its renderer ends, the browser and its back/forward
     // history stay, and loading it again brings back its scroll position and
     // form contents. An engine without it, or a discard it refuses, closes.
-    let discarded = false;
     const sleepNative = async () => {
-        if (!paneCreated()) return;
+        if (!paneCreated() || discarded) return;
+        // A hidden pane is laid out at 0x0, where its page reflows into a
+        // 14 px column and scrolls far down to keep its place; a discard then
+        // keeps that offset, and the page comes back far down. Park it
+        // offscreen at its last real size first, so it settles back where it
+        // was and reports that before it is discarded.
+        const real = lastRealRect;
+        if (real && visibility() !== "active") {
+            parkedForDiscard = true;
+            lastSentRect = { x: -100_000, y: 0, width: real.width, height: real.height };
+            rects.set(model.blockId, lastSentRect);
+            await new Promise((done) => setTimeout(done, DISCARD_SETTLE_MS));
+            parkedForDiscard = false;
+            lastSentRect = null;
+            if (!asleep()) {
+                syncPosition();
+                return;
+            }
+        }
         const r = await getApi().browserPanes.discard?.(model.blockId, "discard").catch(() => null);
+        syncPosition();
         switch (afterDiscard(r, asleep())) {
             case "kept":
                 discarded = true;
@@ -332,7 +365,7 @@ export function usePaneRectSync(params: {
                     void sleepNative();
                     return;
                 }
-                if (discarded) {
+                if (discarded && paneCreated()) {
                     discarded = false;
                     diag(`load-discarded`);
                     void getApi().browserPanes.discard?.(model.blockId, "load").catch(() => {});
