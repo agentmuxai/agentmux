@@ -20,7 +20,7 @@
 //! A disagreement is logged once per agent and pair of values.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use super::*;
 
@@ -54,17 +54,14 @@ fn warn_disagreement_once(uid: &str, local: &str, shared: &str) {
 }
 
 /// The slug and former slugs of one shared definition record.
-#[derive(Debug, Clone, Default)]
-pub(in crate::backend::storage) struct SharedNames {
-    pub slug: String,
-    pub former: Vec<String>,
-}
+pub(in crate::backend::storage) use crate::registry::SlugEntry as SharedNames;
 
 /// Every active shared definition's names, by uid. Empty with no shared
 /// store, or when it can't be listed (logged): every slug then reads as the
-/// local one, which is what this channel answered before.
+/// local one, which is what this channel answered before. Shared, not
+/// copied: the store's slug index hands out the same map until a file changes.
 #[derive(Debug, Default)]
-pub(in crate::backend::storage) struct SharedSlugs(HashMap<String, SharedNames>);
+pub(in crate::backend::storage) struct SharedSlugs(Arc<HashMap<String, SharedNames>>);
 
 impl SharedSlugs {
     pub fn slug(&self, uid: &str) -> Option<&str> {
@@ -77,13 +74,6 @@ impl SharedSlugs {
 
     pub fn others<'a>(&'a self, uid: &'a str) -> impl Iterator<Item = &'a SharedNames> + 'a {
         self.0.iter().filter(move |(id, _)| id.as_str() != uid).map(|(_, n)| n)
-    }
-}
-
-fn shared_names(rec: &crate::registry::DefinitionRecord) -> SharedNames {
-    SharedNames {
-        slug: rec.data.slug.clone(),
-        former: rec.data.former_slugs.iter().map(|f| f.slug.clone()).collect(),
     }
 }
 
@@ -119,12 +109,13 @@ pub(super) fn answers_to(row: &AgentNameMatch, name: &str) -> bool {
 }
 
 impl Store {
-    /// The shared definition's names for `uid`, if it has an active record.
-    /// A read failure is logged and reads as no record.
+    /// The shared definition's names for `uid`, if it has an active record:
+    /// one file's stat, and a parse only if it changed. A read failure is
+    /// logged and reads as no record.
     pub(in crate::backend::storage) fn shared_names_of(&self, uid: &str) -> Option<SharedNames> {
         let reg = self.shared_def_registry()?;
-        match reg.get(uid) {
-            Ok(rec) => rec.as_ref().map(shared_names),
+        match reg.slug_of(uid) {
+            Ok(names) => names,
             Err(e) => {
                 tracing::warn!(uid, error = %e, "agent slug: shared definition unreadable; using this channel's slug");
                 None
@@ -137,14 +128,16 @@ impl Store {
         self.shared_names_of(uid).map(|n| n.slug)
     }
 
-    /// Every active shared definition's names, for a slug-to-uid read. Read
-    /// before taking the connection lock: it is file I/O.
+    /// Every active shared definition's names, for a slug-to-uid read, from
+    /// the store's slug index (`DefinitionStore::slug_index`): a stat per
+    /// file, and a parse only of the files that changed. Read before taking
+    /// the connection lock: it is file I/O.
     pub(in crate::backend::storage) fn shared_slugs(&self) -> SharedSlugs {
         let Some(reg) = self.shared_def_registry() else {
             return SharedSlugs::default();
         };
-        match reg.list_active() {
-            Ok(recs) => SharedSlugs(recs.iter().map(|r| (r.data.id.clone(), shared_names(r))).collect()),
+        match reg.slug_index() {
+            Ok(index) => SharedSlugs(index),
             Err(e) => {
                 tracing::warn!(error = %e, "agent slug: shared definitions unreadable; using this channel's slugs");
                 SharedSlugs::default()

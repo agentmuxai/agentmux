@@ -23,6 +23,7 @@ use serde_json::Value;
 use thiserror::Error;
 
 use super::atomic::{rename_atomic, write_atomic};
+use super::def_slug_index::{SlugEntry, SlugIndex};
 use super::def_schema::{validate, DefValidationError, DefinitionRecord, DEF_MAX_SUPPORTED_SCHEMA};
 
 #[derive(Debug, Error)]
@@ -38,6 +39,8 @@ pub enum DefStoreError {
 pub struct DefinitionStore {
     root: PathBuf,
     write_lock: Mutex<()>,
+    /// Every record's slug, parsed once per change ([`Self::slug_index`]).
+    slugs: SlugIndex,
 }
 
 impl DefinitionStore {
@@ -49,6 +52,7 @@ impl DefinitionStore {
         Ok(Self {
             root,
             write_lock: Mutex::new(()),
+            slugs: SlugIndex::default(),
         })
     }
 
@@ -92,6 +96,7 @@ impl DefinitionStore {
             Err(e) => return Err(e.into()),
         };
         write_atomic(&path, &bytes)?;
+        self.slugs.invalidate(&rec.data.id);
         Ok(())
     }
 
@@ -105,6 +110,7 @@ impl DefinitionStore {
             return Ok(());
         }
         rename_atomic(&from, &self.retired_path(id))?;
+        self.slugs.invalidate(id);
         Ok(())
     }
 
@@ -116,6 +122,7 @@ impl DefinitionStore {
             return Ok(());
         }
         rename_atomic(&from, &self.active_path(id))?;
+        self.slugs.invalidate(id);
         Ok(())
     }
 
@@ -131,6 +138,7 @@ impl DefinitionStore {
                 Err(e) => return Err(e.into()),
             }
         }
+        self.slugs.invalidate(id);
         Ok(())
     }
 
@@ -185,9 +193,23 @@ impl DefinitionStore {
         }
         Ok(out)
     }
+
+    /// Every valid active record's slug and former slugs, by id: what
+    /// [`Self::list_active`] would give, without reading a file that hasn't
+    /// changed since the last call (`def_slug_index`). For lookups that run
+    /// per message.
+    pub fn slug_index(&self) -> Result<std::sync::Arc<std::collections::HashMap<String, SlugEntry>>, DefStoreError> {
+        Ok(self.slugs.all(&self.root)?)
+    }
+
+    /// One active record's slug and former slugs, from the same cache;
+    /// stats only that record's file.
+    pub fn slug_of(&self, id: &str) -> Result<Option<SlugEntry>, DefStoreError> {
+        Ok(self.slugs.one(&self.root, id)?)
+    }
 }
 
-fn read_and_validate(path: &Path, stem: &str) -> Result<DefinitionRecord, DefStoreError> {
+pub(super) fn read_and_validate(path: &Path, stem: &str) -> Result<DefinitionRecord, DefStoreError> {
     let bytes = std::fs::read(path)?;
     let rec: DefinitionRecord = serde_json::from_slice(&bytes)?;
     validate(stem, &rec)?;
@@ -435,6 +457,110 @@ mod tests {
         let got = s.get("aaa").unwrap().unwrap();
         assert_eq!(got.data.former_slugs, vec![former("a", 1), former("b", 2), former("z", 9)]);
         assert_eq!(got.data.slug, "c");
+    }
+
+    /// Backdate a record's file, as an index built a while after the last
+    /// write sees it (out of the racy window).
+    fn age(s: &DefinitionStore, id: &str, secs: u64) {
+        let file = std::fs::File::options().write(true).open(s.root().join(format!("{id}.json"))).unwrap();
+        file.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(secs)).unwrap();
+    }
+
+    fn with_slug(id: &str, slug: &str) -> DefinitionRecord {
+        let mut r = rec(id, "Demo");
+        r.data.slug = slug.to_string();
+        r
+    }
+
+    /// Once warm, a lookup parses nothing: not for the whole index, and not
+    /// for one record.
+    #[test]
+    fn a_warm_slug_index_parses_no_file() {
+        let (_t, s) = store();
+        for i in 0..5 {
+            let id = format!("id-{i}");
+            s.upsert(&with_slug(&id, &format!("slug-{i}"))).unwrap();
+            age(&s, &id, 60);
+        }
+        let first = s.slug_index().unwrap();
+        assert_eq!(first.len(), 5);
+        assert_eq!(s.slugs.parses(), 5);
+        for _ in 0..20 {
+            assert_eq!(s.slug_index().unwrap().get("id-3").map(|e| e.slug.as_str()), Some("slug-3"));
+            assert_eq!(s.slug_of("id-1").unwrap().map(|e| e.slug), Some("slug-1".to_string()));
+        }
+        assert_eq!(s.slugs.parses(), 5, "nothing reparsed");
+        assert!(std::sync::Arc::ptr_eq(&first, &s.slug_index().unwrap()), "the same map is handed out");
+    }
+
+    /// A write through this store invalidates its record: the next lookup
+    /// reparses that file only. A retired record leaves the index.
+    #[test]
+    fn an_in_process_write_invalidates_the_slug_index() {
+        let (_t, s) = store();
+        for id in ["aaa", "bbb"] {
+            s.upsert(&with_slug(id, id)).unwrap();
+            age(&s, id, 60);
+        }
+        s.slug_index().unwrap();
+        let warm = s.slugs.parses();
+
+        // A same-size edit, then the old timestamp put back: the file's
+        // stamp is unchanged, so only the invalidation can trigger a reparse.
+        let path = s.root().join("aaa.json");
+        let before = std::fs::metadata(&path).unwrap();
+        let mut edited = with_slug("aaa", "aaa");
+        edited.data.name = "Dema".to_string();
+        s.upsert(&edited).unwrap();
+        std::fs::File::options().write(true).open(&path).unwrap().set_modified(before.modified().unwrap()).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), before.len());
+        s.slug_index().unwrap();
+        assert_eq!(s.slugs.parses(), warm + 1, "only the written record is reparsed");
+
+        let mut renamed = with_slug("aaa", "aaa");
+        renamed.data.former_slugs = vec![former("aaa-old", 1)];
+        s.upsert(&renamed).unwrap();
+        s.retire("bbb").unwrap();
+        let index = s.slug_index().unwrap();
+        assert_eq!(index["aaa"].former, vec!["aaa-old".to_string()]);
+        assert!(!index.contains_key("bbb"));
+    }
+
+    /// Another process's write is picked up from the file's stamp: a new
+    /// file, a changed one, and a removed one. A same-size rewrite within
+    /// the racy window of the last parse is caught too.
+    #[test]
+    fn an_out_of_process_change_reaches_the_slug_index() {
+        let (_t, s) = store();
+        s.upsert(&with_slug("aaa", "loap-loap-2")).unwrap();
+        age(&s, "aaa", 60);
+        assert_eq!(s.slug_index().unwrap()["aaa"].slug, "loap-loap-2");
+
+        // Another instance renames it and adds an agent, writing the files directly.
+        let mut moved = with_slug("aaa", "loap-2");
+        moved.data.former_slugs = vec![former("loap-loap-2", 1)];
+        std::fs::write(s.root().join("aaa.json"), serde_json::to_vec_pretty(&moved).unwrap()).unwrap();
+        age(&s, "aaa", 30);
+        std::fs::write(s.root().join("ccc.json"), serde_json::to_vec_pretty(&with_slug("ccc", "c")).unwrap()).unwrap();
+        let index = s.slug_index().unwrap();
+        assert_eq!(index["aaa"].slug, "loap-2");
+        assert_eq!(index["aaa"].former, vec!["loap-loap-2".to_string()]);
+        assert_eq!(s.slug_of("ccc").unwrap().map(|e| e.slug), Some("c".to_string()));
+
+        std::fs::remove_file(s.root().join("ccc.json")).unwrap();
+        assert!(!s.slug_index().unwrap().contains_key("ccc"));
+        assert_eq!(s.slug_of("ccc").unwrap(), None);
+
+        // Racy: parsed just after a write, then rewritten with the same size
+        // and the same timestamp. The stamp alone can't tell; the index
+        // doesn't trust it yet.
+        let path = s.root().join("ddd.json");
+        std::fs::write(&path, serde_json::to_vec(&with_slug("ddd", "d-one")).unwrap()).unwrap();
+        let stamp = std::fs::metadata(&path).unwrap().modified().unwrap();
+        assert_eq!(s.slug_of("ddd").unwrap().unwrap().slug, "d-one");
+        std::fs::write(&path, serde_json::to_vec(&with_slug("ddd", "d-two")).unwrap()).unwrap();
+        std::fs::File::options().write(true).open(&path).unwrap().set_modified(stamp).unwrap();
+        assert_eq!(s.slug_of("ddd").unwrap().unwrap().slug, "d-two");
     }
 
     #[test]
