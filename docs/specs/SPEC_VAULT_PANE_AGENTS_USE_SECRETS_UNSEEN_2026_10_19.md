@@ -97,6 +97,8 @@ A new view, `vault`, with a manifest in the block registry, a `lock` icon, opene
 | **Kept by AgentMux** | read-only list of what `secret_store` already holds (provider account keys, MuxBus, browser Basic-Auth logins) | label, where it is managed; a link to that pane. No values (§13 question 5) |
 | **Activity** | — | every use: entry, agent, where (origin or command), when, allowed or denied |
 
+(The browser Basic-Auth logins are the sign-ins a browser pane saves when a site asks for a user name and password. Their passwords sit in the keychain under a hash of the site, which can be neither listed nor turned back into a site, so the list comes from a row `credential.Save` writes beside the keychain item (`db_browser_signins`: site, realm, masked user name; no secret) and `credential.Delete` removes. Sign-ins saved before that row existed are not listed; the pane's footnote says so. A browser profile's cookies are not in the Vault.)
+
 Each entry also shows its **grants** (§6.4, §7.3) with a revoke button, and its last use.
 
 ### 5.3 Locked, revealed, captured
@@ -241,6 +243,13 @@ The first use of an entry by an agent asks in AgentMux's own prompt, in every wi
 ### 7.4 Where commands can run
 
 Host commands first. `connection` to WSL or SSH is refused with a Vault secret until a later phase decides how a value crosses to that host (SSH `SendEnv` needs the server's `AcceptEnv`; writing it to a remote file is worse).
+
+**Proposal for the operator (2026-10-22, #123), not built.** What each route costs, from the code:
+
+- **WSL: yes, through `WSLENV`.** srv already starts a WSL job as `wsl.exe` and lists the caller's own variables in `WSLENV` so they cross (`http_shell.rs`, `backend/remote/wsl.rs`). The injected names are added to the environment after that list is made, which is the only reason they don't cross today. The change is to list them too, lift the refusal for WSL, and have the approval prompt name the distro beside the folder. The value then lives in the environment of the Windows `wsl.exe` and of the Linux process, as a local command's does; it is never put in an argument (so not in `ps`) or a file. Scrubbing, grants and Activity are unchanged. To check in the build: that a value of several lines (a private key) crosses intact. Small.
+- **SSH: not through `SendEnv`; through stdin, after a per-host approval.** `SendEnv` works only if the server's `AcceptEnv` lists the name, which by default it does for `LANG` and `LC_*` alone, so it would fail on almost every host. A value on the command line (`NAME=value cmd`) would sit in the remote `ps` output and shell history; a remote file is worse. What can work: the ssh command runs a fixed remote prelude that reads one base64 line per secret from its standard input, exports it, and `exec`s the approved command, so no value is in any argument on either machine. It needs a POSIX shell and `base64` there, and the command's own stdin is the pipe (agents' `run` isn't interactive). The new risk is **where** a secret goes: an agent could send a card number to any host the person's SSH config reaches. So the grant gains a host (`command:<agent>:<part>@<host>`), the first use for each host asks with the host named, and "Always" is for that host. What can't be removed: the remote user's other processes, and root there, can read the process environment; the person is trusting the host, as they do by running anything on it. Medium.
+- **Recommendation:** build WSL now. Build SSH only if the operator wants agents running credentialed commands on remote hosts, with the per-host approval above; until then SSH stays refused and says why.
+
 
 ## 8. Import and export
 

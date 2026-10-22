@@ -75,8 +75,8 @@ pub(super) async fn handle_credential_service(state: &AppState, call: &WebCallTy
     match call.method.as_str() {
         "ResolveIdentity" => handle_resolve_identity(state, call),
         "Lookup" => handle_lookup(call),
-        "Save" => handle_save(call),
-        "Delete" => handle_delete(call),
+        "Save" => handle_save(state, call),
+        "Delete" => handle_delete(state, call),
         "Fill" => handle_fill(call),
         _ => WebReturnType::error(format!("unknown credential method: {}", call.method)),
     }
@@ -235,7 +235,7 @@ struct SaveArgs {
     password: String,
 }
 
-fn handle_save(call: &WebCallType) -> WebReturnType {
+fn handle_save(state: &AppState, call: &WebCallType) -> WebReturnType {
     let args: SaveArgs = match get_arg(&call.args, 0) {
         Ok(a) => a,
         Err(e) => return WebReturnType::error(format!("credential.Save: {e}")),
@@ -248,7 +248,14 @@ fn handle_save(call: &WebCallType) -> WebReturnType {
         &args.username,
         &args.password,
     ) {
-        Ok(()) => WebReturnType::success_empty(),
+        Ok(()) => {
+            // For the Vault to list: the site and a masked user name, never the password.
+            let masked = mask_username(&args.username);
+            if let Err(e) = state.identity_store.browser_signin_note(&args.identity_id, &args.origin, &args.realm, args.is_proxy, &masked, agentmux_common::time::now_ms()) {
+                tracing::warn!("[credential] couldn't note the saved sign-in for the Vault: {e}");
+            }
+            WebReturnType::success_empty()
+        }
         Err(e) => {
             tracing::warn!("[credential] Save failed: {e}");
             WebReturnType::error("save failed")
@@ -256,13 +263,18 @@ fn handle_save(call: &WebCallType) -> WebReturnType {
     }
 }
 
-fn handle_delete(call: &WebCallType) -> WebReturnType {
+fn handle_delete(state: &AppState, call: &WebCallType) -> WebReturnType {
     let args: ProtectionSpaceArgs = match get_arg(&call.args, 0) {
         Ok(a) => a,
         Err(e) => return WebReturnType::error(format!("credential.Delete: {e}")),
     };
     match browser_credential_store::delete(&args.identity_id, &args.origin, &args.realm, args.is_proxy) {
-        Ok(()) => WebReturnType::success_empty(),
+        Ok(()) => {
+            if let Err(e) = state.identity_store.browser_signin_forget(&args.identity_id, &args.origin, &args.realm, args.is_proxy) {
+                tracing::warn!("[credential] couldn't forget the deleted sign-in for the Vault: {e}");
+            }
+            WebReturnType::success_empty()
+        }
         Err(e) => {
             tracing::warn!("[credential] Delete failed: {e}");
             WebReturnType::error("delete failed")

@@ -16,11 +16,12 @@ vi.mock("@/app/store/mps", () => ({ onMuxEvent: () => () => {} }));
 
 let entries: VaultEntryInfo[] = [];
 let requests: VaultRequest[] = [];
+let keptRows: Array<{ label: string; what: string; managed_in: string }> = [];
 const vault = vi.fn(async (op: string, _args?: Record<string, unknown>): Promise<unknown> => {
     if (op === "list") return { entries, problem: null, requests, backend: "keychain" };
     if (op === "create") return { id: "new-id" };
     if (op === "activity") return { activity: [] };
-    if (op === "kept") return { kept: [] };
+    if (op === "kept") return { kept: keptRows };
     return {};
 });
 vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ approvals: { vault } }) }));
@@ -227,6 +228,21 @@ describe("the Vault pane", () => {
         fireEvent.click(within(personal).getByRole("button", { name: /Add/ }));
         const dialog = await screen.findByRole("dialog");
         expect(within(dialog).queryByText(/macOS asks whether AgentMux may use the keychain/)).toBeNull();
+    });
+
+    it("lists the sign-ins browser panes saved, by site and masked user name, and says which ones it can't list", async () => {
+        keptRows = [{ label: "https://intranet.example.com (Admin)", what: "sign-in for ab*** saved by a browser pane", managed_in: "browser" }];
+        try {
+            renderVault();
+            await screen.findByText("Alex");
+            fireEvent.click(screen.getByRole("tab", { name: "Kept by AgentMux" }));
+            const row = (await screen.findByText("https://intranet.example.com (Admin)")).closest("tr") as HTMLElement;
+            expect(row.textContent).toContain("sign-in for ab*** saved by a browser pane");
+            expect(row.textContent).toContain("The browser pane that asked for it");
+            expect(screen.getByText(/Only sign-ins a browser pane saves from now on are listed/)).toBeInTheDocument();
+        } finally {
+            keptRows = [];
+        }
     });
 
     it("dismisses an agent's request through the host", async () => {

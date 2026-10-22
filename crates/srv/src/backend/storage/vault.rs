@@ -45,6 +45,19 @@ pub(super) const VAULT_SCHEMA: &str = "
         granted_at INTEGER NOT NULL,
         PRIMARY KEY (entry_id, origin)
     );
+    -- The sign-ins a browser pane saved for a site that asked for a user name and password (HTTP
+    -- Basic Auth). The password is in the keychain under a hash, which can't be listed or turned
+    -- back into a site; this row is what the Vault lists. It holds no secret: the site, the realm
+    -- the site named, and the user name masked as the approval window shows it.
+    CREATE TABLE IF NOT EXISTS db_browser_signins (
+        identity_id TEXT NOT NULL,
+        origin      TEXT NOT NULL,
+        realm       TEXT NOT NULL,
+        is_proxy    INTEGER NOT NULL,
+        username    TEXT NOT NULL DEFAULT '',
+        saved_at    INTEGER NOT NULL,
+        PRIMARY KEY (identity_id, origin, realm, is_proxy)
+    );
     -- Which AgentMux instances show a Vault pane now, until when: agents'
     -- whole-window captures of AgentMux are refused while any does.
     CREATE TABLE IF NOT EXISTS db_vault_on_screen (
@@ -126,6 +139,31 @@ impl Store {
         let n = tx.execute("DELETE FROM db_vault_entries WHERE id = ?1", params![id])?;
         tx.commit()?;
         Ok(n > 0)
+    }
+
+    /// Notes that a browser pane saved a sign-in, for the Vault to list (never its password).
+    pub fn browser_signin_note(&self, identity_id: &str, origin: &str, realm: &str, is_proxy: bool, masked_username: &str, at_ms: i64) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO db_browser_signins (identity_id, origin, realm, is_proxy, username, saved_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![identity_id, origin, realm, is_proxy, masked_username, at_ms],
+        )?;
+        Ok(())
+    }
+
+    /// Forgets the note of a sign-in that was deleted.
+    pub fn browser_signin_forget(&self, identity_id: &str, origin: &str, realm: &str, is_proxy: bool) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM db_browser_signins WHERE identity_id = ?1 AND origin = ?2 AND realm = ?3 AND is_proxy = ?4", params![identity_id, origin, realm, is_proxy])?;
+        Ok(())
+    }
+
+    /// The sign-ins browser panes saved, newest first: `(origin, realm, is_proxy, masked username)`.
+    pub fn browser_signins(&self) -> Result<Vec<(String, String, bool, String)>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT origin, realm, is_proxy, username FROM db_browser_signins ORDER BY saved_at DESC, origin, realm")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? != 0, r.get(3)?)))?.collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
 
     pub fn vault_grant_add(&self, entry_id: &str, origin: &str, at_ms: i64, entry_created_at: i64) -> Result<(), StoreError> {
@@ -303,6 +341,27 @@ mod tests {
             updated_at: 1,
             last_used_at: 0,
         }
+    }
+
+    #[test]
+    fn a_saved_browser_sign_in_is_listed_without_a_password_and_forgotten_when_deleted() {
+        let s = store();
+        s.browser_signin_note("id-a", "https://intranet.example.com", "Admin", false, "ab***", 10).unwrap();
+        s.browser_signin_note("id-a", "https://proxy.example.com:8080", "", true, "*", 20).unwrap();
+        // The same site saved again replaces its row, not adds one.
+        s.browser_signin_note("id-a", "https://intranet.example.com", "Admin", false, "cd***", 30).unwrap();
+        assert_eq!(
+            s.browser_signins().unwrap(),
+            vec![("https://intranet.example.com".to_string(), "Admin".to_string(), false, "cd***".to_string()), ("https://proxy.example.com:8080".to_string(), String::new(), true, "*".to_string())],
+            "newest first"
+        );
+        // Another identity's sign-in for the same site is its own row, and deleting one leaves the other.
+        s.browser_signin_note("id-b", "https://intranet.example.com", "Admin", false, "ef***", 40).unwrap();
+        s.browser_signin_forget("id-a", "https://intranet.example.com", "Admin", false).unwrap();
+        let left: Vec<String> = s.browser_signins().unwrap().into_iter().map(|r| r.3).collect();
+        assert_eq!(left, vec!["ef***".to_string(), "*".to_string()]);
+        // Forgetting one that isn't there is fine.
+        s.browser_signin_forget("id-z", "https://nowhere.example", "", false).unwrap();
     }
 
     #[test]
