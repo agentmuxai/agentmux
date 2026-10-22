@@ -217,6 +217,8 @@ events! {
     AgentInputHistoryChanged: "agent:inputhistory" => crate::backend::rpc_types::InputHistoryChangedEvent,
     /// Agents' upgrade requests waiting for the user (`upgrade_request`).
     AppUpgradeRequests: "app:upgraderequests" => crate::backend::upgrade_request::UpgradeRequestsEvent,
+    /// Agents' requests to drive a native app, and the grants in force (`desktop_gate`).
+    AppDesktop: "app:desktop" => crate::backend::desktop_gate::DesktopEvent,
     /// What srv knows about newer releases changed (`update_check`).
     AppUpdateStatusChanged: crate::backend::update_check::EVENT_APP_UPDATE_STATUS => crate::backend::update_check::AppUpdateStatus,
     /// Tell a window's renderer to reveal a block (`notify::router`).

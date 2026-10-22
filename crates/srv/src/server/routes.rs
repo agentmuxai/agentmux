@@ -461,6 +461,10 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // Cancel), and their answer to an agent's upgrade request, relayed by the host.
         .route("/api/v1/host/app_update", post(app_api::app_update::handle_host_app_update))
         .route("/api/v1/host/upgrade_request", post(app_api::app_update::handle_host_upgrade_request))
+        // The user's answer to an agent's request to drive a native app, and
+        // their Stop (SPEC_DESKTOP_DRIVING_2026_10_20.md §5.4, §5.6).
+        .route("/api/v1/host/desktop_request", post(app_api::desktop::handle_host_request))
+        .route("/api/v1/host/desktop_stop", post(app_api::desktop::handle_host_stop))
         .route("/api/v1/host/browser_navigation", post(crate::server::browser_allowlist::handle_host_browser_navigation))
         .route("/api/v1/host/browser_dialog", post(crate::server::browser_dialog::handle_host_browser_dialog))
         .route("/api/v1/ui/browser/dialogs", post(crate::server::browser_dialog::handle_ui_browser_dialogs))
@@ -487,6 +491,12 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // and asking to upgrade (SPEC_UPGRADE_FOR_USERS_AND_AGENTS §5.1).
         .route("/api/v1/app/update-status", get(app_api::app_update::handle_update_status))
         .route("/api/v1/agent/self/upgrade", post(app_api::app_update::handle_request_upgrade))
+        // The Desktop tool: the gate in front of looking at and controlling a
+        // native app (SPEC_DESKTOP_DRIVING_2026_10_20.md §6).
+        .route("/api/v1/agent/desktop/policy", post(app_api::desktop::handle_policy))
+        .route("/api/v1/agent/desktop/authorize", post(app_api::desktop::handle_authorize))
+        .route("/api/v1/agent/desktop/record", post(app_api::desktop::handle_record))
+        .route("/api/v1/agent/desktop/release", post(app_api::desktop::handle_release))
         // `agentmux-mcp doctor`, from the agent's shell: its own pane by token.
         .route("/api/v1/agent/self/mcp-health", post(app_api::mcp_health::handle_mcp_health))
         .route("/api/v1/agent/self/mcp-heal", post(app_api::mcp_health::handle_mcp_heal))

@@ -515,6 +515,8 @@ pub const COMMAND_APP_UPDATE_STATUS: &str = "app.update-status";
 pub const COMMAND_APP_UPDATE_CHECK: &str = "app.update-check";
 // Agents' upgrade requests waiting for the user (backend::upgrade_request).
 pub const COMMAND_APP_UPGRADE_REQUESTS: &str = "app.upgrade-requests";
+// Agents' requests to drive a native app, and the grants in force (backend::desktop_gate).
+pub const COMMAND_APP_DESKTOP: &str = "app.desktop";
 
 // The cloud presence publisher (muxbus::wan_presence): its state, and a try now.
 pub const COMMAND_PRESENCE_STATUS: &str = "presence.status";

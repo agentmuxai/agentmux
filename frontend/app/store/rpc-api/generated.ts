@@ -232,6 +232,7 @@ import type { DeleteDroneReq } from "@/types/rpc/DeleteDroneReq";
 import type { DeleteDroneResp } from "@/types/rpc/DeleteDroneResp";
 import type { DeleteEditorFileReq } from "@/types/rpc/DeleteEditorFileReq";
 import type { DeleteIdentityAccountResult } from "@/types/rpc/DeleteIdentityAccountResult";
+import type { DesktopEvent } from "@/types/rpc/DesktopEvent";
 import type { DroneDefinition } from "@/types/rpc/DroneDefinition";
 import type { DroneRun } from "@/types/rpc/DroneRun";
 import type { EditorRootsReq } from "@/types/rpc/EditorRootsReq";
@@ -2458,6 +2459,10 @@ export const GeneratedApi = {
   // command "app.upgrade-requests"
   AppUpgradeRequestsCommand(client: RpcClient, opts?: RpcOpts): Promise<UpgradeRequestsEvent> {
     return client.rpcCall("app.upgrade-requests", {}, opts);
+  },
+  // command "app.desktop"
+  AppDesktopCommand(client: RpcClient, opts?: RpcOpts): Promise<DesktopEvent> {
+    return client.rpcCall("app.desktop", {}, opts);
   },
   // command "viewer.agent-hidden"
   ViewerAgentHiddenCommand(

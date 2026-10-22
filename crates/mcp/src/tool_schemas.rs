@@ -354,6 +354,31 @@ pub(crate) const APP_TOOL: &str = r#"{
   }
 }"#;
 
+/// Desktop: look at and control a native app, with the user's consent for each
+/// app (docs/specs/SPEC_DESKTOP_DRIVING_2026_10_20.md). Off until the user
+/// turns it on; the description stays short because every agent is shown it.
+pub(crate) const DESKTOP_TOOL: &str = r#"{
+  "name": "Desktop",
+  "description": "Look at and control a native desktop app (Windows only for now). The last resort: use a connector, the app's own API, Browser, Terminal or UI first. Off unless the user turned it on in Settings; the user is asked before you may use each app, can Stop you at any time, and every action is logged. Web browsers, password managers and AgentMux itself are refused. Every call takes an action. apps: the windows you could control, with their ids. look: a screenshot of one window (saved to a path; Read it). click, scroll: x and y are pixels of your last look at that window; it is refused if the window moved since, so look again. type: text into the focused control (never passwords: ask the user). key: a chord such as enter or ctrl+s (no Windows key). wait: pause up to 5 seconds. release: give your access back.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "action": { "type": "string", "enum": ["apps", "look", "click", "scroll", "type", "key", "wait", "release"], "description": "What to do" },
+      "window": { "type": "integer", "description": "The window's id, from apps" },
+      "x":      { "type": "integer", "description": "click, scroll: pixels from the left of your last look at the window" },
+      "y":      { "type": "integer", "description": "click, scroll: pixels from the top of your last look at the window" },
+      "button": { "type": "string", "enum": ["left", "right", "middle"], "description": "click: default left" },
+      "count":  { "type": "integer", "description": "click: 1 to 3 (2 is a double click)" },
+      "dx":     { "type": "integer", "description": "scroll: notches right (negative left)" },
+      "dy":     { "type": "integer", "description": "scroll: notches up (negative down)" },
+      "text":   { "type": "string", "description": "type: up to 500 characters; a newline is Enter" },
+      "keys":   { "type": "string", "description": "key: one key or chord, e.g. enter, esc, ctrl+s, alt+left, f5" },
+      "ms":     { "type": "integer", "description": "wait: milliseconds, at most 5000" }
+    },
+    "required": ["action"]
+  }
+}"#;
+
 /// Identity: an agent's presets and linked provider accounts.
 pub(crate) const IDENTITY_TOOL: &str = r#"{
   "name": "Identity",
@@ -464,6 +489,7 @@ pub(crate) const ADVERTISED: &[&str] = &[
     AGENTS_TOOL,
     MESSAGE_TOOL,
     APP_TOOL,
+    DESKTOP_TOOL,
 ];
 
 /// [`ADVERTISED`] parsed for the `tools/list` answer.
