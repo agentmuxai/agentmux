@@ -122,6 +122,34 @@ enforced in `DefinitionStore::upsert` for every writer: a non-empty K2 slug is n
   A relay-side alias, mapping the old name to the new one so nothing needs holding, would be better; it's tracked as
   a separate cloud-side change.
 
+As built:
+- **Storage.** `db_agent_former_slugs(agent_uid, slug, retired_at)` is created on every open (additive, no version
+  bump) and deleted with the agent's row, so a deleted agent's former slug is free again, as its slug is. Startup and a
+  cross-channel backfill copy the shared `former_slugs` into it; a mirror write carries it back, where `upsert` only
+  appends. Readers consult both copies (`storage/agents/former_slugs.rs`).
+- **Resolution.** One rule, `Store::former_slug_owner`: the name is a former slug of exactly one agent and nobody's
+  current slug. The reactive registry asks it only when no block is bound under the name, and delivers by UID
+  (`reactive/former_slug.rs`, logged once per name per hour). `agents_matching_name` falls back to it when nothing
+  else matches, which covers the resolve endpoint (Tasks, Schedule) and the hold; `agent_defs_for_target` tries it
+  after the route name. The miss path looks up the same-host and cross-channel registries under the current slug
+  when the former one finds nothing, but forwards the request unchanged, since its signatures cover the target; the
+  receiving instance resolves the former slug itself. An entry found that way is never evicted on a failed forward.
+- **Identity.** A jekt whose sender claims a former slug is counted unverified (`sig_verified = false`, so it is
+  forced sensitive with `ESCALATE=required`), signed or not, on every path that runs `verify_jekt_signature`
+  (whatever its tier). Nothing else changed: the ownership checks and `self/keys` already compare the current slug
+  only.
+- **LAN.** `GET /agentmux/reactive/agent?id=<former slug>` answers with `current_name` and the key filed under the
+  current name, only when that name is the agent's alone; never a key left under the former slug. A peer that reads
+  `current_name` caches the key under the current name and counts a signature claiming the former slug as failed.
+- **Reservation.** `resolve_slug_collision` also counts this channel's copy of the former slugs (PR 1 added the shared
+  ones); a fork number whose name or fork slug is a former slug is skipped; `agent_def_find_or_insert` matches a former
+  slug to its agent.
+- **MuxBus.** The name directory holds each former slug, ranked below slugs and route names, while its `retired_at`
+  is under 30 days old; an unknown time (0) is not held. After that, the next directory leaves it out and the lease
+  tick drops the subscription as orphaned.
+- **Not covered:** a WAN jekt delivered over the relay's WebSocket (`sync_agent_reactive`) doesn't run that check.
+  Its signature is checked against the key the sending install published under the name, which Phase 2 retires (S4).
+
 ### Phase 2, migrate: an explicit, journaled operation (one PR)
 
 **Shape.** It's an operation the operator starts, not a boot-time migration, because it needs the affected agents

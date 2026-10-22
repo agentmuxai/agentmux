@@ -168,3 +168,18 @@ fn every_former_slug_is_listed_with_its_retirement() {
         ]
     );
 }
+
+/// A new agent never takes a former slug, from this channel's copy too (the
+/// shared copy is `canonical_slug`'s `a_new_slug_avoids_shared_current_and_former_slugs`).
+#[test]
+fn a_new_agent_never_takes_a_former_slug_this_channel_holds() {
+    let store = Store::open_in_memory().unwrap();
+    let mut def = test_agent_def("uid-zed", "Zed", "claude", "host", 1, "");
+    def.slug = "zed-2".into();
+    store.agent_def_insert(&mut def).unwrap();
+    store.agent_former_slugs_record("uid-zed", &[FormerSlug { slug: "zed-zed-2".into(), retired_at: NOW }]).unwrap();
+    let mut fresh = test_agent_def("uid-fresh", "Fresh", "claude", "host", 2, "");
+    fresh.slug = "Zed-Zed-2".into();
+    store.agent_def_insert(&mut fresh).unwrap();
+    assert_eq!(fresh.slug, "Zed-Zed-2-2");
+}
