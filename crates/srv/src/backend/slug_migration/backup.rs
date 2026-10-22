@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
-use super::home::open_ro;
+use super::home::{open_ro, owner_only};
 use super::journal::{BackupEntry, Fingerprint};
 
 /// What to back up: databases and plain files, by original path.
@@ -27,12 +27,15 @@ pub struct BackupList {
 pub fn take(dir: &Path, list: &BackupList) -> Result<Vec<BackupEntry>, String> {
     std::fs::create_dir_all(dir.join("db")).map_err(|e| format!("{}: {e}", dir.display()))?;
     std::fs::create_dir_all(dir.join("files")).map_err(|e| format!("{}: {e}", dir.display()))?;
-    restrict(dir);
+    for d in [dir.to_path_buf(), dir.join("db"), dir.join("files")] {
+        owner_only(&d)?;
+    }
     let mut out = Vec::new();
     for (i, db) in list.databases.iter().enumerate() {
         let name = db.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let copy = format!("db/{:04}-{name}", i + 1);
         crate::backend::storage::db_copy::copy_database(db, &dir.join(&copy))?;
+        owner_only(&dir.join(&copy))?;
         out.push(BackupEntry { original: db.display().to_string(), sha256: file_sha256(&dir.join(&copy))?, copy, database: true });
     }
     for (i, file) in list.files.iter().enumerate() {
@@ -144,14 +147,3 @@ pub fn fingerprint(path: &Path, database: bool) -> Result<Fingerprint, String> {
     let digest = if path.exists() { file_sha256(path)? } else { String::new() };
     Ok(Fingerprint { path: path.display().to_string(), digest, mtime_ms })
 }
-
-/// The backup folder holds copies of key tables and credentials: owner only.
-#[cfg(unix)]
-fn restrict(dir: &Path) {
-    use std::os::unix::fs::PermissionsExt;
-    let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
-}
-
-// Windows: the folder inherits the per-user ACL of the profile it lives in.
-#[cfg(not(unix))]
-fn restrict(_dir: &Path) {}

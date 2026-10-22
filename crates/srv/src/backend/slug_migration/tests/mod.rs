@@ -9,6 +9,7 @@ mod crash_tests;
 mod fixture;
 mod home_tests;
 mod journal_tests;
+mod permission_tests;
 mod plan_tests;
 mod precondition_tests;
 mod steps_tests;

@@ -197,7 +197,7 @@ fn temp_path(path: &Path) -> PathBuf {
 
 /// `fs::rename`, retried briefly when Windows refuses to replace a file
 /// another process holds open; never falls back to a non-atomic write.
-fn rename_with_retry(from: &Path, to: &Path) -> io::Result<()> {
+pub(crate) fn rename_with_retry(from: &Path, to: &Path) -> io::Result<()> {
     let mut tries = 0;
     loop {
         match std::fs::rename(from, to) {

@@ -238,19 +238,60 @@ pub fn in_tx<T>(conn: &Connection, f: impl FnOnce(&Connection) -> Result<T, Stri
     }
 }
 
-/// Write `bytes` to `path` through a temporary file beside it and a rename.
+/// Write `bytes` to `path` through a temporary file beside it and a rename,
+/// never wider than the file it replaces. On Unix the temporary file is
+/// created owner-only (0600) from the start, so the bytes are never readable
+/// by others for a moment. A file being replaced then keeps its own mode,
+/// except a `.mcp.json`, which holds signing keys and is always 0600, as
+/// AgentMux writes it (`Workdir::write(.., owner_only = true)`); a new file
+/// stays 0600. On Windows the file takes its folder's ACL, as every write
+/// through `Workdir` does: the profile's per-user ACL.
 pub fn write_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    use std::io::Write as _;
     let dir = path.parent().ok_or("no parent directory")?;
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let tmp = path.with_extension(format!("{}.slug-migration", path.extension().and_then(|e| e.to_str()).unwrap_or("tmp")));
-    std::fs::write(&tmp, bytes).map_err(|e| format!("{}: {e}", tmp.display()))?;
-    if let Ok(f) = std::fs::File::open(&tmp) {
-        let _ = f.sync_all();
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+    let tmp = path.with_file_name(format!(".{name}.{}.slug-migration", uuid::Uuid::new_v4()));
+    let err = |e: std::io::Error| format!("{}: {e}", tmp.display());
+    #[cfg(unix)]
+    let keep = (name != ".mcp.json").then(|| std::fs::metadata(path).ok().map(|m| m.permissions())).flatten();
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        opts.mode(0o600);
     }
-    std::fs::rename(&tmp, path).map_err(|e| {
+    let written = (|| {
+        let mut f = opts.open(&tmp).map_err(err)?;
+        #[cfg(unix)]
+        if let Some(perms) = keep {
+            f.set_permissions(perms).map_err(err)?;
+        }
+        f.write_all(bytes).map_err(err)?;
+        f.sync_all().map_err(err)
+    })();
+    let result = written.and_then(|()| {
+        crate::backend::workdir_fs::rename_with_retry(&tmp, path).map_err(|e| format!("{}: {e}", path.display()))
+    });
+    if result.is_err() {
         let _ = std::fs::remove_file(&tmp);
-        format!("{}: {e}", path.display())
-    })
+    }
+    result
+}
+
+/// Make `path` owner-only on Unix: 0700 for a folder, 0600 for a file. On
+/// Windows it keeps the per-user ACL of the profile it lives in.
+pub fn owner_only(path: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = if path.is_dir() { 0o700 } else { 0o600 };
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).map_err(|e| format!("{}: {e}", path.display()))?;
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
 }
 
 /// A name as every key table folds it.

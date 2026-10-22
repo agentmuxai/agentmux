@@ -276,8 +276,14 @@ As built (`crates/srv/src/backend/slug_migration/`):
   - every database, copied through `VACUUM INTO` (`db_copy::copy_database`);
   - the definitions, workspace `.mcp.json` files and stale registrations, as files.
 
-  Each copy's SHA-256 is in the journal header. S8's moves need no copy. The folder is owner-only on Unix. It holds
-  keys and credentials, and the report says so.
+  Each copy's SHA-256 is in the journal header. S8's moves need no copy. On Unix the folder and its subfolders are
+  0700, and every file in it is 0600: each database copy is set so as soon as `VACUUM INTO` has written it, and the
+  journal is created 0600. The backup holds keys and credentials, and the report says so. The journal holds none:
+  a key row's before-image names the row, and the row comes back from the backup's database copy.
+- **File writes never widen a file.** Every file the migration writes goes through a temporary file created 0600
+  on Unix from the start. A file it replaces keeps its own mode, except a `.mcp.json`, which holds signing keys
+  and is always 0600, as AgentMux writes it. A new file stays 0600. On Windows a file takes its folder's ACL, as
+  every `Workdir` write does. Databases are only ever opened, never re-created, so they keep their modes.
 - **Journal.** `journal.jsonl` records, in order:
   - a header: the plan, the backups, and the run's `retired_at` in epoch ms;
   - per step, an intent with its before-image, then a result;

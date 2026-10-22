@@ -138,7 +138,15 @@ impl Journal {
         let err = |e: std::io::Error| format!("{}: {e}", self.path.display());
         let mut line = serde_json::to_string(&record).map_err(|e| e.to_string())?;
         line.push('\n');
-        let mut f = std::fs::OpenOptions::new().create(true).read(true).append(true).open(&self.path).map_err(err)?;
+        let mut opts = std::fs::OpenOptions::new();
+        opts.create(true).read(true).append(true);
+        // Owner-only from its creation, like the backup beside it (Unix).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            opts.mode(0o600);
+        }
+        let mut f = opts.open(&self.path).map_err(err)?;
         let len = f.metadata().map_err(err)?.len();
         if len > 0 {
             let mut last = [0u8; 1];
