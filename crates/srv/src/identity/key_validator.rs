@@ -67,11 +67,16 @@ pub(crate) fn client() -> &'static reqwest::Client {
 
 /// Validate `key` for `provider`. Makes one outbound HTTPS request. Returns
 /// a non-`valid` outcome (never errors the RPC) so the caller can surface a
-/// structured message and stay in the entry state.
+/// structured message and stay in the entry state. A stored OAuth token blob
+/// is validated by its access token (`oauth_tokens::bearer_value`); an
+/// expired one should be refreshed first (`oauth_tokens::access_token_for`).
 pub async fn validate(provider: &str, key: &str) -> ValidationOutcome {
+    let token = zeroize::Zeroizing::new(crate::identity::oauth_tokens::bearer_value(key.to_string()));
+    let key = token.as_str();
     let tail = masked_tail(key);
     match provider {
         "github" => github(key, tail).await,
+        "google" => google(key, tail).await,
         "openai" => openai(key, tail).await,
         "anthropic" => anthropic(key, tail).await,
         "slack" => slack(key, tail).await,
@@ -113,6 +118,37 @@ async fn github(key: &str, tail: String) -> ValidationOutcome {
     ValidationOutcome {
         valid: true,
         metadata: json!({ "github_username": login, "github_scopes": scopes }),
+        masked_tail: tail,
+        error: None,
+    }
+}
+
+/// Google's OpenID Connect userinfo endpoint: answers for any access token
+/// that carries the `openid` scope, with the account's email.
+pub const GOOGLE_USERINFO_URL: &str = "https://openidconnect.googleapis.com/v1/userinfo";
+
+async fn google(key: &str, tail: String) -> ValidationOutcome {
+    use crate::identity::oauth_tokens::OAuthHttp as _;
+    match crate::identity::oauth_tokens::LiveHttp.get_bearer(GOOGLE_USERINFO_URL, key).await {
+        Ok(reply) => google_outcome(reply.status, &reply.body, tail),
+        Err(e) => ValidationOutcome::invalid(tail, format!("network error: {e}")),
+    }
+}
+
+/// Map Google's userinfo answer to an outcome: the email (and whether Google
+/// verified it) as metadata.
+fn google_outcome(status: u16, body: &serde_json::Value, tail: String) -> ValidationOutcome {
+    if status == 401 {
+        return ValidationOutcome::invalid(tail, "Google rejected the token (401): it expired or was revoked");
+    }
+    if !(200..300).contains(&status) {
+        return ValidationOutcome::invalid(tail, format!("Google rejected the token ({status})"));
+    }
+    let email = body.get("email").and_then(|v| v.as_str()).unwrap_or("");
+    let verified = body.get("email_verified").and_then(|v| v.as_bool()).unwrap_or(false);
+    ValidationOutcome {
+        valid: true,
+        metadata: json!({ "email": email, "google_email": email, "email_verified": verified }),
         masked_tail: tail,
         error: None,
     }
@@ -207,5 +243,18 @@ mod tests {
     fn short_keys_fully_masked_no_tail_leak() {
         assert_eq!(masked_tail("ab"), "••••");
         assert_eq!(masked_tail("abcd"), "••••");
+    }
+
+    #[test]
+    fn google_userinfo_gives_the_email() {
+        let body = json!({ "sub": "1", "email": "me@example.com", "email_verified": true });
+        let ok = google_outcome(200, &body, "t".into());
+        assert!(ok.valid);
+        assert_eq!(ok.metadata["email"], "me@example.com");
+        assert_eq!(ok.metadata["google_email"], "me@example.com");
+        assert_eq!(ok.metadata["email_verified"], true);
+        let expired = google_outcome(401, &json!({ "error": "invalid_token" }), "t".into());
+        assert!(!expired.valid && expired.error.unwrap().contains("401"));
+        assert!(!google_outcome(503, &json!({}), "t".into()).valid);
     }
 }

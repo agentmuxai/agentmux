@@ -11,12 +11,21 @@
  *   pending       — flow starting up
  *   url-available — PKCE: open `authUrl` in the browser
  *   code-emitted  — device flow: show `userCode` + `verificationUri`
- *   success       — backend created the account (keychain-backed); `accountId`
+ *   success       — backend created or updated the account (keychain-backed);
+ *                   `accountId`, the scopes the provider granted, the ones
+ *                   asked for and unticked (a partial grant), and the email
+ *                   from the ID token when the provider sends one
  *   failed        — `error` describes why
  */
 export type OAuthFlowStatus =
     | { status: "pending" }
     | { status: "url-available"; authUrl: string }
     | { status: "code-emitted"; userCode: string; verificationUri: string }
-    | { status: "success"; accountId: string }
+    | {
+          status: "success";
+          accountId: string;
+          grantedScopes?: string[];
+          missingScopes?: string[];
+          email?: string | null;
+      }
     | { status: "failed"; error: string };
