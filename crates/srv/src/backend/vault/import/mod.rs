@@ -195,3 +195,5 @@ pub fn read_keyed(bytes: &[u8], file_name: &str, mapping: Option<&Mapping>, pass
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod fuzz_tests;
