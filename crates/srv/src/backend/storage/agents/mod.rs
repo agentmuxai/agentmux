@@ -45,6 +45,7 @@ mod name_keys;
 mod purge;
 mod row;
 
+pub(in crate::backend::storage) use canonical_slug::{canonical_slug, rows_with_canonical_slugs, SharedSlugs};
 pub use former_slugs::FormerSlugOwner;
 pub(super) use former_slugs::FORMER_SLUGS_SCHEMA;
 pub use name_keys::AgentNameMatch;

@@ -558,10 +558,13 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/agentmux/work/:id/heartbeat", post(work_queue::handle_work_heartbeat))
         .route("/agentmux/work/:id/complete", post(work_queue::handle_work_complete))
         .route("/agentmux/work/:id/release", post(work_queue::handle_work_release))
-        // Kanban (SPEC_WARDEN_KANBAN_2026_10_20.md): a holder's progress, question and hand-in.
+        // Kanban (SPEC_WARDEN_KANBAN_2026_10_20.md): a holder's progress, question and hand-in;
+        // any agent's hold and unhold (SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md).
         .route("/agentmux/work/:id/update", post(work_tasks::handle_work_update))
         .route("/agentmux/work/:id/ask", post(work_tasks::handle_work_ask))
         .route("/agentmux/work/:id/submit", post(work_tasks::handle_work_submit))
+        .route("/agentmux/work/:id/hold", post(work_tasks::handle_work_hold))
+        .route("/agentmux/work/:id/unhold", post(work_tasks::handle_work_unhold))
         .route("/agentmux/work/:id", delete(work_queue::handle_work_cancel))
         .merge(bus_routes)
         .merge(reactive_routes)

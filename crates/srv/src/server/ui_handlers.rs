@@ -201,7 +201,7 @@ pub(crate) async fn proxy_to_host_timeout(
     body: serde_json::Value,
     timeout: Option<std::time::Duration>,
 ) -> Result<serde_json::Value, String> {
-    super::host_http::post_to_host(&state.http_client, host, route, body, timeout).await
+    super::browser_hibernation::post_to_host_awake(state, host, route, body, timeout).await
 }
 
 pub(crate) fn err_response(status: StatusCode, e: String) -> Response {

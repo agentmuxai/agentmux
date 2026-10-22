@@ -96,7 +96,12 @@ and is verified alone, and none of them depends on every instance being upgraded
 
 As built: the rule is "K2's slug when it is non-empty, else K1's" (`storage/agents/canonical_slug.rs`). P0.2 is
 enforced in `DefinitionStore::upsert` for every writer: a non-empty K2 slug is never changed by an update, and
-`former_slugs` only grows. So S1 must write the slug through its own path, not `upsert`.
+`former_slugs` only grows. So S1 must write the slug through its own path, not `upsert`. Every write of a K2 record
+holds a cross-process lock on that record (`shared/agents/definitions/locks/<uid>.lock`, an OS file lock taken with a
+5 s timeout) across its read, merge and write, so the guard holds between channels and instances too; S1 takes the
+same lock through `DefinitionStore::with_record_locked`. A new user agent's slug is picked against every K2 slug and former slug, and published by its mirror, under one host-wide lock (`locks/_slug-allocation.lock`), so two channels can't pick the same one. The pick reads every K2 record strictly: a directory or record whose slug fields can't be read stops the insert, and a newer-schema record whose slug fields read counts as taken. P0.4's delete reads the agent's own K2 record strictly: a
+record that exists but can't be read or parsed refuses the delete with nothing changed, while a definition with no
+K2 record is deleted as before.
 
 ### Phase 1, expand: former slugs are aliases (one PR)
 

@@ -79,6 +79,20 @@ pub(crate) fn carry_block_slug_identity_env(
     }
 }
 
+/// The identity an agent's PtyShell child carries, as its `cmd:env`, from
+/// the agent's env after [`carry_slug_identity_env`]: its slug and git
+/// identity, so a commit typed there is the agent's. Deliberately not
+/// `AGENTMUX_AGENT_ID` or `MUXBUS_AGENT_ID`: those are the agent's address, and
+/// an interactive shell exporting `AGENTMUX_AGENT_ID` reports it through its
+/// shell integration (OSC 16162 `E`), which registers that pane as the agent
+/// for message delivery (`termagent.ts`), beside the agent's own pane.
+pub(crate) fn pty_child_identity_env(agent_env: &HashMap<String, String>) -> serde_json::Map<String, serde_json::Value> {
+    ["AGENTMUX_AGENT_SLUG", "GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"]
+        .into_iter()
+        .filter_map(|k| agent_env.get(k).map(|v| (k.to_string(), serde_json::Value::String(v.clone()))))
+        .collect()
+}
+
 /// The agent's id and git identity: [`carry_agent_id_env`], then
 /// [`carry_git_identity_env`] with the id it replaced.
 pub(crate) fn carry_agent_identity_env(
@@ -305,6 +319,23 @@ mod tests {
         let mut rowless = stale.clone();
         super::carry_block_slug_identity_env(&store, "block-p03-none", &mut rowless);
         assert_eq!(rowless, stale, "no row, no slug: cmd:env stays");
+    }
+
+    /// The PtyShell child's `cmd:env` carries the definition's slug and git
+    /// identity, never the stale ones, and not the agent's address.
+    #[test]
+    fn a_pty_child_carries_the_canonical_identity_but_not_the_address() {
+        let mut e = env(&[
+            ("AGENTMUX_AGENT_ID", "loap-loap-2-loap-3"),
+            ("AGENTMUX_AGENT_SLUG", "loap-loap-2-loap-3"),
+            ("GIT_AUTHOR_EMAIL", "loap-loap-2-loap-3@agents.local"),
+        ]);
+        super::carry_slug_identity_env(&mut e, "loap-3");
+        let child = super::pty_child_identity_env(&e);
+        assert_eq!(child["AGENTMUX_AGENT_SLUG"], "loap-3");
+        assert_eq!(child["GIT_AUTHOR_EMAIL"], "loap-3@agents.local");
+        assert_eq!(child["GIT_COMMITTER_EMAIL"], "loap-3@agentmux.local");
+        assert!(!child.contains_key("AGENTMUX_AGENT_ID") && !child.contains_key("MUXBUS_AGENT_ID"));
     }
 
     #[test]

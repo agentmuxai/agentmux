@@ -88,6 +88,7 @@ impl FileStore {
                      SELECT ?1, name, partidx, data FROM db_file_data WHERE zoneid = ?2 AND name = ?3",
                     params![dst_zone, src_zone, name],
                 )?;
+                super::frames::copy_frames(tx, src_zone, dst_zone, name)?;
                 let counted = src.lines.is_some()
                     && src.lines_size.is_some()
                     && src.rev.unwrap_or(0) == src.lines_rev.unwrap_or(0);
@@ -157,13 +158,11 @@ impl FileStore {
                      WHERE zoneid = ?2 AND name = ?3 AND partidx < ?4",
                     params![dst_zone, src_zone, name, whole],
                 )?;
+                super::frames::copy_frames_below(tx, src_zone, dst_zone, name, whole)?;
                 let rest = (len % pds) as usize;
                 if rest > 0 {
-                    let part: Vec<u8> = tx.query_row(
-                        "SELECT data FROM db_file_data WHERE zoneid = ?1 AND name = ?2 AND partidx = ?3",
-                        params![src_zone, name, whole],
-                        |r| r.get(0),
-                    )?;
+                    let part = super::frames::read_part(tx, src_zone, name, whole)?
+                        .ok_or_else(|| StoreError::Other(format!("{src_zone}/{name}: part {whole} is not stored")))?;
                     tx.execute(
                         "INSERT INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
                         params![dst_zone, name, whole, &part[..rest.min(part.len())]],
@@ -228,6 +227,7 @@ impl FileStore {
                     "UPDATE db_file_data SET zoneid = ?1 WHERE zoneid = ?2 AND name = ?3",
                     params![dst_zone, src_zone, name],
                 )?;
+                super::frames::move_frames(tx, src_zone, dst_zone, name)?;
                 tx.execute(
                     "UPDATE db_wave_file SET zoneid = ?1 WHERE zoneid = ?2 AND name = ?3",
                     params![dst_zone, src_zone, name],

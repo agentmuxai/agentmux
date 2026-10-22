@@ -26,7 +26,7 @@ use super::*;
 
 /// `local` unless `shared` is a non-empty slug, which wins. Logs (once) when
 /// both are set and differ.
-pub(super) fn canonical_slug(uid: &str, local: &str, shared: Option<&str>) -> String {
+pub(in crate::backend::storage) fn canonical_slug(uid: &str, local: &str, shared: Option<&str>) -> String {
     let Some(shared) = shared.filter(|s| !s.trim().is_empty()) else {
         return local.to_string();
     };
@@ -60,7 +60,7 @@ pub(in crate::backend::storage) use crate::registry::SlugEntry as SharedNames;
 /// store, or when it can't be listed (logged): every slug then reads as the
 /// local one, which is what this channel answered before. Shared, not
 /// copied: the store's slug index hands out the same map until a file changes.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(in crate::backend::storage) struct SharedSlugs(Arc<HashMap<String, SharedNames>>);
 
 impl SharedSlugs {
@@ -76,6 +76,17 @@ impl SharedSlugs {
         self.0.iter().filter(move |(id, _)| id.as_str() != uid).map(|(_, n)| n)
     }
 
+    /// The uids whose shared slug is `folded` (trimmed and lowercased, as the
+    /// key tables fold).
+    pub fn ids_with_slug<'a>(&'a self, folded: &'a str) -> impl Iterator<Item = &'a str> + 'a {
+        self.0.iter().filter(move |(_, n)| n.slug.trim().to_lowercase() == folded).map(|(id, _)| id.as_str())
+    }
+
+    /// Whether any shared definition lists `folded` among its former slugs.
+    pub fn is_former(&self, folded: &str) -> bool {
+        self.0.values().any(|n| n.former.iter().any(|f| f.trim().to_lowercase() == folded))
+    }
+
     pub fn entries(&self) -> impl Iterator<Item = (&str, &SharedNames)> {
         self.0.iter().map(|(id, n)| (id.as_str(), n))
     }
@@ -83,7 +94,7 @@ impl SharedSlugs {
 
 /// Rows `filter` selects (a `WHERE …` clause, or empty), oldest first, each
 /// with its canonical slug. `NULL` slugs and instance names read as empty.
-pub(super) fn rows_with_canonical_slugs(
+pub(in crate::backend::storage) fn rows_with_canonical_slugs(
     conn: &rusqlite::Connection,
     filter: &str,
     shared: &SharedSlugs,
@@ -130,6 +141,55 @@ impl Store {
     /// [`Self::shared_names_of`]'s slug, for a uid-to-slug read.
     pub(in crate::backend::storage) fn shared_slug_of(&self, uid: &str) -> Option<String> {
         self.shared_names_of(uid).map(|n| n.slug)
+    }
+
+    /// [`Self::shared_slugs`] for deleting `uid`, which must not guess: the
+    /// slugs its signing keys sit under are its shared record's current and
+    /// former slugs, and the record is retired with the delete, so a purge
+    /// that missed them would leave keys for the next agent of that name.
+    /// `uid`'s own record is read strictly (`slug_of_strict`), and a record
+    /// that exists but can't be read or parsed (or a shared directory that
+    /// can't be listed) is an error, before anything is deleted. A record that doesn't exist,
+    /// or no shared store, is not: there are no shared names to cover.
+    pub(in crate::backend::storage) fn shared_slugs_for_delete(&self, uid: &str) -> Result<SharedSlugs, StoreError> {
+        let Some(reg) = self.shared_def_registry() else {
+            return Ok(SharedSlugs::default());
+        };
+        let refuse = |what: &str, e: crate::registry::DefStoreError| {
+            StoreError::Other(format!(
+                "not deleting agent {uid}: {what} ({e}), so the names its signing keys are filed under \
+                 are unknown. Nothing was deleted; fix or restore the file and try again."
+            ))
+        };
+        let own = reg.slug_of_strict(uid).map_err(|e| refuse("its shared definition can't be read", e))?;
+        let index = reg.slug_index().map_err(|e| refuse("the shared definitions can't be listed", e))?;
+        let mut all = (*index).clone();
+        match own {
+            Some(names) => {
+                all.insert(uid.to_string(), names);
+            }
+            None => {
+                all.remove(uid);
+            }
+        }
+        Ok(SharedSlugs(Arc::new(all)))
+    }
+
+    /// Every shared definition's names, for picking a new agent's slug
+    /// (`DefinitionStore::slug_index_strict`): a newer-schema record counts,
+    /// and a directory, file or record whose slugs can't be read is an error,
+    /// so an insert never picks a slug it couldn't check. No shared store:
+    /// nothing to check.
+    pub(in crate::backend::storage) fn shared_slugs_for_allocation(&self) -> Result<SharedSlugs, StoreError> {
+        let Some(reg) = self.shared_def_registry() else {
+            return Ok(SharedSlugs::default());
+        };
+        reg.slug_index_strict().map(|all| SharedSlugs(Arc::new(all))).map_err(|e| {
+            StoreError::Other(format!(
+                "not creating the agent: the shared agent definitions can't all be read ({e}), so its slug \
+                 could be one another agent holds. Nothing was created; fix or remove the file and try again."
+            ))
+        })
     }
 
     /// Every active shared definition's names, for a slug-to-uid read, from
@@ -295,6 +355,196 @@ mod tests {
                 assert!(tombstones.contains(&(name.to_string(), uid.to_string())), "{name}: {tombstones:?}");
             }
         }
+    }
+
+    /// Two channels (two `objects.db`, two handles on one shared directory)
+    /// creating agents with the same base slug at once end with distinct
+    /// slugs: the allocation lock spans the pick and the publication, so the
+    /// second sees the first's record.
+    #[test]
+    fn concurrent_inserts_in_two_channels_get_distinct_slugs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let channels: Vec<Arc<Store>> = (0..2)
+            .map(|_| {
+                let store = Arc::new(Store::open_in_memory().unwrap());
+                store.set_def_registry(Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap()));
+                store
+            })
+            .collect();
+        for round in 0..8 {
+            let start = Arc::new(std::sync::Barrier::new(2));
+            let picked: Vec<String> = channels
+                .iter()
+                .enumerate()
+                .map(|(i, store)| {
+                    let (store, start) = (store.clone(), start.clone());
+                    std::thread::spawn(move || {
+                        let mut def = test_agent_def(&format!("uid-race-{round}-{i}"), "Racer", "claude", "host", 1, "");
+                        def.slug = format!("racer-{round}");
+                        start.wait();
+                        store.agent_def_insert(&mut def).unwrap();
+                        def.slug
+                    })
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|t| t.join().unwrap())
+                .collect();
+            assert_ne!(picked[0], picked[1], "round {round}: {picked:?}");
+        }
+    }
+
+    /// A new agent's slug is picked against every shared record: one whose
+    /// slug fields can't be read stops both insert paths before anything is
+    /// written (finding an existing agent by name still works), and a record
+    /// from a newer schema whose slug fields read fine is honoured as taken,
+    /// current and former slug alike.
+    #[test]
+    fn allocation_fails_closed_on_an_unreadable_record_and_honours_a_newer_schema() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let defs = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+        store.set_def_registry(defs.clone());
+        let mut existing = test_agent_def("uid-alloc-existing", "Existing", "claude", "host", 1, "");
+        existing.slug = "existing".to_string();
+        store.agent_def_insert(&mut existing).unwrap();
+
+        let future = r#"{"schema_version":99,"data":{"id":"uid-future","slug":"taken",
+            "former_slugs":[{"slug":"old-taken","retired_at":1}],"field_from_the_future":true}}"#;
+        std::fs::write(defs.root().join("uid-future.json"), future).unwrap();
+        for (id, base, want) in [("uid-alloc-a", "taken", "taken-2"), ("uid-alloc-b", "old-taken", "old-taken-2")] {
+            let mut def = test_agent_def(id, "New", "claude", "host", 1, "");
+            def.slug = base.to_string();
+            store.agent_def_insert(&mut def).unwrap();
+            assert_eq!(def.slug, want);
+        }
+
+        std::fs::write(defs.root().join("uid-bad.json"), r#"{"schema_version":1,"data":{"id":"uid-bad","slug":5}}"#).unwrap();
+        let mut blocked = test_agent_def("uid-alloc-blocked", "Blocked", "claude", "host", 1, "");
+        blocked.slug = "blocked".to_string();
+        let err = store.agent_def_insert(&mut blocked).expect_err("an unreadable record stops the insert");
+        assert!(err.to_string().contains("Nothing was created"), "{err}");
+        assert!(store.agent_row_get("uid-alloc-blocked").unwrap().is_none());
+        let mut defined = test_agent_def("uid-alloc-defined", "Defined", "claude", "host", 1, "");
+        defined.slug = String::new();
+        assert!(store.agent_def_find_or_insert(&mut defined).is_err());
+        assert!(store.agent_row_get("uid-alloc-defined").unwrap().is_none());
+        let mut again = test_agent_def("uid-alloc-other", "Existing", "claude", "host", 1, "");
+        let found = store.agent_def_find_or_insert(&mut again).unwrap().expect("found by name");
+        assert_eq!(found.id, "uid-alloc-existing");
+    }
+
+    /// A new agent whose shared record can't be written is not inserted, by
+    /// either insert path: its slug was never published, so the row would let
+    /// another channel take the same slug.
+    #[test]
+    fn an_insert_whose_publication_fails_is_undone() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let defs = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+        store.set_def_registry(defs.clone());
+        // A directory where the record goes: the write fails, as on a full disk.
+        std::fs::create_dir_all(defs.root().join("uid-unpublished.json")).unwrap();
+        let mut def = test_agent_def("uid-unpublished", "Solo", "claude", "host", 1, "");
+        def.slug = "solo".to_string();
+        let err = store.agent_def_insert(&mut def).expect_err("the publish failed");
+        assert!(err.to_string().contains("could not publish"), "{err}");
+        assert!(store.agent_row_get("uid-unpublished").unwrap().is_none(), "the local row is undone");
+
+        let mut defined = test_agent_def("uid-unpublished", "Solo", "claude", "host", 1, "");
+        defined.slug = String::new();
+        assert!(store.agent_def_find_or_insert(&mut defined).is_err());
+        assert!(store.agent_row_get("uid-unpublished").unwrap().is_none());
+    }
+
+    /// `agent.define` finds an existing agent by its canonical slug, not by a
+    /// stale local one, so it doesn't mint a second agent beside it.
+    #[test]
+    fn define_finds_an_agent_by_its_canonical_slug() {
+        let uid = "uid-p01-define";
+        let (_tmp, store, _defs) = diverged(uid, "loap-loap-2-loap-3", "loap-3");
+        let mut asked = test_agent_def("uid-p01-define-new", "Loap 3", "claude", "host", 2, "");
+        asked.slug = String::new();
+        let found = store.agent_def_find_or_insert(&mut asked).unwrap().expect("the existing agent");
+        assert_eq!((found.id.as_str(), found.slug.as_str()), (uid, "loap-3"));
+        assert!(store.agent_row_get("uid-p01-define-new").unwrap().is_none(), "nothing inserted");
+    }
+
+    /// With no local row (an agent only the shared registry knows here, or a
+    /// retry after an earlier attempt deleted the row and failed before
+    /// retiring the record), a delete still purges and tombstones every slug
+    /// the shared record holds. Both states look the same from here (an
+    /// active record, no row); each runs through one of the delete paths.
+    #[test]
+    fn delete_purges_shared_names_without_a_local_row() {
+        for (uid, retry) in [("uid-p04-shared-only", false), ("uid-p04-retry", true)] {
+            let (_tmp, store, defs) = diverged(uid, "naki-naki-2", "naki-2");
+            store.conn.lock().unwrap().execute("DELETE FROM db_agents WHERE id = ?1", params![uid]).unwrap();
+            let (_wan_dir, wan) = crate::backend::storage::wan_identity::attach_temp_wan_identity(&store);
+            for name in ["naki-2", "naki-naki-2"] {
+                store.agent_jekt_key_ensure(name).unwrap();
+                store.agent_lan_key_ensure(name).unwrap();
+                wan.agent_key_ensure(name, None).unwrap();
+            }
+            if retry { store.instance_delete(uid).unwrap() } else { store.agent_def_delete(uid).unwrap() };
+            let tombstones = {
+                let conn = store.conn.lock().unwrap();
+                crate::backend::storage::agents::key_tombstones_for_tests(&conn)
+            };
+            for name in ["naki-2", "naki-naki-2"] {
+                assert!(store.agent_jekt_key_load(name).unwrap().is_none(), "{uid}: {name}");
+                assert!(store.agent_lan_key_load(name).unwrap().is_none(), "{uid}: {name}");
+                assert!(wan.agent_key_load(name).unwrap().is_none(), "{uid}: {name}");
+                assert!(tombstones.contains(&(name.to_string(), uid.to_string())), "{uid}: {name}: {tombstones:?}");
+            }
+            assert!(!defs.exists(uid), "the record is retired");
+        }
+    }
+
+    /// A delete that can't read the agent's own shared record (unparseable,
+    /// or failing validation) refuses, through both paths, and leaves the
+    /// row, its keys and the record as they were.
+    #[test]
+    fn delete_refuses_when_its_shared_record_is_unreadable() {
+        for via_instance_delete in [false, true] {
+            let uid = if via_instance_delete { "uid-p04-bad-instance" } else { "uid-p04-bad-def" };
+            let (_tmp, store, defs) = diverged(uid, "loap-loap-2", "loap-2");
+            for name in ["loap-2", "loap-loap-2"] {
+                store.agent_jekt_key_ensure(name).unwrap();
+            }
+            let path = defs.root().join(format!("{uid}.json"));
+            let mismatched = r#"{"schema_version":1,"data":{"id":"someone-else","name":"X","provider":"claude"}}"#;
+            for bad in ["not json", mismatched] {
+                std::fs::write(&path, bad).unwrap();
+                let result = if via_instance_delete { store.instance_delete(uid) } else { store.agent_def_delete(uid) };
+                let err = result.expect_err("an unreadable shared record refuses the delete");
+                assert!(err.to_string().contains("Nothing was deleted"), "{err}");
+                assert!(store.agent_row_get(uid).unwrap().is_some(), "the row stays");
+                for name in ["loap-2", "loap-loap-2"] {
+                    assert!(store.agent_jekt_key_load(name).unwrap().is_some(), "{name}'s key stays");
+                }
+                assert_eq!(std::fs::read_to_string(&path).unwrap(), bad, "the record stays");
+            }
+        }
+    }
+
+    /// A definition with no shared record (never mirrored, or no shared
+    /// store at all) is still deleted, keys included.
+    #[test]
+    fn delete_proceeds_without_a_shared_record() {
+        let plain = Store::open_in_memory().unwrap();
+        let mut def = test_agent_def("uid-p04-plain", "Plain", "claude", "host", 1, "");
+        def.slug = "plain".to_string();
+        plain.agent_def_insert(&mut def).unwrap();
+        plain.agent_jekt_key_ensure("plain").unwrap();
+        assert!(plain.agent_def_delete("uid-p04-plain").unwrap());
+        assert!(plain.agent_jekt_key_load("plain").unwrap().is_none());
+
+        let (_tmp, store, defs) = diverged("uid-p04-absent", "absent", "absent");
+        std::fs::remove_file(defs.root().join("uid-p04-absent.json")).unwrap();
+        store.agent_jekt_key_ensure("absent").unwrap();
+        assert!(store.instance_delete("uid-p04-absent").unwrap());
+        assert!(store.agent_jekt_key_load("absent").unwrap().is_none());
     }
 
     /// The guard still applies: a former slug another agent holds as its

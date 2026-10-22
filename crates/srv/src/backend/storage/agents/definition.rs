@@ -219,13 +219,46 @@ impl Store {
     /// so this is race-safe against concurrent inserts on the same
     /// connection.
     pub fn agent_def_insert(&self, agent: &mut AgentDefinition) -> Result<(), StoreError> {
-        self.agent_def_insert_local_only(agent, None)?;
+        // Held from the slug pick (inside the local insert) to its publication
+        // by the mirror below.
+        let _allocating = self.slug_allocation_lock(agent)?;
+        let shared = self.shared_slugs_to_allocate(agent)?;
+        self.agent_def_insert_with(agent, None, &shared)?;
         // Mirror into the global cross-channel definition store. Content +
         // skills are inserted after the definition (separate calls), so this
         // initial record is content-less; agent_content_set / agent_skill_*
-        // re-mirror with the full payload. (P0.2b.)
-        self.registry_def_upsert(&agent.id);
-        Ok(())
+        // re-mirror with the full payload. (P0.2b.) Publishing the slug is
+        // part of the insert: undone if it fails.
+        self.publish_new_or_undo(&agent.id)
+    }
+
+    /// Mirror a just-inserted agent, which publishes its slug; on failure,
+    /// delete the row again and return the error (`registry_def_publish`).
+    /// The caller still holds the slug allocation lock.
+    fn publish_new_or_undo(&self, id: &str) -> Result<(), StoreError> {
+        let Err(e) = self.registry_def_publish(id) else {
+            return Ok(());
+        };
+        let conn = self.conn.lock().unwrap();
+        if let Err(undo) = conn.execute("DELETE FROM db_agents WHERE id = ?1", params![id]) {
+            tracing::warn!(agent_id = id, error = %undo, "agent insert: could not undo the local row after a failed publish");
+        }
+        Err(e)
+    }
+
+    /// The host-wide slug allocation lock for inserting `agent`
+    /// (`DefinitionStore::lock_slug_allocation`), so a concurrent insert in
+    /// another channel or instance picks its slug knowing this one's. `None`
+    /// for a template, which is never mirrored, or with no shared store. A
+    /// lock that can't be had in time fails the insert before anything is
+    /// written.
+    fn slug_allocation_lock(&self, agent: &AgentDefinition) -> Result<Option<crate::registry::SlugAllocationLock>, StoreError> {
+        let Some(reg) = self.shared_def_registry().filter(|_| agent.is_seeded == 0) else {
+            return Ok(None);
+        };
+        reg.lock_slug_allocation().map(Some).map_err(|e| {
+            StoreError::Other(format!("could not pick a slug for agent {}: {e}", agent.name))
+        })
     }
 
     /// Insert into `db_agents` only — does NOT mirror to the global
@@ -251,7 +284,28 @@ impl Store {
         agent: &mut AgentDefinition,
         updated_at_override: Option<i64>,
     ) -> Result<(), StoreError> {
-        let shared = self.shared_slugs();
+        self.agent_def_insert_with(agent, updated_at_override, &self.shared_slugs())
+    }
+
+    /// The shared slugs a new agent's slug is picked against: all of them,
+    /// read strictly, for a user agent (`shared_slugs_for_allocation`); for a
+    /// template, which is never mirrored and is seeded at boot, the lenient
+    /// index, so a bad shared file can't stop seeding.
+    fn shared_slugs_to_allocate(&self, agent: &AgentDefinition) -> Result<SharedSlugs, StoreError> {
+        if agent.is_seeded == 0 {
+            self.shared_slugs_for_allocation()
+        } else {
+            Ok(self.shared_slugs())
+        }
+    }
+
+    /// [`Self::agent_def_insert_local_only`] against the given shared slugs.
+    fn agent_def_insert_with(
+        &self,
+        agent: &mut AgentDefinition,
+        updated_at_override: Option<i64>,
+        shared: &SharedSlugs,
+    ) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         let base = if agent.slug.is_empty() {
             derive_slug(&agent.name)
@@ -262,7 +316,7 @@ impl Store {
         // table surfaces definition slugs and template-instance projections
         // alike, so a collision against an instance-derived row is caught here
         // too. Shared with `instance_create` so the two cannot drift.
-        agent.slug = resolve_slug_collision(&conn, &base, &agent.id, &shared)?;
+        agent.slug = resolve_slug_collision(&conn, &base, &agent.id, shared)?;
         let stamped_updated_at = updated_at_override.unwrap_or(agent.created_at);
         let is_template = if agent.is_seeded == 1 { 1_i64 } else { 0_i64 };
         let parent_template_id = if agent.is_seeded == 1 { String::new() } else { agent.parent_id.clone() };
@@ -437,10 +491,15 @@ impl Store {
     ) -> Result<Option<AgentDefinition>, StoreError> {
         let name_lower = agent.name.trim().to_lowercase();
         let derived_slug = derive_slug(agent.name.trim());
-        let shared = self.shared_slugs();
+        // Held through the mirror at the end, as in `agent_def_insert`.
+        let _allocating = self.slug_allocation_lock(agent)?;
+        // Strict for the insert below; a failure doesn't stop finding an
+        // existing agent, which only reads names.
+        let allocation = self.shared_slugs_to_allocate(agent);
+        let shared = allocation.as_ref().map_or_else(|_| self.shared_slugs(), SharedSlugs::clone);
         // A slug an agent was renamed from is still that agent's: matched
         // like its current slug, after a name or slug match (fork slug
-        // migration Phase 1). Read before the lock; only a migration writes it.
+        // migration Phase 1). Read before the connection lock.
         let former_owner = self.former_slug_owner(&derived_slug)?.map(|o| o.uid);
 
         {
@@ -452,34 +511,25 @@ impl Store {
             // `db_agent_definitions` counterpart) — same as before this
             // read moved to `db_agents`, since the legacy table never held
             // launch rows to exclude in the first place.
+            // A name match first, then a slug match, where the slug is the
+            // canonical one every other reader gives ([`canonical_slug`]).
+            // Names compare as SQLite's `lower(trim(name))` did: ASCII only.
             let mut stmt = conn.prepare(&format!(
-                "{AGENT_DEFINITION_SELECT}
-                 WHERE (lower(trim(name)) = ?1 OR slug = ?2 COLLATE NOCASE)
-                   AND is_seeded = 0
-                 ORDER BY CASE WHEN lower(trim(name)) = ?1 THEN 0 ELSE 1 END
-                 LIMIT 1"
+                "{AGENT_DEFINITION_SELECT} WHERE is_seeded = 0 ORDER BY created_at ASC, id ASC"
             ))?;
-            let mut rows = stmt.query_map(
-                params![name_lower, derived_slug],
-                map_agent_definition_row,
-            )?;
-            if let Some(row) = rows.next() {
-                return Ok(Some(row?));
-            }
+            let rows = stmt.query_map([], map_agent_definition_row)?.collect::<Result<Vec<_>, _>>()?;
             // Drop borrows on `conn` before proceeding to the insert.
-            drop(rows);
             drop(stmt);
-            if let Some(uid) = former_owner {
-                let owner = conn
-                    .query_row(&format!("{AGENT_DEFINITION_SELECT} WHERE id = ?1 AND is_seeded = 0"), params![uid], map_agent_definition_row)
-                    .map(Some)
-                    .or_else(|e| match e {
-                        rusqlite::Error::QueryReturnedNoRows => Ok(None),
-                        e => Err(e),
-                    })?;
-                if owner.is_some() {
-                    return Ok(owner);
-                }
+            let canonical = |d: &AgentDefinition| canonical_slug(&d.id, &d.slug, shared.slug(&d.id));
+            let found = rows
+                .iter()
+                .find(|d| d.name.trim_matches(' ').to_ascii_lowercase() == name_lower)
+                .or_else(|| rows.iter().find(|d| canonical(d).eq_ignore_ascii_case(&derived_slug)))
+                .or_else(|| former_owner.as_deref().and_then(|uid| rows.iter().find(|d| d.id == uid)));
+            if let Some(def) = found {
+                let mut def = def.clone();
+                def.slug = canonical(&def);
+                return Ok(Some(def));
             }
 
             // Not found — insert under the same lock.
@@ -489,7 +539,7 @@ impl Store {
                 agent.slug.clone()
             };
             // The shared resolver: case-insensitive, like the key tables.
-            agent.slug = super::name_keys::resolve_slug_collision(&conn, &base, &agent.id, &shared)?;
+            agent.slug = super::name_keys::resolve_slug_collision(&conn, &base, &agent.id, &allocation?)?;
             let is_template = if agent.is_seeded == 1 { 1_i64 } else { 0_i64 };
             let parent_template_id = if agent.is_seeded == 1 { String::new() } else { agent.parent_id.clone() };
             conn.execute(
@@ -557,7 +607,8 @@ impl Store {
         // Mirror the freshly-defined agent into the global store (agent.define
         // path). Without this a define-created agent stays channel-local until
         // a later edit. (codex P2 on #1385.)
-        self.registry_def_upsert(&agent.id);
+        // Undone if it fails, as on insert.
+        self.publish_new_or_undo(&agent.id)?;
 
         Ok(None)
     }
@@ -926,7 +977,8 @@ impl Store {
         // row. The JSON registry mirror for the deleted row is covered by
         // `registry_def_retire` below.
         // Its shared slug and former slugs, read before the record is retired.
-        let shared = self.shared_slugs();
+        // A record that exists but can't be read refuses the delete.
+        let shared = self.shared_slugs_for_delete(id)?;
         let (rows, scope) = {
             let conn = self.conn.lock().unwrap();
             // Read BEFORE the DELETE — afterwards there is no row to ask.

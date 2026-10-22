@@ -140,3 +140,64 @@ fn slugs_that_fold_together_outside_ascii_are_nobody_s_either() {
     assert_eq!(ensure(&store, "uid-upper").1, [UidKeyOrigin::Fresh(FreshReason::SlugShared); 2]);
     assert_eq!(ensure(&store, "uid-lower").1, [UidKeyOrigin::Fresh(FreshReason::SlugShared); 2]);
 }
+
+/// A store whose shared definitions are `records`: `(uid, slug, former slugs)`.
+fn with_shared(store: &Store, records: &[(&str, &str, &[&str])]) -> tempfile::TempDir {
+    let tmp = tempfile::tempdir().unwrap();
+    let defs = std::sync::Arc::new(crate::registry::DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+    for (uid, slug, former) in records {
+        defs.upsert(&crate::registry::DefinitionRecord {
+            schema_version: crate::registry::DEF_MAX_SUPPORTED_SCHEMA,
+            data: crate::registry::DefinitionRecordV1 {
+                id: uid.to_string(),
+                slug: slug.to_string(),
+                name: "Shared".to_string(),
+                provider: "claude".to_string(),
+                former_slugs: former
+                    .iter()
+                    .map(|f| crate::registry::FormerSlug { slug: f.to_string(), retired_at: 1 })
+                    .collect(),
+                ..Default::default()
+            },
+        })
+        .unwrap();
+    }
+    store.set_def_registry(defs);
+    tmp
+}
+
+/// P0.1: a row whose shared record was renamed takes nothing filed under
+/// its old name: the slug the copy looks for is the canonical one, and the
+/// old one is a former slug besides.
+#[test]
+fn a_renamed_agent_copies_nothing_from_its_old_name() {
+    let store = Store::open_in_memory().unwrap();
+    row(&store, "uid-loap", "loap-loap-2", ROW_MS);
+    let (old_lan, old_wan) = name_keys(&store, "loap-loap-2", ROW_SECS + 60);
+    let _defs = with_shared(&store, &[("uid-loap", "loap-2", &["loap-loap-2"])]);
+    let (keys, origins) = ensure(&store, "uid-loap");
+    assert_eq!(origins, [UidKeyOrigin::Fresh(FreshReason::NoNameKey); 2]);
+    assert_ne!(keys.lan.public_key, old_lan);
+    assert_ne!(keys.wan.public_key, old_wan);
+}
+
+/// Ownership is judged on canonical slugs: the canonical slug's own key is
+/// copied; a slug another agent holds only in the shared registry is
+/// shared; any agent's former slug is never copied.
+#[test]
+fn ownership_is_judged_on_canonical_slugs() {
+    let store = Store::open_in_memory().unwrap();
+    row(&store, "uid-a", "stale-a", ROW_MS);
+    row(&store, "uid-c", "c", ROW_MS);
+    row(&store, "uid-d", "d", ROW_MS);
+    for name in ["fresh-a", "c", "d"] {
+        name_keys(&store, name, ROW_SECS + 60);
+    }
+    let _defs = with_shared(
+        &store,
+        &[("uid-a", "fresh-a", &[]), ("uid-elsewhere", "c", &[]), ("uid-renamed", "d-new", &["d"])],
+    );
+    assert_eq!(ensure(&store, "uid-a").1, [UidKeyOrigin::Copied; 2]);
+    assert_eq!(ensure(&store, "uid-c").1, [UidKeyOrigin::Fresh(FreshReason::SlugShared); 2]);
+    assert_eq!(ensure(&store, "uid-d").1, [UidKeyOrigin::Fresh(FreshReason::FormerSlug); 2]);
+}

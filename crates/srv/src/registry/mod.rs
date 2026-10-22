@@ -19,6 +19,7 @@
 
 mod atomic;
 mod def_migrate;
+mod def_record_lock;
 mod def_schema;
 mod def_slug_index;
 mod def_store;
@@ -53,7 +54,7 @@ pub use def_schema::{
     FormerSlug, DEF_MAX_SUPPORTED_SCHEMA, DEF_MIN_SUPPORTED_SCHEMA,
 };
 pub use def_slug_index::SlugEntry;
-pub use def_store::{DefStoreError, DefinitionStore};
+pub use def_store::{DefStoreError, DefinitionStore, LockedRecord, SlugAllocationLock};
 pub use leases::{ClaimantInfo, Lease, LeaseError, LeaseHolder, LeaseStore, LEASE_TTL_MS, RENEW_INTERVAL_MS};
 pub use schema::{
     NamedAgentRecord, NamedAgentRecordV1, ValidationError, MAX_SUPPORTED_SCHEMA,

@@ -72,6 +72,8 @@ fn patch_range_in(tx: &rusqlite::Transaction<'_>, zone_id: &str, name: &str, off
     }
     let pds = super::core::PART_DATA_SIZE as i64;
     let end = offset + data.len() as i64;
+    // A write into compressed parts writes into rows (frames.rs).
+    super::frames::unframe(tx, zone_id, name, (offset / pds) as i32, ((end - 1) / pds) as i32)?;
     for idx in (offset / pds)..=((end - 1) / pds) {
         let part_start = idx * pds;
         let mut part: Vec<u8> = tx
@@ -98,9 +100,10 @@ fn patch_range_in(tx: &rusqlite::Transaction<'_>, zone_id: &str, name: &str, off
 }
 
 /// Drop a file's stored bytes from `new_size` on, inside `tx`.
-fn truncate_parts_in(tx: &rusqlite::Transaction<'_>, zone_id: &str, name: &str, new_size: i64) -> Result<(), StoreError> {
+pub(super) fn truncate_parts_in(tx: &rusqlite::Transaction<'_>, zone_id: &str, name: &str, new_size: i64) -> Result<(), StoreError> {
     let pds = super::core::PART_DATA_SIZE as i64;
     let keep_parts = (new_size + pds - 1) / pds;
+    super::frames::truncate_frames(tx, zone_id, name, new_size)?;
     tx.execute(
         "DELETE FROM db_file_data WHERE zoneid = ?1 AND name = ?2 AND partidx >= ?3",
         params![zone_id, name, keep_parts as i32],
@@ -247,6 +250,7 @@ impl FileStore {
             for name in names {
                 tx.execute("DELETE FROM db_wave_file WHERE zoneid = ?1 AND name = ?2", params![zone_id, name])?;
                 tx.execute("DELETE FROM db_file_data WHERE zoneid = ?1 AND name = ?2", params![zone_id, name])?;
+                super::frames::delete_frames(tx, zone_id, Some(name))?;
             }
             Ok(())
         })?;
@@ -307,6 +311,7 @@ impl FileStore {
             for d in drop {
                 tx.execute("DELETE FROM db_wave_file WHERE zoneid = ?1 AND name = ?2", params![zone_id, d])?;
                 tx.execute("DELETE FROM db_file_data WHERE zoneid = ?1 AND name = ?2", params![zone_id, d])?;
+                super::frames::delete_frames(tx, zone_id, Some(d))?;
             }
             Ok(true)
         })?;
