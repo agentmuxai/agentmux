@@ -84,6 +84,30 @@ pub fn export(store: &Store, ids: Option<&[String]>, passphrase: &str, path: &Pa
     if passphrase.chars().count() < MIN_PASSPHRASE {
         return Err(format!("a passphrase is at least {MIN_PASSPHRASE} characters"));
     }
+    let entries = gather(store, ids)?;
+    let count = entries.len();
+    let file = VaultFile { format: FORMAT.into(), version: VERSION, exported_at: now_ms(), app_version: env!("CARGO_PKG_VERSION").into(), entries };
+    let plain = Zeroizing::new(serde_json::to_vec(&file).map_err(|e| e.to_string())?);
+    // `file` holds every value too: wipe them.
+    for mut e in file.entries {
+        for v in e.parts.values_mut() {
+            zeroize::Zeroize::zeroize(v);
+        }
+    }
+    let mut out = Vec::new();
+    let encryptor = age::Encryptor::with_user_passphrase(passphrase_of(passphrase));
+    let mut w = encryptor.wrap_output(&mut out).map_err(|e| format!("couldn't start encrypting: {e}"))?;
+    w.write_all(&plain).map_err(|e| format!("couldn't encrypt: {e}"))?;
+    w.finish().map_err(|e| format!("couldn't finish encrypting: {e}"))?;
+    write_atomically(path, &out)?;
+    let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    record(store, "", "", PERSON, "exported", &file_name, &format!("{count} entries"));
+    Ok(ExportResult { count, file_name })
+}
+
+/// The chosen entries (all when `ids` is `None`), opened: every part in the clear, for the caller to
+/// put in a file and wipe.
+pub(super) fn gather(store: &Store, ids: Option<&[String]>) -> Result<Vec<Incoming>, String> {
     let rows = store.vault_list().map_err(|e| e.to_string())?;
     let rows: Vec<VaultRow> = match ids {
         Some(ids) => {
@@ -110,27 +134,20 @@ pub fn export(store: &Store, ids: Option<&[String]>, passphrase: &str, path: &Pa
             updated_at: row.updated_at,
         });
     }
-    let file = VaultFile { format: FORMAT.into(), version: VERSION, exported_at: now_ms(), app_version: env!("CARGO_PKG_VERSION").into(), entries };
-    let plain = Zeroizing::new(serde_json::to_vec(&file).map_err(|e| e.to_string())?);
-    // `file` holds every value too: wipe them.
-    for mut e in file.entries {
+    Ok(entries)
+}
+
+/// Wipes every part of `entries`.
+pub(super) fn wipe(entries: Vec<Incoming>) {
+    for mut e in entries {
         for v in e.parts.values_mut() {
             zeroize::Zeroize::zeroize(v);
         }
     }
-    let mut out = Vec::new();
-    let encryptor = age::Encryptor::with_user_passphrase(passphrase_of(passphrase));
-    let mut w = encryptor.wrap_output(&mut out).map_err(|e| format!("couldn't start encrypting: {e}"))?;
-    w.write_all(&plain).map_err(|e| format!("couldn't encrypt: {e}"))?;
-    w.finish().map_err(|e| format!("couldn't finish encrypting: {e}"))?;
-    write_atomically(path, &out)?;
-    let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    record(store, "", "", PERSON, "exported", &file_name, &format!("{} entries", rows.len()));
-    Ok(ExportResult { count: rows.len(), file_name })
 }
 
 /// The file appears whole or not at all: written beside it, then renamed.
-fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(super) fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let dir = path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
     let tmp = dir.join(format!(".{}.tmp", uuid::Uuid::new_v4().simple()));
     std::fs::write(&tmp, bytes).map_err(|e| {

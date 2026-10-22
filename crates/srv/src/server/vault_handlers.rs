@@ -225,7 +225,12 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                 let path = file_path(&body)?;
                 let pass = body.get("passphrase").and_then(Value::as_str).unwrap_or("").to_string();
                 let ids: Option<Vec<String>> = body.get("ids").and_then(|v| serde_json::from_value(v.clone()).ok());
-                let out = vault::transfer::export(&store, ids.as_deref(), &pass, &path)?;
+                // `.vault` (an age file), or a KeePass database for the person to take to another manager.
+                let out = match body.get("format").and_then(Value::as_str).unwrap_or("vault") {
+                    "kdbx" => vault::kdbx_export::export(&store, ids.as_deref(), &pass, &path)?,
+                    "vault" => vault::transfer::export(&store, ids.as_deref(), &pass, &path)?,
+                    other => return Err(format!("unknown export format {other:?}")),
+                };
                 Ok((json!({ "count": out.count, "file_name": out.file_name }), true))
             }
             "import_inspect" => {

@@ -378,3 +378,23 @@ async fn an_empty_key_file_is_a_refused_key_file_and_not_no_key_file() {
     assert_eq!(s, StatusCode::BAD_REQUEST, "{empty}");
     assert!(empty.to_string().contains("key file"), "{empty}");
 }
+
+// The export is a `.vault` file or, asked for, a KeePass database: the host's route only, and nothing
+// else is accepted as a format.
+#[tokio::test]
+async fn an_export_can_be_a_keepass_database_and_only_a_known_format() {
+    let app = app().await;
+    let host = |body: Value| post("/api/v1/host/vault", &[HOST], body);
+    send(&app, host(new_ssn())).await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("out.kdbx").to_string_lossy().into_owned();
+    let (s, _) = send(&app, post("/api/v1/host/vault", &[], json!({ "op": "export", "path": path, "format": "kdbx", "passphrase": "correct horse battery staple" }))).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "an agent can't export in any format");
+    let (s, body) = send(&app, host(json!({ "op": "export", "path": path, "format": "zip", "passphrase": "correct horse battery staple" }))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{body}");
+    let (s, body) = send(&app, host(json!({ "op": "export", "path": path, "format": "kdbx", "passphrase": "correct horse battery staple" }))).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let bytes = std::fs::read(&path).unwrap();
+    assert_eq!(&bytes[..4], &[0x03, 0xD9, 0xA2, 0x9A]);
+    assert!(!body.to_string().contains("123-45"), "{body}");
+}

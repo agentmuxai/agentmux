@@ -120,6 +120,30 @@ describe("Export", () => {
         expect(vaultExport.mock.calls[1][0].ids).toEqual(["ssn-alex"]);
     });
 
+    it("exports a .vault file by default, or a KeePass database when asked, and says how to open each", async () => {
+        vaultExport.mockResolvedValue({ count: 2, file_name: "agentmux-test.vault" });
+        await open();
+        const format = screen.getByRole("radiogroup", { name: "File format" });
+        expect(within(format).getByRole("radio", { name: /AgentMux Vault file/ })).toBeChecked();
+        fill("a long enough passphrase");
+        fireEvent.click(save());
+        await waitFor(() => expect(vaultExport).toHaveBeenCalledTimes(1));
+        expect(vaultExport.mock.calls[0][0]).toMatchObject({ format: "vault" });
+        cleanup();
+
+        vaultExport.mockResolvedValue({ count: 2, file_name: "agentmux-test.kdbx" });
+        await open();
+        fireEvent.click(within(screen.getByRole("radiogroup", { name: "File format" })).getByRole("radio", { name: /KeePass database/ }));
+        fill("a long enough passphrase");
+        fireEvent.click(save());
+        await waitFor(() => expect(vaultExport).toHaveBeenCalledTimes(2));
+        expect(vaultExport.mock.calls[1][0]).toMatchObject({ format: "kdbx", passphrase: "a long enough passphrase" });
+        const done = await screen.findByRole("status");
+        expect(done.textContent).toContain("agentmux-test.kdbx");
+        expect(done.textContent).toContain("KeePassXC");
+        expect(done.textContent).not.toContain("age -d");
+    });
+
     it("says where it saved, how to open it without AgentMux, and forgets the passphrase", async () => {
         vaultExport.mockResolvedValue({ count: 2, file_name: "agentmux-test.vault" });
         await open();

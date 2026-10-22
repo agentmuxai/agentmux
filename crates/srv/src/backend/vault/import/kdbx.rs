@@ -15,6 +15,7 @@ use std::collections::BTreeMap;
 use keepass::db::GroupRef;
 use keepass::{Database, DatabaseKey};
 
+use super::super::{kdbx_names, kinds};
 use super::{Imported, Incoming, ReadError, Source, MAX_ITEMS};
 
 pub const MAGIC: [u8; 4] = [0x03, 0xD9, 0xA2, 0x9A];
@@ -163,18 +164,6 @@ fn check_kdf(data: &[u8]) -> Result<(), String> {
 /// The field names KeePass itself uses; any other field is the person's own.
 const STANDARD: &[&str] = &["Title", "UserName", "Password", "URL", "Notes", "otp"];
 
-/// A custom field named for a kind the Vault has becomes that kind (the names an
-/// AgentMux export to KeePass uses, §8.3).
-fn kind_of_field(name: &str) -> Option<(&'static str, &'static str)> {
-    match name.trim().to_lowercase().as_str() {
-        "ssn" | "social security number" => Some(("ssn", "value")),
-        "card number" | "credit card number" => Some(("card", "number")),
-        "api key" | "api_key" | "apikey" => Some(("api-key", "value")),
-        _ => None,
-    }
-}
-
-/// The most a key file may be: KeePass's own are a few hundred bytes (an XML file, or 32 random ones).
 pub const MAX_KEY_FILE: usize = 1024 * 1024;
 
 pub fn read(bytes: &[u8], passphrase: &str, keyfile: Option<&[u8]>) -> Result<Imported, ReadError> {
@@ -263,25 +252,70 @@ fn entry_into(e: &keepass::db::Entry, tag: &str, entries: &mut Vec<Incoming>, sk
         }
         made.push(login);
     }
-    // Custom fields: the ones named like a kind become that kind; the rest are kept
+    // Custom fields: one named like a kind's secret (SSN, Card number, API key, …) makes an entry of
+    // that kind, with the fields that belong to it (a card's expiry, an owner); the rest are kept
     // sealed in a note, since a custom field is often a recovery code or a PIN.
-    let mut extra = String::new();
-    let mut names: Vec<&String> = e.fields.keys().filter(|k| !STANDARD.contains(&k.as_str()) && !k.starts_with("TimeOtp-") && !k.starts_with("KPH: ") && !k.starts_with("_etm_")).collect();
-    names.sort();
-    for name in names {
-        let value = e.get(name).map(str::trim).unwrap_or("");
-        if value.is_empty() {
+    let mut custom: Vec<(String, String)> = e
+        .fields
+        .keys()
+        .filter(|k| !STANDARD.contains(&k.as_str()) && !k.starts_with("TimeOtp-") && !k.starts_with("KPH: ") && !k.starts_with("_etm_"))
+        .filter_map(|k| {
+            let v = e.get(k).map(str::trim).unwrap_or("");
+            (!v.is_empty()).then(|| (k.clone(), v.to_string()))
+        })
+        .collect();
+    custom.sort();
+    let mut used = vec![false; custom.len()];
+    let mut typed: Vec<Incoming> = Vec::new();
+    for primary in kdbx_names::PRIMARY {
+        let Some(i) = custom.iter().position(|(n, _)| kdbx_names::matches(primary.aliases, n)) else { continue };
+        if used[i] {
             continue;
         }
-        match kind_of_field(name) {
-            Some((kind, part)) => made.push(Incoming::new(kind, &format!("{label} ({name})")).part(part, value)),
-            None => {
-                if !extra.is_empty() {
-                    extra.push('\n');
-                }
-                extra.push_str(&format!("{name}: {value}"));
+        used[i] = true;
+        let mut entry = Incoming::new(primary.kind, &label).part(primary.part, &custom[i].1);
+        for c in kdbx_names::COMPANIONS.iter().filter(|c| c.kind == primary.kind) {
+            if let Some(j) = custom.iter().position(|(n, _)| kdbx_names::matches(c.aliases, n)).filter(|j| !used[*j]) {
+                used[j] = true;
+                entry = entry.part(c.part, &custom[j].1);
             }
         }
+        typed.push(entry);
+    }
+    // The details (an owner, a bank, an expiry) go to the entries that take them.
+    for detail in kdbx_names::DETAILS {
+        let Some(j) = custom.iter().position(|(n, _)| kdbx_names::matches(detail.aliases, n) || n.trim().eq_ignore_ascii_case(detail.title)).filter(|j| !used[*j]) else { continue };
+        let mut taken = false;
+        for t in typed.iter_mut() {
+            if kinds::kind(&t.kind).is_some_and(|k| k.fields.contains(&detail.name)) {
+                *t = std::mem::take(t).field(detail.name, &custom[j].1);
+                taken = true;
+            }
+        }
+        if taken {
+            used[j] = true;
+        }
+    }
+    // An entry that is nothing but one typed secret keeps its own title; one with a password too (or
+    // several secrets) names each by what it holds.
+    if typed.len() == 1 && password.is_empty() {
+        typed[0].label = label.clone();
+    } else {
+        for t in typed.iter_mut() {
+            let what = kdbx_names::primary_for(&t.kind).map(|p| p.title).unwrap_or("secret");
+            t.label = format!("{label} ({what})");
+        }
+    }
+    made.extend(typed);
+    let mut extra = String::new();
+    for (i, (name, value)) in custom.iter().enumerate() {
+        if used[i] {
+            continue;
+        }
+        if !extra.is_empty() {
+            extra.push('\n');
+        }
+        extra.push_str(&format!("{name}: {value}"));
     }
     // A one-time-code seed with no password to go with it (a 2FA-only entry) has no
     // login to ride on, so it is kept in the sealed note rather than dropped.
