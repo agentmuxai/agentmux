@@ -167,6 +167,85 @@ describe("Export", () => {
         fireEvent.click(save());
         expect((await screen.findByRole("alert")).textContent).toContain("access denied");
     });
+
+    describe("unencrypted", () => {
+        const PLACE = { pick_id: "place-1", file_name: "agentmux-test.csv", folder: "C:\\Users\\a\\Documents", synced_folder: null };
+        const pickCsv = () => fireEvent.click(within(screen.getByRole("radiogroup", { name: "File format" })).getByRole("radio", { name: /CSV, unencrypted/ }));
+        const exportButton = () => screen.getByRole("button", { name: /Export unencrypted/ });
+
+        it("needs no passphrase, shows the place first, and writes only after the word is typed", async () => {
+            vaultExport.mockResolvedValueOnce(PLACE);
+            await open();
+            pickCsv();
+            expect(screen.queryByText("Passphrase")).toBeNull();
+            expect(screen.getByRole("dialog").textContent).toContain("every secret in it, unencrypted");
+            fireEvent.click(save());
+            await screen.findByRole("group", { name: "Where it will be saved" });
+            expect(vaultExport).toHaveBeenCalledTimes(1);
+            expect(vaultExport.mock.calls[0][0]).toMatchObject({ format: "csv" });
+            expect(vaultExport.mock.calls[0][0].default_name).toMatch(/^agentmux-\d{4}-\d{2}-\d{2}$/);
+            expect(screen.getByRole("group", { name: "Where it will be saved" }).textContent).toContain("agentmux-test.csv");
+            // Nothing is written until the person types the word.
+            expect(exportButton()).toBeDisabled();
+            type(screen.getByLabelText(/Type "export" to confirm/), "expor");
+            expect(exportButton()).toBeDisabled();
+            vaultExport.mockResolvedValueOnce({ count: 2, file_name: "agentmux-test.csv" });
+            type(screen.getByLabelText(/Type "export" to confirm/), "Export");
+            fireEvent.click(exportButton());
+            await waitFor(() => expect(vaultExport).toHaveBeenCalledTimes(2));
+            expect(vaultExport.mock.calls[1][0]).toEqual({ format: "csv", pick_id: "place-1", ids: undefined, confirmed: true });
+            const done = await screen.findByRole("status");
+            expect(done.textContent).toContain("Saved 2 entries to agentmux-test.csv");
+            expect(done.textContent).toContain("isn't encrypted");
+            expect(done.textContent).toContain("spreadsheet");
+        });
+
+        it("warns when the folder is synced to the cloud, and exports only the chosen entries", async () => {
+            vaultExport.mockResolvedValueOnce({ ...PLACE, synced_folder: "OneDrive" });
+            await open();
+            fireEvent.click(within(screen.getByRole("radiogroup", { name: "File format" })).getByRole("radio", { name: /JSON, unencrypted/ }));
+            fireEvent.click(within(screen.getByRole("group", { name: "What to export" })).getByLabelText("Stripe"));
+            fireEvent.click(save());
+            const alerts = await screen.findAllByRole("alert");
+            expect(alerts.map((a) => a.textContent).join(" ")).toContain("synced by OneDrive");
+            vaultExport.mockResolvedValueOnce({ count: 1, file_name: "agentmux-test.json" });
+            type(screen.getByLabelText(/Type "export" to confirm/), "export");
+            fireEvent.click(exportButton());
+            await waitFor(() => expect(vaultExport).toHaveBeenCalledTimes(2));
+            expect(vaultExport.mock.calls[1][0]).toMatchObject({ format: "json", ids: ["ssn-alex"] });
+        });
+
+        it("tells the host to forget the place when the person backs out, and stays quiet when they close the save dialog", async () => {
+            vaultExport.mockResolvedValueOnce({ cancelled: true });
+            const { onClose } = await open();
+            pickCsv();
+            fireEvent.click(save());
+            await waitFor(() => expect(vaultExport).toHaveBeenCalledTimes(1));
+            expect(screen.queryByRole("group", { name: "Where it will be saved" })).toBeNull();
+            expect(screen.queryByText(/Type "export"/)).toBeNull();
+            cleanup();
+
+            vaultExport.mockReset();
+            vaultExport.mockResolvedValueOnce(PLACE);
+            vaultExport.mockResolvedValue({ cancelled: true });
+            const second = await open();
+            pickCsv();
+            fireEvent.click(save());
+            await screen.findByRole("group", { name: "Where it will be saved" });
+            fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+            expect(second.onClose).toHaveBeenCalled();
+            expect(vaultExport.mock.calls.at(-1)![0]).toEqual({ format: "csv", cancel: true });
+            expect(onClose).not.toHaveBeenCalled();
+        });
+
+        it("shows the host's refusal, as on a system that can't confirm the person", async () => {
+            vaultExport.mockRejectedValueOnce(new Error("Exporting the Vault unencrypted needs this computer to confirm it is you first"));
+            await open();
+            pickCsv();
+            fireEvent.click(save());
+            expect((await screen.findByRole("alert")).textContent).toContain("needs this computer to confirm it is you");
+        });
+    });
 });
 
 describe("Import", () => {

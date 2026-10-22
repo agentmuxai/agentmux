@@ -139,7 +139,10 @@ async fn report_copy(state: &Arc<AppState>, id: &str, part: &str, done: bool) {
     }
 }
 
-async fn confirmed(message: String) -> Result<(), String> {
+/// Whether this system has a prompt that confirms the person (see [`verify_person`]).
+pub(super) const CAN_CONFIRM: bool = cfg!(any(target_os = "windows", target_os = "macos"));
+
+pub(super) async fn confirmed(message: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || verify_person(&message)).await.map_err(|e| format!("vault: {e}"))?
 }
 

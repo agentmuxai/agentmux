@@ -229,6 +229,8 @@ pub(crate) async fn handle_host_vault(State(state): State<AppState>, headers: He
                 let out = match body.get("format").and_then(Value::as_str).unwrap_or("vault") {
                     "kdbx" => vault::kdbx_export::export(&store, ids.as_deref(), &pass, &path)?,
                     "vault" => vault::transfer::export(&store, ids.as_deref(), &pass, &path)?,
+                    // Unencrypted, for another manager. The host asked the person and the OS first.
+                    plain @ ("csv" | "json") => vault::plain_export::export(&store, ids.as_deref(), plain, &path)?,
                     other => return Err(format!("unknown export format {other:?}")),
                 };
                 Ok((json!({ "count": out.count, "file_name": out.file_name }), true))
