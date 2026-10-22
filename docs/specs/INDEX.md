@@ -667,6 +667,7 @@ partial list.
 | [`SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27`](SPEC_FLOATING_PANE_ALWAYS_ON_TOP_2026_09_27.md) | SPEC: "Always on top" for floating panes |
 | [`SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09`](SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md) | SPEC: Floating-pane redock — hover-intent dwell and a neutral parking zone |
 | [`SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08`](SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md) | Focus follows the selection: after any close, you can type right away |
+| [`SPEC_FORK_SLUG_MIGRATION_2026_10_22`](SPEC_FORK_SLUG_MIGRATION_2026_10_22.md) | SPEC: Give pre-fix forks their clean agent id, without breaking anything keyed by the old one |
 | [`SPEC_FRONTEND_BUNDLE_SPLITTING_2026_10_21`](SPEC_FRONTEND_BUNDLE_SPLITTING_2026_10_21.md) | Spec: a smaller startup bundle, so each window starts sooner |
 | [`SPEC_GATED_RENDERER_RECOVERY_2026_06_01`](SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md) | Gated Renderer Recovery — Memory-Aware Crash Handling |
 | [`SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27`](SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md) | Spec: Global Memory delivery into agents — single source of truth |

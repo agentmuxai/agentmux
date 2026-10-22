@@ -26,6 +26,7 @@
 //! (`shell::<item>`) that callers elsewhere in the crate already import, so the
 //! reorganization changed no call site.
 
+mod agent_identity;
 mod controller;
 mod file_ops;
 mod indexing;
