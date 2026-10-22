@@ -157,4 +157,41 @@ describe("lazyPaneTab", () => {
     it("memberMismatch ignores component, dispose and members left undefined", () => {
         expect(memberMismatch(["focus"], { component: () => null, dispose: () => {}, focus: () => true, rename: undefined })).toEqual([]);
     });
+
+    it("fills the pane with the pane surface while the code loads, not nothing", async () => {
+        const { load, resolve } = deferredLoad();
+        const manifest = lazyPaneTab({ apiVersion: 1, view: "demo", label: "Demo", icon: "star", members: [], load });
+        const { container } = render(() => {
+            const instance = manifest.create(ctx);
+            return <instance.component ctx={ctx} />;
+        });
+        expect(container.querySelector(".lazy-pane-standin")).not.toBeNull();
+        resolve({ create: () => ({ component: () => <div>real view</div> }) });
+        await flush();
+        expect(container.querySelector(".lazy-pane-standin")).toBeNull();
+        expect(screen.getByText("real view")).toBeTruthy();
+    });
+
+    it("loads once for the panes waiting on it, and builds later panes at once, with no stand-in", async () => {
+        const { load, resolve } = deferredLoad();
+        const real = () => ({ component: () => <div>real view</div>, liveTitle: () => ({ text: "Loaded" }) });
+        const create = vi.fn(real);
+        const manifest = lazyPaneTab({ apiVersion: 1, view: "demo", label: "Demo", icon: "star", members: ["liveTitle"], load });
+        const waiting = createRoot(() => [manifest.create(ctx), manifest.create(ctx)]);
+        expect(load).toHaveBeenCalledOnce();
+        resolve({ create });
+        await flush();
+        expect(create).toHaveBeenCalledTimes(2);
+        expect(waiting.map((i) => i.liveTitle!())).toEqual([{ text: "Loaded" }, { text: "Loaded" }]);
+
+        // The module is here: the next pane is the real instance, synchronously.
+        const { container } = render(() => {
+            const instance = manifest.create(ctx);
+            expect(instance.liveTitle!()).toEqual({ text: "Loaded" });
+            return <instance.component ctx={ctx} />;
+        });
+        expect(container.querySelector(".lazy-pane-standin")).toBeNull();
+        expect(screen.getByText("real view")).toBeTruthy();
+        expect(load).toHaveBeenCalledOnce();
+    });
 });

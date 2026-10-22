@@ -101,6 +101,8 @@ So `create` stays synchronous, and nothing in the host changes.
   - `focus()` returns false.
 - **Building the real instance.** When the module arrives, the stand-in builds it in the stand-in's own reactive root (`runWithOwner`), so the instance's cleanups run when the pane closes. A pane closed before its code arrived never builds one.
 - **Focus.** The host's `focus()` for a tab shown in a focused pane reached the stand-in. When the real instance arrives in an active pane, the stand-in claims focus for it the way a pane that just mounted does (`focusManager.claimFocusOnMount`): only if the pane is still the selection, with no modal or menu over it and no caret the user placed. A progress slot handed over early is passed on too.
+- **What it draws.** The pane surface (`--main-bg-color`, `.lazy-pane-standin`) for as long as the code is on its way. An empty stand-in let the pane frame's dark backdrop show through, so a new Editor flashed black before it drew (2026-10-22).
+- **Only while loading.** A type's module is loaded once, shared by the panes waiting for it. Once it is there, `create(ctx)` builds the real instance at once, as a built-in pane's does, with no stand-in and no empty frame.
 - **A failed load** shows "*Label* failed to load: *reason*" in the pane, with **Try again**, which loads again (§4).
 - **Drift.** If the real instance's members differ from `members`, that is logged as an error naming the difference. Tests for a lazy pane compare the stand-in's members with a real instance's (`membersMatch` in its test).
 
