@@ -904,6 +904,25 @@
     }
   },
   {
+    "command": "agents.migrateForkSlugs",
+    "request": "agentmux_srv::backend::rpc_types::slug_migration::CommandMigrateForkSlugsData",
+    "requestName": "CommandMigrateForkSlugsData",
+    "requestTs": {
+      "imports": [
+        "CommandMigrateForkSlugsData"
+      ],
+      "name": "CommandMigrateForkSlugsData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::slug_migration::MigrateForkSlugsResult",
+    "responseName": "MigrateForkSlugsResult",
+    "responseTs": {
+      "imports": [
+        "MigrateForkSlugsResult"
+      ],
+      "name": "MigrateForkSlugsResult"
+    }
+  },
+  {
     "command": "agentshutdownkeep",
     "request": "agentmux_srv::backend::rpc_types::block::CommandAgentShutdownKeepData",
     "requestName": "CommandAgentShutdownKeepData",

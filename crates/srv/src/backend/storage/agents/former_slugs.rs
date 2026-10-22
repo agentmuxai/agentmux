@@ -34,7 +34,7 @@ use crate::registry::FormerSlug;
 /// Additive, so no version bump. Deleted with the agent's row, like
 /// `db_agent_former_names`: a deleted agent's former slug is free again, as
 /// its current one is.
-pub(in crate::backend::storage) const FORMER_SLUGS_SCHEMA: &str = "
+pub(crate) const FORMER_SLUGS_SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS db_agent_former_slugs (
         agent_uid  TEXT NOT NULL,
         slug       TEXT NOT NULL,

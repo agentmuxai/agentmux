@@ -1140,6 +1140,7 @@ declare global {
         "agent:overlapnotes"?: boolean;
         "kanban:reminders"?: boolean;
         "agent:mcpselfheal"?: boolean;
+        "agent:outdatedidsnotice"?: boolean;
         "agent:transcriptsinglecopy"?: boolean;
         "agent:turnscopedtail"?: boolean;
         "agent:onewayflow"?: boolean;

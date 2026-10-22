@@ -16,6 +16,7 @@ export type SettingsSection =
     | "recording"
     | "devices"
     | "widgets"
+    | "agents"
     | "advanced";
 
 /** One searchable settings row. `keywords` is where "synonyms match" lives —
@@ -46,6 +47,7 @@ export const SETTINGS_SECTION_LABELS: Record<SettingsSection, string> = {
     recording: "Recording",
     devices: "Paired devices",
     widgets: "Widgets",
+    agents: "Agents",
     advanced: "Advanced",
 };
 
@@ -62,6 +64,7 @@ export const SETTINGS_SECTIONS: PaneSections<SettingsSection> = {
         { id: "recording", label: SETTINGS_SECTION_LABELS.recording, icon: "microphone" },
         { id: "devices", label: SETTINGS_SECTION_LABELS.devices, icon: "mobile-screen" },
         { id: "widgets", label: SETTINGS_SECTION_LABELS.widgets, icon: "puzzle-piece" },
+        { id: "agents", label: SETTINGS_SECTION_LABELS.agents, icon: "robot" },
         { id: "advanced", label: SETTINGS_SECTION_LABELS.advanced, icon: "sliders" },
     ],
 };

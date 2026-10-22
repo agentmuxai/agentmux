@@ -14,6 +14,7 @@ mod skills;
 mod history;
 mod template;
 mod fork_history;
+mod fork_slugs;
 // Builds a fork's and a worker's definition ("Fork, spawn and worker" above).
 pub(crate) use template::copy_definition;
 mod identity;
@@ -50,6 +51,7 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     history::register(engine, state);
     template::register(engine, state);
     fork_history::register(engine, state);
+    fork_slugs::register(engine, state);
     api_retry::register(engine);
     identity::register(engine, state);
     instance::register(engine, state);

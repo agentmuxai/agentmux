@@ -275,6 +275,9 @@ async function initHostMux(): Promise<void> {
         // A window that came up with the default layout because there was
         // nothing to restore offers the layout another build saved (srv decides).
         void import("@/app/window/restore-other-build").then((m) => m.offerLayoutFromOtherBuild());
+        // Agents whose id an older build chained: one notice, until dismissed,
+        // pointing to Settings › Agents (srv decides who they are).
+        void import("@/app/view/settings/fork-slug-notice").then((m) => m.offerForkSlugUpdate());
 
         benchDump(); // emit full startup timeline to log
 
