@@ -95,6 +95,11 @@ fn run(host: &BrowserHost, op: DiscardOp) -> Option<bool> {
     unsafe {
         // The struct libcef allocated: a stock build's ends before our fields.
         if (*raw).base.size < std::mem::size_of::<_cef_browser_host_t>() {
+            tracing::info!(
+                runtime_size = (*raw).base.size,
+                binding_size = std::mem::size_of::<_cef_browser_host_t>(),
+                "[discard] libcef has no Discard API (stock build)"
+            );
             return None;
         }
         match op {
