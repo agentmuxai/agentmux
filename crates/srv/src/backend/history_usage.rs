@@ -131,6 +131,13 @@ pub fn compute(
     }
 }
 
+/// The shared store's compression as it is now, for a cached answer.
+pub fn compression_now() -> Option<HistoryCompression> {
+    let store = crate::backend::agent_session::global_transcript_store()?;
+    let roots = Roots::on_this_machine();
+    Some(compression(&store, roots.as_ref().and_then(|r| r.transcripts_db.parent())))
+}
+
 /// The shared store's frames: one sum over the frame table. What compression
 /// waits for is checked here, the way the framer checks it, because only the
 /// srv that owns the store runs the framer and any srv may answer this.
