@@ -176,7 +176,10 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
         if ((e.target as HTMLElement | null)?.closest(".nowheel")) return;
         // Ctrl/Cmd+scroll is the shared pane zoom (the window's handler), not the graph's.
         if (isModKey(e)) return;
+        // The graph's own zoom. Stopped here, so the window's zoom handler, which takes Ctrl or Cmd
+        // on any platform, doesn't also zoom the pane: a macOS pinch is a Ctrl+wheel.
         e.preventDefault();
+        e.stopPropagation();
         const rect = canvasEl.getBoundingClientRect();
         const mx = e.clientX - rect.left;
         const my = e.clientY - rect.top;

@@ -20,6 +20,7 @@ vi.mock("@/app/store/rpc-api", () => ({
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import { isModKey } from "@/util/platformutil";
 import { DroneViewModel } from "./drone-model";
 import { DroneView } from "./drone-view";
 
@@ -80,5 +81,30 @@ describe("Drone pane zoom", () => {
         const { el, model } = mount();
         el(".drone-canvas").dispatchEvent(wheel(false));
         expect(model.viewportAtom().zoom).toBeGreaterThan(1);
+    });
+
+    it("keeps a wheel with the other modifier (a macOS pinch is Ctrl+wheel) for the graph only", () => {
+        const { el, model } = mount();
+        // Whichever of Ctrl and Cmd isn't this platform's zoom modifier.
+        const ctrlOnly = { ctrlKey: true, metaKey: false };
+        const other = isModKey(ctrlOnly) ? { ctrlKey: false, metaKey: true } : ctrlOnly;
+        const reachedWindow = vi.fn();
+        window.addEventListener("wheel", reachedWindow);
+        try {
+            el(".drone-canvas").dispatchEvent(
+                new WheelEvent("wheel", {
+                    deltaY: -100,
+                    ...other,
+                    bubbles: true,
+                    cancelable: true,
+                    clientX: 10,
+                    clientY: 10,
+                })
+            );
+        } finally {
+            window.removeEventListener("wheel", reachedWindow);
+        }
+        expect(model.viewportAtom().zoom).toBeGreaterThan(1);
+        expect(reachedWindow).not.toHaveBeenCalled();
     });
 });
