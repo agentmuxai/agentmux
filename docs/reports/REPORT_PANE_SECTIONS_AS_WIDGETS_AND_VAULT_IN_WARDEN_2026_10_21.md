@@ -64,7 +64,7 @@ What they share is a convention, not a contract. The selected section lives in b
 2. In `widgets.json`, allow `"section": "<id>"` beside `blockdef`. srv and the frontend resolve it to `<view>:section` from the manifest, and an unknown id is reported in Settings ▸ Widgets instead of failing silently. Raw meta keeps working.
 3. Add **Pin this section to the bar**. *Built:* the pane header's menu offers "Pin “LAN” to bar" for the section a pane shows (and its own section, for Warden's Vault). It pins an entry that already opens that section (Kanban's built-in one), or has srv add one to the user's `widgets.json` (`widgets.sectionentry`, key `section@<view>-<section>`) and pins that; a pinned section offers "Unpin". `defwidget@kanban` is the built-in example of the same thing.
 4. In the SDK, export the built-in views and their section ids as a typed union, so `am.panes.open("warden", { "warden:section": "kanban" })` type-checks.
-5. Optionally, mount a section-opened pane lazily: mount only the selected section until the user switches. Warden already does this for History and Kanban through a `visible` prop. This makes a pinned section cheaper than a whole Warden.
+5. *Built (task #173):* Warden mounts each section the first time it is shown, and Host, LAN and Audit poll only while shown (`pollWhileVisible`). Optionally, mount a section-opened pane lazily: mount only the selected section until the user switches. Warden already does this for History and Kanban through a `visible` prop. This makes a pinned section cheaper than a whole Warden.
 
 ## 4. The widget API's `panes` permission (fixed in #5279)
 

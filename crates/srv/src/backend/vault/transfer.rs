@@ -55,6 +55,22 @@ struct VaultFile {
     entries: Vec<Incoming>,
 }
 
+/// [`VaultFile`] borrowing its entries, so writing one out leaves no copy of them to wipe.
+#[derive(Serialize)]
+struct VaultFileRef<'a> {
+    format: &'a str,
+    version: u32,
+    exported_at: i64,
+    app_version: &'a str,
+    entries: &'a [Incoming],
+}
+
+/// The `.vault` file's contents without the encryption, for the plain JSON export.
+pub(super) fn plain_json(entries: &[Incoming]) -> Result<Zeroizing<Vec<u8>>, String> {
+    let file = VaultFileRef { format: FORMAT, version: VERSION, exported_at: now_ms(), app_version: env!("CARGO_PKG_VERSION"), entries };
+    serde_json::to_vec_pretty(&file).map(Zeroizing::new).map_err(|e| e.to_string())
+}
+
 fn passphrase_of(s: &str) -> SecretString {
     SecretString::from(s.to_string())
 }

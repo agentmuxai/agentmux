@@ -19,6 +19,9 @@ use crate::state::AppState;
 /// The file the person last picked to import, by the id the page was given.
 /// The page then names the id, never the path, to unlock or inspect it again.
 static PICKED: Mutex<Option<(String, PathBuf)>> = Mutex::new(None);
+/// Where the person chose to save an unencrypted export, by the id the page was given: the page
+/// sees the place and says so, then confirms with that id, and srv writes only to this path.
+static PLAIN_PICKED: Mutex<Option<(String, PathBuf)>> = Mutex::new(None);
 /// The key file the person chose for the database in `PICKED` (a KeePass database may need one as
 /// well as, or instead of, its password), by the same id. Only its path is held: the bytes are read
 /// when srv is asked, and go to srv only.
@@ -34,7 +37,7 @@ fn key_file_for(pick_id: &str) -> Option<PathBuf> {
 /// A file name the save dialog may suggest: letters, digits, `.`, `_` and `-`.
 fn suggested_name(raw: &str, extension: &str) -> String {
     let clean: String = raw.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')).take(80).collect();
-    let stem = clean.trim_end_matches(".vault").trim_end_matches(".kdbx").trim_matches('.');
+    let stem = clean.trim_end_matches(".vault").trim_end_matches(".kdbx").trim_end_matches(".csv").trim_end_matches(".json").trim_matches('.');
     format!("{}.{extension}", if stem.is_empty() { "agentmux" } else { stem })
 }
 
@@ -51,6 +54,9 @@ async fn relay(state: &Arc<AppState>, body: Value) -> Result<Value, String> {
 /// `vault_export`: ask where to save, then have srv write the encrypted file there.
 /// Answers `{ cancelled: true }` if the person closes the dialog.
 pub async fn export(state: &Arc<AppState>, args: &Value) -> Result<Value, String> {
+    if matches!(args.get("format").and_then(Value::as_str), Some("csv" | "json")) {
+        return export_plain(state, args).await;
+    }
     // A `.vault` file, or a KeePass database.
     let (format, extension, filter) = match args.get("format").and_then(Value::as_str) {
         Some("kdbx") => ("kdbx", "kdbx", "KeePass database"),
@@ -79,6 +85,58 @@ pub async fn export(state: &Arc<AppState>, args: &Value) -> Result<Value, String
         }),
     )
     .await
+}
+
+/// The unencrypted CSV or JSON export, in two steps so the person sees where the file will go
+/// before anything is written (spec §8.3): with no `pick_id`, ask where to save and answer with the
+/// place; with the `pick_id` and `confirmed`, have the OS confirm the person (as Reveal does) and
+/// then have srv write the file. `cancel` forgets the place.
+async fn export_plain(state: &Arc<AppState>, args: &Value) -> Result<Value, String> {
+    let format = if args.get("format").and_then(Value::as_str) == Some("json") { "json" } else { "csv" };
+    let wanted = args.get("pick_id").and_then(Value::as_str).unwrap_or("");
+    if args.get("cancel").and_then(Value::as_bool) == Some(true) {
+        *PLAIN_PICKED.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        return Ok(json!({ "cancelled": true }));
+    }
+    if wanted.is_empty() {
+        // Checked first, so the person isn't taken through the steps to a refusal.
+        if !super::vault::CAN_CONFIRM {
+            return Err("Exporting the Vault unencrypted needs this computer to confirm it is you first, and it can't yet on this system. Export a .vault file instead.".into());
+        }
+        let name = suggested_name(args.get("default_name").and_then(Value::as_str).unwrap_or(""), format);
+        let path = tokio::task::spawn_blocking(move || {
+            let _guard = super::platform::host_dialog_guard();
+            rfd::FileDialog::new().set_title("Export the Vault, unencrypted").set_file_name(name).add_filter(if format == "json" { "JSON" } else { "CSV" }, &[format]).save_file()
+        })
+        .await
+        .map_err(|e| format!("vault_export: {e}"))?;
+        let Some(mut path) = path else { return Ok(json!({ "cancelled": true })) };
+        if path.extension().is_none() {
+            path.set_extension(format);
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        let answer = json!({
+            "pick_id": id,
+            "file_name": path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+            "folder": path.parent().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(),
+            "synced_folder": synced_folder(&path),
+        });
+        *PLAIN_PICKED.lock().unwrap_or_else(|e| e.into_inner()) = Some((id, path));
+        return Ok(answer);
+    }
+    if args.get("confirmed").and_then(Value::as_bool) != Some(true) {
+        return Err("the person hasn't confirmed the export".into());
+    }
+    let held = PLAIN_PICKED.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let path = match held {
+        Some((id, path)) if id == wanted => path,
+        _ => return Err("choose where to save the file again".into()),
+    };
+    super::vault::confirmed("Export every secret in the AgentMux Vault, unencrypted".to_string()).await?;
+    // One export per choice of place.
+    *PLAIN_PICKED.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    tracing::info!("[vault] unencrypted export to a file the person chose");
+    relay(state, json!({ "op": "export", "format": format, "path": path.to_string_lossy(), "ids": args.get("ids") })).await
 }
 
 /// `vault_import`: with no `pick_id`, ask which file, then have srv read it; with
@@ -254,6 +312,21 @@ mod tests {
         assert!(!picked.exists() && other.exists(), "only the picked file");
         assert!(delete_picked(&json!({ "pick_id": "pick-1" })).await.is_err(), "and only once");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_plain_export_is_only_for_the_place_the_person_chose() {
+        *PLAIN_PICKED.lock().unwrap() = Some(("plain-1".to_string(), PathBuf::from("x.csv")));
+        let state = Arc::new(crate::state::AppState::default());
+        let run = |args: Value| tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(export_plain(&state, &args));
+        // Without the person's confirmation, or for another id, nothing is written and the place is kept.
+        assert!(run(json!({ "format": "csv", "pick_id": "plain-1" })).unwrap_err().contains("hasn't confirmed"));
+        assert!(run(json!({ "format": "csv", "pick_id": "someone-elses", "confirmed": true })).unwrap_err().contains("again"));
+        assert!(PLAIN_PICKED.lock().unwrap().is_some());
+        // Cancelling forgets it.
+        assert_eq!(run(json!({ "format": "csv", "cancel": true })).unwrap(), json!({ "cancelled": true }));
+        assert!(PLAIN_PICKED.lock().unwrap().is_none());
+        assert!(run(json!({ "format": "csv", "pick_id": "plain-1", "confirmed": true })).unwrap_err().contains("again"));
     }
 
     #[test]

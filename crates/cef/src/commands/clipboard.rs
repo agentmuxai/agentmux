@@ -183,7 +183,49 @@ pub fn write_secret_text(text: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(target_os = "windows"))]
+/// macOS: the text with the two marks of nspasteboard.org (`ConcealedType`, `TransientType`) that
+/// clipboard history apps and password managers honour by leaving the item out of their history.
+/// Written to the pasteboard in one go, so the marks are there when anything reads the text.
+/// Not run on a Mac by whoever wrote it: type-checked for both Apple targets and nothing more.
+#[cfg(target_os = "macos")]
+pub fn write_secret_text(text: &str) -> Result<(), String> {
+    use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
+    use objc2_foundation::NSString;
+    // The pasteboard server raises an Objective-C exception when it can't be reached; one that
+    // crosses into Rust aborts the whole host, so the writes run inside `catch`.
+    let wrote = objc2::exception::catch(std::panic::AssertUnwindSafe(|| {
+        let pb = NSPasteboard::generalPasteboard();
+        // The change count this clear gave the pasteboard: while it is still the count, nobody else
+        // has taken the pasteboard since, and what is on it is ours to clear again.
+        let mine = pb.clearContents();
+        let string_type = unsafe { NSPasteboardTypeString };
+        // Marks first, then the text, the order the Windows side keeps; a mark that doesn't take refuses the copy.
+        let marked = ["org.nspasteboard.ConcealedType", "org.nspasteboard.TransientType"]
+            .iter()
+            .all(|mark| pb.setString_forType(&NSString::from_str(""), &NSString::from_str(mark)));
+        if marked && pb.setString_forType(&NSString::from_str(text), string_type) {
+            SECRET_CHANGE.store(pb.changeCount(), std::sync::atomic::Ordering::SeqCst);
+            return true;
+        }
+        // A write refused because another app took the pasteboard must not clear what that app put there.
+        if pb.changeCount() == mine {
+            pb.clearContents();
+        }
+        false
+    }));
+    match wrote {
+        Ok(true) => Ok(()),
+        Ok(false) => Err("macOS didn't take the secret on the clipboard privately".into()),
+        Err(_) => Err("macOS couldn't reach the clipboard".into()),
+    }
+}
+
+/// The pasteboard's change count right after the last secret was put there: a clear only happens
+/// while the count is still this, so a copy made since can't be erased.
+#[cfg(target_os = "macos")]
+static SECRET_CHANGE: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(-1);
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 pub fn write_secret_text(text: &str) -> Result<(), String> {
     write_clipboard_text(text)
 }
@@ -229,7 +271,27 @@ pub fn clear_if_holds(text: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(target_os = "windows"))]
+/// macOS: empties the pasteboard if it still holds `text` and nothing has been copied since the
+/// secret went there (its change count is unchanged).
+#[cfg(target_os = "macos")]
+pub fn clear_if_holds(text: &str) -> Result<(), String> {
+    use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
+    objc2::exception::catch(std::panic::AssertUnwindSafe(|| {
+        let pb = NSPasteboard::generalPasteboard();
+        let saved = SECRET_CHANGE.load(std::sync::atomic::Ordering::SeqCst);
+        if pb.changeCount() != saved {
+            return;
+        }
+        let holds = pb.stringForType(unsafe { NSPasteboardTypeString }).is_some_and(|s| s.to_string() == text);
+        // Checked again just before clearing: something copied while the text was being compared must stay.
+        if holds && pb.changeCount() == saved {
+            pb.clearContents();
+        }
+    }))
+    .map_err(|_| "macOS couldn't reach the clipboard".to_string())
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 pub fn clear_if_holds(text: &str) -> Result<(), String> {
     if read_clipboard_text()? == text {
         write_clipboard_text("")?;

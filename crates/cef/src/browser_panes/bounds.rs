@@ -24,7 +24,7 @@
 //! - A pane is moved only while it is live and still in the window that sent
 //!   the batch: a rect from a window a pane was torn off from is dropped.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
@@ -400,6 +400,7 @@ fn apply(state: &Arc<AppState>, window_label: &str, rects: &[(PaneBounds, Option
             }
         }
     }
+    note_hidden(state, &live);
     #[cfg(not(target_os = "windows"))]
     {
         let viewport_w = rects.iter().find_map(|(_, b)| b.map(|b| b.viewport_width()));
@@ -411,6 +412,38 @@ fn apply(state: &Arc<AppState>, window_label: &str, rects: &[(PaneBounds, Option
             "[pane-bounds] applied"
         );
     }
+}
+
+/// The browsers this host has told CEF are hidden, by browser id (a pane's
+/// browser recreated after hibernation has a new id, so it starts shown).
+static HIDDEN: LazyLock<Mutex<HashSet<i32>>> = LazyLock::new(Default::default);
+
+/// A pane laid out at 0×0 is on a tab or window tab that isn't shown: tell CEF
+/// it is hidden, so its page gets hidden-page timer throttling and stops
+/// producing frames, and shown again when it gets a real rect. A collapsed
+/// pane's native window is still shown, so without this Chromium keeps the
+/// page visible. Needs the AgentMux CEF fork's windowed `WasHidden`; an older
+/// libcef ignores the call. Every path that shows a pane lays it out here, the
+/// moves above first, so the first frame after showing has a place to land.
+fn note_hidden(state: &AppState, live: &[(&PaneBounds, String)]) {
+    let mut hidden = HIDDEN.lock();
+    for (r, label) in live {
+        let Some(browser) = state.get_browser(label) else { continue };
+        let collapsed = r.width <= 0 || r.height <= 0;
+        let id = browser.identifier();
+        let changed = if collapsed { hidden.insert(id) } else { hidden.remove(&id) };
+        if !changed {
+            continue;
+        }
+        if let Some(host) = browser.host() {
+            host.was_hidden(collapsed as i32);
+        }
+    }
+}
+
+/// A browser closed (hibernation closes hidden panes): drop its entry.
+pub(crate) fn forget_hidden(browser_id: i32) {
+    HIDDEN.lock().remove(&browser_id);
 }
 
 /// Every pane's wrapper HWND in one deferred move per parent, with the same

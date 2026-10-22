@@ -354,7 +354,10 @@ pub fn on_after_created_browser_pane(state: &Arc<AppState>, browser: &Browser) {
 /// — if the explicit `close()` path already drained the reducer, the
 /// drain is a no-op; if no controller was stashed (Windows or already
 /// destroyed), the destroy step is a no-op.
-pub fn on_before_close_browser_pane(state: &Arc<AppState>, label: &str) {
+pub fn on_before_close_browser_pane(state: &Arc<AppState>, label: &str, browser_id: i32) {
+    // Its hidden mark (hibernation closes hidden panes, so these would pile up).
+    crate::browser_panes::bounds::forget_hidden(browser_id);
+
     // Step 1 (Linux/macOS): destroy the deferred OverlayController.
     // Safe now because the Browser is fully torn down and Chromium has
     // drained any queued tasks holding `WeakPtr<View>` to its BrowserView.

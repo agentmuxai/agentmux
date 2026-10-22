@@ -1445,7 +1445,7 @@ impl AgentMuxHandler {
         // in `crate::browser_pane::callbacks` after Phase 4.
         if let Some(ref lbl) = label {
             if lbl.starts_with("browser-pane-") {
-                crate::browser_pane::callbacks::on_before_close_browser_pane(&self.state, lbl);
+                crate::browser_pane::callbacks::on_before_close_browser_pane(&self.state, lbl, browser.identifier());
             }
             // Pool-window cleanup — release the respawn semaphore +
             // drop the label from the queue if the window died before
