@@ -92,6 +92,13 @@ describe("buildRuntimeArgs", () => {
         });
     });
 
+    it("never gives Claude a level only Codex takes, remembered from a Codex pick", () => {
+        const out = buildRuntimeArgs(CLAUDE_BASE, cfg({ model: "opus", effort: "ultra" }), "claude");
+        expect(out).not.toContain("--effort");
+        expect(out).not.toContain("ultra");
+        expect(buildRuntimeArgs(CLAUDE_BASE, cfg({ model: "opus", effort: "max" }), "claude")).toContain("max");
+    });
+
     // Config overrides, since `codex exec resume` (every turn after the first)
     // takes `-c` but has no `--sandbox`; verified against codex-cli 0.154.0.
     describe("codex effort and mode", () => {

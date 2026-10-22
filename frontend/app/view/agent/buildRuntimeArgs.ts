@@ -11,7 +11,7 @@
 import type { AgentRuntimeConfig, PermissionMode } from "./types";
 import { DEFAULT_RUNTIME_CONFIG } from "./types";
 import { getProvider, isAccountListed } from "./providers";
-import { codexEffort, codexSandbox, effectiveModel, effortApplies, modelTakesEffort } from "./runtime-capabilities";
+import { codexEffort, codexSandbox, effectiveModel, effortLevels, modelTakesEffort } from "./runtime-capabilities";
 import { selectLaunchArgs, withoutOverriddenFlags, withProviderFlags, type LaunchArgsProvider } from "./launch-args";
 
 /**
@@ -168,8 +168,9 @@ export function buildRuntimeArgs(
     // it; older CLIs forwarded it and the API answered 400, see modelTakesEffort)
     // (effort is supported on Opus/Sonnet only). Skip it so a Haiku pane
     // doesn't error out on every turn. Matches a concrete Haiku id too.
-    // Codex's effort is its own config override, below.
-    if (supportsModel && effortApplies(providerId, effectiveModelId ?? config.model)) {
+    // Codex's effort is its own config override, below. Only a level Claude
+    // takes: a pane can hold one remembered from a Codex pick ("ultra").
+    if (supportsModel && effortLevels(providerId, effectiveModelId ?? config.model).includes(config.effort)) {
         args.push("--effort", config.effort);
     }
 
