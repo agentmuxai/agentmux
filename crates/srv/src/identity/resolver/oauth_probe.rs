@@ -368,19 +368,18 @@ mod tests {
     }
 
     #[test]
-    fn probe_oauth_status_codex_unknown_shape_is_valid_best_effort() {
-        // codex / openclaw token-file layouts aren't publicly
-        // documented; our parser falls through to "Valid" when the
-        // file exists but lacks any parseable expiry. Better than
-        // false `needs_reauth` on a working session — strict parsing
-        // is a follow-up once the shape is pinned.
+    fn probe_oauth_status_openclaw_unknown_shape_is_valid_best_effort() {
+        // openclaw's token-file layout isn't publicly documented; our
+        // parser falls through to "Valid" when the file exists but lacks
+        // any parseable expiry. Better than false `needs_reauth` on a
+        // working session. (Codex's is known: `auth.json`, tested above.)
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(
             tmp.path().join(".credentials.json"),
-            r#"{"some":"opaque-codex-blob"}"#,
+            r#"{"some":"opaque-openclaw-blob"}"#,
         )
         .unwrap();
-        let r = probe_oauth_status("codex", tmp.path().to_str().unwrap(), 0);
+        let r = probe_oauth_status("openclaw", tmp.path().to_str().unwrap(), 0);
         assert_eq!(r, Some(OAuthProbeStatus::Valid));
     }
 }
