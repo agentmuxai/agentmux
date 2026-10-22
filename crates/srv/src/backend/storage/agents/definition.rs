@@ -430,6 +430,10 @@ impl Store {
         self.agent_def_insert_local_only(&mut def, Some(record.data.updated_at))?;
 
         let conn = self.conn.lock().unwrap();
+        if let Err(e) = record_former_slugs(&conn, &def.id, &record.data.former_slugs) {
+            tracing::warn!(def_id = %def.id, error = %e, "instance_create backfill: former slugs not copied (non-fatal)");
+        }
+        self.former_slugs.invalidate();
         for c in &record.data.content {
             if let Err(e) = conn.execute(
                 "INSERT INTO db_agent_content (agent_id, content_type, content, updated_at)
@@ -494,6 +498,10 @@ impl Store {
         // existing agent, which only reads names.
         let allocation = self.shared_slugs_to_allocate(agent);
         let shared = allocation.as_ref().map_or_else(|_| self.shared_slugs(), SharedSlugs::clone);
+        // A slug an agent was renamed from is still that agent's: matched
+        // like its current slug, after a name or slug match (fork slug
+        // migration Phase 1). Read before the connection lock.
+        let former_owner = self.former_slug_owner(&derived_slug)?.map(|o| o.uid);
 
         {
             let conn = self.conn.lock().unwrap();
@@ -517,7 +525,8 @@ impl Store {
             let found = rows
                 .iter()
                 .find(|d| d.name.trim_matches(' ').to_ascii_lowercase() == name_lower)
-                .or_else(|| rows.iter().find(|d| canonical(d).eq_ignore_ascii_case(&derived_slug)));
+                .or_else(|| rows.iter().find(|d| canonical(d).eq_ignore_ascii_case(&derived_slug)))
+                .or_else(|| former_owner.as_deref().and_then(|uid| rows.iter().find(|d| d.id == uid)));
             if let Some(def) = found {
                 let mut def = def.clone();
                 def.slug = canonical(&def);

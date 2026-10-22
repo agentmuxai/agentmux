@@ -77,6 +77,10 @@ pub(super) fn purge_agent_dependents(
             removed += conn.execute(&format!("DELETE FROM {table} WHERE uid=?1"), params![id])?;
         }
     }
+    // The slugs it was renamed from (`former_slugs`), keyed by `agent_uid`.
+    if present.contains("db_agent_former_slugs") {
+        removed += conn.execute("DELETE FROM db_agent_former_slugs WHERE agent_uid=?1", params![id])?;
+    }
     // The two that key on the agent differently.
     if present.contains("db_conversation_trust_grants") {
         removed += conn.execute(

@@ -638,16 +638,35 @@ impl Store {
     /// Every non-template, non-hidden agent a typed name could mean (identity
     /// M3, spec §5): exact (canonical) slug, or `name`/`instance_name`
     /// ASCII-case-insensitively, as SQLite's `NOCASE` compared them. Lists
-    /// rather than picks — the caller decides what to do with several.
+    /// rather than picks — the caller decides what to do with several. A name
+    /// none of them answers to may be a slug an agent was renamed from: that
+    /// agent's row (`former_slug_owner_in`; fork slug migration Phase 1).
     pub fn agents_matching_name(&self, typed: &str) -> Result<Vec<AgentNameMatch>, StoreError> {
         let typed = typed.trim();
         if typed.is_empty() {
             return Ok(Vec::new());
         }
+        // Asked before the lock: it may re-read the store.
+        let maybe_former = self.former_slug_known(typed);
         let shared = self.shared_slugs();
         let conn = self.conn.lock().unwrap();
         let rows = rows_with_canonical_slugs(&conn, "WHERE is_template = 0 AND user_hidden = 0", &shared)?;
-        Ok(rows.into_iter().filter(|r| answers_to(r, typed)).collect())
+        let matched: Vec<AgentNameMatch> = rows.iter().filter(|r| answers_to(r, typed)).cloned().collect();
+        if !matched.is_empty() || !maybe_former {
+            return Ok(matched);
+        }
+        let all = rows_with_canonical_slugs(&conn, "", &shared)?;
+        let Some(owner) = former_slug_owner_in(&conn, &shared, &all, &typed.to_lowercase())? else {
+            return Ok(Vec::new());
+        };
+        if let Some(row) = rows.into_iter().find(|r| r.id == owner) {
+            return Ok(vec![row]);
+        }
+        drop(conn);
+        // An agent only the shared definitions hold (made in another
+        // channel): matched from its record, as `agent_def_list` overlays it.
+        let def = self.agent_def_get(&owner)?.filter(|d| d.is_seeded == 0 && d.user_hidden == 0);
+        Ok(def.map(|d| AgentNameMatch { id: d.id, name: d.name, slug: d.slug, instance_name: String::new() }).into_iter().collect())
     }
 
     /// Every row a name selects, **templates and hidden rows included** — the

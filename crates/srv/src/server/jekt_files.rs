@@ -204,7 +204,7 @@ fn inline_target(target: &str) -> Option<InlineTarget> {
     use crate::backend::blockcontroller::persistent::PersistentSubprocessController;
     use crate::backend::reactive::handler::LookupOutcome;
     let handler = crate::backend::reactive::get_global_handler();
-    let block = handler.block_for_uid(target).or_else(|| match handler.lookup_by_name(target) {
+    let block = handler.block_for_uid(target).or_else(|| match handler.lookup_delivery_target(target) {
         LookupOutcome::One(reg) => Some(reg.block_id),
         _ => None,
     })?;

@@ -133,10 +133,15 @@ fn name_taken(defs: &[AgentDefinition], name: &str) -> bool {
 }
 
 /// `name_taken`, or the store's own name resolution finds it (slug, name,
-/// or a launched agent's instance name): every name a fork could take is
-/// checked against both, automatic or typed (#4746).
+/// a launched agent's instance name, or a slug an agent was renamed from):
+/// every name a fork could take is checked against both, automatic or typed
+/// (#4746). So is the name it would be addressed by, its route name: a former
+/// slug stays reserved for its agent (`SPEC_FORK_SLUG_MIGRATION_2026_10_22.md`
+/// Phase 1).
 fn name_in_use(store: &crate::backend::storage::store::Store, defs: &[AgentDefinition], name: &str) -> bool {
-    name_taken(defs, name) || store.agents_matching_name(name).map(|m| !m.is_empty()).unwrap_or(false)
+    name_taken(defs, name)
+        || store.agents_matching_name(name).map(|m| !m.is_empty()).unwrap_or(false)
+        || store.former_slug_reserved(&agentmux_common::slug::agent_route_name(name))
 }
 
 /// Build the flat, lineage-wide "#N" auto-suggestion for forking `source`.
@@ -624,10 +629,13 @@ pub(crate) fn copy_definition(
     // branch_label is the fork's full display name when provided.
     // When empty, auto-generate a flat, lineage-wide "Name #N"
     // (see suggest_fork_name's doc comment).
+    let root = fork_lineage_root(&all_defs, &source);
     let fork_name = if branch_label.is_empty() {
-        let root_former = mstore.agent_former_names(&fork_lineage_root(&all_defs, &source).id).unwrap_or_default();
+        let root_former = mstore.agent_former_names(&root.id).unwrap_or_default();
+        // A number whose fork slug is a former slug is skipped too.
         suggest_fork_name(&all_defs, &mstore.retired_agent_names().unwrap_or_default(), &root_former, &source, |n| {
             name_in_use(mstore, &all_defs, n)
+                || (as_fork && mstore.former_slug_reserved(&agentmux_common::slug::fork_slug(&root.slug, &root.name, n)))
         })
     } else {
         branch_label.to_string()
@@ -642,7 +650,6 @@ pub(crate) fn copy_definition(
     }
     // The root's slug and this fork's label: never the source's
     // slug, which chained every generation (`loap-loap-2-loap-3`).
-    let root = fork_lineage_root(&all_defs, &source);
     // Not a fork: empty, so `agent_def_insert` derives it from the name.
     let fork_slug = if as_fork { agentmux_common::slug::fork_slug(&root.slug, &root.name, &label) } else { String::new() };
     // Source's EFFECTIVE provider, from the shared resolver
@@ -1362,5 +1369,27 @@ mod tests {
         let mut defs = lineage(&[("f2", "Loap #2")]);
         defs[1].branch_label = "Experiment".to_string();
         assert!(name_taken(&defs, "experiment"));
+    }
+
+    /// A slug an agent was renamed from is reserved (fork slug migration
+    /// Phase 1): an automatic fork number whose slug it is gets skipped, and a
+    /// typed name addressed by it is in use.
+    #[tokio::test]
+    async fn a_former_slug_is_never_taken_by_a_new_fork() {
+        let state = test_state();
+        let mut root = crate::backend::storage::agents::test_agent_def("uid-fs-root", "Fsroot", "claude", "host", 1, "");
+        root.slug = "fsroot".into();
+        state.mstore.agent_def_insert(&mut root).unwrap();
+        let mut other = crate::backend::storage::agents::test_agent_def("uid-fs-other", "Other", "claude", "host", 2, "");
+        other.slug = "fsroot-2".into();
+        state.mstore.agent_def_insert(&mut other).unwrap();
+        state.mstore.test_rename_slug("uid-fs-other", "other", 1);
+
+        let fork = copy_definition(&state.mstore, &state.mstore, &state.mstore, "uid-fs-root", "", true).unwrap();
+        assert_eq!((fork.name.as_str(), fork.slug.as_str()), ("Fsroot #3", "fsroot-3"));
+        let defs = state.mstore.agent_def_list().unwrap();
+        assert!(name_in_use(&state.mstore, &defs, "Fsroot-2"));
+        assert!(name_in_use(&state.mstore, &defs, "fsroot 2"), "addressed as fsroot-2");
+        assert!(!name_in_use(&state.mstore, &defs, "Fsroot #4"));
     }
 }

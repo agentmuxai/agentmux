@@ -13,6 +13,11 @@
 //! from the relay reached it. Here a subscription is matched against every
 //! name of a live agent before it is dropped, every such name is subscribed,
 //! and a message pulled for one is delivered to the pane that runs its agent.
+//!
+//! That includes, for [`FORMER_SLUG_GRACE`] after a rename, each slug the
+//! agent was renamed from (`SPEC_FORK_SLUG_MIGRATION_2026_10_22.md` Phase 1):
+//! review notices for PRs opened under the old id still arrive. Receive-only:
+//! nothing is sent as a former slug, which can't sign (`actor::uid_owns_name`).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -41,17 +46,33 @@ impl NameDirectory {
     /// name's route name, as `Store::agent_defs_for_target` resolves a
     /// target, and a name several definitions answer to at its best rank
     /// names none of them: an agent is never kept under a name that isn't
-    /// only its own. Former names are left out on purpose: holding one would
-    /// renew its WAN lease and keep it from an agent that takes it later.
+    /// only its own.
     pub(super) fn from_defs<'a>(defs: impl IntoIterator<Item = (&'a str, &'a str, &'a str)>) -> Self {
+        Self::from_defs_and_former(defs, std::iter::empty())
+    }
+
+    /// [`Self::from_defs`], plus `(uid, former slug)` pairs ranked below
+    /// both, as `agent_defs_for_target` tries them last. Only slugs still in
+    /// their grace period belong here ([`in_grace`]): holding a former name
+    /// renews its WAN lease, so it is held for a bounded time, never for good.
+    pub(super) fn from_defs_and_former<'a>(
+        defs: impl IntoIterator<Item = (&'a str, &'a str, &'a str)>,
+        former: impl IntoIterator<Item = (&'a str, &'a str)>,
+    ) -> Self {
         let mut ranked: HashMap<String, (u8, HashSet<&'a str>)> = HashMap::new();
-        for (uid, slug, name) in defs {
+        let defs = defs.into_iter().map(|(uid, slug, name)| {
+            let slug = Some(slug.trim().to_string()).filter(|s| agentmux_common::slug::is_agent_id(s));
+            (uid, vec![(0u8, slug), (1, crate::backend::reactive::sanitize::registrable_id(name))])
+        });
+        let former = former.into_iter().map(|(uid, slug)| {
+            let slug = Some(slug.trim().to_string()).filter(|s| agentmux_common::slug::is_agent_id(s));
+            (uid, vec![(2u8, slug)])
+        });
+        for (uid, keys) in defs.chain(former) {
             if uid.is_empty() {
                 continue;
             }
-            let slug = Some(slug.trim().to_string()).filter(|s| agentmux_common::slug::is_agent_id(s));
-            let route = crate::backend::reactive::sanitize::registrable_id(name);
-            for (rank, key) in [(0u8, slug), (1, route)] {
+            for (rank, key) in keys {
                 let Some(key) = key.map(|k| k.to_lowercase()) else { continue };
                 let entry = ranked.entry(key).or_insert((rank, HashSet::new()));
                 if rank < entry.0 {
@@ -191,6 +212,17 @@ pub(super) fn live_agents(handler: &ReactiveHandler) -> Vec<LiveAgent> {
 /// new agent; the lease tick and every registration consult it.
 const DIRECTORY_TTL: Duration = Duration::from_secs(60);
 
+/// How long after a rename a former slug stays subscribed (the spec's §9.1).
+/// After it, the next directory leaves the name out and the lease tick drops
+/// it as orphaned; it stays reserved locally.
+pub(super) const FORMER_SLUG_GRACE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
+
+/// Whether a slug retired at `retired_at` (epoch ms) is still in its grace
+/// period at `now` (epoch ms). An unknown time (0) is not.
+pub(super) fn in_grace(retired_at: i64, now: i64) -> bool {
+    retired_at > 0 && now.saturating_sub(retired_at) < FORMER_SLUG_GRACE.as_millis() as i64
+}
+
 static DIRECTORY: Mutex<Option<(Instant, Arc<NameDirectory>)>> = Mutex::new(None);
 
 /// The definitions' names, from this channel's object store, cached for
@@ -215,9 +247,16 @@ pub(super) async fn directory() -> Arc<NameDirectory> {
 
 fn load_directory() -> Option<NameDirectory> {
     let store = crate::backend::identity_spawn::row_store()?;
+    let now = agentmux_common::time::now_ms();
+    let former = store.agent_former_slugs_all().unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "cloud_subscriber: former slugs not read; none held");
+        Vec::new()
+    });
+    let former = former.iter().filter(|(_, f)| in_grace(f.retired_at, now)).map(|(uid, f)| (uid.as_str(), f.slug.as_str()));
     match store.agent_def_list() {
-        Ok(defs) => Some(NameDirectory::from_defs(
+        Ok(defs) => Some(NameDirectory::from_defs_and_former(
             defs.iter().map(|d| (d.id.as_str(), d.slug.as_str(), d.name.as_str())),
+            former,
         )),
         Err(e) => {
             tracing::warn!(error = %e, "cloud_subscriber: agent names not read; keeping the last ones");
