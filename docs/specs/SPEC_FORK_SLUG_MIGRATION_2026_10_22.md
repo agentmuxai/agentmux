@@ -1,7 +1,7 @@
 # SPEC: Give pre-fix forks their clean agent id, without breaking anything keyed by the old one
 
 **Date:** 2026-10-22
-**Status:** active — Phase 0 in #5325, Phase 1 in #5329, Phase 2 in #PRNUM; Phase 3 remains.
+**Status:** active — Phase 0 in #5325, Phase 1 in #5329, Phase 2 in #5342; Phase 3 remains.
 **Related:** [`SPEC_OFFLINE_RESILIENCE_2026_10_20.md`](SPEC_OFFLINE_RESILIENCE_2026_10_20.md) §4.8 and plan row F
 (this is its "fork slug migration" half; the subscription half shipped in #5238),
 [`REPORT_FORK_AGENT_ISOLATION_2026_10_12.md`](../reports/REPORT_FORK_AGENT_ISOLATION_2026_10_12.md) F4 and §5 (why
