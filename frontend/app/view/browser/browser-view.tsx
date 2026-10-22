@@ -177,7 +177,9 @@ function BrowserSleepCard(props: { sleep: BrowserSleep; startedAt: () => number;
                     <span>{eta()}</span>
                 </div>
                 <p class="browser-sleep-card-why">{sleepReasonText(props.sleep.reason)}</p>
-                <p class="browser-sleep-card-lost">{NOT_KEPT_TEXT}</p>
+                <Show when={!props.sleep.kept}>
+                    <p class="browser-sleep-card-lost">{NOT_KEPT_TEXT}</p>
+                </Show>
                 <div class="browser-sleep-card-actions">
                     <Button density="compact" onClick={props.onKeepAwake}>
                         Keep this pane awake

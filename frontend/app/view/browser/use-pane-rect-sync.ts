@@ -9,6 +9,7 @@ import { paneReflowActive, notifyPaneReflow } from "@/app/platform/pane-anim";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { focusManager } from "@/app/store/focusManager";
 import type { BrowserViewModel } from "./browser-model";
+import { afterDiscard } from "./hibernation";
 import { paneRectBatcher } from "./pane-rect-batcher";
 
 /** CSS px the native page stops short of the pane's bottom while a splitter is
@@ -300,12 +301,41 @@ export function usePaneRectSync(params: {
         lastSentRect = null;
         setPaneCreated(false);
     };
+    // Where the browser engine has the Discard API, sleep discards the page in
+    // place instead: its renderer ends, the browser and its back/forward
+    // history stay, and loading it again brings back its scroll position and
+    // form contents. An engine without it, or a discard it refuses, closes.
+    let discarded = false;
+    const sleepNative = async () => {
+        if (!paneCreated()) return;
+        const r = await getApi().browserPanes.discard?.(model.blockId, "discard").catch(() => null);
+        switch (afterDiscard(r, asleep())) {
+            case "kept":
+                discarded = true;
+                diag(`discard-in-place`);
+                void model.markSleepKept().catch(() => {});
+                return;
+            case "close":
+                closeNative(r?.supported ? "asleep (discard refused)" : "asleep");
+                return;
+            case "load":
+                // Woken while the discard was out: load it straight back.
+                void getApi().browserPanes.discard?.(model.blockId, "load").catch(() => {});
+                return;
+        }
+    };
     createEffect(
         on(
             asleep,
             (isAsleep) => {
                 if (isAsleep) {
-                    closeNative("asleep");
+                    void sleepNative();
+                    return;
+                }
+                if (discarded) {
+                    discarded = false;
+                    diag(`load-discarded`);
+                    void getApi().browserPanes.discard?.(model.blockId, "load").catch(() => {});
                     return;
                 }
                 if (paneCreated()) return;
