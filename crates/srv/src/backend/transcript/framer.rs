@@ -21,7 +21,7 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::backend::storage::error::StoreError;
 use crate::backend::storage::filestore::{FileStore, FrameOutcome, CODEC_DELTAS, CODEC_ZSTD, FRAME_PARTS};
@@ -44,6 +44,8 @@ pub const PASS_FRAMES: usize = 64;
 const READS_CODECS: [i64; 2] = [CODEC_ZSTD, CODEC_DELTAS];
 
 static CONFIG: OnceLock<Arc<crate::backend::wconfig::ConfigState>> = OnceLock::new();
+/// What the last pass waited for, for the Storage view.
+static WAITING: Mutex<Option<String>> = Mutex::new(None);
 
 /// Attach the live settings (bootstrap).
 pub fn install_config(config: Arc<crate::backend::wconfig::ConfigState>) {
@@ -57,6 +59,11 @@ pub fn enabled() -> bool {
 
 fn deltas_enabled() -> bool {
     CONFIG.get().and_then(|c| c.extra_bool(SETTING_DELTAS)).unwrap_or(true)
+}
+
+/// What the last pass waited for: a running build that can't read frames.
+pub fn waiting() -> Option<String> {
+    WAITING.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 fn readers_dir(store_dir: &Path) -> PathBuf {
@@ -174,7 +181,9 @@ fn received_ms(store: &FileStore, zone: &str, offset: i64) -> Option<i64> {
 /// most `budget` frames. `skip` carries the frames found ineligible (a lost or
 /// short part) across passes, so they aren't read again and again.
 pub fn pass(store: &FileStore, store_dir: &Path, budget: usize, skip: &mut HashSet<(String, i32)>, now_ms: i64) -> Result<PassReport, StoreError> {
-    pass_with(store, &|| who_blocks(store_dir), budget, skip, now_ms)
+    let report = pass_with(store, &|| who_blocks(store_dir), budget, skip, now_ms)?;
+    *WAITING.lock().unwrap_or_else(|e| e.into_inner()) = report.waiting.clone();
+    Ok(report)
 }
 
 /// [`pass`] with the running-process check given (tests can't depend on

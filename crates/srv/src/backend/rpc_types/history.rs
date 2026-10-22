@@ -38,6 +38,27 @@ pub struct HistoryUsageAgent {
     pub bytes: u64,
 }
 
+/// How compressed the shared pane-history store is (`transcript::framer`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct HistoryCompression {
+    /// `agent:transcriptframes` is on.
+    pub enabled: bool,
+    /// Compressed frames in the store.
+    #[ts(type = "number")]
+    pub frames: u64,
+    /// The transcript bytes those frames hold.
+    #[ts(type = "number")]
+    pub logical_bytes: u64,
+    /// What the frames take on disk.
+    #[ts(type = "number")]
+    pub stored_bytes: u64,
+    /// Why compression waits, when it does: a running build that can't read it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub waiting: Option<String>,
+}
+
 /// What `history.usage` answers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -50,6 +71,10 @@ pub struct HistoryUsage {
     /// When this was measured, in Unix milliseconds.
     #[ts(type = "number")]
     pub computed_at_ms: u64,
+    /// The shared pane-history store's compression; absent when that store isn't open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub compression: Option<HistoryCompression>,
 }
 
 /// `history.agents`'s request: Warden's History section lists every agent

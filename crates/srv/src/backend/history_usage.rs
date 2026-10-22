@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::backend::rpc_types::{HistoryUsage, HistoryUsageAgent, HistoryUsageStore};
+use crate::backend::rpc_types::{HistoryCompression, HistoryUsage, HistoryUsageAgent, HistoryUsageStore};
 use crate::backend::storage::filestore::FileStore;
 
 /// Where each store lives. Built from the machine's data roots, or from temp
@@ -122,7 +122,29 @@ pub fn compute(
     ];
     let total_bytes = stores.iter().map(|s| s.bytes).sum();
 
-    HistoryUsage { total_bytes, stores, agents: largest_agents(transcripts, name_of), computed_at_ms: now_ms }
+    HistoryUsage {
+        total_bytes,
+        stores,
+        agents: largest_agents(transcripts, name_of),
+        computed_at_ms: now_ms,
+        compression: transcripts.map(compression),
+    }
+}
+
+/// The shared store's frames: one sum over the frame table.
+fn compression(transcripts: &FileStore) -> HistoryCompression {
+    use crate::backend::transcript::framer;
+    let (logical, stored, frames) = transcripts.frame_totals().unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "history.usage: couldn't sum the transcript store's frames");
+        (0, 0, 0)
+    });
+    HistoryCompression {
+        enabled: framer::enabled(),
+        frames: frames.max(0) as u64,
+        logical_bytes: logical.max(0) as u64,
+        stored_bytes: stored.max(0) as u64,
+        waiting: framer::waiting(),
+    }
 }
 
 /// The agents with the most pane history, largest first.

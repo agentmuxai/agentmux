@@ -11,11 +11,37 @@ import { Button } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { measuredAgo } from "@/app/statusbar/HistoryUsagePopover";
+import type { HistoryCompression } from "@/types/rpc/HistoryCompression";
 import type { HistoryUsage } from "@/types/rpc/HistoryUsage";
 import { formatBytes } from "@/util/format-bytes";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./warden-history.scss";
+
+/** How compressed the shared pane history is (`agent:transcriptframes`). */
+const CompressionLine = (props: { c: HistoryCompression }): JSX.Element => {
+    const ratio = (): string => (props.c.stored_bytes > 0 ? (props.c.logical_bytes / props.c.stored_bytes).toFixed(1) : "0");
+    return (
+        <div class="warden-history-compression" data-testid="history-compression">
+            <Show
+                when={props.c.frames > 0}
+                fallback={
+                    <span class="warden-manager-dim">
+                        {props.c.enabled ? "Pane history compression is on; nothing is compressed yet." : "Pane history isn't compressed (setting agent:transcriptframes)."}
+                    </span>
+                }
+            >
+                <span>
+                    Pane history compressed: {formatBytes(props.c.logical_bytes)} of transcript in {formatBytes(props.c.stored_bytes)} ({ratio()}×),{" "}
+                    {props.c.frames.toLocaleString()} frames.
+                </span>
+            </Show>
+            <Show when={props.c.enabled && props.c.waiting}>
+                <span class="warden-manager-dim"> Compression waits: {props.c.waiting}</span>
+            </Show>
+        </div>
+    );
+};
 
 export const WardenHistoryStorage = (props: { visible: boolean }): JSX.Element => {
     const [usage, setUsage] = createSignal<HistoryUsage | null>(null);
@@ -81,6 +107,7 @@ export const WardenHistoryStorage = (props: { visible: boolean }): JSX.Element =
                                 </For>
                             </tbody>
                         </table>
+                        <Show when={u().compression}>{(c) => <CompressionLine c={c()} />}</Show>
                         <div class="warden-history-bar">
                             <span class="warden-manager-dim">Measured {measuredAgo(u().computed_at_ms, Date.now())}</span>
                             <Button tone="quiet" density="compact" busy={loading()} onClick={() => void load(true)}>

@@ -578,9 +578,8 @@ impl FileStore {
         })
     }
 
-    /// The bytes the store's frames hold and take: `(logical, stored, frames)`.
-    /// For the Storage numbers (spec §7), which come with the recovery tool.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// The bytes the store's frames hold and take: `(logical, stored, frames)`,
+    /// for the Storage numbers (`history_usage.rs`).
     pub(crate) fn frame_totals(&self) -> Result<(i64, i64, i64), StoreError> {
         self.read_conn(|conn| {
             Ok(conn.query_row(
