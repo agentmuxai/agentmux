@@ -3,7 +3,7 @@
 **Date:** 2026-10-21
 **Author:** Maricon@charlie
 **Type:** Spec (a fix to `SPEC_DRAG_MINIMIZED_PANES_2026_10_20.md` §3 A)
-**Status:** implemented
+**Status:** implemented (#5318)
 **Requested by:** the operator: *"The ghost should land with 50% above, and 50% below where it will land, which follows the existing pattern. but with your collapsed pane, the ghost appears offset. For example, when dragging over to another collpased pane, the dragged collpased pane's ghost lands directly atop. it should land 50% off, bc it will insert."*
 
 ## 1. The existing pattern
