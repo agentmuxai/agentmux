@@ -42,12 +42,12 @@ The operator, 2026-10-22, on finding two finished tasks they had to take off hol
   - Success says the new state: "#110 is on hold" / "#110 is off hold and waiting for Naki-2".
   - A task in any other state is refused with its state ("#110 is in review; only a waiting task can be put on hold").
   - A task already in the asked-for state is not an error: the answer just says so, and no history row is written.
-- **Reason:** optional, at most `MAX_TEXT`. It goes through the same sensitive-text check as notes (§6.13 of the Kanban spec).
+- **Reason:** optional, at most `MAX_TEXT`. One that `is_sensitive_message` flags (a credential, a destructive command) is refused with 400 before anything moves, since it would show on the shared Kanban (§6.13 of the Kanban spec).
 
 ### 3.2 Holding a task the agent is working on
 
 An agent holding a claimed task may put it on hold with its `attempt`. This is "I can't go on until X happens".
-- The claim is given up and the task becomes `held`. It stays the agent's own: a task it took from anyone becomes its own, so the pause comes back to it (unlike `release`, which hands such a task back to anyone).
+- The claim is given up and the task becomes `held`. It stays the agent's own: a task it took from anyone or from a group becomes its own (its group target is cleared), so the pause comes back to it (unlike `release`, which hands such a task back).
 - The attempt isn't counted against the task, because pausing is not failing: the store raises `max_attempts` by one in the same update. It never lowers `attempts`, which is the claim's fence: the next claim gets a new number, so a late call from the paused claim is refused (Codex on #5326).
 - The card leaves In progress for the Backlog, greyed "on hold", with the reason.
 

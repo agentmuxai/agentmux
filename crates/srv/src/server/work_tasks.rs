@@ -444,6 +444,17 @@ fn waiting_for(item: &WorkItem) -> String {
     }
 }
 
+/// A hold's reason shows on the shared Kanban: one that looks like a
+/// credential or a destructive command is refused, before anything moves.
+fn sensitive_reason(reason: &str) -> Option<(StatusCode, Json<Value>)> {
+    crate::backend::reactive::sanitize::is_sensitive_message(reason).then(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "ok": false, "error": "the reason looks like it holds a credential or a destructive command; leave that out of it" })),
+        )
+    })
+}
+
 fn refused(text: String) -> (StatusCode, Json<Value>) {
     (StatusCode::CONFLICT, Json(json!({ "ok": false, "error": text })))
 }
@@ -481,6 +492,9 @@ pub(super) async fn handle_work_hold(
         return (StatusCode::NOT_FOUND, Json(json!({ "error": format!("no task {id}") })));
     };
     let reason = clean(&req.reason);
+    if let Some(r) = sensitive_reason(&reason) {
+        return r;
+    }
     let now = now_ms();
     let name = name_of(&state, &id);
     match item.state.as_str() {
@@ -535,12 +549,16 @@ pub(super) async fn handle_work_unhold(
     let Ok(Some(item)) = state.identity_store.work_queue_get(&id) else {
         return (StatusCode::NOT_FOUND, Json(json!({ "error": format!("no task {id}") })));
     };
+    let reason = clean(&req.reason);
+    if let Some(r) = sensitive_reason(&reason) {
+        return r;
+    }
     let name = name_of(&state, &id);
     match item.state.as_str() {
         work_state::OPEN => moved(&state, &id, work_state::OPEN, false),
         work_state::HELD => match state.identity_store.work_unhold(&id, now_ms()) {
             Ok(Some(m)) => {
-                record(&state, &id, &req.agent_id, "agent", "unheld", &m.from, &m.to, &clean(&req.reason));
+                record(&state, &id, &req.agent_id, "agent", "unheld", &m.from, &m.to, &reason);
                 super::work_queue::publish_changed(&state);
                 moved(&state, &id, work_state::OPEN, true)
             }

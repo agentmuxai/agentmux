@@ -525,8 +525,8 @@ impl Store {
     /// doesn't count against the task: its limit grows by one. `attempts`
     /// itself never goes down, since it is the fence: the next claim gets a
     /// new number, and a late call from this one is refused. A task it took
-    /// from anyone becomes its own, so the pause comes back to it. Fenced like
-    /// the queue's holder transitions.
+    /// from anyone or from a group becomes its own, so the pause comes back to
+    /// it. Fenced like the queue's holder transitions.
     pub fn work_hold_own(
         &self,
         id: &str,
@@ -544,10 +544,11 @@ impl Store {
                 format!(
                     "UPDATE db_work_queue
                         SET state = '{h}', max_attempts = max_attempts + 1,
-                            target_agent = CASE WHEN target_agent = '' AND target_agent_uid = '' AND target_group = ''
+                            target_agent = CASE WHEN target_agent = '' AND target_agent_uid = ''
                                                 THEN claimed_by ELSE target_agent END,
-                            target_agent_uid = CASE WHEN target_agent = '' AND target_agent_uid = '' AND target_group = ''
+                            target_agent_uid = CASE WHEN target_agent = '' AND target_agent_uid = ''
                                                     THEN claimed_by_uid ELSE target_agent_uid END,
+                            target_group = '',
                             claimed_by = '', claimed_by_uid = '', claim_expires = NULL, updated_at = ?4
                       WHERE id = ?1 AND {holder} AND attempts = ?3 AND state = '{c}'",
                     h = work_state::HELD,

@@ -200,6 +200,21 @@ async fn a_named_claim_takes_a_held_task_and_says_why_when_it_cant() {
 }
 
 #[tokio::test]
+async fn a_reason_that_looks_like_a_credential_is_refused_and_nothing_moves() {
+    let (app, state) = app_and_state();
+    let (_, v) = post(&app, "/agentmux/work", json!({"title": "t", "payload": "p"})).await;
+    let num = v["num"].as_i64().unwrap();
+    let (s, _) = post(&app, &format!("/agentmux/work/{num}/hold"), json!({"agent_id": "a1", "reason": "waiting: password=hunter2"})).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let id = state.identity_store.work_board_get(&num.to_string()).unwrap().unwrap().item.id;
+    assert_eq!(state.identity_store.work_queue_get(&id).unwrap().unwrap().state, "open", "nothing moved");
+    assert!(history(&state, num).iter().all(|(k, _, _)| k != "held"));
+    post(&app, &format!("/agentmux/work/{num}/hold"), json!({"agent_id": "a1"})).await;
+    let (s, _) = post(&app, &format!("/agentmux/work/{num}/unhold"), json!({"agent_id": "a1", "reason": "ran rm -rf on it"})).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "unhold too");
+}
+
+#[tokio::test]
 async fn a_group_member_refused_by_name_is_told_the_real_reason() {
     let app = app();
     let (_, first) = post(&app, "/agentmux/work", json!({"title": "first", "payload": "p"})).await;

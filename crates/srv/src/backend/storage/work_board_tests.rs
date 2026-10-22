@@ -316,6 +316,20 @@ fn a_holder_pauses_its_task_on_hold_and_gets_its_attempt_back() {
 }
 
 #[test]
+fn a_paused_group_task_comes_back_to_its_holder_not_the_group() {
+    let (s, _d) = store();
+    s.work_queue_enqueue(&WorkItem { target_group: "g1".into(), ..item("t", 1000) }).unwrap();
+    let f = ClaimFilter { kind: None, agent_id: "Loap-3".into(), agent_uid: "uid-l".into(), groups: vec!["g1".into()] };
+    let c = s.work_queue_claim(&f, 5000, 60_000).unwrap().unwrap();
+    s.work_hold_own("t", "Loap-3", "uid-l", c.attempts, 6000).unwrap().unwrap();
+    s.work_unhold("t", 6100).unwrap().unwrap();
+    let t = s.work_queue_get("t").unwrap().unwrap();
+    assert_eq!((t.target_agent.as_str(), t.target_agent_uid.as_str(), t.target_group.as_str()), ("Loap-3", "uid-l", ""));
+    let other = ClaimFilter { kind: None, agent_id: "Naki".into(), agent_uid: "uid-n".into(), groups: vec!["g1".into()] };
+    assert!(s.work_queue_claim(&other, 7000, 60_000).unwrap().is_none(), "another member can't take the paused work");
+}
+
+#[test]
 fn a_blocked_task_cant_be_paused_and_a_task_for_someone_keeps_its_target() {
     let (s, _d) = store();
     s.work_queue_enqueue(&for_agent("t", 1000, "Loap-3", "uid-l")).unwrap();
