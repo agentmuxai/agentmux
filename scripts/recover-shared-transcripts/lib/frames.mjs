@@ -29,12 +29,25 @@ export function hasFrames(db) {
     return !!db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'db_file_frame'").get();
 }
 
-/** Every frame of a file, by first part. */
-export function framesOf(db, zone, name) {
+/**
+ * Every frame of a file, by first part: where each lies, without its stored bytes (a large
+ * transcript's frames take gigabytes). With `data`, an iterator over whole rows, one at a time.
+ */
+export function framesOf(db, zone, name, { data = false } = {}) {
     if (!hasFrames(db)) return [];
-    return db
-        .prepare("SELECT first_part, part_count, codec, raw_len, check_hash, data FROM db_file_frame WHERE zoneid = ? AND name = ? ORDER BY first_part")
-        .all(zone, name);
+    const cols = data ? "first_part, part_count, codec, raw_len, check_hash, data" : "first_part, part_count, raw_len";
+    const stmt = db.prepare(`SELECT ${cols} FROM db_file_frame WHERE zoneid = ? AND name = ? ORDER BY first_part`);
+    return data ? stmt.iterate(zone, name) : stmt.all(zone, name);
+}
+
+/** The parts of a file in `first..first + count` that have a row (and so don't read from a frame). */
+function rowParts(db, zone, name, first, count) {
+    return new Set(
+        db
+            .prepare("SELECT partidx FROM db_file_data WHERE zoneid = ? AND name = ? AND partidx BETWEEN ? AND ?")
+            .all(zone, name, first, first + count - 1)
+            .map((r) => Number(r.partidx)),
+    );
 }
 
 // Codec 2's template (deltas.rs P1..P8): a delta line is these pieces around its values.
@@ -165,7 +178,7 @@ export function readFileBytes(db, zone, name) {
     for (const r of db.prepare("SELECT partidx, data FROM db_file_data WHERE zoneid = ? AND name = ?").all(zone, name)) {
         parts.set(Number(r.partidx), Buffer.from(r.data));
     }
-    for (const f of framesOf(db, zone, name)) {
+    for (const f of framesOf(db, zone, name, { data: true })) {
         const first = Number(f.first_part);
         const count = Number(f.part_count);
         let raw = null;
@@ -181,7 +194,9 @@ export function readFileBytes(db, zone, name) {
 /**
  * Every frame of every `output` file (or of every file when `name` is null), decoded:
  * { bad: [{ zone, name, first, error }], nul: [{ zone, name, first, parts }] }. A frame that
- * doesn't decode is damage the app reads as blank; one holding a NUL byte is a hole.
+ * doesn't decode is damage the app reads as blank; one holding a NUL byte is a hole. Only
+ * the parts with no row count: the app reads a part's row, not its frame. A frame of a shape
+ * srv never writes is left to `findDamage`.
  */
 export function scanFrames(db, { name = "output" } = {}) {
     const bad = [];
@@ -190,15 +205,20 @@ export function scanFrames(db, { name = "output" } = {}) {
     const where = name === null ? "" : "WHERE name = ?";
     const rows = db.prepare(`SELECT zoneid, name, first_part, part_count, codec, raw_len, check_hash, data FROM db_file_frame ${where} ORDER BY zoneid, name, first_part`);
     for (const f of name === null ? rows.iterate() : rows.iterate(name)) {
+        if (!wellShaped(f)) continue;
+        const first = Number(f.first_part);
+        const count = Number(f.part_count);
+        const shadowed = rowParts(db, f.zoneid, f.name, first, count);
+        if (shadowed.size === count) continue;
         let raw;
         try {
             raw = decodeFrame(f);
         } catch (e) {
-            bad.push({ zone: f.zoneid, name: f.name, first: Number(f.first_part), error: String(e.message ?? e) });
+            bad.push({ zone: f.zoneid, name: f.name, first, error: String(e.message ?? e) });
             continue;
         }
-        for (let i = 0; i < Number(f.part_count); i++) {
-            if (!raw.subarray(i * PART, (i + 1) * PART).includes(0)) continue;
+        for (let i = 0; i < count; i++) {
+            if (shadowed.has(first + i) || !raw.subarray(i * PART, (i + 1) * PART).includes(0)) continue;
             const key = `${f.zoneid}\u0000${f.name}`;
             const had = nul.get(key);
             if (had) had.parts++;

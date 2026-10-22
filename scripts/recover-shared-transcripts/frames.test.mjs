@@ -129,6 +129,25 @@ describe("a store holding frames", () => {
         db.close();
     });
 
+    it("a frame's damage or NULs count only for parts that have no row", () => {
+        const bad = { ...codec2, data: Buffer.from(codec2.data) };
+        bad.data[10] ^= 0xff;
+        const db = store("shadowed-bad", bad);
+        expect(allDamage(db).damage.map((d) => d.kind)).toEqual(["bad-frame"]);
+        // Rows written over every part of the damaged frame: the app reads those.
+        db.prepare("INSERT INTO db_file_data (zoneid, name, partidx, data) VALUES (?, ?, 0, ?)").run("agent:vvv:current", "output", Buffer.alloc(PART, "r"));
+        expect(allDamage(db).damage).toEqual([]);
+        db.close();
+
+        const holey = Buffer.from(raw);
+        holey.fill(0, 100, 200);
+        const db2 = store("shadowed-nul", { ...codec1, check_hash: createHash("sha256").update(holey).digest(), data: zstdCompressSync(holey) });
+        expect(allDamage(db2).damage.map((d) => d.kind)).toEqual(["nul-bytes"]);
+        db2.prepare("INSERT INTO db_file_data (zoneid, name, partidx, data) VALUES (?, ?, 0, ?)").run("agent:vvv:current", "output", Buffer.alloc(PART, "r"));
+        expect(allDamage(db2).damage).toEqual([]);
+        db2.close();
+    });
+
     it("a part with a row and a frame is the row, and the file is whole", () => {
         const db = store("row-and-frame");
         // A build that knows nothing of frames wrote part 0 again: the row wins.
