@@ -11,7 +11,7 @@ import { atoms, getApi, MOS } from "@/app/store/global";
 import { agentModels } from "./agent-models";
 import { buildAgentPaneIcon } from "./components/AgentPaneIcon";
 import { useAgentDefinitions } from "./components/AgentPicker";
-import { PROVIDERS, resolveProviderAlias } from "./providers";
+import { getProvider, PROVIDERS, resolveProviderAlias } from "./providers";
 import { resolveVendorEnvOverride } from "./providers/vendor-env";
 import { Logger } from "@/util/logger";
 import { translateError } from "@/app/errors/translate";
@@ -421,7 +421,9 @@ export class AgentViewModel {
         // its bundle's only when it has none.
         const effectiveProvider = await resolveEffectiveLaunchProvider(agent);
 
-        const provider = PROVIDERS[effectiveProvider] ?? PROVIDERS[resolveProviderAlias(effectiveProvider)];
+        // Through the model overlay, so a new pane starts on a model the
+        // account offers (Codex's list comes from the account, not the catalog).
+        const provider = getProvider(effectiveProvider);
         if (!provider) {
             Logger.error("agent", "Unknown provider in agent definition", { agentId: agent.id, provider: effectiveProvider });
             return false;

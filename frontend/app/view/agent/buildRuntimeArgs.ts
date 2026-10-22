@@ -62,16 +62,12 @@ const PERMISSION_STRIP = new Set([
  */
 const CONTROL_PROTOCOL_FLAG = "--permission-prompt-tool";
 
-// Last-resort codex model: used only when the catalog's codex `models` list
-// marks no `default` (the codex branch of `buildRuntimeArgs` prefers a valid
-// user pick, then that default). codex 0.116.0's baked default
-// (gpt-5.3-codex) was rejected for ChatGPT-account auth. gpt-5.5 remains
-// valid — re-verified 2026-09-12 against OpenAI's Codex model docs when the
-// CLI pin bumped to 0.154.0. It is still supported for ChatGPT sign-in auth and described as the
-// "previous-generation flagship" (gpt-6-astra is newer but in a staged,
-// limited-org rollout as of that date, so gpt-5.5 stays the safer default).
-// Re-verify ChatGPT-account availability when bumping the codex CLI pin.
-const CODEX_DEFAULT_MODEL = "gpt-5.5";
+// Last-resort codex model: used only when the codex `models` list marks no
+// `default` (the codex branch of `buildRuntimeArgs` prefers a valid user pick,
+// then that default; the list is the account's own once it has run). On
+// 2026-10-22 a ChatGPT account no longer accepted gpt-5.5 ("not supported when
+// using Codex with a ChatGPT account"); its list led with gpt-6-astra.
+const CODEX_DEFAULT_MODEL = "gpt-6-astra";
 
 /**
  * Build final CLI args from base provider args and runtime config.

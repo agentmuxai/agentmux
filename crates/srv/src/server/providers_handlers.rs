@@ -6,7 +6,8 @@
 //!
 //! Best-effort by design: any missing token (e.g. macOS Keychain), expiry, or
 //! network failure returns an empty `models` list, and the frontend keeps its
-//! bundled static catalog. Only Claude has an authoritative Models API today;
+//! bundled static catalog. Claude's comes from the Anthropic Models API;
+//! Codex's from the list its CLI caches per account (`backend/codex_models.rs`);
 //! other providers return empty. See `backend/model_catalog.rs` and
 //! `docs/specs/SPEC_MODEL_CATALOG_REFRESH_2026_07_02.md`.
 
@@ -36,18 +37,37 @@ fn empty_result() -> Result<ProvidersModelsResult, String> {
 }
 
 pub fn register_providers_handlers(engine: &Arc<WshRpcEngine>, _state: &AppState) {
-    // providers.models → authoritative model list for a provider (Claude only
-    // today). Reads the account-global OAuth token and hits GET /v1/models.
+    // providers.models → authoritative model list for a provider: Claude's
+    // from GET /v1/models with the account-global OAuth token, Codex's from
+    // its CLI's per-account cache.
     engine.register_typed(
         "providers.models",
         move |params: ProvidersModelsParams, _ctx| async move {
 
-                // Only Claude exposes an authoritative Models API; others fall
-                // back to the frontend's static catalog.
+                // Providers other than Claude and Codex fall back to the
+                // frontend's static catalog.
                 let provider = match get_provider(&params.provider_id) {
                     Some(p) => p,
                     None => return Err(format!("unknown provider: {}", params.provider_id)),
                 };
+                // Codex: the account's own list, as its CLI last fetched it.
+                if provider.id == "codex" {
+                    let paths = match agentmux_common::DataPaths::from_env() {
+                        Some(p) => p,
+                        None => return empty_result(),
+                    };
+                    let auth_dir_name = provider.auth_dir_name;
+                    let models = tokio::task::spawn_blocking(move || {
+                        crate::backend::codex_models::newest_listed_models(crate::backend::codex_models::codex_dirs(
+                            &paths.identities_dir(),
+                            paths.provider_auth_dir(auth_dir_name),
+                            auth_dir_name,
+                        ))
+                    })
+                    .await
+                    .unwrap_or_default();
+                    return Ok(ProvidersModelsResult { models });
+                }
                 if provider.id != "claude" {
                     return empty_result();
                 }

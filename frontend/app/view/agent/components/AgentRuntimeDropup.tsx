@@ -37,7 +37,7 @@ import { AnchoredPopover } from "@/app/element/anchored-popover";
 import { IconButton } from "@/app/element/ui";
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { getRuntimeConfig } from "../buildRuntimeArgs";
-import { familyKey, getProvider, type ProviderModel } from "../providers";
+import { familyKey, getProvider, isAccountListed, type ProviderModel } from "../providers";
 import { runningModelNote } from "../resolved-model";
 import { compareRuntime, useProcessRuntime, type AxisDrift, type RuntimeAgreement } from "../process-runtime";
 import { patchRuntime } from "../runtime-apply";
@@ -217,7 +217,11 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
         const current = runtime().model;
         if (!current || opts.length === 0) return;
         if (opts.some((o) => o.value === current)) return;
-        const replacement = opts.find((o) => familyKey(o.value) === familyKey(current));
+        // From the account's own list (Codex), a model not on it is one the
+        // account can't run any more: move to the list's default.
+        const replacement =
+            opts.find((o) => familyKey(o.value) === familyKey(current)) ??
+            (isAccountListed(props.providerId) ? (opts.find((o) => o.default) ?? opts[0]) : undefined);
         if (replacement) void migrateModel(replacement.value);
     });
 

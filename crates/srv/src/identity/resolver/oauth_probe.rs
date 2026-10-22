@@ -51,6 +51,32 @@ impl OAuthProbeStatus {
     }
 }
 
+/// Codex's sign-in, from `<dir>/auth.json` (what `codex login` writes under
+/// `CODEX_HOME`): a ChatGPT sign-in has `tokens.refresh_token`, an API-key
+/// sign-in a non-empty `OPENAI_API_KEY`. Either is `Valid`; expiry is left to
+/// the CLI, which refreshes its own token. No file, or neither credential in
+/// it, is `NeedsReauth`. SPEC_CODEX_OAUTH_IN_CONNECTORS_AND_EMAIL_LABELS_2026_10_22.md §5.
+fn probe_codex_auth(dir: &Path) -> OAuthProbeStatus {
+    let path = dir.join("auth.json");
+    let json: Option<serde_json::Value> = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok());
+    let non_empty = |v: Option<&serde_json::Value>| v.and_then(|v| v.as_str()).is_some_and(|s| !s.is_empty());
+    let signed_in = json.as_ref().is_some_and(|j| {
+        non_empty(j.get("tokens").and_then(|t| t.get("refresh_token"))) || non_empty(j.get("OPENAI_API_KEY"))
+    });
+    if signed_in {
+        OAuthProbeStatus::Valid
+    } else {
+        tracing::debug!(
+            target: "identity",
+            path = %path.display(),
+            "oauth probe: codex auth.json missing or holds no credential — status=needs_reauth"
+        );
+        OAuthProbeStatus::NeedsReauth
+    }
+}
+
 /// Cheap on-disk probe of the per-bundle OAuth token file for a
 /// provider. No network calls — just reads + parses the token JSON,
 /// then compares `expiresAt` against `now_ms`.
@@ -60,13 +86,10 @@ impl OAuthProbeStatus {
 ///   `{ "claudeAiOauth": { "accessToken", "refreshToken", "expiresAt": <ms> } }`
 ///   (Anthropic's documented format — see
 ///   `docs/specs/agentmux-isolated-auth.md` §1.6).
-/// - `codex` — `<dir>/.credentials.json` (MCP OAuth). Exact field
-///   layout undocumented by OpenAI; for now we treat presence-of-file
-///   as `Valid` and absence as `NeedsReauth`, deferring strict expiry
-///   parsing until the shape is pinned down. Falls through to the
-///   Claude parser as a best-effort — if the file is shape-compatible
-///   (some CLIs reuse Anthropic's format) the expiry check still works.
-/// - `openclaw` — same fallback as codex.
+/// - `codex` — `<dir>/auth.json`, see [`probe_codex_auth`].
+/// - `openclaw` — `<dir>/.credentials.json`. Exact field layout
+///   undocumented; falls through to the Claude parser as a best-effort,
+///   and a file without a parseable expiry counts as `Valid`.
 ///
 /// **Returns** `Some(status)` on a definitive read, `None` when probing
 /// isn't supported for the provider (so the caller skips status
@@ -95,16 +118,17 @@ pub fn probe_oauth_status(
     now_ms: i64,
 ) -> Option<OAuthProbeStatus> {
     let probe_path: std::path::PathBuf = match provider {
-        // Claude Code + codex + openclaw all write to
-        // `<config_dir>/.credentials.json` per
-        // `docs/specs/provider-auth-isolation.md` (the agentmux-managed
-        // dir is what CLAUDE_CONFIG_DIR / CODEX_HOME / OPENCLAW_HOME
-        // point at). Codex / openclaw token field-layout is not
-        // publicly documented; the parser below treats unrecognised
-        // shapes as `Valid` so we don't false-positive a Reconnect on
-        // a working session — strict expiry parsing for those two is
-        // a follow-up once their JSON is pinned down.
-        "claude" | "codex" | "openclaw" => Path::new(dir).join(".credentials.json"),
+        // Codex keeps its sign-in in `$CODEX_HOME/auth.json`, not
+        // `.credentials.json`; reading the latter marked every working
+        // Codex account needs_reauth at its first spawn.
+        "codex" => return Some(probe_codex_auth(Path::new(dir))),
+        // Claude Code + openclaw write to `<config_dir>/.credentials.json`
+        // per `docs/specs/provider-auth-isolation.md` (the agentmux-managed
+        // dir is what CLAUDE_CONFIG_DIR / OPENCLAW_HOME point at).
+        // openclaw's token field-layout is not publicly documented; the
+        // parser below treats unrecognised shapes as `Valid` so we don't
+        // false-positive a Reconnect on a working session.
+        "claude" | "openclaw" => Path::new(dir).join(".credentials.json"),
         _ => return None,
     };
 
@@ -247,6 +271,37 @@ mod tests {
         // Claude Code's has) — a missing file is still a definitive
         // needs_reauth signal for it, on every platform.
         let r = probe_oauth_status("codex", "/definitely/does/not/exist-xyz-9q", 0);
+        assert_eq!(r, Some(OAuthProbeStatus::NeedsReauth));
+    }
+
+    /// The failure this guards: Codex's sign-in is `auth.json`, and probing
+    /// `.credentials.json` marked every working Codex account needs_reauth.
+    #[test]
+    fn a_codex_sign_in_is_read_from_auth_json() {
+        let probe = |contents: Option<&str>| {
+            let tmp = tempfile::tempdir().unwrap();
+            if let Some(c) = contents {
+                std::fs::write(tmp.path().join("auth.json"), c).unwrap();
+            }
+            probe_oauth_status("codex", tmp.path().to_str().unwrap(), 0)
+        };
+        let chatgpt = r#"{"auth_mode":"chatgpt","OPENAI_API_KEY":null,"tokens":{"id_token":"x","access_token":"y","refresh_token":"z","account_id":"a"},"last_refresh":"2026-10-22T00:00:00Z"}"#;
+        assert_eq!(probe(Some(chatgpt)), Some(OAuthProbeStatus::Valid), "a ChatGPT sign-in");
+        assert_eq!(probe(Some(r#"{"OPENAI_API_KEY":"sk-test"}"#)), Some(OAuthProbeStatus::Valid), "an API-key sign-in");
+        assert_eq!(probe(Some(r#"{"OPENAI_API_KEY":null,"tokens":{"refresh_token":""}}"#)), Some(OAuthProbeStatus::NeedsReauth));
+        assert_eq!(probe(Some("not json")), Some(OAuthProbeStatus::NeedsReauth));
+        assert_eq!(probe(None), Some(OAuthProbeStatus::NeedsReauth), "signed out: no auth.json");
+    }
+
+    #[test]
+    fn a_claude_shaped_credentials_file_does_not_sign_codex_in() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join(".credentials.json"),
+            r#"{"claudeAiOauth":{"refreshToken":"r","expiresAt":9999999999999}}"#,
+        )
+        .unwrap();
+        let r = probe_oauth_status("codex", tmp.path().to_str().unwrap(), 0);
         assert_eq!(r, Some(OAuthProbeStatus::NeedsReauth));
     }
 

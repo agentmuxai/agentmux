@@ -50,7 +50,7 @@ describe("buildRuntimeArgs", () => {
             "--json",
             "--dangerously-bypass-approvals-and-sandbox",
             "--model",
-            "gpt-5.5",
+            "gpt-6-astra",
             "-",
         ];
 
@@ -60,8 +60,8 @@ describe("buildRuntimeArgs", () => {
             // The exact things that killed the codex process before the fix:
             expect(out).not.toContain("--dangerously-skip-permissions");
             expect(out).not.toContain("sonnet");
-            // model is a ChatGPT-account-supported gpt-5.x default, not a Claude alias
-            expect(out[out.indexOf("--model") + 1]).toBe("gpt-5.5");
+            // model is the catalog's ChatGPT-account default, not a Claude alias
+            expect(out[out.indexOf("--model") + 1]).toBe("gpt-6-astra");
             // codex `exec` reads the prompt from the trailing positional `-`; the
             // model flag must sit before it, and nothing may follow it.
             expect(out[out.length - 1]).toBe("-");
@@ -75,9 +75,14 @@ describe("buildRuntimeArgs", () => {
         });
 
         it("honors a user-picked codex model", () => {
-            const out = buildRuntimeArgs(CODEX_BASE, cfg({ model: "gpt-5.4" }), "codex");
-            expect(out[out.indexOf("--model") + 1]).toBe("gpt-5.4");
+            const out = buildRuntimeArgs(CODEX_BASE, cfg({ model: "gpt-5.6-sol" }), "codex");
+            expect(out[out.indexOf("--model") + 1]).toBe("gpt-5.6-sol");
             expect(out[out.length - 1]).toBe("-"); // still before the positional
+        });
+
+        it("replaces a pick the model list no longer offers with its default", () => {
+            const out = buildRuntimeArgs(CODEX_BASE, cfg({ model: "gpt-5.5" }), "codex");
+            expect(out[out.indexOf("--model") + 1]).toBe("gpt-6-astra");
         });
     });
 

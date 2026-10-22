@@ -127,6 +127,32 @@ export function setProviderModels(id: string, apiModels: ProviderModel[]): void 
     setModelOverlay((prev) => ({ ...prev, [canonical]: [...curated, ...extras] }));
 }
 
+// Providers whose overlay is the account's own list, not a refresh of the
+// curated one: a stored model id that isn't on it can't be run any more.
+const [accountListed, setAccountListed] = createSignal<ReadonlySet<string>>(new Set());
+
+/**
+ * Replace a provider's models with the list its account offers, in the
+ * account's order, the first being the default (Codex: the list its CLI caches,
+ * `providers.models`). Unlike `setProviderModels`, nothing curated is kept:
+ * Codex's curated ids were all retired at once, so a merge by family would
+ * have kept offering them. Empty input (no cache yet) keeps the curated list.
+ * SPEC_CODEX_OAUTH_IN_CONNECTORS_AND_EMAIL_LABELS_2026_10_22.md §4.
+ */
+export function replaceProviderModels(id: string, accountModels: ProviderModel[]): void {
+    if (accountModels.length === 0) return;
+    const canonical = resolveProviderAlias(id);
+    if (!(PROVIDERS[id] ?? PROVIDERS[canonical])) return;
+    const models = accountModels.map((m, i) => ({ value: m.value, label: m.label, default: i === 0 }));
+    setModelOverlay((prev) => ({ ...prev, [canonical]: models }));
+    setAccountListed((prev) => new Set([...prev, canonical]));
+}
+
+/** Whether this provider's models are its account's own list (`replaceProviderModels`). */
+export function isAccountListed(id: string): boolean {
+    return accountListed().has(resolveProviderAlias(id));
+}
+
 export function getProvider(id: string): ProviderDefinition | undefined {
     const base = PROVIDERS[id] ?? PROVIDERS[resolveProviderAlias(id)];
     if (!base) return undefined;

@@ -1020,9 +1020,19 @@ fn capture_cred_baseline(
     config_dir_env_var: &str,
 ) -> Option<(std::path::PathBuf, Option<std::time::SystemTime>)> {
     let dir = auth_env.get(config_dir_env_var)?;
-    let path = std::path::Path::new(dir).join(".credentials.json");
+    let path = std::path::Path::new(dir).join(credential_file_for(config_dir_env_var));
     let mtime = std::fs::metadata(&path).ok().and_then(|m| m.modified().ok());
     Some((path, mtime))
+}
+
+/// The file a provider's login writes in its config dir: Codex's is
+/// `auth.json` (under `CODEX_HOME`); Claude Code's and OpenClaw's are
+/// `.credentials.json`.
+fn credential_file_for(config_dir_env_var: &str) -> &'static str {
+    match config_dir_env_var {
+        "CODEX_HOME" => "auth.json",
+        _ => ".credentials.json",
+    }
 }
 
 /// Report whether a CLI login child is still in flight.
@@ -1382,6 +1392,16 @@ mod capture_cred_baseline_tests {
         let (path, mtime) = capture_cred_baseline(&auth_env, "CLAUDE_CONFIG_DIR").expect("config dir was set");
         assert_eq!(path, dir.join(".credentials.json"));
         assert!(mtime.is_none(), "fresh mint: no credential file should exist yet");
+    }
+
+    #[test]
+    fn watches_codex_auth_json_not_claudes_file() {
+        let dir = std::env::temp_dir().join(format!("cli-login-baseline-test-codex-{}", std::process::id()));
+        let mut auth_env = HashMap::new();
+        auth_env.insert("CODEX_HOME".to_string(), dir.to_string_lossy().to_string());
+
+        let (path, _) = capture_cred_baseline(&auth_env, "CODEX_HOME").expect("config dir was set");
+        assert_eq!(path, dir.join("auth.json"));
     }
 
     #[test]
