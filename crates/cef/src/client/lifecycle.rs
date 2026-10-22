@@ -1276,6 +1276,7 @@ impl AgentMuxHandler {
         self.sent_favicons.remove(&browser.identifier());
         self.popup_titles.remove(&browser.identifier());
         self.memory_pause_history.remove(&browser.identifier());
+        crate::browser_panes::bounds::forget_hidden(browser.identifier());
         self.unresponsive_reports.remove(&browser.identifier());
         self.terminated_unresponsive.remove(&browser.identifier());
         // Remove this browser's popup tag HERE (not in do_close — do_close only

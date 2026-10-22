@@ -441,6 +441,11 @@ fn note_hidden(state: &AppState, live: &[(&PaneBounds, String)]) {
     }
 }
 
+/// A browser closed (hibernation closes hidden panes): drop its entry.
+pub(crate) fn forget_hidden(browser_id: i32) {
+    HIDDEN.lock().remove(&browser_id);
+}
+
 /// Every pane's wrapper HWND in one deferred move per parent, with the same
 /// flags `wrapper::resize_wrapper` uses (`SWP_NOACTIVATE`, insert-after null =
 /// top, so a moved pane is raised as before). Each wrapper's own `WM_SIZE`
