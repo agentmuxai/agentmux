@@ -60,7 +60,7 @@ fn framed_store() -> (FileStore, Vec<u8>) {
     let mut data = transcript(40 * P + 3000, 7);
     data.truncate(data.iter().rposition(|&b| b == b'\n').unwrap() + 1);
     make(&fs, Z, &data);
-    assert!(matches!(fs.frame_parts(Z, N, 0, 16, CODEC_ZSTD).unwrap(), FrameOutcome::Framed { .. }));
+    assert!(matches!(fs.frame_parts(Z, N, 0, FRAME_PARTS, CODEC_ZSTD).unwrap(), FrameOutcome::Framed { .. }));
     assert!(matches!(fs.frame_parts(Z, N, 16, 16, CODEC_ZSTD).unwrap(), FrameOutcome::Framed { .. }));
     (fs, data)
 }
@@ -195,7 +195,7 @@ fn a_damaged_frame_reads_as_blank_and_the_rest_as_written() {
     assert_eq!(all(&fs, Z), expect, "read_bytes_db");
     // A frame whose bytes decode but don't match its hash is damaged too.
     let (fs, data) = framed_store();
-    let other = encode(CODEC_ZSTD, &vec![b'x'; 16 * P]).unwrap();
+    let (_, other) = encode(CODEC_ZSTD, &vec![b'x'; 16 * P]).unwrap();
     fs.lock_conn()
         .execute("UPDATE db_file_frame SET data = ?1 WHERE zoneid = ?2 AND first_part = 0", params![other, Z])
         .unwrap();
@@ -341,7 +341,7 @@ fn rows_and_frames_are_read_in_one_snapshot() {
     let fs = FileStore::open(&path).unwrap();
     let data = transcript(20 * P, 21);
     make(&fs, Z, &data);
-    assert!(matches!(fs.frame_parts(Z, N, 0, 16, CODEC_ZSTD).unwrap(), FrameOutcome::Framed { .. }));
+    assert!(matches!(fs.frame_parts(Z, N, 0, FRAME_PARTS, CODEC_ZSTD).unwrap(), FrameOutcome::Framed { .. }));
     fs.checkpoint().unwrap();
 
     let reader = Connection::open(&path).unwrap();

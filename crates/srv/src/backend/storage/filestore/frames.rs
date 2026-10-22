@@ -37,6 +37,12 @@ pub(crate) const FRAME_PARTS: i32 = 16;
 const MAX_FRAME_PARTS: i32 = 64;
 /// Codec 1: the frame's bytes, compressed with zstd.
 pub(crate) const CODEC_ZSTD: i64 = 1;
+/// Codec 2: the frame with its streaming deltas stored as uuid and length,
+/// each block's text once (deltas.rs), compressed with zstd.
+pub(crate) const CODEC_DELTAS: i64 = 2;
+/// The most a codec 2 payload may exceed its frame by (its string and block
+/// tables): a bound on decompression.
+const DELTAS_SLACK: usize = 64 * 1024;
 const ZSTD_LEVEL: i32 = 3;
 
 const PDS: usize = PART_DATA_SIZE;
@@ -100,10 +106,20 @@ fn sha256(bytes: &[u8]) -> Vec<u8> {
     Sha256::digest(bytes).to_vec()
 }
 
-/// Encode a frame's logical bytes.
-pub(crate) fn encode(codec: i64, raw: &[u8]) -> Result<Vec<u8>, StoreError> {
+fn zstd_compress(bytes: &[u8]) -> Result<Vec<u8>, StoreError> {
+    zstd::bulk::compress(bytes, ZSTD_LEVEL).map_err(|e| StoreError::Other(format!("frame compress: {e}")))
+}
+
+/// Encode a frame's logical bytes with `codec`. Codec 2 falls back to codec
+/// 1 when the frame has no delta line to leave out (deltas.rs). Returns the
+/// codec used and the stored bytes.
+pub(crate) fn encode(codec: i64, raw: &[u8]) -> Result<(i64, Vec<u8>), StoreError> {
     match codec {
-        CODEC_ZSTD => zstd::bulk::compress(raw, ZSTD_LEVEL).map_err(|e| StoreError::Other(format!("frame compress: {e}"))),
+        CODEC_ZSTD => Ok((CODEC_ZSTD, zstd_compress(raw)?)),
+        CODEC_DELTAS => match super::deltas::encode(raw) {
+            Some((payload, _)) => Ok((CODEC_DELTAS, zstd_compress(&payload)?)),
+            None => Ok((CODEC_ZSTD, zstd_compress(raw)?)),
+        },
         other => Err(StoreError::Other(format!("frame codec {other} can't encode"))),
     }
 }
@@ -117,6 +133,12 @@ pub(crate) fn decode_uncached(frame: &Frame) -> Result<Vec<u8>, StoreError> {
     let raw = match frame.codec {
         CODEC_ZSTD => zstd::bulk::decompress(&frame.data, frame.raw_len as usize)
             .map_err(|e| corrupt(format!("frame at part {}: {e}", frame.first_part)))?,
+        CODEC_DELTAS => {
+            let payload = zstd::bulk::decompress(&frame.data, frame.raw_len as usize + DELTAS_SLACK)
+                .map_err(|e| corrupt(format!("frame at part {}: {e}", frame.first_part)))?;
+            super::deltas::decode(&payload, frame.raw_len as usize)
+                .map_err(|e| corrupt(format!("frame at part {}: {e}", frame.first_part)))?
+        }
         other => return Err(corrupt(format!("frame at part {}: unknown codec {other}", frame.first_part))),
     };
     if raw.len() as i64 != frame.raw_len || sha256(&raw) != frame.check_hash {
@@ -494,7 +516,7 @@ pub(crate) fn frame_parts_in(
             return Ok(FrameOutcome::Skipped("a part is missing or short"));
         }
     }
-    let data = encode(codec, &raw)?;
+    let (codec, data) = encode(codec, &raw)?;
     let frame = Frame { first_part: first, part_count: count, codec, raw_len: raw.len() as i64, check_hash: sha256(&raw), data };
     conn.execute(
         "INSERT INTO db_file_frame (zoneid, name, first_part, part_count, codec, raw_len, check_hash, data)

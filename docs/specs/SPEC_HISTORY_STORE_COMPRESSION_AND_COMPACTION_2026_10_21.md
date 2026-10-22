@@ -3,13 +3,13 @@
 **Date:** 2026-10-21
 **Author:** Agent5@narko
 **Type:** Spec (a storage change; what a reader sees does not change)
-**Status:** active. The operator approved both parts on 2026-10-22 ("lets get the compaction and also cleaning out the streaming deltas"). PR 1 of §9 (the frame table, codec 1, every read and write path; nothing creates a frame yet) is in PR #5324; remaining: codec 2, the framer with its settings and checks, the offline run on a copy of the store, and turning it on. Task #49.
+**Status:** active. The operator approved both parts on 2026-10-22 ("lets get the compaction and also cleaning out the streaming deltas"). PRs 1 and 2 of §9 (the frame table, both codecs, every read and write path, the store accepting version 3; nothing creates a frame yet) are in PR #5324; remaining: the framer with its settings and checks, the recovery tool's decoders, and turning it on. Task #49.
 **Builds on:** `REPORT_AGENT_HISTORY_STORE_DEDUP_COMPRESSION_2026_10_17.md` (AgentY: §4.3 compression, §7.3 "shrink the pane store"), `SPEC_AGENT_TRANSCRIPT_SINGLE_COPY_2026_10_19.md` (Maricon: one copy of each transcript), `docs/analysis/RCA_UPGRADE_0_59_30_TO_0_59_34_ISSUES_2026_10_19.md` §6 (the damaged parts).
 **Platform:** all.
 
 ## 1. What this decides, in one paragraph
 
-The shared transcript store (`shared/agents/transcripts/filestore.db`) is 15.4 GB on this machine and is kept forever. Measured on real transcripts, **compressing it in 1 MiB frames takes it to about 2.7 GB (5.6x)**, and **cleaning out the streaming deltas on top of that saves another 15 to 18%** (about 0.4 GB, to about 2.3 GB). Both are built, in that order, as one storage format: a **frame** holds 1 MiB of a transcript compressed, and a frame may also leave out the delta lines of the finished replies inside it, keeping just enough (each line's id and length) to rebuild them byte for byte. Every byte offset and line number stays what it is, so no reader changes. Nothing runs until the operator turns it on, and it never runs while an AgentMux build that can't read frames is running on the machine.
+The shared transcript store (`shared/agents/transcripts/filestore.db`) is 15.4 GB on this machine and is kept forever. Measured on real transcripts, **compressing it in 1 MiB frames takes it to about 2.7 GB (5.6x)**, and **cleaning out the streaming deltas on top of that saves another 16%** (about 0.4 GB, to about 2.3 GB). Both are built, in that order, as one storage format: a **frame** holds 1 MiB of a transcript compressed, and a frame may also store its streaming delta lines as just each line's id and length, with each reply block's text once, and rebuild them byte for byte. Every byte offset and line number stays what it is, so no reader changes. Nothing runs until the operator turns it on, and it never runs while an AgentMux build that can't read frames is running on the machine.
 
 ## 2. Measurements (2026-10-21, narko)
 
@@ -51,7 +51,7 @@ Sample: the `output` of two agents (Naki #2 and QTimer), parts 20 to 400 of each
 1. **Logical addressing does not change.** A file stays a stream of bytes; byte offsets, line numbers, `output.idx`, `output.tsidx`, the agent record's `ranges` and every reader keep working unchanged. A frame is a different storage of the same bytes.
 2. **Never edit in place.** New rows are written, decoded, compared with the original, and only then do the old rows go, all in one SQLite transaction. (The 2026-10-20 finding: two agents' newest parts were damaged; see the damage report.)
 3. **Only finished data.** Never the part being written, and never anything within the safety margin of the end of the file (§5.2).
-4. **No older build may read a store it cannot decode.** The store is stamped with a higher `user_version` (3; the pattern of #5203), so a build without the decoder refuses it and runs from its own per-channel copy. The stamp is written **when the first frame is about to be written**, not when a new build opens the store: stamping on open would push every older instance on the machine onto its per-channel copy the moment one new build starts. And because a build that opened the store before the stamp keeps its connection, the framer also waits until **every running srv on the machine has said it reads frames** (§5.1).
+4. **No older build may read a store it cannot decode.** The store is stamped with a higher `user_version` (3; the pattern of #5203), so a build without the decoder refuses it and runs from its own per-channel copy. The stamp is written **when the first frame is about to be written**, not when a new build opens the store: stamping on open would push every older instance on the machine onto its per-channel copy the moment one new build starts. So a build that reads every frame codec **accepts** 3 but an ordinary open **stamps** only 2, and never lowers a 3 already there (`GLOBAL_TRANSCRIPT_STORE_FRAMES_VERSION`). That is why codec 2 ships in the same PR as the frame table: a build that read codec 1 only and accepted 3 would read codec 2 frames as damaged. And because a build that opened the store before the stamp keeps its connection, the framer also waits until **every running srv on the machine has said it reads frames** (§5.1).
 5. **Not before the store is repaired and has been clean for a while.** A frame is a bigger loss when damaged (§6). The repair was done on 2026-10-22 (the recovery tool, #5206; see the RCA §6). The framer stays off by default, so the soak is the time between the code landing and the operator turning it on.
 6. **History is kept forever.** Nothing here deletes history.
 
@@ -135,33 +135,25 @@ Frames cover parts that are at least 8 MiB behind the end of the file **and** wh
 
 ## 8. Cleaning out the streaming deltas (codec 2)
 
-Decided 2026-10-22: built. Expected extra saving on the sample: 15 to 18% (§2), about 0.4 GB of 2.7 GB.
+Decided 2026-10-22: built. On the sample it takes a 1 MiB frame from 8.89 MB to **7.47 MB** (16% smaller than compression alone).
 
-**It lives inside a frame.** A frame's bytes are split into lines (the partial line it starts and ends with stays as it is). Everything below happens within one frame, so decoding a frame never needs another frame, and every offset and line number stays valid (rule 1). A reply whose deltas and final line fall in different frames keeps its deltas.
+**What a delta line is.** A reply streams as one line per few characters, each line mostly the same envelope around a little text:
+`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}},"session_id":"…","parent_tool_use_id":null,"uuid":"…"}`
+Tool input streams the same way, as `input_json_delta` / `partial_json`.
 
-**What is left out:** the `stream_event` lines of type `content_block_delta` carrying a `text_delta` or an `input_json_delta`, for one content block of one reply, when all of these hold:
-- the reply's final `assistant` line (the same `message.id` as its `message_start`) is in the frame, and holds that block;
-- **text:** the block's text, JSON-escaped the way the CLI escapes strings, equals the deltas' escaped text strings put end to end;
-- **tool input:** the block's `input`, as its raw JSON text in the assistant line, with a space put after each `,` and `:` outside strings (and, where the stream used them, non-ASCII characters written as `\uXXXX`), equals the deltas' `partial_json` put end to end. (The model streams spaced JSON; the CLI stores it compact. On the sample this held for 96% of tool-input bytes.) Nothing is parsed into a map and written again, so key order, number formats and escapes are what the line had;
-- every one of the block's delta lines is exactly the template below with its own values.
+**What codec 2 stores instead.** For each such line, its uuid (16 bytes) and the length of its text. For each content block (one session, one `parent_tool_use_id`, one `index`, one kind), the text of all its lines **once**, end to end. Everything else stays as it was: every other line, and any delta line that isn't exactly the template (an extra field such as thinking deltas carry, an uppercase uuid, a space, another key order).
 
-If any of these fails, **the whole block keeps its deltas**. Thinking and signature deltas, block start and stop, `message_start`, `message_delta` and `message_stop` always stay (about 9% of the bytes). A reply that was interrupted or crashed has no final line, so it keeps everything.
+**Why not rebuild the text from the reply's final `assistant` line**, as an earlier draft proposed: the final line isn't a faithful copy of the stream. The CLI reorders tool-input keys (`"replace_all":false` first) and adds defaults the model never sent, so a rebuild from it would miss many blocks or need fragile transforms. Storing the block's text once is simpler, needs no parsing into maps and no derived text, works for interrupted replies too (nothing depends on the final line), and compresses as well or better: zstd finds the copy in the final line on its own. Measured on the same sample: 7.47 MB per 1 MiB frame against 7.59 MB for the rebuild.
 
-**What is kept per left-out line:** the `index`, the length of its escaped text, its uuid (16 bytes), the line number of the assistant line in the frame and which block, and per block one flag for the `\uXXXX` form. `session_id` and `parent_tool_use_id` are kept once per block.
+**How it is checked.** A line is taken only if rendering it back from its stored values gives exactly its bytes. The encoder then decodes the whole payload and compares it with the frame's bytes; any difference and the frame is stored with codec 1. The frame's SHA-256 is checked again on every decode. So a change in Anthropic's format shows up as fewer lines taken, never as wrong bytes.
 
-**The template:**
-`{"type":"stream_event","event":{"type":"content_block_delta","index":I,"delta":{"type":"text_delta","text":"T"}},"session_id":"S","parent_tool_use_id":P,"uuid":"U"}` (or `input_json_delta` / `partial_json`), then a newline; `P` is `null` or a quoted id.
-
-**The payload:** a list of line records (a raw line, or a left-out line's kept values), then zstd over the whole list. The decoder writes the raw lines, rebuilds each left-out line from its assistant line, and checks the SHA-256 of the result against the frame's `check_hash`.
-
-**Verification, the operator's rule:** the encoder decodes what it produced and compares it with the original bytes, all of them, before the frame is written (§5.1 step 4 then checks it again from the database). A frame whose rebuild differs anywhere is written as codec 1 instead, and the encoder logs which block failed, so a format change on Anthropic's side shows up as a falling rate of codec 2, never as wrong bytes.
+**The payload** (then zstd): `AMD2`, a string table (session ids, `parent_tool_use_id` values as they appear), the blocks (session, parent, index, kind, text), and the records in order: raw bytes, or a delta line (block, text length, uuid). A frame's first and last chunks may be partial lines; they are raw.
 
 ## 9. Plan
 
 | PR | What | Changes behaviour? |
 |---|---|---|
-| 1 | `db_file_frame`, codec 1, every read and write path of §4, the store accepting `user_version` 3 without writing it, tests | no: nothing creates a frame yet |
-| 2 | Codec 2 (§8): the encoder, the decoder, the verification, tests on synthetic transcripts (real transcripts are private and never go in the repository) | no |
+| 1 + 2 | `db_file_frame`, codec 1, every read and write path of §4; codec 2 (§8): the encoder, the decoder, the verification, tests on synthetic transcripts (real transcripts are private and never go in the repository); the store accepting `user_version` 3 without writing it. One PR (#5324), so the first build that accepts 3 reads every codec | no: nothing creates a frame yet |
 | 3 | The framer (§5), its settings (off), the readers file and the running-instance check, the version stamp, `history.compact`, the Storage numbers, the recovery tool's decoders | only once the operator turns it on |
 | — | Offline run on the 2026-10-21 copy of the real store: frame everything, then read every line of every transcript and compare with the copy, byte for byte; measure the real ratio and the codec 2 rate | no (a copy) |
 | — | The operator turns `agent:transcriptframes` on | yes |
