@@ -15,6 +15,7 @@ import "./drone-view.scss";
 import type { Bundle } from "@/app/store/rpc-api";
 import { Button, IconButton } from "@/app/element/ui";
 import { focusWhenRendered } from "@/util/focusutil";
+import { isModKey } from "@/util/platformutil";
 
 // The node kind this window is dragging from a top bar, read by the canvas's
 // drop handler. On the drag session, so every drone pane in the window sees it.
@@ -53,7 +54,7 @@ const NodeTypeBar = (p: { model: DroneViewModel }): JSX.Element => {
     const validation = () => m.validate();
     let nameEl!: HTMLInputElement;
     return (
-        <header class="drone-bar">
+        <header class="drone-bar" style={{ zoom: m.zoom() }}>
             <input
                 ref={nameEl}
                 class="drone-bar-name"
@@ -173,6 +174,8 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
         // Let scrollable areas inside nodes (class "nowheel") scroll
         // their content instead of zooming the canvas.
         if ((e.target as HTMLElement | null)?.closest(".nowheel")) return;
+        // Ctrl/Cmd+scroll is the shared pane zoom (the window's handler), not the graph's.
+        if (isModKey(e)) return;
         e.preventDefault();
         const rect = canvasEl.getBoundingClientRect();
         const mx = e.clientX - rect.left;
@@ -560,13 +563,13 @@ const Canvas = (p: { model: DroneViewModel }): JSX.Element => {
                 </For>
             </div>
             <Show when={m.draftAtom().graph.nodes.length === 0}>
-                <div class="drone-canvas-hint">
+                <div class="drone-canvas-hint" style={{ zoom: m.zoom() }}>
                     Drag a block from the top bar onto the canvas · drag nodes to move ·
                     drag a right port → a left port to wire · scroll to zoom · drag the
                     canvas to pan · Del removes the selection
                 </div>
             </Show>
-            <div class="drone-controls">
+            <div class="drone-controls" style={{ zoom: m.zoom() }}>
                 <button
                     class="drone-ctrl"
                     title="Zoom in"
@@ -1000,7 +1003,7 @@ const RunPanel = (p: { model: DroneViewModel }): JSX.Element => {
     // show, so the empty canvas stays clean.
     return (
         <Show when={m.runsAtom().length > 0 || m.activeRunIdAtom()}>
-            <footer class="drone-runpanel">
+            <footer class="drone-runpanel" style={{ zoom: m.zoom() }}>
                 <div class="drone-runpanel-title">
                     Runs
                     <Show when={m.activeRunIdAtom()}>

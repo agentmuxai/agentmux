@@ -17,6 +17,7 @@ import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { readZoom } from "@/app/store/zoom-factor";
 import {
     dispatch as dispatchDroneRun,
     registerPane,
@@ -58,6 +59,8 @@ export class DroneViewModel {
     blockId: string;
 
     viewName: Accessor<string>;
+    /** The pane's zoom (`term:zoom`): its bar, controls and run panel, not the graph. */
+    zoom: Accessor<number>;
 
 
     /** The block's meta — the host context's, reactive. */
@@ -179,6 +182,7 @@ export class DroneViewModel {
     constructor(ctx: PaneTabHostContext) {
         this.blockId = ctx.blockId;
         this.meta = ctx.meta;
+        this.zoom = createMemo(() => readZoom(this.meta()));
         this.viewName = createMemo(() => (this.meta()?.["frame:title"] as string) ?? this.draftAtom().name);
 
         // Register the slot SYNCHRONOUSLY so the first dispatch (in

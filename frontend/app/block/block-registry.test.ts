@@ -91,12 +91,13 @@ describe("built-in pane tabs (block-registry.ts)", () => {
         // new pane that leaves out zoom fails here (REPORT_PANE_ZOOM_COVERAGE_2026_10_22.md).
         const zoomHolders = [...VIEWS, "files", "tower"].filter((v) => paneTabCapability(v, "paneZoom") != null).sort();
         expect(zoomHolders).toEqual([
-            "agent", "connectors", "cpuplot", "editor", "files", "help", "memory", "settings", "swarm", "sysinfo", "term",
-            "toolchain", "tower", "warden",
+            "agent", "connectors", "cpuplot", "drone", "editor", "files", "help", "memory", "settings", "swarm", "sysinfo",
+            "term", "toolchain", "tower", "warden",
         ]);
         expect(paneTabCapability("tower", "paneZoom")?.baseFontSize).toBe(13);
         expect(paneTabCapability("toolchain", "paneZoom")?.baseFontSize).toBe(12);
         expect(paneTabCapability("settings", "paneZoom")?.baseFontSize).toBe(12);
+        expect(paneTabCapability("drone", "paneZoom")?.baseFontSize).toBe(13);
         expect(paneTabCapability("sysinfo", "paneZoom")?.baseFontSize).toBe(11);
         expect(paneTabCapability("editor", "paneZoom")?.baseFontSize).toBe(13);
         expect(paneTabCapability("files", "paneZoom")?.baseFontSize).toBe(12);
