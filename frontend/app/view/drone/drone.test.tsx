@@ -36,7 +36,7 @@ describe("dronePaneTab", () => {
         expect(dronePaneTab.view).toBe("drone");
         expect(dronePaneTab.aliases).toEqual(["workflows"]);
         expect(dronePaneTab.create).toBeTypeOf("function");
-        expect(dronePaneTab.capabilities).toEqual({ noPadding: true });
+        expect(dronePaneTab.capabilities).toEqual({ noPadding: true, paneZoom: { baseFontSize: 13 } });
     });
 
     it("titles the pane from its model and disposes the model with the instance", () => {
