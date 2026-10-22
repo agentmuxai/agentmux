@@ -667,6 +667,7 @@ partial list.
 | [`SPEC_FRONTEND_BUNDLE_SPLITTING_2026_10_21`](SPEC_FRONTEND_BUNDLE_SPLITTING_2026_10_21.md) | Spec: a smaller startup bundle, so each window starts sooner |
 | [`SPEC_GATED_RENDERER_RECOVERY_2026_06_01`](SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md) | Gated Renderer Recovery — Memory-Aware Crash Handling |
 | [`SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27`](SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md) | Spec: Global Memory delivery into agents — single source of truth |
+| [`SPEC_GOOGLE_CONNECTORS_GMAIL_CALENDAR_DRIVE_2026_10_14`](SPEC_GOOGLE_CONNECTORS_GMAIL_CALENDAR_DRIVE_2026_10_14.md) | SPEC: Google in Connectors: Gmail, Calendar and Drive for every agent |
 | [`SPEC_GPU_MEMORY_TRACING_SCAFFOLDING_2026_07_24`](SPEC_GPU_MEMORY_TRACING_SCAFFOLDING_2026_07_24.md) | Spec: GPU Memory Tracing Scaffolding — a real trace, not another process-level guess |
 | [`SPEC_HANGAR_ZOOM_2026_10_08`](SPEC_HANGAR_ZOOM_2026_10_08.md) | Zoom in the Hangar, through the shared pane zoom |
 | [`SPEC_HEADLESS_TRANSIENT_RETRY_2026_08_31`](SPEC_HEADLESS_TRANSIENT_RETRY_2026_08_31.md) | Transient-failure retry for turns with no rendered pane |

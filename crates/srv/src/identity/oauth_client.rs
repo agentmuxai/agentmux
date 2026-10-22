@@ -89,7 +89,11 @@ pub fn config_for(provider: &str) -> Option<ServiceOAuthConfig> {
             token_url: "https://oauth2.googleapis.com/token",
             device_url: None,
             scopes: &["openid", "email", "profile"],
-            requires_secret: false,
+            // Google's token endpoint refuses a Desktop client's code exchange
+            // and refresh without its secret. That secret isn't confidential
+            // (RFC 8252 §8.5; spec §3.1), but it's required, so AgentMux's own
+            // client must ship its secret too once it's provisioned.
+            requires_secret: true,
             // A refresh token is returned only with `access_type=offline`,
             // and again on a later consent only with `prompt=consent`;
             // `include_granted_scopes` makes each new token cover every scope

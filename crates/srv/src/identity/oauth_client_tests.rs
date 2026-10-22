@@ -35,7 +35,7 @@ fn catalog_flow_choices() {
     assert_eq!(config_for("github").unwrap().flow, OAuthFlow::Device);
     assert_eq!(config_for("google").unwrap().flow, OAuthFlow::AuthCodePkce);
     assert!(config_for("slack").unwrap().requires_secret);
-    assert!(!config_for("google").unwrap().requires_secret);
+    assert!(config_for("google").unwrap().requires_secret);
     assert!(config_for("nope").is_none());
     assert!(config_for("microsoft").is_some());
     // Only Google is revoked on delete and has its ID token read.
