@@ -15,6 +15,7 @@ import { ConfirmModal } from "@/app/element/confirm-modal";
 import { Button } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import type { ForkSlugBlocker } from "@/types/rpc/ForkSlugBlocker";
 import type { ForkSlugCandidate } from "@/types/rpc/ForkSlugCandidate";
 import type { ForkSlugMigrationMode } from "@/types/rpc/ForkSlugMigrationMode";
 import type { ForkSlugPlan } from "@/types/rpc/ForkSlugPlan";
@@ -42,6 +43,13 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 /** The candidates an update would migrate now: those whose new id is free. */
 export function readyOf(plan: ForkSlugPlan | null | undefined): ForkSlugCandidate[] {
     return plan?.candidates.filter((c) => !c.refused) ?? [];
+}
+
+/** What blocks a run that stopping the affected panes can't clear: an
+ *  older AgentMux running, another update under way, an unreadable
+ *  definition. While any is there, no pane is stopped. */
+export function unclearable(plan: ForkSlugPlan | null | undefined): ForkSlugBlocker[] {
+    return plan?.blockers.filter((b) => !b.clearable_by_stopping) ?? [];
 }
 
 /** The card's status line. */
@@ -83,9 +91,11 @@ export function ForkSlugMigration(): JSX.Element {
     const running = () => ready().flatMap((c) => c.running.map((r) => ({ name: c.name, ...r })));
     const blockers = () => plan()?.blockers ?? [];
     const busy = () => phase() !== "idle";
-    // Running panes are a blocker the card can clear itself; anything else
-    // (an older AgentMux running, another update under way) is the user's.
-    const canStart = () => !busy() && ready().length > 0 && (blockers().length === 0 || running().length > 0);
+    // Running panes are the one blocker the card clears itself, by stopping
+    // them; anything else (an older AgentMux running, another update under
+    // way) is the user's to clear, and stopping panes for it would be for
+    // nothing.
+    const canStart = () => !busy() && ready().length > 0 && unclearable(plan()).length === 0;
 
     const apply = async () => {
         setPhase("applying");
@@ -105,6 +115,13 @@ export function ForkSlugMigration(): JSX.Element {
         setConfirmStop(false);
         setPhase("stopping");
         setError(null);
+        // Read again before stopping anything: something the stop can't
+        // clear may have appeared since the plan was shown.
+        const fresh = await load();
+        if (!fresh || unclearable(fresh).length > 0 || readyOf(fresh).length === 0) {
+            setPhase("idle");
+            return;
+        }
         try {
             const r = await call("stop");
             if (r.wait_ms > 0) await sleep(r.wait_ms + 1000);
@@ -192,7 +209,7 @@ export function ForkSlugMigration(): JSX.Element {
                                         </div>
                                     )}
                                 </Show>
-                                <Show when={!c.refused && c.running.length > 0}>
+                                <Show when={!c.refused && c.running.length > 0 && unclearable(plan()).length === 0}>
                                     <div class="setting-fork-slugs-note">Running: it is stopped first.</div>
                                 </Show>
                                 <Show when={showWhere()}>
@@ -218,7 +235,7 @@ export function ForkSlugMigration(): JSX.Element {
             </Show>
             <Show when={blockers().length > 0 && !busy()}>
                 <ul class="setting-fork-slugs-blockers" aria-label="What has to change first">
-                    <For each={blockers()}>{(b) => <li>{b}</li>}</For>
+                    <For each={blockers()}>{(b) => <li>{b.message}</li>}</For>
                 </ul>
             </Show>
             <Show when={report()}>

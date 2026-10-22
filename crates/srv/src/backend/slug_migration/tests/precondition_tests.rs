@@ -6,6 +6,7 @@
 //! way.
 
 use super::super::stamp::{self, Stamp};
+use crate::backend::rpc_types::ForkSlugBlockerKind;
 use super::fixture::*;
 
 fn fixture() -> (Fx, std::path::PathBuf) {
@@ -93,10 +94,40 @@ fn a_held_lock_refuses() {
     let (fx, _) = fixture();
     let held = super::super::preconditions::take_lock(&fx.home).unwrap();
     let plan = super::super::plan(&fx.home, false).unwrap();
-    assert!(plan.blockers.iter().any(|b| b.contains("under way")), "{:?}", plan.blockers);
+    assert!(
+        plan.blockers.iter().any(|b| b.kind == ForkSlugBlockerKind::Locked && !b.clearable_by_stopping && b.message.contains("under way")),
+        "{:?}",
+        plan.blockers
+    );
     let err = super::apply(&fx.home).unwrap_err();
     assert!(err.contains("under way"), "{err}");
     assert!(super::super::run::rollback(&fx.home, None).unwrap_err().contains("under way"));
     drop(held);
     assert!(super::apply(&fx.home).is_ok());
+}
+
+/// Each blocker says what it is, and only a running agent is one that
+/// stopping its pane clears: an older AgentMux beside it is not, so the card
+/// never stops a pane for a run that still couldn't start.
+#[test]
+fn blockers_say_their_kind_and_only_a_running_agent_is_cleared_by_stopping() {
+    let (fx, data) = fixture();
+    let entry = serde_json::json!({ "agent_id": "naki-naki-2", "local_url": "", "block_id": "b", "pid": std::process::id(), "updated_at": 1, "channel": "stable", "uid": NAKI2 });
+    let dir = fx.home.reactive().join("naki-naki-2");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("stable.json"), serde_json::to_vec(&entry).unwrap()).unwrap();
+    stamp::write(&data);
+    std::fs::write(data.join("srv.lock"), std::process::id().to_string()).unwrap();
+    let running_only = super::super::plan(&fx.home, false).unwrap().blockers;
+    assert!(!running_only.is_empty());
+    assert!(running_only.iter().all(|b| b.kind == ForkSlugBlockerKind::Running && b.clearable_by_stopping), "{running_only:?}");
+
+    std::fs::remove_file(data.join(stamp::STAMP_FILE)).unwrap();
+    let both = super::super::plan(&fx.home, false).unwrap().blockers;
+    let old: Vec<_> = both.iter().filter(|b| b.kind == ForkSlugBlockerKind::OldInstance).collect();
+    assert_eq!(old.len(), 1, "{both:?}");
+    assert!(!old[0].clearable_by_stopping);
+    assert!(old[0].message.starts_with("An older AgentMux is running: channels/stable@0.59.1"), "{}", old[0].message);
+    assert!(old[0].message.ends_with("Update or quit it first."), "{}", old[0].message);
+    assert!(both.iter().any(|b| b.kind == ForkSlugBlockerKind::Running && b.clearable_by_stopping));
 }

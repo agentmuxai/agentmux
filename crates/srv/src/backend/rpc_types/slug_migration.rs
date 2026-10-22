@@ -98,6 +98,38 @@ pub struct ForkSlugSkipped {
     pub reason: String,
 }
 
+/// What kind of thing blocks a run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub enum ForkSlugBlockerKind {
+    /// An affected agent runs: stopping its pane clears it.
+    Running,
+    /// An AgentMux too old to know former slugs runs on this host.
+    OldInstance,
+    /// Another migration holds the host-wide lock.
+    Locked,
+    /// A shared definition can't be read, so no new id can be checked.
+    Unreadable,
+}
+
+/// One reason a run can't start now.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ForkSlugBlocker {
+    pub kind: ForkSlugBlockerKind,
+    pub message: String,
+    /// Whether stopping the affected panes (`stop`) clears it. Only a
+    /// running agent does; nothing else is worth stopping a pane for.
+    pub clearable_by_stopping: bool,
+}
+
+impl ForkSlugBlocker {
+    pub fn new(kind: ForkSlugBlockerKind, message: impl Into<String>) -> Self {
+        ForkSlugBlocker { kind, message: message.into(), clearable_by_stopping: kind == ForkSlugBlockerKind::Running }
+    }
+}
+
 /// What a migration would do. Computing it changes nothing.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -107,7 +139,7 @@ pub struct ForkSlugPlan {
     pub skipped: Vec<ForkSlugSkipped>,
     /// What would refuse an `apply` now: a running agent, an AgentMux too
     /// old to know former slugs, another migration under way.
-    pub blockers: Vec<String>,
+    pub blockers: Vec<ForkSlugBlocker>,
     pub summary: String,
 }
 

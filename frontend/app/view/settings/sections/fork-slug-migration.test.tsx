@@ -7,6 +7,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ForkSlugBlocker } from "@/types/rpc/ForkSlugBlocker";
 import type { ForkSlugCandidate } from "@/types/rpc/ForkSlugCandidate";
 import type { ForkSlugPlan } from "@/types/rpc/ForkSlugPlan";
 
@@ -32,9 +33,22 @@ function cand(name: string, old_slug: string, new_slug: string, extra: Partial<F
 
 const THREE = [cand("Loap #2", "loap-loap-2", "loap-2"), cand("Naki #2", "naki-naki-2", "naki-2"), cand("Loap #3", "loap-loap-2-loap-3", "loap-3")];
 
-function plan(candidates: ForkSlugCandidate[], blockers: string[] = []): ForkSlugPlan {
+function plan(candidates: ForkSlugCandidate[], blockers: ForkSlugBlocker[] = []): ForkSlugPlan {
     return { candidates, skipped: [], blockers, summary: "" };
 }
+
+const RUNNING: ForkSlugBlocker = {
+    kind: "running",
+    message: "Loap #2 is running in stable (holds its lease): stop it first",
+    clearable_by_stopping: true,
+};
+const OLD: ForkSlugBlocker = {
+    kind: "old_instance",
+    message: "An older AgentMux is running: channels/stable@0.58.1 (pid 4). Update or quit it first.",
+    clearable_by_stopping: false,
+};
+
+const RUNNING_LOAP2 = [cand("Loap #2", "loap-loap-2", "loap-2", { running: [{ block_id: "b1", channel: "stable", how: "holds its lease" }] })];
 
 const report = {
     journal: "/home/shared/backups/slug-migration-x/journal.jsonl",
@@ -95,8 +109,8 @@ describe("ForkSlugMigration", () => {
     });
 
     it("stops the running panes first, through the override, then updates", async () => {
-        const running = [cand("Loap #2", "loap-loap-2", "loap-2", { running: [{ block_id: "b1", channel: "stable", how: "holds its lease" }] })];
-        srv([plan(running, ["Loap #2 is running in stable (holds its lease): stop it first"]), plan(running.map((c) => ({ ...c, running: [] }))), plan([])]);
+        const stopped = RUNNING_LOAP2.map((c) => ({ ...c, running: [] }));
+        srv([plan(RUNNING_LOAP2, [RUNNING]), plan(RUNNING_LOAP2, [RUNNING]), plan(stopped), plan([])]);
         render(() => <ForkSlugMigration />);
         await screen.findByText("1 agent has an outdated id.");
         expect(screen.getByText(/stop it first/)).toBeInTheDocument();
@@ -105,16 +119,41 @@ describe("ForkSlugMigration", () => {
         expect(dialog).toHaveTextContent("Stop 1 pane?");
         expect(dialog).toHaveTextContent("Loap #2 (stable)");
         fireEvent.click(within(dialog).getByRole("button", { name: "Stop and update" }));
-        await waitFor(() => expect(modes()).toEqual(["plan", "stop", "plan", "apply", "plan"]));
+        await waitFor(() => expect(modes()).toEqual(["plan", "plan", "stop", "plan", "apply", "plan"]));
+    });
+
+    it("offers no stop, and stops nothing, while an older AgentMux also blocks", async () => {
+        srv([plan(RUNNING_LOAP2, [RUNNING, OLD])]);
+        render(() => <ForkSlugMigration />);
+        await screen.findByText("1 agent has an outdated id.");
+        expect(screen.getByText(/An older AgentMux is running: channels\/stable@0.58.1/)).toBeInTheDocument();
+        expect(screen.queryByText("Running: it is stopped first.")).not.toBeInTheDocument();
+        const update = screen.getByRole("button", { name: "Update them" });
+        expect(update).toBeDisabled();
+        fireEvent.click(update);
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+        expect(modes()).toEqual(["plan"]);
+    });
+
+    it("reads the plan again before stopping, and stops nothing if a blocker it can't clear appeared", async () => {
+        srv([plan(RUNNING_LOAP2, [RUNNING]), plan(RUNNING_LOAP2, [RUNNING, OLD])]);
+        render(() => <ForkSlugMigration />);
+        await screen.findByText("1 agent has an outdated id.");
+        fireEvent.click(screen.getByRole("button", { name: "Update them" }));
+        const dialog = await screen.findByRole("dialog");
+        fireEvent.click(within(dialog).getByRole("button", { name: "Stop and update" }));
+        await screen.findByText(/An older AgentMux is running/);
+        expect(modes()).toEqual(["plan", "plan"]);
+        expect(screen.getByRole("button", { name: "Update them" })).toBeDisabled();
     });
 
     it("can't start while something it can't clear blocks it, and says why an agent is refused", async () => {
         const refused = cand("Loap #3", "loap-loap-2-loap-3", "loap-3", { refused: "loap-3 is taken: agent x has it", suggestion: "loap-3-2" });
-        srv([plan([THREE[0], refused], ["an older AgentMux is running in channels/stable@0.58.1 (pid 4): update or quit it"])]);
+        srv([plan([THREE[0], refused], [OLD])]);
         render(() => <ForkSlugMigration />);
         await screen.findByText("2 agents have an outdated id.");
         expect(screen.getByText(/the next free id is loap-3-2/)).toBeInTheDocument();
-        expect(screen.getByText(/an older AgentMux is running/)).toBeInTheDocument();
+        expect(screen.getByText(/An older AgentMux is running/)).toBeInTheDocument();
         expect(screen.getByRole("button", { name: "Update them" })).toBeDisabled();
     });
 

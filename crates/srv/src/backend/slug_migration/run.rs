@@ -101,7 +101,8 @@ pub(super) fn apply(home: &Home, opts: &Options) -> Result<ForkSlugReport, Strin
         None => {
             let plan = super::plan::plan_with(home, false, false)?;
             if !plan.blockers.is_empty() {
-                return Err(format!("not migrating: {}", plan.blockers.join("; ")));
+                let why: Vec<&str> = plan.blockers.iter().map(|b| b.message.as_str()).collect();
+                return Err(format!("not migrating: {}", why.join("; ")));
             }
             let ready = agents(&plan.candidates);
             if ready.is_empty() {

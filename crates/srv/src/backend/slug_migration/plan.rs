@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use super::home::{fold, open_ro, place, table_exists, Home, Install};
-use crate::backend::rpc_types::{ForkSlugCandidate, ForkSlugPlan, ForkSlugSkipped};
+use crate::backend::rpc_types::{ForkSlugBlocker, ForkSlugBlockerKind, ForkSlugCandidate, ForkSlugPlan, ForkSlugSkipped};
 use agentmux_common::slug::{definition_slug, fork_slug, is_agent_id};
 
 /// One shared definition, as the plan needs it.
@@ -240,8 +240,10 @@ pub(super) fn plan_with(home: &Home, quick: bool, check_lock: bool) -> Result<Fo
         return Ok(ForkSlugPlan { candidates, skipped, blockers: Vec::new(), summary });
     }
     let installs = home.installs()?;
-    let mut blockers: Vec<String> =
-        unreadable.iter().map(|u| format!("a shared definition can't be read, so no new id can be checked: {u}")).collect();
+    let mut blockers: Vec<ForkSlugBlocker> = unreadable
+        .iter()
+        .map(|u| ForkSlugBlocker::new(ForkSlugBlockerKind::Unreadable, format!("A shared definition can't be read, so no new id can be checked: {u}")))
+        .collect();
     let mut taken: BTreeMap<String, String> = BTreeMap::new();
     let mut candidates = Vec::new();
     for f in &found {
@@ -302,7 +304,7 @@ fn suggest(
     Ok(None)
 }
 
-fn summary(candidates: &[ForkSlugCandidate], skipped: &[ForkSlugSkipped], blockers: &[String]) -> String {
+fn summary(candidates: &[ForkSlugCandidate], skipped: &[ForkSlugSkipped], blockers: &[ForkSlugBlocker]) -> String {
     let ready = candidates.iter().filter(|c| c.refused.is_none()).count();
     let mut lines = Vec::new();
     if candidates.is_empty() {
@@ -325,7 +327,7 @@ fn summary(candidates: &[ForkSlugCandidate], skipped: &[ForkSlugSkipped], blocke
         lines.push(format!("{} fork{} left alone (not a pre-fix chain).", skipped.len(), if skipped.len() == 1 { "" } else { "s" }));
     }
     for b in blockers {
-        lines.push(format!("Blocked: {b}"));
+        lines.push(format!("Blocked: {}", b.message));
     }
     lines.join("\n")
 }

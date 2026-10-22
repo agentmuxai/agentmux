@@ -11,21 +11,22 @@ use std::fs::{File, OpenOptions, TryLockError};
 use super::home::{place, Home, Install};
 use super::stamp;
 use crate::backend::reactive::registry::{pid_alive, AgentEntry};
-use crate::backend::rpc_types::ForkSlugCandidate;
+use crate::backend::rpc_types::{ForkSlugBlocker, ForkSlugBlockerKind as Kind, ForkSlugCandidate};
 
 /// Everything that would refuse a run of `candidates` now, worded for the
-/// operator. Empty when a run may start.
-pub(super) fn blockers(home: &Home, installs: &[Install], candidates: &[ForkSlugCandidate], check_lock: bool) -> Vec<String> {
+/// operator, each with its kind: only a running agent is cleared by
+/// stopping its pane. Empty when a run may start.
+pub(super) fn blockers(home: &Home, installs: &[Install], candidates: &[ForkSlugCandidate], check_lock: bool) -> Vec<ForkSlugBlocker> {
     let mut out = Vec::new();
     for c in candidates.iter().filter(|c| c.refused.is_none()) {
         for r in &c.running {
             let at = if r.channel.is_empty() { String::new() } else { format!(" in {}", r.channel) };
-            out.push(format!("{} is running{at} ({}): stop it first", c.name, r.how));
+            out.push(ForkSlugBlocker::new(Kind::Running, format!("{} is running{at} ({}): stop it first", c.name, r.how)));
         }
     }
-    out.extend(old_instances(home, installs));
+    out.extend(old_instances(home, installs).into_iter().map(|m| ForkSlugBlocker::new(Kind::OldInstance, m)));
     if check_lock && lock_held(home) {
-        out.push("another fork slug migration is under way".to_string());
+        out.push(ForkSlugBlocker::new(Kind::Locked, "Another agent id update is under way. Wait for it to finish."));
     }
     out
 }
@@ -48,12 +49,12 @@ pub(super) fn old_instances(home: &Home, installs: &[Install]) -> Vec<String> {
                     stamped.insert(pid);
                 }
                 Some(s) if s.pid == pid => out.push(format!(
-                    "AgentMux {} is running in {} (pid {pid}) and doesn't know former slugs: update or quit it",
+                    "An older AgentMux ({}) is running: {} (pid {pid}). It doesn't know former slugs. Update or quit it first.",
                     s.version,
                     place(install, version)
                 )),
                 _ => out.push(format!(
-                    "an older AgentMux is running in {} (pid {pid}): update or quit it",
+                    "An older AgentMux is running: {} (pid {pid}). Update or quit it first.",
                     place(install, version)
                 )),
             }
@@ -70,7 +71,7 @@ pub(super) fn old_instances(home: &Home, installs: &[Install]) -> Vec<String> {
                 continue;
             }
             out.push(format!(
-                "an AgentMux in channel {} (pid {}) doesn't say which version it is: update or quit it",
+                "An older AgentMux is running: channel {} (pid {}), which doesn't say which version it is. Update or quit it first.",
                 entry.channel, entry.pid
             ));
         }
