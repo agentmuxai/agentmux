@@ -1217,4 +1217,10 @@ describe("Tower's Panes view", () => {
         await screen.findByTestId("tower-rail-block-a");
         expect(screen.queryByRole("tab", { name: /Panes/ })).toBeNull();
     });
+
+    it("zooms the whole view with the pane's shared zoom", async () => {
+        setMeta({ "term:zoom": 1.5 });
+        renderTower();
+        expect(screen.getByTestId("tower-view").style.zoom).toBe("1.5");
+    });
 });

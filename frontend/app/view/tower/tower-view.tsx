@@ -90,7 +90,7 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
     const isPeer = () => m.connection().startsWith("peer:");
 
     return (
-        <div class="tower-view" data-testid="tower-view">
+        <div class="tower-view" data-testid="tower-view" style={{ zoom: m.zoom() }}>
             <div class="tower-toolbar">
                 <Select
                     density="compact"
