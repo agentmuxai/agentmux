@@ -10,7 +10,7 @@ use super::super::run::{self, Crash, Options, CRASHED};
 use super::fixture::*;
 
 fn crash_at(fx: &Fx, uid: &str, crash: Crash) {
-    let opts = Options { crash: Some((uid.to_string(), crash)) };
+    let opts = Options { crash: Some((uid.to_string(), crash)), ..Default::default() };
     assert_eq!(run::apply(&fx.home, &opts).unwrap_err(), CRASHED);
 }
 

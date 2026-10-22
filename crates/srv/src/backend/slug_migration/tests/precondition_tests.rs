@@ -7,6 +7,7 @@
 
 use super::super::stamp::{self, Stamp};
 use crate::backend::rpc_types::ForkSlugBlockerKind;
+use super::super::run;
 use super::fixture::*;
 
 fn fixture() -> (Fx, std::path::PathBuf) {
@@ -130,4 +131,61 @@ fn blockers_say_their_kind_and_only_a_running_agent_is_cleared_by_stopping() {
     assert!(old[0].message.starts_with("An older AgentMux is running: channels/stable@0.59.1"), "{}", old[0].message);
     assert!(old[0].message.ends_with("Update or quit it first."), "{}", old[0].message);
     assert!(both.iter().any(|b| b.kind == ForkSlugBlockerKind::Running && b.clearable_by_stopping));
+}
+
+/// A live lease for `uid`, as a pane running it holds.
+fn lease(fx: &Fx, uid: &str) {
+    let lease = serde_json::json!({
+        "instance_id": uid, "owner_boot_id": "boot", "block_id": "block-1", "session_id": null,
+        "pid": std::process::id(), "acquired_at_ms": 1, "renewed_at_ms": agentmux_common::time::now_ms(),
+        "hostname": whoami::fallible::hostname().unwrap_or_default().trim().to_lowercase(), "channel": "stable"
+    });
+    std::fs::create_dir_all(fx.home.leases()).unwrap();
+    std::fs::write(fx.home.leases().join(format!("{uid}.lease.json")), serde_json::to_vec(&lease).unwrap()).unwrap();
+}
+
+/// Neither way back runs while a migrated agent runs again, under its new
+/// id: the undo would rename it from under its process. Nothing changes,
+/// the journal included.
+#[test]
+fn a_rollback_or_restore_refuses_while_a_migrated_agent_runs() {
+    let fx = Fx::standard();
+    let report = super::apply(&fx.home).unwrap();
+    lease(&fx, LOAP2);
+    let journal = std::path::Path::new(&report.journal);
+    let records = std::fs::read(journal).unwrap();
+    let before = fx.snapshot();
+    for err in [run::rollback(&fx.home, Some(&report.journal)).unwrap_err(), run::restore(&fx.home, Some(&report.journal)).unwrap_err()] {
+        assert!(err.starts_with("not rolling back") && err.contains("Loap #2 is running"), "{err}");
+    }
+    assert_eq!(fx.snapshot(), before);
+    assert_eq!(std::fs::read(journal).unwrap(), records, "the journal is unchanged");
+
+    // A registration under the new id refuses too.
+    std::fs::remove_file(fx.home.leases().join(format!("{LOAP2}.lease.json"))).unwrap();
+    let entry = serde_json::json!({ "agent_id": "loap-2", "local_url": "", "block_id": "b", "pid": std::process::id(), "updated_at": 1, "channel": "stable", "uid": LOAP2 });
+    let dir = fx.home.reactive().join("loap-2");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("stable.json"), serde_json::to_vec(&entry).unwrap()).unwrap();
+    assert!(run::rollback(&fx.home, Some(&report.journal)).unwrap_err().contains("Loap #2 is running"));
+    std::fs::remove_dir_all(&dir).unwrap();
+    run::rollback(&fx.home, Some(&report.journal)).unwrap();
+}
+
+/// A corrupt `objects.db` anywhere blocks the plan, naming the file, and no
+/// target reads as free: every candidate waits and an apply writes nothing.
+#[test]
+fn a_corrupt_objects_db_blocks_the_plan() {
+    let (fx, _) = fixture();
+    let bad = fx.root().join("channels/stable/versions/0.50.0/data/db");
+    std::fs::create_dir_all(&bad).unwrap();
+    std::fs::write(bad.join("objects.db"), vec![0x5au8; 8192]).unwrap();
+    let plan = super::super::plan(&fx.home, false).unwrap();
+    assert!(plan.candidates.iter().all(|c| c.refused.is_some()), "{:?}", plan.candidates);
+    let blocker = plan.blockers.iter().find(|b| b.message.contains("0.50.0")).unwrap_or_else(|| panic!("{:?}", plan.blockers));
+    assert_eq!(blocker.kind, ForkSlugBlockerKind::Unreadable);
+    assert!(!blocker.clearable_by_stopping);
+    let err = super::apply(&fx.home).unwrap_err();
+    assert!(err.contains("can't be read"), "{err}");
+    assert!(!fx.home.backups().exists(), "nothing written");
 }

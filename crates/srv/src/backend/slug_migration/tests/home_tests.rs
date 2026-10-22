@@ -114,3 +114,49 @@ fn the_backup_copies_every_database_with_its_checksum() {
     assert!(backups.iter().any(|b| b.original.ends_with(&format!("{LOAP2}.json"))));
     assert!(backups.iter().any(|b| b.original.ends_with(".mcp.json")));
 }
+
+/// Another channel creates an agent with a planned target after the plan
+/// (during the backup, say): under the slug allocation lock the run checks
+/// the target again before S1, leaves that agent out with nothing written
+/// for it, and migrates the others.
+#[test]
+fn a_target_taken_after_the_plan_leaves_that_agent_out_untouched() {
+    let fx = Fx::standard();
+    let stable_a = fx.root().join("channels/stable/versions/0.59.1/data");
+    let def_before = std::fs::read(fx.home.definitions().join(format!("{LOAP2}.json"))).unwrap();
+    let defs = fx.defs.clone();
+    let db = stable_a.join("db/objects.db");
+    let done = std::sync::atomic::AtomicBool::new(false);
+    let opts = run::Options {
+        before_recheck: Some(Box::new(move || {
+            if done.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                return;
+            }
+            let store = crate::backend::storage::store::Store::open(&db).unwrap();
+            store.set_def_registry(defs.clone());
+            let mut def = crate::backend::storage::agents::test_agent_def("uid-new", "Newcomer", "claude", "host", 2_000, "");
+            def.slug = "loap-2".into();
+            store.agent_def_insert(&mut def).unwrap();
+            assert_eq!(store.agent_def_get("uid-new").unwrap().unwrap().slug, "loap-2", "the newcomer got the planned id");
+        })),
+        ..Default::default()
+    };
+    let report = run::apply(&fx.home, &opts).unwrap();
+    let mut migrated: Vec<&str> = report.migrated.iter().map(|m| m.new_slug.as_str()).collect();
+    migrated.sort();
+    assert_eq!(migrated, vec!["loap-3", "naki-2"]);
+    assert!(report.notes.iter().any(|n| n.contains("Loap #2 wasn't updated") && n.contains("uid-new")), "{:?}", report.notes);
+    assert_eq!(std::fs::read(fx.home.definitions().join(format!("{LOAP2}.json"))).unwrap(), def_before, "its definition is untouched");
+    for install in fx.home.installs().unwrap() {
+        for v in &install.versions {
+            assert_eq!(query::<String>(&v.objects_db(), &format!("SELECT slug FROM db_agents WHERE id = '{LOAP2}'")).as_deref(), Some("loap-loap-2"));
+        }
+    }
+    assert_eq!(
+        query::<String>(&stable_a.join("db/objects.db"), "SELECT hmac_key FROM db_agent_jekt_keys WHERE agent_id = 'loap-loap-2'").as_deref(),
+        Some("hmac-loap-loap-2"),
+        "its keys are untouched"
+    );
+    let journal = super::super::journal::Journal::open(std::path::Path::new(&report.journal)).unwrap();
+    assert!(journal.intent(LOAP2, super::super::journal::Step::S1).is_none(), "no step of it was even begun");
+}

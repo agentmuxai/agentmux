@@ -129,3 +129,29 @@ fn a_plan_writes_nothing_and_lists_every_location() {
         assert!(!text.contains(secret), "the plan never carries a key or a secret ({secret})");
     }
 }
+
+/// Another agent whose display name routes to a target holds it, whatever
+/// its own slug (`loap-2-2`, a collision suffix): a message to `loap-2` would
+/// otherwise reach the migrated agent instead of it. Case-insensitive, and
+/// in a channel's rows as in the shared definitions.
+#[test]
+fn another_agents_display_route_holds_a_target() {
+    let fx = Fx::empty();
+    let data = fx.version("stable", "0.59.1");
+    fx.chains(&data, true);
+    fx.agent(&data, "uid-routed", "LOAP 2", "loap-2-2", "", "", true);
+    let plan = super::super::plan(&fx.home, false).unwrap();
+    let loap2 = by_name(&plan.candidates, "Loap #2");
+    assert!(loap2.refused.as_deref().is_some_and(|r| r.contains("uid-routed") && r.contains("routes there")), "{:?}", loap2.refused);
+    assert!(by_name(&plan.candidates, "Naki #2").refused.is_none());
+
+    // Known only to an older version's rows, by its instance name.
+    let fx = Fx::empty();
+    let data = fx.version("stable", "0.59.1");
+    fx.chains(&data, true);
+    let old = fx.version("local-x", "0.58.0");
+    fx.agent(&old, "uid-inst", "Someone", "someone", "", "", false);
+    fx.exec(&old.join("db/objects.db"), "UPDATE db_agents SET instance_name = 'Naki-2' WHERE id = 'uid-inst'");
+    let plan = super::super::plan(&fx.home, false).unwrap();
+    assert!(by_name(&plan.candidates, "Naki #2").refused.as_deref().is_some_and(|r| r.contains("uid-inst")));
+}

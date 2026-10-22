@@ -65,6 +65,9 @@ pub enum Record {
     Done { uid: String, step: Step, changes: Vec<String> },
     Verified { uid: String },
     Failed { uid: String, error: String },
+    /// Left out of this run with nothing written for it: its new id was
+    /// taken after the plan (another channel created an agent with it).
+    Skipped { uid: String, reason: String },
     Finished { at: i64, after: Vec<Fingerprint> },
     Undo { uid: String, step: Step },
     Undone { uid: String, step: Step, changes: Vec<String> },
@@ -141,6 +144,13 @@ impl Journal {
 
     pub fn done(&self, uid: &str, step: Step) -> bool {
         self.records.iter().any(|r| matches!(r, Record::Done { uid: u, step: s, .. } if u == uid && *s == step))
+    }
+
+    pub fn skipped(&self, uid: &str) -> Option<&str> {
+        self.records.iter().find_map(|r| match r {
+            Record::Skipped { uid: u, reason } if u == uid => Some(reason.as_str()),
+            _ => None,
+        })
     }
 
     pub fn verified(&self, uid: &str) -> bool {

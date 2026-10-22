@@ -246,11 +246,15 @@ As built (`crates/srv/src/backend/slug_migration/`):
 - **Plan.** Candidates are read from the shared definitions; a definition with no shared record isn't considered.
   The old rule is matched against the parent's slug and its former slugs, so a parent migrated first (or by an
   earlier, interrupted run) doesn't hide its child. A target is held by:
-  - another uid's shared slug or former slug;
-  - a row or former slug in any `objects.db`;
+  - another uid's shared slug, former slug or display route (`agent_route_name` of its name, case-insensitive);
+  - a row's slug, former slug, display route or instance route in any `objects.db`;
   - another candidate's target;
   - a live cross-channel registration under it that isn't this uid's;
   - a live per-version registration whose pane (by `agentId`) is another agent's.
+
+  A display route counts because `agent_defs_for_target` prefers a slug: an agent `Loap 2` with the suffixed
+  slug `loap-2-2` would lose its messages to an agent renamed `loap-2`. A database that can't be read (corrupt
+  or incompatible) blocks the plan, naming the file, and every candidate waits; no target reads as free.
 
   A refusal suggests the first free `-N`. Locations are listed through each step's own before-image, so the plan
   shows exactly what a run touches. A key row is reported by its presence, never its value.
@@ -262,6 +266,12 @@ As built (`crates/srv/src/backend/slug_migration/`):
   as new enough when the stamp's pid is the lock's live pid and it lists `former-slugs-v1`. A live srv in the
   registry with no such stamp counts as too old, as does every build before this one.
 - **Lock.** `shared/locks/slug-migration.lock`, an OS file lock held for the whole run or rollback.
+- **The target, again, before S1.** The plan comes before the backup, and another channel may create an agent
+  with a planned id meanwhile. So before an agent's first write the run takes the host-wide slug allocation lock
+  (`DefinitionStore::lock_slug_allocation`, which every agent creation holds while it picks and publishes a slug),
+  checks the target again by the plan's rules, and holds the lock through S1 and S2, which publish the new id. A
+  target taken since leaves that agent out with nothing written for it (`Skipped` in the journal, a note in the
+  report); the others still migrate. The lock isn't held during the backup.
 - **Backup.** `shared/backups/slug-migration-<UTC time>/` holds:
   - every database, copied through `VACUUM INTO` (`db_copy::copy_database`);
   - the definitions, workspace `.mcp.json` files and stale registrations, as files.
@@ -297,6 +307,9 @@ As built (`crates/srv/src/backend/slug_migration/`):
 - **Verify.** Re-reads K1, K2, K5, K9, K12, K13 and the key tables. Then it resolves the old and the new name
   through srv's own resolver (`Store::former_slug_owner`, `agent_ids_for_slug_folded`) on each `objects.db`. A
   version too old for that query is checked by its rows only.
+- **Both ways back refuse first** while an agent the run touched runs anywhere on the host, under its old id or
+  its new one (a relaunch takes the new one), or while an AgentMux too old for former slugs runs. Nothing is
+  written, the journal included.
 - **Rollback, journal mode.** Undoes every recorded intent, newest first, and is resumable.
   - A file still holding what its step wrote gets the backup's bytes back. One edited since is reverted field by
     field (S1) or left as it is and reported (`.mcp.json`).

@@ -12,10 +12,11 @@ use serde_json::Value;
 
 use super::home::{fold, open_ro, place, table_exists, Home, Install};
 use crate::backend::rpc_types::{ForkSlugBlocker, ForkSlugBlockerKind, ForkSlugCandidate, ForkSlugPlan, ForkSlugSkipped};
-use agentmux_common::slug::{definition_slug, fork_slug, is_agent_id};
+use agentmux_common::slug::{agent_route_name, definition_slug, fork_slug, is_agent_id};
+use rusqlite::OptionalExtension;
 
 /// One shared definition, as the plan needs it.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(super) struct Def {
     pub uid: String,
     pub name: String,
@@ -159,12 +160,21 @@ fn lineage_root<'a>(by_id: &BTreeMap<&str, &'a Def>, def: &'a Def) -> Option<(&'
     Some((cur, depth))
 }
 
+/// Whether a display or instance name routes to `folded`, as a message's
+/// target does (`agent_route_name`, case-insensitive).
+fn routes_to(name: &str, folded: &str) -> bool {
+    !name.trim().is_empty() && fold(&agent_route_name(name)) == folded
+}
+
 /// Who holds `target` other than `uid`, if anyone: a shared definition's
-/// slug or former slug, a row or former slug in any `objects.db` on disk,
-/// another candidate's new id, a live cross-channel registration, or a live
-/// per-version registration of another agent's pane. Held only by `uid`
-/// itself (its own display binding) is free. An `Err` is a store that can't
-/// be read: the answer isn't known.
+/// slug, former slug or display route; a row's slug, former slug, display or
+/// instance route in any `objects.db` on disk; another candidate's new id; a
+/// live cross-channel registration; or a live per-version registration of
+/// another agent's pane. A display route counts because a message to the
+/// target would otherwise reach whichever agent holds it as its slug, and
+/// the agent it was meant for would never see it. Held only by `uid` itself
+/// (its own display binding) is free. An `Err` is a store that can't be
+/// read: the answer isn't known.
 pub(super) fn holder_of(
     home: &Home,
     installs: &[Install],
@@ -181,18 +191,44 @@ pub(super) fn holder_of(
         if d.former.iter().any(|f| fold(f) == t) {
             return Ok(Some(format!("agent {} ({}) was renamed from it, and it stays reserved", d.name, d.uid)));
         }
+        if routes_to(&d.name, &t) {
+            return Ok(Some(format!("messages to it reach agent {} ({}), whose name routes there", d.name, d.uid)));
+        }
     }
     if let Some(other) = taken.get(&t).filter(|o| o.as_str() != uid) {
         return Ok(Some(format!("this run renames agent {other} to it")));
     }
     for install in installs {
         for version in &install.versions {
-            let conn = open_ro(&version.objects_db())?;
+            let db = version.objects_db();
+            let failed = |e: rusqlite::Error| format!("{} can't be read: {e}", db.display());
+            let conn = open_ro(&db)?;
             let row: Option<String> = conn
                 .query_row("SELECT id FROM db_agents WHERE slug = ?1 COLLATE NOCASE AND id != ?2 LIMIT 1", [&t, uid], |r| r.get(0))
-                .ok();
+                .optional()
+                .map_err(failed)?;
             if let Some(id) = row {
                 return Ok(Some(format!("agent {id} has it in {}", place(install, version))));
+            }
+            let routed: Option<(String, String)> = {
+                let mut stmt = conn
+                    .prepare("SELECT id, name, COALESCE(instance_name, '') FROM db_agents WHERE id != ?1")
+                    .map_err(failed)?;
+                let rows = stmt
+                    .query_map([uid], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))
+                    .map_err(failed)?;
+                let mut hit = None;
+                for row in rows {
+                    let (id, name, instance) = row.map_err(failed)?;
+                    if routes_to(&name, &t) || routes_to(&instance, &t) {
+                        hit = Some((id, if routes_to(&name, &t) { name } else { instance }));
+                        break;
+                    }
+                }
+                hit
+            };
+            if let Some((id, name)) = routed {
+                return Ok(Some(format!("messages to it reach agent {id} in {}, whose name {name:?} routes there", place(install, version))));
             }
             if table_exists(&conn, "db_agent_former_slugs") {
                 let former: Option<String> = conn
@@ -201,7 +237,8 @@ pub(super) fn holder_of(
                         [&t, uid],
                         |r| r.get(0),
                     )
-                    .ok();
+                    .optional()
+                    .map_err(failed)?;
                 if let Some(id) = former {
                     return Ok(Some(format!("agent {id} was renamed from it in {}", place(install, version))));
                 }
@@ -244,22 +281,37 @@ pub(super) fn plan_with(home: &Home, quick: bool, check_lock: bool) -> Result<Fo
         .iter()
         .map(|u| ForkSlugBlocker::new(ForkSlugBlockerKind::Unreadable, format!("A shared definition can't be read, so no new id can be checked: {u}")))
         .collect();
+    blockers.extend(unreadable_stores(home, &installs).into_iter().map(|u| {
+        ForkSlugBlocker::new(ForkSlugBlockerKind::Unreadable, format!("A database can't be read, so no new id can be checked: {u}"))
+    }));
+    if !blockers.is_empty() {
+        // Nothing past this point can be trusted: a store that can't be read
+        // may hold any target. Every candidate waits, none is "free".
+        let candidates: Vec<ForkSlugCandidate> = found
+            .iter()
+            .map(|f| ForkSlugCandidate { refused: Some("not every store can be read, so its new id can't be checked".into()), ..bare(f) })
+            .collect();
+        let summary = summary(&candidates, &skipped, &blockers);
+        return Ok(ForkSlugPlan { candidates, skipped, blockers, summary });
+    }
     let mut taken: BTreeMap<String, String> = BTreeMap::new();
     let mut candidates = Vec::new();
     for f in &found {
         let mut c = bare(f);
-        if unreadable.is_empty() {
-            match holder_of(home, &installs, &defs, &taken, &f.def.uid, &f.new_slug)? {
-                Some(holder) => {
-                    c.refused = Some(format!("{} is taken: {holder}", f.new_slug));
-                    c.suggestion = suggest(home, &installs, &defs, &taken, &f.def.uid, &f.new_slug)?;
-                }
-                None => {
-                    taken.insert(fold(&f.new_slug), f.def.uid.clone());
-                }
+        match holder_of(home, &installs, &defs, &taken, &f.def.uid, &f.new_slug) {
+            Ok(Some(holder)) => {
+                c.refused = Some(format!("{} is taken: {holder}", f.new_slug));
+                c.suggestion = suggest(home, &installs, &defs, &taken, &f.def.uid, &f.new_slug).unwrap_or(None);
             }
-        } else {
-            c.refused = Some("the shared definitions can't all be read".into());
+            Ok(None) => {
+                taken.insert(fold(&f.new_slug), f.def.uid.clone());
+            }
+            Err(e) => {
+                c.refused = Some("its new id can't be checked".into());
+                blockers.push(ForkSlugBlocker::new(ForkSlugBlockerKind::Unreadable, format!("A database can't be read, so no new id can be checked: {e}")));
+                candidates.push(c);
+                continue;
+            }
         }
         c.locations = super::locations::locations(home, &installs, &f.def, &f.new_slug)?;
         c.running = super::running::running(home, &installs, &f.def)?;
@@ -270,6 +322,34 @@ pub(super) fn plan_with(home: &Home, quick: bool, check_lock: bool) -> Result<Fo
     }
     let summary = summary(&candidates, &skipped, &blockers);
     Ok(ForkSlugPlan { candidates, skipped, blockers, summary })
+}
+
+/// Every database a run reads or writes that can't be read now, by path
+/// and why: a corrupt or incompatible `objects.db` (its agents), `wan.db` or
+/// host store. A query that finds no row is not a failure; one that can't
+/// run is.
+pub(super) fn unreadable_stores(home: &Home, installs: &[Install]) -> Vec<String> {
+    let mut out = Vec::new();
+    let probe = |db: &Path, sql: &str, out: &mut Vec<String>| {
+        let result = open_ro(db).and_then(|c| {
+            c.query_row(sql, [], |_| Ok(())).optional().map(|_| ()).map_err(|e| e.to_string())
+        });
+        if let Err(e) = result {
+            out.push(format!("{} ({e})", db.display()));
+        }
+    };
+    for install in installs {
+        for version in &install.versions {
+            probe(&version.objects_db(), "SELECT id, slug, name, COALESCE(instance_name, '') FROM db_agents LIMIT 1", &mut out);
+        }
+        if let Some(wan) = install.wan_db() {
+            probe(&wan, "SELECT name FROM sqlite_master LIMIT 1", &mut out);
+        }
+    }
+    for db in home.host_stores(installs) {
+        probe(&db, "SELECT name FROM sqlite_master LIMIT 1", &mut out);
+    }
+    out
 }
 
 fn bare(f: &Found) -> ForkSlugCandidate {

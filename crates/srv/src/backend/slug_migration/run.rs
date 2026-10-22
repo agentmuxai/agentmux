@@ -29,6 +29,10 @@ pub(super) enum Crash {
 pub(super) struct Options {
     #[cfg(test)]
     pub crash: Option<(String, Crash)>,
+    /// Runs just before an agent's target is checked again, as another
+    /// channel creating an agent during the backup would.
+    #[cfg(test)]
+    pub before_recheck: Option<Box<dyn Fn()>>,
 }
 
 pub(super) const CRASHED: &str = "crashed (test)";
@@ -119,14 +123,17 @@ pub(super) fn apply(home: &Home, opts: &Options) -> Result<ForkSlugReport, Strin
     let (plan, backups) = (plan.clone(), backups.to_vec());
     let ctx = Ctx { home, installs: &installs, run_dir: journal.dir(), backups: &backups, retired_at };
     for a in agents(&plan.candidates) {
-        if journal.verified(&a.uid) {
+        if journal.verified(&a.uid) || journal.skipped(&a.uid).is_some() {
             continue;
         }
-        if let Err(e) = run_agent(&ctx, &mut journal, &a, opts) {
+        if let Err(e) = run_agent_reserved(&ctx, &mut journal, &a, opts) {
             if e != CRASHED {
                 journal.append(Record::Failed { uid: a.uid.clone(), error: e.clone() })?;
             }
             return Err(e);
+        }
+        if journal.skipped(&a.uid).is_some() {
+            continue;
         }
         let problems = verify::verify(&ctx, &a)?;
         if !problems.is_empty() {
@@ -148,10 +155,46 @@ pub(super) fn apply(home: &Home, opts: &Options) -> Result<ForkSlugReport, Strin
     Ok(report(&journal, &plan, None))
 }
 
-/// One agent's steps, each recorded before and after it runs.
-fn run_agent(ctx: &Ctx, journal: &mut Journal, a: &Agent, opts: &Options) -> Result<(), String> {
+/// One agent's steps. Before its first write, its new id is checked again
+/// under the host-wide slug allocation lock, the one every channel creating
+/// an agent holds while it picks and publishes a slug: the plan was made
+/// before the backup, which can take a while, and another channel may have
+/// handed the id out since. The lock is held through S1 and S2, which
+/// publish the new id in the shared definition and every `objects.db`, and
+/// released before the rest. A target taken in the meantime leaves the agent
+/// out of the run with nothing written for it (`Record::Skipped`). A resumed
+/// agent whose S1 already has an intent had its id checked then.
+fn run_agent_reserved(ctx: &Ctx, journal: &mut Journal, a: &Agent, opts: &Options) -> Result<(), String> {
+    if journal.intent(&a.uid, Step::S1).is_some() {
+        return run_agent(ctx, journal, a, opts, &STEPS);
+    }
+    #[cfg(test)]
+    if let Some(hook) = &opts.before_recheck {
+        hook();
+    }
+    let store = crate::registry::DefinitionStore::open(ctx.home.definitions()).map_err(|e| e.to_string())?;
+    let allocation = store.lock_slug_allocation().map_err(|e| e.to_string())?;
+    let (defs, unreadable) = super::plan::load_defs(ctx.home)?;
+    let holder = if unreadable.is_empty() {
+        super::plan::holder_of(ctx.home, ctx.installs, &defs, &Default::default(), &a.uid, &a.new)?
+    } else {
+        Some(format!("the shared definitions can't all be read ({})", unreadable.join("; ")))
+    };
+    if let Some(holder) = holder {
+        let reason = format!("{} wasn't updated: {} was taken after the plan ({holder})", a.name, a.new);
+        tracing::warn!(uid = %a.uid, target = %a.new, %holder, "fork slug migration: target taken since the plan; agent left out");
+        journal.append(Record::Skipped { uid: a.uid.clone(), reason })?;
+        return Ok(());
+    }
+    run_agent(ctx, journal, a, opts, &STEPS[..2])?;
+    drop(allocation);
+    run_agent(ctx, journal, a, opts, &STEPS[2..])
+}
+
+/// `steps` of one agent, each recorded before and after it runs.
+fn run_agent(ctx: &Ctx, journal: &mut Journal, a: &Agent, opts: &Options, steps: &[Step]) -> Result<(), String> {
     let _ = opts;
-    for step in STEPS {
+    for &step in steps {
         if journal.done(&a.uid, step) {
             continue;
         }
@@ -194,7 +237,7 @@ fn report(journal: &Journal, plan: &crate::backend::rpc_types::ForkSlugPlan, fai
         .iter()
         .map(|m| format!("gh-agent pr list --state open --search \"agentmux:agent_id={} in:body\"", fold(&m.old_slug)))
         .collect();
-    let mut notes = Vec::new();
+    let mut notes: Vec<String> = plan.candidates.iter().filter_map(|c| journal.skipped(&c.uid).map(str::to_string)).collect();
     if !migrated.is_empty() {
         notes.extend([
             "Relaunch each migrated agent: it takes its new id, fresh signing keys and a new WAN key publication at its next spawn.".to_string(),
@@ -228,6 +271,36 @@ fn pick(home: &Home, path: Option<&str>) -> Result<Journal, String> {
     }
 }
 
+/// Refuse to undo `journal`'s run while any agent it touched runs anywhere
+/// on this host, under its old id or its new one (a relaunch takes the new
+/// one), or while an AgentMux too old for former slugs runs: either would
+/// keep using, or write back, what the undo changes. The caller holds the
+/// migration lock.
+fn refuse_undo_while_running(home: &Home, installs: &[super::home::Install], journal: &Journal) -> Result<(), String> {
+    let (defs, _) = super::plan::load_defs(home)?;
+    let touched: std::collections::HashSet<String> = journal.intents().into_iter().map(|(uid, _, _)| uid).collect();
+    let mut why = Vec::new();
+    for c in journal.header().1.candidates.iter().filter(|c| touched.contains(&c.uid)) {
+        let mut def = defs.iter().find(|d| d.uid == c.uid).cloned().unwrap_or_else(|| super::plan::Def {
+            uid: c.uid.clone(),
+            name: c.name.clone(),
+            slug: c.new_slug.clone(),
+            ..Default::default()
+        });
+        def.former.extend([c.old_slug.clone(), c.new_slug.clone()]);
+        for r in super::running::running(home, installs, &def)? {
+            let at = if r.channel.is_empty() { String::new() } else { format!(" in {}", r.channel) };
+            why.push(format!("{} is running{at} ({}): stop it first", c.name, r.how));
+        }
+    }
+    why.extend(preconditions::old_instances(home, installs));
+    if why.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("not rolling back: {}", why.join("; ")))
+    }
+}
+
 /// Journal mode: undo every step that has an intent, newest first, each
 /// from its before-image. Resumable: a step already undone is skipped.
 pub(super) fn rollback(home: &Home, path: Option<&str>) -> Result<ForkSlugReport, String> {
@@ -242,6 +315,7 @@ pub(super) fn rollback(home: &Home, path: Option<&str>) -> Result<ForkSlugReport
         });
     }
     let installs = home.installs()?;
+    refuse_undo_while_running(home, &installs, &journal)?;
     let (retired_at, plan, backups) = journal.header();
     let (plan, backups) = (plan.clone(), backups.to_vec());
     let ctx = Ctx { home, installs: &installs, run_dir: journal.dir(), backups: &backups, retired_at };
@@ -277,6 +351,7 @@ pub(super) fn restore(home: &Home, path: Option<&str>) -> Result<ForkSlugReport,
         return Err("this run was already rolled back".into());
     }
     let after = journal.finished().ok_or("this run didn't finish: roll it back from its journal instead")?.to_vec();
+    refuse_undo_while_running(home, &home.installs()?, &journal)?;
     let mut changed = Vec::new();
     for f in &after {
         let database = is_database(&journal, &f.path);
