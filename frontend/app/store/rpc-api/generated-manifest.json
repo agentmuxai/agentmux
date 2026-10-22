@@ -1434,6 +1434,10 @@
             "method": "AppUpgradeRequestsCommand"
         },
         {
+            "command": "app.desktop",
+            "method": "AppDesktopCommand"
+        },
+        {
             "command": "viewer.agent-hidden",
             "method": "ViewerAgentHiddenCommand"
         },

@@ -12,6 +12,7 @@
 }
 
 .warden-history-agents,
+.warden-history-typed,
 .warden-history-storage {
     display: flex;
     flex-direction: column;
@@ -116,4 +117,26 @@ tr[data-deleted] td {
         padding-left: var(--space-4);
         list-style: disc;
     }
+}
+
+.warden-history-typed-table td {
+    vertical-align: top;
+}
+
+.warden-history-typed-when {
+    white-space: nowrap;
+}
+
+// A long message shows its first lines; the whole text is the tooltip.
+.warden-history-typed-text {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+    overflow: hidden;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.warden-history-typed-tags {
+    font-size: var(--text-sm);
 }

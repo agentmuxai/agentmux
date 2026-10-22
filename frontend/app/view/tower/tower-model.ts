@@ -11,6 +11,7 @@ import { remotesList } from "@/app/store/remotes-store";
 import { RpcApi, type TowerPeerInfo, type TowerProcessKind, type TowerSnapshot } from "@/app/store/rpc-api";
 import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { readZoom } from "@/app/store/zoom-factor";
 import { settingsAtom } from "@/store/global";
 import { type Accessor, createEffect, createMemo, createSignal, on, onCleanup, type Setter } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
@@ -104,6 +105,8 @@ export class TowerViewModel {
     /** The Agents view's tree shows CPU time and peak memory too. */
     moreColumns: Accessor<boolean>;
     viewName: Accessor<string>;
+    /** The pane's zoom (`term:zoom`), applied to the whole view. */
+    zoom: Accessor<number>;
     private setMeta: (patch: Record<string, unknown>) => void;
     private setSnapshot: (snap: TowerSnapshot | null) => void;
     private setError: Setter<string | null>;
@@ -129,6 +132,7 @@ export class TowerViewModel {
     constructor(ctx: PaneTabHostContext) {
         this.blockId = ctx.blockId;
         this.setMeta = (patch) => void ctx.setMeta(patch);
+        this.zoom = createMemo(() => readZoom(ctx.meta()));
         // "host" is what the Processes view was called until 2026-10-10.
         this.view = createMemo<TowerView>(() => {
             const v = ctx.meta()?.["tower:view"];

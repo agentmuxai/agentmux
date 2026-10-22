@@ -5,4 +5,5 @@
 
 pub mod append;
 pub mod damage;
+pub mod framer;
 pub mod source;

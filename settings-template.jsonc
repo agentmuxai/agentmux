@@ -190,6 +190,11 @@
     // to the block's own store. Halves what AgentMux writes to disk while
     // agents run. Off until it has been through a soak.
     // "agent:transcriptsinglecopy": false,
+    // Compress the finished parts of agent transcripts in the shared store
+    // (about 6x smaller); what a reader sees doesn't change. With it on,
+    // transcriptdeltas also stores each streamed reply's text once.
+    // "agent:transcriptframes":    false,
+    // "agent:transcriptdeltas":    true,
 
     // -- Other --
     // "widget:icononly":           false,

@@ -8,7 +8,6 @@ import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { MODE_DESCRIPTIONS, MODE_LABELS, SUPERVISOR_MODES } from "@/app/store/supervisor";
-import { summarizeAmbientOutcomes } from "@/app/store/ambient-outcomes";
 import { gapSummary, localTarget, partitionTargets, remoteFleetTargets, unavailableReason, type FleetAction } from "./swarm-fleet-targets";
 import type { FleetResultEntry, SwarmViewModel } from "./swarm-model";
 import { remoteSections } from "./swarm-remote";
@@ -94,11 +93,9 @@ export function FleetToolbar({
         await model.bulkStopSelection({ staged });
     };
 
-    // Shown whenever there's an agent to select, a selection to act on, or
-    // stats to show: "Select all" and Stats must be reachable with nothing
-    // selected yet.
-    const stats = createMemo(() => summarizeAmbientOutcomes(model.ambientOutcomesAtom()));
-    const showToolbar = () => allBlockIds().length > 0 || count() > 0 || stats() !== null;
+    // Shown whenever there's an agent to select or a selection to act on:
+    // "Select all" must be reachable with nothing selected yet.
+    const showToolbar = () => allBlockIds().length > 0 || count() > 0;
 
     return (
         <Show when={showToolbar()}>
@@ -119,8 +116,8 @@ export function FleetToolbar({
                 {/* Never "act on selected" without stating the concrete count
                     first (spec §3: hidden scope is the top accidental-broadcast
                     cause). Selection-dependent actions below are gated on
-                    count() > 0 individually — only Stats (and this bar's own
-                    visibility) doesn't require a selection. */}
+                    count() > 0 individually; only this bar's own visibility
+                    doesn't require a selection. */}
                 <Show when={count() > 0}>
                     <span class="swarm-fleet-toolbar-count">
                         {count()} selected
@@ -207,24 +204,6 @@ export function FleetToolbar({
                             <i class="fa-solid fa-user-shield" /> Supervisor
                         </Button>
                     </Show>
-                </Show>
-
-                <Show when={stats()}>
-                    {(st) => (
-                        <Button
-                            class="swarm-fleet-btn"
-                            icon="chart-simple"
-                            pressed={model.statsOpenAtom()}
-                            aria-expanded={model.statsOpenAtom()}
-                            title="Model requests AgentMux makes on its own (session titles, names, prompt suggestions), since its server started"
-                            onClick={() => model.toggleStats()}
-                        >
-                            Stats
-                            <Show when={st().unhealthyCount > 0}>
-                                <span class="swarm-stats-failing">{st().unhealthyCount} failing</span>
-                            </Show>
-                        </Button>
-                    )}
                 </Show>
 
                 <Show when={count() > 0}>

@@ -29,6 +29,7 @@ import type { ConfigEvent } from "@/types/rpc/ConfigEvent";
 import type { ConnStatus } from "@/types/rpc/ConnStatus";
 import type { ConnectivityStatus } from "@/types/rpc/ConnectivityStatus";
 import type { CredentialsRevokedEvent } from "@/types/rpc/CredentialsRevokedEvent";
+import type { DesktopEvent } from "@/types/rpc/DesktopEvent";
 import type { DispatchActivityEvent } from "@/types/rpc/DispatchActivityEvent";
 import type { DispatchUpdatedEvent } from "@/types/rpc/DispatchUpdatedEvent";
 import type { DockClearEvent } from "@/types/rpc/DockClearEvent";
@@ -111,6 +112,7 @@ export type MuxEventPayloads = {
   agentturn: AgentTurnEvent;
   "ambient-narration": AmbientNarrationEvent;
   "ambient:spent": AmbientSpentEvent;
+  "app:desktop": DesktopEvent;
   "app:updatestatus": AppUpdateStatus;
   "app:upgraderequests": UpgradeRequestsEvent;
   "attachment:batch-done": AttachmentBatchDoneEvent;
@@ -217,6 +219,7 @@ export const TYPED_MUX_EVENTS = [
   "agentturn",
   "ambient-narration",
   "ambient:spent",
+  "app:desktop",
   "app:updatestatus",
   "app:upgraderequests",
   "attachment:batch-done",

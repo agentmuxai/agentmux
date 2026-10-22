@@ -851,6 +851,44 @@ async fn route_command(
             relayed?;
             Ok(serde_json::json!(true))
         }
+        "desktop_request_decide" => {
+            // The user's answer to an agent's request to drive a native app,
+            // relayed to srv as the host: no agent can approve its own
+            // request (SPEC_DESKTOP_DRIVING_2026_10_20.md §5.4).
+            let body = serde_json::json!({
+                "id": args.get("id").and_then(|v| v.as_str()).unwrap_or(""),
+                "choice": args.get("choice").and_then(|v| v.as_str()).unwrap_or("deny"),
+            });
+            let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
+            let auth_key = state.auth_key.lock().clone();
+            let ipc_token = state.ipc_token.clone();
+            tracing::info!("[ipc] desktop_request_decide id={} choice={}", body["id"], body["choice"]);
+            let relayed: Result<(), String> = tokio::task::spawn_blocking(move || {
+                crate::client::backend_desktop_request(&web_endpoint, &auth_key, &ipc_token, &body)
+            })
+            .await
+            .map_err(|e| format!("desktop_request_decide: {e}"))?;
+            relayed?;
+            Ok(serde_json::json!(true))
+        }
+        "desktop_stop" => {
+            // The user's Stop on an agent driving a native app, relayed to
+            // srv as the host (SPEC_DESKTOP_DRIVING_2026_10_20.md §5.6).
+            let body = serde_json::json!({
+                "block_id": args.get("block_id").and_then(|v| v.as_str()).unwrap_or(""),
+            });
+            let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
+            let auth_key = state.auth_key.lock().clone();
+            let ipc_token = state.ipc_token.clone();
+            tracing::info!("[ipc] desktop_stop block_id={}", body["block_id"]);
+            let relayed: Result<(), String> = tokio::task::spawn_blocking(move || {
+                crate::client::backend_desktop_stop(&web_endpoint, &auth_key, &ipc_token, &body)
+            })
+            .await
+            .map_err(|e| format!("desktop_stop: {e}"))?;
+            relayed?;
+            Ok(serde_json::json!(true))
+        }
         "browser_pane_focus" => {
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
             tracing::info!("[ipc] browser_pane_focus block_id={}", block_id);

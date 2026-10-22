@@ -96,6 +96,7 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
         <div
             ref={container}
             class="settings-view-container"
+            style={{ zoom: props.model.zoom() }}
             onPointerDown={() => {
                 lastPressAt = performance.now();
             }}

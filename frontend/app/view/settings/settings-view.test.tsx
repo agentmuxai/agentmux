@@ -272,3 +272,19 @@ describe("Settings pane: the section to open at", () => {
         expect(openWith({ view: "settings", "settings:section": "nope" })).toBe("Appearance");
     });
 });
+
+describe("SettingsView zoom", () => {
+    afterEach(() => cleanup());
+
+    it("zooms the whole view with the pane's shared zoom", () => {
+        const [meta] = createSignal<Record<string, unknown>>({ "term:zoom": 1.25 });
+        const block = { meta, setMeta: async () => {} };
+        const { container } = render(() => <SettingsView model={new SettingsViewModel(block as never)} />);
+        expect((container.querySelector(".settings-view-container") as HTMLElement).style.zoom).toBe("1.25");
+    });
+
+    it("stays at 100% without a block", () => {
+        const { container } = render(() => <SettingsView model={new SettingsViewModel()} />);
+        expect((container.querySelector(".settings-view-container") as HTMLElement).style.zoom).toBe("1");
+    });
+});

@@ -246,6 +246,12 @@ export const cefApprovals: ApprovalHostApi = {
     decideUpgrade: async (id, version, accept) => {
         await invokeCommand("upgrade_request_decide", { id, version, accept });
     },
+    decideDesktop: async (id, choice) => {
+        await invokeCommand("desktop_request_decide", { id, choice });
+    },
+    stopDesktop: async (blockId) => {
+        await invokeCommand("desktop_stop", { block_id: blockId });
+    },
     forgetWidgetKey: async (publisher) => {
         await invokeCommand("widget_approval_decide", { id: publisher, hash: "", decision: "forget_key" });
     },

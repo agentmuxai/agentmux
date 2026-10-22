@@ -234,6 +234,15 @@
     }
   },
   {
+    "event": "app:desktop",
+    "payloadTs": {
+      "imports": [
+        "DesktopEvent"
+      ],
+      "name": "DesktopEvent"
+    }
+  },
+  {
     "event": "app:updatestatus",
     "payloadTs": {
       "imports": [

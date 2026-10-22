@@ -334,6 +334,8 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                     match crate::boot_timing::time("open_transcripts_db", || FileStore::open_global_transcripts(&dir.join("filestore.db"))) {
                         Ok(fs) => {
                             tracing::info!(dir = %dir.display(), "global transcripts: store attached");
+                            // This srv reads compressed frames (transcript::framer).
+                            crate::backend::transcript::framer::mark_reader(&dir);
                             Some(Arc::new(fs))
                         }
                         Err(e) => {
