@@ -3,7 +3,7 @@
 **Date:** 2026-10-21
 **Author:** Agent5@narko
 **Type:** Spec (a storage change; what a reader sees does not change)
-**Status:** active. The operator approved both parts on 2026-10-22 ("lets get the compaction and also cleaning out the streaming deltas"). PRs 1 and 2 of §9 (the frame table, both codecs, every read and write path, the store accepting version 3; nothing creates a frame yet) are in PR #5324; remaining: the framer with its settings and checks, the recovery tool's decoders, and turning it on. Task #49.
+**Status:** active. The operator approved both parts on 2026-10-22 ("lets get the compaction and also cleaning out the streaming deltas"). PRs 1 and 2 of §9 (the frame table, both codecs, every read and write path, the store accepting version 3; nothing creates a frame yet) are in PR #5324. PR 3 (the framer, its settings, off, and its checks) is in the PR stacked on it. Remaining: PR 4 (the recovery tool's decoders, `history.compact`, `decompress`, the Storage numbers), then turning it on. Task #49.
 **Builds on:** `REPORT_AGENT_HISTORY_STORE_DEDUP_COMPRESSION_2026_10_17.md` (AgentY: §4.3 compression, §7.3 "shrink the pane store"), `SPEC_AGENT_TRANSCRIPT_SINGLE_COPY_2026_10_19.md` (Maricon: one copy of each transcript), `docs/analysis/RCA_UPGRADE_0_59_30_TO_0_59_34_ISSUES_2026_10_19.md` §6 (the damaged parts).
 **Platform:** all.
 

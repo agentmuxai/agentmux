@@ -546,6 +546,8 @@ impl FileStore {
     }
 
     /// Turn every frame of a file back into part rows; the number undone.
+    /// For `decompress` (spec §5.4), which comes with the recovery tool.
+    #[cfg_attr(not(test), allow(dead_code))]
     #[track_caller]
     pub(crate) fn unframe_file(&self, zone_id: &str, name: &str) -> Result<usize, StoreError> {
         let out = self.write_txn(|tx| unframe(tx, zone_id, name, 0, i32::MAX - MAX_FRAME_PARTS))?;
@@ -576,7 +578,9 @@ impl FileStore {
         })
     }
 
-    /// The bytes a file's frames hold and take: `(logical, stored, frames)`.
+    /// The bytes the store's frames hold and take: `(logical, stored, frames)`.
+    /// For the Storage numbers (spec §7), which come with the recovery tool.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn frame_totals(&self) -> Result<(i64, i64, i64), StoreError> {
         self.read_conn(|conn| {
             Ok(conn.query_row(
