@@ -175,7 +175,7 @@ declare global {
         /** Export the Vault to a `.vault` file: the host asks where to save, then srv
          *  writes it encrypted to `passphrase`. Answers `{ count, file_name }`, or
          *  `{ cancelled: true }`. */
-        vaultExport?(args: { ids?: string[]; passphrase: string; default_name: string; format?: "vault" | "kdbx" }): Promise<unknown>;
+        vaultExport?(args: { ids?: string[]; passphrase?: string; default_name?: string; format?: "vault" | "kdbx" | "csv" | "json"; pick_id?: string; confirmed?: boolean; cancel?: boolean }): Promise<unknown>;
         /** Import from a `.vault` file: with no `pick_id` the host asks which file;
          *  with one it reads the same file again with `passphrase`. */
         vaultImport?(args: { pick_id?: string; passphrase?: string; mapping?: unknown; choose_key_file?: boolean; clear_key_file?: boolean }): Promise<unknown>;
