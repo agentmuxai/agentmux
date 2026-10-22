@@ -281,6 +281,15 @@ pub(crate) async fn handle_record(
         "details": req.details,
     }));
     publish(&state);
+    // A grant's `active` ("Driving", not "May drive") is decided when the event
+    // is published, so publish again once it lapses; nothing else would until
+    // the next action (muxreview P2 on #5334). Extra ones from a burst of
+    // actions are harmless: each reads the gate as it is then.
+    let later = state.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(gate::DRIVING_SHOWN_MS + 250)).await;
+        publish(&later);
+    });
     Json(json!({ "ok": true })).into_response()
 }
 

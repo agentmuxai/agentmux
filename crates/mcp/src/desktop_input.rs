@@ -198,13 +198,16 @@ pub(crate) mod win {
     use std::sync::Once;
     use std::time::Duration;
 
-    use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
+    use windows_sys::Win32::Foundation::{CloseHandle, BOOL, HWND, LPARAM, POINT, RECT};
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
     use windows_sys::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetAncestor, GetForegroundWindow, GetSystemMetrics, GetWindowRect, IsIconic, SetForegroundWindow, ShowWindow,
-        WindowFromPoint,
-        GA_ROOT, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_RESTORE,
+        EnumChildWindows, GetAncestor, GetForegroundWindow, GetSystemMetrics, GetWindowRect, GetWindowThreadProcessId,
+        IsIconic, SetForegroundWindow, ShowWindow, WindowFromPoint,
+        GA_ROOT, GA_ROOTOWNER, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_RESTORE,
     };
 
     use super::{to_absolute, Chord, Rect};
@@ -253,9 +256,11 @@ pub(crate) mod win {
         }
     }
 
-    /// The window at screen point (`sx`, `sy`) must be `id` itself (or a
-    /// child of it): if another window covers the point, the click would land
-    /// there, so it is refused.
+    /// The window at screen point (`sx`, `sy`) must be `id` itself, a child
+    /// of it, or a window it owns: an open menu, dropdown or dialog of the app
+    /// is a top-level window of its own, owned by the app's window
+    /// (`GA_ROOTOWNER`). If anything else covers the point, the click would
+    /// land there, so it is refused.
     pub(crate) fn point_belongs_to(id: u32, sx: i32, sy: i32) -> Result<(), String> {
         let target = id as usize as HWND;
         unsafe {
@@ -264,11 +269,54 @@ pub(crate) mod win {
                 return Err("nothing is at that point".into());
             }
             let root = GetAncestor(at, GA_ROOT);
-            if root == target || at == target {
+            let owner = GetAncestor(at, GA_ROOTOWNER);
+            if root == target || owner == target || at == target {
                 Ok(())
             } else {
                 Err("another window covers that point; the click would land there".into())
             }
+        }
+    }
+
+    /// The executable of the app a Windows Store (UWP) frame hosts. Its
+    /// top-level window belongs to `ApplicationFrameHost.exe`, which hosts
+    /// every such app, so the app itself is the process of a child window
+    /// that isn't the frame host's. `None` when there is none, as while the
+    /// app is minimised and suspended.
+    pub(crate) fn hosted_app_exe(id: u32) -> Option<String> {
+        struct Search {
+            frame_pid: u32,
+            found: u32,
+        }
+        unsafe extern "system" fn each(child: HWND, lparam: LPARAM) -> BOOL {
+            let search = unsafe { &mut *(lparam as *mut Search) };
+            let mut pid = 0u32;
+            unsafe { GetWindowThreadProcessId(child, &mut pid) };
+            if pid != 0 && pid != search.frame_pid {
+                search.found = pid;
+                return 0;
+            }
+            1
+        }
+        let frame = id as usize as HWND;
+        let mut search = Search { frame_pid: 0, found: 0 };
+        unsafe {
+            GetWindowThreadProcessId(frame, &mut search.frame_pid);
+            EnumChildWindows(frame, Some(each), &mut search as *mut Search as LPARAM);
+        }
+        if search.found == 0 {
+            return None;
+        }
+        unsafe {
+            let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, search.found);
+            if process.is_null() {
+                return None;
+            }
+            let mut buf = [0u16; 1024];
+            let mut len = buf.len() as u32;
+            let ok = QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, buf.as_mut_ptr(), &mut len);
+            CloseHandle(process);
+            (ok != 0 && len > 0).then(|| String::from_utf16_lossy(&buf[..len as usize]))
         }
     }
 
@@ -406,6 +454,9 @@ pub(crate) mod win {
     }
     pub(crate) fn point_belongs_to(_id: u32, _sx: i32, _sy: i32) -> Result<(), String> {
         Err(NOT_YET.into())
+    }
+    pub(crate) fn hosted_app_exe(_id: u32) -> Option<String> {
+        None
     }
     pub(crate) fn click(_sx: i32, _sy: i32, _button: &str, _count: u32) -> Result<(), String> {
         Err(NOT_YET.into())

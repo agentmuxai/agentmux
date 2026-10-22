@@ -65,9 +65,28 @@ fn app_label(exe_or_name: &str) -> String {
     name.strip_suffix(".exe").unwrap_or(name).to_string()
 }
 
-fn window_ref(w: &AgentMuxWindowInfo, id: u32) -> DesktopWindowRef {
+/// The process that hosts every Windows Store (UWP) app's window.
+const FRAME_HOST: &str = "ApplicationFrameHost";
+
+/// Why a Windows Store app's window can't be used right now.
+const UNIDENTIFIED_STORE_APP: &str =
+    "this is a Windows Store app whose app can't be identified while its window is minimised; ask the user to restore it, then call apps again";
+
+/// The window as srv names it. The app is what grants, denials and the
+/// blocklist key on, so a Windows Store app is named by its own executable,
+/// not by `ApplicationFrameHost.exe`, which hosts all of them: a grant for
+/// Calculator must not cover every other Store app, and a Store password
+/// manager must stay blockable by name. When the hosted app can't be found
+/// (it is suspended while minimised), the window is refused, never keyed on
+/// the frame host.
+fn window_ref(w: &AgentMuxWindowInfo, id: u32) -> Result<DesktopWindowRef> {
     let app = if w.exe_path.is_empty() { w.window.app_name().unwrap_or_default() } else { w.exe_path.clone() };
-    DesktopWindowRef { id, app, title: w.title.clone() }
+    let app = if app_label(&app).eq_ignore_ascii_case(FRAME_HOST) {
+        input::win::hosted_app_exe(id).ok_or_else(|| anyhow::anyhow!("{UNIDENTIFIED_STORE_APP}"))?
+    } else {
+        app
+    };
+    Ok(DesktopWindowRef { id, app, title: w.title.clone() })
 }
 
 /// A window by the id `apps` gave. Only a foreign app of the user's own can
@@ -110,7 +129,7 @@ async fn post(cx: &ToolCtx<'_>, path: &str, body: &impl serde::Serialize, secs: 
 /// asks them and answers `pending` at once, and their answer reaches the agent
 /// as an [AgentMux] note.
 async fn authorize(cx: &ToolCtx<'_>, action: &str, w: &AgentMuxWindowInfo, id: u32) -> Result<String> {
-    let body = DesktopAuthorizeRequest { auth: sign_ui_automation_auth()?, action: action.to_string(), window: window_ref(w, id) };
+    let body = DesktopAuthorizeRequest { auth: sign_ui_automation_auth()?, action: action.to_string(), window: window_ref(w, id)? };
     let answer = post(cx, "/api/v1/agent/desktop/authorize", &body, 30).await?;
     match answer["status"].as_str() {
         Some("allow") => Ok(answer["grant_id"].as_str().unwrap_or("").to_string()),
@@ -122,11 +141,13 @@ async fn authorize(cx: &ToolCtx<'_>, action: &str, w: &AgentMuxWindowInfo, id: u
 /// happened (or failed) either way.
 async fn record(cx: &ToolCtx<'_>, grant: &str, action: &str, w: &AgentMuxWindowInfo, id: u32, details: Value, result: &str) {
     let Ok(auth) = sign_ui_automation_auth() else { return };
+    // Authorized a moment ago, so the window was identified then.
+    let Ok(window) = window_ref(w, id) else { return };
     let body = DesktopRecordRequest {
         auth,
         grant_id: Some(grant.to_string()).filter(|g| !g.is_empty()),
         action: action.to_string(),
-        window: window_ref(w, id),
+        window,
         details,
         result: result.to_string(),
     };
@@ -139,10 +160,16 @@ async fn apps(cx: &ToolCtx<'_>) -> Result<String> {
         .filter(|w| w.tier == CaptureTier::ForeignApp && !w.title.trim().is_empty())
         .collect();
     candidates.truncate(MAX_LISTED);
-    let refs: Vec<DesktopWindowRef> = candidates
-        .iter()
-        .filter_map(|w| w.window.id().ok().map(|id| window_ref(w, id)))
-        .collect();
+    // A Store app that can't be identified is listed, not offered (window_ref).
+    let mut refs: Vec<DesktopWindowRef> = Vec::new();
+    let mut unidentified: Vec<u32> = Vec::new();
+    for w in &candidates {
+        let Ok(id) = w.window.id() else { continue };
+        match window_ref(w, id) {
+            Ok(r) => refs.push(r),
+            Err(_) => unidentified.push(id),
+        }
+    }
     let body = DesktopPolicyRequest { auth: sign_ui_automation_auth()?, windows: refs.clone() };
     let policy = post(cx, "/api/v1/agent/desktop/policy", &body, 30).await?;
     if policy["enabled"].as_bool() != Some(true) {
@@ -164,6 +191,9 @@ async fn apps(cx: &ToolCtx<'_>) -> Result<String> {
                 lines.push(format!("{:>10}  {app} — {title:?} — {note}", r.id));
             }
         }
+    }
+    for id in unidentified {
+        lines.push(format!("{id:>10}  a Windows Store app — minimised, so it can't be identified; it can be used once the user restores it"));
     }
     if lines.is_empty() {
         return Ok("No app windows other than AgentMux are open.".into());
@@ -321,10 +351,12 @@ async fn wait(args: &Value) -> Result<String> {
 async fn release(args: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     let id = window_id(args)?;
     let w = find_window(id)?;
-    let body = DesktopReleaseRequest { auth: sign_ui_automation_auth()?, window: window_ref(&w, id) };
+    let window = window_ref(&w, id)?;
+    let app = app_label(&window.app);
+    let body = DesktopReleaseRequest { auth: sign_ui_automation_auth()?, window };
     let answer = post(cx, "/api/v1/agent/desktop/release", &body, 30).await?;
     Ok(if answer["released"].as_bool() == Some(true) {
-        format!("Gave back your access to {}.", app_label(&w.exe_path))
+        format!("Gave back your access to {app}.")
     } else {
         "You had no access to give back.".into()
     })
@@ -339,6 +371,9 @@ mod tests {
         assert_eq!(app_label(r"C:\Windows\System32\notepad.exe"), "notepad");
         assert_eq!(app_label("/usr/bin/gedit"), "gedit");
         assert_eq!(app_label("calc"), "calc");
+        // The frame host is recognised whatever the path's case, so a Store
+        // app is never keyed on it (window_ref).
+        assert!(app_label(r"C:\WINDOWS\system32\ApplicationFrameHost.exe").eq_ignore_ascii_case(FRAME_HOST));
     }
 
     #[test]
