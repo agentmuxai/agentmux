@@ -346,20 +346,23 @@ fn read_bytes_covered(
     offset: i64,
     len: i64,
 ) -> Result<(Vec<u8>, usize), StoreError> {
-    let read = |fill: u8| match read_bytes_covered_rows(conn, zone_id, name, offset, len, fill) {
-        Err(StoreError::Sqlite(e)) if super::parts::is_corrupt(&e) => {
-            super::parts::read_covered_past_damage(conn, zone_id, name, offset, len, fill)
+    // Rows and frames are read in one snapshot (frames.rs `in_snapshot`).
+    super::frames::in_snapshot(conn, || {
+        let read = |fill: u8| match read_bytes_covered_rows(conn, zone_id, name, offset, len, fill) {
+            Err(StoreError::Sqlite(e)) if super::parts::is_corrupt(&e) => {
+                super::parts::read_covered_past_damage(conn, zone_id, name, offset, len, fill)
+            }
+            other => other,
+        };
+        let (bytes, covered) = read(0)?;
+        let want = len.max(0) as usize;
+        if covered == want || !super::parts::lost_reads_blank(conn, name)? {
+            return Ok((bytes, covered));
         }
-        other => other,
-    };
-    let (bytes, covered) = read(0)?;
-    let want = len.max(0) as usize;
-    if covered == want || !super::parts::lost_reads_blank(conn, name)? {
-        return Ok((bytes, covered));
-    }
-    // Lost content (module doc of `parts.rs`): read again with the gaps blank.
-    super::parts::note_lost(zone_id, name);
-    Ok((read(b' ')?.0, want))
+        // Lost content (module doc of `parts.rs`): read again with the gaps blank.
+        super::parts::note_lost(zone_id, name);
+        Ok((read(b' ')?.0, want))
+    })
 }
 
 /// [`read_bytes_covered`] in one range query, failing on a damaged part.
@@ -383,8 +386,10 @@ fn read_bytes_covered_rows(
          WHERE zoneid = ?1 AND name = ?2 AND partidx BETWEEN ?3 AND ?4",
     )?;
     let mut rows = stmt.query(params![zone_id, name, first, last])?;
+    let mut seen = std::collections::HashSet::new();
     while let Some(row) = rows.next()? {
         let idx: i32 = row.get(0)?;
+        seen.insert(idx);
         // Borrowed from SQLite's row, not copied: the caller wants a few bytes
         // (a torn-line check reads one) out of a part that can be 64 KB.
         let data = blob_ref(row, 1)?;
@@ -398,6 +403,9 @@ fn read_bytes_covered_rows(
             covered += (to - from) as usize;
         }
     }
+    drop(rows);
+    // Parts with no row may be in a compressed frame (frames.rs).
+    covered += super::frames::fill_range(conn, zone_id, name, offset, &mut out, first, last, &seen)?;
     Ok((out, covered))
 }
 
@@ -523,6 +531,9 @@ impl FileStore {
         let mut data_offset = 0usize;
         let mut current_part = start_part;
         if offset_in_part > 0 {
+            // The last part is never framed (frames.rs), but a file's tail
+            // must be a row before it is extended, whatever left it otherwise.
+            super::frames::unframe(tx, zone_id, name, start_part, start_part)?;
             // Keep only the bytes the size covers: anything past it (a
             // torn append by a build without transactions) is not content.
             let mut scratch = TAIL_SCRATCH.lock().unwrap_or_else(|e| e.into_inner());
