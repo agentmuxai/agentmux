@@ -216,6 +216,79 @@ pub struct TowerMachine {
     pub mem_total: Option<u64>,
 }
 
+/// One pane in the Panes view (SPEC_TOWER_PANES_VIEW_2026_10_21.md §4): what
+/// it costs, measured. An agent or terminal pane's numbers are its task's; a
+/// browser pane's are the renderers its page runs in (its own and its frames').
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct TowerPane {
+    pub block_id: String,
+    /// The pane's view: `agent`, `term`, `browser`, `editor`, ….
+    pub view: String,
+    /// Its title, agent name or page host; empty when it has none.
+    pub title: String,
+    /// `shown` (its window tab is the shown one), `hidden`, or `asleep` (a
+    /// hibernated browser pane, with no page).
+    pub state: String,
+    /// Its task (`TowerTask::id`): an agent or terminal pane's processes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub task: Option<String>,
+    /// Fraction of one core used by what it alone runs; absent when nothing
+    /// it runs is measured (a pane drawn in its window's renderer).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cpu: Option<f64>,
+    /// Private memory of what it alone runs, bytes.
+    #[ts(type = "number")]
+    pub mem: u64,
+    /// A browser pane's renderers that serve it alone.
+    pub processes: Vec<TowerProcess>,
+    /// Renderers it shares with other panes: shown under each, counted once
+    /// (`TowerPanes::shared_mem`), never in `mem`.
+    pub shared: Vec<TowerProcess>,
+}
+
+/// A window tab and its panes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct TowerPaneTab {
+    pub tab_id: String,
+    pub name: String,
+    /// The window's shown tab.
+    pub shown: bool,
+    pub panes: Vec<TowerPane>,
+}
+
+/// A window, its renderer (which draws every pane in it except browser
+/// pages), and its tabs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct TowerPaneWindow {
+    pub window_id: String,
+    pub name: String,
+    /// The window's own renderer processes.
+    pub renderers: Vec<TowerProcess>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cpu: Option<f64>,
+    #[ts(type = "number")]
+    pub mem: u64,
+    pub tabs: Vec<TowerPaneTab>,
+}
+
+/// The Panes view: windows, tabs and panes (`TowerSampleReq::panes`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct TowerPanes {
+    pub windows: Vec<TowerPaneWindow>,
+    /// Hidden pre-warmed windows' renderers, waiting to be the next window.
+    pub pool: Vec<TowerProcess>,
+    /// Renderers shared by several panes, each counted once, bytes.
+    #[ts(type = "number")]
+    pub shared_mem: u64,
+}
+
 /// `tower.sample`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -243,6 +316,10 @@ pub struct TowerSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub host: Option<TowerHost>,
+    /// The Panes view's windows, tabs and panes, when the request asked for them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub panes: Option<TowerPanes>,
 }
 
 /// `tower.sample`'s request.
@@ -253,6 +330,11 @@ pub struct TowerSampleReq {
     #[serde(default)]
     #[ts(optional)]
     pub host: Option<bool>,
+    /// Also group this machine's AgentMux by window, tab and pane (the Panes
+    /// view, SPEC_TOWER_PANES_VIEW_2026_10_21.md).
+    #[serde(default)]
+    #[ts(optional)]
+    pub panes: Option<bool>,
     /// Another machine: an SSH connection or `wsl://<distro>`, as a pane's
     /// `connection` meta names it, or a paired AgentMux computer
     /// (`peer:<id>`). Absent or `local`: this computer.

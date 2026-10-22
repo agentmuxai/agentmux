@@ -117,7 +117,7 @@ export class TowerViewModel {
     private inFlight: Promise<void> = Promise.resolve();
     /** The machine `inFlight` asks (`""` for this computer). */
     private inFlightFor = "";
-    private lastStart: [boolean, string, string] | undefined;
+    private lastStart: [boolean, string, string, boolean] | undefined;
     /** The machine that failed and waits for Retry. */
     private stalledFor: string | null = null;
     private setStalled: Setter<boolean>;
@@ -132,7 +132,7 @@ export class TowerViewModel {
         // "host" is what the Processes view was called until 2026-10-10.
         this.view = createMemo<TowerView>(() => {
             const v = ctx.meta()?.["tower:view"];
-            return v === "processes" || v === "host" ? "processes" : "agents";
+            return v === "processes" || v === "host" ? "processes" : v === "panes" ? "panes" : "agents";
         });
         this.connection = createMemo(() => {
             const c = ctx.meta()?.["tower:connection"];
@@ -142,7 +142,10 @@ export class TowerViewModel {
         // Another AgentMux computer has panes, so it has tasks too; an SSH host
         // or WSL distribution has only processes.
         this.hasTasks = () => !this.remote() || this.connection().startsWith("peer:");
-        this.effectiveView = createMemo<TowerView>(() => (this.hasTasks() ? this.view() : "processes"));
+        // The Panes view is this computer's AgentMux only (SPEC_TOWER_PANES_VIEW_2026_10_21.md §6.4).
+        this.effectiveView = createMemo<TowerView>(() =>
+            !this.hasTasks() ? "processes" : this.remote() && this.view() === "panes" ? "agents" : this.view()
+        );
         this.selected = createMemo(() => {
             const v = ctx.meta()?.["tower:agent"];
             return typeof v === "string" ? v : "";
@@ -171,7 +174,7 @@ export class TowerViewModel {
             return this.hasTasks() ? "agent" : "app";
         });
         this.viewName = createMemo(() => {
-            if (!this.remote()) return this.view() === "processes" ? "Tower · Processes" : "Tower";
+            if (!this.remote()) return this.view() === "processes" ? "Tower · Processes" : this.view() === "panes" ? "Tower · Panes" : "Tower";
             const peer = this.peers().find((p) => p.connection === this.connection());
             return `Tower · ${peer?.hostname || this.connection()}`;
         });
@@ -227,7 +230,7 @@ export class TowerViewModel {
                     // ssh and ask about installing again.
                     if (connection && this.stalledFor === connection) return;
                     this.stalledFor = null;
-                    if (visible) this.start(view === "processes", connection, filter);
+                    if (visible) this.start(view === "processes", connection, filter, view === "panes");
                 }
             )
         );
@@ -249,7 +252,7 @@ export class TowerViewModel {
                   ? ""
                   : undefined;
         this.setMeta({
-            "tower:view": view === "processes" ? "processes" : null,
+            "tower:view": view === "agents" ? null : view,
             ...(carried !== undefined ? { "tower:only": carried || null } : {}),
         });
     }
@@ -411,9 +414,9 @@ export class TowerViewModel {
         this.start(...last);
     }
 
-    private start(host: boolean, connection: string, filter: string): void {
+    private start(host: boolean, connection: string, filter: string, panes = false): void {
         const gen = ++this.generation;
-        this.lastStart = [host, connection, filter];
+        this.lastStart = [host, connection, filter, panes];
         this.setStalled(false);
         // At most one request in flight: a new one (another filter, say)
         // waits for the last to answer. Another machine's helper measures CPU
@@ -422,7 +425,7 @@ export class TowerViewModel {
         // waiting on a password) mustn't hold up this one.
         const wait = this.inFlightFor === connection ? this.inFlight : Promise.resolve();
         void wait.then(() => {
-            if (gen === this.generation) this.poll(gen, host, connection, filter);
+            if (gen === this.generation) this.poll(gen, host, connection, filter, panes);
         });
     }
 
@@ -432,14 +435,14 @@ export class TowerViewModel {
         this.timer = undefined;
     }
 
-    private poll(gen: number, host: boolean, connection: string, filter: string): void {
+    private poll(gen: number, host: boolean, connection: string, filter: string, panes = false): void {
         const request = connection
             ? RpcApi.TowerSampleCommand(
                   TabRpcClient,
                   { host: host || !connection.startsWith("peer:"), connection, filter, block_id: this.blockId },
                   { timeout: REMOTE_TIMEOUT_MS }
               )
-            : RpcApi.TowerSampleCommand(TabRpcClient, { host });
+            : RpcApi.TowerSampleCommand(TabRpcClient, { host, ...(panes ? { panes } : {}) });
         this.inFlightFor = connection;
         this.inFlight = request.then(
             () => undefined,
@@ -447,7 +450,7 @@ export class TowerViewModel {
         );
         const again = (delay: number) => {
             if (gen === this.generation) {
-                this.timer = setTimeout(() => this.poll(gen, host, connection, filter), delay);
+                this.timer = setTimeout(() => this.poll(gen, host, connection, filter, panes), delay);
             }
         };
         request.then(

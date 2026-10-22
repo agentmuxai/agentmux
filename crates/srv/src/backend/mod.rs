@@ -131,6 +131,7 @@ pub mod own_instance;
 pub mod sysinfo;
 pub mod blockstats_detail;
 pub mod tower_agentmux;
+pub mod tower_panes;
 pub mod tower_kind;
 pub mod tower_peers;
 pub mod tower_remote;

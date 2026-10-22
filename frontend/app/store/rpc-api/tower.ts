@@ -6,6 +6,10 @@
 
 export type { TowerHost } from "@/types/rpc/TowerHost";
 export type { TowerMachine } from "@/types/rpc/TowerMachine";
+export type { TowerPane } from "@/types/rpc/TowerPane";
+export type { TowerPanes } from "@/types/rpc/TowerPanes";
+export type { TowerPaneTab } from "@/types/rpc/TowerPaneTab";
+export type { TowerPaneWindow } from "@/types/rpc/TowerPaneWindow";
 export type { TowerPeerInfo } from "@/types/rpc/TowerPeerInfo";
 export type { TowerProcess } from "@/types/rpc/TowerProcess";
 export type { TowerProcessKind } from "@/types/rpc/TowerProcessKind";

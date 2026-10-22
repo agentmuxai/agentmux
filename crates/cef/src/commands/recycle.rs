@@ -58,7 +58,7 @@ fn take(label: &str) -> Option<Pending> {
 /// about this window (spec §4.1).
 #[cfg_attr(target_os = "linux", allow(dead_code))]
 fn own_renderer_pid(entries: &[crate::renderer_map::RendererEntry], label: &str) -> Option<u32> {
-    let pid = entries.iter().find(|e| e.label == label)?.pid;
+    let pid = entries.iter().find(|e| e.label == label && e.main)?.pid;
     let shared = entries.iter().any(|e| e.pid == pid && e.label != label);
     (!shared).then_some(pid)
 }
@@ -181,7 +181,7 @@ mod tests {
     use crate::renderer_map::RendererEntry;
 
     fn entry(pid: u32, label: &str) -> RendererEntry {
-        RendererEntry { pid, label: label.to_string(), block_id: None, pool: false, window_id: None }
+        RendererEntry { pid, label: label.to_string(), main: true, block_id: None, pool: false, window_id: None }
     }
 
     #[test]

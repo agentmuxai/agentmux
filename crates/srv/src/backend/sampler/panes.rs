@@ -125,6 +125,7 @@ mod tests {
         TowerSnapshot {
             ts_ms: 0,
             hostname: String::new(),
+            panes: None,
             os: String::new(),
             cpu_count: 1,
             memory_metric: String::new(),

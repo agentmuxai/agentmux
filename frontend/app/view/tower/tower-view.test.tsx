@@ -1082,3 +1082,139 @@ describe("Tower: kinds of process", () => {
         expect((mem.querySelector(".tower-chart-line") as SVGElement).style.stroke).toBe("var(--sysinfo-mem-color)");
     });
 });
+
+const MB = 1024 * 1024;
+
+/** The Panes view's part of a sample: one window, its renderer, two tabs. */
+function withPanes(snap: TowerSnapshot): TowerSnapshot {
+    const renderer = { id: "60:1", pid: 60, name: "agentmux.exe", cpu: 0.2, mem: 900 * MB, detail: "Renderer" };
+    const ghPage = { id: "61:1", pid: 61, name: "agentmux.exe", cpu: 0.1, mem: 150 * MB, detail: "Renderer" };
+    const ghFrame = { id: "62:1", pid: 62, name: "agentmux.exe", cpu: 0, mem: 40 * MB, detail: "Renderer" };
+    const shared = { id: "63:1", pid: 63, name: "agentmux.exe", cpu: 0, mem: 80 * MB, detail: "Renderer" };
+    const pane = (block_id: string, view: string, title: string, state: string) => ({
+        block_id,
+        view,
+        title,
+        state,
+        mem: 0,
+        processes: [],
+        shared: [],
+    });
+    return {
+        ...snap,
+        panes: {
+            windows: [
+                {
+                    window_id: "w1",
+                    name: "My Bizzy",
+                    renderers: [renderer],
+                    cpu: 0.2,
+                    mem: 900 * MB,
+                    tabs: [
+                        {
+                            tab_id: "t1",
+                            name: "Tab 1",
+                            shown: true,
+                            panes: [
+                                { ...pane("block-a", "agent", "AgentX", "shown"), task: "block-a", cpu: 2, mem: GB },
+                                {
+                                    ...pane("gh", "browser", "github.com", "shown"),
+                                    cpu: 0.1,
+                                    mem: 190 * MB,
+                                    processes: [ghPage, ghFrame],
+                                },
+                                pane("sw", "swarm", "", "shown"),
+                            ],
+                        },
+                        {
+                            tab_id: "t2",
+                            name: "Tab 2",
+                            shown: false,
+                            panes: [
+                                { ...pane("news", "browser", "news.example", "hidden"), shared: [shared] },
+                                pane("slept", "browser", "docs.agentmux.ai", "asleep"),
+                            ],
+                        },
+                    ],
+                },
+            ],
+            pool: [{ id: "70:1", pid: 70, name: "agentmux.exe", cpu: 0, mem: 60 * MB, detail: "Renderer" }],
+            shared_mem: 80 * MB,
+        },
+    };
+}
+
+describe("Tower's Panes view", () => {
+    beforeEach(() => {
+        peersCmd.mockResolvedValue({ peers: [studio] });
+        sample.mockImplementation((_client: unknown, req: { host: boolean; panes?: boolean }) =>
+            Promise.resolve(req.panes ? withPanes(snapshot(req.host)) : snapshot(req.host))
+        );
+        setMeta({ "tower:view": "panes" });
+    });
+    afterEach(() => {
+        cleanup();
+        vi.clearAllMocks();
+        setMeta({});
+    });
+
+    it("asks for panes and lists each window, its tabs and their panes", async () => {
+        renderTower();
+        await screen.findByTestId("tower-pane-window-w1");
+        expect(sample).toHaveBeenCalledWith(expect.anything(), { host: false, panes: true });
+        expect(screen.getByText("Window My Bizzy")).toBeInTheDocument();
+        const order = screen
+            .getAllByTestId(/^tower-pane-(tab|block|gh|sw|news|slept)/)
+            .map((r) => r.dataset.testid);
+        expect(order).toEqual([
+            "tower-pane-tab-t1",
+            "tower-pane-block-a",
+            "tower-pane-gh",
+            "tower-pane-sw",
+            "tower-pane-tab-t2",
+            "tower-pane-news",
+            "tower-pane-slept",
+        ]);
+    });
+
+    it("measures agents and browser pages, and gives panes drawn in the window a dash", async () => {
+        renderTower();
+        const agent = await screen.findByTestId("tower-pane-block-a");
+        expect(within(agent).getByText("1.0 GB")).toBeInTheDocument();
+        expect(within(screen.getByTestId("tower-pane-gh")).getByText("190.0 MB")).toBeInTheDocument();
+        const swarm = screen.getByTestId("tower-pane-sw");
+        expect(within(swarm).getAllByText("—")).toHaveLength(2);
+        expect(within(screen.getByTestId("tower-pane-window-w1")).getByText("900.0 MB")).toBeInTheDocument();
+        expect(within(screen.getByTestId("tower-pane-slept")).getByText("no page")).toBeInTheDocument();
+        expect(within(screen.getByTestId("tower-pane-slept")).getByText("asleep")).toBeInTheDocument();
+    });
+
+    it("opens a browser pane to its page's renderers, its frames' included", async () => {
+        renderTower();
+        const gh = await screen.findByTestId("tower-pane-gh");
+        fireEvent.click(within(gh).getByRole("button", { name: "Show its processes" }));
+        expect(screen.getByText("62")).toBeInTheDocument();
+        expect(screen.getByText("61")).toBeInTheDocument();
+    });
+
+    it("says when a renderer is shared, and doesn't add it to the pane", async () => {
+        renderTower();
+        await screen.findByTestId("tower-pane-news");
+        expect(screen.getByText(/Shares a renderer with another browser pane/)).toBeInTheDocument();
+        expect(screen.getByText(/80.0 MB in renderers several browser panes share, counted once/)).toBeInTheDocument();
+    });
+
+    it("goes to a pane from its row", async () => {
+        renderTower();
+        const gh = await screen.findByTestId("tower-pane-gh");
+        fireEvent.click(within(gh).getByRole("button", { name: "Show this pane" }));
+        expect(reveal).toHaveBeenCalledWith("gh", { source: "tower" });
+    });
+
+    it("isn't offered for another computer", async () => {
+        setMeta({ "tower:view": "panes", "tower:connection": "peer:p1" });
+        renderTower();
+        await screen.findByTestId("tower-rail-block-a");
+        expect(screen.queryByRole("tab", { name: /Panes/ })).toBeNull();
+    });
+});

@@ -795,6 +795,7 @@ fn render(
     TowerSnapshot {
         ts_ms: s.ts_ms,
         hostname: hostname.to_string(),
+        panes: None,
         os: std::env::consts::OS.to_string(),
         cpu_count: agentmux_procstats::cpu_count() as u32,
         memory_metric: agentmux_procstats::MEMORY_METRIC.to_string(),

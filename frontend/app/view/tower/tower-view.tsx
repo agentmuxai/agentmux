@@ -25,6 +25,7 @@ import { agentColor, AgentsView } from "./tower-agents";
 import { KindBreakdown, KindIcon, LoadCells } from "./tower-kind-ui";
 import { type KindGroup, kindGroups, kindOf, KINDS, sortKindGroups } from "./tower-kinds";
 import type { TowerViewModel } from "./tower-model";
+import { PanesView } from "./tower-panes";
 import { ProcessName } from "./tower-process-name";
 import { SortHeader } from "./tower-sort-header";
 import {
@@ -134,6 +135,17 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
                                       icon: "server",
                                       tooltip: "Every process on this machine",
                                   },
+                                  // This computer's AgentMux only (SPEC_TOWER_PANES_VIEW_2026_10_21.md §6.4).
+                                  ...(m.remote()
+                                      ? []
+                                      : [
+                                            {
+                                                id: "panes" as const,
+                                                label: "Panes",
+                                                icon: "table-columns",
+                                                tooltip: "Each window, tab and pane, and what it costs",
+                                            },
+                                        ]),
                               ]
                     }
                     value={m.effectiveView()}
@@ -184,6 +196,9 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
                         <Switch>
                             <Match when={m.effectiveView() === "agents"}>
                                 <AgentsView model={m} cpu={cpu} />
+                            </Match>
+                            <Match when={m.effectiveView() === "panes"}>
+                                <PanesView model={m} cpu={cpu} />
                             </Match>
                             <Match when={m.effectiveView() === "processes"}>
                                 <Show when={snap().host} fallback={<div class="tower-empty">Measuring…</div>}>

@@ -129,6 +129,10 @@ impl Describer {
 pub struct RendererEntry {
     pub pid: u32,
     pub label: String,
+    /// The browser's own renderer, not one of its frames' (a cross-site
+    /// iframe's). An older host lists only its own, so absent means yes.
+    #[serde(default = "own_renderer")]
+    pub main: bool,
     /// A browser pane's block id.
     #[serde(default)]
     pub block_id: Option<String>,
@@ -138,6 +142,10 @@ pub struct RendererEntry {
     /// An app window's srv window id.
     #[serde(default)]
     pub window_id: Option<String>,
+}
+
+fn own_renderer() -> bool {
+    true
 }
 
 /// The host's `renderer_map` answer (`{ok, data: {renderers}}`) as entries;
@@ -163,7 +171,12 @@ pub fn renderer_serves(
     let mut names: Vec<String> = Vec::new();
     for e in entries.iter().filter(|e| e.pid == pid) {
         let name = if let Some(block_id) = &e.block_id {
-            page(block_id).map_or_else(|| "browser pane".to_string(), |p| format!("browser pane {p}"))
+            let pane = page(block_id).map_or_else(|| "browser pane".to_string(), |p| format!("browser pane {p}"));
+            if e.main {
+                pane
+            } else {
+                format!("a frame in {pane}")
+            }
         } else if e.pool {
             "pool window (idle)".to_string()
         } else {
@@ -427,7 +440,7 @@ mod tests {
     }
 
     fn entry(pid: u32, label: &str) -> RendererEntry {
-        RendererEntry { pid, label: label.to_string(), block_id: None, pool: false, window_id: None }
+        RendererEntry { pid, label: label.to_string(), main: true, block_id: None, pool: false, window_id: None }
     }
 
     #[test]
@@ -463,6 +476,24 @@ mod tests {
             renderer_serves(&entries, 2, &page, &none).as_deref(),
             Some("browser pane b.test, browser pane a.test")
         );
+    }
+
+    #[test]
+    fn a_cross_site_frames_renderer_says_whose_page_it_is_in() {
+        let entries = vec![
+            RendererEntry { block_id: Some("b1".into()), ..entry(2, "pane-a") },
+            RendererEntry { block_id: Some("b1".into()), main: false, ..entry(3, "pane-a") },
+        ];
+        let page = |_: &str| Some("github.com".to_string());
+        let none = |_: &str| None;
+        assert_eq!(renderer_serves(&entries, 3, &page, &none).as_deref(), Some("a frame in browser pane github.com"));
+        assert_eq!(renderer_serves(&entries, 2, &page, &none).as_deref(), Some("browser pane github.com"));
+    }
+
+    #[test]
+    fn an_older_hosts_entry_is_its_browsers_own_renderer() {
+        let parsed = parse_renderer_map(&serde_json::json!({ "ok": true, "data": { "renderers": [{ "pid": 4, "label": "main" }] } }));
+        assert!(parsed[0].main);
     }
 
     #[test]
