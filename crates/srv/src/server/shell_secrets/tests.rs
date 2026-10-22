@@ -208,3 +208,47 @@ async fn a_command_too_long_to_show_whole_is_refused_without_asking() {
     assert!(inject(&s.state, &s.block, Some(&s.auth), Some(&wanted(&s)), false, &at_limit, "C:/work").await.is_ok());
     assert_eq!(ask.await.unwrap().command, at_limit);
 }
+
+// A job given secrets keeps its cleaned output for the agent whose pane started it, and no other job does.
+#[tokio::test]
+async fn the_cleaned_output_is_read_back_only_by_the_agent_that_ran_the_job() {
+    use crate::backend::shell_node::ShellStatusInfo;
+    use agentmux_common::api_types::ShellOutputRequest;
+    use axum::response::IntoResponse;
+    let s = setup().await;
+    let tail = std::sync::Arc::new(parking_lot::Mutex::new(std::collections::VecDeque::from(["token=[vault:x]".to_string(), "done".to_string()])));
+    let status = std::sync::Arc::new(parking_lot::Mutex::new(ShellStatusInfo { running: false, exit_code: Some(0), line_count: 2, block_id: s.block.clone(), tail: Some(tail), tail_clipped: true, ..Default::default() }));
+    let (tx, _rx) = tokio::sync::oneshot::channel::<()>();
+    s.state.shell_sessions.register_full("job-with-secrets".to_string(), tx, None, status);
+    let plain = std::sync::Arc::new(parking_lot::Mutex::new(ShellStatusInfo { running: false, exit_code: Some(0), line_count: 1, block_id: s.block.clone(), ..Default::default() }));
+    let (tx2, _rx2) = tokio::sync::oneshot::channel::<()>();
+    s.state.shell_sessions.register_full("job-without".to_string(), tx2, None, plain);
+
+    let ask = |id: &str, auth: &UiAutomationAuth| {
+        let req = ShellOutputRequest { shell_id: id.to_string(), auth: auth.clone() };
+        let state = s.state.clone();
+        async move {
+            let resp = crate::server::http_shell::handle_shell_output(axum::extract::State(state), axum::Json(req)).await.into_response();
+            let status = resp.status();
+            let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+            (status, serde_json::from_slice::<serde_json::Value>(&bytes).unwrap_or_default())
+        }
+    };
+    let (code, body) = ask("job-with-secrets", &s.auth).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert_eq!((body["output"].as_str(), body["exit_code"].as_i64(), body["running"].as_bool(), body["truncated"].as_bool()), (Some("token=[vault:x]\ndone"), Some(0), Some(false), Some(true)));
+    // Another pane, a job that kept nothing, and an id nobody has.
+    // Another agent, really known to this srv, with its own signed identity.
+    let other_agent = format!("other-{}", uuid::Uuid::new_v4());
+    s.state.reactive_handler.register_agent(&other_agent, &format!("block-{}", uuid::Uuid::new_v4()), None).unwrap();
+    let key = s.state.mstore.agent_jekt_key_ensure(&other_agent).unwrap();
+    let ts = agentmux_common::time::now_secs();
+    let sig = agentmux_common::jekt_sign::sign_jekt(&key, "ui-automation-identity", &other_agent, "__srv__", ts, "");
+    let other = UiAutomationAuth { agent_id: other_agent, ts_secs: ts, sig };
+    assert_eq!(ask("job-with-secrets", &other).await.0, StatusCode::NOT_FOUND, "another agent's own identity");
+    assert_eq!(ask("job-without", &s.auth).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(ask("no-such-job", &s.auth).await.0, StatusCode::NOT_FOUND);
+    // The instance key is not an identity: a request that only names an agent is refused.
+    let forged = UiAutomationAuth { agent_id: s.auth.agent_id.clone(), ts_secs: s.auth.ts_secs, sig: "not-a-signature".to_string() };
+    assert_eq!(ask("job-with-secrets", &forged).await.0, StatusCode::FORBIDDEN);
+}

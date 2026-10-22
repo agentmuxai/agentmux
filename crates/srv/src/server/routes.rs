@@ -225,6 +225,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/shell/input", post(handle_shell_input))
         // Phase 3b — query running state, exit code, and line count.
         .route("/api/v1/shell/status", post(handle_shell_status))
+        .route("/api/v1/shell/output", post(handle_shell_output))
         // Real PTY-backed shell, for genuinely interactive programs the
         // piped /api/v1/shell/* family above can't drive (see
         // docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md).

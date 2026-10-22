@@ -921,6 +921,83 @@ async fn await_prompt(cx: &ToolCtx<'_>, id: &str) -> Result<()> {
     }
 }
 
+/// How long `run` with `secrets` waits for srv to know the job before saying it may not have started.
+const NEVER_STARTED: Duration = Duration::from_secs(15);
+
+/// `run` with `secrets`, not in the background: starts the job (srv asks the person
+/// first), waits for it to end, and returns its output as srv cleaned it of the
+/// Vault values, with its exit code. A job that outlasts `timeout_ms` keeps running
+/// as a background job.
+async fn run_with_secrets(arguments: &Value, command: &str, cx: &ToolCtx<'_>) -> Result<Value> {
+    if command.contains('\n') {
+        anyhow::bail!("run takes one command line; join steps with && (or put them in a script file)");
+    }
+    let mut args = arguments.clone();
+    args["cmd"] = json!(command);
+    let id = shell::call("Shell", &args, cx).await?;
+    remember(&id, Kind::Background, str_arg(arguments, "connection").map(str::to_string));
+    let timeout_ms = arguments.get("timeout_ms").and_then(|v| v.as_u64()).unwrap_or(120_000).min(MAX_TIMEOUT_MS);
+    let started = Instant::now();
+    let deadline = started + Duration::from_millis(timeout_ms);
+    let base = cx.local_url.trim_end_matches('/').to_string();
+    // Proves which agent is asking: the output is the pane's own. Signed afresh for each poll, since srv
+    // refuses a signature older than five minutes and a wait can be longer.
+    sign_ui_automation_auth().map_err(|e| anyhow::anyhow!("the job started, but reading its output needs this agent's signed identity: {e}"))?;
+    // srv registers a job's output only once its process has started, so the first polls
+    // can find nothing, and a poll can fail for a moment: retry, and never lose the job.
+    let mut seen = false;
+    let mut last_error = String::new();
+    let mut last: Option<agentmux_common::api_types::ShellOutputResponse> = None;
+    loop {
+        let body = serde_json::to_value(agentmux_common::api_types::ShellOutputRequest { shell_id: id.clone(), auth: sign_ui_automation_auth()? })?;
+        let polled = srv_post_json(cx.client, &format!("{base}/api/v1/shell/output"), cx.auth_key, &body, "Terminal output").await;
+        match polled.and_then(|v| Ok(serde_json::from_value::<agentmux_common::api_types::ShellOutputResponse>(v)?)) {
+            Ok(r) => {
+                seen = true;
+                last = Some(r);
+            }
+            Err(e) => last_error = e.to_string(),
+        }
+        // A job that never shows up (it failed to start) isn't waited for the whole timeout.
+        if !seen && (started.elapsed() > NEVER_STARTED || Instant::now() >= deadline) {
+            return Ok(json!({
+                "terminal": id,
+                "how": "no-output",
+                "note": format!("The job was created but srv has no output for it, so it may not have started ({last_error}). Check it with wait until \"exit\"; close stops it."),
+            }));
+        }
+        let Some(r) = last.clone() else {
+            tokio::time::sleep(POLL).await;
+            continue;
+        };
+        let lines: Vec<&str> = r.output.lines().collect();
+        let cut = lines.len() > MAX_RUN_LINES;
+        let output = lines[lines.len().saturating_sub(MAX_RUN_LINES)..].join("\n");
+        // The job ended, as the last good poll saw it; a poll that failed since is not news.
+        if !r.running {
+            return Ok(json!({
+                "terminal": id,
+                "exit_code": r.exit_code,
+                "output": output,
+                "truncated": r.truncated || cut,
+                "duration_ms": started.elapsed().as_millis() as u64,
+                "note": "The output is cleaned of the Vault values the command was given: they show as [vault:<id>].",
+            }));
+        }
+        if Instant::now() >= deadline {
+            return Ok(json!({
+                "terminal": id,
+                "how": "timeout",
+                "running": true,
+                "output": output,
+                "truncated": r.truncated || cut,
+                "note": "Still running as a background job: wait with until \"exit\" waits for it; close stops it.",
+            }));
+        }
+        tokio::time::sleep(POLL).await;
+    }
+}
+
 async fn run_action(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {
     let command = str_arg(arguments, "command").ok_or_else(|| anyhow::anyhow!("run needs command"))?;
     let background = arguments.get("background").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -929,10 +1006,11 @@ async fn run_action(arguments: &Value, cx: &ToolCtx<'_>) -> Result<Value> {
             anyhow::bail!("secrets must be an object of environment variable names to Vault entry ids, e.g. {{\"STRIPE_API_KEY\": \"api-key-stripe\"}}");
         }
     }
-    if arguments.get("secrets").is_some_and(|s| s.as_object().is_some_and(|o| !o.is_empty())) && !background {
-        anyhow::bail!(
-            "secrets go only to a background job (background: true): a command typed into a terminal would show its value in the terminal; wait for the job with until \"exit\""
-        );
+    // A command given Vault secrets never goes through the terminal the person watches (its
+    // line would be typed there with the value in the environment's reach, and its output
+    // read back from the screen): it runs as a job whose output srv cleans of the values.
+    if !background && arguments.get("secrets").is_some_and(|s| s.as_object().is_some_and(|o| !o.is_empty())) {
+        return run_with_secrets(arguments, command, cx).await;
     }
     if background {
         let mut args = arguments.clone();

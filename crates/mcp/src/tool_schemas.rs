@@ -41,7 +41,7 @@ pub(crate) const TERMINAL_TOOL: &str = r#"{
       "cols":          { "type": "integer", "description": "open, type: terminal columns (default 200)" },
       "env":           { "type": "object", "additionalProperties": { "type": "string" }, "description": "run with background: extra environment variables (they don't cross into SSH)" },
       "title":         { "type": "string", "description": "run with background: the job's label in the conversation (default: the command)" },
-      "secrets":       { "type": "object", "additionalProperties": { "type": "string" }, "description": "run with background: Vault entries to put in the job's environment, {\"ENV_NAME\": \"entry id\"} (\"id.part\" for a part other than the entry's main one; the Vault tool's list gives the ids). The person is asked the first time; you never see a value, and the job's output is cleaned of it. Local only." },
+      "secrets":       { "type": "object", "additionalProperties": { "type": "string" }, "description": "run: Vault entries to put in the command's environment, {\"ENV_NAME\": \"entry id\"} (\"id.part\" for a part other than the entry's main one; the Vault tool's list gives the ids). The person is asked the first time; you never see a value. Without background, run waits for the command and returns its exit_code and its output with every value cleaned out ([vault:<id>]); with background the output goes to the conversation, not to you. Local only." },
       "capture_stdin": { "type": "boolean", "description": "run with background: give the job a stdin that type can write to (default false, so a program reading stdin to EOF doesn't hang)" }
     },
     "required": ["action"]

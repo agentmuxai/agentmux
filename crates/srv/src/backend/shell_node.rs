@@ -27,6 +27,10 @@ use agentmux_common::api_types::ShellInputFailure;
 
 use agentmux_common::time::now_ms_u64 as now_ms;
 
+/// How much of a job's cleaned output is kept for the agent that ran it.
+const TAIL_LINES: usize = 400;
+const TAIL_LINE_CHARS: usize = 4000;
+
 /// Live status of a running (or recently exited) shell. Updated by
 /// `ShellNodeRunner` as output arrives and on exit.
 ///
@@ -45,6 +49,11 @@ pub struct ShellStatusInfo {
     pub cmd: String,
     pub title: String,
     pub started_at: u64,
+    /// The last lines of a job that was given Vault secrets, already cleaned of them:
+    /// kept only for such a job, so the agent that ran it can read the result.
+    pub tail: Option<Arc<Mutex<VecDeque<String>>>>,
+    /// A line of `tail` was cut to the per-line limit: the output is not whole.
+    pub tail_clipped: bool,
 }
 
 /// Snapshot of one currently-running shell for the Swarm pane's per-agent
@@ -451,6 +460,8 @@ impl ShellNodeRunner {
             cmd: self.cmd.clone(),
             title: self.title.clone(),
             started_at: now_ms(),
+            tail: self.scrubber.as_ref().map(|_| Arc::new(Mutex::new(VecDeque::new()))),
+            tail_clipped: false,
         }));
         let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
         let evicted = self.registry.register_full(
@@ -509,7 +520,23 @@ impl ShellNodeRunner {
             line_count += 1;
             status_arc.lock().line_count = line_count;
             match &self.scrubber {
-                Some(s) => publish_chunk(&broker, &block_id, &shell_id, kind, &s.scrub(&content), ts),
+                Some(s) => {
+                    let clean = s.scrub(&content);
+                    {
+                        let mut status = status_arc.lock();
+                        if clean.chars().count() > TAIL_LINE_CHARS {
+                            status.tail_clipped = true;
+                        }
+                        if let Some(tail) = &status.tail {
+                            let mut t = tail.lock();
+                            if t.len() >= TAIL_LINES {
+                                t.pop_front();
+                            }
+                            t.push_back(clean.chars().take(TAIL_LINE_CHARS).collect());
+                        }
+                    }
+                    publish_chunk(&broker, &block_id, &shell_id, kind, &clean, ts)
+                }
                 None => publish_chunk(&broker, &block_id, &shell_id, kind, &content, ts),
             }
         }
