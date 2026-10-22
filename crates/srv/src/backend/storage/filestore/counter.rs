@@ -346,20 +346,23 @@ fn read_bytes_covered(
     offset: i64,
     len: i64,
 ) -> Result<(Vec<u8>, usize), StoreError> {
-    let read = |fill: u8| match read_bytes_covered_rows(conn, zone_id, name, offset, len, fill) {
-        Err(StoreError::Sqlite(e)) if super::parts::is_corrupt(&e) => {
-            super::parts::read_covered_past_damage(conn, zone_id, name, offset, len, fill)
+    // Rows and frames are read in one snapshot (frames.rs `in_snapshot`).
+    super::frames::in_snapshot(conn, || {
+        let read = |fill: u8| match read_bytes_covered_rows(conn, zone_id, name, offset, len, fill) {
+            Err(StoreError::Sqlite(e)) if super::parts::is_corrupt(&e) => {
+                super::parts::read_covered_past_damage(conn, zone_id, name, offset, len, fill)
+            }
+            other => other,
+        };
+        let (bytes, covered) = read(0)?;
+        let want = len.max(0) as usize;
+        if covered == want || !super::parts::lost_reads_blank(conn, name)? {
+            return Ok((bytes, covered));
         }
-        other => other,
-    };
-    let (bytes, covered) = read(0)?;
-    let want = len.max(0) as usize;
-    if covered == want || !super::parts::lost_reads_blank(conn, name)? {
-        return Ok((bytes, covered));
-    }
-    // Lost content (module doc of `parts.rs`): read again with the gaps blank.
-    super::parts::note_lost(zone_id, name);
-    Ok((read(b' ')?.0, want))
+        // Lost content (module doc of `parts.rs`): read again with the gaps blank.
+        super::parts::note_lost(zone_id, name);
+        Ok((read(b' ')?.0, want))
+    })
 }
 
 /// [`read_bytes_covered`] in one range query, failing on a damaged part.

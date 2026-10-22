@@ -329,3 +329,37 @@ fn only_known_code_reads_the_part_table_directly() {
     }
     assert!(unknown.is_empty(), "these read db_file_data without knowing about frames: {unknown:?}");
 }
+
+/// The interleaving review found: a reader sees a part with no row (it is in
+/// a frame), another connection unframes it (rows back, frame gone), and the
+/// reader's frame lookup then finds nothing. In one snapshot the reader still
+/// sees the frame it started with.
+#[test]
+fn rows_and_frames_are_read_in_one_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("filestore.db");
+    let fs = FileStore::open(&path).unwrap();
+    let data = transcript(20 * P, 21);
+    make(&fs, Z, &data);
+    assert!(matches!(fs.frame_parts(Z, N, 0, 16, CODEC_ZSTD).unwrap(), FrameOutcome::Framed { .. }));
+    fs.checkpoint().unwrap();
+
+    let reader = Connection::open(&path).unwrap();
+    let got = in_snapshot(&reader, || {
+        let rows: i64 = reader.query_row(
+            "SELECT COUNT(*) FROM db_file_data WHERE zoneid = ?1 AND name = ?2 AND partidx < 16",
+            params![Z, N],
+            |r| r.get(0),
+        )?;
+        assert_eq!(rows, 0, "the parts are in the frame");
+        // Another connection turns the frame back into rows meanwhile.
+        assert_eq!(fs.unframe_file(Z, N).unwrap(), 1);
+        let mut parts = HashMap::new();
+        fill_parts(&reader, Z, N, 0, 15, &mut parts, false)?;
+        Ok(parts.len())
+    })
+    .unwrap();
+    assert_eq!(got, 16, "the reader's snapshot still has the frame");
+    // Outside the snapshot the rows are there, and the bytes are the same.
+    assert_eq!(all(&fs, Z), data);
+}

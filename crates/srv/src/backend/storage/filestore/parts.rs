@@ -66,11 +66,12 @@ pub(super) fn load_parts(
     size: i64,
 ) -> Result<HashMap<i32, Vec<u8>>, StoreError> {
     // One range query, not one per part: reading an 800 MB transcript part by
-    // part was 12,270 queries and took 12 s in a release build.
-    match load_range(conn, zone_id, name, start, end) {
+    // part was 12,270 queries and took 12 s in a release build. Rows and
+    // frames are read in one snapshot (frames.rs `in_snapshot`).
+    super::frames::in_snapshot(conn, || match load_range(conn, zone_id, name, start, end) {
         Err(StoreError::Sqlite(e)) if is_corrupt(&e) => load_each(conn, zone_id, name, start, end, size),
         other => other,
-    }
+    })
 }
 
 /// `[offset, offset + len)` of a file and how many of its bytes are stored,

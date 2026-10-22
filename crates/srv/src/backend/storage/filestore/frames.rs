@@ -201,6 +201,27 @@ fn any_frame(conn: &Connection, zone_id: &str, name: &str, start: i32, end: i32)
     Ok(stmt.exists(params![zone_id, name, start, end, MAX_FRAME_PARTS])?)
 }
 
+/// Run `f`, a read that queries part rows and then frames, in one snapshot.
+/// Between the two queries another connection may unframe (rows back, frame
+/// gone) or frame (rows gone, frame in): read as separate statements, a part
+/// could then be in neither place. A connection already in a transaction (a
+/// snapshot reader, a write) has its snapshot; a pooled reader in autocommit
+/// gets one here. `f` must only read.
+pub(super) fn in_snapshot<T>(conn: &Connection, f: impl FnOnce() -> Result<T, StoreError>) -> Result<T, StoreError> {
+    if !conn.is_autocommit() {
+        return f();
+    }
+    conn.execute_batch("BEGIN")?;
+    let out = f();
+    // Only reads ran, so ending with ROLLBACK is the same as COMMIT, and it
+    // can't fail where COMMIT does: SQLite refuses to commit a transaction
+    // that met a damaged page, which a read past damage does on purpose.
+    if let Err(e) = conn.execute_batch("ROLLBACK") {
+        tracing::warn!(error = %e, "filestore: ending a read snapshot failed");
+    }
+    out
+}
+
 /// Fill the parts of `start..=end` that `parts` doesn't hold from frames.
 /// `tolerant`: a frame that fails to decode fills its parts with spaces (the
 /// damaged-part rule of `parts.rs`) instead of failing the read.
