@@ -260,3 +260,21 @@ fn a_bitwarden_item_with_null_lists_still_comes_in() {
     assert_eq!(i.entries.len(), 1);
     assert_eq!(i.entries[0].parts["password"], "pw");
 }
+
+#[test]
+fn a_bitwarden_csv_secure_note_row_is_kept_as_a_note() {
+    let csv = "folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp\n\
+Home,,login,Router,,,0,http://router.example.com,admin,  pw with edges ,\n\
+Home,,note,Wifi codes,\"guest: 1234\\nmain: correct-horse\",,0,,,,\n\
+,,login,Bookmark only,,,0,https://example.com,,,\n";
+    let i = read_ok(csv, "bitwarden_export_20261021.csv");
+    let by = |label: &str| i.entries.iter().find(|e| e.label == label).unwrap_or_else(|| panic!("no {label}"));
+    assert_eq!(by("Router").parts["password"], "  pw with edges ");
+    let note = by("Wifi codes");
+    assert_eq!(note.kind, "note");
+    assert!(note.parts["text"].contains("guest: 1234"), "{:?}", note.parts);
+    assert_eq!(note.tags, vec!["Home".to_string()]);
+    // A row with nothing to keep is listed, not imported.
+    let why: std::collections::HashMap<_, _> = i.skipped.iter().cloned().collect();
+    assert!(why["Bookmark only"].contains("no password"), "{why:?}");
+}

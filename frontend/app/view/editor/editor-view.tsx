@@ -1213,7 +1213,6 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                                     <Markdown
                                         textAtom={() => liveDoc()}
                                         contentClass="editor-preview-markdown-content"
-                                        nativeScrollbar
                                         // Local images in the document render, relative to its
                                         // folder; none for a document on an SSH host.
                                         media={previewMedia(model.filePathAtom(), model.connection(), !!model.activeTabAtom()?.isScratch)}

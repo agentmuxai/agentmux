@@ -62,7 +62,7 @@ import {
     type TranscriptFileEvent,
 } from "../transcript-cursor";
 import { injectDayDividers } from "./day-dividers";
-import { HistoryNavigator, type HistoryMode } from "./HistoryNavigator";
+import { HistoryNavigator, shortWhen, type HistoryMode } from "./HistoryNavigator";
 import type { DocumentNode, DocumentState, FilterState } from "../types";
 
 /** Lines per fetch. Most transcript lines are streaming fragments, so 600
@@ -176,6 +176,20 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
     // The rendered document: raw nodes + day separators, recomputed as a
     // pure pass (§4.4 — dividers are render-time synthetics).
     const displayNodes = createMemo(() => injectDayDividers(rawNodes()));
+
+    // When the rows on screen were received: what a reader looks for, where
+    // the transcript line numbers say little (most lines are streaming pieces,
+    // so 3,000 lines come to a few dozen rows).
+    const shownSpan = createMemo((): string => {
+        const times = rawNodes()
+            .map((n) => (n as { timestamp?: number }).timestamp)
+            .filter((t): t is number => typeof t === "number" && t > 0);
+        if (times.length === 0) return "";
+        const first = shortWhen(times.reduce((m, t) => Math.min(m, t)));
+        const last = shortWhen(times.reduce((m, t) => Math.max(m, t)));
+        return first === last ? first : `${first} – ${last}`;
+    });
+    const withSpan = (text: string): string => (shownSpan() ? `${shownSpan()} · ${text}` : text);
 
     // Local document atoms for the reused view components. The document
     // atom is projected from displayNodes; DocumentState is this reader's
@@ -749,11 +763,11 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
                             : mode() !== "live" && totalLines() > 0
                               ? endLine() <= historyOffset()
                                   ? "nothing before this point"
-                                  : `${mode() === "archive" ? "archived conversation · " : ""}lines ${historyOffset() + 1}–${endLine()} of ${totalLines()}`
+                                  : withSpan(`${mode() === "archive" ? "archived conversation · " : ""}lines ${historyOffset() + 1}–${endLine()} of ${totalLines()}`)
                               : historyOffset() === 0 && totalLines() > 0
                                 ? "full history loaded"
                                 : totalLines() > 0
-                                    ? `${totalLines()} lines · scroll up for earlier`
+                                    ? withSpan(`${totalLines()} lines · scroll up for earlier`)
                                     : "no recorded history"}
                 </div>
             </div>

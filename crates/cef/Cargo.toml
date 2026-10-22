@@ -62,6 +62,7 @@ cef = { version = "154", default-features = false, features = ["build-util"] }
 # Default features pick the right native backend per platform (Win32
 # IFileDialog / macOS NSOpenPanel / Linux GTK3).
 rfd = "0.15"
+base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"

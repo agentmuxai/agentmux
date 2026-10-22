@@ -27,7 +27,8 @@
     .content {
         height: 100%;
         width: 100%;
-        overflow: scroll;
+        // A native scrollbar, only when the content overflows (no reserved gutter).
+        overflow: auto;
         line-height: 1.5;
         color: var(--main-text-color);
         font-family: var(--markdown-font-family);

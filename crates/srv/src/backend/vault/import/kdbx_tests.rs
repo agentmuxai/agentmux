@@ -5,6 +5,11 @@ use super::*;
 use keepass::config::{DatabaseConfig, KdfConfig};
 use keepass::db::Value;
 
+/// Most tests open a database by its password alone.
+fn read(bytes: &[u8], passphrase: &str) -> Result<Imported, ReadError> {
+    super::read(bytes, passphrase, None)
+}
+
 /// A database as KeePassXC would save it, with a cheap key derivation.
 fn database(kdf: KdfConfig) -> Database {
     let mut config = DatabaseConfig::default();
@@ -202,4 +207,99 @@ fn a_cut_off_or_old_or_foreign_header_is_refused_without_panicking() {
         junk.extend((0..200u32).map(|i| (i as u8).wrapping_mul(n).wrapping_add(n)));
         let _ = read(&junk, "pw");
     }
+}
+
+// Databases written by another implementation (pykeepass 4.2, a Python library with its own KDBX
+// writer, so not the keepass crate that reads them): Argon2d with AES-256, nested groups, an attachment,
+// a password with edge spaces, and an entry in the recycle bin. Password: "correct horse battery".
+const FROM_PYKEEPASS: &[u8] = include_bytes!("fixtures/pykeepass_plain.kdbx");
+// The same with a protected custom field and an `otp` seed, which pykeepass writes after the entry's
+// AutoType rather than among its other strings as KeePass does.
+const FROM_PYKEEPASS_CUSTOM: &[u8] = include_bytes!("fixtures/pykeepass_custom_fields.kdbx");
+
+#[test]
+fn a_database_another_implementation_wrote_opens_with_everything_it_holds() {
+    let i = match read(FROM_PYKEEPASS, "correct horse battery") {
+        Ok(i) => i,
+        Err(ReadError::Other(e)) => panic!("{e}"),
+        Err(_) => panic!("unexpected"),
+    };
+    let by = |label: &str| i.entries.iter().find(|e| e.label == label).unwrap_or_else(|| panic!("no {label}: {:?}", i.entries.iter().map(|e| &e.label).collect::<Vec<_>>()));
+    let login = by("Example");
+    assert_eq!((login.kind.as_str(), login.parts["password"].as_str(), login.fields["username"].as_str()), ("login", "hunter2-pw", "alex"));
+    assert_eq!(login.fields["site"], "https://example.com/login");
+    assert_eq!(login.tags, vec!["Websites".to_string()]);
+    assert_eq!(by("Example (notes)").parts["text"], "recovery: 4455");
+    assert_eq!(by("Spaced").parts["password"], "  edge spaces  ", "a password keeps its spaces");
+    assert_eq!(by("Server note").tags, vec!["Websites/Work".to_string()]);
+    assert!(i.entries.iter().all(|e| e.label != "Deleted one"), "the recycle bin is skipped");
+}
+
+#[test]
+fn a_wrong_password_is_called_wrong_and_a_layout_the_reader_cannot_parse_is_said_plainly() {
+    match read(FROM_PYKEEPASS, "wrong") {
+        Err(ReadError::Other(e)) => assert!(e.contains("didn't open"), "{e}"),
+        _ => panic!("refused"),
+    }
+    // Custom fields written out of KeePass's order fail in the keepass crate's XML reader. Said so,
+    // and without the crate's detail, which can quote the file.
+    match read(FROM_PYKEEPASS_CUSTOM, "correct horse battery") {
+        Err(ReadError::Other(e)) => assert!(e.contains("lays its entries out differently") && !e.contains("duplicate field"), "{e}"),
+        Ok(_) => {} // a newer keepass crate may read it: then it must simply work
+        Err(_) => panic!("unexpected"),
+    }
+}
+
+// ── Key files ───────────────────────────────────────────────────────────────
+// Written by pykeepass with a KeePass XML key file: one by its password and the key file, one by the
+// key file alone. Password "correct horse battery".
+const WITH_KEYFILE: &[u8] = include_bytes!("fixtures/pykeepass_password_and_keyfile.kdbx");
+const KEYFILE_ONLY: &[u8] = include_bytes!("fixtures/pykeepass_keyfile_only.kdbx");
+const KEYFILE: &[u8] = include_bytes!("fixtures/livekey.keyx");
+
+fn err_of(r: Result<Imported, ReadError>) -> String {
+    match r {
+        Err(ReadError::Other(e)) => e,
+        Err(ReadError::NeedsPassphrase) => "needs a password".to_string(),
+        Err(_) => "other".to_string(),
+        Ok(_) => "opened".to_string(),
+    }
+}
+
+#[test]
+fn a_database_that_needs_its_key_file_opens_with_it_and_says_so_without_it() {
+    let i = match super::read(WITH_KEYFILE, "correct horse battery", Some(KEYFILE)) {
+        Ok(i) => i,
+        Err(ReadError::Other(e)) => panic!("{e}"),
+        Err(_) => panic!("unexpected"),
+    };
+    let login = i.entries.iter().find(|e| e.label == "Keyed example").expect("read");
+    assert_eq!((login.kind.as_str(), login.parts["password"].as_str()), ("login", "hunter2-keyed"));
+    // Without it, the password alone is wrong, and the message points at the key file.
+    let without = err_of(super::read(WITH_KEYFILE, "correct horse battery", None));
+    assert!(without.contains("didn't open") && without.contains("key file"), "{without}");
+    // A different key file, or a wrong password with the right one, is refused without a hint to look elsewhere.
+    let other_key = KEYFILE.iter().map(|b| if *b == b'a' { b'b' } else { *b }).collect::<Vec<u8>>();
+    let wrong_key = err_of(super::read(WITH_KEYFILE, "correct horse battery", Some(&other_key)));
+    assert!(wrong_key.contains("password and key file didn't open"), "{wrong_key}");
+    let wrong_pw = err_of(super::read(WITH_KEYFILE, "wrong", Some(KEYFILE)));
+    assert!(wrong_pw.contains("password and key file didn't open"), "{wrong_pw}");
+}
+
+#[test]
+fn a_database_with_only_a_key_file_opens_with_no_password() {
+    assert!(super::read(KEYFILE_ONLY, "", Some(KEYFILE)).is_ok(), "key file alone");
+    // Nothing at all asks for a password first.
+    assert_eq!(err_of(super::read(KEYFILE_ONLY, "", None)), "needs a password");
+    // A password that isn't part of it fails.
+    assert!(err_of(super::read(KEYFILE_ONLY, "extra", Some(KEYFILE))).contains("didn't open"));
+}
+
+#[test]
+fn a_file_that_is_not_a_key_file_or_is_huge_is_refused() {
+    let big = vec![b'x'; MAX_KEY_FILE + 1];
+    assert!(err_of(super::read(WITH_KEYFILE, "correct horse battery", Some(&big))).contains("too large"));
+    // KeePass reads any other file as a raw key; an empty one is the only thing it can't use.
+    let empty = err_of(super::read(WITH_KEYFILE, "correct horse battery", Some(b"")));
+    assert!(empty.contains("key file"), "{empty}");
 }

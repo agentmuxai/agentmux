@@ -12,6 +12,10 @@ import { WardenHistoryManager } from "@/app/view/warden-history/warden-history-m
 import { WardenKanbanManager } from "@/app/view/warden-kanban/warden-kanban-manager";
 import { VaultView } from "@/app/view/vault/vault-view";
 import { WARDEN_SECTIONS, type WardenSection, type WardenViewModel } from "./warden-model";
+// The section panes use section-pane.scss's `.bundle-manager-section` / `-pane` rules (a pane that is not the
+// selected section is `display: none` there). Connectors and Memory used to guarantee it was loaded, but
+// their barrels no longer import section-pane.tsx, so without this import Warden shows every section at once.
+import "@/app/view/section-pane/section-pane.scss";
 import "./warden-view.scss";
 
 const RAIL: TabItem<WardenSection>[] = [...WARDEN_SECTIONS.items];

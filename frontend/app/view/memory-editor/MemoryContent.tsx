@@ -59,7 +59,6 @@ export function MemoryContent(props: MemoryContentProps): JSX.Element {
                                         <Markdown
                                             text={props.content ?? ""}
                                             scrollable={true}
-                                            nativeScrollbar={true}
                                             contentClass="memory-content-markdown-content"
                                         />
                                     </div>

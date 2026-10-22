@@ -17,6 +17,7 @@
 mod bitwarden;
 mod env;
 mod kdbx;
+pub use kdbx::MAX_KEY_FILE;
 mod logins;
 mod onepux;
 
@@ -166,8 +167,13 @@ pub fn read(bytes: &[u8], file_name: &str, mapping: Option<&Mapping>) -> Result<
 
 /// [`read`], with the password an encrypted database (KeePass) needs.
 pub fn read_with(bytes: &[u8], file_name: &str, mapping: Option<&Mapping>, passphrase: Option<&str>) -> Result<Imported, ReadError> {
+    read_keyed(bytes, file_name, mapping, passphrase, None)
+}
+
+/// [`read_with`], and the key file a KeePass database may need as well as, or instead of, its password.
+pub fn read_keyed(bytes: &[u8], file_name: &str, mapping: Option<&Mapping>, passphrase: Option<&str>, keyfile: Option<&[u8]>) -> Result<Imported, ReadError> {
     if bytes.starts_with(&kdbx::MAGIC) {
-        return kdbx::read(bytes, passphrase.unwrap_or(""));
+        return kdbx::read(bytes, passphrase.unwrap_or(""), keyfile);
     }
     if bytes.starts_with(b"PK\x03\x04") {
         if onepux::looks_like(bytes) {
