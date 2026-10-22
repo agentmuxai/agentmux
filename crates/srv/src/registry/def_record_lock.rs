@@ -53,3 +53,6 @@ pub(super) fn lock_record(root: &Path, id: &str, timeout: Duration) -> Result<Fi
         }
     }
 }
+
+/// The lock name for slug allocation (a uid is a UUID, so it can't collide).
+pub(super) const SLUG_ALLOCATION: &str = "_slug-allocation";

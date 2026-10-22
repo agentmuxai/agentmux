@@ -88,6 +88,17 @@ impl DefinitionStore {
         out
     }
 
+    /// The host-wide slug allocation lock, held until the guard drops. A
+    /// new agent's slug is picked against every slug the shared store holds
+    /// and then published by mirroring its record: whoever inserts holds this
+    /// across both, so two channels or instances creating agents at once
+    /// can't both pick the same free slug. Same bounded wait as a record's
+    /// lock; [`DefStoreError::Locked`] names it.
+    pub fn lock_slug_allocation(&self) -> Result<SlugAllocationLock, DefStoreError> {
+        let file = super::def_record_lock::lock_record(&self.root, super::def_record_lock::SLUG_ALLOCATION, self.lock_timeout)?;
+        Ok(SlugAllocationLock { _file: file })
+    }
+
     #[cfg(test)]
     pub(crate) fn set_lock_timeout(&mut self, timeout: Duration) {
         self.lock_timeout = timeout;
@@ -260,6 +271,11 @@ impl DefinitionStore {
     pub fn slug_of(&self, id: &str) -> Result<Option<SlugEntry>, DefStoreError> {
         Ok(self.slugs.one(&self.root, id)?)
     }
+}
+
+/// Held slug allocation ([`DefinitionStore::lock_slug_allocation`]).
+pub struct SlugAllocationLock {
+    _file: std::fs::File,
 }
 
 /// One definition record, locked by [`DefinitionStore::with_record_locked`].
@@ -708,6 +724,21 @@ mod tests {
         assert!(matches!(b.retire("aaa"), Err(DefStoreError::Locked { .. })));
         assert_eq!(std::fs::read(a.root().join("aaa.json")).unwrap(), before, "nothing written");
         holder.join().unwrap().unwrap();
+    }
+
+    /// Slug allocation is one host-wide lock: a second store waits for it,
+    /// then fails with `Locked`; once released it is free again.
+    #[test]
+    fn slug_allocation_is_exclusive_and_bounded() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("definitions");
+        let a = DefinitionStore::open(root.clone()).unwrap();
+        let mut b = DefinitionStore::open(root).unwrap();
+        b.set_lock_timeout(std::time::Duration::from_millis(100));
+        let held = a.lock_slug_allocation().unwrap();
+        assert!(matches!(b.lock_slug_allocation(), Err(DefStoreError::Locked { .. })));
+        drop(held);
+        assert!(b.lock_slug_allocation().is_ok());
     }
 
     #[test]

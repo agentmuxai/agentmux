@@ -335,6 +335,43 @@ mod tests {
         }
     }
 
+    /// Two channels (two `objects.db`, two handles on one shared directory)
+    /// creating agents with the same base slug at once end with distinct
+    /// slugs: the allocation lock spans the pick and the publication, so the
+    /// second sees the first's record.
+    #[test]
+    fn concurrent_inserts_in_two_channels_get_distinct_slugs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let channels: Vec<Arc<Store>> = (0..2)
+            .map(|_| {
+                let store = Arc::new(Store::open_in_memory().unwrap());
+                store.set_def_registry(Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap()));
+                store
+            })
+            .collect();
+        for round in 0..8 {
+            let start = Arc::new(std::sync::Barrier::new(2));
+            let picked: Vec<String> = channels
+                .iter()
+                .enumerate()
+                .map(|(i, store)| {
+                    let (store, start) = (store.clone(), start.clone());
+                    std::thread::spawn(move || {
+                        let mut def = test_agent_def(&format!("uid-race-{round}-{i}"), "Racer", "claude", "host", 1, "");
+                        def.slug = format!("racer-{round}");
+                        start.wait();
+                        store.agent_def_insert(&mut def).unwrap();
+                        def.slug
+                    })
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|t| t.join().unwrap())
+                .collect();
+            assert_ne!(picked[0], picked[1], "round {round}: {picked:?}");
+        }
+    }
+
     /// `agent.define` finds an existing agent by its canonical slug, not by a
     /// stale local one, so it doesn't mint a second agent beside it.
     #[test]

@@ -219,6 +219,9 @@ impl Store {
     /// so this is race-safe against concurrent inserts on the same
     /// connection.
     pub fn agent_def_insert(&self, agent: &mut AgentDefinition) -> Result<(), StoreError> {
+        // Held from the slug pick (inside the local insert) to its publication
+        // by the mirror below.
+        let _allocating = self.slug_allocation_lock(agent)?;
         self.agent_def_insert_local_only(agent, None)?;
         // Mirror into the global cross-channel definition store. Content +
         // skills are inserted after the definition (separate calls), so this
@@ -226,6 +229,21 @@ impl Store {
         // re-mirror with the full payload. (P0.2b.)
         self.registry_def_upsert(&agent.id);
         Ok(())
+    }
+
+    /// The host-wide slug allocation lock for inserting `agent`
+    /// (`DefinitionStore::lock_slug_allocation`), so a concurrent insert in
+    /// another channel or instance picks its slug knowing this one's. `None`
+    /// for a template, which is never mirrored, or with no shared store. A
+    /// lock that can't be had in time fails the insert before anything is
+    /// written.
+    fn slug_allocation_lock(&self, agent: &AgentDefinition) -> Result<Option<crate::registry::SlugAllocationLock>, StoreError> {
+        let Some(reg) = self.shared_def_registry().filter(|_| agent.is_seeded == 0) else {
+            return Ok(None);
+        };
+        reg.lock_slug_allocation().map(Some).map_err(|e| {
+            StoreError::Other(format!("could not pick a slug for agent {}: {e}", agent.name))
+        })
     }
 
     /// Insert into `db_agents` only — does NOT mirror to the global
@@ -434,6 +452,8 @@ impl Store {
     ) -> Result<Option<AgentDefinition>, StoreError> {
         let name_lower = agent.name.trim().to_lowercase();
         let derived_slug = derive_slug(agent.name.trim());
+        // Held through the mirror at the end, as in `agent_def_insert`.
+        let _allocating = self.slug_allocation_lock(agent)?;
         let shared = self.shared_slugs();
 
         {
