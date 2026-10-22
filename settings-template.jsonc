@@ -168,6 +168,10 @@
     // agent on this computer is also changing, so it can message them first.
     // "agent:overlapnotes":        true,
 
+    // Remind an idle agent of the tasks waiting in its Kanban backlog, in a
+    // short [AgentMux] note after two minutes idle. Off by default.
+    // "kanban:reminders":          false,
+
     // When an agent's AgentMux tools (its MCP server) don't connect, reconnect
     // them, then restart the agent once without the shell prefix.
     // "agent:mcpselfheal":         true,

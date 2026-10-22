@@ -1115,6 +1115,7 @@ declare global {
         "attachments:retentiondays"?: number;
         "agent:askquestiontimeoutms"?: number;
         "agent:overlapnotes"?: boolean;
+        "kanban:reminders"?: boolean;
         "agent:mcpselfheal"?: boolean;
         "agent:transcriptsinglecopy"?: boolean;
         "agent:turnscopedtail"?: boolean;
