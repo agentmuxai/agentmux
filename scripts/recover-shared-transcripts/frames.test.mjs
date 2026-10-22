@@ -117,6 +117,18 @@ describe("a store holding frames", () => {
         db.close();
     });
 
+    it("a part with a row and a frame is the row, and the file is whole", () => {
+        const db = store("row-and-frame");
+        // A build that knows nothing of frames wrote part 0 again: the row wins.
+        const newer = Buffer.alloc(PART, "n");
+        db.prepare("INSERT INTO db_file_data (zoneid, name, partidx, data) VALUES (?, ?, 0, ?)").run("agent:vvv:current", "output", newer);
+        expect(findDamage(db).damage).toEqual([]);
+        expect(allDamage(db).damage).toEqual([]);
+        expect(partIndex(db, "agent:vvv:current", "output").map((p) => p.framed)).toEqual([false, false, false]);
+        expect(readFileBytes(db, "agent:vvv:current", "output").equals(Buffer.concat([newer, tail]))).toBe(true);
+        db.close();
+    });
+
     it("a rebuild takes the file's frames with its rows", () => {
         const db = store("rebuild");
         const fresh = transcript("new", 2 * PART + 3);

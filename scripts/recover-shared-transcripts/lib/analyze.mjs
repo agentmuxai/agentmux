@@ -11,16 +11,22 @@ import { hasFrames, partIndex, scanFrames } from "./frames.mjs";
 export const PART = 64 * 1024;
 
 const ROW_PARTS = "SELECT zoneid, name, COUNT(*) AS n, MIN(partidx) AS lo, MAX(partidx) AS hi, SUM(LENGTH(data)) AS bytes FROM db_file_data GROUP BY zoneid, name";
-// A frame's parts count as parts. A part with both a row and a frame is counted twice, so
-// the file shows as damaged: the app never leaves one so.
-const FRAMED_PARTS = `SELECT zoneid, name, SUM(n) AS n, MIN(lo) AS lo, MAX(hi) AS hi, SUM(bytes) AS bytes FROM (
-    ${ROW_PARTS}
+// A frame's parts count as parts, each once: a part that has a row as well is the row, as
+// the app reads it (frames.rs: a row always wins; a build that knows nothing of frames may
+// write one into a framed part). This is `partIndex` in SQL, for every file at once.
+const FRAMED_PARTS = `frame_parts(zoneid, name, partidx, k, cnt) AS (
+    SELECT zoneid, name, first_part, 1, part_count FROM db_file_frame
     UNION ALL
-    SELECT zoneid, name, SUM(part_count), MIN(first_part), MAX(first_part + part_count - 1), SUM(raw_len) FROM db_file_frame GROUP BY zoneid, name)
-  GROUP BY zoneid, name`;
+    SELECT zoneid, name, partidx + 1, k + 1, cnt FROM frame_parts WHERE k < cnt),
+all_parts AS (
+    SELECT zoneid, name, partidx, LENGTH(data) AS len FROM db_file_data
+    UNION ALL
+    SELECT zoneid, name, partidx, ${64 * 1024} FROM frame_parts fp
+     WHERE NOT EXISTS (SELECT 1 FROM db_file_data d WHERE d.zoneid = fp.zoneid AND d.name = fp.name AND d.partidx = fp.partidx)),
+parts AS (SELECT zoneid, name, COUNT(*) AS n, MIN(partidx) AS lo, MAX(partidx) AS hi, SUM(len) AS bytes FROM all_parts GROUP BY zoneid, name)`;
 
 const inventory = (framed) => `
-WITH parts AS (${framed ? FRAMED_PARTS : ROW_PARTS})
+${framed ? `WITH RECURSIVE ${FRAMED_PARTS}` : `WITH parts AS (${ROW_PARTS})`}
 SELECT f.zoneid AS zoneid, f.name AS name, f.size AS size, p.n AS n, p.lo AS lo, p.hi AS hi, p.bytes AS bytes
   FROM db_wave_file f LEFT JOIN parts p ON p.zoneid = f.zoneid AND p.name = f.name
 UNION ALL
