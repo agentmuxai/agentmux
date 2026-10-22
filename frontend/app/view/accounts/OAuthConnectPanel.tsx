@@ -3,34 +3,58 @@
 
 /**
  * OAuthConnectPanel — drives a service-OAuth connect flow from the
- * Accounts form. The backend (oauth_client.rs + account.oauth.* RPCs) does all
- * the work: it opens the browser / emits a device code, exchanges tokens, and
- * creates the account (keychain-backed). This panel just kicks it off and polls
- * to completion, rendering the device code / browser prompt along the way.
+ * Accounts form, and a Reconnect from an account's details. The backend
+ * (oauth_client.rs + account.oauth.* RPCs) does all the work: it opens the
+ * browser / emits a device code, exchanges tokens, and creates or updates the
+ * account (keychain-backed). This panel picks the client
+ * (`OAuthClientSection`), kicks the flow off and polls to completion,
+ * rendering the device code / browser prompt along the way.
  *
- * Built-in public client ids aren't provisioned yet, so the GitHub reference
- * provider uses the BYO path (user supplies their own OAuth app's client id).
- * docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §4.2/§12.1.
+ * Built-in public client ids aren't provisioned yet, so every provider uses
+ * the user's own client, saved in the keychain after the first connect.
+ * docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §4.2/§12.1,
+ * docs/specs/SPEC_GOOGLE_CONNECTORS_GMAIL_CALENDAR_DRIVE_2026_10_14.md §7.
  */
 
-import { createSignal, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, on, onCleanup, Show, type JSX } from "solid-js";
 import { RpcApi, type OAuthFlowStatus } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { openLink } from "@/app/store/global";
 import { writeText } from "@/util/clipboard";
 import type { AccountProvider } from "@/app/view/identity/identity-model";
-import { refreshAccountCache } from "@/app/view/identity/identity-model";
-import { oauthInfo, needsByo } from "./oauth-catalog";
+import { PROVIDER_LABELS, refreshAccountCache } from "@/app/view/identity/identity-model";
+import { oauthInfo } from "./oauth-catalog";
+import { isBlockedError, setOAuthNote } from "./oauth-account-state";
+import { createOAuthClientState, OAuthClientSection } from "./OAuthClientSection";
 import { Button } from "@/app/element/ui";
+import "./oauth-connect.scss";
 
 const POLL_INTERVAL_MS = 2000;
 
+/** What a finished connect reports. */
+export interface OAuthConnectResult {
+    accountId: string;
+    /** Scopes asked for and unticked on the consent screen. */
+    missingScopes: string[];
+    email?: string | null;
+}
+
 interface OAuthConnectPanelProps {
     provider: AccountProvider;
-    /** Reactive account name from the parent form. */
-    name: () => string;
-    /** Called once the backend reports success (account already created). */
-    onConnected: () => void;
+    /** Reactive account name from the parent form; optional when the sign-in names the account. */
+    name?: () => string;
+    /** Authorize this existing account again (Reconnect) instead of creating one. */
+    accountId?: string;
+    /** Scopes beyond the provider's base ones. */
+    scopes?: string[];
+    /** Start once the client is known, without a Connect click (a Reconnect). */
+    autoStart?: boolean;
+    /** Prefills the client id if the user has to enter the client again. */
+    clientIdHint?: string;
+    /** Called once the backend reports success (account already created or updated). */
+    onConnected: (result: OAuthConnectResult) => void;
+    /** Shows a Cancel button beside Connect. */
+    onCancel?: () => void;
 }
 
 export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
@@ -38,8 +62,7 @@ export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
     // Defensive: the parent only renders this for OAuth-capable providers.
     if (!info) return <div class="identity-form-error">OAuth is not available for this provider.</div>;
 
-    const [clientId, setClientId] = createSignal("");
-    const [clientSecret, setClientSecret] = createSignal("");
+    const client = createOAuthClientState(info, props.clientIdHint);
     const [sessionId, setSessionId] = createSignal<string | null>(null);
     const [status, setStatus] = createSignal<OAuthFlowStatus | null>(null);
     const [busy, setBusy] = createSignal(false);
@@ -69,9 +92,11 @@ export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
         if (sid && isRunning()) void RpcApi.AccountOAuthCancelCommand(TabRpcClient, { sessionId: sid });
     });
 
-    const finishSuccess = async () => {
+    const finishSuccess = async (s: Extract<OAuthFlowStatus, { status: "success" }>) => {
+        const missingScopes = s.missingScopes ?? [];
+        setOAuthNote(s.accountId, { missingScopes });
         await refreshAccountCache();
-        props.onConnected();
+        props.onConnected({ accountId: s.accountId, missingScopes, email: s.email });
     };
 
     const applyStatus = (s: OAuthFlowStatus, sid: string) => {
@@ -82,11 +107,13 @@ export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
         }
         if (s.status === "success") {
             stopPolling();
-            void finishSuccess();
+            void finishSuccess(s);
             return;
         }
         if (s.status === "failed") {
             stopPolling();
+            // A reconnect its organization blocks shows on the account's card.
+            if (props.accountId && isBlockedError(s.error)) setOAuthNote(props.accountId, { blocked: s.error });
             return;
         }
         // pending / url-available / code-emitted — keep polling. `poll` is a
@@ -106,17 +133,14 @@ export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
     }
 
     const connect = async () => {
-        const n = props.name().trim();
-        if (!n) {
+        const n = props.name?.().trim() ?? "";
+        if (!n && !props.accountId && !info.namedBySignIn) {
             setLocalError("Enter a name first");
             return;
         }
-        if (needsByo(info) && !clientId().trim()) {
-            setLocalError("Client ID is required");
-            return;
-        }
-        if (info.requiresSecret && !clientSecret().trim()) {
-            setLocalError("Client secret is required");
+        const picked = client.state.requestFields();
+        if ("error" in picked) {
+            setLocalError(picked.error);
             return;
         }
         setBusy(true);
@@ -124,14 +148,20 @@ export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
         opened = false;
         stopped = false;
         try {
+            const scopes = props.scopes?.filter(Boolean) ?? [];
             const res = await RpcApi.AccountOAuthStartCommand(TabRpcClient, {
                 provider: props.provider,
-                name: n,
-                clientId: clientId().trim() || undefined,
-                clientSecret: info.requiresSecret ? clientSecret().trim() || undefined : undefined,
+                name: props.accountId ? undefined : n || undefined,
+                accountId: props.accountId,
+                scopes: scopes.length > 0 ? scopes : undefined,
+                ...picked.fields,
             });
+            // srv holds the secret now; the input doesn't need it any more.
+            client.state.clearSecret();
             if (res.error || !res.sessionId || !res.status) {
-                setLocalError(res.error ?? "Could not start the OAuth flow");
+                const error = res.error ?? "Could not start the OAuth flow";
+                if (props.accountId && isBlockedError(error)) setOAuthNote(props.accountId, { blocked: error });
+                setLocalError(error);
                 return;
             }
             setSessionId(res.sessionId);
@@ -143,6 +173,16 @@ export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
         }
     };
 
+    // A Reconnect starts by itself once it knows it has a client to use.
+    let autoStarted = false;
+    createEffect(
+        on(client.state.loaded, (loaded) => {
+            if (!props.autoStart || autoStarted || !loaded || client.state.showFields()) return;
+            autoStarted = true;
+            void connect();
+        }),
+    );
+
     const reset = () => {
         stopPolling();
         const sid = sessionId();
@@ -153,62 +193,31 @@ export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
         opened = false;
     };
 
+    const label = PROVIDER_LABELS[props.provider] ?? props.provider;
+
     return (
         <div class="oauth-connect">
             <Show when={localError()}>
-                <div class="identity-form-error">{localError()}</div>
+                {(err) => <FlowError error={err()} />}
             </Show>
 
-            {/* Idle: BYO credentials + Connect */}
+            {/* Idle: the client + Connect */}
             <Show when={status() == null}>
-                <Show when={needsByo(info)}>
-                    <div class="oauth-byo-note">
-                        ⓘ {info.byoHint ?? "Supply your own OAuth app's client id."}
-                        <Show when={info.consoleUrl}>
-                            {" "}
-                            <a
-                                class="oauth-link"
-                                href="#"
-                                onClick={(e) => {
-                                    e.preventDefault();
-                                    openLink(info.consoleUrl!);
-                                }}
-                            >
-                                Open developer console ↗
-                            </a>
-                        </Show>
-                    </div>
-                    <FormRow label="Client ID">
-                        <input
-                            class="identity-input"
-                            type="text"
-                            value={clientId()}
-                            onInput={(e) => setClientId(e.currentTarget.value)}
-                            placeholder="Iv1.0123456789abcdef"
-                        />
-                    </FormRow>
-                    <Show when={info.requiresSecret}>
-                        <FormRow label="Client secret">
-                            <input
-                                class="identity-input"
-                                type="password"
-                                autocomplete="off"
-                                value={clientSecret()}
-                                onInput={(e) => setClientSecret(e.currentTarget.value)}
-                                placeholder="stored in your OS keychain — never in plaintext"
-                            />
-                        </FormRow>
-                    </Show>
-                </Show>
+                <OAuthClientSection client={client} />
                 <div class="identity-key-actions">
                     <Button
                         tone="accent"
                         class="identity-btn identity-btn-primary"
-                        disabled={busy()}
+                        disabled={busy() || !client.state.loaded()}
                         onClick={() => void connect()}
                     >
-                        {busy() ? "Starting…" : `Connect with ${providerLabel(props.provider)}`}
+                        {busy() ? "Starting…" : props.accountId ? "Reconnect" : `Connect ${label}`}
                     </Button>
+                    <Show when={props.onCancel}>
+                        <Button class="identity-btn identity-btn-secondary" onClick={() => props.onCancel?.()}>
+                            Cancel
+                        </Button>
+                    </Show>
                 </div>
             </Show>
 
@@ -261,9 +270,7 @@ export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
                         </Show>
 
                         <Show when={s().status === "failed"}>
-                            <div class="identity-form-error">
-                                {(s() as { error: string }).error}
-                            </div>
+                            <FlowError error={(s() as { error: string }).error} />
                         </Show>
 
                         <div class="identity-key-actions">
@@ -289,17 +296,14 @@ export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
 
 OAuthConnectPanel.displayName = "OAuthConnectPanel";
 
-function providerLabel(provider: AccountProvider): string {
-    if (provider === "github") return "GitHub";
-    if (provider === "aws") return "AWS";
-    return provider.charAt(0).toUpperCase() + provider.slice(1);
-}
-
-function FormRow(props: { label: string; children: JSX.Element }): JSX.Element {
+/** A flow's error; an organization's block gets its own heading (spec §7). */
+function FlowError(props: { error: string }): JSX.Element {
     return (
-        <div class="identity-form-field">
-            <label class="identity-form-label">{props.label}</label>
-            {props.children}
+        <div class="identity-form-error" role="alert">
+            <Show when={isBlockedError(props.error)}>
+                <div class="oauth-error-title">Blocked by your organization</div>
+            </Show>
+            {props.error}
         </div>
     );
 }

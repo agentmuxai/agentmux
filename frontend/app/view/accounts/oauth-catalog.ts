@@ -29,6 +29,14 @@ export interface OAuthServiceInfo {
     consoleUrl?: string;
     /** Short note on how to register the BYO app correctly. */
     byoHint?: string;
+    /** Numbered steps for making the BYO client, shown instead of `byoHint`. */
+    consoleSteps?: string[];
+    /** The BYO client's secret is needed for the token exchange. */
+    byoNeedsSecret?: boolean;
+    /** Offers the "Workspace internal" client mode beside "Your own client" (D8). */
+    workspaceMode?: boolean;
+    /** The sign-in reports the account's email, which names the account: no name needed. */
+    namedBySignIn?: boolean;
 }
 
 /**
@@ -55,6 +63,18 @@ const OAUTH_SERVICES: Partial<Record<AccountProvider, OAuthServiceInfo>> = {
         byoHint:
             "Create an OAuth client of type “Desktop app” in Google Cloud Console " +
             "and paste its Client ID below.",
+        // Spec §2.2 and §3.1: a Desktop app client, loopback redirect, PKCE.
+        consoleSteps: [
+            "In Google Cloud console, open APIs & Services → Credentials.",
+            "If asked, set up the OAuth consent screen: External, or Internal for your Workspace organization.",
+            "Create credentials → OAuth client ID, application type “Desktop app”.",
+            "Paste its client ID and client secret below. AgentMux keeps them in your OS keychain, so you do this once.",
+        ],
+        // Google's token endpoint wants a Desktop client's secret too, though
+        // it isn't confidential (spec §3.1).
+        byoNeedsSecret: true,
+        workspaceMode: true,
+        namedBySignIn: true,
     },
     slack: {
         provider: "slack",
@@ -76,7 +96,16 @@ export function supportsOAuth(provider: AccountProvider): boolean {
     return provider in OAUTH_SERVICES;
 }
 
-/** True when the connect flow must collect BYO client credentials from the user. */
-export function needsByo(info: OAuthServiceInfo): boolean {
-    return !info.builtIn || info.requiresSecret;
+/**
+ * True when the connect flow must collect BYO client credentials from the
+ * user. `builtinAvailable` is srv's answer (`account.oauth.client.get`) when
+ * known; it wins over the catalog's `builtIn`.
+ */
+export function needsByo(info: OAuthServiceInfo, builtinAvailable?: boolean): boolean {
+    return !(builtinAvailable ?? info.builtIn) || info.requiresSecret;
+}
+
+/** Whether a BYO client for this service must come with its secret. */
+export function byoSecretRequired(info: OAuthServiceInfo): boolean {
+    return info.requiresSecret || !!info.byoNeedsSecret;
 }

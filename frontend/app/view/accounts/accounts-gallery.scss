@@ -122,3 +122,13 @@
     width: 320px;
     max-width: calc(100vw - 32px);
 }
+
+// An OAuth account's card: the line saying what stopped it or what the
+// consent screen left out, and its client tag in the footer.
+.account-card .account-card-note {
+    color: var(--warning-text-color);
+}
+
+.account-card .account-card-tag {
+    vertical-align: middle;
+}
