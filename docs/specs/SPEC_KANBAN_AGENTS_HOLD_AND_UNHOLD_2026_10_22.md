@@ -1,6 +1,6 @@
 # Spec: agents put Kanban tasks on hold and take them off hold
 
-**Status:** active — implemented in #PRNUM.
+**Status:** active — implemented in #5326.
 **Date:** 2026-10-22
 **Author:** Naki-2@narko, at the operator's request
 **Verified against:** `agentmux` `main` @ `31bf85d31` (2026-10-22), by reading code.
