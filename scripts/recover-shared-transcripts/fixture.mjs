@@ -101,6 +101,19 @@ export function transcript(tag, bytes) {
     return Buffer.from(lines.join(""));
 }
 
+/** The frame table, as `ensure_schema` in crates/srv/src/backend/storage/filestore/frames.rs creates it. */
+export const FRAME_TABLE = `CREATE TABLE IF NOT EXISTS db_file_frame (
+             zoneid      TEXT    NOT NULL,
+             name        TEXT    NOT NULL,
+             first_part  INTEGER NOT NULL,
+             part_count  INTEGER NOT NULL,
+             codec       INTEGER NOT NULL,
+             raw_len     INTEGER NOT NULL,
+             check_hash  BLOB    NOT NULL,
+             data        BLOB    NOT NULL,
+             PRIMARY KEY (zoneid, name, first_part)
+         )`;
+
 export function createFilestore(path) {
     mkdirSync(join(path, ".."), { recursive: true });
     const db = new DatabaseSync(path);
