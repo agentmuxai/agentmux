@@ -188,6 +188,35 @@ describe("Import", () => {
         expect(document.body.innerHTML).not.toContain("wrong passphrase");
     });
 
+    it("lets a KeePass database's key file be chosen in the host's window, shows only its name, and opens with the key file alone", async () => {
+        vaultImport.mockResolvedValueOnce({ needs_passphrase: true, pick_id: "pick-1", file_name: "Passwords.kdbx" });
+        render(() => <VaultImportDialog onClose={vi.fn()} />);
+        const open = await screen.findByRole("button", { name: "Open file" });
+        expect(open).toBeDisabled();
+        // Choosing asks the host (which opens its own file window); only the file's name comes back.
+        vaultImport.mockResolvedValueOnce({ needs_passphrase: true, pick_id: "pick-1", file_name: "Passwords.kdbx", key_file_name: "my.keyx" });
+        fireEvent.click(screen.getByRole("button", { name: "Choose a key file…" }));
+        expect(await screen.findByText("my.keyx")).toBeInTheDocument();
+        expect(vaultImport).toHaveBeenLastCalledWith(expect.objectContaining({ pick_id: "pick-1", choose_key_file: true }));
+        // With a key file chosen, no password is needed to try.
+        const unlockable = screen.getByRole("button", { name: "Open file" });
+        expect(unlockable).not.toBeDisabled();
+        vaultImport.mockResolvedValueOnce({ preview: PREVIEW, pick_id: "pick-1", file_name: "Passwords.kdbx" });
+        fireEvent.click(unlockable);
+        await screen.findByText(/to import/);
+        expect(vaultImport).toHaveBeenLastCalledWith(expect.objectContaining({ pick_id: "pick-1", passphrase: "" }));
+    });
+
+    it("removes a chosen key file through the host too", async () => {
+        vaultImport.mockResolvedValueOnce({ needs_passphrase: true, pick_id: "pick-1", file_name: "Passwords.kdbx", key_file_name: "my.keyx" });
+        render(() => <VaultImportDialog onClose={vi.fn()} />);
+        const remove = await screen.findByRole("button", { name: "Remove" });
+        vaultImport.mockResolvedValueOnce({ needs_passphrase: true, pick_id: "pick-1", file_name: "Passwords.kdbx", key_file_name: null });
+        fireEvent.click(remove);
+        expect(await screen.findByRole("button", { name: "Choose a key file…" })).toBeInTheDocument();
+        expect(vaultImport).toHaveBeenLastCalledWith(expect.objectContaining({ pick_id: "pick-1", clear_key_file: true }));
+    });
+
     it("previews counts, labels, duplicates and what can't come in, with no values, then imports", async () => {
         vaultImport.mockResolvedValueOnce({ preview: PREVIEW, pick_id: "pick-1", file_name: "backup.vault" });
         render(() => <VaultImportDialog onClose={vi.fn()} />);

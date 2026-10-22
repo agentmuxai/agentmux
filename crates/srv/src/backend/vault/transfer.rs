@@ -247,6 +247,11 @@ pub fn inspect(store: &Store, path: &Path, passphrase: Option<&str>) -> Result<I
 
 /// [`inspect`], with the person's column choices for a CSV no reader recognises.
 pub fn inspect_with(store: &Store, path: &Path, passphrase: Option<&str>, mapping: Option<&Mapping>) -> Result<ImportPreview, InspectError> {
+    inspect_keyed(store, path, passphrase, mapping, None)
+}
+
+/// [`inspect_with`], and the key file of a KeePass database that has one.
+pub fn inspect_keyed(store: &Store, path: &Path, passphrase: Option<&str>, mapping: Option<&Mapping>, keyfile: Option<&[u8]>) -> Result<ImportPreview, InspectError> {
     let meta = std::fs::metadata(path).map_err(|e| format!("couldn't read that file: {e}"))?;
     if !meta.is_file() {
         return Err("that isn't a file".to_string().into());
@@ -270,7 +275,7 @@ pub fn inspect_with(store: &Store, path: &Path, passphrase: Option<&str>, mappin
         }
         (Source::Vault, file.entries, Vec::new(), false)
     } else {
-        match import::read_with(&head, &file_name, mapping, passphrase) {
+        match import::read_keyed(&head, &file_name, mapping, passphrase, keyfile) {
             Ok(i) => (i.source, i.entries, i.skipped.into_iter().map(|(label, reason)| Skipped { label, reason }).collect(), i.plaintext),
             Err(ReadError::NeedsMapping(m)) => return Err(InspectError::NeedsMapping(m)),
             Err(ReadError::NeedsPassphrase) => return Err(InspectError::NeedsPassphrase),

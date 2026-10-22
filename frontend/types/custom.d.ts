@@ -178,7 +178,7 @@ declare global {
         vaultExport?(args: { ids?: string[]; passphrase: string; default_name: string }): Promise<unknown>;
         /** Import from a `.vault` file: with no `pick_id` the host asks which file;
          *  with one it reads the same file again with `passphrase`. */
-        vaultImport?(args: { pick_id?: string; passphrase?: string; mapping?: unknown }): Promise<unknown>;
+        vaultImport?(args: { pick_id?: string; passphrase?: string; mapping?: unknown; choose_key_file?: boolean; clear_key_file?: boolean }): Promise<unknown>;
         /** Delete the file picked for an import, after the person pressed Delete the file. */
         vaultImportDelete?(args: { pick_id: string }): Promise<unknown>;
         /** Ask to adopt memory folders (payload: window_label, agent_id, list_id, choices, summary). */
