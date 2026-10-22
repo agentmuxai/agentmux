@@ -361,6 +361,8 @@ export function usePaneRectSync(params: {
                 return;
             case "close":
                 closeNative(r?.supported ? "asleep (discard refused)" : "asleep");
+                // A record still "kept" from an earlier discard would promise history.
+                void model.clearSleepKept().catch(() => {});
                 return;
             case "load":
                 // Woken while the discard was out: load it straight back.
