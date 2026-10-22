@@ -56,9 +56,12 @@ export const WardenAmbientManager = (props: {
             <Show
                 when={summary()}
                 fallback={
-                    <div class="warden-section-stub">
-                        {loading() ? "Loading…" : "No calls have ended since AgentMux's server started."}
-                    </div>
+                    // With an error and no counts yet, the error alone: the server couldn't be asked.
+                    <Show when={loading() || !error()}>
+                        <div class="warden-section-stub">
+                            {loading() ? "Loading…" : "No calls have ended since AgentMux's server started."}
+                        </div>
+                    </Show>
                 }
             >
                 {(s) => (

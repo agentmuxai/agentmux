@@ -48,10 +48,12 @@ describe("WardenAmbientManager", () => {
         expect(document.querySelector("table")).toBeNull();
     });
 
-    it("shows the error from a server without the command", async () => {
+    it("shows only the error from a server without the command, not that no calls have ended", async () => {
         outcomes.mockRejectedValue(new Error("unknown command ambient.outcomes"));
         render(() => <WardenAmbientManager visible />);
         await waitFor(() => expect(screen.getByText(/unknown command ambient\.outcomes/)).toBeInTheDocument());
+        expect(screen.queryByText(/No calls have ended/)).toBeNull();
+        expect(screen.queryByText("Loading…")).toBeNull();
     });
 
     it("doesn't ask while hidden", async () => {
