@@ -27,7 +27,7 @@ use agentmux_common::time::now_ms;
 use crate::backend::kanban::prs::{link_if_from, pr_in_text};
 use crate::backend::reactive::types::AgentRegistration;
 use crate::backend::storage::work_board::{requested, BoardTask, CardUpdate, ChecklistItem, NewCard, WorkEvent};
-use crate::backend::storage::work_queue::{work_state, WorkItem};
+use crate::backend::storage::work_queue::{work_state, ClaimFilter, WorkItem};
 
 use super::caller::Caller;
 use super::AppState;
@@ -553,7 +553,8 @@ pub(super) async fn handle_work_unhold(
 
 /// Why a named claim (`claim` with `id`) took nothing: the first rule the task
 /// fails, in words the agent can act on.
-pub(super) fn why_not_claimed(state: &AppState, id: &str, agent_id: &str, agent_uid: &str, groups: &[String], now: i64) -> String {
+pub(super) fn why_not_claimed(state: &AppState, id: &str, filter: &ClaimFilter, now: i64) -> String {
+    let (agent_id, agent_uid, groups) = (filter.agent_id.as_str(), filter.agent_uid.as_str(), &filter.groups);
     let Ok(Some(item)) = state.identity_store.work_queue_get(id) else {
         return format!("there is no task {id}");
     };
@@ -572,6 +573,9 @@ pub(super) fn why_not_claimed(state: &AppState, id: &str, agent_id: &str, agent_
     }
     if !item.target_group.is_empty() && !groups.contains(&item.target_group) {
         return format!("{name} is for group {}, which you aren't in", item.target_group);
+    }
+    if let Some(kind) = filter.kind.as_deref().filter(|k| !k.is_empty() && *k != item.kind) {
+        return format!("{name} is not of kind {kind}");
     }
     if let Some(after) = state.identity_store.work_deps_of(id).unwrap_or_default().into_iter().find(|a| !a.finished()) {
         return format!("{name} starts after #{} \"{}\", which is {}", after.num, after.title, after.state);

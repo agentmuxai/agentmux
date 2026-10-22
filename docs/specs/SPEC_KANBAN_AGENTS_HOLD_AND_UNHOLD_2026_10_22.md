@@ -59,7 +59,7 @@ For a `blocked` task (a question waiting on the operator), `hold` is refused. Th
 
 `claim` gains `id`. With it, srv claims that task, and only that one, if:
 - **It is waiting:** `open`, or `held`. Claiming a held task lifts the hold; the history records `unheld` and then `claimed`, both by the agent.
-- **The caller may take it:** it is for the caller, or for anyone, or for a group the caller is in. These are the same eligibility rules as an ordinary claim, by UID first (`ClaimFilter`).
+- **The caller may take it:** it is for the caller, or for anyone, or for a group the caller is in, and of the `kind` the claim names, if it names one. These are the same eligibility rules as an ordinary claim, by UID first (`ClaimFilter`).
 - **It isn't waiting on unfinished tasks** (`after`, §6.15). Otherwise it is refused, naming the unfinished task. The operator's **Start** still overrides the wait; an agent's claim doesn't.
 
 A new store function, `work_claim_one(id, filter, now, lease)`, does it in one `UPDATE … RETURNING`, like `work_start_for` but with the eligibility and dependency checks in the `WHERE` clause. That way a task that moved in the meantime is never taken. It reaps first, like `handle_work_claim`. The answer is the same as an ordinary claim (`claimed`, `attempt`, `num`, `item`), or `{claimed: false, why}`.

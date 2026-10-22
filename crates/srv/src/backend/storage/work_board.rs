@@ -558,8 +558,9 @@ impl Store {
     /// An agent claims one named task (`Tasks` `claim` with `id`, §3.3 of the
     /// same spec): open, or held (claiming it lifts the hold), and only when
     /// [`Store::work_queue_claim`] would let this claimer take it: for it, for
-    /// anyone or for one of its groups, attempts left, not before its time,
-    /// and not waiting on an unfinished task. One conditional UPDATE, so a
+    /// anyone or for one of its groups, of the asked-for kind if any,
+    /// attempts left, not before its time, and not waiting on an unfinished
+    /// task. One conditional UPDATE, so a
     /// task that moved meanwhile is never taken. Returns the claimed row and
     /// the state it was in.
     pub fn work_claim_one(
@@ -580,7 +581,7 @@ impl Store {
         let groups: String = if filter.groups.is_empty() {
             String::new()
         } else {
-            let marks: Vec<String> = (0..filter.groups.len()).map(|i| format!("?{}", i + 7)).collect();
+            let marks: Vec<String> = (0..filter.groups.len()).map(|i| format!("?{}", i + 8)).collect();
             format!(" OR q.target_group IN ({})", marks.join(","))
         };
         let sql = format!(
@@ -593,14 +594,16 @@ impl Store {
                 AND ((q.target_agent_uid <> '' AND q.target_agent_uid = ?5)
                      OR (q.target_agent_uid = '' AND (q.target_agent = '' OR q.target_agent = ?1)))
                 AND (q.target_group = ''{groups})
+                AND (?7 = '' OR q.kind = ?7)
                 AND NOT {waits}
               RETURNING {COLS}",
             claimed = work_state::CLAIMED,
             waits = WAITS_ON_UNFINISHED,
         );
         let expires = now_ms + lease_ms;
+        let kind = filter.kind.clone().unwrap_or_default();
         let mut binds: Vec<&dyn rusqlite::ToSql> =
-            vec![&filter.agent_id, &expires, &now_ms, &id, &filter.agent_uid, &before];
+            vec![&filter.agent_id, &expires, &now_ms, &id, &filter.agent_uid, &before, &kind];
         for g in &filter.groups {
             binds.push(g);
         }

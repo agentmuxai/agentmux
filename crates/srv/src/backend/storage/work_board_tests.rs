@@ -349,6 +349,9 @@ fn a_named_claim_keeps_the_queues_rules() {
     s.work_deps_set("second", &["first".to_string()]).unwrap();
     assert!(named(&s, "second", "Loap-3", "uid-l").is_none(), "it starts after an unfinished task");
 
+    s.work_queue_enqueue(&WorkItem { kind: "repro".into(), ..item("repro", 1250) }).unwrap();
+    let review = ClaimFilter { kind: Some("review".into()), agent_id: "Loap-3".into(), agent_uid: "uid-l".into(), groups: vec![] };
+    assert!(s.work_claim_one("repro", &review, 5000, 60_000).unwrap().is_none(), "a kind asked for filters a named claim too");
     s.work_queue_enqueue(&WorkItem { not_before: Some(9_999_999), ..item("later", 1300) }).unwrap();
     assert!(named(&s, "later", "Loap-3", "uid-l").is_none(), "not before its time");
     assert!(named(&s, "missing", "Loap-3", "uid-l").is_none());

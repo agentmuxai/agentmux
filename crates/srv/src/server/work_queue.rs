@@ -322,7 +322,7 @@ pub(super) async fn handle_work_claim(
                 )
             }
             Ok(None) => {
-                let why = super::work_tasks::why_not_claimed(&state, &id, &filter.agent_id, &filter.agent_uid, &filter.groups, now);
+                let why = super::work_tasks::why_not_claimed(&state, &id, &filter, now);
                 (StatusCode::OK, Json(json!({ "claimed": false, "why": why })))
             }
             Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("claim failed: {e}")),
