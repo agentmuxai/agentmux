@@ -1,9 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { buildPaneArgs, buildRuntimeArgs } from "./buildRuntimeArgs";
-import { getProvider } from "./providers";
+import { getProvider, replaceProviderModels } from "./providers";
 import type { AgentRuntimeConfig } from "./types";
 
 const CLAUDE_PROVIDER = getProvider("claude")!;
@@ -69,7 +69,7 @@ describe("buildRuntimeArgs", () => {
 
         it("falls back to the codex default when a carried-over Claude model is stored", () => {
             // A pane created before per-provider models may have `model:"opus"`.
-            const out = buildRuntimeArgs(CODEX_BASE, cfg({ permissionMode: "plan", model: "opus" }), "codex");
+            const out = buildRuntimeArgs(CODEX_BASE, cfg({ model: "opus" }), "codex");
             expect(out).toEqual(CODEX_FIXED);
             expect(out).not.toContain("opus");
         });
@@ -89,6 +89,54 @@ describe("buildRuntimeArgs", () => {
             const out = buildRuntimeArgs(CODEX_BASE, cfg({ model: "" }), "codex");
             expect(out).not.toContain("--model");
             expect(out[out.length - 1]).toBe("-");
+        });
+    });
+
+    // Config overrides, since `codex exec resume` (every turn after the first)
+    // takes `-c` but has no `--sandbox`; verified against codex-cli 0.154.0.
+    describe("codex effort and mode", () => {
+        afterEach(() => replaceProviderModels("codex", []));
+        const listAstra = () =>
+            replaceProviderModels("codex", [
+                { value: "gpt-6-astra", label: "GPT-6-Astra", efforts: ["low", "medium", "high", "ultra"], defaultEffort: "low" },
+            ]);
+
+        it("passes a level the model takes as model_reasoning_effort, before the `-` positional", () => {
+            listAstra();
+            const out = buildRuntimeArgs(CODEX_BASE, cfg({ model: "gpt-6-astra", effort: "ultra" }), "codex");
+            expect(out).toEqual([
+                "exec",
+                "--json",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--model",
+                "gpt-6-astra",
+                "-c",
+                "model_reasoning_effort=ultra",
+                "-",
+            ]);
+            expect(out).not.toContain("--effort");
+        });
+
+        it("leaves out a level the model doesn't take, so the CLI runs the model's own default", () => {
+            listAstra();
+            const out = buildRuntimeArgs(CODEX_BASE, cfg({ model: "gpt-6-astra", effort: "max" }), "codex");
+            expect(out.join(" ")).not.toContain("model_reasoning_effort");
+            // Nor while the account's list (and so the model's levels) is unknown.
+            replaceProviderModels("codex", []);
+            const unknown = buildRuntimeArgs(CODEX_BASE, cfg({ model: "gpt-6-astra", effort: "high" }), "codex");
+            expect(unknown.join(" ")).not.toContain("model_reasoning_effort");
+        });
+
+        it("runs Workspace write and Read only in Codex's sandbox, without the bypass flag", () => {
+            const write = buildRuntimeArgs(CODEX_BASE, cfg({ permissionMode: "acceptEdits" }), "codex");
+            expect(write).not.toContain("--dangerously-bypass-approvals-and-sandbox");
+            expect(write.slice(-5)).toEqual(["-c", "sandbox_mode=workspace-write", "-c", "approval_policy=never", "-"]);
+            const read = buildRuntimeArgs(CODEX_BASE, cfg({ permissionMode: "plan" }), "codex");
+            expect(read.slice(-5)).toEqual(["-c", "sandbox_mode=read-only", "-c", "approval_policy=never", "-"]);
+            // Full access is the base args as they are.
+            expect(buildRuntimeArgs(CODEX_BASE, cfg({ permissionMode: "bypass" }), "codex")).toContain(
+                "--dangerously-bypass-approvals-and-sandbox",
+            );
         });
     });
 

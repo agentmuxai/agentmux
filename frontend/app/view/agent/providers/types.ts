@@ -49,6 +49,12 @@ export interface ProviderModel {
     default?: boolean;      // the default model for this provider
     description?: string;   // optional one-liner shown in the /model picker
     aliases?: string[];     // optional /model aliases (e.g. "claude-opus")
+    /** The reasoning efforts this model takes, in the CLI's order, when the
+     *  account's own list says (Codex: `low` … `ultra`, different per model).
+     *  Absent: the provider's own levels (Claude's five). */
+    efforts?: string[];
+    /** The effort the CLI uses when none is passed (Codex, from the same list). */
+    defaultEffort?: string;
 }
 
 export interface ProviderDefinition {

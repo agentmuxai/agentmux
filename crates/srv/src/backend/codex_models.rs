@@ -34,6 +34,16 @@ struct CachedModel {
     visibility: String,
     #[serde(default)]
     priority: i64,
+    #[serde(default)]
+    default_reasoning_level: Option<String>,
+    #[serde(default)]
+    supported_reasoning_levels: Vec<ReasoningLevel>,
+}
+
+#[derive(serde::Deserialize)]
+struct ReasoningLevel {
+    #[serde(default)]
+    effort: String,
 }
 
 /// The listed models of one cache, in the CLI's own order (`priority`), and
@@ -51,6 +61,8 @@ fn parse(contents: &str) -> Option<(String, Vec<CatalogModel>)> {
         .map(|m| CatalogModel {
             display_name: if m.display_name.is_empty() { m.slug.clone() } else { m.display_name },
             id: m.slug,
+            efforts: m.supported_reasoning_levels.into_iter().map(|l| l.effort).filter(|e| !e.is_empty()).collect(),
+            default_effort: m.default_reasoning_level.filter(|e| !e.is_empty()),
         })
         .collect();
     Some((cache.fetched_at, models))
@@ -103,14 +115,15 @@ pub fn forget_models_on_sign_in(dir: &Path) {
     }
 }
 
-/// Every Codex config dir AgentMux manages: each account's
-/// `<identities>/<account>/<auth_dir_name>` and the shared provider dir.
-pub fn codex_dirs(identities_dir: &Path, shared_provider_dir: PathBuf, auth_dir_name: &str) -> Vec<PathBuf> {
-    let mut dirs: Vec<PathBuf> = std::fs::read_dir(identities_dir)
+/// Every account's Codex config dir: `<identities>/<account>/<auth_dir_name>`.
+/// Not the old shared provider dir (`shared/providers/codex`): no account uses
+/// it, and its `auth.json` without a model list made the common list unknown
+/// for good, so Codex panes got no `--model` and the curated menu (AgentA,
+/// found testing #5323).
+pub fn codex_dirs(identities_dir: &Path, auth_dir_name: &str) -> Vec<PathBuf> {
+    std::fs::read_dir(identities_dir)
         .map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.path().join(auth_dir_name)).collect())
-        .unwrap_or_default();
-    dirs.push(shared_provider_dir);
-    dirs
+        .unwrap_or_default()
 }
 
 /// The ids every Codex account on this install lists, in order: what a pane
@@ -130,7 +143,7 @@ pub fn installed_common_model_ids() -> Vec<String> {
         let Some(provider) = crate::backend::providers::get_provider("codex") else {
             return Vec::new();
         };
-        let dirs = codex_dirs(&paths.identities_dir(), paths.provider_auth_dir(provider.auth_dir_name), provider.auth_dir_name);
+        let dirs = codex_dirs(&paths.identities_dir(), provider.auth_dir_name);
         models_every_account_lists(dirs).into_iter().map(|m| m.id).collect()
     }
 }
@@ -143,7 +156,15 @@ mod tests {
         let models: Vec<serde_json::Value> = models
             .iter()
             .map(|(slug, vis, prio)| {
-                serde_json::json!({ "slug": slug, "display_name": slug.to_uppercase(), "visibility": vis, "priority": prio, "context_window": 1 })
+                serde_json::json!({
+                    "slug": slug, "display_name": slug.to_uppercase(), "visibility": vis, "priority": prio, "context_window": 1,
+                    "default_reasoning_level": "medium",
+                    "supported_reasoning_levels": [
+                        { "effort": "low", "description": "Fast" },
+                        { "effort": "medium", "description": "Balanced" },
+                        { "effort": "ultra", "description": "Deepest" }
+                    ]
+                })
             })
             .collect();
         serde_json::json!({ "fetched_at": fetched_at, "client_version": "0.154.0", "models": models }).to_string()
@@ -159,6 +180,19 @@ mod tests {
         let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids, ["gpt-6-astra", "gpt-5.6-sol"]);
         assert_eq!(models[0].display_name, "GPT-6-ASTRA");
+    }
+
+    /// Each model's own efforts and default, for the composer's Effort menu.
+    #[test]
+    fn keeps_each_models_efforts_and_default() {
+        let (_, models) = parse(&cache("2026-10-22T06:47:36Z", &[("gpt-6-astra", "list", 2)])).unwrap();
+        assert_eq!(models[0].efforts, ["low", "medium", "ultra"]);
+        assert_eq!(models[0].default_effort.as_deref(), Some("medium"));
+        // A cache from before the CLI listed levels: none, and no default.
+        let bare = serde_json::json!({ "fetched_at": "x", "models": [{ "slug": "m", "visibility": "list" }] }).to_string();
+        let (_, models) = parse(&bare).unwrap();
+        assert!(models[0].efforts.is_empty());
+        assert_eq!(models[0].default_effort, None);
     }
 
     #[test]
@@ -231,13 +265,13 @@ mod tests {
     }
 
     #[test]
-    fn finds_every_accounts_codex_dir_and_the_shared_one() {
+    fn finds_every_accounts_codex_dir_but_not_the_old_shared_one() {
         let root = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(root.path().join("acct-1").join("codex")).unwrap();
-        std::fs::create_dir_all(root.path().join("acct-2")).unwrap();
-        let shared = root.path().join("providers").join("codex");
-        let dirs = codex_dirs(root.path(), shared.clone(), "codex");
-        assert!(dirs.contains(&root.path().join("acct-1").join("codex")));
-        assert!(dirs.contains(&shared));
+        let identities = root.path().join("identities");
+        std::fs::create_dir_all(identities.join("acct-1").join("codex")).unwrap();
+        std::fs::create_dir_all(identities.join("acct-2")).unwrap();
+        let dirs = codex_dirs(&identities, "codex");
+        assert!(dirs.contains(&identities.join("acct-1").join("codex")));
+        assert!(!dirs.iter().any(|d| d.starts_with(root.path().join("providers"))), "the shared provider dir is no account's");
     }
 }

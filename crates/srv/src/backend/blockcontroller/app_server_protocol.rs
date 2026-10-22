@@ -545,7 +545,7 @@ impl CodexAppServerSession {
             .await?)
     }
 
-    #[allow(dead_code)] // Unwired until SPEC_CODEX_APP_SERVER_FIRST_CLASS_PROVIDER_2026_09_12.md §15 Slice 6.
+    /// Used by a Codex `/compact` (`subprocess/codex_compact.rs`).
     pub async fn compact_thread(
         &self,
         timeout: Duration,

@@ -1164,3 +1164,43 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
         expect(chip(container).getAttribute("title")).toBe("Not signed in — click Log in to continue");
     });
 });
+
+// A Codex pane: the Mode · Model · Effort panel, and Compact once its thread
+// exists. Codex reports no context reading, so Compact sits in the slot its
+// session totals open, and srv compacts the thread on "/compact".
+describe("AgentComposerStrip — a Codex pane gets the runtime panel and Compact", () => {
+    const codex = (meta: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+        render(() => (
+            <AgentComposerStrip
+                {...baseProps}
+                providerId="codex"
+                blockId="block-1"
+                blockAtom={() => ({ meta }) as never}
+                onCompact={() => {}}
+                sessionTotals={{ input_tokens: 12_000, output_tokens: 300 }}
+                {...extra}
+            />
+        ));
+
+    it("shows the runtime panel and a Compact that works once the thread has an id", () => {
+        codex({ "agent:sessionid": "01a1643d-1929-7ce3-a8da-8538c0ba661e" });
+        expect(screen.getByRole("button", { name: /Runtime settings/i })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Compact" })).toBeEnabled();
+    });
+
+    it("keeps Compact off before the first turn, and while a turn runs", () => {
+        codex({});
+        expect(screen.getByRole("button", { name: "Compact" })).toBeDisabled();
+        cleanup();
+        codex({ "agent:sessionid": "t1" }, { loading: true });
+        expect(screen.getByRole("button", { name: "Compact" })).toBeDisabled();
+    });
+
+    it("gives neither to a provider without them", () => {
+        render(() => (
+            <AgentComposerStrip {...baseProps} providerId="gemini" blockId="block-1" blockAtom={() => ({ meta: {} }) as never} onCompact={() => {}} sessionTotals={{ input_tokens: 1, output_tokens: 1 }} />
+        ));
+        expect(screen.queryByRole("button", { name: /Runtime settings/i })).toBeNull();
+        expect(screen.queryByRole("button", { name: "Compact" })).toBeNull();
+    });
+});
