@@ -374,7 +374,9 @@ pub fn resolve_client(
             cfg.provider
         ));
     };
-    if cfg.requires_secret && client.client_secret.is_none() {
+    // The user's own client must bring its secret. The built-in one has no
+    // secret field yet: it gets one when AgentMux's client is provisioned.
+    if cfg.requires_secret && client.mode != ClientMode::Builtin && client.client_secret.is_none() {
         return Err(format!(
             "{} requires a client secret — register your own OAuth app and \
              supply its client id + secret (BYO).",

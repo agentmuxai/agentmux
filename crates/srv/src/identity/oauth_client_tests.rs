@@ -55,8 +55,9 @@ fn unconfigured_provider_is_gated() {
     let cfg = config_for("google").unwrap();
     // No built-in client id, no BYO and nothing saved → clear "not configured" error.
     assert!(resolve_client(&cfg, None, None).is_err());
-    // BYO client id unblocks it.
-    assert_eq!(resolve_client(&cfg, Some(&byo("abc", None)), None).unwrap().client_id, "abc");
+    // A BYO Desktop client needs its secret too: Google's token endpoint refuses one without.
+    assert!(resolve_client(&cfg, Some(&byo("abc", None)), None).is_err());
+    assert_eq!(resolve_client(&cfg, Some(&byo("abc", Some("sec"))), None).unwrap().client_id, "abc");
 }
 
 #[test]
@@ -64,8 +65,8 @@ fn the_client_is_the_requests_then_the_saved_one_then_the_built_in_one() {
     let mut cfg = config_for("google").unwrap();
     cfg.client_id = Some("builtin-id");
     let saved = SavedClient { client_id: "saved-id".into(), client_secret: Some("s".into()), mode: ClientMode::Workspace };
-    let c = resolve_client(&cfg, Some(&byo("req-id", None)), Some(&saved)).unwrap();
-    assert_eq!((c.client_id.as_str(), c.mode, c.client_secret), ("req-id", ClientMode::Byo, None));
+    let c = resolve_client(&cfg, Some(&byo("req-id", Some("r"))), Some(&saved)).unwrap();
+    assert_eq!((c.client_id.as_str(), c.mode, c.client_secret.as_deref()), ("req-id", ClientMode::Byo, Some("r")));
     let c = resolve_client(&cfg, None, Some(&saved)).unwrap();
     assert_eq!((c.client_id.as_str(), c.mode, c.client_secret.as_deref()), ("saved-id", ClientMode::Workspace, Some("s")));
     let c = resolve_client(&cfg, None, None).unwrap();
