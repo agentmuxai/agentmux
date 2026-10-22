@@ -245,25 +245,29 @@ impl DefinitionStore {
 
     /// One active record's slug and former slugs, read from its file now,
     /// for a caller that must not act on a guess (deleting the agent). `None`
-    /// only when there is no active file. A file that can't be read or parsed,
-    /// names another id, or has a schema this build doesn't know is an error.
-    /// Unlike [`Self::get`], a record missing its name or provider still
-    /// answers: those don't bear on its slugs.
+    /// only when there is no active file. A file that can't be read, or whose
+    /// slug fields can't be (`def_slug_index::slug_fields`), is an error. A
+    /// record this build otherwise can't load (a newer schema, a missing name
+    /// or provider) still answers when its slug fields can be read.
     pub fn slug_of_strict(&self, id: &str) -> Result<Option<SlugEntry>, DefStoreError> {
         let bytes = match std::fs::read(self.active_path(id)) {
             Ok(b) => b,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(e.into()),
         };
-        let rec: DefinitionRecord = serde_json::from_slice(&bytes)?;
-        match validate(id, &rec) {
-            Ok(()) | Err(DefValidationError::MissingField("name" | "provider")) => {}
-            Err(e) => return Err(e.into()),
-        }
-        Ok(Some(SlugEntry {
-            slug: rec.data.slug,
-            former: rec.data.former_slugs.into_iter().map(|f| f.slug).collect(),
-        }))
+        super::def_slug_index::slug_fields(id, &bytes)
+            .map(Some)
+            .map_err(|why| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{id}.json: {why}")).into())
+    }
+
+    /// Every active record's slug and former slugs, for allocating a new
+    /// slug: [`Self::slug_index`]'s cache, but every record counts, newer
+    /// schemas included, and anything that can't be read (the directory, a
+    /// file, a record's slug fields) is an error rather than skipped.
+    pub fn slug_index_strict(&self) -> Result<std::collections::HashMap<String, SlugEntry>, DefStoreError> {
+        self.slugs
+            .all_strict(&self.root)
+            .map_err(|why| std::io::Error::new(std::io::ErrorKind::InvalidData, why).into())
     }
 
     /// One active record's slug and former slugs, from the same cache;
@@ -299,9 +303,12 @@ impl LockedRecord<'_> {
     }
 }
 
-pub(super) fn read_and_validate(path: &Path, stem: &str) -> Result<DefinitionRecord, DefStoreError> {
-    let bytes = std::fs::read(path)?;
-    let rec: DefinitionRecord = serde_json::from_slice(&bytes)?;
+fn read_and_validate(path: &Path, stem: &str) -> Result<DefinitionRecord, DefStoreError> {
+    parse_and_validate(&std::fs::read(path)?, stem)
+}
+
+pub(super) fn parse_and_validate(bytes: &[u8], stem: &str) -> Result<DefinitionRecord, DefStoreError> {
+    let rec: DefinitionRecord = serde_json::from_slice(bytes)?;
     validate(stem, &rec)?;
     Ok(rec)
 }
@@ -724,6 +731,29 @@ mod tests {
         assert!(matches!(b.retire("aaa"), Err(DefStoreError::Locked { .. })));
         assert_eq!(std::fs::read(a.root().join("aaa.json")).unwrap(), before, "nothing written");
         holder.join().unwrap().unwrap();
+    }
+
+    /// The strict index fails when the directory can't be listed or a
+    /// record's slug fields can't be read, and reads a newer schema's.
+    #[test]
+    fn the_strict_slug_index_fails_closed_and_reads_newer_schemas() {
+        let (_t, s) = store();
+        s.upsert(&with_slug("aaa", "a")).unwrap();
+        let future = r#"{"schema_version":99,"data":{"id":"bbb","slug":"b","former_slugs":[{"slug":"b-old"}]}}"#;
+        std::fs::write(s.root().join("bbb.json"), future).unwrap();
+        let strict = s.slug_index_strict().unwrap();
+        assert_eq!(strict["bbb"].former, vec!["b-old".to_string()]);
+        assert!(!s.slug_index().unwrap().contains_key("bbb"), "the lenient index lists what list_active does");
+
+        for bad in [r#"{"data":{"id":"ccc","former_slugs":"x"}}"#, "{", r#"{"data":{"id":"other"}}"#] {
+            std::fs::write(s.root().join("ccc.json"), bad).unwrap();
+            assert!(s.slug_index_strict().is_err(), "{bad}");
+        }
+        std::fs::remove_file(s.root().join("ccc.json")).unwrap();
+        assert!(s.slug_index_strict().is_ok());
+
+        std::fs::remove_dir_all(s.root()).unwrap();
+        assert!(s.slug_index_strict().is_err(), "an unlistable directory");
     }
 
     /// Slug allocation is one host-wide lock: a second store waits for it,

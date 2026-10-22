@@ -222,7 +222,8 @@ impl Store {
         // Held from the slug pick (inside the local insert) to its publication
         // by the mirror below.
         let _allocating = self.slug_allocation_lock(agent)?;
-        self.agent_def_insert_local_only(agent, None)?;
+        let shared = self.shared_slugs_to_allocate(agent)?;
+        self.agent_def_insert_with(agent, None, &shared)?;
         // Mirror into the global cross-channel definition store. Content +
         // skills are inserted after the definition (separate calls), so this
         // initial record is content-less; agent_content_set / agent_skill_*
@@ -283,7 +284,28 @@ impl Store {
         agent: &mut AgentDefinition,
         updated_at_override: Option<i64>,
     ) -> Result<(), StoreError> {
-        let shared = self.shared_slugs();
+        self.agent_def_insert_with(agent, updated_at_override, &self.shared_slugs())
+    }
+
+    /// The shared slugs a new agent's slug is picked against: all of them,
+    /// read strictly, for a user agent (`shared_slugs_for_allocation`); for a
+    /// template, which is never mirrored and is seeded at boot, the lenient
+    /// index, so a bad shared file can't stop seeding.
+    fn shared_slugs_to_allocate(&self, agent: &AgentDefinition) -> Result<SharedSlugs, StoreError> {
+        if agent.is_seeded == 0 {
+            self.shared_slugs_for_allocation()
+        } else {
+            Ok(self.shared_slugs())
+        }
+    }
+
+    /// [`Self::agent_def_insert_local_only`] against the given shared slugs.
+    fn agent_def_insert_with(
+        &self,
+        agent: &mut AgentDefinition,
+        updated_at_override: Option<i64>,
+        shared: &SharedSlugs,
+    ) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         let base = if agent.slug.is_empty() {
             derive_slug(&agent.name)
@@ -294,7 +316,7 @@ impl Store {
         // table surfaces definition slugs and template-instance projections
         // alike, so a collision against an instance-derived row is caught here
         // too. Shared with `instance_create` so the two cannot drift.
-        agent.slug = resolve_slug_collision(&conn, &base, &agent.id, &shared)?;
+        agent.slug = resolve_slug_collision(&conn, &base, &agent.id, shared)?;
         let stamped_updated_at = updated_at_override.unwrap_or(agent.created_at);
         let is_template = if agent.is_seeded == 1 { 1_i64 } else { 0_i64 };
         let parent_template_id = if agent.is_seeded == 1 { String::new() } else { agent.parent_id.clone() };
@@ -468,7 +490,10 @@ impl Store {
         let derived_slug = derive_slug(agent.name.trim());
         // Held through the mirror at the end, as in `agent_def_insert`.
         let _allocating = self.slug_allocation_lock(agent)?;
-        let shared = self.shared_slugs();
+        // Strict for the insert below; a failure doesn't stop finding an
+        // existing agent, which only reads names.
+        let allocation = self.shared_slugs_to_allocate(agent);
+        let shared = allocation.as_ref().map_or_else(|_| self.shared_slugs(), SharedSlugs::clone);
 
         {
             let conn = self.conn.lock().unwrap();
@@ -506,7 +531,7 @@ impl Store {
                 agent.slug.clone()
             };
             // The shared resolver: case-insensitive, like the key tables.
-            agent.slug = super::name_keys::resolve_slug_collision(&conn, &base, &agent.id, &shared)?;
+            agent.slug = super::name_keys::resolve_slug_collision(&conn, &base, &agent.id, &allocation?)?;
             let is_template = if agent.is_seeded == 1 { 1_i64 } else { 0_i64 };
             let parent_template_id = if agent.is_seeded == 1 { String::new() } else { agent.parent_id.clone() };
             conn.execute(

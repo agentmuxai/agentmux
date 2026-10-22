@@ -60,7 +60,7 @@ pub(in crate::backend::storage) use crate::registry::SlugEntry as SharedNames;
 /// store, or when it can't be listed (logged): every slug then reads as the
 /// local one, which is what this channel answered before. Shared, not
 /// copied: the store's slug index hands out the same map until a file changes.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(in crate::backend::storage) struct SharedSlugs(Arc<HashMap<String, SharedNames>>);
 
 impl SharedSlugs {
@@ -169,6 +169,23 @@ impl Store {
             }
         }
         Ok(SharedSlugs(Arc::new(all)))
+    }
+
+    /// Every shared definition's names, for picking a new agent's slug
+    /// (`DefinitionStore::slug_index_strict`): a newer-schema record counts,
+    /// and a directory, file or record whose slugs can't be read is an error,
+    /// so an insert never picks a slug it couldn't check. No shared store:
+    /// nothing to check.
+    pub(in crate::backend::storage) fn shared_slugs_for_allocation(&self) -> Result<SharedSlugs, StoreError> {
+        let Some(reg) = self.shared_def_registry() else {
+            return Ok(SharedSlugs::default());
+        };
+        reg.slug_index_strict().map(|all| SharedSlugs(Arc::new(all))).map_err(|e| {
+            StoreError::Other(format!(
+                "not creating the agent: the shared agent definitions can't all be read ({e}), so its slug \
+                 could be one another agent holds. Nothing was created; fix or remove the file and try again."
+            ))
+        })
     }
 
     /// Every active shared definition's names, for a slug-to-uid read, from
@@ -370,6 +387,46 @@ mod tests {
                 .collect();
             assert_ne!(picked[0], picked[1], "round {round}: {picked:?}");
         }
+    }
+
+    /// A new agent's slug is picked against every shared record: one whose
+    /// slug fields can't be read stops both insert paths before anything is
+    /// written (finding an existing agent by name still works), and a record
+    /// from a newer schema whose slug fields read fine is honoured as taken,
+    /// current and former slug alike.
+    #[test]
+    fn allocation_fails_closed_on_an_unreadable_record_and_honours_a_newer_schema() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let defs = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+        store.set_def_registry(defs.clone());
+        let mut existing = test_agent_def("uid-alloc-existing", "Existing", "claude", "host", 1, "");
+        existing.slug = "existing".to_string();
+        store.agent_def_insert(&mut existing).unwrap();
+
+        let future = r#"{"schema_version":99,"data":{"id":"uid-future","slug":"taken",
+            "former_slugs":[{"slug":"old-taken","retired_at":1}],"field_from_the_future":true}}"#;
+        std::fs::write(defs.root().join("uid-future.json"), future).unwrap();
+        for (id, base, want) in [("uid-alloc-a", "taken", "taken-2"), ("uid-alloc-b", "old-taken", "old-taken-2")] {
+            let mut def = test_agent_def(id, "New", "claude", "host", 1, "");
+            def.slug = base.to_string();
+            store.agent_def_insert(&mut def).unwrap();
+            assert_eq!(def.slug, want);
+        }
+
+        std::fs::write(defs.root().join("uid-bad.json"), r#"{"schema_version":1,"data":{"id":"uid-bad","slug":5}}"#).unwrap();
+        let mut blocked = test_agent_def("uid-alloc-blocked", "Blocked", "claude", "host", 1, "");
+        blocked.slug = "blocked".to_string();
+        let err = store.agent_def_insert(&mut blocked).expect_err("an unreadable record stops the insert");
+        assert!(err.to_string().contains("Nothing was created"), "{err}");
+        assert!(store.agent_row_get("uid-alloc-blocked").unwrap().is_none());
+        let mut defined = test_agent_def("uid-alloc-defined", "Defined", "claude", "host", 1, "");
+        defined.slug = String::new();
+        assert!(store.agent_def_find_or_insert(&mut defined).is_err());
+        assert!(store.agent_row_get("uid-alloc-defined").unwrap().is_none());
+        let mut again = test_agent_def("uid-alloc-other", "Existing", "claude", "host", 1, "");
+        let found = store.agent_def_find_or_insert(&mut again).unwrap().expect("found by name");
+        assert_eq!(found.id, "uid-alloc-existing");
     }
 
     /// A new agent whose shared record can't be written is not inserted, by
