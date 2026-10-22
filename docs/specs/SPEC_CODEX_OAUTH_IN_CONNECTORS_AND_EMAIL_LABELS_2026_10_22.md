@@ -1,6 +1,6 @@
 # Spec: Codex sign-in in Connectors, and every account labelled by its email
 
-**Status:** proposed
+**Status:** active — §4 (Codex models from the account) and §5 (the Codex status probe) in #5323; §6 and §7 not started.
 **Date:** 2026-10-22
 **Author:** AgentA@Area54, at the operator's request
 **Verified against:** `agentmux` `main` @ `cc46a8c21` (2026-10-22), by reading code, and live on 0.59.38 with a Codex agent (Coddy).
