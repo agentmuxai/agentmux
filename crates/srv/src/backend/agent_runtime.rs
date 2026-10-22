@@ -979,7 +979,7 @@ mod tests {
         let out = seed_launch("codex", s(&["exec", "--json", "-"]), "");
         assert_eq!(
             out.cli_args,
-            s(&["exec", "--json", "--model", "gpt-5.5", "-"])
+            s(&["exec", "--json", "--model", "gpt-6-astra", "-"])
         );
     }
 
@@ -1175,7 +1175,7 @@ mod tests {
             let out = with_runtime_flags(&meta, s(&["exec", "-"]));
             assert_eq!(
                 after(&out, "--model").as_deref(),
-                Some("gpt-5.5"),
+                Some("gpt-6-astra"),
                 "{stale}"
             );
         }

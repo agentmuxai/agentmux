@@ -50,7 +50,8 @@ import { describeError, formatDescribedError } from "@/app/errors/error-report";
 import { withTimeout } from "@/app/init/timeout";
 import { retryTransient } from "@/util/transient-network";
 import { fireAndForget } from "@/util/util";
-import { replaceProviderModels, setProviderModels } from "@/app/view/agent/providers";
+import { setProviderModels } from "@/app/view/agent/providers";
+import { refreshCodexModels } from "@/app/view/agent/providers/codex-models-refresh";
 import { scheduleRevealLift } from "@/store/tab-reveal";
 import { installLauncherEventBridge } from "@/util/launcher-events";
 import { installSrvEventBridge } from "@/util/srv-events";
@@ -1123,17 +1124,10 @@ async function initMux(initOpts: AgentMuxInitOpts) {
             (res?.models ?? []).map((m) => ({ value: m.id, label: m.display_name })),
         );
     });
-    // Codex: the models its account offers, from the list the Codex CLI
-    // caches per account. Replaces the curated list, whose ids OpenAI retired
-    // (SPEC_CODEX_OAUTH_IN_CONNECTORS_AND_EMAIL_LABELS_2026_10_22.md §4).
-    // Empty until a Codex account has run once; the curated list stays then.
-    fireAndForget(async () => {
-        const res = await RpcApi.ProvidersModelsCommand(TabRpcClient, { provider_id: "codex" });
-        replaceProviderModels(
-            "codex",
-            (res?.models ?? []).map((m) => ({ value: m.id, label: m.display_name })),
-        );
-    });
+    // Codex: the models its accounts offer, from the lists the Codex CLI
+    // caches per account; fetched again when a Codex pane starts or its model
+    // menu opens (codex-models-refresh.ts).
+    refreshCodexModels();
 
     tlog("TOTAL initMux", t0);
 

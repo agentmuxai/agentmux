@@ -54,17 +54,30 @@ fn parse(contents: &str) -> Option<(String, Vec<CatalogModel>)> {
     Some((cache.fetched_at, models))
 }
 
-/// The most recently fetched list among these Codex config dirs, or empty when
-/// none has one yet (a fresh sign-in before its first turn).
-pub fn newest_listed_models(dirs: impl IntoIterator<Item = PathBuf>) -> Vec<CatalogModel> {
-    dirs.into_iter()
+/// The models every Codex account here can run: those listed in each account's
+/// cache, in the order of the most recently fetched one. The menu and a new
+/// pane's default are shared by all Codex panes, so offering one account's
+/// list would let a pane bound to another account (a different plan) pick a
+/// model it can't run. Empty when no account has a list yet (a fresh sign-in
+/// before its first turn) or the lists share nothing; the frontend then keeps
+/// its curated list.
+pub fn models_every_account_lists(dirs: impl IntoIterator<Item = PathBuf>) -> Vec<CatalogModel> {
+    let mut lists: Vec<(String, Vec<CatalogModel>)> = dirs
+        .into_iter()
         .filter_map(|d| std::fs::read_to_string(d.join(MODELS_CACHE_FILE)).ok())
         .filter_map(|s| parse(&s))
         .filter(|(_, models)| !models.is_empty())
-        // RFC 3339 timestamps from the same CLI compare correctly as text.
-        .max_by(|a, b| a.0.cmp(&b.0))
-        .map(|(_, models)| models)
-        .unwrap_or_default()
+        .collect();
+    // RFC 3339 timestamps from the same CLI compare correctly as text.
+    lists.sort_by(|a, b| b.0.cmp(&a.0));
+    let Some(((_, newest), others)) = lists.split_first() else {
+        return Vec::new();
+    };
+    newest
+        .iter()
+        .filter(|m| others.iter().all(|(_, list)| list.iter().any(|o| o.id == m.id)))
+        .cloned()
+        .collect()
 }
 
 /// Every Codex config dir AgentMux manages: each account's
@@ -104,23 +117,45 @@ mod tests {
     }
 
     #[test]
-    fn takes_the_most_recently_fetched_account_and_skips_dirs_without_a_cache() {
+    fn offers_only_what_every_account_lists_in_the_newest_lists_order_and_skips_dirs_without_a_cache() {
         let root = tempfile::tempdir().unwrap();
-        let (old, new, none) = (root.path().join("a"), root.path().join("b"), root.path().join("c"));
-        for d in [&old, &new, &none] {
+        let (plus, pro, none) = (root.path().join("a"), root.path().join("b"), root.path().join("c"));
+        for d in [&plus, &pro, &none] {
             std::fs::create_dir_all(d).unwrap();
         }
-        std::fs::write(old.join(MODELS_CACHE_FILE), cache("2026-10-01T00:00:00Z", &[("gpt-5.5", "list", 1)])).unwrap();
-        std::fs::write(new.join(MODELS_CACHE_FILE), cache("2026-10-22T00:00:00Z", &[("gpt-6-astra", "list", 1)])).unwrap();
-        let models = newest_listed_models([old, none, new]);
-        assert_eq!(models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["gpt-6-astra"]);
+        std::fs::write(
+            plus.join(MODELS_CACHE_FILE),
+            cache("2026-10-21T00:00:00Z", &[("gpt-5.6-sol", "list", 6), ("gpt-6-astra", "list", 2)]),
+        )
+        .unwrap();
+        std::fs::write(
+            pro.join(MODELS_CACHE_FILE),
+            cache("2026-10-22T00:00:00Z", &[("gpt-6-astra", "list", 2), ("gpt-6-pro", "list", 1), ("gpt-5.6-sol", "list", 6)]),
+        )
+        .unwrap();
+        let ids = |models: Vec<CatalogModel>| models.into_iter().map(|m| m.id).collect::<Vec<_>>();
+        // gpt-6-pro is the Pro account's alone: a pane on the Plus account can't run it.
+        assert_eq!(ids(models_every_account_lists([plus.clone(), none, pro.clone()])), ["gpt-6-astra", "gpt-5.6-sol"]);
+        // One account: its own list.
+        assert_eq!(ids(models_every_account_lists([pro])), ["gpt-6-pro", "gpt-6-astra", "gpt-5.6-sol"]);
+    }
+
+    #[test]
+    fn lists_that_share_nothing_offer_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        let (a, b) = (root.path().join("a"), root.path().join("b"));
+        for (d, id) in [(&a, "gpt-5.5"), (&b, "gpt-6-astra")] {
+            std::fs::create_dir_all(d).unwrap();
+            std::fs::write(d.join(MODELS_CACHE_FILE), cache("2026-10-22T00:00:00Z", &[(id, "list", 1)])).unwrap();
+        }
+        assert!(models_every_account_lists([a, b]).is_empty());
     }
 
     #[test]
     fn nothing_cached_or_unreadable_is_an_empty_list() {
         let root = tempfile::tempdir().unwrap();
         std::fs::write(root.path().join(MODELS_CACHE_FILE), "not json").unwrap();
-        assert!(newest_listed_models([root.path().to_path_buf(), root.path().join("missing")]).is_empty());
+        assert!(models_every_account_lists([root.path().to_path_buf(), root.path().join("missing")]).is_empty());
     }
 
     #[test]

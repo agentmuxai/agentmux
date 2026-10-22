@@ -50,7 +50,8 @@ pub fn register_providers_handlers(engine: &Arc<WshRpcEngine>, _state: &AppState
                     Some(p) => p,
                     None => return Err(format!("unknown provider: {}", params.provider_id)),
                 };
-                // Codex: the account's own list, as its CLI last fetched it.
+                // Codex: the models every Codex account here lists, as their
+                // CLI last fetched them (one list serves every Codex pane).
                 if provider.id == "codex" {
                     let paths = match agentmux_common::DataPaths::from_env() {
                         Some(p) => p,
@@ -58,7 +59,7 @@ pub fn register_providers_handlers(engine: &Arc<WshRpcEngine>, _state: &AppState
                     };
                     let auth_dir_name = provider.auth_dir_name;
                     let models = tokio::task::spawn_blocking(move || {
-                        crate::backend::codex_models::newest_listed_models(crate::backend::codex_models::codex_dirs(
+                        crate::backend::codex_models::models_every_account_lists(crate::backend::codex_models::codex_dirs(
                             &paths.identities_dir(),
                             paths.provider_auth_dir(auth_dir_name),
                             auth_dir_name,
