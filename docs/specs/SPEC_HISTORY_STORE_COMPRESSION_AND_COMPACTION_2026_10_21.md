@@ -3,7 +3,7 @@
 **Date:** 2026-10-21
 **Author:** Agent5@narko
 **Type:** Spec (a storage change; what a reader sees does not change)
-**Status:** active. The operator approved both parts on 2026-10-22 ("lets get the compaction and also cleaning out the streaming deltas"). PRs 1 and 2 of §9 (the frame table, both codecs, every read and write path, the store accepting version 3; nothing creates a frame yet) are in PR #5324. PR 3 (the framer, its settings, off, and its checks) is in the PR stacked on it. Remaining: PR 4 (the recovery tool's decoders, `history.compact`, `decompress`, the Storage numbers), then turning it on. Task #49.
+**Status:** active. The operator approved both parts on 2026-10-22 ("lets get the compaction and also cleaning out the streaming deltas"). PRs 1 and 2 of §9 (the frame table, both codecs, every read and write path, the store accepting version 3; nothing creates a frame yet) merged in #5324. PR 3 (the framer, its settings, off, and its checks) is #5328; PR 4 (the recovery tool's decoders) is #5330. Remaining: the Storage numbers, then turning it on. Task #49.
 **Builds on:** `REPORT_AGENT_HISTORY_STORE_DEDUP_COMPRESSION_2026_10_17.md` (AgentY: §4.3 compression, §7.3 "shrink the pane store"), `SPEC_AGENT_TRANSCRIPT_SINGLE_COPY_2026_10_19.md` (Maricon: one copy of each transcript), `docs/analysis/RCA_UPGRADE_0_59_30_TO_0_59_34_ISSUES_2026_10_19.md` §6 (the damaged parts).
 **Platform:** all.
 
@@ -140,7 +140,7 @@ Frames cover parts that are at least 8 MiB behind the end of the file **and** wh
 | Agent record (`history/record.rs`), session ranges | none: they are byte ranges of the logical file |
 | Fork copy (`copy_older_session_history`, #5219) | a prefix ending inside a frame decodes that frame; whole-file copies copy frame rows |
 | Archive (`move_files_to_zone`) | frame rows move with the part rows |
-| Offline recovery tool | learns the frame table and both codecs (`recover.mjs`, in the framer's PR, before any frame can exist); a test vector written by the Rust encoder is decoded by the tool's own decoder |
+| Offline recovery tool | learns the frame table and both codecs (`recover.mjs`, PR 4, #5330, which lands before the setting is turned on); a test vector written by the Rust encoder is decoded by the tool's own decoder |
 | An older build | refuses the store (version gate) and runs from its own copy |
 
 **Measuring it:** Warden > History > Storage gets, per store, the **stored size** and the **logical size** (what the files hold decoded), the ratio, bytes framed and not yet framed, and a count of frames checked by the scrub with any failures. `history.usage` already reads file sizes; it adds `SUM(length(data))` per table.
