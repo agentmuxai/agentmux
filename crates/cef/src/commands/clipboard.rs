@@ -192,15 +192,20 @@ pub fn write_secret_text(text: &str) -> Result<(), String> {
     use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
     use objc2_foundation::NSString;
     let pb = NSPasteboard::generalPasteboard();
-    pb.clearContents();
-    // Marks first, then the text, the order the Windows side keeps.
-    for mark in ["org.nspasteboard.ConcealedType", "org.nspasteboard.TransientType"] {
-        pb.setString_forType(&NSString::from_str(""), &NSString::from_str(mark));
-    }
+    // The change count this clear gave the pasteboard: while it is still the count, nobody else has
+    // taken the pasteboard since, and what is on it is ours to clear again.
+    let mine = pb.clearContents();
     let string_type = unsafe { NSPasteboardTypeString };
-    if !pb.setString_forType(&NSString::from_str(text), string_type) {
-        pb.clearContents();
-        return Err("macOS didn't take the secret on the clipboard".into());
+    // Marks first, then the text, the order the Windows side keeps; a mark that doesn't take refuses the copy.
+    let marked = ["org.nspasteboard.ConcealedType", "org.nspasteboard.TransientType"]
+        .iter()
+        .all(|mark| pb.setString_forType(&NSString::from_str(""), &NSString::from_str(mark)));
+    if !(marked && pb.setString_forType(&NSString::from_str(text), string_type)) {
+        // A write refused because another app took the pasteboard must not clear what that app put there.
+        if pb.changeCount() == mine {
+            pb.clearContents();
+        }
+        return Err("macOS didn't take the secret on the clipboard privately".into());
     }
     SECRET_CHANGE.store(pb.changeCount(), std::sync::atomic::Ordering::SeqCst);
     Ok(())
@@ -263,10 +268,13 @@ pub fn clear_if_holds(text: &str) -> Result<(), String> {
 pub fn clear_if_holds(text: &str) -> Result<(), String> {
     use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
     let pb = NSPasteboard::generalPasteboard();
-    if pb.changeCount() != SECRET_CHANGE.load(std::sync::atomic::Ordering::SeqCst) {
+    let saved = SECRET_CHANGE.load(std::sync::atomic::Ordering::SeqCst);
+    if pb.changeCount() != saved {
         return Ok(());
     }
-    if pb.stringForType(unsafe { NSPasteboardTypeString }).is_some_and(|s| s.to_string() == text) {
+    let holds = pb.stringForType(unsafe { NSPasteboardTypeString }).is_some_and(|s| s.to_string() == text);
+    // Checked again just before clearing: something copied while the text was being compared must stay.
+    if holds && pb.changeCount() == saved {
         pb.clearContents();
     }
     Ok(())
