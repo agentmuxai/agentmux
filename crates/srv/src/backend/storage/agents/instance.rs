@@ -892,7 +892,7 @@ impl Store {
     /// resurrection path this way rather than by re-adding a legacy-table
     /// delete here).
     pub fn instance_delete(&self, id: &str) -> Result<bool, StoreError> {
-        let shared = self.shared_slugs();
+        let shared = self.shared_slugs_for_delete(id)?;
         let rows = {
             let conn = self.conn.lock().unwrap();
             // Refuse a template explicitly, rather than leaning on the

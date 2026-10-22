@@ -128,6 +128,38 @@ impl Store {
         self.shared_names_of(uid).map(|n| n.slug)
     }
 
+    /// [`Self::shared_slugs`] for deleting `uid`, which must not guess: the
+    /// slugs its signing keys sit under are its shared record's current and
+    /// former slugs, and the record is retired with the delete, so a purge
+    /// that missed them would leave keys for the next agent of that name.
+    /// `uid`'s own record is read strictly (`slug_of_strict`), and a record
+    /// that exists but can't be read or parsed (or a shared directory that
+    /// can't be listed) is an error, before anything is deleted. A record that doesn't exist,
+    /// or no shared store, is not: there are no shared names to cover.
+    pub(in crate::backend::storage) fn shared_slugs_for_delete(&self, uid: &str) -> Result<SharedSlugs, StoreError> {
+        let Some(reg) = self.shared_def_registry() else {
+            return Ok(SharedSlugs::default());
+        };
+        let refuse = |what: &str, e: crate::registry::DefStoreError| {
+            StoreError::Other(format!(
+                "not deleting agent {uid}: {what} ({e}), so the names its signing keys are filed under \
+                 are unknown. Nothing was deleted; fix or restore the file and try again."
+            ))
+        };
+        let own = reg.slug_of_strict(uid).map_err(|e| refuse("its shared definition can't be read", e))?;
+        let index = reg.slug_index().map_err(|e| refuse("the shared definitions can't be listed", e))?;
+        let mut all = (*index).clone();
+        match own {
+            Some(names) => {
+                all.insert(uid.to_string(), names);
+            }
+            None => {
+                all.remove(uid);
+            }
+        }
+        Ok(SharedSlugs(Arc::new(all)))
+    }
+
     /// Every active shared definition's names, for a slug-to-uid read, from
     /// the store's slug index (`DefinitionStore::slug_index`): a stat per
     /// file, and a parse only of the files that changed. Read before taking
@@ -290,6 +322,52 @@ mod tests {
                 assert!(tombstones.contains(&(name.to_string(), uid.to_string())), "{name}: {tombstones:?}");
             }
         }
+    }
+
+    /// A delete that can't read the agent's own shared record (unparseable,
+    /// or failing validation) refuses, through both paths, and leaves the
+    /// row, its keys and the record as they were.
+    #[test]
+    fn delete_refuses_when_its_shared_record_is_unreadable() {
+        for via_instance_delete in [false, true] {
+            let uid = if via_instance_delete { "uid-p04-bad-instance" } else { "uid-p04-bad-def" };
+            let (_tmp, store, defs) = diverged(uid, "loap-loap-2", "loap-2");
+            for name in ["loap-2", "loap-loap-2"] {
+                store.agent_jekt_key_ensure(name).unwrap();
+            }
+            let path = defs.root().join(format!("{uid}.json"));
+            let mismatched = r#"{"schema_version":1,"data":{"id":"someone-else","name":"X","provider":"claude"}}"#;
+            for bad in ["not json", mismatched] {
+                std::fs::write(&path, bad).unwrap();
+                let result = if via_instance_delete { store.instance_delete(uid) } else { store.agent_def_delete(uid) };
+                let err = result.expect_err("an unreadable shared record refuses the delete");
+                assert!(err.to_string().contains("Nothing was deleted"), "{err}");
+                assert!(store.agent_row_get(uid).unwrap().is_some(), "the row stays");
+                for name in ["loap-2", "loap-loap-2"] {
+                    assert!(store.agent_jekt_key_load(name).unwrap().is_some(), "{name}'s key stays");
+                }
+                assert_eq!(std::fs::read_to_string(&path).unwrap(), bad, "the record stays");
+            }
+        }
+    }
+
+    /// A definition with no shared record (never mirrored, or no shared
+    /// store at all) is still deleted, keys included.
+    #[test]
+    fn delete_proceeds_without_a_shared_record() {
+        let plain = Store::open_in_memory().unwrap();
+        let mut def = test_agent_def("uid-p04-plain", "Plain", "claude", "host", 1, "");
+        def.slug = "plain".to_string();
+        plain.agent_def_insert(&mut def).unwrap();
+        plain.agent_jekt_key_ensure("plain").unwrap();
+        assert!(plain.agent_def_delete("uid-p04-plain").unwrap());
+        assert!(plain.agent_jekt_key_load("plain").unwrap().is_none());
+
+        let (_tmp, store, defs) = diverged("uid-p04-absent", "absent", "absent");
+        std::fs::remove_file(defs.root().join("uid-p04-absent.json")).unwrap();
+        store.agent_jekt_key_ensure("absent").unwrap();
+        assert!(store.instance_delete("uid-p04-absent").unwrap());
+        assert!(store.agent_jekt_key_load("absent").unwrap().is_none());
     }
 
     /// The guard still applies: a former slug another agent holds as its

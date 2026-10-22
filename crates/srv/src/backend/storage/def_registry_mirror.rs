@@ -263,21 +263,20 @@ impl Store {
         let Some(reg) = self.shared_def_registry() else {
             return false;
         };
-        let mut rec = match reg.get(&agent.id) {
-            Ok(Some(r)) => r,
-            _ => return false,
-        };
-        // Keep the record's content + skills; replace the definition fields.
-        let kept_content = std::mem::take(&mut rec.data.content);
-        let kept_skills = std::mem::take(&mut rec.data.skills);
-        let mut new_rec = agent_definition_to_record(agent, &[], &[]);
-        new_rec.data.content = kept_content;
-        new_rec.data.skills = kept_skills;
-        if let Err(e) = reg.upsert(&new_rec) {
+        // Read and rewritten under the record's lock, so a concurrent writer's
+        // content or skills aren't overwritten with this read's copy.
+        let updated = reg.with_record_locked(&agent.id, |locked| {
+            let Some(mut rec) = locked.get()? else { return Ok(false) };
+            // Keep the record's content + skills; replace the definition fields.
+            let mut new_rec = agent_definition_to_record(agent, &[], &[]);
+            new_rec.data.content = std::mem::take(&mut rec.data.content);
+            new_rec.data.skills = std::mem::take(&mut rec.data.skills);
+            locked.upsert(&new_rec).map(|()| true)
+        });
+        updated.unwrap_or_else(|e| {
             tracing::warn!(def_id = %agent.id, error = %e, "def registry: cross-channel update failed");
-            return false;
-        }
-        true
+            false
+        })
     }
 
     /// Update a single content blob in the global registry record for a
@@ -296,36 +295,28 @@ impl Store {
         let Some(reg) = self.shared_def_registry() else {
             return Err(StoreError::Other("no global registry available".into()));
         };
-        let mut rec = match reg.get(agent_id) {
-            Ok(Some(r)) => r,
-            Ok(None) => {
-                return Err(StoreError::Other(format!(
-                    "agent {agent_id} not in global registry"
-                )))
-            }
-            Err(e) => {
-                return Err(StoreError::Other(format!(
-                    "global registry read failed: {e}"
-                )))
-            }
-        };
-        match value {
-            Some(v) => {
-                if let Some(blob) = rec.data.content.iter_mut().find(|b| b.content_type == content_type) {
-                    blob.content = v.to_string();
-                } else {
-                    rec.data.content.push(DefContentBlob {
-                        content_type: content_type.to_string(),
-                        content: v.to_string(),
-                    });
+        // Read, changed and rewritten under the record's lock (see above).
+        reg.with_record_locked(agent_id, |locked| {
+            let Some(mut rec) = locked.get()? else { return Ok(None) };
+            match value {
+                Some(v) => {
+                    if let Some(blob) = rec.data.content.iter_mut().find(|b| b.content_type == content_type) {
+                        blob.content = v.to_string();
+                    } else {
+                        rec.data.content.push(DefContentBlob {
+                            content_type: content_type.to_string(),
+                            content: v.to_string(),
+                        });
+                    }
+                }
+                None => {
+                    rec.data.content.retain(|b| b.content_type != content_type);
                 }
             }
-            None => {
-                rec.data.content.retain(|b| b.content_type != content_type);
-            }
-        }
-        reg.upsert(&rec)
-            .map_err(|e| StoreError::Other(format!("global registry write failed: {e}")))?;
+            locked.upsert(&rec).map(Some)
+        })
+        .map_err(|e| StoreError::Other(format!("global registry update failed: {e}")))?
+        .ok_or_else(|| StoreError::Other(format!("agent {agent_id} not in global registry")))?;
         Ok(())
     }
 }

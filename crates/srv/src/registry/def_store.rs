@@ -17,7 +17,7 @@
 //! registry; a later cleanup can extract a generic file-store both use.
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::time::Duration;
 
 use serde_json::Value;
 use thiserror::Error;
@@ -34,11 +34,14 @@ pub enum DefStoreError {
     Json(#[from] serde_json::Error),
     #[error("validation: {0}")]
     Validation(#[from] DefValidationError),
+    #[error("definition {id} is being written by another process (waited {waited_ms} ms); try again")]
+    Locked { id: String, waited_ms: u64 },
 }
 
 pub struct DefinitionStore {
     root: PathBuf,
-    write_lock: Mutex<()>,
+    /// How long a writer waits for a record's lock ([`Self::with_record_locked`]).
+    lock_timeout: Duration,
     /// Every record's slug, parsed once per change ([`Self::slug_index`]).
     slugs: SlugIndex,
 }
@@ -51,7 +54,7 @@ impl DefinitionStore {
         std::fs::create_dir_all(root.join("retired"))?;
         Ok(Self {
             root,
-            write_lock: Mutex::new(()),
+            lock_timeout: super::def_record_lock::LOCK_TIMEOUT,
             slugs: SlugIndex::default(),
         })
     }
@@ -68,13 +71,39 @@ impl DefinitionStore {
         self.root.join("retired").join(format!("{id}.json"))
     }
 
+    /// Run `f` with record `id` locked against every other writer, in this
+    /// process or another (`def_record_lock`): a read, merge and write inside
+    /// it can't interleave with another one. Every write below takes it;
+    /// a rename that has to read and rewrite the record takes it too. Waits
+    /// up to the store's lock timeout, then fails with
+    /// [`DefStoreError::Locked`] having written nothing.
+    pub fn with_record_locked<T>(
+        &self,
+        id: &str,
+        f: impl FnOnce(&LockedRecord<'_>) -> Result<T, DefStoreError>,
+    ) -> Result<T, DefStoreError> {
+        let lock = super::def_record_lock::lock_record(&self.root, id, self.lock_timeout)?;
+        let out = f(&LockedRecord { store: self, id: id.to_string() });
+        drop(lock);
+        out
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_lock_timeout(&mut self, timeout: Duration) {
+        self.lock_timeout = timeout;
+    }
+
     /// Insert or update a definition. Preserves unknown top-level + `data`
     /// fields on an existing file (forward-compat); refuses to overwrite a
     /// corrupt or higher-schema file. An existing record's slug and former
     /// slugs are kept ([`keep_slug_and_former_slugs`]): a rename is not an
-    /// update.
+    /// update. Holds the record's lock across the read, merge and write.
     pub fn upsert(&self, rec: &DefinitionRecord) -> Result<(), DefStoreError> {
-        let _g = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+        self.with_record_locked(&rec.data.id, |locked| locked.upsert(rec))
+    }
+
+    /// [`Self::upsert`]'s body; the caller holds the record's lock.
+    fn upsert_locked(&self, rec: &DefinitionRecord) -> Result<(), DefStoreError> {
         let path = self.active_path(&rec.data.id);
         let bytes = match std::fs::read(&path) {
             Ok(existing) => match merge_for_write(&existing, rec)? {
@@ -104,42 +133,43 @@ impl DefinitionStore {
     /// tombstone prevents another channel's migration from resurrecting an
     /// agent the user deliberately deleted.
     pub fn retire(&self, id: &str) -> Result<(), DefStoreError> {
-        let _g = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
-        let from = self.active_path(id);
-        if !from.exists() {
-            return Ok(());
-        }
-        rename_atomic(&from, &self.retired_path(id))?;
-        self.slugs.invalidate(id);
-        Ok(())
+        self.with_record_locked(id, |_| {
+            let from = self.active_path(id);
+            if from.exists() {
+                rename_atomic(&from, &self.retired_path(id))?;
+                self.slugs.invalidate(id);
+            }
+            Ok(())
+        })
     }
 
     /// Move a record back from `retired/` to active. Idempotent.
     pub fn unretire(&self, id: &str) -> Result<(), DefStoreError> {
-        let _g = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
-        let from = self.retired_path(id);
-        if !from.exists() {
-            return Ok(());
-        }
-        rename_atomic(&from, &self.active_path(id))?;
-        self.slugs.invalidate(id);
-        Ok(())
+        self.with_record_locked(id, |_| {
+            let from = self.retired_path(id);
+            if from.exists() {
+                rename_atomic(&from, &self.active_path(id))?;
+                self.slugs.invalidate(id);
+            }
+            Ok(())
+        })
     }
 
     /// Hard-delete (drops both active and retired files). Mirrors SQLite
     /// `agent_def_delete`. Use [`Self::retire`] when a resurrection-proof
     /// tombstone is wanted instead.
     pub fn hard_delete(&self, id: &str) -> Result<(), DefStoreError> {
-        let _g = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
-        for p in [self.active_path(id), self.retired_path(id)] {
-            match std::fs::remove_file(&p) {
-                Ok(()) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => return Err(e.into()),
+        self.with_record_locked(id, |_| {
+            for p in [self.active_path(id), self.retired_path(id)] {
+                match std::fs::remove_file(&p) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(e.into()),
+                }
             }
-        }
-        self.slugs.invalidate(id);
-        Ok(())
+            self.slugs.invalidate(id);
+            Ok(())
+        })
     }
 
     pub fn exists(&self, id: &str) -> bool {
@@ -202,10 +232,54 @@ impl DefinitionStore {
         Ok(self.slugs.all(&self.root)?)
     }
 
+    /// One active record's slug and former slugs, read from its file now,
+    /// for a caller that must not act on a guess (deleting the agent). `None`
+    /// only when there is no active file. A file that can't be read or parsed,
+    /// names another id, or has a schema this build doesn't know is an error.
+    /// Unlike [`Self::get`], a record missing its name or provider still
+    /// answers: those don't bear on its slugs.
+    pub fn slug_of_strict(&self, id: &str) -> Result<Option<SlugEntry>, DefStoreError> {
+        let bytes = match std::fs::read(self.active_path(id)) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e.into()),
+        };
+        let rec: DefinitionRecord = serde_json::from_slice(&bytes)?;
+        match validate(id, &rec) {
+            Ok(()) | Err(DefValidationError::MissingField("name" | "provider")) => {}
+            Err(e) => return Err(e.into()),
+        }
+        Ok(Some(SlugEntry {
+            slug: rec.data.slug,
+            former: rec.data.former_slugs.into_iter().map(|f| f.slug).collect(),
+        }))
+    }
+
     /// One active record's slug and former slugs, from the same cache;
     /// stats only that record's file.
     pub fn slug_of(&self, id: &str) -> Result<Option<SlugEntry>, DefStoreError> {
         Ok(self.slugs.one(&self.root, id)?)
+    }
+}
+
+/// One definition record, locked by [`DefinitionStore::with_record_locked`].
+pub struct LockedRecord<'a> {
+    store: &'a DefinitionStore,
+    id: String,
+}
+
+impl LockedRecord<'_> {
+    /// The active record, as [`DefinitionStore::get`] reads it.
+    pub fn get(&self) -> Result<Option<DefinitionRecord>, DefStoreError> {
+        self.store.get(&self.id)
+    }
+
+    /// [`DefinitionStore::upsert`] of this record, under the lock already held.
+    pub fn upsert(&self, rec: &DefinitionRecord) -> Result<(), DefStoreError> {
+        if rec.data.id != self.id {
+            return Err(DefValidationError::IdMismatch { filename: self.id.clone(), id: rec.data.id.clone() }.into());
+        }
+        self.store.upsert_locked(rec)
     }
 }
 
@@ -561,6 +635,79 @@ mod tests {
         std::fs::write(&path, serde_json::to_vec(&with_slug("ddd", "d-two")).unwrap()).unwrap();
         std::fs::File::options().write(true).open(&path).unwrap().set_modified(stamp).unwrap();
         assert_eq!(s.slug_of("ddd").unwrap().unwrap().slug, "d-two");
+    }
+
+    /// P0.2 across stores: two `DefinitionStore`s on one directory, as two
+    /// channels have. While one holds the record's lock for a rename (the
+    /// slug and a former slug written directly, as Phase 2's will be), the
+    /// other's update waits, then merges onto the renamed record: the slug is
+    /// not reverted and the former slug is not dropped.
+    #[test]
+    fn an_update_from_another_store_waits_for_the_record_lock() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("definitions");
+        let a = std::sync::Arc::new(DefinitionStore::open(root.clone()).unwrap());
+        let b = DefinitionStore::open(root).unwrap();
+        a.upsert(&with_slug("aaa", "loap-loap-2")).unwrap();
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let holder = {
+            let a = a.clone();
+            std::thread::spawn(move || {
+                a.with_record_locked("aaa", |locked| {
+                    let mut rec = locked.get()?.unwrap();
+                    tx.send(()).unwrap();
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                    rec.data.slug = "loap-2".to_string();
+                    rec.data.former_slugs = vec![former("loap-loap-2", 1)];
+                    Ok(std::fs::write(a.root().join("aaa.json"), serde_json::to_vec_pretty(&rec)?)?)
+                })
+            })
+        };
+        rx.recv().unwrap();
+        let started = std::time::Instant::now();
+        let mut stale = with_slug("aaa", "loap-loap-2");
+        stale.data.name = "Edited".to_string();
+        b.upsert(&stale).unwrap();
+        assert!(started.elapsed() >= std::time::Duration::from_millis(200), "the update waited for the lock");
+        holder.join().unwrap().unwrap();
+
+        let got = b.get("aaa").unwrap().unwrap();
+        assert_eq!(got.data.name, "Edited");
+        assert_eq!(got.data.slug, "loap-2");
+        assert_eq!(got.data.former_slugs, vec![former("loap-loap-2", 1)]);
+    }
+
+    /// A writer that can't get the lock in time fails with `Locked` and
+    /// writes nothing.
+    #[test]
+    fn a_lock_timeout_fails_and_writes_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("definitions");
+        let a = std::sync::Arc::new(DefinitionStore::open(root.clone()).unwrap());
+        let mut b = DefinitionStore::open(root).unwrap();
+        b.set_lock_timeout(std::time::Duration::from_millis(100));
+        a.upsert(&with_slug("aaa", "aaa")).unwrap();
+        let before = std::fs::read(a.root().join("aaa.json")).unwrap();
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let holder = {
+            let a = a.clone();
+            std::thread::spawn(move || {
+                a.with_record_locked("aaa", |_| {
+                    tx.send(()).unwrap();
+                    std::thread::sleep(std::time::Duration::from_millis(600));
+                    Ok(())
+                })
+            })
+        };
+        rx.recv().unwrap();
+        let mut edit = with_slug("aaa", "aaa");
+        edit.data.name = "Changed".to_string();
+        assert!(matches!(b.upsert(&edit), Err(DefStoreError::Locked { .. })));
+        assert!(matches!(b.retire("aaa"), Err(DefStoreError::Locked { .. })));
+        assert_eq!(std::fs::read(a.root().join("aaa.json")).unwrap(), before, "nothing written");
+        holder.join().unwrap().unwrap();
     }
 
     #[test]

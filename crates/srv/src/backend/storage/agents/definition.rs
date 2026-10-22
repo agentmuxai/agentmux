@@ -907,7 +907,8 @@ impl Store {
         // row. The JSON registry mirror for the deleted row is covered by
         // `registry_def_retire` below.
         // Its shared slug and former slugs, read before the record is retired.
-        let shared = self.shared_slugs();
+        // A record that exists but can't be read refuses the delete.
+        let shared = self.shared_slugs_for_delete(id)?;
         let (rows, scope) = {
             let conn = self.conn.lock().unwrap();
             // Read BEFORE the DELETE — afterwards there is no row to ask.
