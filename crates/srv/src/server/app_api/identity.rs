@@ -476,6 +476,24 @@ pub(crate) async fn identity_account_validate_stored_impl<'o>(
     let (acct, _account_store) = crate::identity::resolver::resolve_account(&state.id_store, &state.identity_store, account_id)
         .map_err(|e| format!("identity.account.validate: {e}"))?
         .ok_or_else(|| format!("identity.account.validate: account {account_id} not found"))?;
+    // An OAuth account is validated by its access token, refreshed first when
+    // it is near expiry; a grant the provider dropped answers "Reconnect
+    // needed" (and marks the account) rather than probing a dead token.
+    if acct.kind == "oauth" && matches!(acct.secret_ref, crate::backend::storage::identities::SecretRef::Keychain { .. }) {
+        use crate::identity::oauth_tokens::{access_token_for, KeychainSecrets, LiveHttp};
+        let token = match access_token_for(&LiveHttp, &KeychainSecrets, &state.id_store, &state.identity_store, &acct).await {
+            Ok(t) => t,
+            Err(e) => return Ok(IdentityAccountValidateResult {
+                valid: false,
+                status: "invalid".to_string(),
+                masked_tail: String::new(),
+                error: Some(e),
+            }),
+        };
+        let tail = crate::identity::key_validator::masked_tail(&token);
+        let outcome = crate::identity::key_validator::validate(&acct.provider, &token).await;
+        return Ok(IdentityAccountValidateResult::of(outcome, tail));
+    }
     let aid = account_id.to_string();
     let plaintext = tokio::task::spawn_blocking(move || crate::identity::secret_store::get(&aid))
         .await.map_err(|e| format!("identity.account.validate: keychain task: {e}"))?

@@ -366,6 +366,16 @@ impl Store {
         Ok(n > 0)
     }
 
+    /// Set one account's `status`, and nothing else: no row is created, and
+    /// a context or `secret_ref` written meanwhile stands. For an OAuth
+    /// refresh that finds the grant gone (`needs_reauth`) or working again.
+    /// Returns whether a row was updated.
+    pub fn identity_set_status(&self, id: &str, status: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let n = conn.execute("UPDATE db_accounts SET status = ?2 WHERE id = ?1", params![id, status])?;
+        Ok(n > 0)
+    }
+
     pub fn identity_upsert(&self, account: &IdentityAccount) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         let secret_ref_json = serde_json::to_string(&account.secret_ref)?;
@@ -860,6 +870,22 @@ mod tests {
              );",
         )
         .unwrap();
+    }
+
+    #[test]
+    fn identity_set_status_changes_only_the_status_of_an_existing_row() {
+        let store = Store::open_in_memory().unwrap();
+        let mut account = sample_account("acc-s", "google");
+        account.context = serde_json::json!({ "email": "me@example.com" });
+        store.identity_upsert(&account).unwrap();
+        assert!(store.identity_set_status("acc-s", "needs_reauth").unwrap());
+        let got = store.identity_get("acc-s").unwrap().unwrap();
+        assert_eq!(got.status, "needs_reauth");
+        assert_eq!(got.context, account.context);
+        assert_eq!(got.name, account.name);
+        // No row is created for an account that isn't there.
+        assert!(!store.identity_set_status("acc-gone", "valid").unwrap());
+        assert!(store.identity_get("acc-gone").unwrap().is_none());
     }
 
     #[test]

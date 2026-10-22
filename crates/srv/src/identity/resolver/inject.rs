@@ -2350,12 +2350,12 @@ mod tests {
         };
         store.agent_def_insert(&mut def).unwrap();
 
-        // GitHub account (PlaintextDev for test simplicity).
+        // GitHub account connected with OAuth: its secret is the token blob.
         let github = make_account(
             "acct-gh",
             "github",
             SecretRef::PlaintextDev {
-                plaintext_dev: "ghp_round_trip".to_string(),
+                plaintext_dev: r#"{"access_token":"gho_round_trip","refresh_token":null,"expires_at":0}"#.to_string(),
             },
         );
         store.identity_upsert(&github).unwrap();
@@ -2384,9 +2384,9 @@ mod tests {
         let mut env: HashMap<String, String> = HashMap::new();
         inject_identity_env(store.clone(), store.clone(), store, "block-1", &mut env).unwrap();
 
-        // GitHub writes both standard env-var names from one secret.
-        assert_eq!(env.get("GITHUB_TOKEN").map(String::as_str), Some("ghp_round_trip"));
-        assert_eq!(env.get("GH_TOKEN").map(String::as_str), Some("ghp_round_trip"));
+        // Both standard env-var names, with the access token, not the blob.
+        assert_eq!(env.get("GITHUB_TOKEN").map(String::as_str), Some("gho_round_trip"));
+        assert_eq!(env.get("GH_TOKEN").map(String::as_str), Some("gho_round_trip"));
         // Anthropic writes its single env var.
         assert_eq!(
             env.get("ANTHROPIC_API_KEY").map(String::as_str),

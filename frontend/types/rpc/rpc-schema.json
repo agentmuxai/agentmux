@@ -38,6 +38,44 @@
     }
   },
   {
+    "command": "account.oauth.client.clear",
+    "request": "agentmux_srv::server::agent_handlers::identity::OAuthClientReq",
+    "requestName": "OAuthClientReq",
+    "requestTs": {
+      "imports": [
+        "OAuthClientReq"
+      ],
+      "name": "OAuthClientReq"
+    },
+    "response": "agentmux_srv::server::agent_handlers::identity::AccountOAuthClientClearResult",
+    "responseName": "AccountOAuthClientClearResult",
+    "responseTs": {
+      "imports": [
+        "AccountOAuthClientClearResult"
+      ],
+      "name": "AccountOAuthClientClearResult"
+    }
+  },
+  {
+    "command": "account.oauth.client.get",
+    "request": "agentmux_srv::server::agent_handlers::identity::OAuthClientReq",
+    "requestName": "OAuthClientReq",
+    "requestTs": {
+      "imports": [
+        "OAuthClientReq"
+      ],
+      "name": "OAuthClientReq"
+    },
+    "response": "agentmux_srv::server::agent_handlers::identity::AccountOAuthClientInfo",
+    "responseName": "AccountOAuthClientInfo",
+    "responseTs": {
+      "imports": [
+        "AccountOAuthClientInfo"
+      ],
+      "name": "AccountOAuthClientInfo"
+    }
+  },
+  {
     "command": "account.oauth.poll",
     "request": "agentmux_srv::server::agent_handlers::identity::OAuthSessionReq",
     "requestName": "OAuthSessionReq",

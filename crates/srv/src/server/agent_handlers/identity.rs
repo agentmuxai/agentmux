@@ -12,6 +12,7 @@ use crate::backend::rpc_types::{
     COMMAND_UPSERT_IDENTITY_ACCOUNT, COMMAND_DELETE_IDENTITY_ACCOUNT,
     COMMAND_ACCOUNT_KEY_VERIFY,
     COMMAND_ACCOUNT_OAUTH_START, COMMAND_ACCOUNT_OAUTH_POLL, COMMAND_ACCOUNT_OAUTH_CANCEL,
+    COMMAND_ACCOUNT_OAUTH_CLIENT_GET, COMMAND_ACCOUNT_OAUTH_CLIENT_CLEAR,
     COMMAND_LINK_AGENT_IDENTITY, COMMAND_UNLINK_AGENT_IDENTITY,
     COMMAND_LIST_AGENT_IDENTITIES, COMMAND_LIST_ALL_AGENT_IDENTITIES,
     COMMAND_LIST_NAMED_AGENTS, COMMAND_HIDE_NAMED_AGENT,
@@ -92,16 +93,33 @@ struct VerifyKeyReq {
 }
 
 /// Request for `account.oauth.start`. `clientId`/`clientSecret` are BYO OAuth
-/// app credentials (optional; required for secret-mandatory providers).
+/// app credentials (optional; required for secret-mandatory providers). Never
+/// log this struct: `clientSecret` is a secret.
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct OAuthStartReq {
     provider: String,
+    /// The new account's label; ignored when `accountId` is set.
+    #[serde(default)]
     name: String,
     #[serde(default)]
     client_id: Option<String>,
     #[serde(default)]
     client_secret: Option<String>,
+    /// `"byo"` (default) or `"workspace"`: what kind of client `clientId` is.
+    #[serde(default)]
+    client_mode: Option<String>,
+    /// Save `clientId`/`clientSecret` in the keychain for later connects to
+    /// this provider once the flow succeeds (default true).
+    #[serde(default)]
+    save_client: Option<bool>,
+    /// Scopes beyond the provider's base ones (a service being turned on).
+    #[serde(default)]
+    scopes: Vec<String>,
+    /// Authorize this existing account again (turn a service on, or
+    /// reconnect) instead of creating a new one.
+    #[serde(default)]
+    account_id: Option<String>,
 }
 
 #[derive(serde::Deserialize, serde::Serialize, ts_rs::TS)]
@@ -109,6 +127,55 @@ struct OAuthStartReq {
 #[serde(rename_all = "camelCase")]
 pub struct OAuthSessionReq {
     pub session_id: String,
+}
+
+/// Request for `account.oauth.client.get` / `account.oauth.client.clear`.
+#[derive(serde::Deserialize, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "camelCase")]
+pub struct OAuthClientReq {
+    pub provider: String,
+}
+
+/// What `account.oauth.client.get` answers: whether the user's own client is
+/// saved for the provider, never its secret.
+#[derive(serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "camelCase")]
+pub struct AccountOAuthClientInfo {
+    saved: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    client_id: Option<String>,
+    has_secret: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "\"byo\" | \"workspace\"")]
+    mode: Option<String>,
+    /// Whether AgentMux ships its own client for the provider (the one-click
+    /// path); false means a connect needs the user's own client.
+    builtin_available: bool,
+}
+
+/// What `account.oauth.client.clear` answers: whether a client was saved.
+#[derive(serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "camelCase")]
+pub struct AccountOAuthClientClearResult {
+    cleared: bool,
+}
+
+/// The `OAuthStartReq` fields that become `oauth_client::StartOptions`,
+/// minus the reads (saved client, existing account) the handler does.
+fn byo_from_req(req: &OAuthStartReq) -> Result<Option<crate::identity::oauth_client::ByoCredentials>, String> {
+    let Some(client_id) = req.client_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(None);
+    };
+    let mode = crate::identity::oauth_tokens::ClientMode::parse_user(req.client_mode.as_deref())?;
+    Ok(Some(crate::identity::oauth_client::ByoCredentials {
+        client_id: client_id.to_string(),
+        client_secret: req.client_secret.clone().filter(|s| !s.is_empty()),
+        mode,
+    }))
 }
 
 /// Serialize an OAuthStatus to the frontend wire shape.
@@ -124,11 +191,21 @@ fn oauth_status_wire(s: &crate::identity::oauth_client::OAuthStatus) -> serde_js
             "userCode": user_code,
             "verificationUri": verification_uri,
         }),
-        OAuthStatus::Success { account_id } => {
-            serde_json::json!({ "status": "success", "accountId": account_id })
-        }
+        OAuthStatus::Success { account_id, granted_scopes, missing_scopes, email } => serde_json::json!({
+            "status": "success",
+            "accountId": account_id,
+            "grantedScopes": granted_scopes,
+            "missingScopes": missing_scopes,
+            "email": email,
+        }),
         OAuthStatus::Failed { error } => serde_json::json!({ "status": "failed", "error": error }),
     }
+}
+
+/// Whether a delete stops, keeping the account, because revoking its grant
+/// failed and the caller asked for the revoke to succeed first.
+fn revoke_keeps_account(revoke_report: &serde_json::Value, require_revoke: bool) -> bool {
+    require_revoke && revoke_report.get("outcome").and_then(|v| v.as_str()) == Some("failed")
 }
 
 /// Shallow-merge the keys of `overlay` (if both are JSON objects) into `base`.
@@ -151,6 +228,13 @@ pub struct DeleteIdentityAccountResult {
     /// What removing the saved login did; null when there was no account row.
     #[ts(type = "{ outcome: \"removed\" | \"absent\" | \"skipped\" | \"failed\" | \"none\"; path?: string; detail?: string; historyKept?: boolean; historyPath?: string } | null")]
     cleanup: serde_json::Value,
+    /// Revoking an OAuth account's grant at the provider (Google) before the
+    /// delete; null when there was nothing to revoke. `failed` means the grant
+    /// may live on at the provider. With `require_revoke` the account was then
+    /// kept (`deleted: false`) so the delete can be retried; without it the
+    /// account is gone and the grant is left to the provider's account page.
+    #[ts(type = "{ outcome: \"revoked\" | \"failed\"; detail?: string } | null")]
+    revoke: serde_json::Value,
 }
 
 /// What `account.key.verify` answers: `{ valid: false, error }` when validation
@@ -440,9 +524,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }
     });
 
-    // ── Service OAuth (scaffold) ──
+    // ── Service OAuth ──
     // start: resolve config + client (gates on "not configured"), spawn the
     // flow, return session id + initial status. poll/cancel drive the rest.
+    // With `accountId` it authorizes that account again (more scopes, or a
+    // reconnect) instead of creating one. Spec G0 of
+    // docs/specs/SPEC_GOOGLE_CONNECTORS_GMAIL_CALENDAR_DRIVE_2026_10_14.md.
     let oauth_mstore = state.id_store.clone();
     let oauth_identity_store = state.identity_store.clone();
     // `Value` request, parsed into OAuthStartReq below; the stub keeps its type.
@@ -450,15 +537,51 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         let mstore = oauth_mstore.clone();
         let identity_store = oauth_identity_store.clone();
         async move {
+                use crate::identity::oauth_client::{FlowTarget, StartOptions};
+                // NB: `req.client_secret` is a secret — never log `req`.
                 let req: OAuthStartReq = serde_json::from_value(data)
                     .map_err(|e| format!("account.oauth.start: {e}"))?;
-                let byo = req.client_id.map(|cid| {
-                    crate::identity::oauth_client::ByoCredentials {
-                        client_id: cid,
-                        client_secret: req.client_secret,
+                let failed = |e: String| -> Result<AccountOAuthStartResult, String> {
+                    Ok(AccountOAuthStartResult { session_id: None, status: None, error: Some(e) })
+                };
+                let byo = match byo_from_req(&req) {
+                    Ok(b) => b,
+                    Err(e) => return failed(e),
+                };
+                let target = match req.account_id.as_deref().filter(|s| !s.is_empty()) {
+                    None => FlowTarget::New { name: req.name.clone() },
+                    Some(id) => match mstore.identity_get(id) {
+                        Ok(Some(acct)) => FlowTarget::Existing(acct),
+                        Ok(None) => return failed(format!("account {id} not found")),
+                        Err(e) => return failed(format!("account {id} could not be read: {e}")),
+                    },
+                };
+                // The user's saved client, when none came with the request. A
+                // keychain that can't be read means none: the panel asks again.
+                let saved = if byo.is_some() {
+                    None
+                } else {
+                    let provider = req.provider.clone();
+                    let loaded = tokio::task::spawn_blocking(move || crate::identity::oauth_tokens::load_saved_client(&provider))
+                        .await
+                        .map_err(|e| format!("keychain task: {e}"))
+                        .and_then(|r| r);
+                    match loaded {
+                        Ok(saved) => saved,
+                        Err(e) => {
+                            tracing::warn!(target: "identity", provider = %req.provider, error = %e, "account.oauth.start: the saved OAuth client could not be read");
+                            None
+                        }
                     }
-                });
-                match crate::identity::oauth_client::start(&req.provider, req.name, byo, mstore, identity_store) {
+                };
+                let opts = StartOptions {
+                    target,
+                    byo,
+                    saved,
+                    extra_scopes: req.scopes.clone(),
+                    save_client: req.save_client.unwrap_or(true),
+                };
+                match crate::identity::oauth_client::start(&req.provider, opts, mstore, identity_store) {
                     Ok((session_id, status)) => Ok(AccountOAuthStartResult {
                         session_id: Some(session_id),
                         status: Some(oauth_status_wire(&status)),
@@ -466,9 +589,44 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }),
                     // "not configured" / unknown provider surface as a clean
                     // error field, not an RPC failure, so the UI can show it.
-                    Err(e) => Ok(AccountOAuthStartResult { session_id: None, status: None, error: Some(e) }),
+                    Err(e) => failed(e),
                 }
         }
+    });
+
+    // The user's own OAuth client saved for a provider (D8): whether there is
+    // one, and forgetting it. Accounts made with it keep refreshing: each
+    // keeps its own copy of what a refresh needs.
+    engine.register_typed(COMMAND_ACCOUNT_OAUTH_CLIENT_GET, move |req: OAuthClientReq, _ctx| async move {
+        let builtin_available = crate::identity::oauth_client::config_for(&req.provider)
+            .ok_or_else(|| format!("account.oauth.client.get: unknown OAuth provider: {}", req.provider))?
+            .client_id
+            .is_some();
+        let provider = req.provider.clone();
+        let saved = tokio::task::spawn_blocking(move || crate::identity::oauth_tokens::load_saved_client(&provider))
+            .await
+            .map_err(|e| format!("account.oauth.client.get: keychain task: {e}"))?
+            .map_err(|e| format!("account.oauth.client.get: {e}"))?;
+        Ok(AccountOAuthClientInfo {
+            saved: saved.is_some(),
+            client_id: saved.as_ref().map(|c| c.client_id.clone()),
+            has_secret: saved.as_ref().is_some_and(|c| c.client_secret.is_some()),
+            mode: saved.as_ref().map(|c| c.mode.as_str().to_string()),
+            builtin_available,
+        })
+    });
+
+    engine.register_typed(COMMAND_ACCOUNT_OAUTH_CLIENT_CLEAR, move |req: OAuthClientReq, _ctx| async move {
+        if crate::identity::oauth_client::config_for(&req.provider).is_none() {
+            return Err(format!("account.oauth.client.clear: unknown OAuth provider: {}", req.provider));
+        }
+        let provider = req.provider.clone();
+        let cleared = tokio::task::spawn_blocking(move || crate::identity::oauth_tokens::clear_saved_client(&provider))
+            .await
+            .map_err(|e| format!("account.oauth.client.clear: keychain task: {e}"))?
+            .map_err(|e| format!("account.oauth.client.clear: {e}"))?;
+        tracing::info!(target: "identity", provider = %req.provider, cleared, "account.oauth.client.clear: saved OAuth client forgotten");
+        Ok(AccountOAuthClientClearResult { cleared })
     });
 
     // The response stays `Value`: oauth_status_wire builds it, and the frontend
@@ -511,6 +669,24 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // side log lines can carry it.
                 let acct = mstore.identity_get(&cmd.id).ok().flatten();
                 let provider = acct.as_ref().map(|a| a.provider.clone()).unwrap_or_default();
+                // An OAuth grant is revoked at the provider first, while the
+                // token is still in the keychain; otherwise it would live on
+                // there (spec §7 "Disconnect"). Null when there's none.
+                let mut revoke_report = serde_json::Value::Null;
+                if let Some(acct) = acct.as_ref() {
+                    use crate::identity::oauth_tokens::{revoke_before_delete, KeychainSecrets, LiveHttp};
+                    if let Some(report) = revoke_before_delete(&LiveHttp, &KeychainSecrets, acct).await {
+                        revoke_report = report;
+                    }
+                }
+                if revoke_keeps_account(&revoke_report, cmd.require_revoke) {
+                    return Ok(DeleteIdentityAccountResult {
+                        deleted: false,
+                        affected_agents: Vec::new(),
+                        cleanup: serde_json::Value::Null,
+                        revoke: revoke_report,
+                    });
+                }
                 // What the cleanup did, returned to Connectors so a login that
                 // couldn't be removed is reported, not hidden
                 // (SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04.md H3).
@@ -623,6 +799,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     affected_agents,
                     // Null when there was no account row to clean up after.
                     cleanup: cleanup_report,
+                    revoke: revoke_report,
                 })
         }
     });
@@ -1004,6 +1181,99 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             }
         },
     );
+}
+
+#[cfg(test)]
+mod oauth_rpc_tests {
+    use super::*;
+    use crate::identity::oauth_client::OAuthStatus;
+    use crate::identity::oauth_tokens::ClientMode;
+
+    #[test]
+    fn a_start_request_without_the_new_fields_still_parses() {
+        let old: OAuthStartReq =
+            serde_json::from_value(json!({ "provider": "google", "name": "Work", "clientId": "cid" })).unwrap();
+        assert!(old.scopes.is_empty() && old.account_id.is_none() && old.save_client.is_none());
+        let byo = byo_from_req(&old).unwrap().unwrap();
+        assert_eq!((byo.client_id.as_str(), byo.mode, byo.client_secret), ("cid", ClientMode::Byo, None));
+    }
+
+    #[test]
+    fn a_start_request_can_turn_a_service_on_for_an_existing_account() {
+        let req: OAuthStartReq = serde_json::from_value(json!({
+            "provider": "google",
+            "accountId": "acc-1",
+            "scopes": ["https://www.googleapis.com/auth/calendar.events.readonly"],
+            "clientId": " cid ", "clientSecret": "", "clientMode": "workspace", "saveClient": false,
+        }))
+        .unwrap();
+        assert_eq!(req.account_id.as_deref(), Some("acc-1"));
+        assert_eq!(req.scopes.len(), 1);
+        assert_eq!(req.save_client, Some(false));
+        let byo = byo_from_req(&req).unwrap().unwrap();
+        assert_eq!((byo.client_id.as_str(), byo.mode, byo.client_secret), ("cid", ClientMode::Workspace, None));
+        // A blank client id means "none passed"; an unknown mode is refused.
+        let blank: OAuthStartReq = serde_json::from_value(json!({ "provider": "google", "clientId": "  " })).unwrap();
+        assert!(byo_from_req(&blank).unwrap().is_none());
+        let bad: OAuthStartReq =
+            serde_json::from_value(json!({ "provider": "google", "clientId": "c", "clientMode": "builtin" })).unwrap();
+        assert!(byo_from_req(&bad).is_err());
+    }
+
+    #[test]
+    fn success_reports_the_granted_and_missing_scopes_and_email() {
+        let wire = oauth_status_wire(&OAuthStatus::Success {
+            account_id: "acc-1".into(),
+            granted_scopes: vec!["openid".into()],
+            missing_scopes: vec!["https://www.googleapis.com/auth/calendar.events".into()],
+            email: Some("me@example.com".into()),
+        });
+        assert_eq!(
+            wire,
+            json!({
+                "status": "success", "accountId": "acc-1", "grantedScopes": ["openid"],
+                "missingScopes": ["https://www.googleapis.com/auth/calendar.events"], "email": "me@example.com",
+            })
+        );
+    }
+
+    #[test]
+    fn only_a_failed_revoke_with_require_revoke_keeps_the_account() {
+        let failed = json!({ "outcome": "failed", "detail": "offline" });
+        assert!(revoke_keeps_account(&failed, true));
+        assert!(!revoke_keeps_account(&failed, false), "by default the account is deleted anyway");
+        assert!(!revoke_keeps_account(&json!({ "outcome": "revoked" }), true));
+        assert!(!revoke_keeps_account(&serde_json::Value::Null, true));
+        // The old request shape still parses, and doesn't require the revoke.
+        let old: CommandDeleteIdentityAccountData = serde_json::from_value(json!({ "id": "acc-1" })).unwrap();
+        assert!(!old.require_revoke);
+    }
+
+    #[test]
+    fn the_delete_result_carries_the_revoke_outcome() {
+        let r = DeleteIdentityAccountResult {
+            deleted: true,
+            affected_agents: vec![],
+            cleanup: json!({ "outcome": "removed" }),
+            revoke: json!({ "outcome": "revoked" }),
+        };
+        let v = serde_json::to_value(r).unwrap();
+        assert_eq!(v["revoke"]["outcome"], "revoked");
+        assert_eq!(v["cleanup"]["outcome"], "removed");
+    }
+
+    #[tokio::test]
+    async fn the_saved_client_commands_are_registered_typed() {
+        let state = crate::server::tests::test_state();
+        let (engine, _rx) = crate::backend::rpc::engine::WshRpcEngine::new();
+        register(&engine, &state);
+        let schema = engine.schema_json();
+        let rows = schema.as_array().unwrap();
+        let row = |c: &str| rows.iter().find(|r| r["command"] == c).unwrap_or_else(|| panic!("{c} missing")).clone();
+        assert_eq!(row(COMMAND_ACCOUNT_OAUTH_CLIENT_GET)["responseName"], "AccountOAuthClientInfo");
+        assert_eq!(row(COMMAND_ACCOUNT_OAUTH_CLIENT_CLEAR)["responseName"], "AccountOAuthClientClearResult");
+        assert_eq!(row(COMMAND_ACCOUNT_OAUTH_CLIENT_CLEAR)["requestName"], "OAuthClientReq");
+    }
 }
 
 #[cfg(test)]

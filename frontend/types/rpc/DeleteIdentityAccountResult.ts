@@ -11,4 +11,12 @@ affectedAgents: Array<string>,
 /**
  * What removing the saved login did; null when there was no account row.
  */
-cleanup: { outcome: "removed" | "absent" | "skipped" | "failed" | "none"; path?: string; detail?: string; historyKept?: boolean; historyPath?: string } | null, };
+cleanup: { outcome: "removed" | "absent" | "skipped" | "failed" | "none"; path?: string; detail?: string; historyKept?: boolean; historyPath?: string } | null, 
+/**
+ * Revoking an OAuth account's grant at the provider (Google) before the
+ * delete; null when there was nothing to revoke. `failed` means the grant
+ * may live on at the provider. With `require_revoke` the account was then
+ * kept (`deleted: false`) so the delete can be retried; without it the
+ * account is gone and the grant is left to the provider's account page.
+ */
+revoke: { outcome: "revoked" | "failed"; detail?: string } | null, };

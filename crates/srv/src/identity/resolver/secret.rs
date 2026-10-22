@@ -25,7 +25,15 @@ use super::errors::ResolverError;
 ///   the production path.
 /// - **SecretsManager**: deferred. Returns
 ///   [`ResolverError::SecretsManagerUnsupported`].
+///
+/// The value is the credential to use: an account connected with OAuth
+/// stores a JSON token blob, of which only its `access_token` is the
+/// credential (`oauth_tokens::bearer_value`). A plain key is unchanged.
 pub fn resolve_secret(secret_ref: &SecretRef) -> Result<String, ResolverError> {
+    resolve_stored(secret_ref).map(crate::identity::oauth_tokens::bearer_value)
+}
+
+fn resolve_stored(secret_ref: &SecretRef) -> Result<String, ResolverError> {
     match secret_ref {
         SecretRef::Env { env_var } => std::env::var(env_var)
             .map_err(|_| ResolverError::EnvVarMissing(env_var.clone())),
@@ -82,6 +90,28 @@ mod tests {
         })
         .unwrap();
         assert_eq!(s, "ghp_test123");
+    }
+
+    /// An OAuth-connected GitHub account stores a JSON blob; the agent's
+    /// `GH_TOKEN` is its access token, not the blob (spec §2.3's bug).
+    #[cfg(debug_assertions)]
+    #[test]
+    fn resolve_an_oauth_token_blob_to_its_access_token() {
+        let s = resolve_secret(&SecretRef::PlaintextDev {
+            plaintext_dev: r#"{"access_token":"gho_oauth","refresh_token":null,"expires_at":0}"#.to_string(),
+        })
+        .unwrap();
+        assert_eq!(s, "gho_oauth");
+    }
+
+    #[test]
+    fn resolve_env_var_blob_and_plain_values() {
+        let var = "AGENTMUX_TEST_RESOLVE_SECRET_BLOB_Q7Z";
+        std::env::set_var(var, r#"{"access_token":"gho_env"}"#);
+        assert_eq!(resolve_secret(&SecretRef::Env { env_var: var.to_string() }).unwrap(), "gho_env");
+        std::env::set_var(var, "ghp_plain_env");
+        assert_eq!(resolve_secret(&SecretRef::Env { env_var: var.to_string() }).unwrap(), "ghp_plain_env");
+        std::env::remove_var(var);
     }
 
     #[test]
