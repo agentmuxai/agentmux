@@ -32,6 +32,7 @@ pub mod act;
 pub mod cdp;
 pub mod dates;
 pub mod frames;
+pub mod hibernation;
 pub mod page_state;
 pub mod resolver;
 pub mod routes;

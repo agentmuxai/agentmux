@@ -29,6 +29,15 @@ import { errorPageFailedUrl } from "./error-page-url";
 import { findTabHolding } from "@/app/util/reveal-block";
 import { getLayoutModelForStaticTab, getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import { closeBlockInStack, effectiveStack } from "@/layout/lib/layoutStack";
+import {
+    KEEPAWAKE_META_KEY,
+    LOADMS_META_KEY,
+    readSleep,
+    SLEEP_META_KEY,
+    WAKE_META_KEY,
+    type BrowserSleep,
+    type SleepReason,
+} from "./hibernation";
 
 /** Close `blockId` the way its × would: just its tab when the pane holds
  *  others, else the pane. Looks in the window tab on screen, then in the
@@ -221,6 +230,13 @@ export class BrowserViewModel {
     /** The jar this tab browses as (`browser:identity`), fixed when it was
      *  opened; undefined for Personal (SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md §5). */
     identityAtom: Accessor<string | undefined>;
+    /** The pane's sleep record while it is asleep or waking (`browser:sleep`;
+     *  SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md §4). */
+    sleepAtom: Accessor<BrowserSleep | undefined>;
+    /** How long the page took to load the last time it did (`browser:loadms`), in ms. */
+    loadMsAtom: Accessor<number | undefined>;
+    /** The person asked to keep this pane awake (`browser:keepawake`). */
+    keepAwakeAtom: Accessor<boolean>;
 
     /** Late callers (IPC handlers landing post-dispose, defensive guards
      *  in goBack/Forward/reload) read this to no-op instead of firing
@@ -480,6 +496,12 @@ export class BrowserViewModel {
                 const v = this.meta()?.["browser:identity"];
                 return typeof v === "string" && v ? v : undefined;
             });
+            this.sleepAtom = createMemo(() => readSleep(this.meta()?.[SLEEP_META_KEY]));
+            this.loadMsAtom = createMemo(() => {
+                const v = this.meta()?.[LOADMS_META_KEY];
+                return typeof v === "number" && v > 0 ? v : undefined;
+            });
+            this.keepAwakeAtom = createMemo(() => this.meta()?.[KEEPAWAKE_META_KEY] === true);
             this.allowedOriginsAtom = createMemo(() => {
                 const v = this.meta()?.["browser:allowed_origins"];
                 return Array.isArray(v) ? v.filter((o) => typeof o === "string") : [];
@@ -1008,6 +1030,40 @@ export class BrowserViewModel {
      *  (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.5). */
     takeOver(): Promise<void> {
         return this.ctx.setMeta({ "browser:owner_agent": null });
+    }
+
+    /** Put the pane to sleep: record what it needs to come back; the view
+     *  then closes its page (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md §4). */
+    hibernate(reason: SleepReason): Promise<void> {
+        const sleep: BrowserSleep = {
+            since: Date.now(),
+            reason,
+            url: this.urlAtom() || ((this.meta()?.["url"] as string | undefined) ?? ""),
+            title: this._titleIsReal[0]() ? this.titleAtom() : "",
+            favicon: this.faviconUrlAtom(),
+            loadMs: this.loadMsAtom(),
+        };
+        this.diag(`hibernate reason=${reason} url=${JSON.stringify(sleep.url)}`);
+        return this.ctx.setMeta({ [SLEEP_META_KEY]: sleep });
+    }
+
+    /** The page has loaded again after a wake: the pane is awake. */
+    endSleep(loadMs: number | undefined): Promise<void> {
+        return this.ctx.setMeta({
+            [SLEEP_META_KEY]: null,
+            [WAKE_META_KEY]: null,
+            ...(loadMs != null && loadMs > 0 ? { [LOADMS_META_KEY]: Math.round(loadMs) } : {}),
+        });
+    }
+
+    /** How long the page took to load, for the next wake's estimate. */
+    recordLoadMs(loadMs: number): Promise<void> {
+        return this.ctx.setMeta({ [LOADMS_META_KEY]: Math.round(loadMs) });
+    }
+
+    /** The person asked to keep this pane awake. */
+    keepAwake(): Promise<void> {
+        return this.ctx.setMeta({ [KEEPAWAKE_META_KEY]: true });
     }
 
     dispose(): void {

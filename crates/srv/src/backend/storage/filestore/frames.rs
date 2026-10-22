@@ -145,9 +145,10 @@ pub(crate) fn decode_uncached(frame: &Frame) -> Result<Vec<u8>, StoreError> {
 
 /// The last frames decoded: a History page read touches one or two frames,
 /// and paging through a conversation touches each a few times. A hit needs
-/// the same hash and the same stored bytes, so a frame damaged after it was
-/// read is still found damaged.
-type Cached = (Vec<u8>, Vec<u8>, Arc<Vec<u8>>);
+/// the same codec, part count, length, hash and stored bytes, so a frame
+/// damaged after it was read, in any column the decode checks, is still found
+/// damaged (and its part count can't outgrow the cached bytes).
+type Cached = ((i64, i32, i64), Vec<u8>, Vec<u8>, Arc<Vec<u8>>);
 static CACHE: LazyLock<Mutex<Vec<Cached>>> = LazyLock::new(Default::default);
 const CACHE_FRAMES: usize = 12;
 
@@ -155,9 +156,10 @@ const CACHE_FRAMES: usize = 12;
 pub(crate) fn decode(frame: &Frame) -> Result<Arc<Vec<u8>>, StoreError> {
     {
         let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(i) = cache.iter().position(|(hash, data, _)| *hash == frame.check_hash && *data == frame.data) {
+        let shape = (frame.codec, frame.part_count, frame.raw_len);
+        if let Some(i) = cache.iter().position(|(s, hash, data, _)| *s == shape && *hash == frame.check_hash && *data == frame.data) {
             let hit = cache.remove(i);
-            let bytes = hit.2.clone();
+            let bytes = hit.3.clone();
             cache.push(hit);
             return Ok(bytes);
         }
@@ -167,7 +169,7 @@ pub(crate) fn decode(frame: &Frame) -> Result<Arc<Vec<u8>>, StoreError> {
     if cache.len() >= CACHE_FRAMES {
         cache.remove(0);
     }
-    cache.push((frame.check_hash.clone(), frame.data.clone(), bytes.clone()));
+    cache.push(((frame.codec, frame.part_count, frame.raw_len), frame.check_hash.clone(), frame.data.clone(), bytes.clone()));
     Ok(bytes)
 }
 

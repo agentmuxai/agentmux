@@ -66,6 +66,23 @@
         "term:shiftenternewline": {
           "type": "boolean"
         },
+        "browser:hibernate": {
+          "type": "boolean",
+          "default": true,
+          "description": "A browser pane out of sight for a while hibernates: its page closes to free its memory (often 100 to 200 MB) and loads again when you're about to look at it, with a note while it restores. Never a pane an agent is using, one playing or capturing media, one with something typed into it, or a local dev server. Off: browser panes keep running while hidden."
+        },
+        "browser:hibernateafter": {
+          "type": "number",
+          "default": 30,
+          "minimum": 1,
+          "description": "Minutes a browser pane is hidden before it hibernates. Sooner when the computer is low on memory: 5 minutes, then 1."
+        },
+        "browser:keepawakesites": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Sites whose browser panes never hibernate, by host (example.com) or origin (https://example.com)."
+        },
         "browser:searchsuggestions": {
           "type": "boolean",
           "default": true,

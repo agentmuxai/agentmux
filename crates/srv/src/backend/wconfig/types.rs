@@ -153,6 +153,17 @@ pub struct SettingsType {
     /// computer (history, typed URLs). Incognito tabs never ask, as in Chrome.
     #[serde(rename = "browser:searchsuggestions", default, skip_serializing_if = "Option::is_none")]
     pub browser_search_suggestions: Option<bool>,
+    /// A browser pane out of sight for a while hibernates: its page closes to
+    /// free its memory and loads again when the pane is about to be seen
+    /// (docs/specs/SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md). On unless false.
+    #[serde(rename = "browser:hibernate", default, skip_serializing_if = "Option::is_none")]
+    pub browser_hibernate: Option<bool>,
+    /// Minutes a browser pane is hidden before it hibernates (default 30).
+    #[serde(rename = "browser:hibernateafter", default, skip_serializing_if = "Option::is_none")]
+    pub browser_hibernate_after: Option<f64>,
+    /// Sites whose browser panes never hibernate, by origin or host.
+    #[serde(rename = "browser:keepawakesites", default, skip_serializing_if = "Option::is_none")]
+    pub browser_keep_awake_sites: Option<Vec<String>>,
 
     /// Maximum runtime in hours before the watchdog kills an agent pane.
     /// 0 (default) disables the limit.

@@ -110,13 +110,22 @@ fn hex(c: u8) -> Option<u8> {
 
 /// A canonical lowercase uuid as 16 bytes.
 fn parse_uuid(s: &[u8]) -> Option<[u8; 16]> {
-    if s.len() != 36 || s[8] != b'-' || s[13] != b'-' || s[18] != b'-' || s[23] != b'-' {
+    if s.len() != 36 {
         return None;
     }
-    let digits: Vec<u8> = s.iter().copied().filter(|&c| c != b'-').collect();
+    // A dash at each of the four places and a hex digit everywhere else, so
+    // there are exactly 32 digits.
     let mut out = [0u8; 16];
-    for (i, pair) in digits.chunks(2).enumerate() {
-        out[i] = hex(pair[0])? << 4 | hex(pair[1])?;
+    let mut digit = 0;
+    for (at, &c) in s.iter().enumerate() {
+        if matches!(at, 8 | 13 | 18 | 23) {
+            if c != b'-' {
+                return None;
+            }
+            continue;
+        }
+        out[digit / 2] |= hex(c)? << if digit % 2 == 0 { 4 } else { 0 };
+        digit += 1;
     }
     Some(out)
 }
