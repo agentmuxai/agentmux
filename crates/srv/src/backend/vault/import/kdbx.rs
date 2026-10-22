@@ -164,6 +164,7 @@ fn check_kdf(data: &[u8]) -> Result<(), String> {
 /// The field names KeePass itself uses; any other field is the person's own.
 const STANDARD: &[&str] = &["Title", "UserName", "Password", "URL", "Notes", "otp"];
 
+/// The most a key file may be: KeePass's own are a few hundred bytes (an XML file, or 32 random ones).
 pub const MAX_KEY_FILE: usize = 1024 * 1024;
 
 pub fn read(bytes: &[u8], passphrase: &str, keyfile: Option<&[u8]>) -> Result<Imported, ReadError> {
