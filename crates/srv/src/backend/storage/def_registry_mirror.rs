@@ -157,22 +157,39 @@ impl Store {
     /// P0.2). The slug read here is already the shared one when a record
     /// exists (`agent_def_get`).
     pub(super) fn registry_def_upsert(&self, def_id: &str) {
+        // Best-effort for an edit: the record already exists and holds the
+        // agent's slug, so a missed refresh loses nothing another channel could
+        // claim, and the next write repairs it. A new agent's insert goes
+        // through `registry_def_publish` instead.
+        if let Err(e) = self.registry_def_write(def_id) {
+            tracing::warn!(def_id, error = %e, "def registry: mirror upsert failed");
+        }
+    }
+
+    /// [`Self::registry_def_upsert`] for a NEW agent, whose record is what
+    /// publishes the slug it was just given (`SPEC_FORK_SLUG_MIGRATION_2026_10_22.md`
+    /// P0.1): a failure is returned, so the insert can be undone while it still
+    /// holds the slug allocation lock, rather than leave a slug another channel
+    /// can't see and could take too.
+    pub(super) fn registry_def_publish(&self, def_id: &str) -> Result<(), StoreError> {
+        self.registry_def_write(def_id)
+            .map_err(|e| StoreError::Other(format!("could not publish agent {def_id} to the shared definitions: {e}")))
+    }
+
+    fn registry_def_write(&self, def_id: &str) -> Result<(), String> {
         let Some(reg) = self.shared_def_registry() else {
-            return;
+            return Ok(());
         };
         let def = match self.agent_def_get(def_id) {
             Ok(Some(d)) => d,
-            Ok(None) => return,
-            Err(e) => {
-                tracing::warn!(def_id, error = %e, "def registry: read definition failed, skipping mirror");
-                return;
-            }
+            Ok(None) => return Ok(()),
+            Err(e) => return Err(format!("read definition: {e}")),
         };
         // Only USER agents go to the global cross-channel store. Seeded
         // templates are manifest-managed and re-seeded per channel (and
         // their hide flag is per-channel UI state), so they stay local.
         if def.is_seeded != 0 {
-            return;
+            return Ok(());
         }
         // LOCAL-only reads: the mirror operates on a local agent, so it must
         // never read the global record (that would re-mirror just-deleted
@@ -180,9 +197,7 @@ impl Store {
         let content = self.agent_content_get_all_local(def_id).unwrap_or_default();
         let skills = self.agent_skill_list_local(def_id).unwrap_or_default();
         let rec = agent_definition_to_record(&def, &content, &skills);
-        if let Err(e) = reg.upsert(&rec) {
-            tracing::warn!(def_id, error = %e, "def registry: mirror upsert failed");
-        }
+        reg.upsert(&rec).map_err(|e| e.to_string())
     }
 
     /// Same mirror as `registry_def_upsert`, but never CREATES a global

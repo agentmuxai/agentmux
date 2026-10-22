@@ -372,6 +372,29 @@ mod tests {
         }
     }
 
+    /// A new agent whose shared record can't be written is not inserted, by
+    /// either insert path: its slug was never published, so the row would let
+    /// another channel take the same slug.
+    #[test]
+    fn an_insert_whose_publication_fails_is_undone() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let defs = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+        store.set_def_registry(defs.clone());
+        // A directory where the record goes: the write fails, as on a full disk.
+        std::fs::create_dir_all(defs.root().join("uid-unpublished.json")).unwrap();
+        let mut def = test_agent_def("uid-unpublished", "Solo", "claude", "host", 1, "");
+        def.slug = "solo".to_string();
+        let err = store.agent_def_insert(&mut def).expect_err("the publish failed");
+        assert!(err.to_string().contains("could not publish"), "{err}");
+        assert!(store.agent_row_get("uid-unpublished").unwrap().is_none(), "the local row is undone");
+
+        let mut defined = test_agent_def("uid-unpublished", "Solo", "claude", "host", 1, "");
+        defined.slug = String::new();
+        assert!(store.agent_def_find_or_insert(&mut defined).is_err());
+        assert!(store.agent_row_get("uid-unpublished").unwrap().is_none());
+    }
+
     /// `agent.define` finds an existing agent by its canonical slug, not by a
     /// stale local one, so it doesn't mint a second agent beside it.
     #[test]

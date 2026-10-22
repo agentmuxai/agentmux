@@ -379,9 +379,9 @@ fn cmd_env_overrides(
 
 impl ShellController {
     /// Apply `cmd:env` to an interactive shell's command: the live global
-    /// settings, then the block's own metadata, then the identity strip.
+    /// settings, the block's own (an agent's current identity in), the strip.
     fn apply_cmd_env(&self, c: &mut CommandBuilder, block_meta: &MetaMapType) {
-        cmd_env_overrides(&self.live_settings(), block_meta).apply_to(c);
+        cmd_env_overrides(&self.live_settings(), &self.with_agent_identity(block_meta)).apply_to(c);
     }
 
     /// The process a `cmd` pane runs: `cmd` itself when it has `cmd:args` or
@@ -731,7 +731,7 @@ impl Controller for ShellController {
             c.env("AGENTMUX_VERSION", env!("CARGO_PKG_VERSION"));
             // Configured cmd:env (global, then the block's), as a local
             // interactive shell gets it, and listed in WSLENV so it crosses.
-            let overrides = cmd_env_overrides(&self.live_settings(), &block_meta);
+            let overrides = cmd_env_overrides(&self.live_settings(), &self.with_agent_identity(&block_meta));
             overrides.apply_to(&mut c);
             c.env(
                 "WSLENV",

@@ -226,9 +226,23 @@ impl Store {
         // Mirror into the global cross-channel definition store. Content +
         // skills are inserted after the definition (separate calls), so this
         // initial record is content-less; agent_content_set / agent_skill_*
-        // re-mirror with the full payload. (P0.2b.)
-        self.registry_def_upsert(&agent.id);
-        Ok(())
+        // re-mirror with the full payload. (P0.2b.) Publishing the slug is
+        // part of the insert: undone if it fails.
+        self.publish_new_or_undo(&agent.id)
+    }
+
+    /// Mirror a just-inserted agent, which publishes its slug; on failure,
+    /// delete the row again and return the error (`registry_def_publish`).
+    /// The caller still holds the slug allocation lock.
+    fn publish_new_or_undo(&self, id: &str) -> Result<(), StoreError> {
+        let Err(e) = self.registry_def_publish(id) else {
+            return Ok(());
+        };
+        let conn = self.conn.lock().unwrap();
+        if let Err(undo) = conn.execute("DELETE FROM db_agents WHERE id = ?1", params![id]) {
+            tracing::warn!(agent_id = id, error = %undo, "agent insert: could not undo the local row after a failed publish");
+        }
+        Err(e)
     }
 
     /// The host-wide slug allocation lock for inserting `agent`
@@ -560,7 +574,8 @@ impl Store {
         // Mirror the freshly-defined agent into the global store (agent.define
         // path). Without this a define-created agent stays channel-local until
         // a later edit. (codex P2 on #1385.)
-        self.registry_def_upsert(&agent.id);
+        // Undone if it fails, as on insert.
+        self.publish_new_or_undo(&agent.id)?;
 
         Ok(None)
     }

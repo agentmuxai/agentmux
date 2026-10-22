@@ -79,13 +79,28 @@ pub fn wslenv(existing: &str) -> String {
     parts.join(":")
 }
 
+/// The agent identity a process started for an agent carries, set by the
+/// server from the agent's definition (`agent_handlers::identity_env`), not
+/// by its caller. Listed in `WSLENV` when present, so a command run in a
+/// distro for an agent names it as one run on Windows does.
+/// `GH_CONFIG_DIR` crosses too, path-translated, as [`wslenv_with`] adds it.
+pub const AGENT_IDENTITY_ENV: [&str; 7] = [
+    "AGENTMUX_AGENT_ID",
+    "AGENTMUX_AGENT_SLUG",
+    "MUXBUS_AGENT_ID",
+    "GIT_AUTHOR_NAME",
+    "GIT_AUTHOR_EMAIL",
+    "GIT_COMMITTER_NAME",
+    "GIT_COMMITTER_EMAIL",
+];
+
 /// `WSLENV` for a process in a distro: the terminal variables, the names its
 /// caller set (an agent `Shell` call's `env`, or a pane's configured
 /// `cmd:env`), and `GH_CONFIG_DIR` translated to a distro path (`/p`), so an
 /// agent's plain-`gh` guard holds inside the distro too and `gh` there cannot
 /// act as the user. Never an `AGENTMUX_*` variable beyond the terminal ones
-/// and the agent id: the auth key, the local URL and the jekt key stay on
-/// Windows.
+/// and the agent id and slug: the auth key, the local URL and the jekt key
+/// stay on Windows.
 pub fn wslenv_with<'a>(existing: &str, caller_keys: impl IntoIterator<Item = &'a str>) -> String {
     let guard = crate::backend::gh_guard::GH_CONFIG_DIR;
     // Whatever flag the user's own WSLENV gives GH_CONFIG_DIR (`/u` would keep
@@ -112,7 +127,8 @@ pub fn wslenv_with<'a>(existing: &str, caller_keys: impl IntoIterator<Item = &'a
             && !key.contains([':', '/', '='])
             && (!key.starts_with("AGENTMUX_")
                 || FORWARDED_ENV.contains(&key)
-                || key == "AGENTMUX_AGENT_ID")
+                || key == "AGENTMUX_AGENT_ID"
+                || key == "AGENTMUX_AGENT_SLUG")
             && key != guard
             && key != "WSLENV";
         if forwardable {
