@@ -270,6 +270,22 @@ export function awakeReason(f: PaneFacts, now: number, keepAwakeSites?: unknown)
 
 /** Why the page keeps the pane awake, from the host's check; a check that
  *  couldn't run keeps it awake too. */
+/** Whether this browser engine can freeze a page and show it again. CDP's
+ *  freeze marks the page hidden and its thaw doesn't mark it shown, so only an
+ *  engine with the AgentMux CEF fork's windowed WasHidden, which the pane's
+ *  show calls, brings a thawed page back to full speed. That fork build is the
+ *  one with the Discard API, so its presence answers. Asked once per window. */
+let engineCanFreeze: Promise<boolean> | undefined;
+export function engineSupportsFreeze(ask: () => Promise<{ supported: boolean } | null | undefined>): Promise<boolean> {
+    engineCanFreeze ??= ask()
+        .then((r) => r?.supported === true)
+        .catch(() => {
+            engineCanFreeze = undefined; // ask again next time
+            return false;
+        });
+    return engineCanFreeze;
+}
+
 /** What in the page keeps a hidden pane from being frozen: only what a frozen
  *  page would break while it waits (media playing, DevTools attached). A typed
  *  form or a leave-page prompt is fine: freezing keeps the page as it is. */
