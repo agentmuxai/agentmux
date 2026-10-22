@@ -654,8 +654,17 @@ impl Store {
             return Ok(matched);
         }
         let all = rows_with_canonical_slugs(&conn, "", &shared)?;
-        let owner = former_slug_owner_in(&conn, &shared, &all, &typed.to_lowercase())?;
-        Ok(rows.into_iter().filter(|r| owner.as_deref() == Some(r.id.as_str())).collect())
+        let Some(owner) = former_slug_owner_in(&conn, &shared, &all, &typed.to_lowercase())? else {
+            return Ok(Vec::new());
+        };
+        if let Some(row) = rows.into_iter().find(|r| r.id == owner) {
+            return Ok(vec![row]);
+        }
+        drop(conn);
+        // An agent only the shared definitions hold (made in another
+        // channel): matched from its record, as `agent_def_list` overlays it.
+        let def = self.agent_def_get(&owner)?.filter(|d| d.is_seeded == 0 && d.user_hidden == 0);
+        Ok(def.map(|d| AgentNameMatch { id: d.id, name: d.name, slug: d.slug, instance_name: String::new() }).into_iter().collect())
     }
 
     /// Every row a name selects, **templates and hidden rows included** — the

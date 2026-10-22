@@ -65,6 +65,26 @@ pub(super) fn refuse_former_sender(state: &AppState, req: &mut InjectionRequest)
     )
 }
 
+/// The host key a request signed as `name` is checked with, outside jekt
+/// delivery (UI automation's `verified_block_id`): none for a former slug,
+/// which never signs, whatever key is still filed under it.
+pub(crate) fn signing_key(state: &AppState, name: &str) -> Result<Vec<u8>, String> {
+    let former = crate::backend::reactive::handler::former_slug_claim(
+        name,
+        |n| state.reactive_handler.has_live_name(n),
+        |n| state.mstore.former_slug_owner(n).ok().flatten().map(|o| o.uid),
+    );
+    if former.is_some() {
+        tracing::warn!(agent_id = %name, "signed as a slug its agent was renamed from, which can't sign: refused");
+        return Err(format!("agent_id={name:?} is a slug its agent was renamed from, which can't sign"));
+    }
+    match state.mstore.agent_jekt_key_load(name) {
+        Ok(Some(k)) => Ok(k),
+        Ok(None) => Err(format!("no signing key on file for agent_id={name:?} — respawn this agent to get one")),
+        Err(e) => Err(format!("load signing key: {e}")),
+    }
+}
+
 /// `GET /agentmux/reactive/agent?id=` for a former slug: the agent's current
 /// name, and only the public key filed under that name — never one left
 /// under the former slug — when the agent alone owns it. A peer re-pins

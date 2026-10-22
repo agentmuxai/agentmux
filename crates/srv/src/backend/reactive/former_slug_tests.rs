@@ -52,8 +52,19 @@ async fn a_message_to_a_former_slug_reaches_the_agents_uid() {
     assert!(resp.success, "{:?}", resp.error);
     assert_eq!(resp.block_id.as_deref(), Some("block-loap3"));
     assert_eq!(sent.lock().unwrap().first().map(String::as_str), Some("block-loap3"));
-    assert_eq!(h.get_agent("loap-loap-2-loap-3").map(|r| r.block_id.clone()).as_deref(), Some("block-loap3"));
-    assert!(matches!(h.lookup_by_name("loap-loap-2-loap-3"), LookupOutcome::One(r) if r.uid.as_deref() == Some(UID)));
+    assert_eq!(h.get_delivery_target("loap-loap-2-loap-3").map(|r| r.block_id.clone()).as_deref(), Some("block-loap3"));
+    assert!(matches!(h.lookup_delivery_target("loap-loap-2-loap-3"), LookupOutcome::One(r) if r.uid.as_deref() == Some(UID)));
+}
+
+/// The lookups that authenticate and act as an agent never answer a former
+/// slug: a retired name can't be resolved to the pane it used to name.
+#[test]
+fn generic_lookups_never_answer_a_former_slug() {
+    let (h, _, calls) = renamed_agent();
+    assert!(h.get_agent("loap-loap-2-loap-3").is_none());
+    assert!(matches!(h.lookup_by_name("loap-loap-2-loap-3"), LookupOutcome::NotFound));
+    assert_eq!(calls.load(Ordering::SeqCst), 0, "the store is never asked");
+    assert_eq!(h.get_agent("loap-3").map(|r| r.block_id.clone()).as_deref(), Some("block-loap3"));
 }
 
 /// A live name or current slug never asks the resolver: it adds nothing to a

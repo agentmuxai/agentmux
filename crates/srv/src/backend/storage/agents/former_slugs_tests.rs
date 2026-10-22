@@ -183,3 +183,30 @@ fn a_new_agent_never_takes_a_former_slug_this_channel_holds() {
     store.agent_def_insert(&mut fresh).unwrap();
     assert_eq!(fresh.slug, "Zed-Zed-2-2");
 }
+
+/// A former slug of an agent only the shared definitions hold (made in
+/// another channel, no row here) still resolves, from its shared record.
+#[test]
+fn a_shared_only_agents_former_slug_resolves() {
+    let (_t, store, defs) = store_with(&[]);
+    let remote = crate::registry::DefinitionRecord {
+        schema_version: crate::registry::DEF_MAX_SUPPORTED_SCHEMA,
+        data: crate::registry::DefinitionRecordV1 {
+            id: "uid-remote".into(),
+            slug: "remote-2".into(),
+            name: "Remote #2".into(),
+            provider: "claude".into(),
+            former_slugs: vec![FormerSlug { slug: "remote-remote-2".into(), retired_at: NOW }],
+            ..Default::default()
+        },
+    };
+    defs.upsert(&remote).unwrap();
+    assert!(store.agent_row_get("uid-remote").unwrap().is_none());
+    let matched = store.agents_matching_name("remote-remote-2").unwrap();
+    assert_eq!(
+        matched.iter().map(|m| (m.id.as_str(), m.slug.as_str(), m.name.as_str())).collect::<Vec<_>>(),
+        vec![("uid-remote", "remote-2", "Remote #2")]
+    );
+    let owner = store.former_slug_owner("remote-remote-2").unwrap().unwrap();
+    assert_eq!((owner.uid.as_str(), owner.slug.as_str()), ("uid-remote", "remote-2"));
+}

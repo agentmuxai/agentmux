@@ -133,3 +133,24 @@ fn registries_are_searched_under_the_current_slug_after_the_name_as_sent() {
     assert!(!may_evict("fs-reg-2", &req));
     assert!(may_evict("fs-reg-fs-reg-2", &req));
 }
+
+/// UI automation verifies a signature, then acts as its signer's pane: a
+/// signer named by a former slug is refused, even with its old key and a
+/// valid signature. The same agent under its current slug is accepted.
+#[tokio::test]
+async fn ui_automation_signed_as_a_former_slug_is_refused() {
+    let state = test_state();
+    let (old_key, new_key) = renamed(&state, "uid-fs-ui", "fs-ui-fs-ui-2", "fs-ui-2");
+    crate::backend::reactive::handler::get_global_handler()
+        .register_agent_full("fs-ui-2", "block-fs-ui", None, 0, Some("fs-ui-2"), Some("uid-fs-ui"), "test")
+        .unwrap();
+    let auth = |key: &[u8], name: &str| {
+        let ts = agentmux_common::time::now_secs();
+        let sig = agentmux_common::jekt_sign::sign_jekt(key, "ui-automation-identity", name, "__srv__", ts, "");
+        agentmux_common::api_types::UiAutomationAuth { agent_id: name.into(), ts_secs: ts, sig }
+    };
+    let refused = crate::server::ui_handlers::verified_block_id(&state, None, &auth(&old_key, "fs-ui-fs-ui-2"));
+    assert!(refused.as_ref().is_err_and(|e| e.contains("renamed")), "{refused:?}");
+    let accepted = crate::server::ui_handlers::verified_block_id(&state, None, &auth(&new_key, "fs-ui-2"));
+    assert_eq!(accepted.as_deref(), Ok("block-fs-ui"));
+}

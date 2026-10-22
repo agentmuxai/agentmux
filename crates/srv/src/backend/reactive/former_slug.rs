@@ -6,7 +6,10 @@
 //! nothing is registered under is asked of the store, and a former slug
 //! reaches its agent's registration by UID. Tried only after every live name
 //! and current slug has missed, so it never takes a name from its holder, and
-//! it adds nothing to a delivery that resolves as before.
+//! it adds nothing to a delivery that resolves as before. Only delivery asks
+//! for it (`resolve_target`, [`Handler::get_delivery_target`],
+//! [`Handler::lookup_delivery_target`]); `get_agent` and `lookup_by_name`,
+//! which authenticate and act as an agent, never answer a former slug.
 //!
 //! And a former slug never speaks: [`refuse_former_slug_sender`] holds that
 //! rule for every delivery, whichever path brought it. The handler applies it
@@ -20,7 +23,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use super::{Handler, ReactiveHandler};
+use super::{Handler, LookupOutcome, ReactiveHandler};
+use crate::backend::reactive::types::AgentRegistration;
 use crate::backend::reactive::types::InjectionRequest;
 
 /// The UID a name is a former slug of (`Store::former_slug_owner`), `None`
@@ -56,16 +60,13 @@ pub(crate) fn refuse_former_slug_sender(
     is_live: impl FnOnce(&str) -> bool,
     owner_of: impl FnOnce(&str) -> Option<String>,
 ) -> bool {
-    let Some(claimed) = req.source_agent.as_deref().map(str::trim).filter(|s| !s.is_empty()) else {
+    let Some(claimed) = req.source_agent.clone() else {
         return false;
     };
-    let claimed = claimed.to_lowercase();
-    if is_live(&claimed) {
-        return false;
-    }
-    let Some(uid) = owner_of(&claimed) else {
+    let Some(uid) = former_slug_claim(&claimed, is_live, owner_of) else {
         return false;
     };
+    let claimed = claimed.trim();
     tracing::warn!(
         claimed = %claimed,
         uid = %uid,
@@ -76,7 +77,38 @@ pub(crate) fn refuse_former_slug_sender(
     true
 }
 
+/// The UID `claimed` is a former slug of, when a signer names itself by one:
+/// not a live name (`is_live`, lowercased), and a former slug (`owner_of`).
+/// The rule [`refuse_former_slug_sender`] applies to a jekt, for any other
+/// "verify a signature, then act as its signer" path (UI automation).
+pub(crate) fn former_slug_claim(
+    claimed: &str,
+    is_live: impl FnOnce(&str) -> bool,
+    owner_of: impl FnOnce(&str) -> Option<String>,
+) -> Option<String> {
+    let claimed = claimed.trim().to_lowercase();
+    if claimed.is_empty() || is_live(&claimed) {
+        return None;
+    }
+    owner_of(&claimed)
+}
+
 impl Handler {
+    /// [`Handler::get_agent`], plus a former slug's agent: for a delivery
+    /// target only, never a name that authenticates or acts.
+    pub fn get_delivery_target(&self, name: &str) -> Option<&AgentRegistration> {
+        match self.read_resolve(name, true) {
+            Ok(Some(block)) => self.agent_info.get(&block),
+            _ => None,
+        }
+    }
+
+    /// [`Handler::lookup_by_name`], plus a former slug's agent: for a
+    /// delivery target (a transcript, files, the resolve endpoint).
+    pub fn lookup_delivery_target(&self, name: &str) -> LookupOutcome {
+        self.lookup_resolved(name, true)
+    }
+
     /// [`refuse_former_slug_sender`] against this registry and the store.
     pub(super) fn refuse_former_slug_sender(&self, req: &mut InjectionRequest) -> bool {
         let Some(resolver) = self.former_slug_resolver.as_ref() else {
@@ -112,6 +144,16 @@ impl Handler {
 }
 
 impl ReactiveHandler {
+    /// See the inner [`Handler::get_delivery_target`].
+    pub fn get_delivery_target(&self, name: &str) -> Option<AgentRegistration> {
+        self.inner.lock().unwrap().get_delivery_target(name).cloned()
+    }
+
+    /// See the inner [`Handler::lookup_delivery_target`].
+    pub fn lookup_delivery_target(&self, name: &str) -> LookupOutcome {
+        self.inner.lock().unwrap().lookup_delivery_target(name)
+    }
+
     /// See the inner [`Handler::set_former_slug_resolver`].
     pub fn set_former_slug_resolver(&self, resolver: FormerSlugResolver) {
         self.inner.lock().unwrap().set_former_slug_resolver(resolver);

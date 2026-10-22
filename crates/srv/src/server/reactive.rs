@@ -419,7 +419,7 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
 }
 
 mod channel_v2;
-mod former_slug;
+pub(crate) mod former_slug;
 mod lan_v2;
 
 /// Anti-replay window for cross-channel `channel_sig` —
@@ -1498,7 +1498,7 @@ pub(super) async fn handle_reactive_agent(
     if let Some(sender) = crate::backend::swarm_lan_broadcast::sender_lookup(&state.mstore, &state.hostname, id) {
         return Json(sender).into_response();
     }
-    match state.reactive_handler.get_agent(id) {
+    match state.reactive_handler.get_delivery_target(id) {
         Some(agent) => {
             // Merged in, not part of AgentRegistration's own serialization —
             // this is the LAN pubkey-lookup half of
@@ -1989,7 +1989,7 @@ pub(super) async fn handle_reactive_transcript(
             .into_response();
     }
 
-    let reg = match state.reactive_handler.lookup_by_name(&params.agent) {
+    let reg = match state.reactive_handler.lookup_delivery_target(&params.agent) {
         crate::backend::reactive::handler::LookupOutcome::One(reg) => reg,
         // Identity M2 (spec §4.4.3): a name several live blocks hold is a
         // purely LOCAL collision — refuse it with the candidates, never

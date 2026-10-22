@@ -124,9 +124,9 @@ pub(crate) fn resolve_name_to_uid(
 
     let mut candidates: Vec<AgentCandidate> = Vec::new();
 
-    // (2) Live registry, by name.
+    // (2) Live registry, by name (a former slug too: this picks a target).
     let live: Vec<crate::backend::reactive::AgentRegistration> =
-        match registry.lookup_by_name(typed) {
+        match registry.lookup_delivery_target(typed) {
             LookupOutcome::One(reg) => vec![reg],
             LookupOutcome::Ambiguous(regs) => regs,
             LookupOutcome::NotFound => Vec::new(),

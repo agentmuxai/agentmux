@@ -14,7 +14,7 @@ pub(super) use super::rate_limiter::RateLimiter;
 #[path = "former_slug.rs"]
 mod former_slug;
 pub use former_slug::FormerSlugResolver;
-pub(crate) use former_slug::refuse_former_slug_sender;
+pub(crate) use former_slug::{former_slug_claim, refuse_former_slug_sender};
 
 // ---- Handler ----
 
@@ -76,8 +76,7 @@ pub struct Handler {
     /// before ambiguity is decided. `None` (tests) treats every block as
     /// live.
     block_liveness: Option<BlockLivenessProbe>,
-    /// A name nothing is bound under, tried as a slug an agent was renamed
-    /// from (`former_slug.rs`). `None` (tests) tries nothing.
+    /// Tries a name nothing is bound under as a former slug (`former_slug.rs`).
     former_slug_resolver: Option<FormerSlugResolver>,
     audit_log: Vec<AuditLogEntry>,
     /// The UID of the delivery in flight
@@ -96,34 +95,9 @@ pub struct Handler {
     include_source_in_message: bool,
 }
 
-/// A block's names, typed (identity M2, spec §4.4.2).
-///
-/// `display` is the name the block was most recently registered under —
-/// the Register-tail and the HTTP presence path supply it every time — and
-/// is **replaced** on re-registration, so a retired name does not linger and
-/// make a later agent ambiguous. `stable` is the `AGENTMUX_AGENT_ID` parked
-/// at spawn (what the alias map used to hold) and is **kept** across display
-/// changes: it is the value GitHub PR-body tags embed precisely because it
-/// does not change on rename (`INCIDENT_2026_09_09_JEKT_STABLE_ID_ALIAS.md`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NameBindings {
-    pub display: String,
-    pub stable: Option<String>,
-}
-
-impl NameBindings {
-    /// Every lowercased key this block is bound under.
-    fn keys(&self) -> Vec<String> {
-        let mut keys = vec![self.display.to_lowercase()];
-        if let Some(s) = &self.stable {
-            let k = s.to_lowercase();
-            if !keys.contains(&k) {
-                keys.push(k);
-            }
-        }
-        keys
-    }
-}
+#[path = "name_bindings.rs"]
+mod name_bindings;
+pub use name_bindings::NameBindings;
 
 /// What a by-name unregister did (identity M2, spec §4.4.4 Q7). A name held
 /// by several live blocks is refused, never silently no-op'd as success.
@@ -552,8 +526,9 @@ impl Handler {
     /// is never second-guessed, so a block that is momentarily between
     /// controllers (a `resync_controller` replace, or a frontend register
     /// that beats the resync) is not answered as "not found" — which would
-    /// forward a purely local miss to other instances.
-    fn read_resolve(&self, target: &str) -> Result<Option<String>, Vec<String>> {
+    /// forward a purely local miss to other instances. A former slug answers
+    /// only when `former` (a delivery target, never a name that acts).
+    fn read_resolve(&self, target: &str, former: bool) -> Result<Option<String>, Vec<String>> {
         if let Some(block) = self
             .uid_to_block
             .get(target)
@@ -564,7 +539,7 @@ impl Handler {
         let key = target.to_lowercase();
         let blocks = self.name_to_blocks.get(&key).cloned().unwrap_or_default();
         match blocks.len() {
-            0 => Ok(self.former_slug_block(&key).map(|(block, _)| block)),
+            0 => Ok(former.then(|| self.former_slug_block(&key)).flatten().map(|(block, _)| block)),
             1 => Ok(Some(blocks[0].clone())),
             _ => {
                 let live: Vec<String> = blocks.into_iter().filter(|b| self.is_live(b)).collect();
@@ -627,8 +602,13 @@ impl Handler {
     /// Name lookup that tells an ambiguous name apart from an unknown one
     /// (identity M2) — for callers that must refuse with candidates rather
     /// than fall through to cross-instance forwarding (`GetAgentTranscript`).
+    /// No former slugs (`lookup_delivery_target` adds them).
     pub fn lookup_by_name(&self, name: &str) -> LookupOutcome {
-        match self.read_resolve(name) {
+        self.lookup_resolved(name, false)
+    }
+
+    pub(super) fn lookup_resolved(&self, name: &str, former: bool) -> LookupOutcome {
+        match self.read_resolve(name, former) {
             Ok(Some(block)) => match self.agent_info.get(&block) {
                 Some(reg) => LookupOutcome::One(reg.clone()),
                 None => LookupOutcome::NotFound,
@@ -745,8 +725,9 @@ impl Handler {
     /// exactly one live block. A name held by several is `None`, counted
     /// (`lookup.ambiguous_name`): callers that authorize on it fail closed,
     /// and callers that display on it show nothing rather than the wrong one.
+    /// Never a former slug's agent: callers authenticate and act on this.
     pub fn get_agent(&self, agent_id: &str) -> Option<&AgentRegistration> {
-        match self.read_resolve(agent_id) {
+        match self.read_resolve(agent_id, false) {
             Ok(Some(block)) => self.agent_info.get(&block),
             Ok(None) => None,
             Err(_) => {

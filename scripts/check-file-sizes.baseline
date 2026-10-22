@@ -24,7 +24,7 @@
 2217 crates/srv/src/backend/history/index.rs
 1900 crates/srv/src/backend/history/mod.rs
 3192 crates/srv/src/backend/lan_discovery.rs
-2101 crates/srv/src/backend/reactive/handler.rs
+2082 crates/srv/src/backend/reactive/handler.rs
 2494 crates/srv/src/backend/storage/migrations.rs
 1799 crates/srv/src/backend/storage/muxbus.rs
 3354 crates/srv/src/identity/resolver/inject.rs
@@ -37,7 +37,7 @@
 2108 crates/srv/src/server/muxspect_handlers.rs
 1558 crates/srv/src/server/native_memory_handlers.rs
 2554 crates/srv/src/server/reactive.rs
-1528 crates/srv/src/server/ui_handlers.rs
+1520 crates/srv/src/server/ui_handlers.rs
 2270 crates/srv/src/server/websocket.rs
 2000 frontend/app/store/agent-pane-state/reducer.ts
 1501 frontend/app/view/agent/agent-view.tsx
