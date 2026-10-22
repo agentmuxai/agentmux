@@ -143,7 +143,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                         .send()
                         .await;
                     anyhow::bail!(
-                        "This AgentMux can't claim a task by id yet: it handed out {} instead, which was released                          again. Claim without id, or ask the operator to start task {n} on you.",
+                        "This AgentMux can't claim a task by id yet: it handed out {} instead, which was released again. Claim without id, or ask the operator to start task {n} on you.",
                         task_name(&v, id)
                     );
                 }

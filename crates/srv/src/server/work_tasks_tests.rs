@@ -194,3 +194,22 @@ async fn a_named_claim_takes_a_held_task_and_says_why_when_it_cant() {
     let (_, c) = post(&app, "/agentmux/work/claim", json!({"agent_id": "a1"})).await;
     assert_eq!(c["num"], other["num"], "without id, claim is unchanged");
 }
+
+#[tokio::test]
+async fn a_group_member_refused_by_name_is_told_the_real_reason() {
+    let app = app();
+    let (_, first) = post(&app, "/agentmux/work", json!({"title": "first", "payload": "p"})).await;
+    let first = first["num"].as_i64().unwrap();
+    let (_, t) = post(
+        &app,
+        "/agentmux/work",
+        json!({"title": "group work", "payload": "p", "target_group": "g1", "after": [first.to_string()]}),
+    )
+    .await;
+    let num = t["num"].as_i64().unwrap();
+    let (_, c) = post(&app, "/agentmux/work/claim", json!({"agent_id": "a1", "id": num.to_string(), "groups": ["g1"]})).await;
+    assert_eq!(c["claimed"], false);
+    assert!(c["why"].as_str().unwrap().contains(&format!("starts after #{first}")), "a member: {c}");
+    let (_, c) = post(&app, "/agentmux/work/claim", json!({"agent_id": "a2", "id": num.to_string()})).await;
+    assert!(c["why"].as_str().unwrap().contains("group g1"), "not a member: {c}");
+}
