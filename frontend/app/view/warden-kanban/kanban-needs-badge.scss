@@ -1,0 +1,20 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// On the widget-bar icon's top right corner (the icon is the positioned parent).
+.kanban-needs-badge {
+    position: absolute;
+    top: -5px;
+    right: -8px;
+    min-width: 14px;
+    height: 14px;
+    padding: 0 3px;
+    border-radius: 7px;
+    background: var(--warning-color);
+    color: var(--main-bg-color);
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 14px;
+    text-align: center;
+    pointer-events: none;
+}

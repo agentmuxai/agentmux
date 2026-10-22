@@ -13,6 +13,7 @@
 // the hover-brighten is suppressed — row-hover background is enough; an
 // icon color flicker on every menu-row hover reads as noisy.
 .widget-icon {
+    position: relative; // the Kanban button's Needs-you badge sits on its corner
     // --widget-tint: the widget type's color, faintly (widgetIconStyle).
     color: var(--widget-tint, var(--widget-icon-color));
     transition: color var(--duration-decorative-quick) var(--ease-standard);

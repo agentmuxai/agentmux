@@ -14,7 +14,7 @@ import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 
-import { columnOf } from "./kanban-columns";
+import { needsCountOf } from "./kanban-columns";
 import type { KanbanActRequest, KanbanActResult, KanbanBoard, KanbanTaskDetail } from "./kanban-types";
 
 const POLL_MS = 15_000;
@@ -59,7 +59,7 @@ export class KanbanModel {
         this.error = error;
         this.setBoard = setBoard;
         this.setError = setError;
-        this.needsCount = createMemo(() => (board()?.tasks ?? []).filter((t) => columnOf(t) === "needs").length);
+        this.needsCount = createMemo(() => needsCountOf(board()?.tasks ?? []));
     }
 
     /** Follow the queue while the section is shown; stop when it isn't. */
