@@ -327,7 +327,15 @@ Most services export plaintext CSV or JSON: every secret readable by anything th
 
 ### 8.7 Parsers are attack surface
 
-An import file can be crafted. Parsers run in srv with size caps (64 MiB file, 100 000 entries, 1 MiB per value) and limits on zip expansion, and are fuzzed (`cargo fuzz` targets for KDBX, the `.1pux` and Proton zips, JSON and CSV). Argon2 parameters in a `.kdbx` file are capped (memory 1 GiB, iterations 100) so a file can't hang srv; a file over the cap is refused with that reason.
+An import file can be crafted. Parsers run in srv with size caps (64 MiB file, 100 000 entries, 1 MiB per value) and limits on zip expansion, and are fuzzed. **Built (#108):** `backend/vault/import/fuzz_tests.rs` is a mutation fuzzer that runs with `cargo test`. It takes a real file of each format (the KeePass fixtures, and an export of LastPass, Bitwarden JSON and CSV, a browser CSV, a `.env`, AgentMux's own JSON, and a `.1pux`), damages it the ways a fuzzer does (flipped, overwritten, cut, repeated and spliced bytes; runaway nesting and numbers), and feeds it to `read_keyed` under every file name a file can arrive under, and to the KeePass header check. A panic, or a read over ten seconds, fails the test with the seed and the input to replay. The same seed always makes the same input; `VAULT_FUZZ_ITERS`, `VAULT_FUZZ_KDBX_EVERY` and `VAULT_FUZZ_SEED` turn the same test into a long run:
+
+```bash
+VAULT_FUZZ_ITERS=200000 VAULT_FUZZ_KDBX_EVERY=1000000 cargo test -p agentmux-srv fuzz_tests::no_reader --release -- --nocapture
+```
+
+It is not coverage-guided, and it is not `cargo-fuzz`: the readers live in the `agentmux-srv` binary crate, which a `cargo-fuzz` target cannot link against. Moving the importers into a library crate would allow real `cargo-fuzz` targets (still open). A damaged database is only header-checked on most runs, because reading one stretches a password (seconds in a debug build); its exemption from the ten-second limit is that a header may ask, within the caps, for a gigabyte and a hundred rounds.
+
+Argon2 parameters in a `.kdbx` file are capped (memory 1 GiB, iterations 100) so a file can't hang srv; a file over the cap is refused with that reason.
 
 ## 9. Security
 

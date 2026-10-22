@@ -229,3 +229,5 @@ fn read_own_json(text: &str) -> Option<Result<Imported, ReadError>> {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod fuzz_tests;
