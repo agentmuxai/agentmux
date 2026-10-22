@@ -125,32 +125,81 @@ pub fn spawn_wal_checkpoint_loop(
     });
 }
 
-/// The shared transcript store's WAL is cut back by one srv on the machine (the
-/// owner of `filestore.db.owner`, [`TruncateOwner`]): a first look two minutes
-/// after start, then every half hour. The PASSIVE checkpoints
-/// (`filestore/checkpointer.rs`) keep the WAL's content copied back; this gives
-/// the disk back and starts the log afresh. The TRUNCATE runs on its own
-/// connection, so this srv's appends don't wait behind it.
+/// One srv on the machine looks after the shared transcript store: the owner
+/// of `filestore.db.owner` ([`TruncateOwner`]).
+///
+/// - **Its WAL is cut back**: a first look two minutes after start, then every
+///   half hour. The PASSIVE checkpoints (`filestore/checkpointer.rs`) keep the
+///   WAL's content copied back; this gives the disk back and starts the log
+///   afresh. The TRUNCATE runs on its own connection, so this srv's appends
+///   don't wait behind it.
+/// - **Its finished transcripts are compressed** (`transcript::framer`), when
+///   `agent:transcriptframes` is on: a pass of at most
+///   [`framer::PASS_FRAMES`] frames each minute, or every few seconds while
+///   there is work.
 pub fn spawn_global_transcripts_truncate_loop(token: tokio_util::sync::CancellationToken, store: Option<Arc<FileStore>>) {
+    use crate::backend::transcript::framer;
     let Some(store) = store else { return };
     let Some(mut owner) = crate::backend::storage::filestore::TruncateOwner::for_store(&store) else { return };
+    let Some(dir) = store.path().and_then(|p| p.parent()).map(|p| p.to_path_buf()) else { return };
     tokio::spawn(async move {
+        const TRUNCATE_EVERY: std::time::Duration = std::time::Duration::from_secs(30 * 60);
         let mut wait = std::time::Duration::from_secs(2 * 60);
+        let mut last_truncate: Option<std::time::Instant> = None;
+        let skip = Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+        let mut last_waiting: Option<String> = None;
         loop {
             tokio::select! {
                 _ = tokio::time::sleep(wait) => {}
                 _ = token.cancelled() => break,
             }
-            wait = std::time::Duration::from_secs(30 * 60);
+            wait = std::time::Duration::from_secs(60);
             if !owner.is_owner() {
                 continue;
             }
-            let store = Arc::clone(&store);
-            match tokio::task::spawn_blocking(move || store.checkpoint_truncate_apart()).await {
-                Ok(Ok(true)) => tracing::debug!("wal_checkpoint(TRUNCATE): global transcripts ok"),
-                Ok(Ok(false)) => tracing::debug!("wal_checkpoint(TRUNCATE): global transcripts busy; the next pass finishes"),
-                Ok(Err(e)) => tracing::warn!(error = %e, "wal_checkpoint(TRUNCATE) on the global transcript store failed"),
-                Err(e) => tracing::warn!(error = %e, "global transcript store truncate task failed"),
+            if last_truncate.is_none_or(|t| t.elapsed() >= TRUNCATE_EVERY) {
+                last_truncate = Some(std::time::Instant::now());
+                let store = Arc::clone(&store);
+                match tokio::task::spawn_blocking(move || store.checkpoint_truncate_apart()).await {
+                    Ok(Ok(true)) => tracing::debug!("wal_checkpoint(TRUNCATE): global transcripts ok"),
+                    Ok(Ok(false)) => tracing::debug!("wal_checkpoint(TRUNCATE): global transcripts busy; the next pass finishes"),
+                    Ok(Err(e)) => tracing::warn!(error = %e, "wal_checkpoint(TRUNCATE) on the global transcript store failed"),
+                    Err(e) => tracing::warn!(error = %e, "global transcript store truncate task failed"),
+                }
+            }
+            if !framer::enabled() {
+                continue;
+            }
+            let (store, dir, skip) = (Arc::clone(&store), dir.clone(), Arc::clone(&skip));
+            let pass = tokio::task::spawn_blocking(move || {
+                let mut skip = skip.lock().unwrap_or_else(|e| e.into_inner());
+                framer::pass(&store, &dir, framer::PASS_FRAMES, &mut skip, agentmux_common::time::now_ms())
+            })
+            .await;
+            match pass {
+                Ok(Ok(report)) => {
+                    if report.waiting != last_waiting {
+                        if let Some(who) = &report.waiting {
+                            tracing::info!(who = %who, "framer: waiting");
+                        }
+                        last_waiting = report.waiting.clone();
+                    }
+                    if report.frames > 0 {
+                        tracing::info!(
+                            frames = report.frames,
+                            codec2 = report.codec2,
+                            raw_bytes = report.raw_bytes,
+                            stored_bytes = report.stored_bytes,
+                            skipped = report.skipped,
+                            "framer: compressed"
+                        );
+                    }
+                    if !report.done && report.waiting.is_none() {
+                        wait = std::time::Duration::from_secs(5);
+                    }
+                }
+                Ok(Err(e)) => tracing::warn!(error = %e, "framer: pass failed"),
+                Err(e) => tracing::warn!(error = %e, "framer: pass task failed"),
             }
         }
     });

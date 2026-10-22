@@ -9,7 +9,7 @@
 
 ## 1. What this decides, in one paragraph
 
-The shared transcript store (`shared/agents/transcripts/filestore.db`) is 15.4 GB on this machine and is kept forever. Measured on real transcripts, **compressing it in 1 MiB frames takes it to about 2.7 GB (5.6x)**, and **cleaning out the streaming deltas on top of that saves another 16%** (about 0.4 GB, to about 2.3 GB). Both are built, in that order, as one storage format: a **frame** holds 1 MiB of a transcript compressed, and a frame may also store its streaming delta lines as just each line's id and length, with each reply block's text once, and rebuild them byte for byte. Every byte offset and line number stays what it is, so no reader changes. Nothing runs until the operator turns it on, and it never runs while an AgentMux build that can't read frames is running on the machine.
+The shared transcript store (`shared/agents/transcripts/filestore.db`) is 15.4 GB on this machine and is kept forever. Replayed over a copy of the whole store, **compressing it in 1 MiB frames takes the 14.0 GB of transcript it can frame to 2.39 GB (5.8x)**, and **cleaning out the streaming deltas on top of that saves another 11.5%**, to 2.12 GB (6.6x) (§2.1). Both are built, in that order, as one storage format: a **frame** holds 1 MiB of a transcript compressed, and a frame may also store its streaming delta lines as just each line's id and length, with each reply block's text once, and rebuild them byte for byte. Every byte offset and line number stays what it is, so no reader changes. Nothing runs until the operator turns it on, and it never runs while an AgentMux build that can't read frames is running on the machine.
 
 ## 2. Measurements (2026-10-21, narko)
 
@@ -44,7 +44,19 @@ Sample: the `output` of two agents (Naki #2 and QTimer), parts 20 to 400 of each
 - The residue is what stays: a uuid (16 bytes) and a length per dropped line. Everything else on a delta line (`type`, `index`, `session_id`, `parent_tool_use_id`) is constant within a turn or a fixed template.
 - Larger frames win clearly (4.4x to 5.6x from 64 KiB to 1 MiB) because the same prompts, paths and schemas recur across records.
 
-**Estimate for the 15.4 GB pane store** (assuming this sample is typical, which §9 checks): 1 MiB frames give about 2.7 GB; adding delta compaction about 2.3 GB. AgentY's estimate for the pane store was 0.9 GB; that assumed the deltas were the bulk of what was left after compression.
+**Estimate for the 15.4 GB pane store** (from the sample; §2.1 has the real numbers): 1 MiB frames give about 2.7 GB; adding delta compaction about 2.3 GB. AgentY's estimate for the pane store was 0.9 GB; that assumed the deltas were the bulk of what was left after compression.
+
+### 2.1 Offline replay over the whole store (2026-10-22)
+
+`replay_a_real_store` (an ignored test in `filestore/tests_deltas.rs`, run in release against `AGENTMUX_FRAMES_REPLAY_DB`) read every 16-part frame of every transcript in a copy of the repaired store, encoded it with both codecs, decoded it and compared every byte.
+
+| | Frames | Bytes | Ratio |
+|---|---|---|---|
+| Raw | 13,321 (59 transcripts) | 13,968 MB | |
+| Codec 1 | 13,321 | 2,394 MB | 5.84x |
+| Codec 2 | 13,038 used codec 2, the rest fell back to codec 1 | 2,119 MB | 6.59x, 11.5% smaller than codec 1 |
+
+Every frame decoded to its exact bytes under both codecs. Codec 2 left out 28.2 million delta lines. One frame was skipped because a part in it is missing (a lost part is never framed, §5.1). It ran in about 6 minutes on one core.
 
 ## 3. Rules that hold for everything below
 
@@ -87,25 +99,25 @@ db_file_frame (
 
 ### 5.1 The framer
 
-A background worker in the srv that owns the store's truncate lock (`filestore.db.owner`, #5201: one srv per machine), so two processes never frame the same file, and every process still reads frames. It runs at low priority, a bounded amount per pass (one file, a few frames), and not while the machine is busy (the load the sampler already reads).
+A background worker in the srv that owns the store's truncate lock (`filestore.db.owner`, #5201: one srv per machine), so two processes never frame the same file, and every process still reads frames. It runs on a blocking thread, at most 64 frames (about 64 MiB) per pass: a pass each minute, or every five seconds while work remains (`transcript/framer.rs`, driven by the truncate loop in `bootstrap/shutdown.rs`).
 
-**Who else is running.** Every frames-aware srv writes a small file, `transcripts/readers/<pid>.json` (its pid, version and the frame format it reads), when it opens the store, and removes it on exit. Before each pass the framer lists the running processes named `agentmux-srv*` (sysinfo, already a dependency; crash monitors excluded by their `--crash-monitor` argument) and frames nothing while one of them has no such file. An older build, or another agent's dev build from an older branch, therefore holds framing off until it exits. The Storage view says so ("compression waits: AgentMux 0.59.36 is still running").
+**Who else is running.** Every frames-aware srv writes a small file, `transcripts/readers/<pid>.json` (its pid, version and the frame format it reads), when it opens the store. The framer prunes the files of processes that have exited; the process start time in each file keeps a reused pid from passing for the srv that wrote it. Before each pass the framer lists the running processes named `agentmux-srv*` (sysinfo, already a dependency; crash monitors excluded by their `--crash-monitor` argument) and frames nothing while one of them has no such file. An older build, or another agent's dev build from an older branch, therefore holds framing off until it exits. The Storage view says so ("compression waits: AgentMux 0.59.36 is still running").
 
 For one file it repeats:
 
 1. Choose up to 16 consecutive part rows below the safety margin, none of them the file's last part.
 2. Read their bytes. All 16 must exist and be full (65,536 bytes). If any row is missing, short or fails to read (a damaged part), stop: **a damaged or lost part is never framed**, and the file is skipped and reported.
-3. Encode (codec 2 when the frame has finished deltas to leave out, otherwise codec 1), write the `db_file_frame` row. If this is the store's first frame, stamp `user_version` 3 first, in the same transaction.
+3. Encode (codec 2 when the frame has deltas to leave out, otherwise codec 1) and write the `db_file_frame` row. Before its first pass the framer stamps `user_version` 3, then checks the running processes again: a build that opened the store before the stamp is a running process the check sees, and one that starts after it refuses the store.
 4. In the same transaction: read the frame back, decode it, compare with the bytes read in step 2, **every byte, every frame**, and only then delete the part rows and put `rev` back. Any mismatch rolls back and records an incident.
 5. `COMMIT`. One frame per transaction, so a crash leaves either the old parts or the frame, never both missing.
 
 ### 5.2 The safety margin
 
-Frames cover parts that are at least 8 MiB behind the end of the file **and** whose last line was received at least 24 hours ago (from the file's receive-time sidecar; a file without one uses the byte margin alone). A transcript being written is untouched. Both numbers are settings.
+Frames cover parts that are at least 8 MiB behind the end of the file **and** whose last line was received at least 24 hours ago (from the file's receive-time sidecar; a file without one uses the byte margin alone). A transcript being written is untouched. Both are constants for now (`MARGIN_BYTES`, `MARGIN_MS`).
 
 ### 5.3 Setting and rollout
 
-`agent:transcriptframes` (off by default). Off: no new frames; existing frames still decode. `agent:transcriptdeltas` (on by default once frames are on) chooses codec 2 where it applies; off, every frame is codec 1. A `history.compact` command runs one pass on demand (used by tests and by the operator's "Compress now" in Warden > History > Storage).
+`agent:transcriptframes` (off by default). Off: no new frames; existing frames still decode. `agent:transcriptdeltas` (on by default once frames are on) chooses codec 2 where it applies; off, every frame is codec 1. A `history.compact` command (PR 4) runs one pass on demand (used by tests and by the operator's "Compress now" in Warden > History > Storage).
 
 ### 5.4 Rollback
 
@@ -135,7 +147,7 @@ Frames cover parts that are at least 8 MiB behind the end of the file **and** wh
 
 ## 8. Cleaning out the streaming deltas (codec 2)
 
-Decided 2026-10-22: built. On the sample it takes a 1 MiB frame from 8.89 MB to **7.47 MB** (16% smaller than compression alone).
+Decided 2026-10-22: built. On the sample it takes a 1 MiB frame from 8.89 MB to **7.47 MB** (16% smaller than compression alone); over the whole store, 11.5% (§2.1).
 
 **What a delta line is.** A reply streams as one line per few characters, each line mostly the same envelope around a little text:
 `{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}},"session_id":"…","parent_tool_use_id":null,"uuid":"…"}`
@@ -154,8 +166,9 @@ Tool input streams the same way, as `input_json_delta` / `partial_json`.
 | PR | What | Changes behaviour? |
 |---|---|---|
 | 1 + 2 | `db_file_frame`, codec 1, every read and write path of §4; codec 2 (§8): the encoder, the decoder, the verification, tests on synthetic transcripts (real transcripts are private and never go in the repository); the store accepting `user_version` 3 without writing it. One PR (#5324), so the first build that accepts 3 reads every codec | no: nothing creates a frame yet |
-| 3 | The framer (§5), its settings (off), the readers file and the running-instance check, the version stamp, `history.compact`, the Storage numbers, the recovery tool's decoders | only once the operator turns it on |
-| — | Offline run on the 2026-10-21 copy of the real store: frame everything, then read every line of every transcript and compare with the copy, byte for byte; measure the real ratio and the codec 2 rate | no (a copy) |
+| 3 | The framer (§5), its settings (off), the readers file and the running-instance check, the version stamp | only once the operator turns it on |
+| 4 | The recovery tool's decoders for both codecs (with a test vector the Rust encoder writes), `history.compact`, `decompress`, the Storage numbers. Lands before the operator turns frames on | no |
+| — | Offline run on a copy of the real store: every frame encoded and decoded under both codecs, byte for byte; the real ratio and codec 2 rate. Done 2026-10-22, §2.1 | no (a copy) |
 | — | The operator turns `agent:transcriptframes` on | yes |
 
 **Tests:** (1) for random files and random frame boundaries, `read_at` over every offset and length returns the original bytes, framed or not, with appends, truncates, replaces, copies and moves interleaved; (2) the framing transaction rolled back at each step leaves the old parts; (3) a decoder fuzz (truncated, flipped, oversized frames: an error, never a panic, never wrong bytes); (4) the offline replay above; (5) a guard that fails the build if a new `db_file_data` query appears outside the known sites; (6) for codec 2, the byte-exact rebuild over synthetic transcripts with the awkward cases (escapes, non-ASCII, key order, numbers, a reply split across frames, an interrupted reply).
