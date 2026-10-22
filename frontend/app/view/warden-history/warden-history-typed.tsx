@@ -48,6 +48,8 @@ export const WardenHistoryTyped = (props: { visible: boolean }): JSX.Element => 
             if (!ids.includes(agentId())) setAgentId(ids[0] ?? "");
             setError(null);
         } catch (e) {
+            // Not "Loading…" under the error: Refresh tries again.
+            if (agents() === null) setAgents([]);
             setError(String(e));
         }
     };

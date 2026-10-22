@@ -138,6 +138,17 @@ describe("Warden History → Typed", () => {
         await waitFor(() => expect(screen.getByText("msg 300 older")).toBeInTheDocument());
     });
 
+    it("says why the agents can't be listed instead of staying on Loading", async () => {
+        HistoryAgentsCommand.mockRejectedValueOnce(new Error("srv is busy"));
+        render(() => <WardenHistoryTyped visible={true} />);
+        await waitFor(() => expect(screen.getByText(/srv is busy/)).toBeInTheDocument());
+        expect(screen.getByText("No agent to show.")).toBeInTheDocument();
+        expect(screen.queryByText("Loading…")).toBeNull();
+        // Refresh tries again.
+        fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+        await waitFor(() => expect(screen.getByText("merge on approval")).toBeInTheDocument());
+    });
+
     it("says why when the history can't be read", async () => {
         AgentInputHistoryCommand.mockRejectedValue(new Error("srv is busy"));
         render(() => <WardenHistoryTyped visible={true} />);
