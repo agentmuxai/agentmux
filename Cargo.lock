@@ -243,6 +243,7 @@ dependencies = [
 name = "agentmux-srv"
 version = "0.59.37"
 dependencies = [
+ "aes 0.8.4",
  "age",
  "agentmux-common",
  "agentmux-procstats",
@@ -252,6 +253,7 @@ dependencies = [
  "base64 0.22.1",
  "bollard",
  "calamine",
+ "cbc 0.1.2",
  "chardetng",
  "chrono",
  "clap",
@@ -265,6 +267,7 @@ dependencies = [
  "flate2",
  "futures-util",
  "hex",
+ "hkdf",
  "hmac 0.12.1",
  "hyper",
  "hyper-util",
@@ -283,6 +286,7 @@ dependencies = [
  "objc2",
  "objc2-foundation",
  "parking_lot",
+ "pbkdf2",
  "portable-pty",
  "proptest",
  "quick-xml 0.39.4",

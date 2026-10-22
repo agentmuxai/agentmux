@@ -158,9 +158,12 @@ fn a_bitwarden_json_export_comes_in_as_logins_cards_notes_and_identity_numbers()
 }
 
 #[test]
-fn a_password_protected_bitwarden_export_says_how_to_get_one_that_isnt() {
-    let e = err_of(br#"{"encrypted": true, "passwordProtected": true, "data": "2.abc"}"#, "x.json");
-    assert!(e.contains("password-protected") && e.contains("unencrypted"), "{e}");
+fn a_bitwarden_export_that_cannot_be_opened_says_why() {
+    // Password-protected: the password is asked for (the file's own test is bitwarden_encrypted).
+    assert_eq!(err_of(br#"{"encrypted": true, "passwordProtected": true, "salt": "s", "data": "2.abc"}"#, "x.json"), "needs a password");
+    // Encrypted with the account's own key: only Bitwarden can open it.
+    let e = err_of(br#"{"encrypted": true, "data": "2.abc"}"#, "x.json");
+    assert!(e.contains("account's own key") && e.contains("export it again"), "{e}");
     assert!(err_of(b"{\"hello\": 1}", "x.json").contains("no items"));
     assert!(err_of(b"{not json", "x.json").contains("isn't a Bitwarden export"));
 }

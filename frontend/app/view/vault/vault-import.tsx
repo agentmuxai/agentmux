@@ -169,11 +169,12 @@ export function VaultImportDialog(props: { onClose: () => void }): JSX.Element {
                                 void unlock();
                             }}
                         >
-                            <Field label="Passphrase" layout="stacked" description="This file is encrypted. Type the passphrase it was exported with, or a KeePass database's master password.">
+                            <Field label="Passphrase" layout="stacked" description="This file is encrypted. Type the passphrase it was exported with: a Vault file's, a KeePass database's master password, or the password a Bitwarden export was protected with.">
                                 <TextInput type="password" autocomplete="new-password" spellcheck={false} autofocus value={pass()} onInput={(e) => setPass(e.currentTarget.value)} />
                             </Field>
                             <input type="submit" hidden />
                         </form>
+                        <Show when={/\.kdbx$/i.test((step() as Extract<ImportStep, { kind: "needs_passphrase" }>).fileName)}>
                         <div class="vault-keyfile">
                             <span class="warden-manager-dim">A KeePass database can also need a key file.</span>{" "}
                             <Show
@@ -194,6 +195,7 @@ export function VaultImportDialog(props: { onClose: () => void }): JSX.Element {
                                 )}
                             </Show>
                         </div>
+                        </Show>
                     </Show>
                     <Show when={step()?.kind === "needs_mapping" ? (step() as Extract<ImportStep, { kind: "needs_mapping" }>) : null}>
                         {(s) => (
