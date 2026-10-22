@@ -165,6 +165,8 @@ const REPLACED: &[(&str, &str)] = &[
     ("WorkUpdate", "Tasks with action \"update\""),
     ("WorkAsk", "Tasks with action \"ask\""),
     ("WorkSubmit", "Tasks with action \"submit\""),
+    ("WorkHold", "Tasks with action \"hold\""),
+    ("WorkUnhold", "Tasks with action \"unhold\""),
     ("WhoIsWorkingOn", "Presence with action \"who\""),
     ("ClaimWork", "Presence with action \"claim\""),
     ("ReleaseWork", "Presence with action \"release\""),

@@ -184,11 +184,20 @@ describe("Reveal and Copy", () => {
         expect(onClose).toHaveBeenCalledTimes(1);
     });
 
-    it("explains instead of asking where Windows Hello isn't built", async () => {
+    it("asks Touch ID, or the Mac's password, on macOS", async () => {
         setPlatform("darwin");
         open();
         await screen.findByRole("dialog");
-        expect(within(screen.getByRole("dialog")).getAllByText(/need Windows Hello for now/).length).toBeGreaterThan(0);
+        expect(within(screen.getByRole("dialog")).getAllByText(/Touch ID, or your Mac's password, confirms it's you/).length).toBeGreaterThan(0);
+        expect(within(part("number")).getByRole("button", { name: /Reveal/ })).toBeEnabled();
+        expect(within(part("number")).getByRole("button", { name: /Copy/ })).toBeEnabled();
+    });
+
+    it("explains instead of asking where nothing can confirm the person", async () => {
+        setPlatform("linux");
+        open();
+        await screen.findByRole("dialog");
+        expect(within(screen.getByRole("dialog")).getAllByText(/aren't available on this system yet/).length).toBeGreaterThan(0);
         expect(within(part("number")).getByRole("button", { name: /Reveal/ })).toBeDisabled();
         expect(within(part("number")).getByRole("button", { name: /Copy/ })).toBeDisabled();
     });

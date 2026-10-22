@@ -186,6 +186,9 @@ pub fn read_keyed(bytes: &[u8], file_name: &str, mapping: Option<&Mapping>, pass
     let text = text.trim_start_matches('\u{feff}');
     let trimmed = text.trim_start();
     if trimmed.starts_with('{') {
+        if let Some(own) = read_own_json(text) {
+            return own;
+        }
         return bitwarden::read(text, passphrase);
     }
     if file_name.to_ascii_lowercase().ends_with(".env") || env::looks_like_env(text) {
@@ -194,5 +197,38 @@ pub fn read_keyed(bytes: &[u8], file_name: &str, mapping: Option<&Mapping>, pass
     logins::read(text, mapping)
 }
 
+/// AgentMux's own plain JSON export (a `.vault` file's contents, unencrypted), or `None` when the
+/// text is some other JSON.
+fn read_own_json(text: &str) -> Option<Result<Imported, ReadError>> {
+    /// Just enough to tell whose JSON it is, without reading the entries.
+    #[derive(Deserialize)]
+    struct Probe {
+        format: Option<String>,
+    }
+    #[derive(Deserialize)]
+    struct File {
+        #[serde(default)]
+        version: u32,
+        entries: Vec<Incoming>,
+    }
+    let probe: Probe = serde_json::from_str(text).ok()?;
+    if probe.format.as_deref() != Some(super::transfer::FORMAT) {
+        return None;
+    }
+    let file: File = match serde_json::from_str(text) {
+        Ok(f) => f,
+        Err(_) => return Some(Err("this isn't a Vault export: its contents aren't in the expected shape".into())),
+    };
+    if file.version > super::transfer::VERSION {
+        return Some(Err(format!("this file was made by a newer AgentMux (format version {}); update AgentMux to import it", file.version).into()));
+    }
+    if file.entries.len() > MAX_ITEMS {
+        return Some(Err(format!("this file has more than {MAX_ITEMS} entries, more than the Vault imports").into()));
+    }
+    Some(Ok(Imported { source: Source::Vault, entries: file.entries, skipped: Vec::new(), plaintext: true }))
+}
+
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod fuzz_tests;

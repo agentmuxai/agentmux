@@ -182,6 +182,40 @@ export async function exportVault(args: { ids?: string[]; passphrase: string; de
     return { count: res?.count ?? 0, file_name: res?.file_name ?? "" };
 }
 
+/** The two unencrypted formats, for taking the Vault to another manager. */
+export type PlainFormat = "csv" | "json";
+
+/** Where an unencrypted export will be written, before anything is. */
+export interface PlainPlace {
+    pickId: string;
+    fileName: string;
+    folder: string;
+    /** The cloud service that syncs that folder, if one does. */
+    syncedFolder: string | null;
+}
+
+/** Step one of an unencrypted export: the host asks where to save. `null` if the person closed the dialog. */
+export async function choosePlainPlace(args: { format: PlainFormat; defaultName: string }): Promise<PlainPlace | null> {
+    const relay = getApi()?.approvals?.vaultExport;
+    if (!relay) throw new Error("Export needs the AgentMux desktop app.");
+    const res = (await relay({ format: args.format, default_name: args.defaultName })) as { cancelled?: boolean; pick_id?: string; file_name?: string; folder?: string; synced_folder?: string | null };
+    if (res?.cancelled || !res?.pick_id) return null;
+    return { pickId: res.pick_id, fileName: res.file_name ?? "", folder: res.folder ?? "", syncedFolder: res.synced_folder ?? null };
+}
+
+/** Step two: after the person typed the confirmation, the host has the OS confirm them and srv writes the file. */
+export async function exportPlain(args: { format: PlainFormat; pickId: string; ids?: string[] }): Promise<{ count: number; file_name: string }> {
+    const relay = getApi()?.approvals?.vaultExport;
+    if (!relay) throw new Error("Export needs the AgentMux desktop app.");
+    const res = (await relay({ format: args.format, pick_id: args.pickId, ids: args.ids, confirmed: true })) as { count?: number; file_name?: string };
+    return { count: res?.count ?? 0, file_name: res?.file_name ?? "" };
+}
+
+/** The person backed out after choosing the place: the host forgets it. */
+export async function cancelPlainPlace(format: PlainFormat): Promise<void> {
+    await getApi()?.approvals?.vaultExport?.({ format, cancel: true }).catch(() => undefined);
+}
+
 export type Duplicates = "skip" | "replace" | "keep_both";
 
 /** Where an import is: the file needs its passphrase, or is read and described. */

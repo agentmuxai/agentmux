@@ -285,3 +285,98 @@ fn an_undelivered_start_is_undone_without_using_an_attempt() {
     s.work_unhold("t", 2200).unwrap().unwrap();
     assert_eq!(claim(&s, "Loap-3", "uid-l").unwrap().id, "t", "still claimable: no attempt was burnt");
 }
+
+// SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md §3.2: the holder pauses its task.
+#[test]
+fn a_holder_pauses_its_task_on_hold_and_gets_its_attempt_back() {
+    let (s, _d) = store();
+    s.work_queue_enqueue(&item("t", 1000)).unwrap();
+    let c = claim(&s, "Loap-3", "uid-l").unwrap();
+    assert!(s.work_hold_own("t", "Naki", "uid-n", c.attempts, 2000).unwrap().is_none(), "not the holder");
+    assert!(s.work_hold_own("t", "Loap-3", "uid-l", c.attempts + 1, 2000).unwrap().is_none(), "stale fence");
+    assert!(s.work_hold_own("t", "Loap-3", "uid-l", c.attempts, 2000).unwrap().is_some());
+    let t = s.work_queue_get("t").unwrap().unwrap();
+    assert_eq!(
+        (t.state.as_str(), t.attempts, t.max_attempts, t.claimed_by.as_str(), t.claim_expires),
+        (work_state::HELD, 1, 4, "", None),
+        "paused, not failed: the attempt doesn't count, and the fence keeps counting"
+    );
+    assert_eq!((t.target_agent.as_str(), t.target_agent_uid.as_str()), ("Loap-3", "uid-l"), "taken from anyone, it comes back to its holder");
+    assert!(claim(&s, "Naki", "uid-n").is_none(), "held: nobody takes it");
+
+    // Reclaimed, the task has a new fence: a late call from the paused claim
+    // can't touch the new one.
+    let (again, _) = s
+        .work_claim_one("t", &ClaimFilter { kind: None, agent_id: "Loap-3".into(), agent_uid: "uid-l".into(), groups: vec![] }, 5000, 60_000)
+        .unwrap()
+        .unwrap();
+    assert_eq!(again.attempts, c.attempts + 1);
+    assert!(s.work_submit("t", "Loap-3", "uid-l", c.attempts, "stale", 6000).unwrap().is_none(), "the paused claim's fence is spent");
+    assert!(s.work_ask("t", "Loap-3", "uid-l", again.attempts, 6000).unwrap().is_some());
+}
+
+#[test]
+fn a_paused_group_task_comes_back_to_its_holder_not_the_group() {
+    let (s, _d) = store();
+    s.work_queue_enqueue(&WorkItem { target_group: "g1".into(), ..item("t", 1000) }).unwrap();
+    let f = ClaimFilter { kind: None, agent_id: "Loap-3".into(), agent_uid: "uid-l".into(), groups: vec!["g1".into()] };
+    let c = s.work_queue_claim(&f, 5000, 60_000).unwrap().unwrap();
+    s.work_hold_own("t", "Loap-3", "uid-l", c.attempts, 6000).unwrap().unwrap();
+    s.work_unhold("t", 6100).unwrap().unwrap();
+    let t = s.work_queue_get("t").unwrap().unwrap();
+    assert_eq!((t.target_agent.as_str(), t.target_agent_uid.as_str(), t.target_group.as_str()), ("Loap-3", "uid-l", ""));
+    let other = ClaimFilter { kind: None, agent_id: "Naki".into(), agent_uid: "uid-n".into(), groups: vec!["g1".into()] };
+    assert!(s.work_queue_claim(&other, 7000, 60_000).unwrap().is_none(), "another member can't take the paused work");
+}
+
+#[test]
+fn a_blocked_task_cant_be_paused_and_a_task_for_someone_keeps_its_target() {
+    let (s, _d) = store();
+    s.work_queue_enqueue(&for_agent("t", 1000, "Loap-3", "uid-l")).unwrap();
+    let c = claim(&s, "Loap-3", "uid-l").unwrap();
+    s.work_ask("t", "Loap-3", "uid-l", c.attempts, 1500).unwrap().unwrap();
+    assert!(s.work_hold_own("t", "Loap-3", "uid-l", c.attempts, 2000).unwrap().is_none(), "its question is the pause");
+    s.work_answered("t", 2500, 60_000).unwrap().unwrap();
+    s.work_hold_own("t", "Loap-3", "uid-l", c.attempts, 3000).unwrap().unwrap();
+    let t = s.work_queue_get("t").unwrap().unwrap();
+    assert_eq!((t.target_agent.as_str(), t.target_agent_uid.as_str()), ("Loap-3", "uid-l"));
+}
+
+// §3.3: claiming one named task.
+fn named(s: &Store, id: &str, agent: &str, uid: &str) -> Option<(WorkItem, String)> {
+    let f = ClaimFilter { kind: None, agent_id: agent.into(), agent_uid: uid.into(), groups: vec![] };
+    s.work_claim_one(id, &f, 5000, 60_000).unwrap()
+}
+
+#[test]
+fn a_named_claim_takes_that_task_even_on_hold_and_no_other() {
+    let (s, _d) = store();
+    s.work_queue_enqueue(&for_agent("first", 1000, "Loap-3", "uid-l")).unwrap();
+    s.work_queue_enqueue(&WorkItem { state: work_state::HELD.into(), ..for_agent("later", 2000, "Loap-3", "uid-l") }).unwrap();
+    let (t, from) = named(&s, "later", "Loap-3", "uid-l").unwrap();
+    assert_eq!((t.id.as_str(), t.state.as_str(), t.attempts, from.as_str()), ("later", work_state::CLAIMED, 1, work_state::HELD));
+    assert_eq!(s.work_queue_get("first").unwrap().unwrap().state, work_state::OPEN, "the other task is untouched");
+    assert!(named(&s, "later", "Loap-3", "uid-l").is_none(), "already claimed");
+    let (t, from) = named(&s, "first", "Loap-3", "uid-l").unwrap();
+    assert_eq!((t.id.as_str(), from.as_str()), ("first", work_state::OPEN));
+}
+
+#[test]
+fn a_named_claim_keeps_the_queues_rules() {
+    let (s, _d) = store();
+    s.work_queue_enqueue(&for_agent("theirs", 1000, "Naki", "uid-n")).unwrap();
+    assert!(named(&s, "theirs", "Loap-3", "uid-l").is_none(), "another agent's task");
+    assert!(named(&s, "theirs", "Naki", "uid-other").is_none(), "a UID-addressed task needs that UID");
+
+    s.work_queue_enqueue(&item("first", 1000)).unwrap();
+    s.work_queue_enqueue(&item("second", 1100)).unwrap();
+    s.work_deps_set("second", &["first".to_string()]).unwrap();
+    assert!(named(&s, "second", "Loap-3", "uid-l").is_none(), "it starts after an unfinished task");
+
+    s.work_queue_enqueue(&WorkItem { kind: "repro".into(), ..item("repro", 1250) }).unwrap();
+    let review = ClaimFilter { kind: Some("review".into()), agent_id: "Loap-3".into(), agent_uid: "uid-l".into(), groups: vec![] };
+    assert!(s.work_claim_one("repro", &review, 5000, 60_000).unwrap().is_none(), "a kind asked for filters a named claim too");
+    s.work_queue_enqueue(&WorkItem { not_before: Some(9_999_999), ..item("later", 1300) }).unwrap();
+    assert!(named(&s, "later", "Loap-3", "uid-l").is_none(), "not before its time");
+    assert!(named(&s, "missing", "Loap-3", "uid-l").is_none());
+}

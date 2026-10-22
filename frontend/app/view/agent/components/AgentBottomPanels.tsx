@@ -27,6 +27,7 @@ import { AgentSessionNotices } from "./AgentSessionNotices";
 import { compactionModelKey } from "../compaction-estimate";
 import { toolActivity } from "@/app/store/agent-pane-state/tool-labels";
 import { ForkProviderFallbackBanner } from "./ForkProviderFallbackBanner";
+import { HistoryLoadFailedBanner } from "./HistoryLoadFailedBanner";
 import { PaneRow } from "./PaneRow";
 import { TurnAwayDigest } from "./TurnAwayDigest";
 import { focusManager } from "@/app/store/focusManager";
@@ -207,6 +208,8 @@ export const AgentBottomPanels = (props: {
             lands with no `--fork-session` support; stays for the pane's
             lifetime, no dismiss button (quick-fork.ts). */}
         <ForkProviderFallbackBanner meta={() => props.block()?.meta} />
+        {/* The earlier messages couldn't be loaded (InitFailed): say so, not an empty pane. */}
+        <HistoryLoadFailedBanner phase={() => props.paneModel.state.initPhase} />
 
         {/* Pinned activity dock — long-running shells (and later crons /
             subagents) sit just above the composer so task status is adjacent

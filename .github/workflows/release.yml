@@ -327,10 +327,16 @@ jobs:
   # condition stayed true, ran anyway, downloaded zero artifacts, and failed
   # confusingly later instead of being cleanly blocked at the real point of
   # failure.
+  #
+  # build-macos is checked by its result as well: a job killed by a time limit
+  # ends as `cancelled`, which `failure()` doesn't count, and `cancelled()`
+  # only covers the whole run. v0.59.37 shipped without macOS that way. So
+  # publish needs build-macos to have succeeded, or to have been skipped
+  # because macOS signing isn't set up (check-macos), never anything else.
   publish:
     name: Publish release
     needs: [verify, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos]
-    if: ${{ !failure() && !cancelled() }}
+    if: ${{ !failure() && !cancelled() && (needs.build-macos.result == 'success' || (needs.build-macos.result == 'skipped' && needs.check-macos.outputs.available != 'true')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -10,13 +10,45 @@
 //! line rule (`lines.rs`), so readers skip it, and every byte after it keeps
 //! its offset, so `output.idx` still finds the lines that follow. Only the
 //! lines inside the damaged part are lost, and each read of it is logged.
+//!
+//! A part with no row at all, inside the size its file claims, is treated the
+//! same way, but only in the shared transcript store and only for transcript
+//! text ([`lost_reads_blank`]). Elsewhere it means a build without transactions
+//! is mid-write (it raised the size before storing the parts), so it stays
+//! "not stored yet". In the shared store every writer commits size and parts
+//! together (its version stamp keeps older builds out, #5203), so a missing part
+//! can only be lost: the 2026-10-22 repair left some at the very end of a
+//! transcript, and the pane, which opens at the newest lines, stayed empty.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::{LazyLock, Mutex};
 
 use rusqlite::{params, Connection, ErrorCode};
 
-use super::core::PART_DATA_SIZE;
+use super::core::{GLOBAL_TRANSCRIPT_STORE_VERSION, PART_DATA_SIZE};
 use crate::backend::storage::error::StoreError;
+
+/// Whether a part missing inside `name`'s size is lost content, to read as
+/// blank: transcript text (`output`) in the shared store, the one database
+/// stamped [`GLOBAL_TRANSCRIPT_STORE_VERSION`]. Binary files keep refusing
+/// (spaces would read as offsets or stamps), and so does every per-channel
+/// store. Asked only after a read came up short.
+pub(super) fn lost_reads_blank(conn: &Connection, name: &str) -> Result<bool, StoreError> {
+    if name != "output" {
+        return Ok(false);
+    }
+    let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    Ok(version >= GLOBAL_TRANSCRIPT_STORE_VERSION)
+}
+
+/// Log a file read past a lost part, once per file in this process: every
+/// read of a pane's newest page would otherwise log it again.
+pub(super) fn note_lost(zone_id: &str, name: &str) {
+    static SEEN: LazyLock<Mutex<HashSet<(String, String)>>> = LazyLock::new(Default::default);
+    if SEEN.lock().unwrap_or_else(|e| e.into_inner()).insert((zone_id.to_string(), name.to_string())) {
+        tracing::warn!(zone = zone_id, file = name, "filestore: a lost part inside the file's size reads as blank");
+    }
+}
 
 /// SQLite reported the database file itself as damaged.
 pub(super) fn is_corrupt(e: &rusqlite::Error) -> bool {
@@ -34,11 +66,12 @@ pub(super) fn load_parts(
     size: i64,
 ) -> Result<HashMap<i32, Vec<u8>>, StoreError> {
     // One range query, not one per part: reading an 800 MB transcript part by
-    // part was 12,270 queries and took 12 s in a release build.
-    match load_range(conn, zone_id, name, start, end) {
+    // part was 12,270 queries and took 12 s in a release build. Rows and
+    // frames are read in one snapshot (frames.rs `in_snapshot`).
+    super::frames::in_snapshot(conn, || match load_range(conn, zone_id, name, start, end) {
         Err(StoreError::Sqlite(e)) if is_corrupt(&e) => load_each(conn, zone_id, name, start, end, size),
         other => other,
-    }
+    })
 }
 
 /// `[offset, offset + len)` of a file and how many of its bytes are stored,
@@ -50,6 +83,7 @@ pub(super) fn read_covered_past_damage(
     name: &str,
     offset: i64,
     len: i64,
+    fill: u8,
 ) -> Result<(Vec<u8>, usize), StoreError> {
     if len <= 0 {
         return Ok((Vec::new(), 0));
@@ -62,7 +96,7 @@ pub(super) fn read_covered_past_damage(
     let pds = PART_DATA_SIZE as i64;
     let (first, last) = ((offset / pds) as i32, ((offset + len - 1) / pds) as i32);
     let parts = load_each(conn, zone_id, name, first, last, size)?;
-    let mut out = vec![0u8; len as usize];
+    let mut out = vec![fill; len as usize];
     let mut covered = 0usize;
     for (idx, data) in &parts {
         let part_start = *idx as i64 * pds;
@@ -90,6 +124,9 @@ fn load_range(conn: &Connection, zone_id: &str, name: &str, start: i32, end: i32
         let (idx, data) = row?;
         parts.insert(idx, data);
     }
+    drop(stmt);
+    // Parts with no row may be in a compressed frame (frames.rs).
+    super::frames::fill_parts(conn, zone_id, name, start, end, &mut parts, false)?;
     Ok(parts)
 }
 
@@ -126,6 +163,9 @@ fn load_each(
             Err(e) => return Err(e.into()),
         }
     }
+    drop(one);
+    // A frame holding parts with no row fills them; a damaged frame reads as blank.
+    super::frames::fill_parts(conn, zone_id, name, start, end, &mut parts, true)?;
     Ok(parts)
 }
 

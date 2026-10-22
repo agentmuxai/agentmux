@@ -582,6 +582,13 @@ async fn route_command(
             state.browser_panes.set_rects(state, &window_label, rects, base).await;
             Ok(serde_json::json!(true))
         }
+        "browser_pane_hibernation_check" => {
+            // What the page is doing that a hibernation would lose
+            // (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md §5.3).
+            let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
+            crate::browser_api::hibernation::check(state, block_id).await
+        }
+        "memory_pressure_level" => Ok(serde_json::json!(crate::memory_pressure::current_level().as_str())),
         "browser_pane_close" => {
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
             // Window-aware close (tear-off / redock race fix). During a

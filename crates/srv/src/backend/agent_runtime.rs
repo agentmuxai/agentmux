@@ -251,6 +251,20 @@ fn flag_value<'a>(flags: &'a [String], names: &[&str]) -> Option<&'a str> {
     found
 }
 
+/// `args` without any `--model` / `-m` (and its value) or `--model=…`.
+fn without_model_flags(args: Vec<String>) -> Vec<String> {
+    let mut out = Vec::with_capacity(args.len());
+    let mut it = args.into_iter();
+    while let Some(a) = it.next() {
+        if a == "--model" || a == "-m" {
+            it.next();
+        } else if !a.starts_with("--model=") {
+            out.push(a);
+        }
+    }
+    out
+}
+
 /// `base` without any of [`OWNED_FLAGS`] (and their values).
 fn without_owned_flags(base: Vec<String>) -> Vec<String> {
     let mut out = Vec::with_capacity(base.len());
@@ -407,6 +421,30 @@ pub(crate) fn apply_remembered(
     (base, front.join(" "), mode_for_menu)
 }
 
+/// The models this provider's accounts list, when AgentMux knows them: Codex's
+/// from its CLI's per-account cache (`codex_models`); empty otherwise.
+fn account_listed_models(provider_id: &str) -> Vec<String> {
+    if provider_id == "codex" {
+        crate::backend::codex_models::installed_common_model_ids()
+    } else {
+        Vec::new()
+    }
+}
+
+/// The model a pane starts on: the first its accounts list, when known, else
+/// the catalog default (`default_model_for`). For Codex an unknown list (a
+/// fresh sign-in before its first turn) gives `""`: no `--model`, so the CLI
+/// picks one the account offers rather than a catalog id it may not run.
+/// `None` for a provider whose model the runtime menu does not wire.
+fn launch_default_model(provider_id: &str, listed: &[String]) -> Option<String> {
+    let catalog = default_model_for(provider_id)?;
+    Some(match listed.first() {
+        Some(first) => first.clone(),
+        None if provider_id == "codex" => String::new(),
+        None => catalog.to_string(),
+    })
+}
+
 /// Build `cmd:args` and `agent:runtime` for a freshly opened pane.
 ///
 /// `base` is the catalog argv for the pane's controller. `provider_flags` is
@@ -423,7 +461,8 @@ pub(crate) fn seed_launch(
         .split_whitespace()
         .map(str::to_string)
         .collect();
-    let Some(default_model) = default_model_for(provider_id) else {
+    let listed = account_listed_models(provider_id);
+    let Some(default_model) = launch_default_model(provider_id, &listed) else {
         let mut cli_args = base;
         cli_args.extend(flags);
         return SeededLaunch {
@@ -434,7 +473,7 @@ pub(crate) fn seed_launch(
 
     let flag_model = flag_value(&flags, &["--model", "-m"]);
     let flag_effort = flag_value(&flags, &["--effort"]);
-    let model = flag_model.unwrap_or(default_model).to_string();
+    let model = flag_model.map(str::to_string).unwrap_or(default_model);
     let effort = flag_effort.unwrap_or(DEFAULT_EFFORT).to_string();
 
     let mut cli_args = without_owned_flags(base);
@@ -459,7 +498,7 @@ pub(crate) fn seed_launch(
             }
         }
         "codex" | "antigravity" => {
-            if flag_model.is_none() {
+            if flag_model.is_none() && !model.is_empty() {
                 cli_args.extend(["--model".to_string(), model.clone()]);
             }
         }
@@ -503,6 +542,13 @@ fn is_claude_model(m: &str) -> bool {
 /// agent's choice. Leaves alone a provider the menu does not wire, an unknown
 /// provider, and an empty argv (nothing to extend). Idempotent.
 pub(crate) fn with_runtime_flags(meta: &MetaMapType, args: Vec<String>) -> Vec<String> {
+    let raw_provider = crate::backend::obj::meta_get_string(meta, "agentProvider", "");
+    let listed = account_listed_models(crate::backend::providers::resolve_provider_alias(&raw_provider));
+    with_runtime_flags_listed(meta, args, &listed)
+}
+
+/// [`with_runtime_flags`], given the models the provider's accounts list.
+fn with_runtime_flags_listed(meta: &MetaMapType, args: Vec<String>, listed: &[String]) -> Vec<String> {
     if args.is_empty() {
         return args;
     }
@@ -512,7 +558,7 @@ pub(crate) fn with_runtime_flags(meta: &MetaMapType, args: Vec<String>) -> Vec<S
     // for — would silently get nothing (ReAgent P1 on #4116). Unknown → "".
     let raw_provider = crate::backend::obj::meta_get_string(meta, "agentProvider", "");
     let provider_id = crate::backend::providers::resolve_provider_alias(&raw_provider);
-    let Some(default_model) = default_model_for(provider_id) else {
+    let Some(default_model) = launch_default_model(provider_id, listed) else {
         return args;
     };
     let runtime = |key: &str| {
@@ -523,18 +569,37 @@ pub(crate) fn with_runtime_flags(meta: &MetaMapType, args: Vec<String>) -> Vec<S
             .map(str::to_string)
     };
 
-    let have_model = flag_value(&args, &["--model", "-m"]).map(str::to_string);
+    let mut args = args;
+    let mut have_model = flag_value(&args, &["--model", "-m"]).map(str::to_string);
+    // A Codex model already in the stored argv (an older pane's `--model
+    // gpt-5.5`) that no account lists any more is dropped and chosen again
+    // below, unless it is the agent definition's own choice.
+    if provider_id == "codex" && !listed.is_empty() {
+        let definition_flags: Vec<String> = crate::backend::obj::meta_get_string(meta, "agent:provider_flags", "")
+            .split_whitespace()
+            .map(str::to_string)
+            .collect();
+        let definition_model = flag_value(&definition_flags, &["--model", "-m"]);
+        if let Some(m) = have_model.as_deref() {
+            if !listed.iter().any(|l| l == m) && definition_model != Some(m) {
+                args = without_model_flags(args);
+                have_model = None;
+            }
+        }
+    }
     let have_effort = flag_value(&args, &["--effort"]).is_some();
     let model = have_model.clone().unwrap_or_else(|| {
         runtime("model")
             .filter(|m| match provider_id {
-                "codex" => !is_claude_model(m),
+                // A model no Codex account lists any more (gpt-5.5 on
+                // 2026-10-22) would fail every turn: the default instead.
+                "codex" => !is_claude_model(m) && (listed.is_empty() || listed.iter().any(|l| l == m)),
                 // agy's own ids include `claude-sonnet-4-6`; only the bare
                 // Claude aliases, carried over from a Claude pane, are foreign.
                 "antigravity" => !matches!(m.as_str(), "opus" | "sonnet" | "haiku"),
                 _ => true,
             })
-            .unwrap_or_else(|| default_model.to_string())
+            .unwrap_or_else(|| default_model.clone())
     });
 
     let mut out = args;
@@ -549,7 +614,7 @@ pub(crate) fn with_runtime_flags(meta: &MetaMapType, args: Vec<String>) -> Vec<S
             }
         }
         "codex" => {
-            if have_model.is_none() {
+            if have_model.is_none() && !model.is_empty() {
                 // The stdin marker `-` must end up last even when the stored
                 // argv has flags after it (provider_flags were appended past it).
                 let marker = out.iter().rposition(|a| a == "-").map(|i| out.remove(i));
@@ -864,7 +929,8 @@ mod tests {
                     "--model" => out.cli_args.get(i + 1).cloned(),
                     _ => a.strip_prefix("--model=").map(str::to_string),
                 })
-                .unwrap();
+                // Codex with no known account list names none: runtime "".
+                .unwrap_or_default();
             assert_eq!(rt["model"], in_args, "{provider} {flags:?}");
         }
     }
@@ -976,10 +1042,10 @@ mod tests {
 
     #[test]
     fn codex_keeps_its_stdin_marker_last() {
-        let out = seed_launch("codex", s(&["exec", "--json", "-"]), "");
+        let out = seed_launch("codex", s(&["exec", "--json", "-"]), "--model gpt-6-astra");
         assert_eq!(
             out.cli_args,
-            s(&["exec", "--json", "--model", "gpt-5.5", "-"])
+            s(&["exec", "--json", "--model", "gpt-6-astra", "-"])
         );
     }
 
@@ -1172,13 +1238,41 @@ mod tests {
     fn a_claude_model_stored_on_a_codex_pane_never_reaches_codex() {
         for stale in ["opus", "sonnet", "haiku", "claude-sonnet-5-5"] {
             let meta = meta_with("codex", Some(json!({ "model": stale })));
+            // No account list in tests: the CLI picks, so no `--model` at all.
             let out = with_runtime_flags(&meta, s(&["exec", "-"]));
-            assert_eq!(
-                after(&out, "--model").as_deref(),
-                Some("gpt-5.5"),
-                "{stale}"
-            );
+            assert_eq!(out, s(&["exec", "-"]), "{stale}");
+            let listed = s(&["gpt-6-astra"]);
+            let out = with_runtime_flags_listed(&meta, s(&["exec", "-"]), &listed);
+            assert_eq!(after(&out, "--model").as_deref(), Some("gpt-6-astra"), "{stale}");
         }
+    }
+
+    /// Codex's accounts list their own models (SPEC_CODEX_OAUTH_IN_CONNECTORS_AND_EMAIL_LABELS_2026_10_22.md §4):
+    /// a pane srv opens starts on the first of them, and a stored model none
+    /// lists is replaced by it rather than failing every turn.
+    #[test]
+    fn a_codex_pane_starts_on_and_keeps_to_what_its_accounts_list() {
+        let listed = s(&["gpt-7-nova", "gpt-6-astra"]);
+        assert_eq!(launch_default_model("codex", &listed).as_deref(), Some("gpt-7-nova"));
+        assert_eq!(launch_default_model("codex", &[]).as_deref(), Some(""), "no list yet: none, the CLI picks");
+        assert_eq!(seed_launch("codex", s(&["exec", "-"]), "").cli_args, s(&["exec", "-"]));
+        assert_eq!(launch_default_model("aider", &listed), None, "a provider the menu doesn't wire");
+
+        let run = |model: &str| {
+            let meta = meta_with("codex", Some(json!({ "model": model })));
+            after(&with_runtime_flags_listed(&meta, s(&["exec", "-"]), &listed), "--model")
+        };
+        assert_eq!(run("gpt-6-astra").as_deref(), Some("gpt-6-astra"), "a listed pick is kept");
+        assert_eq!(run("gpt-5.5").as_deref(), Some("gpt-7-nova"), "a retired one is replaced");
+
+        // Already in the stored argv (an older pane): replaced too, once, and
+        // the stdin marker stays last; but the definition's own model is kept.
+        let mut meta = meta_with("codex", Some(json!({ "model": "gpt-5.5" })));
+        let out = with_runtime_flags_listed(&meta, s(&["exec", "--model", "gpt-5.5", "-"]), &listed);
+        assert_eq!(out, s(&["exec", "--model", "gpt-7-nova", "-"]));
+        meta.insert("agent:provider_flags".to_string(), json!("--model gpt-5.5"));
+        let out = with_runtime_flags_listed(&meta, s(&["exec", "-", "--model", "gpt-5.5"]), &listed);
+        assert_eq!(after(&out, "--model").as_deref(), Some("gpt-5.5"), "the definition's choice");
     }
 
     #[test]

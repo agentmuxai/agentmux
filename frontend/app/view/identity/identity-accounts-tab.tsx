@@ -3,7 +3,14 @@
 
 import { createEffect, createSignal, For, on, Show, type Accessor, type JSX } from "solid-js";
 import type { Account, IdentityViewModel } from "./identity-model";
-import { accountLabel, agentsAssignedToAccount, KIND_LABELS, PROVIDER_LABELS } from "./identity-model";
+import {
+    accountLabel,
+    agentsAssignedToAccount,
+    KIND_LABELS,
+    PROVIDER_LABELS,
+    revokeFailureText,
+    revokesOnDelete,
+} from "./identity-model";
 import { useAgentDefinitions } from "@/app/view/agent/components/AgentPicker";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -14,6 +21,8 @@ import { buildAccountRowMenu } from "./bind-to-agent-menu";
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import "./identity-view.scss";
 import { Button, IconButton } from "@/app/element/ui";
+import { accountStatus } from "@/app/view/accounts/account-card";
+import { OAuthAccountSection } from "@/app/view/accounts/OAuthAccountSection";
 
 // CLI providers whose config dir holds conversation history that a delete
 // keeps: those with a `history_native_subdir` in
@@ -26,6 +35,7 @@ const STATUS_DOT: Record<string, string> = {
     invalid: "status-dot status-invalid",
     checking: "status-dot status-checking",
     unknown: "status-dot status-unknown",
+    needs_reauth: "status-dot status-expired",
 };
 
 // ── Accounts tab ─────────────────────────────────────────────────────────────
@@ -142,6 +152,41 @@ export function AccountDeleteNotice({ model }: { model: IdentityViewModel }): JS
                         <IconButton icon="xmark" label="Dismiss" density="compact" onClick={() => model.dismissDeleteNotice()} />
                     </div>
                 )}
+            </Show>
+            {/* Signing out at the provider failed and the account was kept
+                (SPEC_GOOGLE_CONNECTORS_GMAIL_CALENDAR_DRIVE_2026_10_14.md §7
+                "Disconnect"): the grant would otherwise live on there. */}
+            <Show when={model.revokeFailureAtom()}>
+                {(failure) => {
+                    const [busy, setBusy] = createSignal<"retry" | "remove" | null>(null);
+                    const run = async (which: "retry" | "remove") => {
+                        setBusy(which);
+                        try {
+                            await (which === "retry" ? model.retryRevoke() : model.removeWithoutRevoke());
+                        } finally {
+                            setBusy(null);
+                        }
+                    };
+                    return (
+                        <div class="identity-delete-notice" role="alert">
+                            <span class="identity-delete-notice-icon" aria-hidden="true">⚠</span>
+                            <span class="identity-delete-notice-text">{revokeFailureText(failure())}</span>
+                            <Button density="compact" busy={busy() === "retry"} disabled={!!busy()} onClick={() => void run("retry")}>
+                                Try again
+                            </Button>
+                            <Button
+                                density="compact"
+                                tone="danger"
+                                busy={busy() === "remove"}
+                                disabled={!!busy()}
+                                onClick={() => void run("remove")}
+                            >
+                                Remove anyway
+                            </Button>
+                            <IconButton icon="xmark" label="Dismiss" density="compact" onClick={() => model.dismissRevokeFailure()} />
+                        </div>
+                    );
+                }}
             </Show>
         </>
     );
@@ -278,7 +323,9 @@ export function AccountDetailPanel({ model, account }: { model: IdentityViewMode
                     </Show>
                 </span>
                 <span class={`${STATUS_DOT[account.status] ?? STATUS_DOT["unknown"]} detail-status`} title={account.status} />
-                <span class="identity-detail-status-text" data-status={account.status}>{account.status}</span>
+                <span class="identity-detail-status-text" data-status={account.status}>
+                    {accountStatus(account.status).label}
+                </span>
             </div>
 
             {/* Resolve the label via the brand so CLI-OAuth accounts surface "via <CLI>" —
@@ -350,6 +397,7 @@ export function AccountDetailPanel({ model, account }: { model: IdentityViewMode
             <Show when={account.context.description}>
                 <DetailField label="Notes" value={account.context.description!} />
             </Show>
+            <OAuthAccountSection account={account} />
 
             <div class="identity-detail-section">Used by</div>
             <Show
@@ -401,7 +449,10 @@ export function DeleteAccountConfirm({ model, account }: { model: IdentityViewMo
     const usedBy = useAccountAgentNames(account);
     const backend = account.secret_ref?.backend;
     const keepsHistory = backend === "oauth_config_dir" && PROVIDERS_WITH_KEPT_HISTORY.has(account.provider);
-    const isKey = backend === "keychain" || backend === "env" || backend === "secrets_manager";
+    // srv signs a Google OAuth account out at Google before deleting it.
+    const signsOut = revokesOnDelete(account) && account.provider === "google";
+    const isKey = !revokesOnDelete(account) && (backend === "keychain" || backend === "env" || backend === "secrets_manager");
+    const grantStays = revokesOnDelete(account) && !signsOut;
     const providerName = PROVIDER_LABELS[brandForProvider(account.provider)] ?? account.provider;
     const editing = () => model.formOpenAtom() && model.editingAccountAtom()?.id === account.id;
     return (
@@ -428,6 +479,12 @@ export function DeleteAccountConfirm({ model, account }: { model: IdentityViewMo
                 </Show>
                 <Show when={isKey}>
                     <p>The key itself still works. To revoke it, do that at {providerName}.</p>
+                </Show>
+                <Show when={signsOut}>
+                    <p>It signs out of {providerName} first, so AgentMux's access ends there too.</p>
+                </Show>
+                <Show when={grantStays}>
+                    <p>Its access stays authorized at {providerName}. To end it, revoke it there.</p>
                 </Show>
                 <Show when={editing()}>
                     <p>Unsaved changes to this account will be lost.</p>

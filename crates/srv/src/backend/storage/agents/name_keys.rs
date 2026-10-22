@@ -28,7 +28,7 @@ pub struct AgentNameMatch {
 /// have to be one critical section, or two concurrent inserts race to the
 /// same candidate.
 ///
-/// There is deliberately no "exclude this row id" option. It looks necessary
+/// There is deliberately no option to exclude a local row by id. It looks necessary
 /// for `instance_create`'s `ON CONFLICT(id) DO UPDATE` path — a row
 /// re-resolving its own slug would otherwise collide with itself — but that
 /// clause does not assign `slug` at all, so on the conflict path the computed
@@ -36,7 +36,18 @@ pub struct AgentNameMatch {
 /// #3514). On the insert path the row does not exist yet, so there is nothing
 /// to exclude either. If `slug` is ever added to that `DO UPDATE SET`, this
 /// becomes real and needs revisiting.
-pub(super) fn resolve_slug_collision(conn: &rusqlite::Connection, base: &str) -> rusqlite::Result<String> {
+///
+/// A slug the shared definitions hold is taken too (`shared`, read before the
+/// lock): every other agent's current slug, which may not have reached this
+/// channel's row yet, and every former slug, which is never handed out again
+/// (`SPEC_FORK_SLUG_MIGRATION_2026_10_22.md` §4). `own_id` is the row being
+/// inserted, whose own shared record (a cross-channel backfill) doesn't count.
+pub(super) fn resolve_slug_collision(
+    conn: &rusqlite::Connection,
+    base: &str,
+    own_id: &str,
+    shared: &SharedSlugs,
+) -> rusqlite::Result<String> {
     let mut candidate = base.to_string();
     let mut n: u32 = 2;
     loop {
@@ -48,7 +59,8 @@ pub(super) fn resolve_slug_collision(conn: &rusqlite::Connection, base: &str) ->
             params![candidate],
             |row| row.get(0),
         )?;
-        if count == 0 {
+        let held = |s: &String| s.eq_ignore_ascii_case(&candidate);
+        if count == 0 && !shared.others(own_id).any(|names| held(&names.slug) || names.former.iter().any(held)) {
             return Ok(candidate);
         }
         // Trimmed so the suffixed slug stays a valid agent id (at most 64
@@ -96,20 +108,16 @@ pub(super) fn resolve_slug_collision(conn: &rusqlite::Connection, base: &str) ->
 /// name-keyed signing keys may sit under — in `db_agent_key_tombstones`,
 /// before its row is deleted (identity M4a, spec §6.5.4). A template row is
 /// skipped: templates are never deleted through here as agents, and their
-/// names are shared by design. Idempotent; a missing row records nothing.
-pub(super) fn tombstone_key_names(conn: &rusqlite::Connection, id: &str) -> Result<(), StoreError> {
-    let names: Option<(String, String, String)> = conn
-        .query_row(
-            "SELECT slug, name, COALESCE(instance_name, '') FROM db_agents WHERE id = ?1 AND is_template = 0",
-            params![id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )
-        .map(Some)
-        .or_else(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => Ok(None),
-            e => Err(e),
-        })?;
-    let Some((slug, name, instance_name)) = names else {
+/// names are shared by design. Idempotent. `shared` adds the slug and former
+/// slugs its shared definition holds ([`deleted_agent_key_names`]); with no
+/// row (an agent only the shared registry knows, or a retry after the row
+/// went) those are the names ([`deleting_row_names`]).
+pub(super) fn tombstone_key_names(
+    conn: &rusqlite::Connection,
+    id: &str,
+    shared: &SharedSlugs,
+) -> Result<(), StoreError> {
+    let Some((slug, name, instance_name)) = deleting_row_names(conn, id)? else {
         return Ok(());
     };
     let now = agentmux_common::time::now_secs();
@@ -120,13 +128,9 @@ pub(super) fn tombstone_key_names(conn: &rusqlite::Connection, id: &str) -> Resu
     // compared in Rust, never with SQLite's ASCII-only `lower()`. Deleting
     // the second "AgentY" must not tombstone the first one's `agenty`
     // (adversarial review of #3571).
-    let mut candidates = key_names_of(&slug, &name, &instance_name);
-    for former in former_names(conn, id)? {
-        candidates.extend(key_names_of("", &former, ""));
-    }
-    for n in candidates {
+    for n in deleted_agent_key_names(conn, id, (&slug, &name, &instance_name), shared)? {
         let n = n.trim().to_string();
-        if n.is_empty() || key_name_used_by_another(conn, id, &n)? {
+        if n.is_empty() || key_name_used_by_another(conn, id, &n, shared)? {
             continue;
         }
         conn.execute(
@@ -155,38 +159,22 @@ pub(super) fn tombstone_key_names(conn: &rusqlite::Connection, id: &str) -> Resu
 /// every statement here is idempotent, so a retry converges, whereas a skipped
 /// purge would hand the key to the next agent of that name. Lock order is
 /// `objects.db` (held by the caller) → `wan.db`, as `wan_identity.rs`
-/// documents.
+/// documents. The names include its shared slug and former slugs
+/// ([`deleted_agent_key_names`]).
 pub(super) fn purge_name_keyed_keys(
     conn: &rusqlite::Connection,
     id: &str,
     wan: Option<&super::super::wan_identity::WanIdentityStore>,
+    shared: &SharedSlugs,
 ) -> Result<usize, StoreError> {
-    let names: Option<(String, String, String)> = conn
-        .query_row(
-            "SELECT slug, name, COALESCE(instance_name, '') FROM db_agents WHERE id = ?1 AND is_template = 0",
-            params![id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )
-        .map(Some)
-        .or_else(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => Ok(None),
-            e => Err(e),
-        })?;
-    let Some((slug, name, instance_name)) = names else {
+    let Some((slug, name, instance_name)) = deleting_row_names(conn, id)? else {
         return Ok(0);
     };
     let mut removed = 0;
-    let mut candidates = key_names_of(&slug, &name, &instance_name);
-    for former in former_names(conn, id)? {
-        for n in key_names_of("", &former, "") {
-            if !candidates.contains(&n) {
-                candidates.push(n);
-            }
-        }
-    }
+    let candidates = deleted_agent_key_names(conn, id, (&slug, &name, &instance_name), shared)?;
     let mut purged_names = Vec::new();
     for key_name in candidates {
-        if key_name_used_by_another(conn, id, &key_name)? {
+        if key_name_used_by_another(conn, id, &key_name, shared)? {
             continue;
         }
         removed += delete_key_rows(conn, &key_name)?;
@@ -233,6 +221,52 @@ pub(super) fn key_names_of(slug: &str, name: &str, instance_name: &str) -> Vec<S
     names
 }
 
+/// Every name a deleted agent's keys may be filed under: its row's names
+/// ([`key_names_of`]), its former display names, and — P0.4 of
+/// `SPEC_FORK_SLUG_MIGRATION_2026_10_22.md` — the slug and every former slug
+/// its shared definition holds, since a renamed agent signed under each in
+/// turn. Folded as the key tables fold; no duplicates.
+pub(super) fn deleted_agent_key_names(
+    conn: &rusqlite::Connection,
+    id: &str,
+    (slug, name, instance_name): (&str, &str, &str),
+    shared: &SharedSlugs,
+) -> Result<Vec<String>, StoreError> {
+    let mut names = key_names_of(slug, name, instance_name);
+    let mut push = |n: String| {
+        if !n.trim().is_empty() && !names.contains(&n) {
+            names.push(n);
+        }
+    };
+    for former in former_names(conn, id)? {
+        key_names_of("", &former, "").into_iter().for_each(&mut push);
+    }
+    if let Some(own) = shared.names(id) {
+        std::iter::once(&own.slug).chain(&own.former).for_each(|s| push(s.trim().to_lowercase()));
+    }
+    Ok(names)
+}
+
+/// The names on `id`'s row, read for its delete before the row goes. `None`
+/// for a template, which is never deleted as an agent. A row that isn't
+/// there reads as no names, not as nothing to do: the agent may exist only in
+/// the shared registry, or an earlier attempt may have deleted the row and
+/// failed before retiring the shared record, and the slugs that record holds
+/// still need purging and tombstoning (P0.4).
+fn deleting_row_names(conn: &rusqlite::Connection, id: &str) -> Result<Option<(String, String, String)>, StoreError> {
+    let row = conn.query_row(
+        "SELECT is_template, COALESCE(slug, ''), name, COALESCE(instance_name, '') FROM db_agents WHERE id = ?1",
+        params![id],
+        |r| Ok((r.get::<_, i64>(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+    );
+    match row {
+        Ok((template, ..)) if template != 0 => Ok(None),
+        Ok((_, slug, name, instance_name)) => Ok(Some((slug, name, instance_name))),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(Some(Default::default())),
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// `agent.open`'s id for a definition with no slug (`agent_open.rs`).
 pub(super) fn agent_open_fallback_id(name: &str) -> String {
     agentmux_common::slug::path_slug(name)
@@ -263,11 +297,17 @@ pub(super) fn former_names(conn: &rusqlite::Connection, id: &str) -> Result<Vec<
 /// continuations sign under the template's slug. Folded as the key tables
 /// fold (`to_lowercase`), not SQLite's ASCII-only `lower()`: slugs `Ä` and
 /// `ä` share the key filed under `ä` (Codex P2 on #3575).
+/// Another agent's shared slug and former slugs count too (`shared`).
 pub(super) fn key_name_used_by_another(
     conn: &rusqlite::Connection,
     id: &str,
     folded: &str,
+    shared: &SharedSlugs,
 ) -> Result<bool, StoreError> {
+    let names_it = |s: &String| s.trim().to_lowercase() == folded;
+    if shared.others(id).any(|n| names_it(&n.slug) || n.former.iter().any(names_it)) {
+        return Ok(true);
+    }
     let mut stmt =
         conn.prepare("SELECT slug, name, COALESCE(instance_name, '') FROM db_agents WHERE id != ?1")?;
     let rows = stmt.query_map(params![id], |r| {
@@ -354,30 +394,34 @@ impl Store {
         former_names(&conn, id)
     }
 
-    /// The slugs of every row whose slug equals `name` trimmed and folded
-    /// (identity M4d-3's drift count). New slugs collide case-insensitively
-    /// (`resolve_slug_collision`), so only rows from before that can differ
-    /// by case alone.
+    /// The (canonical) slugs of every row whose slug equals `name` trimmed and
+    /// folded (identity M4d-3's drift count). New slugs collide
+    /// case-insensitively (`resolve_slug_collision`), so only rows from before
+    /// that can differ by case alone.
     pub fn agent_slugs_folded(&self, name: &str) -> Result<Vec<String>, StoreError> {
-        // Folded in Rust as the key tables fold, never SQLite's ASCII-only lower().
+        Ok(self.rows_with_slug_folded(name)?.into_iter().map(|r| r.slug).collect())
+    }
+
+    /// Rows whose canonical slug is non-empty and equals `name`, trimmed and
+    /// folded in Rust as the key tables fold, never SQLite's ASCII-only lower().
+    fn rows_with_slug_folded(&self, name: &str) -> Result<Vec<AgentNameMatch>, StoreError> {
         let folded = name.trim().to_lowercase();
+        let shared = self.shared_slugs();
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT slug FROM db_agents WHERE slug IS NOT NULL AND slug <> ''")?;
-        let slugs = stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
-        Ok(slugs.into_iter().filter(|s| s.trim().to_lowercase() == folded).collect())
+        let rows = rows_with_canonical_slugs(&conn, "", &shared)?;
+        Ok(rows
+            .into_iter()
+            .filter(|r| !r.slug.is_empty() && r.slug.trim().to_lowercase() == folded)
+            .collect())
     }
 }
 
 impl Store {
-    /// The ids of every row whose slug is `name`, trimmed and folded with
-    /// Rust's `to_lowercase` (identity M4d-6: which agent this instance knows
-    /// by a name a jekt claims).
+    /// The ids of every row whose (canonical) slug is `name`, trimmed and
+    /// folded with Rust's `to_lowercase` (identity M4d-6: which agent this
+    /// instance knows by a name a jekt claims).
     pub fn agent_ids_for_slug_folded(&self, name: &str) -> Result<Vec<String>, StoreError> {
-        let folded = name.trim().to_lowercase();
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT id, slug FROM db_agents WHERE slug IS NOT NULL AND slug <> ''")?;
-        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?.collect::<Result<Vec<_>, _>>()?;
-        Ok(rows.into_iter().filter(|(_, slug)| slug.trim().to_lowercase() == folded).map(|(id, _)| id).collect())
+        Ok(self.rows_with_slug_folded(name)?.into_iter().map(|r| r.id).collect())
     }
 }
 

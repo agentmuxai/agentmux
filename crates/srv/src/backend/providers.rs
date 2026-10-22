@@ -219,7 +219,7 @@ pub struct InstructionDirScan {
 pub fn default_model_for(provider_id: &str) -> Option<&'static str> {
     match provider_id {
         "claude" => Some("sonnet"),
-        "codex" => Some("gpt-5.5"),
+        "codex" => Some("gpt-6-astra"),
         // One of the ids `agy models` lists (agy 1.1.11).
         "antigravity" => Some("gemini-3.8-flash-medium"),
         _ => None,

@@ -29,7 +29,7 @@ fn find<'a>(i: &'a Imported, label: &str) -> &'a Incoming {
 
 // ── LastPass ────────────────────────────────────────────────────────────────
 
-const LASTPASS: &str = "url,username,password,totp,extra,name,grouping,fav\n\
+pub(super) const LASTPASS: &str = "url,username,password,totp,extra,name,grouping,fav\n\
 https://example.com/login,alex,hunter2,JBSWY3DPEHPK3PXP,\"recovery codes: 1234 5678\",Example,Shopping,0\n\
 http://sn,,,,\"NoteType:Credit Card\nLanguage:en-US\nName on Card:Alex Doe\nType:Visa\nNumber:4111111111111111\nSecurity Code:123\nStart Date:January,2020\nExpiration Date:March,2030\nNotes:Company card\nsecond line\",Company Visa,Finance,0\n\
 http://sn,,,,\"NoteType:Bank Account\nLanguage:en-US\nBank Name:First Bank\nAccount Type:Checking\nRouting Number:021000021\nAccount Number:1234567890\nNotes:\",Checking,Finance,0\n\
@@ -120,7 +120,7 @@ fn one_password_csv_is_read_by_its_column_names() {
 
 // ── Bitwarden ───────────────────────────────────────────────────────────────
 
-const BITWARDEN: &str = r#"{
+pub(super) const BITWARDEN: &str = r#"{
   "encrypted": false,
   "folders": [{"id": "f1", "name": "Work"}],
   "items": [

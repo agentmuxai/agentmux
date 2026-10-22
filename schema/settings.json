@@ -66,6 +66,23 @@
         "term:shiftenternewline": {
           "type": "boolean"
         },
+        "browser:hibernate": {
+          "type": "boolean",
+          "default": true,
+          "description": "A browser pane out of sight for a while hibernates: its page closes to free its memory (often 100 to 200 MB) and loads again when you're about to look at it, with a note while it restores. Never a pane an agent is using, one playing or capturing media, one with something typed into it, or a local dev server. Off: browser panes keep running while hidden."
+        },
+        "browser:hibernateafter": {
+          "type": "number",
+          "default": 30,
+          "minimum": 1,
+          "description": "Minutes a browser pane is hidden before it hibernates. Sooner when the computer is low on memory: 5 minutes, then 1."
+        },
+        "browser:keepawakesites": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Sites whose browser panes never hibernate, by host (example.com) or origin (https://example.com)."
+        },
         "browser:searchsuggestions": {
           "type": "boolean",
           "default": true,
@@ -598,6 +615,11 @@
           "type": "boolean",
           "default": true,
           "description": "When an agent edits a file another agent on this computer has uncommitted or edited in the last two hours (same repository and path, in any clone), AgentMux sends the editing agent a short [AgentMux] note naming the other agent, so it can message them first. Rate-limited: one note per other agent and file every two hours, three per agent per ten minutes. Set false to turn the notes off. See docs/specs/SPEC_AGENT_OVERLAP_AWARENESS_2026_10_10.md §3.3."
+        },
+        "kanban:reminders": {
+          "type": "boolean",
+          "default": false,
+          "description": "Remind an idle agent of the tasks waiting in its Kanban backlog: after two minutes idle, one short [AgentMux] note naming them, once each time it goes idle. Off by default; also switched in the Kanban's toolbar. See docs/specs/SPEC_KANBAN_REMINDER_OFF_BY_DEFAULT_2026_10_22.md."
         },
         "agent:mcpselfheal": {
           "type": "boolean",

@@ -33,6 +33,7 @@ import { AccountCard, accountSearchText, AgentMuxCard, sortAccounts, useAccountU
 import { AccountsGallery } from "./AccountsGallery";
 import { AgentMuxConnectPanel, useMuxBusStatus } from "./AgentMuxConnectPanel";
 import { ClaudeLoginPanel } from "./ClaudeLoginPanel";
+import { requestReconnect } from "./oauth-account-state";
 import "@/app/view/identity/identity-view.scss";
 
 type ConnectedItem = { kind: "agentmux" } | { kind: "account"; account: Account };
@@ -92,6 +93,12 @@ export function AccountsManager(): JSX.Element {
     const toggle = (account: Account) =>
         model.setSelectedAccount(model.selectedAccountAtom()?.id === account.id ? null : account);
 
+    // A card's Reconnect runs in its details, which show the browser prompt.
+    const reconnect = (account: Account) => {
+        requestReconnect(account.id);
+        model.setSelectedAccount(account);
+    };
+
     return (
         <div class="identity-view accounts-manager">
             <div class="identity-body accounts-manager-body">
@@ -149,6 +156,7 @@ export function AccountsManager(): JSX.Element {
                                         selected={model.selectedAccountAtom()?.id === item.account.id}
                                         onSelect={() => toggle(item.account)}
                                         onContextMenu={(e) => openMenu(item.account, e)}
+                                        onReconnect={() => reconnect(item.account)}
                                     />
                                 )
                             }

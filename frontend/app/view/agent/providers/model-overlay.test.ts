@@ -99,6 +99,36 @@ describe("setProviderModels", () => {
     });
 });
 
+describe("replaceProviderModels (Codex: the account's own list)", () => {
+    const codex = () => overlay.getProvider("codex")!.models;
+
+    it("replaces the curated list, in the account's order, the first being the default", () => {
+        overlay.replaceProviderModels("codex", apiModels(["gpt-7-nova", "GPT-7-Nova"], ["gpt-6-astra", "GPT-6-Astra"]));
+        expect(codex()).toEqual([
+            { value: "gpt-7-nova", label: "GPT-7-Nova", default: true },
+            { value: "gpt-6-astra", label: "GPT-6-Astra", default: false },
+        ]);
+        expect(overlay.isAccountListed("codex")).toBe(true);
+        expect(overlay.isAccountListed("codex-cli")).toBe(true);
+        expect(overlay.isAccountListed("claude")).toBe(false);
+    });
+
+    it("keeps the curated list when the account has no list yet", () => {
+        const curated = codex();
+        overlay.replaceProviderModels("codex", []);
+        expect(codex()).toBe(curated);
+        expect(overlay.isAccountListed("codex")).toBe(false);
+    });
+
+    it("goes back to the curated list when the accounts' lists stop sharing anything", () => {
+        const curated = codex().map((m) => m.value);
+        overlay.replaceProviderModels("codex", apiModels(["gpt-7-nova", "GPT-7-Nova"]));
+        overlay.replaceProviderModels("codex", []);
+        expect(codex().map((m) => m.value)).toEqual(curated);
+        expect(overlay.isAccountListed("codex")).toBe(false);
+    });
+});
+
 describe("curated catalog", () => {
     // These read the UNOVERLAID catalog — hence the per-test module reset.
     it("keeps version numbers out of descriptions so they cannot contradict labels", () => {

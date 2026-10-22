@@ -9,6 +9,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { atomWithThrottle, boundNumber, createSignalAtom, SignalAtom } from "@/util/util";
 import type { Properties as CSSProperties } from "csstype";
 import { createEffect, createMemo, createRoot, getOwner, on, runWithOwner, Owner } from "solid-js";
+import { chipPlaceholderRect } from "./chipPlaceholder";
 import { getLayoutStateAtomFromTab } from "./layoutAtom";
 import { findNode, withDerivedNodeIds } from "./layoutNode";
 import { computeMoveNode } from "./layoutTree";
@@ -805,24 +806,21 @@ export class LayoutModel {
                                 }
                             }
 
-                            // A minimized pane lands as a chip: show its own size at the edge it goes to,
-                            // not a half-pane slot (SPEC_DRAG_MINIMIZED_PANES_2026_10_20.md §3 A).
+                            // A minimized pane lands as a chip: show its own size where it goes, not a
+                            // half-pane slot (SPEC_CHIP_DROP_PLACEHOLDER_ON_THE_SEAM_2026_10_21.md).
                             const chip = this.draggedChipSize(action.node?.id);
                             if (chip) {
                                 const after = action.index > targetIndex;
-                                if (parentNode.flexDirection === FlexDirection.Column) {
-                                    placeholderDimensions.height = Math.min(chip.height, targetBoundingRect.height);
-                                    placeholderDimensions.top = after
-                                        ? targetBoundingRect.top + targetBoundingRect.height - placeholderDimensions.height
-                                        : targetBoundingRect.top;
-                                } else {
-                                    placeholderDimensions.width = Math.min(chip.width, targetBoundingRect.width);
-                                    placeholderDimensions.height = Math.min(chip.height, targetBoundingRect.height);
-                                    placeholderDimensions.top = targetBoundingRect.top;
-                                    placeholderDimensions.left = after
-                                        ? targetBoundingRect.left + targetBoundingRect.width - placeholderDimensions.width
-                                        : targetBoundingRect.left;
-                                }
+                                const outerEdge = !after || action.index >= (parentNode.children?.length ?? 1);
+                                return setTransform(
+                                    chipPlaceholderRect(
+                                        targetBoundingRect,
+                                        chip,
+                                        parentNode.flexDirection,
+                                        after,
+                                        outerEdge
+                                    )
+                                );
                             }
 
                             return setTransform(placeholderDimensions);

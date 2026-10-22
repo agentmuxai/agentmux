@@ -51,6 +51,7 @@ import { withTimeout } from "@/app/init/timeout";
 import { retryTransient } from "@/util/transient-network";
 import { fireAndForget } from "@/util/util";
 import { setProviderModels } from "@/app/view/agent/providers";
+import { refreshCodexModels } from "@/app/view/agent/providers/codex-models-refresh";
 import { scheduleRevealLift } from "@/store/tab-reveal";
 import { installLauncherEventBridge } from "@/util/launcher-events";
 import { installSrvEventBridge } from "@/util/srv-events";
@@ -1123,6 +1124,10 @@ async function initMux(initOpts: AgentMuxInitOpts) {
             (res?.models ?? []).map((m) => ({ value: m.id, label: m.display_name })),
         );
     });
+    // Codex: the models its accounts offer, from the lists the Codex CLI
+    // caches per account; fetched again when a Codex pane starts or its model
+    // menu opens (codex-models-refresh.ts).
+    refreshCodexModels();
 
     tlog("TOTAL initMux", t0);
 

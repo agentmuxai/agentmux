@@ -663,6 +663,23 @@ declare global {
         /** The person paused the driving agent: its calls on this pane are
          *  refused until they resume it. Written by srv only. */
         "browser:paused"?: boolean | null;
+        /** The pane is asleep or waking: its page was closed to free memory,
+         *  with what it needs to come back. Written by the window
+         *  (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md §4). */
+        "browser:sleep"?: {
+            since: number;
+            reason: "hidden" | "pressure" | "launch" | "manual";
+            url: string;
+            title: string;
+            favicon: string;
+            loadMs?: number;
+        } | null;
+        /** srv asks the pane's view to wake it, for an agent's Browser call (ms timestamp). */
+        "browser:wake"?: number | null;
+        /** How long the pane's page took to load the last time, in ms. */
+        "browser:loadms"?: number | null;
+        /** The person asked to keep this pane awake. */
+        "browser:keepawake"?: boolean | null;
         /** The pane whose page opened this one as a popup, and that page's
          *  origin, shown as "Popup from …". Written by srv only
          *  (SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md §3.4, §5). */
@@ -1002,6 +1019,12 @@ declare global {
         "term:allowbracketedpaste"?: boolean;
         "term:shiftenternewline"?: boolean;
         "browser:searchsuggestions"?: boolean;
+        /** Hidden browser panes hibernate (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md). On unless false. */
+        "browser:hibernate"?: boolean;
+        /** Minutes a browser pane is hidden before it hibernates (default 30). */
+        "browser:hibernateafter"?: number;
+        /** Sites whose browser panes never hibernate, by origin or host. */
+        "browser:keepawakesites"?: string[];
         /** User shortcut overrides (frontend/app/keybindings/registry.ts `setUserKeybindings`). */
         "keybindings"?: { key?: string; command: string; when?: string; platform?: "mac" | "other" }[];
         "term:predictiveecho"?: boolean;
@@ -1115,6 +1138,7 @@ declare global {
         "attachments:retentiondays"?: number;
         "agent:askquestiontimeoutms"?: number;
         "agent:overlapnotes"?: boolean;
+        "kanban:reminders"?: boolean;
         "agent:mcpselfheal"?: boolean;
         "agent:transcriptsinglecopy"?: boolean;
         "agent:turnscopedtail"?: boolean;
