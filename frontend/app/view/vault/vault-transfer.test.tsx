@@ -231,6 +231,16 @@ describe("Import", () => {
         expect(vaultImport).toHaveBeenLastCalledWith(expect.objectContaining({ pick_id: "pick-1", passphrase: "" }));
     });
 
+    it("offers a key file for a KeePass database whatever it is called, and not for a Vault or Bitwarden file", async () => {
+        for (const [name, offered] of [["backup.bin", true], ["Passwords", true], ["backup.vault", false], ["bitwarden_encrypted_export.json", false]] as const) {
+            vaultImport.mockResolvedValueOnce({ needs_passphrase: true, pick_id: "pick-1", file_name: name });
+            render(() => <VaultImportDialog onClose={vi.fn()} />);
+            await screen.findByLabelText("Passphrase");
+            expect(screen.queryByRole("button", { name: "Choose a key file…" }) !== null, name).toBe(offered);
+            cleanup();
+        }
+    });
+
     it("removes a chosen key file through the host too", async () => {
         vaultImport.mockResolvedValueOnce({ needs_passphrase: true, pick_id: "pick-1", file_name: "Passwords.kdbx", key_file_name: "my.keyx" });
         render(() => <VaultImportDialog onClose={vi.fn()} />);
