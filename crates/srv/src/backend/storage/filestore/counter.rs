@@ -292,7 +292,8 @@ pub(super) const DROP_EPOCH_SQL: &str =
     "gen = NULL, lines = NULL, lines_size = NULL, lines_tail = NULL, lines_modts = NULL, lines_rev = NULL";
 
 /// Bytes `[offset, offset + len)` of a file, straight from its parts (never
-/// the cache). A missing part reads as zeros, as `append_data_at` pads it.
+/// the cache). A missing part reads as zeros, as `append_data_at` pads it,
+/// except where it is lost content ([`super::parts::lost_reads_blank`]): blank.
 pub(super) fn read_bytes(
     conn: &Connection,
     zone_id: &str,
@@ -307,7 +308,9 @@ pub(super) fn read_bytes(
 /// stored — a part missing inside the size the file claims. That is a file
 /// mid-write by a build without transactions (it raises `size` before
 /// inserting parts, Codex on #3631); the counter must never count bytes that
-/// read as zeros only because they aren't there yet.
+/// read as zeros only because they aren't there yet. In the shared store's
+/// transcript text no such build can write, so a missing part there is lost
+/// and reads as blank instead ([`super::parts::lost_reads_blank`]).
 pub(super) fn read_bytes_exact(
     conn: &Connection,
     zone_id: &str,
@@ -343,12 +346,20 @@ fn read_bytes_covered(
     offset: i64,
     len: i64,
 ) -> Result<(Vec<u8>, usize), StoreError> {
-    match read_bytes_covered_rows(conn, zone_id, name, offset, len) {
+    let read = |fill: u8| match read_bytes_covered_rows(conn, zone_id, name, offset, len, fill) {
         Err(StoreError::Sqlite(e)) if super::parts::is_corrupt(&e) => {
-            super::parts::read_covered_past_damage(conn, zone_id, name, offset, len)
+            super::parts::read_covered_past_damage(conn, zone_id, name, offset, len, fill)
         }
         other => other,
+    };
+    let (bytes, covered) = read(0)?;
+    let want = len.max(0) as usize;
+    if covered == want || !super::parts::lost_reads_blank(conn, name)? {
+        return Ok((bytes, covered));
     }
+    // Lost content (module doc of `parts.rs`): read again with the gaps blank.
+    super::parts::note_lost(zone_id, name);
+    Ok((read(b' ')?.0, want))
 }
 
 /// [`read_bytes_covered`] in one range query, failing on a damaged part.
@@ -358,13 +369,14 @@ fn read_bytes_covered_rows(
     name: &str,
     offset: i64,
     len: i64,
+    fill: u8,
 ) -> Result<(Vec<u8>, usize), StoreError> {
     if len <= 0 {
         return Ok((Vec::new(), 0));
     }
     let pds = PART_DATA_SIZE as i64;
     let (first, last) = ((offset / pds) as i32, ((offset + len - 1) / pds) as i32);
-    let mut out = vec![0u8; len as usize];
+    let mut out = vec![fill; len as usize];
     let mut covered = 0usize;
     let mut stmt = conn.prepare_cached(
         "SELECT partidx, data FROM db_file_data
@@ -527,7 +539,11 @@ impl FileStore {
                 },
             )
             .optional()?;
-            part.resize(offset_in_part, 0);
+            // Bytes the size covers but no part holds: in the shared store's
+            // transcript they are lost and stay blank, not zeros (a run of NULs
+            // reads as one long garbage line).
+            let pad = if part.len() < offset_in_part && super::parts::lost_reads_blank(tx, name)? { b' ' } else { 0 };
+            part.resize(offset_in_part, pad);
             let to_copy = (PART_DATA_SIZE - offset_in_part).min(data.len());
             part.extend_from_slice(&data[..to_copy]);
             data_offset = to_copy;

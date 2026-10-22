@@ -169,6 +169,18 @@ const CLAUDE_FORMAT = "claude-stream-json";
 /** The background fill waits until the user has done nothing in the window for this long. */
 const FILL_QUIET_MS = 1_000;
 
+/** Waits before each new try of the usual open, when srv asks for a retry. */
+export const HISTORY_RETRY_MS = [1_000, 3_000, 8_000] as const;
+
+/**
+ * Whether a failed history read is worth trying again: srv says "retry" while it
+ * can't serve the read yet (an index being rebuilt, a transcript repaired after
+ * store damage), and a timed-out request may simply have been slow.
+ */
+export function isRetriableHistoryError(reason: string): boolean {
+    return /\bretry\b|unavailable right now|timed? ?out/i.test(reason);
+}
+
 const whenIdle = (): Promise<void> =>
     new Promise((resolve) => {
         if (typeof requestIdleCallback === "function") requestIdleCallback(() => resolve(), { timeout: 500 });
@@ -791,6 +803,10 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 if (!mounted) return;
               }
             }  // end if (opts.definitionId)
+            // The usual open: the count, then the newest page. A retriable failure
+            // gets a few more tries before the pane gives up; giving up shows
+            // HistoryLoadFailedBanner instead of an empty pane with no word why.
+            for (let attempt = 0; ; attempt++) {
             try {
                 const countResp = await RpcApi.BlockfileLineCountCommand(TabRpcClient, {
                     block_id: opts.blockId,
@@ -846,13 +862,21 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                     at: Date.now(),
                 });
                 opts.onHistoryReady?.();
+                return;
             } catch (err: any) {
                 if (!mounted) return;
+                const reason = err?.message ?? String(err);
+                const wait = HISTORY_RETRY_MS[attempt];
+                if (wait !== undefined && isRetriableHistoryError(reason)) {
+                    opts.log("history", `could not load history (${reason}); trying again in ${wait} ms`, "warn");
+                    await new Promise((resolve) => setTimeout(resolve, wait));
+                    if (!mounted) return;
+                    continue;
+                }
                 // Non-fatal — fresh session or backend not ready yet.
                 // Surface the failure to the reducer so it can gate
                 // turn-start and the UI can render an error state, then
                 // flip to ready so the user can still send (best-effort).
-                const reason = err?.message ?? String(err);
                 opts.log("history", `could not load history: ${reason}`, "warn");
                 opts.transcriptSettle?.settle(null);
                 // Surface the failure for diagnostics. The reducer's
@@ -865,6 +889,8 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                     reason,
                 });
                 opts.onHistoryReady?.();
+                return;
+            }
             }
         })();
     });

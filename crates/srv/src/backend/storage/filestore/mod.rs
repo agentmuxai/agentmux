@@ -37,6 +37,8 @@ mod tests_copy;
 #[cfg(test)]
 mod tests_counter;
 #[cfg(test)]
+mod tests_lost_parts;
+#[cfg(test)]
 mod tests_replace;
 #[cfg(test)]
 mod tests_stamp_throttle;
