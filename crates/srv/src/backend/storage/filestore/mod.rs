@@ -15,6 +15,7 @@ mod checkpointer;
 mod copy;
 mod core;
 mod counter;
+mod frames;
 mod ijson;
 mod lines;
 mod off_worker;

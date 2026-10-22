@@ -123,6 +123,9 @@ fn load_range(conn: &Connection, zone_id: &str, name: &str, start: i32, end: i32
         let (idx, data) = row?;
         parts.insert(idx, data);
     }
+    drop(stmt);
+    // Parts with no row may be in a compressed frame (frames.rs).
+    super::frames::fill_parts(conn, zone_id, name, start, end, &mut parts, false)?;
     Ok(parts)
 }
 
@@ -159,6 +162,9 @@ fn load_each(
             Err(e) => return Err(e.into()),
         }
     }
+    drop(one);
+    // A frame holding parts with no row fills them; a damaged frame reads as blank.
+    super::frames::fill_parts(conn, zone_id, name, start, end, &mut parts, true)?;
     Ok(parts)
 }
 

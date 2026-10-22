@@ -87,6 +87,9 @@ encoding_rs = "0.8"
 chardetng = "0.1"
 flate2 = "1"
 sha2 = "0.10"
+# Compressed frames of the shared transcript store
+# (SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21.md §4).
+zstd = "0.13"
 # Image attachments in the agent composer: decode, orient, downscale, re-encode
 # (SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6.4). Same 0.25 line the
 # workspace already locks for agentmux-mcp.

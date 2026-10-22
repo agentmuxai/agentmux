@@ -323,6 +323,7 @@ impl FileStore {
             let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
             check_schema_compat(&tx, schema_version, "filestore.db")?;
             run_filestore_migrations(&tx)?;
+            super::frames::ensure_schema(&tx)?;
             stamp_version(&tx, schema_version)?;
             tx.commit()?;
         }
@@ -542,6 +543,7 @@ impl FileStore {
                 "DELETE FROM db_file_data WHERE zoneid = ?1 AND name = ?2",
                 params![zone_id, name],
             )?;
+            super::frames::delete_frames(tx, zone_id, Some(name))?;
             Ok(())
         })?;
 
@@ -577,6 +579,7 @@ impl FileStore {
                 "DELETE FROM db_file_data WHERE zoneid = ?1",
                 params![zone_id],
             )?;
+            super::frames::delete_frames(tx, zone_id, None)?;
             Ok(names)
         })?;
 
@@ -648,6 +651,7 @@ impl FileStore {
             "DELETE FROM db_file_data WHERE zoneid = ?1 AND name = ?2",
             params![zone_id, name],
         )?;
+        super::frames::delete_frames(tx, zone_id, Some(name))?;
         for (idx, part_data) in Self::split_into_parts(data).iter().enumerate() {
             tx.execute(
                 "INSERT INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
