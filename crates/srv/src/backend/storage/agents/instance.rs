@@ -638,7 +638,9 @@ impl Store {
     /// Every non-template, non-hidden agent a typed name could mean (identity
     /// M3, spec §5): exact (canonical) slug, or `name`/`instance_name`
     /// ASCII-case-insensitively, as SQLite's `NOCASE` compared them. Lists
-    /// rather than picks — the caller decides what to do with several.
+    /// rather than picks — the caller decides what to do with several. A name
+    /// none of them answers to may be a slug an agent was renamed from: that
+    /// agent's row (`former_slug_owner_in`; fork slug migration Phase 1).
     pub fn agents_matching_name(&self, typed: &str) -> Result<Vec<AgentNameMatch>, StoreError> {
         let typed = typed.trim();
         if typed.is_empty() {
@@ -647,7 +649,13 @@ impl Store {
         let shared = self.shared_slugs();
         let conn = self.conn.lock().unwrap();
         let rows = rows_with_canonical_slugs(&conn, "WHERE is_template = 0 AND user_hidden = 0", &shared)?;
-        Ok(rows.into_iter().filter(|r| answers_to(r, typed)).collect())
+        let matched: Vec<AgentNameMatch> = rows.iter().filter(|r| answers_to(r, typed)).cloned().collect();
+        if !matched.is_empty() {
+            return Ok(matched);
+        }
+        let all = rows_with_canonical_slugs(&conn, "", &shared)?;
+        let owner = former_slug_owner_in(&conn, &shared, &all, &typed.to_lowercase())?;
+        Ok(rows.into_iter().filter(|r| owner.as_deref() == Some(r.id.as_str())).collect())
     }
 
     /// Every row a name selects, **templates and hidden rows included** — the

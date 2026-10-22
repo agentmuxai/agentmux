@@ -376,6 +376,9 @@ impl Store {
         self.agent_def_insert_local_only(&mut def, Some(record.data.updated_at))?;
 
         let conn = self.conn.lock().unwrap();
+        if let Err(e) = record_former_slugs(&conn, &def.id, &record.data.former_slugs) {
+            tracing::warn!(def_id = %def.id, error = %e, "instance_create backfill: former slugs not copied (non-fatal)");
+        }
         for c in &record.data.content {
             if let Err(e) = conn.execute(
                 "INSERT INTO db_agent_content (agent_id, content_type, content, updated_at)
@@ -435,6 +438,10 @@ impl Store {
         let name_lower = agent.name.trim().to_lowercase();
         let derived_slug = derive_slug(agent.name.trim());
         let shared = self.shared_slugs();
+        // A slug an agent was renamed from is still that agent's: matched
+        // like its current slug, after a name or slug match (fork slug
+        // migration Phase 1). Read before the lock; only a migration writes it.
+        let former_owner = self.former_slug_owner(&derived_slug)?.map(|o| o.uid);
 
         {
             let conn = self.conn.lock().unwrap();
@@ -462,6 +469,18 @@ impl Store {
             // Drop borrows on `conn` before proceeding to the insert.
             drop(rows);
             drop(stmt);
+            if let Some(uid) = former_owner {
+                let owner = conn
+                    .query_row(&format!("{AGENT_DEFINITION_SELECT} WHERE id = ?1 AND is_seeded = 0"), params![uid], map_agent_definition_row)
+                    .map(Some)
+                    .or_else(|e| match e {
+                        rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                        e => Err(e),
+                    })?;
+                if owner.is_some() {
+                    return Ok(owner);
+                }
+            }
 
             // Not found — insert under the same lock.
             let base = if agent.slug.is_empty() {

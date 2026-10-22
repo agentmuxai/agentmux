@@ -75,6 +75,10 @@ impl SharedSlugs {
     pub fn others<'a>(&'a self, uid: &'a str) -> impl Iterator<Item = &'a SharedNames> + 'a {
         self.0.iter().filter(move |(id, _)| id.as_str() != uid).map(|(_, n)| n)
     }
+
+    pub fn entries(&self) -> impl Iterator<Item = (&str, &SharedNames)> {
+        self.0.iter().map(|(id, n)| (id.as_str(), n))
+    }
 }
 
 /// Rows `filter` selects (a `WHERE …` clause, or empty), oldest first, each
@@ -218,7 +222,8 @@ mod tests {
         assert!(store.instance_get_by_slug("loap-loap-2-loap-3").unwrap().is_none());
         let by_name = store.agents_matching_name("loap-3").unwrap();
         assert_eq!(by_name.iter().map(|m| (m.id.as_str(), m.slug.as_str())).collect::<Vec<_>>(), vec![(uid, "loap-3")]);
-        assert!(store.agents_matching_name("loap-loap-2-loap-3").unwrap().is_empty());
+        // A typed name that is now a former slug still finds its agent (Phase 1).
+        assert_eq!(store.agents_matching_name("loap-loap-2-loap-3").unwrap(), by_name);
         assert_eq!(store.rows_answering_to("loap-3").unwrap().len(), 1);
         assert_eq!(store.agent_ids_for_slug_folded("LOAP-3").unwrap(), vec![uid.to_string()]);
         assert!(store.agent_ids_for_slug_folded("loap-loap-2-loap-3").unwrap().is_empty());

@@ -234,6 +234,9 @@ pub(super) fn verify_jekt_signature(state: &AppState, req: &mut InjectionRequest
         req.sig_verified = Some(true); // identity M4d-4
         return;
     }
+    if former_slug::refuse_former_sender(state, req, &claimed) {
+        return;
+    }
     let Ok(Some(key)) = state.mstore.agent_jekt_key_load(&claimed) else {
         return;
     };
@@ -354,6 +357,11 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
         // flag on its own (same treatment self-declared senders get
         // elsewhere).
         crate::backend::lan_discovery::LanPubkeyLookup::NotFound => return,
+        crate::backend::lan_discovery::LanPubkeyLookup::Renamed(current) => {
+            tracing::warn!(agent_id = %claimed, current = %current, "LAN jekt signed as a slug its agent was renamed from, which never signs: counted as failed");
+            req.lan_verified = Some(false);
+            return;
+        }
         // reagentx P0 follow-up: the lookup was SKIPPED (rate-limited), not
         // genuinely absent — a lan_sig WAS presented (checked above), so
         // "we didn't check" must not collapse into the same benign outcome
@@ -411,6 +419,7 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
 }
 
 mod channel_v2;
+mod former_slug;
 mod lan_v2;
 
 /// Anti-replay window for cross-channel `channel_sig` —
@@ -784,9 +793,11 @@ pub(crate) async fn deliver(
     if is_not_found {
         // A candidate an older build registered can't take files (spec §3.4).
         let mut files_too_old = false;
+        // A former slug's agent is registered under its current one (`former_slug`).
+        let alias = former_slug::owner(state, &req.target_agent).map(|o| o.slug);
         // Tier 2: same-host, different sidecar (file registry → HTTP loopback)
         let data_dir = base::get_mux_data_dir();
-        if let Some(entry) = agent_registry::lookup(&data_dir, &req.target_agent) {
+        if let Some((found_as, entry)) = former_slug::registry_entry(&data_dir, &req.target_agent, alias.as_deref()) {
             // Guard against self-forwarding loops.
             if entry.local_url != state.local_web_url && super::jekt_files::entry_takes(&req, &entry, &mut files_too_old) {
                 match forward_inject_to_peer(
@@ -832,13 +843,13 @@ pub(crate) async fn deliver(
                     // whenever the body parsed, regardless of success, so a
                     // stale same-channel entry never reached a later tier).
                     ForwardOutcome::Stale => {
-                        if agent_registry::should_evict_on_forward_failure(&entry) {
+                        if former_slug::may_evict(&found_as, &req) && agent_registry::should_evict_on_forward_failure(&entry) {
                             tracing::warn!(
                                 target = %req.target_agent,
                                 pid = entry.pid,
                                 "cross-instance forward: entry presumed dead — evicting and falling through"
                             );
-                            agent_registry::remove(&data_dir, &req.target_agent);
+                            agent_registry::remove(&data_dir, &found_as);
                         } else {
                             // Alive but did not take it: the target exists
                             // elsewhere, so it is not held here.
@@ -865,7 +876,7 @@ pub(crate) async fn deliver(
         // a failed forward evicts just that channel's entry and falls through
         // to the next candidate, same evict-on-fail shape Tier 3 already uses.
         if let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() {
-            let candidates = agent_registry::lookup_all_shared(&shared_dir, &req.target_agent);
+            let (found_as, candidates) = former_slug::shared_entries(&shared_dir, &req.target_agent, alias.as_deref());
             for entry in candidates {
                 // Self-forward guard, matching Tier 2a. Also loopback-only
                 // (§5 of the spec): a poisoned registry entry can't redirect
@@ -909,14 +920,14 @@ pub(crate) async fn deliver(
                     // Evicting only this channel's entry lets the loop try the
                     // next candidate.
                     ForwardOutcome::Stale => {
-                        if agent_registry::should_evict_on_forward_failure(&entry) {
+                        if former_slug::may_evict(&found_as, &req) && agent_registry::should_evict_on_forward_failure(&entry) {
                             tracing::warn!(
                                 target = %req.target_agent,
                                 channel = %entry.channel,
                                 pid = entry.pid,
                                 "cross-channel forward: entry presumed dead — evicting and trying next candidate"
                             );
-                            agent_registry::remove_shared(&shared_dir, &req.target_agent, &entry.channel);
+                            agent_registry::remove_shared(&shared_dir, &found_as, &entry.channel);
                         } else {
                             candidate_seen = true;
                             tracing::warn!(
@@ -1517,6 +1528,8 @@ pub(super) async fn handle_reactive_agent(
                     obj.insert("uid_public_key".to_string(), json!(pubkey));
                 }
             }
+            // A former slug: its agent's current name and key (`former_slug`).
+            former_slug::renamed_lookup(&state, id, &mut value);
             Json(value).into_response()
         }
         None => (
@@ -2090,15 +2103,15 @@ async fn handle_reactive_transcript_cross_channel(
     // still caps this at one hop even in an exotic multi-instance cycle
     // this filter alone wouldn't catch — e.g. instance A's entry points to
     // B and B's own entry for the same agent points back to A).
-    let Some(entry) = crate::backend::reactive::registry::lookup_all_shared(&shared_dir, &params.agent)
-        .into_iter()
-        .find(|e| !is_self_registration(&e.local_url, &state.local_web_url))
-    else {
+    // A former slug's agent is registered, and asked for, under its current one.
+    let alias = former_slug::owner(state, &params.agent).map(|o| o.slug);
+    let (agent, entries) = former_slug::shared_entries(&shared_dir, &params.agent, alias.as_deref());
+    let Some(entry) = entries.into_iter().find(|e| !is_self_registration(&e.local_url, &state.local_web_url)) else {
         return not_found();
     };
 
     let query: Vec<(&str, String)> = vec![
-        ("agent", params.agent.clone()),
+        ("agent", agent),
         ("max_lines", params.max_lines.to_string()),
         ("forwarded", "true".to_string()),
     ];
@@ -2508,22 +2521,8 @@ mod forward_inject_tests;
 /// answer as a route. Holding here is the default; only "another install
 /// runs it" or an answer the relay cannot give plainly sends it to the relay.
 #[cfg(test)]
-mod absent_route_tests {
-    use super::*;
-    use crate::muxbus::wan_lease::Holder;
-
-    #[test]
-    fn the_lease_answer_picks_the_route() {
-        assert_eq!(absent_route_for(&Holder::Free), AbsentRoute::HoldHere);
-        assert_eq!(absent_route_for(&Holder::Yours), AbsentRoute::HoldHere);
-        // No relay to send through: keep it here.
-        assert_eq!(absent_route_for(&Holder::Unreachable), AbsentRoute::HoldHere);
-        assert_eq!(absent_route_for(&Holder::Other(crate::muxbus::wan_lease::HeldBy { desc: "computer area54".into(), ..Default::default() })), AbsentRoute::Relay);
-        // An older relay, or one that won't say: the order before this plan.
-        assert_eq!(absent_route_for(&Holder::Unsupported), AbsentRoute::Relay);
-        assert_eq!(absent_route_for(&Holder::Unknown), AbsentRoute::Relay);
-    }
-}
+#[path = "tests/reactive/absent_route_tests.rs"]
+mod absent_route_tests;
 
 /// Tier-4 (cloud relay) gating tests.
 ///

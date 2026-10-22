@@ -22,7 +22,10 @@
 //! name matches, with its UID when it has one. (3) The store, by slug and by
 //! display name (`name`, `instance_name`, case-insensitively) over
 //! non-template, non-hidden rows — the agents that exist but are not running
-//! right now. Live and stored candidates that share a UID are one candidate.
+//! right now — and, when none of those match, by a slug an agent was renamed
+//! from (`Store::agents_matching_name`; `SPEC_FORK_SLUG_MIGRATION_2026_10_22.md`
+//! Phase 1), so a task or cron job addressed to an old id still reaches its
+//! agent. Live and stored candidates that share a UID are one candidate.
 //!
 //! Spec §1.1 measured that a display name never resolves through the
 //! exact-case slug tier. That finding is about a resolver that has to *pick*;
@@ -399,6 +402,33 @@ mod tests {
         store.set_def_registry(std::sync::Arc::new(defs));
         let r = resolve_name_to_uid(&store, &registry(), UID_UP);
         assert!(r.is_err(), "{r:?}");
+    }
+
+    /// A slug an agent was renamed from resolves to it, stored or live: the
+    /// endpoint `WorkEnqueue` and `CronCreate` call, so a task or a cron job
+    /// addressed to the old id stores the agent's UID (fork slug migration
+    /// Phase 1). Live and stored are one candidate.
+    #[test]
+    fn a_former_slug_resolves_to_its_agent_stored_or_live() {
+        let store = std::sync::Arc::new(store_with(&[(UID_Y, "Loap #2", "loap-loap-2")]));
+        store.test_rename_slug(UID_Y, "loap-2", 1);
+        let r = resolve_name_to_uid(&store, &registry(), "loap-loap-2").unwrap();
+        let NameResolution::One { uid, candidate } = r else {
+            panic!("expected One, got {r:?}");
+        };
+        assert_eq!((uid.as_str(), candidate.slug.as_str(), candidate.live), (UID_Y, "loap-2", false));
+
+        let reg = registry();
+        let resolver_store = store.clone();
+        reg.set_former_slug_resolver(std::sync::Arc::new(move |n: &str| {
+            resolver_store.former_slug_owner(n).ok().flatten().map(|o| o.uid)
+        }));
+        reg.register_agent_full("Loap-2", "block-l", None, 0, Some("loap-2"), Some(UID_Y), "test.m3").unwrap();
+        let r = resolve_name_to_uid(&store, &reg, "loap-loap-2").unwrap();
+        assert!(
+            matches!(&r, NameResolution::One { uid, candidate } if uid == UID_Y && candidate.live),
+            "{r:?}"
+        );
     }
 
     /// Templates are prototypes, never targets (spec §1.2): a provider key

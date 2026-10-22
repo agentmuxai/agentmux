@@ -55,7 +55,9 @@ pub(super) fn resolve_slug_collision(
             // Case-insensitive: every per-name key table folds the name, so
             // `Victim` beside `victim` would get victim's keys. Slugs are
             // ASCII (`slug::is_valid_agent_id`), so NOCASE folds all of them.
-            "SELECT COUNT(*) FROM db_agents WHERE slug = ?1 COLLATE NOCASE",
+            // This channel's copy of the former slugs counts too (`former_slugs`).
+            "SELECT (SELECT COUNT(*) FROM db_agents WHERE slug = ?1 COLLATE NOCASE)
+                  + (SELECT COUNT(*) FROM db_agent_former_slugs WHERE slug = ?1 COLLATE NOCASE)",
             params![candidate],
             |row| row.get(0),
         )?;
@@ -265,6 +267,8 @@ pub(super) fn deleted_agent_key_names(
     if let Some(own) = shared.names(id) {
         std::iter::once(&own.slug).chain(&own.former).for_each(|s| push(s.trim().to_lowercase()));
     }
+    // And this channel's copy of its former slugs (`former_slugs`).
+    local_former_slugs(conn, id)?.into_iter().for_each(|f| push(f.slug));
     Ok(names)
 }
 
@@ -322,6 +326,15 @@ pub(super) fn key_name_used_by_another(
         if slug.to_lowercase() == folded || fallback_of(&name) || fallback_of(&instance_name) {
             return Ok(true);
         }
+    }
+    // Another agent's former slug, in this channel's copy.
+    let other_former: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM db_agent_former_slugs WHERE agent_uid != ?1 AND slug = ?2)",
+        params![id, folded],
+        |r| r.get(0),
+    )?;
+    if other_former {
+        return Ok(true);
     }
     // A live agent's former names too: its running session may still sign
     // under an earlier name's fallback until it relaunches.
@@ -430,7 +443,8 @@ impl Store {
     /// The definitions a message's target names: the one whose slug it is,
     /// else every one whose display name routes to it (`agent_route_name`: a
     /// fork "Loap #3" is `Loap-3`, and a root `Claude` may hold the slug
-    /// `claude-2`) (#4744). Folded like the key tables.
+    /// `claude-2`) (#4744), else the one it was renamed from
+    /// (`former_slug_owner`). Folded like the key tables.
     pub fn agent_defs_for_target(&self, target: &str) -> Result<Vec<AgentDefinition>, StoreError> {
         let fold = |s: &str| s.trim().to_lowercase();
         let target = fold(target);
@@ -438,6 +452,14 @@ impl Store {
         if let Some(def) = defs.iter().find(|d| fold(&d.slug) == target) {
             return Ok(vec![def.clone()]);
         }
-        Ok(defs.into_iter().filter(|d| fold(&agentmux_common::slug::agent_route_name(&d.name)) == target).collect())
+        let by_route: Vec<AgentDefinition> =
+            defs.iter().filter(|d| fold(&agentmux_common::slug::agent_route_name(&d.name)) == target).cloned().collect();
+        if !by_route.is_empty() {
+            return Ok(by_route);
+        }
+        let Some(owner) = self.former_slug_owner(&target)? else {
+            return Ok(Vec::new());
+        };
+        Ok(defs.into_iter().filter(|d| d.id == owner.uid).collect())
     }
 }

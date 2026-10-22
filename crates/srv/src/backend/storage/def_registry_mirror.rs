@@ -59,8 +59,8 @@ pub(super) fn agent_definition_to_record(
         container_volumes: def.container_volumes.clone(),
         container_name: def.container_name.clone(),
         use_ambient_login: def.use_ambient_login,
-        // Not a column: only the shared record holds them, and `upsert`
-        // keeps the file's (an empty list isn't written).
+        // Not a column: the mirror writes add this channel's copy
+        // (`former_slugs`), and `upsert` keeps the file's and appends.
         former_slugs: Vec::new(),
         content: content
             .iter()
@@ -179,7 +179,8 @@ impl Store {
         // content/skills back, defeating the deletion). (reagent P1 on #1385.)
         let content = self.agent_content_get_all_local(def_id).unwrap_or_default();
         let skills = self.agent_skill_list_local(def_id).unwrap_or_default();
-        let rec = agent_definition_to_record(&def, &content, &skills);
+        let mut rec = agent_definition_to_record(&def, &content, &skills);
+        rec.data.former_slugs = self.agent_former_slugs_local(def_id).unwrap_or_default();
         if let Err(e) = reg.upsert(&rec) {
             tracing::warn!(def_id, error = %e, "def registry: mirror upsert failed");
         }
@@ -230,7 +231,8 @@ impl Store {
         }
         let content = self.agent_content_get_all_local(def_id).unwrap_or_default();
         let skills = self.agent_skill_list_local(def_id).unwrap_or_default();
-        let rec = agent_definition_to_record(&def, &content, &skills);
+        let mut rec = agent_definition_to_record(&def, &content, &skills);
+        rec.data.former_slugs = self.agent_former_slugs_local(def_id).unwrap_or_default();
         if let Err(e) = reg.upsert(&rec) {
             tracing::warn!(def_id, error = %e, "def registry: mirror refresh failed");
         }

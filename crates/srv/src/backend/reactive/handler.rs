@@ -11,6 +11,10 @@ use super::{audit_hash, now_unix_millis, AUDIT_LOG_MAX, RATE_LIMIT_MAX};
 
 pub(super) use super::rate_limiter::RateLimiter;
 
+#[path = "former_slug.rs"]
+mod former_slug;
+pub use former_slug::FormerSlugResolver;
+
 // ---- Handler ----
 
 /// Core reactive messaging handler.
@@ -71,6 +75,9 @@ pub struct Handler {
     /// before ambiguity is decided. `None` (tests) treats every block as
     /// live.
     block_liveness: Option<BlockLivenessProbe>,
+    /// A name nothing is bound under, tried as a slug an agent was renamed
+    /// from (`former_slug.rs`). `None` (tests) tries nothing.
+    former_slug_resolver: Option<FormerSlugResolver>,
     audit_log: Vec<AuditLogEntry>,
     /// The UID of the delivery in flight
     /// (`InjectionRequest::audit_source_uid`), copied onto every audit entry
@@ -145,6 +152,8 @@ pub enum LookupOutcome {
 pub(super) enum TargetResolution {
     Uid(String),
     Name(String),
+    /// A slug the agent `uid` was renamed from, which it answers to by UID.
+    FormerSlug { block: String, uid: String },
     Ambiguous(Vec<AgentRegistration>),
     NotFound,
 }
@@ -182,6 +191,7 @@ impl Handler {
             stable_agent_identity_confirmer: None,
             uid_identity_confirmer: None,
             block_liveness: None,
+            former_slug_resolver: None,
             audit_log: Vec::with_capacity(AUDIT_LOG_MAX),
             delivery_source_uid: String::new(),
             delivery_wan: None,
@@ -553,7 +563,7 @@ impl Handler {
         let key = target.to_lowercase();
         let blocks = self.name_to_blocks.get(&key).cloned().unwrap_or_default();
         match blocks.len() {
-            0 => Ok(None),
+            0 => Ok(self.former_slug_block(&key).map(|(block, _)| block)),
             1 => Ok(Some(blocks[0].clone())),
             _ => {
                 let live: Vec<String> = blocks.into_iter().filter(|b| self.is_live(b)).collect();
@@ -581,7 +591,13 @@ impl Handler {
         let key = target.to_lowercase();
         let blocks = self.name_to_blocks.get(&key).cloned().unwrap_or_default();
         if blocks.is_empty() {
-            return TargetResolution::NotFound;
+            return match self.former_slug_block(&key) {
+                Some((block, uid)) => {
+                    former_slug::note_delivery(target, &uid);
+                    TargetResolution::FormerSlug { block, uid }
+                }
+                None => TargetResolution::NotFound,
+            };
         }
         let live: Vec<String> = if blocks.len() == 1 {
             blocks
@@ -891,9 +907,12 @@ impl Handler {
         // string deliberately does not begin with "agent not found": that
         // prefix is what `handle_reactive_inject` forwards to other
         // instances, and a local collision must not be forwarded.
-        let (block_id, resolved_by_uid) = match self.resolve_target(&req.target_agent) {
-            TargetResolution::Uid(b) => (b, true),
-            TargetResolution::Name(b) => (b, false),
+        // The UID a target resolved by: its own, or the agent's whose
+        // former slug it is. `None` for a name.
+        let (block_id, resolved_uid) = match self.resolve_target(&req.target_agent) {
+            TargetResolution::Uid(b) => (b, Some(req.target_agent.clone())),
+            TargetResolution::FormerSlug { block, uid } => (block, Some(uid)),
+            TargetResolution::Name(b) => (b, None),
             TargetResolution::Ambiguous(candidates) => {
                 let err = format!(
                     "ambiguous agent name: '{}' is held by {} live agents — address one by uid: {}",
@@ -956,16 +975,17 @@ impl Handler {
         // delivery proceeds — see that field's doc comment for the
         // registered-but-unspawned case this protects. The name checks
         // below apply only to targets that resolved by name.
-        if resolved_by_uid {
+        let resolved_by_uid = resolved_uid.is_some();
+        if let Some(expected_uid) = resolved_uid.as_deref() {
             let own_uid = self
                 .uid_identity_confirmer
                 .as_ref()
                 .and_then(|c| c(&block_id));
             if let Some(own_uid) = own_uid {
-                if !own_uid.eq_ignore_ascii_case(&req.target_agent) {
+                if !own_uid.eq_ignore_ascii_case(expected_uid) {
                     let err = format!(
                         "identity mismatch: block {} resolved for uid '{}' but its own uid is '{}'",
-                        block_id, req.target_agent, own_uid
+                        block_id, expected_uid, own_uid
                     );
                     tracing::error!(
                         target = %req.target_agent,
@@ -2081,46 +2101,5 @@ pub fn get_global_handler() -> &'static ReactiveHandler {
 }
 
 #[cfg(test)]
-mod needs_review_hook_tests {
-    use super::*;
-
-    fn resp(success: bool, requires_stop: Option<bool>, block: Option<&str>) -> InjectionResponse {
-        InjectionResponse {
-            deferred: None,
-            success,
-            request_id: "r".into(),
-            block_id: block.map(Into::into),
-            error: None,
-            timestamp: 0,
-            effective_tier: None,
-            requires_stop,
-            channel_verified: None,
-        }
-    }
-
-    #[test]
-    fn hook_fires_only_for_successful_escalate_required_deliveries() {
-        let h = ReactiveHandler::new();
-        let hits = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
-        let h2 = hits.clone();
-        h.add_needs_review_hook(std::sync::Arc::new(move |b: &str| h2.lock().unwrap().push(b.to_string())));
-        h.after_delivery(&resp(true, Some(true), Some("b1")));
-        h.after_delivery(&resp(true, Some(false), Some("b2"))); // ESCALATE=none
-        h.after_delivery(&resp(true, None, Some("b3")));        // not sensitive
-        h.after_delivery(&resp(false, Some(true), Some("b4"))); // delivery failed
-        h.after_delivery(&resp(true, Some(true), None));        // no block
-        assert_eq!(*hits.lock().unwrap(), vec!["b1".to_string()]);
-    }
-
-    #[test]
-    fn every_registered_hook_is_called() {
-        let h = ReactiveHandler::new();
-        let hits = std::sync::Arc::new(std::sync::Mutex::new(0u32));
-        for _ in 0..2 {
-            let h2 = hits.clone();
-            h.add_needs_review_hook(std::sync::Arc::new(move |_: &str| *h2.lock().unwrap() += 1));
-        }
-        h.after_delivery(&resp(true, Some(true), Some("b1")));
-        assert_eq!(*hits.lock().unwrap(), 2, "a second router must not replace the first");
-    }
-}
+#[path = "handler_needs_review_tests.rs"]
+mod needs_review_hook_tests;
