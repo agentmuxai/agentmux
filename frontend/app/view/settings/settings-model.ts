@@ -5,6 +5,7 @@ import { createEffect, createSignal, on } from "solid-js";
 
 import { sectionKeyOf, sectionOf, type PaneSections } from "@/app/block/pane-sections";
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
+import { readZoom } from "@/app/store/zoom-factor";
 
 export type SettingsSection =
     | "appearance"
@@ -72,6 +73,8 @@ export class SettingsViewModel {
     activeSection: () => SettingsSection;
     setSection: (s: SettingsSection) => void;
     viewName: () => string;
+    /** The pane's zoom (`term:zoom`), applied to the whole view; 1 without a block (tests). */
+    zoom: () => number;
 
     // Search query — docs/specs/SPEC_SETTINGS_PANE_SEARCH_2026_09_21.md §3.5.
     // Same plain-createSignal treatment as activeSection (no blockAtom; see
@@ -103,6 +106,7 @@ export class SettingsViewModel {
             this.setSection = setSection;
         }
         this.viewName = () => SETTINGS_SECTION_LABELS[this.activeSection()];
+        this.zoom = () => readZoom(block?.meta());
         const [query, setQuery] = createSignal("");
         this.query = query;
         this.setQuery = setQuery;

@@ -150,4 +150,9 @@ describe("ToolchainView", () => {
         fireEvent.click(await screen.findByRole("button", { name: "Reset to the default port" }));
         await waitFor(() => expect(localStorage.getItem("agentmux:widget-ports")).toBe("{}"));
     });
+
+    it("zooms the whole view with the pane's shared zoom", () => {
+        const { container } = render(() => <ToolchainView zoom={() => 1.5} />);
+        expect((container.querySelector(".toolchain-view") as HTMLElement).style.zoom).toBe("1.5");
+    });
 });

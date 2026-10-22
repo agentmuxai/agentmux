@@ -121,7 +121,8 @@ let latestFetchedAt = 0;
 
 // ── View component ────────────────────────────────────────────────────────────
 
-export function ToolchainView(): JSX.Element {
+/** `zoom`: the pane's zoom (`term:zoom`), applied to the whole view; 1 when not given. */
+export function ToolchainView(props: { zoom?: () => number } = {}): JSX.Element {
     const plat = currentPlatform();
     const [env, setEnv] = createSignal<ToolEnv | null>(null);
     const [showPath, setShowPath] = createSignal(false);
@@ -609,7 +610,7 @@ export function ToolchainView(): JSX.Element {
     );
 
     return (
-        <div class="toolchain-view ui-density-compact">
+        <div class="toolchain-view ui-density-compact" style={{ zoom: props.zoom?.() ?? 1 }}>
             <div class="ui-card-section-header toolchain-view-header">
                 <span class="ui-card-section-title">Toolchain</span>
                 {/* The one-glance answer to "am I behind?" — counts only what

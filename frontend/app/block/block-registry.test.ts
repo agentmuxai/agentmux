@@ -87,7 +87,16 @@ describe("built-in pane tabs (block-registry.ts)", () => {
         expect(holders("hueBorder")).toEqual(["term"]);
         expect(holders("nativeSurface")).toEqual(["browser"]);
         // 5b: zoom.ts's allowlist and editor's base size, paste, Ctrl+F, cwd.
-        expect(holders("paneZoom")).toEqual(["agent", "connectors", "cpuplot", "editor", "help", "memory", "swarm", "sysinfo", "term", "warden"]);
+        // Over every built-in pane (VIEWS above is the old map's list, without Hangar and Tower), so a
+        // new pane that leaves out zoom fails here (REPORT_PANE_ZOOM_COVERAGE_2026_10_22.md).
+        const zoomHolders = [...VIEWS, "files", "tower"].filter((v) => paneTabCapability(v, "paneZoom") != null).sort();
+        expect(zoomHolders).toEqual([
+            "agent", "connectors", "cpuplot", "editor", "files", "help", "memory", "settings", "swarm", "sysinfo", "term",
+            "toolchain", "tower", "warden",
+        ]);
+        expect(paneTabCapability("tower", "paneZoom")?.baseFontSize).toBe(13);
+        expect(paneTabCapability("toolchain", "paneZoom")?.baseFontSize).toBe(12);
+        expect(paneTabCapability("settings", "paneZoom")?.baseFontSize).toBe(12);
         expect(paneTabCapability("sysinfo", "paneZoom")?.baseFontSize).toBe(11);
         expect(paneTabCapability("editor", "paneZoom")?.baseFontSize).toBe(13);
         expect(paneTabCapability("files", "paneZoom")?.baseFontSize).toBe(12);
