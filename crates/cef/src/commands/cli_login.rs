@@ -1001,8 +1001,8 @@ pub fn cancel_cli_login(state: &Arc<AppState>) -> Result<serde_json::Value, Stri
 
 /// Reads the provider's config-dir env var (`config_dir_env_var` — e.g.
 /// "CLAUDE_CONFIG_DIR", "OPENCLAW_HOME") out of the spawn's `auth_env` and
-/// stats its `.credentials.json` (same path convention the PTY reap's
-/// post-login existence check already uses, ~line 773). `None` inner value
+/// stats its credential file: Codex's `auth.json`, otherwise `.credentials.json`
+/// (the PTY reap's post-login existence check's convention). `None` inner value
 /// = the file doesn't exist yet (a fresh mint — any later appearance
 /// counts as "changed"). Returns `None` entirely when the named env var
 /// wasn't passed (nothing to compare against; `get_cli_login_status`
@@ -1020,19 +1020,10 @@ fn capture_cred_baseline(
     config_dir_env_var: &str,
 ) -> Option<(std::path::PathBuf, Option<std::time::SystemTime>)> {
     let dir = auth_env.get(config_dir_env_var)?;
-    let path = std::path::Path::new(dir).join(credential_file_for(config_dir_env_var));
+    let file = if config_dir_env_var == "CODEX_HOME" { "auth.json" } else { ".credentials.json" };
+    let path = std::path::Path::new(dir).join(file);
     let mtime = std::fs::metadata(&path).ok().and_then(|m| m.modified().ok());
     Some((path, mtime))
-}
-
-/// The file a provider's login writes in its config dir: Codex's is
-/// `auth.json` (under `CODEX_HOME`); Claude Code's and OpenClaw's are
-/// `.credentials.json`.
-fn credential_file_for(config_dir_env_var: &str) -> &'static str {
-    match config_dir_env_var {
-        "CODEX_HOME" => "auth.json",
-        _ => ".credentials.json",
-    }
 }
 
 /// Report whether a CLI login child is still in flight.
@@ -1386,22 +1377,11 @@ mod capture_cred_baseline_tests {
     #[test]
     fn reports_none_mtime_for_a_credential_file_that_does_not_exist_yet() {
         let dir = std::env::temp_dir().join(format!("cli-login-baseline-test-{}", std::process::id()));
-        let mut auth_env = HashMap::new();
-        auth_env.insert("CLAUDE_CONFIG_DIR".to_string(), dir.to_string_lossy().to_string());
-
-        let (path, mtime) = capture_cred_baseline(&auth_env, "CLAUDE_CONFIG_DIR").expect("config dir was set");
-        assert_eq!(path, dir.join(".credentials.json"));
-        assert!(mtime.is_none(), "fresh mint: no credential file should exist yet");
-    }
-
-    #[test]
-    fn watches_codex_auth_json_not_claudes_file() {
-        let dir = std::env::temp_dir().join(format!("cli-login-baseline-test-codex-{}", std::process::id()));
-        let mut auth_env = HashMap::new();
-        auth_env.insert("CODEX_HOME".to_string(), dir.to_string_lossy().to_string());
-
-        let (path, _) = capture_cred_baseline(&auth_env, "CODEX_HOME").expect("config dir was set");
-        assert_eq!(path, dir.join("auth.json"));
+        for (var, file) in [("CLAUDE_CONFIG_DIR", ".credentials.json"), ("CODEX_HOME", "auth.json")] {
+            let env = HashMap::from([(var.to_string(), dir.to_string_lossy().to_string())]);
+            let (path, mtime) = capture_cred_baseline(&env, var).expect("config dir was set");
+            assert!(path == dir.join(file) && mtime.is_none(), "{var}: {path:?}; fresh mint: no file yet");
+        }
     }
 
     #[test]
