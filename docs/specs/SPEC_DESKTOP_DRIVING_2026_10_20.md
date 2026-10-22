@@ -1,6 +1,6 @@
 # SPEC: Desktop driving: an agent looks at and controls a native app, with the user's consent for each app
 
-**Status:** active — Phase 1 (Windows) in #5333: the Desktop tool (apps, look, click, scroll, type, key, wait, release), per-app consent, the blocklist, Stop and the audit log. Remaining: Phase 2 and later (§8), and the hands-on test of real input.
+**Status:** active — Phase 1 (Windows) in #5334: the Desktop tool (apps, look, click, scroll, type, key, wait, release), per-app consent, the blocklist, Stop and the audit log. Remaining: Phase 2 and later (§8), and the hands-on test of real input.
 **Date:** 2026-10-20
 **Author:** Manoz@Area54, at the operator's request
 **Trigger (operator, 2026-10-20):** "write spec to file and lets build it", after a review of issue #261 and of how Claude Cowork, Perplexity and OpenAI's CUA do computer use.
