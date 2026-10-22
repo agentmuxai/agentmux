@@ -297,12 +297,22 @@ fn a_holder_pauses_its_task_on_hold_and_gets_its_attempt_back() {
     assert!(s.work_hold_own("t", "Loap-3", "uid-l", c.attempts, 2000).unwrap().is_some());
     let t = s.work_queue_get("t").unwrap().unwrap();
     assert_eq!(
-        (t.state.as_str(), t.attempts, t.claimed_by.as_str(), t.claim_expires),
-        (work_state::HELD, 0, "", None),
-        "paused, not failed: the attempt is given back"
+        (t.state.as_str(), t.attempts, t.max_attempts, t.claimed_by.as_str(), t.claim_expires),
+        (work_state::HELD, 1, 4, "", None),
+        "paused, not failed: the attempt doesn't count, and the fence keeps counting"
     );
     assert_eq!((t.target_agent.as_str(), t.target_agent_uid.as_str()), ("Loap-3", "uid-l"), "taken from anyone, it comes back to its holder");
     assert!(claim(&s, "Naki", "uid-n").is_none(), "held: nobody takes it");
+
+    // Reclaimed, the task has a new fence: a late call from the paused claim
+    // can't touch the new one.
+    let (again, _) = s
+        .work_claim_one("t", &ClaimFilter { kind: None, agent_id: "Loap-3".into(), agent_uid: "uid-l".into(), groups: vec![] }, 5000, 60_000)
+        .unwrap()
+        .unwrap();
+    assert_eq!(again.attempts, c.attempts + 1);
+    assert!(s.work_submit("t", "Loap-3", "uid-l", c.attempts, "stale", 6000).unwrap().is_none(), "the paused claim's fence is spent");
+    assert!(s.work_ask("t", "Loap-3", "uid-l", again.attempts, 6000).unwrap().is_some());
 }
 
 #[test]

@@ -521,9 +521,12 @@ impl Store {
 
     /// The holder pauses its task (`Tasks` `hold` on its own claim,
     /// SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md §3.2): `claimed` to
-    /// `held`, the claim given up and its attempt given back, since pausing
-    /// isn't failing. A task it took from anyone becomes its own, so the
-    /// pause comes back to it. Fenced like the queue's holder transitions.
+    /// `held`, the claim given up. Pausing isn't failing, so the attempt
+    /// doesn't count against the task: its limit grows by one. `attempts`
+    /// itself never goes down, since it is the fence: the next claim gets a
+    /// new number, and a late call from this one is refused. A task it took
+    /// from anyone becomes its own, so the pause comes back to it. Fenced like
+    /// the queue's holder transitions.
     pub fn work_hold_own(
         &self,
         id: &str,
@@ -540,7 +543,7 @@ impl Store {
             |holder| {
                 format!(
                     "UPDATE db_work_queue
-                        SET state = '{h}', attempts = attempts - 1,
+                        SET state = '{h}', max_attempts = max_attempts + 1,
                             target_agent = CASE WHEN target_agent = '' AND target_agent_uid = '' AND target_group = ''
                                                 THEN claimed_by ELSE target_agent END,
                             target_agent_uid = CASE WHEN target_agent = '' AND target_agent_uid = '' AND target_group = ''

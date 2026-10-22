@@ -135,7 +135,7 @@ async fn any_agent_holds_and_unholds_a_waiting_task_and_the_history_says_who() {
 }
 
 #[tokio::test]
-async fn only_its_holder_can_put_a_claimed_task_on_hold_and_doing_so_keeps_the_attempt() {
+async fn only_its_holder_can_put_a_claimed_task_on_hold_and_the_pause_costs_no_attempt() {
     let app = app();
     post(&app, "/agentmux/work", json!({"title": "t", "payload": "p"})).await;
     let (_, c) = post(&app, "/agentmux/work/claim", json!({"agent_id": "a1"})).await;
@@ -150,7 +150,11 @@ async fn only_its_holder_can_put_a_claimed_task_on_hold_and_doing_so_keeps_the_a
     let (s, v) = post(&app, &format!("/agentmux/work/{num}/hold"), json!({"agent_id": "a1", "attempt": attempt, "reason": "blocked on X"})).await;
     assert_eq!((s, v["state"].as_str(), v["for"].as_str()), (StatusCode::OK, Some("held"), Some("a1")), "{v}");
     let (_, c) = post(&app, "/agentmux/work/claim", json!({"agent_id": "a1", "id": num.to_string()})).await;
-    assert_eq!((c["claimed"].as_bool(), c["attempt"].as_i64()), (Some(true), Some(attempt)), "the pause gave the attempt back");
+    let again = c["attempt"].as_i64().unwrap();
+    assert_eq!((c["claimed"].as_bool(), again), (Some(true), attempt + 1), "a new claim, a new fence");
+    assert_eq!(c["item"]["max_attempts"].as_i64(), Some(4), "the pause didn't use up an attempt");
+    let (s, _) = post(&app, &format!("/agentmux/work/{num}/update"), json!({"agent_id": "a1", "attempt": attempt, "note": "late"})).await;
+    assert_eq!(s, StatusCode::CONFLICT, "the paused claim's attempt no longer works");
 }
 
 #[tokio::test]

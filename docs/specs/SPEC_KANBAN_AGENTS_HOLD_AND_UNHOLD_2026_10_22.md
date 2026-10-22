@@ -48,7 +48,7 @@ The operator, 2026-10-22, on finding two finished tasks they had to take off hol
 
 An agent holding a claimed task may put it on hold with its `attempt`. This is "I can't go on until X happens".
 - The claim is given up and the task becomes `held`. It stays the agent's own: a task it took from anyone becomes its own, so the pause comes back to it (unlike `release`, which hands such a task back to anyone).
-- The attempt isn't counted against `max_attempts`, because pausing is not failing. The store decrements it in the same update.
+- The attempt isn't counted against the task, because pausing is not failing: the store raises `max_attempts` by one in the same update. It never lowers `attempts`, which is the claim's fence: the next claim gets a new number, so a late call from the paused claim is refused (Codex on #5326).
 - The card leaves In progress for the Backlog, greyed "on hold", with the reason.
 
 Any other agent's `hold` on a claimed task is refused ("#12 is being worked on by Loap-3; message them"). A task someone is working on is that agent's to pause.
@@ -102,7 +102,7 @@ The queue is shared by every AgentMux on the computer (Kanban spec §10). An old
 - `crates/srv/src/server/work_tasks.rs`: `handle_work_hold`, `handle_work_unhold`; holding one's own claimed task (§3.2).
 - `crates/srv/src/server/routes.rs`: the two routes.
 - `crates/srv/src/server/work_queue.rs`: `ClaimRequest.id`; `handle_work_claim` calls `work_claim_one` when it is set.
-- `crates/srv/src/backend/storage/work_board.rs`: `work_claim_one`; `work_hold_own` (claimed → held for its holder, attempt fenced and given back).
+- `crates/srv/src/backend/storage/work_board.rs`: `work_claim_one`; `work_hold_own` (claimed → held for its holder, fenced; its attempt limit grows by one).
 - `crates/mcp/src/tool_schemas.rs`, `crates/mcp/src/tools/work.rs`: the actions, `claim`'s `id`, the wording (§3.5).
 - `crates/srv/operator-config-seed.json`: the guidance sentence.
 - `frontend/app/view/warden-kanban/`: no change; the drawer's history already renders `held` and `unheld` rows with an agent actor by name.
@@ -114,7 +114,7 @@ The queue is shared by every AgentMux on the computer (Kanban spec §10). An old
 - **Store:**
   - hold moves `open` → `held` only;
   - unhold moves `held` → `open` only;
-  - holding its own claimed task gives the attempt back and keeps the target;
+  - holding its own claimed task costs no attempt, keeps the fence counting (a late call from the paused claim is refused) and keeps the target;
   - a stale `attempt` is refused;
   - `work_claim_one` takes an eligible open or held task, refuses one for another agent, one waiting on an unfinished task, and one that moved meanwhile.
 - **Routes:**
@@ -136,4 +136,4 @@ The queue is shared by every AgentMux on the computer (Kanban spec §10). An old
   - *As asked:* yes, on any waiting task.
   - *Alternative:* only its own tasks and Anyone's.
   - *Recommended:* yes, as asked. The history names who did it, and the other agent can lift it.
-- **D3. Pausing one's own claimed task (§3.2):** included, with the attempt given back. *Recommended*, since that is the natural way to say "blocked on something outside".
+- **D3. Pausing one's own claimed task (§3.2):** included, costing no attempt. *Recommended*, since that is the natural way to say "blocked on something outside".
