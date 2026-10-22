@@ -198,6 +198,10 @@ describe("Export", () => {
             expect(done.textContent).toContain("Saved 2 entries to agentmux-test.csv");
             expect(done.textContent).toContain("isn't encrypted");
             expect(done.textContent).toContain("spreadsheet");
+            // No advice about a passphrase or an age file: this file has neither.
+            expect(done.textContent).not.toContain("passphrase");
+            expect(done.textContent).not.toContain("age -d");
+            expect(done.textContent).not.toContain("KeePass");
         });
 
         it("warns when the folder is synced to the cloud, and exports only the chosen entries", async () => {

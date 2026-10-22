@@ -171,20 +171,23 @@ export function VaultExportDialog(props: { onClose: () => void }): JSX.Element {
                                     {plainFormat() === "csv" ? " Don't open it in a spreadsheet and save it: a spreadsheet changes values it takes for numbers or formulas." : ""}
                                 </p>
                             </Show>
-                            <p class="warden-manager-dim">
-                                <Show
-                                    when={!plainFormat() && format() === "kdbx"}
-                                    fallback={
-                                        <>
-                                            {"Keep the passphrase somewhere safe: nothing can recover the file without it. It's an age file, so `age -d "}
-                                            {done()!.file_name}
-                                            {"` opens it without AgentMux."}
-                                        </>
-                                    }
-                                >
-                                    {"Open it in KeePassXC, KeePassDX or Strongbox with that password. Keep the password somewhere safe: nothing can recover the file without it. It is a KDBX 4.1 file, so a KeePass app from before 2022 can't open it."}
-                                </Show>
-                            </p>
+                            {/* A plain file has no passphrase and isn't an age file: only the warning above applies. */}
+                            <Show when={!plainFormat()}>
+                                <p class="warden-manager-dim">
+                                    <Show
+                                        when={format() === "kdbx"}
+                                        fallback={
+                                            <>
+                                                {"Keep the passphrase somewhere safe: nothing can recover the file without it. It's an age file, so `age -d "}
+                                                {done()!.file_name}
+                                                {"` opens it without AgentMux."}
+                                            </>
+                                        }
+                                    >
+                                        {"Open it in KeePassXC, KeePassDX or Strongbox with that password. Keep the password somewhere safe: nothing can recover the file without it. It is a KDBX 4.1 file, so a KeePass app from before 2022 can't open it."}
+                                    </Show>
+                                </p>
+                            </Show>
                         </div>
                     }
                 >
