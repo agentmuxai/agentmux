@@ -166,3 +166,55 @@ fn a_name_that_is_no_former_name_never_touches_the_store() {
     rename(&store, "uid-zed", "Zork Two");
     assert_eq!(owner_uid(&store, "zork").as_deref(), Some("uid-zed"), "seen at once after a rename");
 }
+
+/// An agent only the shared definitions hold (made in another channel, no row
+/// here) holds its current display name too: a local agent's former display
+/// name of the same route never resolves over it.
+#[test]
+fn a_shared_only_agents_current_display_name_wins() {
+    let store = Store::open_in_memory().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let defs = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+    store.set_def_registry(defs.clone());
+    let mut local = test_agent_def("uid-local", "Xeno Name", "claude", "host", 1, "");
+    local.slug = "local".into();
+    store.agent_def_insert(&mut local).unwrap();
+    rename(&store, "uid-local", "Local Now");
+    assert_eq!(owner_uid(&store, "Xeno Name").as_deref(), Some("uid-local"));
+
+    for (uid, name, label) in [("uid-remote", "Xeno Name", ""), ("uid-remote-fork", "Remote #2", "xeno name")] {
+        let remote = crate::registry::DefinitionRecord {
+            schema_version: crate::registry::DEF_MAX_SUPPORTED_SCHEMA,
+            data: crate::registry::DefinitionRecordV1 {
+                id: uid.into(),
+                slug: format!("{uid}-slug"),
+                name: name.into(),
+                branch_label: label.into(),
+                provider: "claude".into(),
+                ..Default::default()
+            },
+        };
+        defs.upsert(&remote).unwrap();
+        assert!(store.agent_row_get(uid).unwrap().is_none());
+        assert_eq!(owner_uid(&store, "Xeno Name"), None, "{uid} holds it now");
+        assert!(store.agents_matching_name("xeno-name").unwrap().iter().all(|m| m.id != "uid-local"));
+        std::fs::remove_file(defs.root().join(format!("{uid}.json"))).unwrap();
+    }
+}
+
+/// A display name and its route are one key on both sides of the fast
+/// negative set: "Loap #3", "loap-3" and "LOAP-3" all resolve, from a warm set,
+/// and a name that is no former one still costs no store access.
+#[test]
+fn a_display_name_and_its_route_fold_to_one_key() {
+    let (_t, store) = store_with(&[("uid-lp", "Loap #3", "lp")]);
+    rename(&store, "uid-lp", "Loap Main");
+    assert_eq!(owner_uid(&store, "warm-up"), None);
+    let warm = reads(&store);
+    assert_eq!(owner_uid(&store, "nobody-here"), None);
+    assert_eq!(reads(&store), warm, "the set answers a miss");
+    for name in ["Loap #3", "loap-3", "LOAP-3", " Loap #3 "] {
+        assert_eq!(owner_uid(&store, name).as_deref(), Some("uid-lp"), "{name}");
+    }
+    assert_eq!(super::route_key("Loap #3"), super::route_key("loap-3"));
+}

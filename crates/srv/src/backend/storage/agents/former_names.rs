@@ -45,7 +45,9 @@ fn fold(name: &str) -> String {
 /// The names every agent holds now and every former name with the agents that
 /// list it, read in one pass.
 pub(super) struct FormerNameIndex {
-    /// Every slug and display route an agent holds now, folded.
+    /// Every slug and display route an agent holds now, folded: this
+    /// channel's rows, and every shared definition's (an agent made in
+    /// another channel may have no row here).
     current: HashSet<String>,
     /// Former name key → every uid that lists it, slug or display.
     owners: HashMap<String, BTreeSet<String>>,
@@ -56,6 +58,7 @@ pub(super) struct FormerNameIndex {
 impl FormerNameIndex {
     pub(super) fn read(conn: &rusqlite::Connection, shared: &SharedSlugs) -> Result<Self, StoreError> {
         let mut current: HashSet<String> = shared.entries().map(|(_, n)| fold(&n.slug)).collect();
+        current.extend(shared.entries().flat_map(|(_, n)| n.display.iter().filter_map(|d| route_key(d))));
         let mut stmt = conn.prepare(
             "SELECT id, COALESCE(slug, ''), name, COALESCE(instance_name, ''), COALESCE(branch_label, '') FROM db_agents",
         )?;

@@ -28,11 +28,14 @@ use std::time::{Duration, SystemTime};
 
 use serde_json::Value;
 
-/// The slug and former slugs of one active shared definition.
+/// The slug and former slugs of one active shared definition, and the
+/// display names it goes by now (its `name` and `branch_label`, non-empty),
+/// which a former display name of another agent never outranks.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SlugEntry {
     pub slug: String,
     pub former: Vec<String>,
+    pub display: Vec<String>,
 }
 
 /// Wider than the coarsest common timestamp granularity (FAT's 2 s).
@@ -218,7 +221,9 @@ impl State {
 /// still answers, as long as these fields are where this build puts them:
 /// `data.id` naming the file, `data.slug` a string (absent reads as empty),
 /// `data.former_slugs` a list of objects with a string `slug` (absent reads as
-/// none). Anything else is an error naming what is wrong.
+/// none). Anything else is an error naming what is wrong. The display names
+/// (`data.name`, `data.branch_label`) are read when they are strings and
+/// skipped otherwise: they never make a record's slugs unreadable.
 pub(super) fn slug_fields(id: &str, bytes: &[u8]) -> Result<SlugEntry, String> {
     let json: Value = serde_json::from_slice(bytes).map_err(|e| format!("not JSON ({e})"))?;
     let data = json.get("data").and_then(Value::as_object).ok_or("no `data` object")?;
@@ -239,5 +244,11 @@ pub(super) fn slug_fields(id: &str, bytes: &[u8]) -> Result<SlugEntry, String> {
             .ok_or("a `data.former_slugs` entry has no string `slug`")?,
         Some(_) => return Err("`data.former_slugs` isn't a list".to_string()),
     };
-    Ok(SlugEntry { slug, former })
+    let display = ["name", "branch_label"]
+        .iter()
+        .filter_map(|k| data.get(*k).and_then(Value::as_str))
+        .filter(|s| !s.trim().is_empty())
+        .map(str::to_string)
+        .collect();
+    Ok(SlugEntry { slug, former, display })
 }
