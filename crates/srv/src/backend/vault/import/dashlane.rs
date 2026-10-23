@@ -62,7 +62,7 @@ fn read_table(t: &Table, part: Part) -> Result<Imported, ReadError> {
                 let secret = sealed(&[("issuing bank", c("issuingbank")), ("country", c("country"))]);
                 if c("type").eq_ignore_ascii_case("bank") {
                     let label = [name, c("issuingbank")].into_iter().find(|s| !s.is_empty()).unwrap_or("Dashlane bank account");
-                    sink.bank(label, c("accountnumber"), c("routingnumber"), c("issuingbank"), holder, "", "");
+                    sink.bank(label, c("accountnumber"), c("routingnumber"), c("issuingbank"), holder, &sealed(&[("country", c("country"))]), "");
                 } else {
                     let label = if name.is_empty() { "Dashlane card" } else { name };
                     sink.card(label, c("ccnumber"), month_year(c("expirationmonth"), c("expirationyear")), c("code"), holder, &secret, "");

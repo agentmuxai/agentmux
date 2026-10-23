@@ -10,17 +10,16 @@ use super::shared::{cell, label_of, parse_csv, present, sealed, Sink};
 use super::{Imported, ReadError, Source};
 
 /// Whether a CSV that no other reader knew is Keeper's: no header, every row at least the seven
-/// columns, a title in each, and a website column that is empty or looks like an address.
+/// columns, a title in each, a website column that is empty or an address in every row, and an
+/// address in at least one. A table with a header row fails this, since its header names are no
+/// addresses.
 pub(super) fn read(text: &str) -> Option<Result<Imported, ReadError>> {
     let t = parse_csv(text, false).ok()?;
-    if t.rows.is_empty() || t.rows.iter().any(|r| r.len() < 6 || cell(r, Some(1)).is_empty()) {
+    if t.rows.is_empty() || t.rows.iter().any(|r| r.len() < 7 || cell(r, Some(1)).is_empty()) {
         return None;
     }
-    let addresses = t.rows.iter().filter(|r| {
-        let w = cell(r, Some(4));
-        w.is_empty() || w.contains('.') || w.contains("://")
-    });
-    if addresses.count() * 2 < t.rows.len() {
+    let is_address = |w: &str| w.contains('.') || w.contains("://");
+    if t.rows.iter().any(|r| !cell(r, Some(4)).is_empty() && !is_address(cell(r, Some(4)))) || !t.rows.iter().any(|r| is_address(cell(r, Some(4)))) {
         return None;
     }
     let mut sink = Sink::default();

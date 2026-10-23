@@ -85,6 +85,7 @@ fn dashlane_payments_ids_and_notes_come_in_as_their_kinds() {
     assert_eq!((card.parts["number"].as_str(), card.parts["cvc"].as_str(), card.parts["name"].as_str(), card.parts["expiry"].as_str()), ("4111111111111111", "123", "Alex Doe", "03/2030"));
     let bank = find(&i, "Checking");
     assert_eq!(bank.kind, "bank-account");
+    assert_eq!(text_of(&i, "Checking (notes)"), "country: US", "what a bank account has no field for is sealed, as a card's is");
     assert_eq!((bank.parts["account"].as_str(), bank.parts["routing"].as_str(), bank.fields["bank"].as_str()), ("1234567890", "021000021", "First Bank"));
 
     let i = read_ok(DASHLANE_IDS, "ids.csv");
@@ -176,6 +177,8 @@ fn files_the_new_readers_do_not_claim_are_read_as_before() {
     assert!(matches!(read(b"alpha,beta\n1,2\n", "x.csv", None), Err(ReadError::NeedsMapping(_))));
     // Three columns with no header is not Keeper's seven.
     assert!(matches!(read(b"a,b,c\nd,e,f\n", "x.csv", None), Err(ReadError::NeedsMapping(_))));
+    // Neither is a table whose header row names seven unknown columns: its header is no Keeper row.
+    assert!(matches!(read(b"id,title,x,y,url,notes,z\n1,Home,,,,hello,\n", "x.csv", None), Err(ReadError::NeedsMapping(_))));
     // The person's own mapping always wins over a guess about the service.
     let mapping = Mapping { kind: "api-key".into(), label: 0, value: 3, site: None, username: None };
     let mapped = read(NORDPASS.as_bytes(), "nordpass.csv", Some(&mapping)).ok().unwrap();
