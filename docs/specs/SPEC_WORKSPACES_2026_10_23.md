@@ -1,7 +1,7 @@
 # SPEC: Workspaces — a named set of windows, saved as you go
 
 **Date:** 2026-10-23
-**Status:** active — a running spec, refined with the operator. PR 1 (§10: the ☰ cleanup and default pins) in progress; nothing else built. Supersedes the user-facing parts of `SPEC_OFFLINE_RESILIENCE_2026_10_20.md` §4.7 as built in PR #5356 (unmerged), and the naming decision of `SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md` §3.
+**Status:** active — a running spec, refined with the operator. PR 1 (§3, §3.1) shipped in #5357; PR 2 (the saved Default Workspace, §2, §4, §5 header, §8) in #5358; PRs 3–5 not started. Supersedes the user-facing parts of `SPEC_OFFLINE_RESILIENCE_2026_10_20.md` §4.7 as built in PR #5356 (unmerged), and the naming decision of `SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md` §3.
 **Trigger:** Operator, 2026-10-23, reviewing #5356 ("closing a window keeps its workspace"): *"remove the entries from the hamburger that already have widgets … change the "layouts" to "Workspaces". A workspace to the user (lets define it in the glossary) is a set of windows/panes. Opening a workspace necessarily means closing the existing one. … Start with Default Workspace and it is a running file. Users can also create New Workspace. … if he closes that window, it becomes "greyed" out in the status panel. We need a reopen and delete buttons …"*
 **Related:** `SPEC_LAYOUT_FILES_2026_09_25.md` (the `agentmux.layout` file this extends), `SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08.md` (proposed, unbuilt: continuous session record), `SPEC_OFFLINE_RESILIENCE_2026_10_20.md` G8 ("closing is not deleting"), `SPEC_VERSION_INSTANCE_PANEL_2026_04_25.md` (the status bar panel).
 
@@ -122,6 +122,13 @@ Only the defaults change: a user who has customized the bar (`widget:pinned` in 
 - A write with nothing changed is skipped. Writes are serialized: one in flight, the next one queued.
 - The quit-time write is a last flush, never the only one: on a crash, a forced quit or a fast macOS quit it doesn't run.
 
+**As built (#5358).**
+- Changes are counted by the store's own writes to windows, a window's contents, tabs, layouts and blocks (`LayoutWrites`), so no writer is missed; the saver looks every 250 ms.
+- A change to blocks' settings alone (an agent pane writes them as it works) is saved 30 s after the first instead of 1 s after the last; any change to the arrangement keeps the 1 s / 15 s rule. Close, quit, OS shutdown and focus loss (`workspace.Flush`) save at once either way. A save that would store what is stored already is skipped.
+- While a quit is closing its windows one by one, saves wait, so the quit's record of every window isn't replaced by the ones still open.
+- Windows a cold start restored but the main window hasn't opened yet (`session:restored_windows`) are part of every save.
+- The quit record (`session:last_topology`) is still written as before, for one release; a cold start restores the newer of it and the workspace record.
+
 **What is saved:** the arrangement and each pane's settings, plus each agent pane's agent and session id, so it resumes. **Not saved:** running processes, terminal scrollback (Windows Terminal's experience), an agent's conversation (it lives in the agent's own history).
 
 **Restoring doesn't run anything silently.** Agent panes resume their own sessions, as a crash recovery does today. A terminal pane comes back as a shell in its folder; a command it was started with is shown, not run, until the user presses Enter (Zellij's rule, and what Open layout… already offers).
@@ -134,7 +141,7 @@ Sources: wiki.mozilla.org/Firefox/session_restore; code.visualstudio.com/docs/ed
 
 - **Where:** a `db_workspaces` table in the instance's own `objects.db` (`channels/<channel>/versions/<v>/data/db/`). **Instances stay independent** (operator, 2026-10-23): no workspace state is shared between two running AgentMux instances. Today the same channel and version is already one instance (a second launch opens a window in the first, `crates/launcher/src/hash.rs`); two versions of one channel can run side by side, and each keeps its own workspaces.
 - **Upgrades:** the first launch of a new version copies the workspaces of the channel's most recent other version, once, reading that database only (as #5236 already reads another build's session record). After that the two versions' workspaces are separate.
-- **What a row holds:** the workspace's id and name, and its windows as an `agentmux.layout` document (`SPEC_LAYOUT_FILES_2026_09_25.md` §3), extended with each window's `state` (`open`/`closed`) and always with `resume` references. One serializer serves saving, export and import.
+- **What a row holds:** the workspace's id and name, and its windows in the session record's shape (`session_windows::snapshot_session`: one entry per window, its tabs, panes with their settings, split trees, placement, name and appearance), so the restore that already brings back a quit's windows (`restore_all`) restores it. Export (PR 4) writes it as an `agentmux.layout` document (`SPEC_LAYOUT_FILES_2026_09_25.md` §3) with each window's `state` (`open`/`closed`).
 - **One transaction per save** (SQLite WAL), so a save is all or nothing.
 - **Backups:** the last record that loaded cleanly is kept as the row's `previous`, replaced only after a clean load, so a bad save never overwrites the good copy. A copy is also kept before each upgrade.
 - **Loading falls back:** the record, then `previous`, then the pre-upgrade copy, then a fresh default window. When a fallback was used, a notice says so and which copy was used.
