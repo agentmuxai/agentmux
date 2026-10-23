@@ -199,7 +199,8 @@ class WindowServiceType {
         restoreIfAvailable?: boolean,
         seedView?: string,
         seedMeta?: Record<string, unknown>,
-        previousWindowId?: string
+        previousWindowId?: string,
+        anotherWindowOpening?: boolean
     ): Promise<MuxWindow> {
         return MOS.callBackendService("window", "CreateWindow", Array.from(arguments))
     }

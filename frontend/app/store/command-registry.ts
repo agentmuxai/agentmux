@@ -302,6 +302,7 @@ export function registerDefaultCommands(): void {
     workspaceCommand("workspace:new", "New Workspace…", "plus", (m) => m.newWorkspace());
     workspaceCommand("workspace:open", "Open Workspace…", "folder-open", (m) => m.openWorkspacePicker());
     workspaceCommand("workspace:rename", "Rename Workspace…", "pen", (m) => m.renameWorkspacePrompt());
+    workspaceCommand("workspace:delete", "Delete Workspace…", "trash-can", (m) => m.deleteWorkspacePrompt());
     workspaceCommand("workspace:export", "Export Workspace…", "file-export", (m) => m.exportWorkspace());
     workspaceCommand("workspace:import", "Import Workspace…", "file-import", (m) => m.importWorkspace());
     commandRegistry.register({

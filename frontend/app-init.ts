@@ -69,6 +69,7 @@ import { installFocusFollowsSelection } from "@/app/store/focusManager";
 import { installPaneHistory } from "@/app/store/pane-history";
 import { installSideButtons } from "@/app/store/side-buttons";
 import { reopenRestoredWindows } from "@/app/init/restored-windows";
+import { restoresLastWindow } from "@/app/init/last-window";
 import { installWorkspaceFlushOnBlur, surfaceWorkspaceRestoreNotice } from "@/app/store/user-workspace";
 
 // Deferred — assigned inside initApp() after window.api is ready.
@@ -102,6 +103,9 @@ window.removeNotificationById = removeNotificationById;
 window.modalsModel = modalsModel;
 
 const RPC_TIMEOUT = 5_000; // 5 seconds for individual RPC calls
+// A window restoring the last one closed: srv may wait for that close (3 s)
+// and for its agents to stop (up to 5 s) first (#5363).
+const RESTORE_TIMEOUT = 20_000;
 
 /**
  * Initialize the window-instance-number atom and seed the reducer
@@ -344,22 +348,47 @@ async function initHostNewWindow(seedView?: string | null, seedMeta?: Record<str
             (id) => withTimeout(retryTransient(() => WorkspaceService.GetWorkspace(id)), RPC_TIMEOUT, "GetWorkspace")
         );
         if (reattached) getApi().sendLog(`[initCefNewWindow] reload: re-attached to window ${reattached.oid}`);
+        // No window is open (AgentMux stayed in the tray after its last
+        // window closed): bring that window back, not the default panes.
+        // The host's open windows other than this one: srv can still list a
+        // window whose close is on its way. One still opening (no window id
+        // yet, as a second tray click makes) doesn't count: srv lets exactly
+        // one opener restore (#5363).
+        const others = await withTimeout(getApi().listWindowInstances(), RPC_TIMEOUT, "listWindowInstances")
+            .then((ws) => ws.filter((w) => w.label !== currentWindowLabel()))
+            .catch(() => null);
+        const otherLiveWindows = others ? others.filter((w) => !!w.windowId).length : null;
+        // Another window still opening beside this one (a double click on the
+        // tray icon): srv then doesn't wait for a close that isn't coming.
+        const anotherWindowOpening = !!others?.some((w) => !w.windowId);
+        const restoreLast = restoresLastWindow({
+            windowIds: clientData.windowids,
+            otherLiveWindows,
+            workspaceId: tearOffWsId,
+            view: seedView ?? new URLSearchParams(window.location.search).get("initialView"),
+            reattached: !!reattached,
+        });
+        if (restoreLast) getApi().sendLog("[initCefNewWindow] no window open: restoring the workspace's last window");
         const newWindow = reattached ?? await withTimeout(
             WindowService.CreateWindow(
                 null,
                 tearOffWsId,
                 currentWindowLabel(),
-                false,
+                restoreLast,
                 seedView ?? undefined,
                 seedMeta ?? undefined,
                 // A reload keeps this window's own theme and opacity.
-                previousWindowId()
+                previousWindowId(),
+                anotherWindowOpening
             ),
-            RPC_TIMEOUT,
+            // A restore can wait for the last close and its agents' teardown.
+            restoreLast ? RESTORE_TIMEOUT : RPC_TIMEOUT,
             "CreateWindow"
         );
         tlog("CreateWindow", t);
         rememberWindowId(newWindow.oid);
+        // Any other window the restore brought back opens beside this one.
+        if (restoreLast) void reopenRestoredWindows();
 
         // Register label→window_id with the host NOW, not at the end of
         // initMux (which also registers — idempotently — after render):
