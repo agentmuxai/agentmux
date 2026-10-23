@@ -54,6 +54,20 @@ fn template_parents_are_lineage_roots() {
     assert!(plan.skipped.is_empty(), "first-generation agents aren't forks: {:?}", plan.skipped);
 }
 
+/// The walk reads a branch label the way `fork_lineage_root_id` does: a
+/// whitespace-only label is still a fork's, so the root is above it (#5366).
+#[test]
+fn a_whitespace_label_is_a_fork_in_the_lineage_walk() {
+    let fx = Fx::empty();
+    let data = fx.version("stable", "0.59.1");
+    fx.agent(&data, LOAP, "Loap", "loap", "claude", "", true);
+    fx.agent(&data, LOAP2, "Loap #2", "loap-loap-2", LOAP, " ", true);
+    fx.agent(&data, LOAP3, "Loap #3", "loap-loap-2-loap-3", LOAP2, "Loap #3", true);
+    let plan = super::super::plan(&fx.home, false).unwrap();
+    let loap3 = plan.candidates.iter().find(|c| c.name == "Loap #3").expect("Loap #3 is a candidate");
+    assert_eq!(loap3.new_slug, "loap-3", "its root is Loap, above the whitespace-labelled fork");
+}
+
 /// A collision suffix and a missing parent are listed as left alone; a fork
 /// that already has its clean id isn't listed at all.
 #[test]

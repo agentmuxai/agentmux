@@ -100,7 +100,7 @@ pub(super) fn find_candidates(defs: &[Def]) -> (Vec<Found>, Vec<ForkSlugSkipped>
     // Only forks: an agent without a branch label is a lineage root, whatever
     // its `parent_id` says (one made from a template keeps the template's id
     // there), as `fork_lineage_root_id` reads it.
-    for def in defs.iter().filter(|d| !d.parent_id.trim().is_empty() && !d.branch_label.trim().is_empty()) {
+    for def in defs.iter().filter(|d| !d.parent_id.trim().is_empty() && !d.branch_label.is_empty()) {
         let skip = |reason: &str| ForkSlugSkipped {
             uid: def.uid.clone(),
             name: def.name.clone(),
@@ -152,7 +152,9 @@ fn lineage_root<'a>(by_id: &BTreeMap<&str, &'a Def>, def: &'a Def) -> Option<(&'
     let mut seen = HashSet::new();
     let mut cur = def;
     let mut depth = 0;
-    while !cur.branch_label.trim().is_empty() && !cur.parent_id.trim().is_empty() {
+    // Exactly `fork_lineage_root_id`'s test: a whitespace-only label still
+    // makes a fork (#5366).
+    while !cur.branch_label.is_empty() && !cur.parent_id.is_empty() {
         if !seen.insert(cur.uid.as_str()) {
             return None;
         }
