@@ -16,13 +16,14 @@
  */
 
 import { getApi } from "@/store/global";
+import { requestCloseWindow } from "./window-close";
 import { type JSX } from "solid-js";
 import "./window-controls.darwin.scss";
 
 const TrafficLights = (): JSX.Element => {
     const handleClose = (e: MouseEvent) => {
         e.stopPropagation();
-        getApi().closeWindow().catch(console.error);
+        requestCloseWindow().catch(console.error);
     };
     const handleMinimize = (e: MouseEvent) => {
         e.stopPropagation();

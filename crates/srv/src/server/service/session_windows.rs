@@ -56,6 +56,11 @@ use crate::server::AppState;
 /// Restored workspaces waiting for the main window to open them.
 const WAITING_META_KEY: &str = "session:restored_windows";
 
+/// Restored workspaces the main window took (`TakeRestoredWindows`) and is
+/// opening: kept for saves until a window shows each, so a save in between
+/// doesn't drop one that opens slowly or not at all (#5358).
+const OPENING_META_KEY: &str = "session:restored_windows_opening";
+
 /// Restored windows' names and appearance, by workspace, waiting for their
 /// windows. (Named for what it first held: a name.)
 const NAMES_META_KEY: &str = "session:restored_window_names";
@@ -163,25 +168,19 @@ pub(crate) fn has_live_window(store: &Store) -> bool {
 pub(crate) fn snapshot_session(store: &Store, for_quit: bool) -> Option<Value> {
     let live = live_windows(store);
     let window_ids: Vec<String> = live.iter().map(|(w, _)| w.oid.clone()).collect();
+    let live_ws: std::collections::HashSet<String> = live.iter().map(|(_, ws)| ws.clone()).collect();
     let windows: Vec<Value> = live
         .into_iter()
         .filter_map(|(w, ws)| {
             let mut entry = super::session_restore::snapshot_workspace(store, &ws)?;
-            entry["window"] = json!({
-                "x": w.pos.x,
-                "y": w.pos.y,
-                "width": w.winsize.width,
-                "height": w.winsize.height,
-            });
-            if let Some(name) = saved_name(store, &w) {
-                entry["window"]["name"] = json!(name);
-            }
-            let appearance = saved_appearance(store, &w);
-            if !appearance.is_empty() {
-                entry["window"]["meta"] = Value::Object(appearance);
-            }
+            entry["window"] = super::session_closed::placement_of(store, &w);
+            // A close keeps the window's contents (`session_closed`): the
+            // restore reopens them, and rebuilds them from this entry only if
+            // they are gone.
+            entry["workspaceid"] = json!(ws);
             Some(entry)
         })
+        .chain(waiting_windows(store, &live_ws))
         .collect();
     let mut record = windows.first()?.clone();
     if let Some(obj) = record.as_object_mut() {
@@ -197,6 +196,46 @@ pub(crate) fn snapshot_session(store: &Store, for_quit: bool) -> Option<Value> {
     Some(record)
 }
 
+/// The restored windows still waiting for the main window to open them
+/// (`restore_all`), as record entries: their workspaces exist, but no window
+/// shows them yet, so a snapshot of the live windows alone would drop them
+/// (#5358).
+fn waiting_windows(store: &Store, live_ws: &std::collections::HashSet<String>) -> Vec<Value> {
+    let client = store.get_all::<Client>().ok().and_then(|cs| cs.into_iter().next());
+    let list = |key: &str| client.as_ref().and_then(|c| c.meta.get(key)?.as_array().cloned()).unwrap_or_default();
+    let mut seen = std::collections::HashSet::new();
+    list(WAITING_META_KEY)
+        .into_iter()
+        .chain(list(OPENING_META_KEY))
+        .filter(|p| p.get("workspaceid").and_then(|v| v.as_str()).is_some_and(|ws| seen.insert(ws.to_string())))
+        .filter_map(|mut placement| {
+            let ws = placement.get("workspaceid")?.as_str()?.to_string();
+            if live_ws.contains(&ws) {
+                return None;
+            }
+            let mut entry = super::session_restore::snapshot_workspace(store, &ws)?;
+            placement.as_object_mut()?.remove("workspaceid");
+            entry["window"] = placement;
+            entry["workspaceid"] = json!(ws);
+            Some(entry)
+        })
+        .collect()
+}
+
+/// The contents of the restored windows still waiting for the main window to
+/// open them.
+pub(crate) fn waiting_workspaces(store: &Store) -> std::collections::HashSet<String> {
+    store
+        .get_all::<Client>()
+        .ok()
+        .and_then(|cs| cs.into_iter().next())
+        .and_then(|c| c.meta.get(WAITING_META_KEY).and_then(|v| v.as_array().cloned()))
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|w| w.get("workspaceid").and_then(|v| v.as_str()).map(str::to_string))
+        .collect()
+}
+
 /// The windows a record holds: its `windows`, or the record itself for one
 /// saved before records held several.
 pub(crate) fn windows_of(record: &Value) -> Vec<Value> {
@@ -208,7 +247,7 @@ pub(crate) fn windows_of(record: &Value) -> Vec<Value> {
 
 /// Whether `record` is a quit's, saved within the last two minutes: the
 /// closes of that quit are still arriving.
-fn is_recent_quit_record(record: &Value, now_ms: i64) -> bool {
+pub(crate) fn is_recent_quit_record(record: &Value, now_ms: i64) -> bool {
     record.get("saved_for").and_then(|v| v.as_str()) == Some("quit")
         && record
             .get("saved_at_ms")
@@ -216,8 +255,8 @@ fn is_recent_quit_record(record: &Value, now_ms: i64) -> bool {
             .is_some_and(|at| (0..QUIT_RECORD_KEPT_FOR_MS).contains(&(now_ms - at)))
 }
 
-/// The close that empties `Client.windowids`, before `ws_id` is deleted:
-/// saves that workspace as the session, with the closing window's `name` and
+/// The close that empties `Client.windowids`, before `ws_id` is kept or
+/// deleted: saves that workspace as the session, with the closing window's `name` and
 /// `appearance` (read before its row was pruned), unless this close is one of
 /// a quit's that already saved every window.
 pub(crate) fn save_on_last_close(
@@ -245,7 +284,12 @@ pub(crate) fn save_on_last_close(
         }
         // When it was closed, for another build offering it (`session_other_builds`).
         snapshot["saved_at_ms"] = json!(agentmux_common::time::now_ms());
-        super::session_restore::save_last_session_snapshot(store, snapshot);
+        // The close keeps the workspace: the restore reopens it as it was.
+        snapshot["workspaceid"] = json!(ws_id);
+        super::session_restore::save_last_session_snapshot(store, snapshot.clone());
+        // The open workspace keeps it too (`user_workspace`), whole: the saver
+        // makes no save with no window open.
+        super::user_workspace::write_record_now(store, snapshot);
     }
 }
 
@@ -255,17 +299,28 @@ pub(crate) fn save_on_last_close(
 /// closes windows concurrently and srv can exit first; seen in a simulated
 /// upgrade, where the second window's row survived and the main window then
 /// took it instead of restoring the session. The record holds that window, so
-/// forget its row and its workspace (with its tabs and panes): the first
-/// window then restores every window as designed. Only the windows the quit
-/// saved (its `window_ids`) are forgotten: a record left from an older quit
-/// never costs a later run its windows. Returns how many it forgot.
+/// forget its row: the first window then restores every window as designed.
+/// Its workspace stays when the record names it (the restore reopens it), and
+/// goes with its tabs and panes when it doesn't (a record an older build
+/// wrote, which rebuilds it instead). Only the windows the quit saved (its
+/// `window_ids`) are forgotten: a record left from an older quit never costs a
+/// later run its windows. Returns how many it forgot.
 pub(crate) fn forget_windows_left_by_quit(store: &Store) -> usize {
-    let saved: std::collections::HashSet<String> = super::session_restore::load_last_session_snapshot(store)
-        .filter(|r| r.get("saved_for").and_then(|v| v.as_str()) == Some("quit"))
+    let record = super::session_restore::load_last_session_snapshot(store)
+        .filter(|r| r.get("saved_for").and_then(|v| v.as_str()) == Some("quit"));
+    let saved: std::collections::HashSet<String> = record
+        .as_ref()
         .and_then(|r| r.get("window_ids").and_then(|v| v.as_array()).cloned())
         .unwrap_or_default()
         .into_iter()
         .filter_map(|v| v.as_str().map(str::to_string))
+        .collect();
+    let named: std::collections::HashSet<String> = record
+        .as_ref()
+        .map(windows_of)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|w| w.get("workspaceid").and_then(|v| v.as_str()).map(str::to_string))
         .collect();
     let Some(mut client) = store.get_all::<Client>().ok().and_then(|cs| cs.into_iter().next()) else {
         return 0;
@@ -277,7 +332,7 @@ pub(crate) fn forget_windows_left_by_quit(store: &Store) -> usize {
     client.windowids = kept;
     for id in &left {
         if let Some(w) = store.get::<Window>(id).ok().flatten() {
-            if store.get::<Workspace>(&w.workspaceid).ok().flatten().is_some() {
+            if !named.contains(&w.workspaceid) && store.get::<Workspace>(&w.workspaceid).ok().flatten().is_some() {
                 let _ = crate::backend::wcore::delete_workspace(store, &w.workspaceid);
             }
             let _ = store.delete::<Window>(id);
@@ -318,15 +373,29 @@ pub(crate) fn set_client_meta(store: &Store, key: &str, value: Option<Value>) {
 /// Restore every window in `record`: the first that comes back is the one
 /// being created (returned, as `restore_last_session` always did); each other
 /// one gets a workspace of its own, published and left for
-/// [`handle_take_restored_windows`].
+/// [`handle_take_restored_windows`]. A workspace record's closed windows
+/// (`"state": "closed"`) stay closed (`session_closed::restore_closed`), once
+/// a window came back.
 pub(crate) async fn restore_all(state: &AppState, record: &Value) -> Result<Option<(String, Vec<Event>)>, String> {
     let mut main = None;
     let mut waiting = Vec::new();
     let mut waiting_meta = serde_json::Map::new();
     let mut first_err = None;
     let mut restored_count = 0usize;
-    for (i, window) in windows_of(record).iter().enumerate() {
-        let restored = super::session_restore::restore_workspace(state, window).await;
+    let mut reopened = 0usize;
+    let mut taken = std::collections::HashSet::new();
+    let all = windows_of(record);
+    let open: Vec<&Value> = all.iter().filter(|w| !super::session_closed::is_closed(w)).collect();
+    for (i, window) in open.iter().copied().enumerate() {
+        let restored = match reusable_workspace(state, window, &taken).await {
+            Some(ws_id) => {
+                reopened += 1;
+                taken.insert(ws_id.clone());
+                super::session_closed::forget(&state.mstore, &ws_id);
+                Ok(Some((ws_id, Vec::new())))
+            }
+            None => super::session_restore::restore_workspace(state, window).await,
+        };
         if let Ok(Some((ws_id, _))) = &restored {
             let patch = window.get("window").map(patch_of).unwrap_or_default();
             if !patch.is_empty() {
@@ -357,15 +426,53 @@ pub(crate) async fn restore_all(state: &AppState, record: &Value) -> Result<Opti
     // unless this says the layout came back from the record.
     if restored_count > 0 {
         let from = if record.get("saved_for").and_then(|v| v.as_str()) == Some("quit") { "quit" } else { "last-close" };
-        tracing::info!(windows = restored_count, "session_restore: restored {} window(s) from the {} record", restored_count, from);
+        tracing::info!(
+            windows = restored_count,
+            reopened,
+            "session_restore: restored {} window(s) from the {} record ({} kept as they were, the rest rebuilt)",
+            restored_count,
+            from,
+            reopened
+        );
     }
     set_client_meta(&state.mstore, WAITING_META_KEY, (!waiting.is_empty()).then(|| Value::Array(waiting)));
+    set_client_meta(&state.mstore, OPENING_META_KEY, None);
     set_client_meta(&state.mstore, NAMES_META_KEY, (!waiting_meta.is_empty()).then(|| Value::Object(waiting_meta)));
+    if let Some((main_ws, _)) = &main {
+        let shown = open
+            .iter()
+            .filter_map(|w| w.get("workspaceid").and_then(|v| v.as_str()).map(str::to_string))
+            .collect();
+        super::session_closed::restore_closed(state, record, main_ws, &shown).await;
+    }
     match (main, first_err) {
         (Some(main), _) => Ok(Some(main)),
         (None, Some(e)) => Err(e),
         (None, None) => Ok(None),
     }
+}
+
+/// The workspace a record entry names, when it is still there to reopen as it
+/// was: the reducer and the store have it, it holds a pane, no window shows
+/// it, and no earlier entry of this restore took it. `None` means rebuild the
+/// entry from the record.
+async fn reusable_workspace(
+    state: &AppState,
+    window: &Value,
+    taken: &std::collections::HashSet<String>,
+) -> Option<String> {
+    let ws_id = window.get("workspaceid").and_then(|v| v.as_str()).filter(|s| !s.is_empty())?;
+    if taken.contains(ws_id) || !state.srv_state.lock().await.workspaces.contains_key(ws_id) {
+        return None;
+    }
+    // A close still stopping its agents (srv kept running with no window) finishes first.
+    drop(crate::sagas::close_pane::workspace_close_lock(ws_id).await);
+    let store = &state.mstore;
+    super::session_restore::snapshot_workspace(store, ws_id)?;
+    if super::session_closed::open_workspaces(store).contains(ws_id) {
+        return None;
+    }
+    Some(ws_id.to_string())
 }
 
 /// Add restored workspaces for the main window to open beside it
@@ -434,14 +541,26 @@ pub(crate) fn forget_restored_window_meta(store: &Store, ws_id: &str) -> Option<
 /// whose workspace is gone since is left out.
 pub(crate) fn handle_take_restored_windows(state: &AppState, _call: &WebCallType) -> WebReturnType {
     let store = &state.mstore;
+    // One transaction moves them from waiting to opening, so no save sees
+    // them in neither list (#5358).
     let waiting = store
-        .get_all::<Client>()
-        .ok()
-        .and_then(|cs| cs.into_iter().next())
-        .and_then(|c| c.meta.get(WAITING_META_KEY).cloned())
-        .and_then(|v| v.as_array().cloned())
-        .unwrap_or_default();
-    set_client_meta(store, WAITING_META_KEY, None);
+        .with_tx(|tx| {
+            let Some(mut client) = tx.get_all::<Client>()?.into_iter().next() else { return Ok(Vec::new()) };
+            let Some(waiting) = client.meta.remove(WAITING_META_KEY).and_then(|v| v.as_array().cloned()) else {
+                return Ok(Vec::new());
+            };
+            let mut opening = client.meta.get(OPENING_META_KEY).and_then(|v| v.as_array().cloned()).unwrap_or_default();
+            opening.extend(waiting.iter().cloned());
+            if !opening.is_empty() {
+                client.meta.insert(OPENING_META_KEY.to_string(), Value::Array(opening));
+            }
+            tx.update(&mut client)?;
+            Ok(waiting)
+        })
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "session_restore: couldn't take the restored windows");
+            Vec::new()
+        });
     let live: Vec<Value> = waiting
         .into_iter()
         .filter(|w| {
@@ -451,6 +570,24 @@ pub(crate) fn handle_take_restored_windows(state: &AppState, _call: &WebCallType
         })
         .collect();
     WebReturnType::success(Value::Array(live))
+}
+
+/// A window now shows restored workspace `ws_id`: saves take it from the
+/// live windows from here on.
+pub(crate) fn restored_window_opened(store: &Store, ws_id: &str) {
+    let _ = store.with_tx(|tx| {
+        let Some(mut client) = tx.get_all::<Client>()?.into_iter().next() else { return Ok(()) };
+        let Some(opening) = client.meta.get(OPENING_META_KEY).and_then(|v| v.as_array().cloned()) else { return Ok(()) };
+        let left: Vec<Value> =
+            opening.into_iter().filter(|e| e.get("workspaceid").and_then(|v| v.as_str()) != Some(ws_id)).collect();
+        if left.is_empty() {
+            client.meta.remove(OPENING_META_KEY);
+        } else {
+            client.meta.insert(OPENING_META_KEY.to_string(), Value::Array(left));
+        }
+        tx.update(&mut client)?;
+        Ok(())
+    });
 }
 
 #[cfg(test)]

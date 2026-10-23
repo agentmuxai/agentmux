@@ -223,7 +223,8 @@ fn rpc(
 /// same data dir (not two calls within one process), matching what an actual
 /// quit-and-relaunch does: process 1 creates a window, adds a block with a
 /// distinctive meta marker, and is closed gracefully (`CloseWindow`, which
-/// snapshots-then-cascades — see `window_close::handle_close_window`); it is
+/// saves the session and keeps the window's contents — see
+/// `window_close::handle_close_window`); it is
 /// then killed for real. Process 2 starts cold against the same
 /// `AGENTMUX_DATA_DIR` and calls `CreateWindow` the same way the frontend's
 /// genuine cold-start path does (`restoreIfAvailable: true`, `app-init.ts`).
@@ -317,10 +318,9 @@ fn restore_last_session_survives_a_real_process_restart() {
         .as_str()
         .expect("restored window workspaceid")
         .to_string();
-    assert_ne!(
-        restored_ws_id, workspace_id,
-        "restore creates a brand-new workspace, it does not resurrect the deleted one"
-    );
+    // Closing keeps the window's contents (SPEC_WORKSPACES_2026_10_23.md §2),
+    // so the next launch reopens the same contents with the same ids.
+    assert_eq!(restored_ws_id, workspace_id, "the next launch reopens the window's kept contents");
 
     let restored_workspace = rpc(
         &client,
@@ -330,8 +330,10 @@ fn restore_last_session_survives_a_real_process_restart() {
         "GetObject",
         serde_json::json!([format!("workspace:{}", restored_ws_id)]),
     );
+    // Kept contents can still hold their first tab in `pinnedtabids`, as above.
     let restored_tab_id = restored_workspace["tabids"][0]
         .as_str()
+        .or_else(|| restored_workspace["pinnedtabids"][0].as_str())
         .expect("restored workspace has a tab")
         .to_string();
     let restored_tab = rpc(
@@ -366,11 +368,8 @@ fn restore_last_session_survives_a_real_process_restart() {
         );
         if block["meta"]["test:marker"].as_str() == Some(marker) {
             found_marker = true;
-            // And it must be a genuinely NEW block id, not the one from the
-            // now-deleted first workspace (CreateBlock always mints a fresh
-            // id; this also guards against a remap bug leaving a stale
-            // placeholder or the original id in the restored tree).
-            assert_ne!(block_id, &marker_block_id);
+            // The same pane, kept across the restart, not a rebuilt copy.
+            assert_eq!(block_id, &marker_block_id);
             break;
         }
     }

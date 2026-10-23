@@ -274,7 +274,14 @@ export function registerDefaultCommands(): void {
         label: "Close Window",
         category: "Window",
         icon: "xmark",
-        execute: () => getApi().closeWindow().catch(console.error),
+        // Keeps it in the workspace as a closed window; warns first when an
+        // agent in it is working. Loaded when run: window-close.ts reads the
+        // window's stores, which pane code must not import.
+        execute: () =>
+            fireAndForget(async () => {
+                const { requestCloseWindow } = await import("@/app/window/window-close");
+                await requestCloseWindow();
+            }),
     });
     commandRegistry.register({
         id: "window:recycle",

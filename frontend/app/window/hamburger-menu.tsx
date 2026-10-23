@@ -184,7 +184,12 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
             {
                 label: "Exit",
                 icon: "right-from-bracket",
-                onClick: () => getApi().closeWindow().catch(console.error),
+                // Warns first when an agent in this window is working.
+                onClick: () =>
+                    fireAndForget(async () => {
+                        const { requestCloseWindow } = await import("./window-close");
+                        await requestCloseWindow();
+                    }),
             },
         ];
     });

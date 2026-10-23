@@ -34,6 +34,12 @@ vi.mock("@/app/store/app-api", () => ({
     getApi: () => ({ getWindowButtonLayout: async () => h.layout }),
 }));
 vi.mock("@/app/hook/useWindowDrag.platform", () => ({ useWindowDrag: () => ({ dragProps: {} }) }));
+// Close asks window-close.ts, which warns when agents are working (its own tests).
+vi.mock("./window-close", () => ({
+    requestCloseWindow: async () => {
+        h.calls.push("close");
+    },
+}));
 
 import {
     DEFAULT_WINDOW_BUTTON_LAYOUT,

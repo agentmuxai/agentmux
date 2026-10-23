@@ -15,6 +15,20 @@ import type { ConnStatus } from "@/types/rpc/ConnStatus";
  *  was (physical pixels, from srv's window row). srv `session_windows.rs`. */
 export type RestoredWindow = { workspaceid: string; x?: number; y?: number; width?: number; height?: number };
 
+/** A closed window of the open workspace, for the status bar panel (srv
+ *  `session_closed.rs`). `agents` are the names of its agents. */
+export type ClosedWindow = {
+    workspaceid: string;
+    closed_at_ms: number;
+    name: string;
+    tabs: number;
+    panes: number;
+    agents: string[];
+};
+
+/** An agent running in a window's workspace; `working` when it is mid-turn. */
+export type WindowAgent = { block_id: string; name: string; working: boolean };
+
 // blockservice.BlockService (block)
 class BlockServiceType {
     GetControllerStatus(arg2: string): Promise<BlockControllerRuntimeStatus> {
@@ -176,6 +190,28 @@ class WindowServiceType {
     TakeRestoredWindows(): Promise<RestoredWindow[]> {
         return MOS.callBackendService("window", "TakeRestoredWindows", Array.from(arguments))
     }
+    // The open workspace's closed windows (srv `session_closed.rs`), newest first.
+    ListClosedWindows(): Promise<ClosedWindow[]> {
+        return MOS.callBackendService("window", "ListClosedWindows", Array.from(arguments))
+    }
+    // Reopen one: drops it from the list and returns where it was, for
+    // `getApi().openRestoredWindow`.
+    TakeClosedWindow(workspaceId: string): Promise<RestoredWindow> {
+        return MOS.callBackendService("window", "TakeClosedWindow", Array.from(arguments))
+    }
+    // Remove a closed window from the workspace: deletes its contents.
+    DeleteClosedWindow(workspaceId: string): Promise<void> {
+        return MOS.callBackendService("window", "DeleteClosedWindow", Array.from(arguments))
+    }
+    // Remove an open window from the workspace: its next close deletes its
+    // contents instead of keeping them. Refused for the only open window.
+    DiscardWorkspaceOnClose(windowId: string): Promise<void> {
+        return MOS.callBackendService("window", "DiscardWorkspaceOnClose", Array.from(arguments))
+    }
+    // The agents running in the window's workspace, for the close warning.
+    WindowAgents(windowId: string): Promise<WindowAgent[]> {
+        return MOS.callBackendService("window", "WindowAgents", Array.from(arguments))
+    }
 
     // move block to new window
     // @returns object updates
@@ -238,6 +274,19 @@ class WorkspaceServiceType {
     // @returns object updates
     UpdateWorkspace(workspaceId: string, name: string): Promise<void> {
         return MOS.callBackendService("workspace", "UpdateWorkspace", Array.from(arguments))
+    }
+
+    // The user's workspace, a named set of windows (srv `user_workspace.rs`),
+    // not the window's contents the methods above act on.
+    // Save it now if anything changed since its last save.
+    Flush(): Promise<{ saved: boolean }> {
+        return MOS.callBackendService("workspace", "Flush", Array.from(arguments))
+    }
+
+    // Rename a workspace (`""` is the open one).
+    // @returns object updates (the client, whose meta holds the open one's name)
+    RenameUserWorkspace(workspaceId: string, name: string): Promise<void> {
+        return MOS.callBackendService("workspace", "RenameUserWorkspace", Array.from(arguments))
     }
 
     // Move a block from one tab to another within the same workspace

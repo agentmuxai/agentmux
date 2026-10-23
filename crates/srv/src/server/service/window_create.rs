@@ -56,12 +56,20 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
     // (this flag set, but the function never reaches that final clear)
     // leaves the snapshot intact for the next launch to retry.
     let mut did_restore = false;
+    // What that restore loaded, and from which copy: the open workspace keeps
+    // it as its last clean load once this window is up (`user_workspace`).
+    let mut restored_copy = None;
     // Resolve / create the workspace.
     let (ws_id, fresh_workspace_events): (String, Vec<agentmux_common::ipc::Event>) =
         if requested_ws_id.is_empty() {
             let restored_from_last_session = if restore_if_available {
-                match super::session_restore::restore_last_session(state).await {
-                    Ok(Some(result)) => Some(result),
+                // The newer of the session record and the open workspace's
+                // record, then that workspace's older copies.
+                match super::user_workspace::restore_at_launch(state).await {
+                    Ok(Some(restored)) => {
+                        restored_copy = Some((restored.loaded, restored.from));
+                        Some(restored.main)
+                    }
                     Ok(None) => None,
                     Err(e) => {
                         tracing::warn!(
@@ -403,6 +411,9 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
     // A window a session restore rebuilt gets back the name, theme and opacity
     // it had (session_windows.rs): the main one, and each reopened beside it.
     // They are forgotten only once written.
+    super::session_windows::restored_window_opened(store, &ws_id);
+    // A closed window reopening (`TakeClosedWindow`) is open now.
+    super::session_closed::forget(store, &ws_id);
     let restored_meta = super::session_windows::restored_window_meta(store, &ws_id);
     let name_events = match (!restored_meta.is_empty()).then_some(restored_meta) {
         None => Vec::new(),
@@ -475,6 +486,9 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
             // workspace even after a genuinely successful restore.
             if did_restore {
                 super::session_restore::clear_last_session_snapshot(store);
+                if let Some((loaded, from)) = &restored_copy {
+                    super::user_workspace::after_clean_load(store, loaded, *from);
+                }
             }
             WebReturnType::success(serde_json::to_value(&win).unwrap_or_default())
         }
