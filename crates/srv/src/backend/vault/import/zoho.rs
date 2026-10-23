@@ -19,8 +19,9 @@ fn pairs(data: &str) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
     for line in data.lines() {
         match line.split_once(':') {
-            // A key is short and isn't the start of an address (`https://…`).
-            Some((k, v)) if !k.trim().is_empty() && k.len() <= 40 && !v.starts_with("//") => {
+            // A key is short and isn't the scheme of an address (`https://…`); a password that
+            // starts with `//` is still the value of `Password`.
+            Some((k, v)) if !k.trim().is_empty() && k.len() <= 40 && !(v.starts_with("//") && URL_SCHEMES.contains(&k.trim().to_ascii_lowercase().as_str())) => {
                 out.push((k.trim().to_string(), v.trim().to_string()));
             }
             _ => match out.last_mut() {
@@ -36,6 +37,7 @@ fn pairs(data: &str) -> Vec<(String, String)> {
     out
 }
 
+const URL_SCHEMES: &[&str] = &["http", "https", "ftp", "ftps", "sftp", "ssh", "ws", "wss", "file"];
 const USER_KEYS: &[&str] = &["user name", "username", "login", "login name", "user", "user id", "userid", "email"];
 const PASSWORD_KEYS: &[&str] = &["password", "passphrase", "pin", "key"];
 
