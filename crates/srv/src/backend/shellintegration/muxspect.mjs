@@ -391,7 +391,7 @@ function renderVerifySender(data) {
         console.log(`\nfound but heartbeat is stale.`);
     }
     console.log(`\nNote: this is a registry-liveness check, not cryptographic sender verification.`);
-    console.log(`Check the JEKT's own TRUST=/SIG= fields for that (see CLAUDE.md's JEKT section).`);
+    console.log(`Check the JEKT's own TRUST=/SIG= fields for that (see https://docs.agentmux.ai/internals/jekt-protocol/).`);
 }
 
 // `conversations` — see SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_
