@@ -394,7 +394,7 @@ async fn receive<R: tokio::io::AsyncRead + Unpin>(
     verify_reagent_signature(&mut req, agentmux_common::time::now_secs());
     verify_lan_signature(state, &mut req).await;
     verify_cross_channel_signature(state, &mut req);
-    let replay = replay::reserve(&mut req, agentmux_common::time::now_secs());
+    let mut replay = replay::reserve(&mut req, agentmux_common::time::now_secs());
     req.route_unsigned_target();
     resolve_transcript_request_tier_fields(&state.mstore, &mut req);
 
@@ -572,7 +572,8 @@ pub(crate) async fn lan_peer_takes(
 /// The answer for a jekt with files that no instance on this machine or the
 /// LAN took: held for an agent defined here that isn't running, otherwise
 /// refused with the reason. Files don't go through the relay yet (spec §8).
-pub(crate) async fn no_route(
+#[allow(clippy::too_many_arguments)]
+pub(in crate::server) async fn no_route(
     state: &super::AppState,
     auth_via: super::ReactiveAuthVia,
     caller_uid: &str,
@@ -580,6 +581,7 @@ pub(crate) async fn no_route(
     resp: &crate::backend::reactive::types::InjectionResponse,
     candidate_seen: bool,
     too_old: bool,
+    replay: &mut super::reactive::replay::Reservation,
 ) -> serde_json::Value {
     use super::reactive::{hold_for_absent_target, route_for_absent, AbsentRoute, HoldReason};
     if too_old {
@@ -589,7 +591,7 @@ pub(crate) async fn no_route(
     // As a text jekt: held here for an agent defined here that no install
     // runs, else through the relay (spec §4.4).
     if !candidate_seen && route_for_absent(state, auth_via, req, resp).await == AbsentRoute::HoldHere {
-        if let Some(held) = hold_for_absent_target(state, auth_via, req, resp, HoldReason::NotRunning).await {
+        if let Some(held) = hold_for_absent_target(state, auth_via, req, resp, HoldReason::NotRunning, replay).await {
             return held;
         }
     }
@@ -599,7 +601,7 @@ pub(crate) async fn no_route(
         Err(why) => return refused(req, why),
     }
     if !candidate_seen {
-        if let Some(held) = hold_for_absent_target(state, auth_via, req, resp, HoldReason::NotRunning).await {
+        if let Some(held) = hold_for_absent_target(state, auth_via, req, resp, HoldReason::NotRunning, replay).await {
             return held;
         }
     }

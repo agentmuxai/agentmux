@@ -7,9 +7,9 @@
 //! Used by `deliver()` and by the files path (`jekt_files::receive`). The
 //! check and the reservation are one step under one lock, so two copies
 //! arriving together can't both pass. A message counts once it is delivered
-//! to a local agent; when this instance doesn't deliver it (it forwards it,
-//! or delivery fails), the reservation is dropped, so a forward that comes
-//! back here is still delivered once. Entries live longer than any
+//! to a local agent or held here for one; when this instance doesn't take it
+//! (it forwards it, or delivery fails), the reservation is dropped, so a
+//! forward that comes back here is still delivered once. Entries live longer than any
 //! signature's freshness window.
 
 use std::collections::HashMap;
@@ -86,8 +86,9 @@ fn seen() -> &'static Mutex<Seen> {
 pub(in crate::server) struct Reservation(Option<Key>);
 
 impl Reservation {
-    /// The message reached a local agent: keep it counted.
-    pub(in crate::server) fn delivered(mut self) {
+    /// The message reached a local agent, or is held here for one: keep it
+    /// counted.
+    pub(in crate::server) fn delivered(&mut self) {
         self.0 = None;
     }
 }

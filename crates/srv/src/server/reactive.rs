@@ -712,7 +712,7 @@ pub(crate) async fn deliver(
     verify_reagent_signature(&mut req, now_unix_secs());
     verify_lan_signature(&state, &mut req).await;
     verify_cross_channel_signature(&state, &mut req);
-    let replay = replay::reserve(&mut req, now_unix_secs());
+    let mut replay = replay::reserve(&mut req, now_unix_secs());
     req.route_unsigned_target();
     resolve_transcript_request_tier_fields(&state.mstore, &mut req);
 
@@ -736,7 +736,7 @@ pub(crate) async fn deliver(
     // (SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md Phase 0 item 4).
     // No other tier can run it either: the agent lives on this instance.
     if resp.error.as_deref().is_some_and(super::jekt_held::is_spawn_gate_refusal) {
-        if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NeedsLogin).await {
+        if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NeedsLogin, &mut replay).await {
             return held;
         }
         return serde_json::to_value(&resp).unwrap_or_default();
@@ -1012,10 +1012,10 @@ pub(crate) async fn deliver(
         // the relay's 30 min expiry instead of the 24 h hold, and only a
         // sender NOT signed in to the cloud ever reached the hold.
         if req.files.is_some() {
-            return super::jekt_files::no_route(state, auth_via, caller_uid, &req, &resp, candidate_seen, files_too_old).await;
+            return super::jekt_files::no_route(state, auth_via, caller_uid, &req, &resp, candidate_seen, files_too_old, &mut replay).await;
         }
         if !candidate_seen && route_for_absent(state, auth_via, &req, &resp).await == AbsentRoute::HoldHere {
-            if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NotRunning).await {
+            if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NotRunning, &mut replay).await {
                 return held;
             }
         }
@@ -1025,7 +1025,7 @@ pub(crate) async fn deliver(
         // 5. No tier knew the target: hold it for the agent's return, when
         //    the durable jekt conditions hold.
         if !candidate_seen {
-            if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NotRunning).await {
+            if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NotRunning, &mut replay).await {
                 return held;
             }
         }
@@ -1075,13 +1075,15 @@ fn echo_local_delivery(
 ///
 /// The same rules hold a jekt the target's spawn gate refused
 /// ([`HoldReason::NeedsLogin`]); the replay then waits for sign-in
-/// (`jekt_held::still_needs_login`).
-pub(crate) async fn hold_for_absent_target(
+/// (`jekt_held::still_needs_login`). Delivered by UID or held, a message
+/// keeps its one-delivery `replay` reservation.
+pub(in crate::server) async fn hold_for_absent_target(
     state: &AppState,
     auth_via: super::ReactiveAuthVia,
     req: &InjectionRequest,
     resp: &crate::backend::reactive::types::InjectionResponse,
     reason: HoldReason,
+    replay: &mut replay::Reservation,
 ) -> Option<serde_json::Value> {
     use crate::backend::storage::jekt_held::{HeldJekt, HoldOutcome, HELD_TTL_MS};
     if !hold_applies(auth_via, req, resp) {
@@ -1139,6 +1141,7 @@ pub(crate) async fn hold_for_absent_target(
         by_uid.target_agent = outcome.target_uid.clone();
         let resp = state.reactive_handler.inject_message(by_uid);
         if resp.success {
+            replay.delivered();
             // As addressed, so the sender's echo names whom it wrote to
             // (ReAgent P1 on #3632: this path skipped the echo).
             echo_local_delivery(state, req, &resp);
@@ -1158,6 +1161,7 @@ pub(crate) async fn hold_for_absent_target(
     let target = &req.target_agent;
     match outcome {
         Ok(HoldOutcome::Held) | Ok(HoldOutcome::AlreadyHeld) => {
+            replay.delivered();
             crate::backend::agent_resolve::record_uid_fallback("jekt.held");
             let error = match reason {
                 HoldReason::NotRunning => format!(
