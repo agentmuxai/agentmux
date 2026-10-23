@@ -22,7 +22,7 @@ fn pairs(data: &str) -> Vec<(String, String)> {
             // A key is short and isn't the scheme of an address (`https://…`); a password that
             // starts with `//` is still the value of `Password`.
             Some((k, v)) if !k.trim().is_empty() && k.len() <= 40 && !(v.starts_with("//") && URL_SCHEMES.contains(&k.trim().to_ascii_lowercase().as_str())) => {
-                out.push((k.trim().to_string(), v.trim().to_string()));
+                out.push((k.trim().to_string(), v.to_string()));
             }
             _ => match out.last_mut() {
                 Some((_, v)) => {
@@ -58,11 +58,11 @@ pub(super) fn read(text: &str) -> Result<Imported, ReadError> {
                 continue;
             }
             if USER_KEYS.contains(&lower.as_str()) && username.is_empty() {
-                username = v;
+                username = v.trim().to_string();
             } else if PASSWORD_KEYS.contains(&lower.as_str()) && password.is_empty() {
                 password = v;
             } else if !v.trim().is_empty() {
-                kept.push(if k.is_empty() { v } else { format!("{k}: {v}") });
+                kept.push(if k.is_empty() { v.trim().to_string() } else { format!("{k}: {}", v.trim()) });
             }
         }
         let label = label_of(name, url, &username);

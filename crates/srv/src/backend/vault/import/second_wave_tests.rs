@@ -42,7 +42,8 @@ note - 2023-03-31,,,,,This is a safe note,,\n\
 pub(super) const ZOHO: &str = "\"Password Name\",\"Description\",\"Password URL\",\"SecretData\",\"Notes\",\"CustomData\",\"Tags\",\"Classification\",\"Favorite\",\"TOTP\",\"Folder Name\"\n\
 Acme,,https://acme.example,\"SecretType:Web Account\nUser Name:bob\nPassword:pw\nRecovery code:9999\n\",remember,\"\",,E,1,otpauth://totp?secret=JBSWY3DP&digits=6,Work\n\
 Only notes,,,,just a note,,,,,,\n\
-Slashes,,,\"User Name:amy\nPassword://abc\nSite:https://x.test\",,,,,,,\n";
+Slashes,,,\"User Name:amy\nPassword://abc\nSite:https://x.test\",,,,,,,\n\
+Spaces,,,\"User Name:sam\nPassword:  pw with spaces  \",,,,,,,\n";
 
 pub(super) const KEEPER: &str = "\"Foo\\Baz\",\"Example\",\"bob@example.test\",\"pw\",\"https://example.test/\",\"a note\",\"\",\"Account ID\",\"12345\",\"TFC:Keeper\",\"otpauth://totp/x?secret=ABC\"\n\
 \"\",\"Note only\",\"\",\"\",\"\",\"just text\",\"\",\n";
@@ -158,6 +159,8 @@ fn zoho_vault_unpacks_the_secret_data_column() {
     let slashes = find(&i, "Slashes");
     assert_eq!((slashes.parts["password"].as_str(), slashes.fields["username"].as_str()), ("//abc", "amy"));
     assert_eq!(text_of(&i, "Slashes (notes)"), "Site: https://x.test");
+    // A password is kept exactly as exported, spaces and all.
+    assert_eq!(find(&i, "Spaces").parts["password"], "  pw with spaces  ");
 }
 
 #[test]
