@@ -269,14 +269,10 @@ wrap_drag_handler! {
             _frame: Option<&mut Frame>,
             regions: Option<&[DraggableRegion]>,
         ) {
-            if let Some(rs) = regions {
-                let summary: Vec<String> = rs.iter().map(|r| {
-                    format!("{}x{}@{},{} drag={}", r.bounds.width, r.bounds.height, r.bounds.x, r.bounds.y, r.draggable != 0)
-                }).collect();
-                tracing::info!("[drag_handler] on_draggable_regions_changed: {} regions — {:?}", rs.len(), summary);
-            } else {
-                tracing::info!("[drag_handler] on_draggable_regions_changed: None");
-            }
+            // About twice a second: the status bar's live numbers move its
+            // no-drag regions. Logged in full at info, this was 97% of the
+            // host log; a count at debug is enough.
+            tracing::debug!(regions = regions.map(<[DraggableRegion]>::len), "[drag_handler] draggable regions changed");
             let mut browser = browser.cloned();
             let Some(browser_view) = browser_view_get_for_browser(browser.as_mut()) else { return };
             let Some(window) = browser_view.window() else { return };
