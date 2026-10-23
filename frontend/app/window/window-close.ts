@@ -1,12 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Closing a window keeps it in the open workspace as a closed window (srv
-// `session_closed.rs`, SPEC_WORKSPACES_2026_10_23.md §2, §5): the status bar's
-// version panel lists it greyed, to reopen or delete. In-app closes warn first
-// when an agent is mid-turn; an OS close (Alt+F4, the taskbar) reaches the
-// host without passing through here. Kept out of pane code's imports: the
-// palette loads it when a command runs.
+// Closing a window keeps it in the open workspace as a closed window
+// (SPEC_WORKSPACES_2026_10_23.md §5); in-app closes warn first when an agent
+// is mid-turn. Pane code must not import this: the palette loads it on use.
 
 import { modalsModel, openModal } from "@/app/store/modalmodel";
 import { WindowService, type WindowAgent } from "@/app/store/services";
