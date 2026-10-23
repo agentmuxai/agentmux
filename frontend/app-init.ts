@@ -69,6 +69,7 @@ import { installFocusFollowsSelection } from "@/app/store/focusManager";
 import { installPaneHistory } from "@/app/store/pane-history";
 import { installSideButtons } from "@/app/store/side-buttons";
 import { reopenRestoredWindows } from "@/app/init/restored-windows";
+import { installWorkspaceFlushOnBlur, surfaceWorkspaceRestoreNotice } from "@/app/store/user-workspace";
 
 // Deferred — assigned inside initApp() after window.api is ready.
 // Do NOT call getApi() at module level: this file is statically imported by
@@ -272,6 +273,11 @@ async function initHostMux(): Promise<void> {
         })();
         // What AgentMux recovered from, until the user closes it (SPEC_RECOVERY_NOTICES_AND_TOASTS §4.2).
         void import("@/app/init/incidents").then(({ surfaceIncidents }) => surfaceIncidents());
+        // The workspace opened from an older copy because its last save didn't
+        // load. Read again: the cold start's CreateWindow above is what knows.
+        void ClientService.GetClientData()
+            .then(surfaceWorkspaceRestoreNotice)
+            .catch(() => {});
         // A window that came up with the default layout because there was
         // nothing to restore offers the layout another build saved (srv decides).
         void import("@/app/window/restore-other-build").then((m) => m.offerLayoutFromOtherBuild());
@@ -691,6 +697,8 @@ async function initMuxWrap(initOpts: AgentMuxInitOpts) {
         // Subscribes to the launcher window-exit signal so a dead
         // holder's singleton claim is auto-released. Idempotent.
         startSingletonCrashRelease();
+        // The workspace is saved when a window loses focus (SPEC_WORKSPACES §4.1).
+        installWorkspaceFlushOnBlur();
     } catch (e) {
         getApi().sendLog("Error in initMux " + e.message + "\n" + e.stack);
         console.error("Error in initMux", e);

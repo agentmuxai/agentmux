@@ -94,6 +94,9 @@ pub struct Store {
     /// SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.6). `None` except on
     /// the channel's Global Memory store at runtime.
     global_memory_observer: Mutex<Option<GlobalMemoryObserver>>,
+    /// Writes to the objects a user workspace is saved from, counted so the
+    /// workspace saver knows when something changed (`user_workspaces.rs`).
+    pub(super) layout_writes: super::user_workspaces::LayoutWrites,
 }
 
 /// A change to Global Memory, for [`Store::set_global_memory_observer`].
@@ -138,6 +141,7 @@ impl Store {
             registry_agents_base: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
             global_memory_observer: Mutex::new(None),
+            layout_writes: Default::default(),
         })
     }
 
@@ -215,6 +219,7 @@ impl Store {
             registry_agents_base: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
             global_memory_observer: Mutex::new(None),
+            layout_writes: Default::default(),
         })
     }
 
@@ -258,6 +263,7 @@ impl Store {
             registry_agents_base: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
             global_memory_observer: Mutex::new(None),
+            layout_writes: Default::default(),
         })
     }
 
@@ -286,6 +292,7 @@ impl Store {
             registry_agents_base: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
             global_memory_observer: Mutex::new(None),
+            layout_writes: Default::default(),
         })
     }
 
@@ -355,6 +362,7 @@ impl Store {
         // partially mutate a newer DB before the error fired.)
         check_schema_compat(&conn, OBJECT_SCHEMA_VERSION, "objects.db")?;
         run_object_schema(&conn)?;
+        conn.execute_batch(super::user_workspaces::SCHEMA)?;
         stamp_version(&conn, OBJECT_SCHEMA_VERSION)?;
         Ok(Self {
             conn: Mutex::new(conn),
@@ -366,6 +374,7 @@ impl Store {
             registry_agents_base: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
             global_memory_observer: Mutex::new(None),
+            layout_writes: Default::default(),
         })
     }
 
@@ -558,6 +567,7 @@ impl Store {
             &format!("INSERT INTO {table} (oid, version, data) VALUES (?1, 1, ?2)"),
             params![oid, data],
         )?;
+        self.layout_writes.wrote(T::get_otype());
 
         Ok(())
     }
@@ -584,6 +594,7 @@ impl Store {
             params![data, oid],
             |row| row.get(0),
         )?;
+        self.layout_writes.wrote(T::get_otype());
 
         obj.set_version(new_version);
         Ok(new_version)
@@ -606,6 +617,7 @@ impl Store {
             params![data, oid],
             |row| row.get(0),
         )?;
+        self.layout_writes.wrote(otype);
         Ok(new_version)
     }
 
@@ -618,6 +630,7 @@ impl Store {
             &format!("DELETE FROM {table} WHERE oid = ?1"),
             params![oid],
         )?;
+        self.layout_writes.wrote(T::get_otype());
         Ok(())
     }
 
@@ -634,6 +647,7 @@ impl Store {
             &format!("DELETE FROM {table} WHERE oid = ?1"),
             params![oid],
         )?;
+        self.layout_writes.wrote(otype);
         Ok(())
     }
 
@@ -682,7 +696,7 @@ impl Store {
     {
         let conn = self.conn.lock().unwrap();
         conn.execute_batch("BEGIN")?;
-        let tx = StoreTx { conn: &conn };
+        let tx = StoreTx { conn: &conn, layout_writes: &self.layout_writes };
         match f(&tx) {
             Ok(result) => {
                 conn.execute_batch("COMMIT")?;
@@ -739,11 +753,18 @@ impl Store {
 /// already-locked connection without additional Mutex acquisition.
 pub struct StoreTx<'a> {
     conn: &'a Connection,
+    layout_writes: &'a super::user_workspaces::LayoutWrites,
 }
 
 impl<'a> StoreTx<'a> {
     fn table_name<T: StoreObj>() -> String {
         format!("db_{}", T::get_otype())
+    }
+
+    /// The locked connection, for sibling modules' own tables
+    /// (`user_workspaces`), written in the same transaction.
+    pub(super) fn raw_conn(&self) -> &Connection {
+        self.conn
     }
 
     pub fn get<T: StoreObj>(&self, oid: &str) -> Result<Option<T>, StoreError> {
@@ -786,6 +807,7 @@ impl<'a> StoreTx<'a> {
             &format!("INSERT INTO {table} (oid, version, data) VALUES (?1, 1, ?2)"),
             params![oid, data],
         )?;
+        self.layout_writes.wrote(T::get_otype());
 
         Ok(())
     }
@@ -806,6 +828,7 @@ impl<'a> StoreTx<'a> {
             params![data, oid],
             |row| row.get(0),
         )?;
+        self.layout_writes.wrote(T::get_otype());
 
         obj.set_version(new_version);
         Ok(new_version)
@@ -837,6 +860,7 @@ impl<'a> StoreTx<'a> {
             &format!("DELETE FROM {table} WHERE oid = ?1"),
             params![oid],
         )?;
+        self.layout_writes.wrote(T::get_otype());
         Ok(())
     }
 }

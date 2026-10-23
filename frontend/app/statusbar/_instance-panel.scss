@@ -79,6 +79,25 @@
     margin-bottom: var(--space-1);
 }
 
+// The open workspace's name heads the window list; double-click or F2 renames it.
+.instance-panel-workspace-title {
+    @include mixins.truncate;
+    cursor: default;
+    outline: none;
+
+    &:focus-visible {
+        color: var(--main-text-color);
+    }
+}
+
+// The name as typed, not in the heading's capitals.
+.instance-panel-workspace-name-input {
+    width: 100%;
+    text-transform: none;
+    letter-spacing: normal;
+    font-size: var(--text-sm);
+}
+
 .instance-panel-window-row {
     display: flex;
     align-items: center;

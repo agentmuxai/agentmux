@@ -10,6 +10,9 @@
  *
  * Spec: SPEC_VERSION_INSTANCE_PANEL_2026_04_25.md
  *
+ * The window list is headed by the open workspace's name (a named set of
+ * windows, SPEC_WORKSPACES_2026_10_23.md §5), renamed by double-click or F2.
+ *
  * V1 scope: about-info + windows + actions. LAN peers stay in
  * HostPopover (they already have a richer hover-rich detail view).
  * Per-window token totals deferred until token-usage is per-window.
@@ -36,6 +39,7 @@ import {
     resolveWindowName,
 } from "@/util/window-title";
 import { Button } from "@/app/element/ui";
+import { renameWorkspace, WORKSPACE_NAME_MAX_LEN, workspaceHeading, workspaceName } from "@/app/store/user-workspace";
 
 interface InstancePanelProps {
     /** The status bar's version chip. */
@@ -96,6 +100,27 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     // survives entries() reordering. Single rename at a time.
     const [editingLabel, setEditingLabel] = createSignal<string | null>(null);
     const [editValue, setEditValue] = createSignal("");
+
+    // The workspace heading's rename: one at a time, like a window's.
+    const currentWorkspaceName = () => workspaceName(atoms.client());
+    const [editingWorkspace, setEditingWorkspace] = createSignal(false);
+    const [workspaceEditValue, setWorkspaceEditValue] = createSignal("");
+    const enterWorkspaceRename = () => {
+        setWorkspaceEditValue(currentWorkspaceName());
+        setEditingWorkspace(true);
+    };
+    const cancelWorkspaceRename = () => {
+        setEditingWorkspace(false);
+        setWorkspaceEditValue("");
+    };
+    // Enter or blur. Blank is no change (as for a window's name).
+    const commitWorkspaceRename = () => {
+        if (!editingWorkspace()) return;
+        const value = workspaceEditValue();
+        cancelWorkspaceRename();
+        if (value.trim() === currentWorkspaceName()) return;
+        renameWorkspace(value).catch((e) => console.error("[InstancePanel] workspace rename failed:", e));
+    };
 
     // Defer single-click focus past the dblclick threshold so
     // double-clicking a row enters rename mode WITHOUT first
@@ -340,6 +365,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     //      (codex PR #569 round-2 P1)
     onCleanup(() => {
         cancelPendingFocus();
+        commitWorkspaceRename();
         const editing = editingLabel();
         if (!editing) return;
         const entry = entries().find((e) => e.label === editing);
@@ -458,8 +484,58 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
             </div>
             <div class="instance-panel-divider" />
             <div class="instance-panel-section">
-                <div class="instance-panel-section-title">
-                    This process — {entries().length} window{entries().length !== 1 ? "s" : ""}
+                <div
+                    class="instance-panel-section-title instance-panel-workspace-title"
+                    classList={{ "instance-panel-workspace-title-editing": editingWorkspace() }}
+                    title="The open workspace — double-click to rename (F2)"
+                    role="button"
+                    tabIndex={0}
+                    onDblClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (!editingWorkspace()) enterWorkspaceRename();
+                    }}
+                    onKeyDown={(e) => {
+                        if (editingWorkspace()) return; // the input owns its keys
+                        if (e.key === "F2") {
+                            e.preventDefault();
+                            enterWorkspaceRename();
+                        }
+                    }}
+                >
+                    <Show
+                        when={editingWorkspace()}
+                        fallback={workspaceHeading(currentWorkspaceName(), entries().length)}
+                    >
+                        <input
+                            ref={(el) => {
+                                if (el) {
+                                    queueMicrotask(() => {
+                                        el.focus();
+                                        el.select();
+                                    });
+                                }
+                            }}
+                            class="instance-panel-window-name-input instance-panel-workspace-name-input"
+                            aria-label="Workspace name"
+                            value={workspaceEditValue()}
+                            maxLength={WORKSPACE_NAME_MAX_LEN}
+                            onInput={(e) => setWorkspaceEditValue(e.currentTarget.value)}
+                            onKeyDown={(e) => {
+                                e.stopPropagation();
+                                if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    commitWorkspaceRename();
+                                } else if (e.key === "Escape") {
+                                    e.preventDefault();
+                                    cancelWorkspaceRename();
+                                }
+                            }}
+                            onBlur={() => commitWorkspaceRename()}
+                            onClick={(e) => e.stopPropagation()}
+                            onDblClick={(e) => e.stopPropagation()}
+                        />
+                    </Show>
                 </div>
                 <For each={entries()}>
                     {(entry, i) => {

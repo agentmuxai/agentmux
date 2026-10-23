@@ -240,6 +240,19 @@ class WorkspaceServiceType {
         return MOS.callBackendService("workspace", "UpdateWorkspace", Array.from(arguments))
     }
 
+    // The user's workspace, a named set of windows (srv `user_workspace.rs`),
+    // not the window's contents the methods above act on.
+    // Save it now if anything changed since its last save.
+    Flush(): Promise<{ saved: boolean }> {
+        return MOS.callBackendService("workspace", "Flush", Array.from(arguments))
+    }
+
+    // Rename a workspace (`""` is the open one).
+    // @returns object updates (the client, whose meta holds the open one's name)
+    RenameUserWorkspace(workspaceId: string, name: string): Promise<void> {
+        return MOS.callBackendService("workspace", "RenameUserWorkspace", Array.from(arguments))
+    }
+
     // Move a block from one tab to another within the same workspace
     // @returns object updates
     MoveBlockToTab(workspaceId: string, blockId: string, sourceTabId: string, destTabId: string, autoClose?: boolean): Promise<void> {

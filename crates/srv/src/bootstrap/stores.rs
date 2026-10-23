@@ -488,6 +488,13 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         );
     }
 
+    // The user's workspace (SPEC_WORKSPACES_2026_10_23.md §4.2): Default
+    // Workspace, or a new version's copy of the previous version's. Before the
+    // initial data, which a copied workspace with windows replaces.
+    let opened_workspace = crate::server::service::user_workspace::prepare_at_startup(
+        &mstore,
+        crate::server::service::session_other_builds::ScanRoots::live().as_ref(),
+    );
     // Bootstrap data (creates Client/Window/Workspace/Tab on first launch)
     let first_launch = wcore::ensure_initial_data(&mstore).unwrap_or_else(|e| {
         tracing::error!("Failed to ensure initial data: {}", e);
@@ -500,6 +507,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     }
     // A window whose close a quit outran: the session record restores it.
     crate::server::service::forget_windows_left_by_quit(&mstore);
+    crate::server::service::user_workspace::adopt_current(&mstore, opened_workspace);
 
     // Seed ~/.agentmux/.gitignore so accidental git operations inside the
     // data directory (e.g. an agent running `git init` or `git clone` in its

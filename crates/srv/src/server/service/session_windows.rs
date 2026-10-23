@@ -208,7 +208,7 @@ pub(crate) fn windows_of(record: &Value) -> Vec<Value> {
 
 /// Whether `record` is a quit's, saved within the last two minutes: the
 /// closes of that quit are still arriving.
-fn is_recent_quit_record(record: &Value, now_ms: i64) -> bool {
+pub(crate) fn is_recent_quit_record(record: &Value, now_ms: i64) -> bool {
     record.get("saved_for").and_then(|v| v.as_str()) == Some("quit")
         && record
             .get("saved_at_ms")
@@ -245,7 +245,10 @@ pub(crate) fn save_on_last_close(
         }
         // When it was closed, for another build offering it (`session_other_builds`).
         snapshot["saved_at_ms"] = json!(agentmux_common::time::now_ms());
-        super::session_restore::save_last_session_snapshot(store, snapshot);
+        super::session_restore::save_last_session_snapshot(store, snapshot.clone());
+        // The open workspace keeps it too (`user_workspace`), whole: the saver
+        // makes no save with no window open.
+        super::user_workspace::write_record_now(store, snapshot);
     }
 }
 

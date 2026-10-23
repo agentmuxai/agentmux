@@ -34,6 +34,7 @@ pub(crate) mod session_restore;
 pub(crate) mod session_other_builds;
 mod session_windows;
 pub(crate) use session_windows::forget_windows_left_by_quit;
+pub(crate) mod user_workspace;
 mod tab_lifecycle;
 mod tab_move;
 mod tear_off;

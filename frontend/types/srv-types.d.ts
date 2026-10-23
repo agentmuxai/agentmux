@@ -916,6 +916,12 @@ declare global {
         // lose; ForkProviderFallbackBanner (agent-view.tsx) reads it.
         // SPEC_AGENT_QUICK_FORK_NEW_TAB_2026_08_21.md §4.4.
         "quickfork:noHistoryFallback"?: boolean;
+        // The client's: the open workspace (a named set of windows), its name,
+        // and which older copy a launch had to open, if one
+        // (srv `user_workspace.rs`, SPEC_WORKSPACES_2026_10_23.md).
+        "workspace:current"?: string;
+        "workspace:name"?: string;
+        "workspace:restored_from"?: "previous" | "pre_upgrade" | null;
     };
 
     // tsgenmeta.MethodMeta

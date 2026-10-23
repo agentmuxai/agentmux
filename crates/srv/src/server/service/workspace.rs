@@ -76,6 +76,10 @@ pub(super) async fn handle_workspace_service(state: &AppState, call: &WebCallTyp
         "TearOffBlock" => handle_tear_off_block(state, call).await,
         "RedockFloatingPane" => handle_redock_floating_pane(state, call).await,
         "TearOffTab" => handle_tear_off_tab(state, call).await,
+        // The user's workspace, a named set of windows (`user_workspace`), not
+        // the window's contents the methods above act on.
+        "Flush" => super::user_workspace::handle_flush(state, call).await,
+        "RenameUserWorkspace" => super::user_workspace::handle_rename(state, call),
         _ => WebReturnType::error(format!("unknown workspace method: {}", call.method)),
     }
 }
