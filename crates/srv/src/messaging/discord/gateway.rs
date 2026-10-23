@@ -23,7 +23,6 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message};
 
-use crate::backend::reactive::handler::get_global_handler;
 use crate::backend::reactive::types::InjectionRequest;
 use crate::messaging::{BridgeHealth, BridgeStatus, OutboundMsg};
 
@@ -412,7 +411,6 @@ fn handle_dispatch(
             };
 
             let envelope = format!("[Discord @{}]: {}", msg.author.username, msg.content);
-            let handler = get_global_handler();
             let req = InjectionRequest {
                 target_agent: target.clone(),
                 message: envelope,
@@ -424,7 +422,7 @@ fn handle_dispatch(
                 forward_hops: 0,
                 ..Default::default()
             };
-            let result = handler.inject_message(req);
+            let result = crate::server::jekt_entry::inject_from_bridge(req);
             if result.success {
                 tracing::debug!(
                     "discord_bridge: injected msg from {} to agent {}",

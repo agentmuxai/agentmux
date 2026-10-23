@@ -13,7 +13,6 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::mpsc;
 
-use crate::backend::reactive::handler::get_global_handler;
 use crate::backend::reactive::types::InjectionRequest;
 use crate::messaging::{BridgeHealth, BridgeStatus, OutboundMsg};
 
@@ -191,7 +190,6 @@ fn handle_update(update: &Update, config: &TelegramConfig, health: &Arc<Mutex<Br
     let text = message.text.as_deref().unwrap_or("");
     let envelope = format!("[Telegram @{username}]: {text}");
 
-    let handler = get_global_handler();
     let req = InjectionRequest {
         target_agent: target.clone(),
         message: envelope,
@@ -203,7 +201,7 @@ fn handle_update(update: &Update, config: &TelegramConfig, health: &Arc<Mutex<Br
         forward_hops: 0,
         ..Default::default()
     };
-    let result = handler.inject_message(req);
+    let result = crate::server::jekt_entry::inject_from_bridge(req);
     if result.success {
         tracing::debug!("telegram_bridge: injected msg from {username} to agent {target}");
     } else {
