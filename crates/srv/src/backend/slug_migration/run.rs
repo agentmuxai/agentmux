@@ -164,11 +164,8 @@ pub(super) fn apply(home: &Home, opts: &Options) -> Result<ForkSlugReport, Strin
 /// released before the rest. A target taken in the meantime leaves the agent
 /// out of the run with nothing written for it (`Record::Skipped`).
 ///
-/// Only a finished S1 reserves the id (the shared definition then holds it),
-/// so a resume checks again until S1 is done: a run interrupted between S1's
-/// intent and its write released the lock with nothing reserved, and another
-/// channel may have handed the id out since (Codex P1 on #5342). Taken by
-/// then, the run stops for a rollback instead of publishing a duplicate.
+/// Only a finished S1 reserves the id, so a resume checks again until S1 is
+/// done; a target taken meanwhile stops the run for a rollback (#5342).
 fn run_agent_reserved(ctx: &Ctx, journal: &mut Journal, a: &Agent, opts: &Options) -> Result<(), String> {
     if journal.done(&a.uid, Step::S1) {
         return run_agent(ctx, journal, a, opts, &STEPS);
@@ -355,10 +352,8 @@ pub(super) fn rollback(home: &Home, path: Option<&str>) -> Result<ForkSlugReport
 /// one the run left is unchanged since it finished (its bytes and
 /// modification time); the moved folders go back through the journal.
 ///
-/// Databases never go back as a whole copy: other panes write to them during
-/// and after the run, and a copy would silently drop those writes (Codex P1
-/// on #5342). They go back row by row instead, through the same database
-/// undos journal mode runs, which touch only what the run wrote.
+/// Databases go back row by row through journal mode's database undos, never
+/// as a whole copy, which would drop other panes' writes since (#5342).
 pub(super) fn restore(home: &Home, path: Option<&str>) -> Result<ForkSlugReport, String> {
     let _lock = preconditions::take_lock(home)?;
     let mut journal = pick(home, path)?;

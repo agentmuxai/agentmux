@@ -61,8 +61,7 @@ fn restore_mode_puts_the_backup_back_only_while_nothing_changed() {
     run::restore(&fx.home, Some(&report.journal)).unwrap();
     assert_eq!(fx.snapshot(), original);
 
-    // A database written since the run keeps that write: its rows go back
-    // one by one, never as a copy of the whole file (Codex P1 on #5342).
+    // A database written since the run keeps that write (#5342).
     let fx = Fx::standard();
     let report = super::apply(&fx.home).unwrap();
     let db = fx.root().join("channels/stable/versions/0.59.2/data/db/objects.db");
@@ -177,9 +176,7 @@ fn a_target_taken_after_the_plan_leaves_that_agent_out_untouched() {
 }
 
 /// A run interrupted after S1's intent but before its write holds no
-/// reservation, so another channel can hand the id out meanwhile. The resume
-/// checks again and stops for a rollback instead of publishing a duplicate
-/// (Codex P1 on #5342).
+/// reservation: the resume checks again and stops for a rollback (#5342).
 #[test]
 fn a_resume_checks_the_target_again_until_s1_is_done() {
     let fx = Fx::standard();
