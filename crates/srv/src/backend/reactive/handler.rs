@@ -1218,9 +1218,9 @@ impl Handler {
         // conversation_visibility is `ask` (or `trusted_peers` with a
         // non-allow-listed requester) — `req.transcript_request_escalate_forced`,
         // resolved by the server (`resolve_transcript_request_tier_fields`)
-        // against that agent's own setting before the marker is rendered;
-        // meaningless unless `is_transcript_request` is also true. A valid signature answers
-        // *who is asking*, not *whether this content should be disclosed* —
+        // against that agent's own setting before the marker is rendered,
+        // and meaningful only with `is_transcript_request`. A valid signature
+        // answers *who is asking*, not *whether to disclose this content* —
         // identity proof alone doesn't relax that question, unlike every
         // other TIER=sensitive case above.
         let requires_stop = is_sensitive

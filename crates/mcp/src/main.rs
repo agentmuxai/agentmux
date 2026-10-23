@@ -9,8 +9,8 @@
 //! Communication is JSON-RPC 2.0 over stdin/stdout.
 //!
 //! The `Terminal` tool's background `run` (formerly `Shell`) starts a
-//! persistent shell process on agentmux-srv and returns immediately with a `shell_id`. Output streams live in the
-//! conversation as a `ShellNode` row without blocking the agent.
+//! persistent shell on agentmux-srv and returns at once with a `shell_id`;
+//! output streams into the conversation as a `ShellNode` row, unblocking.
 //!
 //! Env vars (inherited from agentmux-srv's agent env injection):
 //!   AGENTMUX_LOCAL_URL    — sidecar HTTP base URL
