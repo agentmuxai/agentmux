@@ -1037,7 +1037,7 @@ pub(crate) async fn deliver(
 
 /// Echo a locally delivered jekt into the sender's own pane, as every
 /// successful delivery path does.
-fn echo_local_delivery(
+pub(super) fn echo_local_delivery(
     state: &AppState,
     req: &InjectionRequest,
     resp: &crate::backend::reactive::types::InjectionResponse,
@@ -1050,17 +1050,10 @@ fn echo_local_delivery(
         &resp.request_id,
         resp.effective_tier.as_deref(),
         resp.requires_stop,
-        EchoTrust {
-            delivery_tier: req.delivery_tier.as_deref().unwrap_or("host"),
-            // Same `req` this call's own `effective_tier`/`requires_stop`
-            // were computed from (via `inject_message`) — not hardcoded, so
-            // the echoed marker's TRUST/SIG stays consistent with its own
-            // ESCALATE= (reagentx P1 on PR #2623).
-            sig_verified: req.sig_verified,
-            reagent_verified: req.reagent_verified,
-            lan_verified: req.lan_verified,
-            channel_verified: req.channel_verified,
-        },
+        // Same `req` this call's own `effective_tier`/`requires_stop` were
+        // computed from (via `inject_message`), so the echoed marker's
+        // TRUST/SIG stays consistent with its own ESCALATE=.
+        EchoTrust::of(req),
         req.priority.as_deref().unwrap_or("normal"),
         req.files_delivery.as_ref(),
     );

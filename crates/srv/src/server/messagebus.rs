@@ -20,7 +20,6 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::backend::messagebus::{BusMessage, MessageType, Priority};
-use crate::backend::reactive::InjectionRequest;
 use super::AppState;
 
 // ---- Request types ----
@@ -144,27 +143,19 @@ pub(super) async fn handle_inject(
         super::actor::ActorSite::BusInject,
         Some(&req.from),
     );
-    // Try direct PTY injection via ReactiveHandler (agent has registered block_id)
-    let mut reactive_req = InjectionRequest {
-        target_agent: req.target.clone(),
-        message: req.message.clone(),
-        source_agent: Some(req.from.clone()),
-        request_id: None,
-        priority: req.priority.clone(),
-        jekt_tier: None,
-        delivery_tier: Some("host".to_string()),
-        forward_hops: 0,
-        audit_source_uid: super::caller::attributed_uid(caller.as_deref()),
-        ..Default::default()
-    };
-    // reagentx P0 on PR #2565: this endpoint used to call inject_message
-    // directly with a fully client-controlled `source_agent`, bypassing
-    // host-tier signature verification entirely — closing that gap here
-    // means a claimed identity with a signing key on file (this endpoint
-    // never carries a signature) now correctly renders TRUST=unverified and
-    // forces TIER=sensitive, instead of silently passing as self-declared.
-    super::reactive::verify_jekt_signature(&state, &mut reactive_req);
-    let resp = state.reactive_handler.inject_message(reactive_req);
+    // Try direct PTY injection via ReactiveHandler (agent has registered
+    // block_id). The request carries no signature, so a claimed identity
+    // with a signing key on file reads TRUST=unverified and TIER=sensitive;
+    // a transcript_request body reads TIER=sensitive too (`jekt_entry`).
+    let reactive_req = super::jekt_entry::bus_inject_request(
+        &state,
+        &req.from,
+        &req.target,
+        &req.message,
+        req.priority.clone(),
+        super::caller::attributed_uid(caller.as_deref()),
+    );
+    let resp = state.reactive_handler.inject_message(reactive_req.clone());
     if resp.success {
         return Json(json!({
             "status": "injected",
@@ -175,9 +166,9 @@ pub(super) async fn handle_inject(
     }
 
     // Agent not registered with a block_id — fall back to MessageBus WS push
-    // (only fall back on "agent not found", propagate other errors)
-    let is_not_found = resp.error.as_deref().map(|e| e.contains("not found")).unwrap_or(false);
-    if !is_not_found {
+    // (only on "agent not found", and never for a transcript request);
+    // propagate other errors.
+    if !super::jekt_entry::bus_fallback_allowed(&reactive_req, &resp) {
         return Json(json!({
             "status": "error",
             "error": resp.error,
