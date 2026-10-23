@@ -54,6 +54,9 @@ export function unclearable(plan: ForkSlugPlan | null | undefined): ForkSlugBloc
 
 /** The card's status line. */
 export function planLine(plan: ForkSlugPlan): string {
+    if (plan.last_run && !plan.last_run.finished) {
+        return plan.last_run.failed ? `An update stopped before it finished: ${plan.last_run.failed}` : "An update stopped before it finished.";
+    }
     const n = plan.candidates.length;
     if (n === 0) return "Every agent has an up-to-date id.";
     return `${plural(n, "agent")} ${n === 1 ? "has" : "have"} an outdated id.`;
@@ -143,8 +146,13 @@ export function ForkSlugMigration(): JSX.Element {
         else void apply();
     };
 
+    // The run Undo reverses: this session's, or the latest one on disk, so
+    // Undo outlives the session that ran it.
+    const undoJournal = () => report()?.journal || plan()?.last_run?.journal;
+    const unfinished = () => (plan()?.last_run && !plan()!.last_run!.finished ? plan()!.last_run! : null);
+
     const undo = async () => {
-        const journal = report()?.journal;
+        const journal = undoJournal();
         setConfirmUndo(false);
         if (!journal) return;
         setPhase("undoing");
@@ -181,7 +189,12 @@ export function ForkSlugMigration(): JSX.Element {
                 <span class="setting-fork-slugs-line" role="status">
                     {line()}
                 </span>
-                <Show when={(plan()?.candidates.length ?? 0) > 0}>
+                <Show when={unfinished()}>
+                    <Button tone="accent" busy={phase() === "applying"} disabled={busy()} onClick={() => void apply()}>
+                        Finish the update
+                    </Button>
+                </Show>
+                <Show when={!unfinished() && (plan()?.candidates.length ?? 0) > 0}>
                     <Button tone="accent" busy={phase() === "applying" || phase() === "stopping"} disabled={!canStart()} onClick={start}>
                         Update them
                     </Button>
@@ -253,15 +266,15 @@ export function ForkSlugMigration(): JSX.Element {
                             <pre class="setting-fork-slugs-commands">{r().pr_searches.join("\n")}</pre>
                         </Show>
                         <For each={r().notes}>{(n) => <div class="setting-fork-slugs-note">{n}</div>}</For>
-                        <Show when={r().journal}>
-                            <div class="setting-fork-slugs-actions">
-                                <Button tone="quiet" density="compact" disabled={busy()} onClick={() => setConfirmUndo(true)}>
-                                    Undo the update
-                                </Button>
-                            </div>
-                        </Show>
                     </div>
                 )}
+            </Show>
+            <Show when={undoJournal()}>
+                <div class="setting-fork-slugs-actions">
+                    <Button tone="quiet" density="compact" disabled={busy()} onClick={() => setConfirmUndo(true)}>
+                        Undo the update
+                    </Button>
+                </div>
             </Show>
             <ConfirmModal
                 open={confirmStop()}

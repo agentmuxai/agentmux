@@ -198,3 +198,21 @@ fn a_resume_checks_the_target_again_until_s1_is_done() {
     run::rollback(&fx.home, None).unwrap();
     assert_eq!(std::fs::read(&def).unwrap(), def_before);
 }
+
+/// The plan names the latest run until it is rolled back, so Settings can
+/// finish or undo it after the session that ran it is gone.
+#[test]
+fn the_plan_names_the_last_run_until_it_is_rolled_back() {
+    let fx = Fx::standard();
+    assert_eq!(super::super::plan(&fx.home, false).unwrap().last_run, None);
+    let opts = run::Options { crash: Some((LOAP3.to_string(), run::Crash::AfterDone(super::super::journal::Step::S2))), ..Default::default() };
+    assert_eq!(run::apply(&fx.home, &opts).unwrap_err(), run::CRASHED);
+    let last = super::super::plan(&fx.home, false).unwrap().last_run.expect("an unfinished run");
+    assert!(!last.finished);
+    let report = super::apply(&fx.home).unwrap();
+    let last = super::super::plan(&fx.home, false).unwrap().last_run.expect("the finished run");
+    assert!(last.finished);
+    assert_eq!(last.journal, report.journal);
+    run::rollback(&fx.home, None).unwrap();
+    assert_eq!(super::super::plan(&fx.home, false).unwrap().last_run, None);
+}

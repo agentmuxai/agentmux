@@ -171,4 +171,25 @@ describe("ForkSlugMigration", () => {
         expect(migrate.mock.calls[3][1]).toEqual({ mode: "rollback", journal: report.journal });
         expect(await screen.findByText("3 agents have an outdated id.")).toBeInTheDocument();
     });
+
+    it("finishes or undoes a run that stopped partway, after the session that ran it is gone", async () => {
+        const stopped: ForkSlugPlan = { ...plan([]), last_run: { journal: report.journal, finished: false, failed: "uid-loap-3: crashed" } };
+        srv([stopped, plan([])]);
+        render(() => <ForkSlugMigration />);
+        expect(await screen.findByText("An update stopped before it finished: uid-loap-3: crashed")).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Update them" })).not.toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Undo the update" })).toBeEnabled();
+        fireEvent.click(screen.getByRole("button", { name: "Finish the update" }));
+        await waitFor(() => expect(modes()).toEqual(["plan", "apply", "plan"]));
+    });
+
+    it("undoes the last finished run from the plan's journal", async () => {
+        srv([{ ...plan([]), last_run: { journal: report.journal, finished: true } }, plan([])]);
+        render(() => <ForkSlugMigration />);
+        await screen.findByText("Every agent has an up-to-date id.");
+        fireEvent.click(screen.getByRole("button", { name: "Undo the update" }));
+        fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Undo" }));
+        await waitFor(() => expect(modes()).toEqual(["plan", "rollback", "plan"]));
+        expect(migrate.mock.calls[1][1]).toEqual({ mode: "rollback", journal: report.journal });
+    });
 });

@@ -143,13 +143,11 @@ pub(super) fn apply(home: &Home, opts: &Options) -> Result<ForkSlugReport, Strin
         }
         journal.append(Record::Verified { uid: a.uid.clone() })?;
     }
+    // Only files: restore mode compares them, and takes databases back row
+    // by row without a digest.
     let mut after = Vec::new();
-    for b in &backups {
-        let path = Path::new(&b.original);
-        if b.database && !path.exists() {
-            continue;
-        }
-        after.push(backup::fingerprint(path, b.database)?);
+    for b in backups.iter().filter(|b| !b.database) {
+        after.push(backup::fingerprint(Path::new(&b.original), false)?);
     }
     journal.append(Record::Finished { at: agentmux_common::time::now_ms(), after })?;
     Ok(report(&journal, &plan, None))

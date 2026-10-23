@@ -297,7 +297,7 @@ pub(super) fn plan_with(home: &Home, quick: bool, check_lock: bool) -> Result<Fo
     if quick {
         let candidates = found.into_iter().map(|f| bare(&f)).collect::<Vec<_>>();
         let summary = summary(&candidates, &skipped, &[]);
-        return Ok(ForkSlugPlan { candidates, skipped, blockers: Vec::new(), summary });
+        return Ok(ForkSlugPlan { candidates, skipped, blockers: Vec::new(), summary, last_run: last_run(home) });
     }
     let installs = home.installs()?;
     let mut blockers: Vec<ForkSlugBlocker> = unreadable
@@ -315,7 +315,7 @@ pub(super) fn plan_with(home: &Home, quick: bool, check_lock: bool) -> Result<Fo
             .map(|f| ForkSlugCandidate { refused: Some("not every store can be read, so its new id can't be checked".into()), ..bare(f) })
             .collect();
         let summary = summary(&candidates, &skipped, &blockers);
-        return Ok(ForkSlugPlan { candidates, skipped, blockers, summary });
+        return Ok(ForkSlugPlan { candidates, skipped, blockers, summary, last_run: last_run(home) });
     }
     let mut taken: BTreeMap<String, String> = BTreeMap::new();
     let mut candidates = Vec::new();
@@ -344,7 +344,22 @@ pub(super) fn plan_with(home: &Home, quick: bool, check_lock: bool) -> Result<Fo
         blockers.extend(super::preconditions::blockers(home, &installs, &candidates, check_lock));
     }
     let summary = summary(&candidates, &skipped, &blockers);
-    Ok(ForkSlugPlan { candidates, skipped, blockers, summary })
+    Ok(ForkSlugPlan { candidates, skipped, blockers, summary, last_run: last_run(home) })
+}
+
+/// The latest run, unless it was rolled back. A journal that can't be read
+/// counts as no run: the plan still shows, and an apply reports the error.
+fn last_run(home: &Home) -> Option<crate::backend::rpc_types::ForkSlugLastRun> {
+    let path = super::journal::journals(&home.backups()).into_iter().next()?;
+    let journal = super::journal::Journal::open(&path).ok()?;
+    if journal.rolled_back() {
+        return None;
+    }
+    Some(crate::backend::rpc_types::ForkSlugLastRun {
+        journal: path.display().to_string(),
+        finished: journal.finished().is_some(),
+        failed: journal.last_failure(),
+    })
 }
 
 /// Every database a run reads or writes that can't be read now, by path

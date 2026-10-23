@@ -141,6 +141,24 @@ pub struct ForkSlugPlan {
     /// old to know former slugs, another migration under way.
     pub blockers: Vec<ForkSlugBlocker>,
     pub summary: String,
+    /// The latest run, unless it was rolled back: what Settings resumes or
+    /// undoes after the session that ran it is gone.
+    #[serde(default)]
+    #[ts(optional)]
+    pub last_run: Option<ForkSlugLastRun>,
+}
+
+/// A run that wasn't rolled back.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ForkSlugLastRun {
+    pub journal: String,
+    /// False while an apply would resume it.
+    pub finished: bool,
+    /// Why it stopped, while nothing has moved on since.
+    #[serde(default)]
+    #[ts(optional)]
+    pub failed: Option<String>,
 }
 
 /// One agent a run migrated.

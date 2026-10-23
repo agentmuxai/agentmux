@@ -337,6 +337,8 @@ As built (`crates/srv/src/backend/slug_migration/`):
 - **Surfaces.**
   - Settings › Agents, a new section, holds the card: the plan's line, "Update them", the list with "Show where the
     old ids are stored", what blocks it, the report with the PR searches, and "Undo the update".
+  - The plan names the latest run until it is rolled back (`last_run`): a run that stopped partway shows "Finish the
+    update" (an apply, which resumes it), and "Undo the update" works on the latest run after Settings is reopened.
   - A running pane is stopped only after a confirmation, and the plan is read again before the run.
   - The startup notice stays until it is closed or acted on. Either turns `agent:outdatedidsnotice` off, and it
     doesn't ask again.
