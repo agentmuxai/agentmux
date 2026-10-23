@@ -15,6 +15,12 @@
 //!
 //! Every struct carries an `extra` map, so a reader keeps fields it doesn't
 //! know and writes them back unchanged (spec §3.1).
+//!
+//! A workspace export (`SPEC_WORKSPACES_2026_10_23.md` §4.2) is the same
+//! document with `scope: "workspace"`, the workspace's name, and every window
+//! it holds, each with its `name` and its `state` (`open` or `closed`). Those
+//! fields are optional, so it stays version 1: an older reader keeps them as
+//! unknown fields, and a file without them reads as open, unnamed windows.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -34,6 +40,13 @@ pub const LAYOUT_VERSION: u32 = 1;
 /// Every layout file ends with this (spec §3.1): filterable in dialogs,
 /// highlighted as JSON in any editor.
 pub const LAYOUT_EXTENSION: &str = ".agentmux-layout.json";
+/// An exported workspace ends with this.
+pub const WORKSPACE_EXTENSION: &str = ".agentmux-workspace.json";
+/// The `scope` of a workspace export.
+pub const SCOPE_WORKSPACE: &str = "workspace";
+/// A window's `state` in a workspace export: shown, or closed (kept to reopen).
+pub const WINDOW_OPEN: &str = "open";
+pub const WINDOW_CLOSED: &str = "closed";
 
 // ── The file format (spec §3) ──
 
@@ -71,6 +84,12 @@ pub struct SavedBy {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct LayoutWindow {
+    /// The name the user gave the window (a workspace export).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// `open` or `closed` (a workspace export); absent reads as open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_tab: Option<usize>,
     #[serde(default)]
@@ -193,45 +212,86 @@ pub fn export_window(store: &Store, window_id: &str, name: &str, ctx: &ExportCon
         .get::<Window>(window_id)
         .map_err(|e| format!("could not read window {window_id}: {e}"))?
         .ok_or_else(|| format!("no such window: {window_id}"))?;
+    let mut warnings = Vec::new();
+    let exported = export_contents(store, &window.workspaceid, ctx, &mut warnings)?
+        .ok_or_else(|| "the window has no tabs with panes to save".to_string())?;
+    Ok(Exported { doc: envelope(name, "window", vec![exported], ctx), warnings })
+}
+
+fn envelope(name: &str, scope: &str, windows: Vec<LayoutWindow>, ctx: &ExportContext) -> LayoutDoc {
+    LayoutDoc {
+        format: LAYOUT_FORMAT.to_string(),
+        version: LAYOUT_VERSION,
+        name: name.to_string(),
+        saved_at: ctx.saved_at.clone(),
+        saved_by: SavedBy {
+            app: "agentmux".to_string(),
+            app_version: ctx.app_version.clone(),
+            instance: ctx.instance.clone(),
+            extra: Map::new(),
+        },
+        scope: scope.to_string(),
+        windows,
+        extra: Map::new(),
+    }
+}
+
+/// One window's contents (`workspace_id`, the srv object) as a layout
+/// window. `Ok(None)` when no tab has a pane to write.
+fn export_contents(
+    store: &Store,
+    workspace_id: &str,
+    ctx: &ExportContext,
+    warnings: &mut Vec<String>,
+) -> Result<Option<LayoutWindow>, String> {
     let workspace = store
-        .get::<Workspace>(&window.workspaceid)
+        .get::<Workspace>(workspace_id)
         .map_err(|e| format!("could not read the window's workspace: {e}"))?
         .ok_or_else(|| "the window has no workspace".to_string())?;
-
-    let mut warnings = Vec::new();
     let mut tabs = Vec::new();
     let mut active_tab = None;
     // `pinnedtabids` is legacy but can still hold a fresh workspace's only
     // tab — read both, as `session_restore::snapshot_workspace` does.
     for tab_id in workspace.pinnedtabids.iter().chain(workspace.tabids.iter()) {
         let Some(tab) = store.get::<Tab>(tab_id).ok().flatten() else { continue };
-        let Some(exported) = export_tab(store, &tab, ctx, &mut warnings) else { continue };
+        let Some(exported) = export_tab(store, &tab, ctx, warnings) else { continue };
         if tab_id == &workspace.activetabid {
             active_tab = Some(tabs.len());
         }
         tabs.push(exported);
     }
-    if tabs.is_empty() {
-        return Err("the window has no tabs with panes to save".to_string());
+    Ok((!tabs.is_empty()).then(|| LayoutWindow { active_tab, tabs, ..Default::default() }))
+}
+
+/// One window of a workspace export: its contents (the srv object), the
+/// name the user gave it, and whether it is closed.
+pub struct WorkspaceWindow {
+    pub workspace_id: String,
+    pub name: Option<String>,
+    pub closed: bool,
+}
+
+/// Export a workspace (`SPEC_WORKSPACES_2026_10_23.md` §4.2): every window
+/// in `windows`, each with its name and state, under the workspace's `name`.
+/// A window with nothing to write is left out; none at all is an error.
+pub fn export_workspace(
+    store: &Store,
+    name: &str,
+    windows: &[WorkspaceWindow],
+    ctx: &ExportContext,
+) -> Result<Exported, String> {
+    let mut warnings = Vec::new();
+    let mut out = Vec::new();
+    for w in windows {
+        let Some(mut exported) = export_contents(store, &w.workspace_id, ctx, &mut warnings)? else { continue };
+        exported.name = w.name.clone().filter(|n| !n.trim().is_empty());
+        exported.state = Some(if w.closed { WINDOW_CLOSED } else { WINDOW_OPEN }.to_string());
+        out.push(exported);
     }
-    Ok(Exported {
-        doc: LayoutDoc {
-            format: LAYOUT_FORMAT.to_string(),
-            version: LAYOUT_VERSION,
-            name: name.to_string(),
-            saved_at: ctx.saved_at.clone(),
-            saved_by: SavedBy {
-                app: "agentmux".to_string(),
-                app_version: ctx.app_version.clone(),
-                instance: ctx.instance.clone(),
-                extra: Map::new(),
-            },
-            scope: "window".to_string(),
-            windows: vec![LayoutWindow { active_tab, tabs, extra: Map::new() }],
-            extra: Map::new(),
-        },
-        warnings,
-    })
+    if out.is_empty() {
+        return Err("the workspace has no windows with panes to export".to_string());
+    }
+    Ok(Exported { doc: envelope(name, SCOPE_WORKSPACE, out, ctx), warnings })
 }
 
 /// Pane ids are minted per tab in tree order; node ids are the tree's own,
@@ -565,19 +625,29 @@ fn view_from_block(store: &Store, meta: &MetaMapType, ctx: &ExportContext, warni
 /// Whether `path` is somewhere a layout may be written: absolute, and named
 /// `*.agentmux-layout.json`.
 pub fn is_layout_path(path: &Path) -> bool {
+    has_extension(path, LAYOUT_EXTENSION)
+}
+
+/// Whether `path` is somewhere a workspace export may be written: absolute,
+/// and named `*.agentmux-workspace.json`.
+pub fn is_workspace_path(path: &Path) -> bool {
+    has_extension(path, WORKSPACE_EXTENSION)
+}
+
+fn has_extension(path: &Path, extension: &str) -> bool {
     path.is_absolute()
         && path
             .file_name()
             .and_then(|n| n.to_str())
-            .is_some_and(|n| n.to_ascii_lowercase().ends_with(LAYOUT_EXTENSION) && n.len() > LAYOUT_EXTENSION.len())
+            .is_some_and(|n| n.to_ascii_lowercase().ends_with(extension) && n.len() > extension.len())
 }
 
 /// Write `doc` to `path` atomically: a temp file beside it, then a rename,
 /// so a crash or a full disk never leaves half a layout behind.
 pub fn write_layout_file(path: &Path, doc: &LayoutDoc) -> Result<(), String> {
-    if !is_layout_path(path) {
+    if !is_layout_path(path) && !is_workspace_path(path) {
         return Err(format!(
-            "a layout must be saved to an absolute path ending in {LAYOUT_EXTENSION}: {}",
+            "a layout must be saved to an absolute path ending in {LAYOUT_EXTENSION} or {WORKSPACE_EXTENSION}: {}",
             path.display()
         ));
     }
@@ -619,6 +689,8 @@ pub const META_LAYOUT_AGENT: &str = "layout:agent";
 /// A layout file larger than this is refused unread — real ones are a few KB.
 pub const MAX_LAYOUT_FILE_BYTES: u64 = 1024 * 1024;
 const MAX_TABS: usize = 50;
+/// The most windows an imported workspace opens.
+const MAX_WINDOWS: usize = 20;
 const MAX_PANES_PER_TAB: usize = 64;
 const MAX_TREE_DEPTH: usize = 32;
 
@@ -713,33 +785,96 @@ pub fn plan_from_doc(store: &Store, doc: &LayoutDoc, opts: &PlanOptions) -> Appl
     if doc.windows.len() > 1 {
         plan.notes.push(format!("The file has {} windows; only the first is opened.", doc.windows.len()));
     }
+    let (tabs, active_tab) = plan_window(&agents, window, opts, &mut plan.commands, &mut plan.notes);
+    plan.tabs = tabs;
+    plan.active_tab = active_tab;
+    plan
+}
+
+/// One window of a [`WorkspacePlan`]: its tabs, as [`ApplyPlan`] has them.
+#[derive(Debug, Clone, Default)]
+pub struct WindowPlan {
+    pub name: Option<String>,
+    pub closed: bool,
+    pub tabs: Vec<PlanTab>,
+    pub active_tab: Option<usize>,
+}
+
+/// A whole file turned into panes, every window of it: what Import… opens
+/// as a new workspace (`SPEC_WORKSPACES_2026_10_23.md` §3.2). A layout file
+/// saved from one window is a workspace of that window.
+#[derive(Debug, Clone, Default)]
+pub struct WorkspacePlan {
+    /// Only the windows with a tab that can be opened.
+    pub windows: Vec<WindowPlan>,
+    pub commands: Vec<String>,
+    pub notes: Vec<String>,
+}
+
+/// Build the plan for every window of `doc`. Never touches the store beyond
+/// reading agent definitions.
+pub fn plan_workspace(store: &Store, doc: &LayoutDoc, opts: &PlanOptions) -> WorkspacePlan {
+    let agents = store.agent_def_list().unwrap_or_default();
+    let mut plan = WorkspacePlan::default();
+    if doc.windows.is_empty() {
+        plan.notes.push("The file has no windows.".to_string());
+    }
+    if doc.windows.len() > MAX_WINDOWS {
+        plan.notes.push(format!("Only the first {MAX_WINDOWS} of {} windows are opened.", doc.windows.len()));
+    }
+    for (i, window) in doc.windows.iter().take(MAX_WINDOWS).enumerate() {
+        let (tabs, active_tab) = plan_window(&agents, window, opts, &mut plan.commands, &mut plan.notes);
+        if tabs.is_empty() {
+            plan.notes.push(format!("Window {} has no panes that can be opened, so it is skipped.", i + 1));
+            continue;
+        }
+        plan.windows.push(WindowPlan {
+            name: window.name.clone().map(|n| n.trim().to_string()).filter(|n| !n.is_empty()),
+            closed: window.state.as_deref() == Some(WINDOW_CLOSED),
+            tabs,
+            active_tab,
+        });
+    }
+    plan
+}
+
+/// One window's tabs as plan tabs, and which of them is active.
+fn plan_window(
+    agents: &[crate::backend::storage::agents::AgentDefinition],
+    window: &LayoutWindow,
+    opts: &PlanOptions,
+    commands: &mut Vec<String>,
+    notes: &mut Vec<String>,
+) -> (Vec<PlanTab>, Option<usize>) {
+    let mut tabs = Vec::new();
+    let mut active_tab = None;
     if window.tabs.len() > MAX_TABS {
-        plan.notes.push(format!("Only the first {MAX_TABS} of {} tabs are opened.", window.tabs.len()));
+        notes.push(format!("Only the first {MAX_TABS} of {} tabs are opened.", window.tabs.len()));
     }
     for (i, tab) in window.tabs.iter().take(MAX_TABS).enumerate() {
         let mut builder = PlanBuilder {
             doc_tab: tab,
-            agents: &agents,
+            agents,
             opts,
             blocks: Vec::new(),
             summary: Vec::new(),
             node_by_pane: HashMap::new(),
             panes_used: 0,
             truncated: Vec::new(),
-            commands: &mut plan.commands,
-            notes: &mut plan.notes,
+            commands,
+            notes,
         };
         let rootnode = tab.root.as_ref().and_then(|root| builder.node(root, 100.0, 0));
         let (blocks, summary, node_by_pane) = (builder.blocks, builder.summary, builder.node_by_pane);
         if blocks.is_empty() {
-            plan.notes.push(format!("Tab “{}” has no panes that can be opened, so it is skipped.", tab.name));
+            notes.push(format!("Tab “{}” has no panes that can be opened, so it is skipped.", tab.name));
             continue;
         }
         if window.active_tab == Some(i) {
-            plan.active_tab = Some(plan.tabs.len());
+            active_tab = Some(tabs.len());
         }
         let node_for = |pane: &Option<String>| pane.as_ref().and_then(|p| node_by_pane.get(p)).cloned().unwrap_or_default();
-        plan.tabs.push(PlanTab {
+        tabs.push(PlanTab {
             name: tab.name.clone(),
             blocks,
             rootnode,
@@ -748,7 +883,7 @@ pub fn plan_from_doc(store: &Store, doc: &LayoutDoc, opts: &PlanOptions) -> Appl
             summary,
         });
     }
-    plan
+    (tabs, active_tab)
 }
 
 struct PlanBuilder<'a> {
@@ -872,6 +1007,8 @@ impl PlanBuilder<'_> {
                         meta.insert(META_LAYOUT_AGENT.into(), Value::String(def.id.clone()));
                         self.summary.push(format!("Agent: {}", def.name));
                     }
+                    // A pane that showed the agent picker shows it again.
+                    None if slug.is_none() && name.is_none() => self.summary.push("Agent picker".to_string()),
                     None => {
                         self.notes.push(format!("There's no agent “{label}” here — its pane opens the agent picker."));
                         self.summary.push(format!("Agent: {label} (not found — picker)"));

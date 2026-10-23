@@ -23,7 +23,7 @@ const h = vi.hoisted(() => {
     const openModal = vi.fn();
     const CommandPaletteModal = () => null;
     const store = {
-        atoms: { modalOpen: () => false, isTermMultiInput: () => false },
+        atoms: { modalOpen: () => false, isTermMultiInput: () => false, client: () => null },
         createTab,
         getAllBlockComponentModels: () => [],
         getApi: () => ({
@@ -54,8 +54,20 @@ const h = vi.hoisted(() => {
         setTheme: vi.fn((_: string) => Promise.resolve()),
         setOpacity: vi.fn(),
     };
-    const chooseOtherBuild = vi.fn(() => Promise.resolve());
-    return { chooseOtherBuild, createTab, openNewWindow, openModal, CommandPaletteModal, store, settings, caps, win, menu: { items: [] as MenuItem[], close: vi.fn() } };
+    // ☰ → Workspaces: the list srv gave, and the actions (workspaces.ts).
+    const workspaces = {
+        list: [] as { id: string; name: string; current: boolean }[],
+        refresh: vi.fn(() => Promise.resolve([])),
+    };
+    const actions = {
+        newWorkspace: vi.fn(),
+        switchWorkspace: vi.fn(),
+        importWorkspace: vi.fn(),
+        exportWorkspace: vi.fn(),
+        renameWorkspacePrompt: vi.fn(),
+        deleteWorkspacePrompt: vi.fn(),
+    };
+    return { workspaces, actions, createTab, openNewWindow, openModal, CommandPaletteModal, store, settings, caps, win, menu: { items: [] as MenuItem[], close: vi.fn() } };
 });
 
 // keymodel.ts imports the store as "@/app/store/global", the menu as "@/store/global".
@@ -80,7 +92,12 @@ vi.mock("@/app/store/window-opacity-store", () => ({
 }));
 vi.mock("@/app/store/window-identity", () => ({ windowId: () => "w-a" }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
-vi.mock("./restore-other-build", () => ({ chooseLayoutFromOtherBuild: h.chooseOtherBuild }));
+vi.mock("@/app/store/user-workspace", () => ({
+    refreshWorkspaceList: h.workspaces.refresh,
+    workspaceList: () => h.workspaces.list,
+    workspaceName: () => "Default Workspace",
+}));
+vi.mock("./workspaces", () => h.actions);
 vi.mock("@/app/store/command-registry", () => ({ commandRegistry: { run: vi.fn(() => false) } }));
 vi.mock("@/app/hook/useVoiceInput", () => ({ getVoiceSession: vi.fn() }));
 vi.mock("@/app/host/host-caps", () => ({
@@ -285,32 +302,78 @@ describe("on a host without multiWindow", () => {
     });
 });
 
-// SPEC_LAYOUT_FILES_2026_09_25.md §6.1: ☰ → Layouts → "Save layout…", between
-// Opacity and the divider above Settings (placement per the 08-13 spec §5.1).
-describe("Layouts entry", () => {
-    it("sits after Opacity and offers Save layout…, Open layout… and Restore layout from another build…", () => {
-        render(() => <HamburgerMenu />);
-        const labels = h.menu.items.map((i) => i.label);
-        const at = labels.indexOf("Layouts");
-        expect(at).toBe(labels.indexOf("Opacity") + 1);
-        expect(h.menu.items[at + 1].divider).toBe(true);
-        expect(h.menu.items[at].subItems?.map((i) => i.label)).toEqual([
-            "Save layout…",
-            "Open layout…",
-            "Restore layout from another build…",
-        ]);
-        for (const item of h.menu.items[at].subItems ?? []) {
-            expect(typeof item.onClick).toBe("function");
-        }
+// SPEC_WORKSPACES_2026_10_23.md §3.2: ☰ → Workspaces replaces Layouts, in
+// its place after Opacity.
+describe("Workspaces entry", () => {
+    const workspaces = () => h.menu.items.find((i) => i.label === "Workspaces");
+    const sub = (label: string) => workspaces()?.subItems?.find((i) => i.label === label);
+
+    afterEach(() => {
+        h.workspaces.list = [];
         cleanup();
     });
 
-    it("lists the layouts other builds saved", () => {
+    it("sits after Opacity, with New, Open, Import, Export, Rename and Delete", () => {
         render(() => <HamburgerMenu />);
-        const layouts = h.menu.items.find((i) => i.label === "Layouts");
-        layouts?.subItems?.find((i) => i.label === "Restore layout from another build…")?.onClick?.(new MouseEvent("click"));
-        expect(h.chooseOtherBuild).toHaveBeenCalledTimes(1);
-        cleanup();
+        const labels = h.menu.items.map((i) => i.label);
+        expect(labels).not.toContain("Layouts");
+        const at = labels.indexOf("Workspaces");
+        expect(at).toBe(labels.indexOf("Opacity") + 1);
+        expect(h.menu.items[at + 1].divider).toBe(true);
+        expect(workspaces()?.subItems?.map((i) => i.label)).toEqual([
+            "New Workspace…",
+            "Open Workspace",
+            "Import…",
+            "Export…",
+            "",
+            "Rename workspace…",
+            "Delete workspace…",
+        ]);
+        const all = JSON.stringify(workspaces()?.subItems?.map((i) => i.label));
+        for (const gone of ["Save layout…", "Open layout…", "Restore layout from another build…"]) {
+            expect(all).not.toContain(gone);
+        }
+    });
+
+    it("asks srv for the workspaces when it mounts", () => {
+        h.workspaces.refresh.mockClear();
+        render(() => <HamburgerMenu />);
+        expect(h.workspaces.refresh).toHaveBeenCalledTimes(1);
+    });
+
+    it("Open Workspace lists every workspace, the open one checked, and opens one when chosen", async () => {
+        h.workspaces.list = [
+            { id: "b", name: "Reviews", current: true },
+            { id: "a", name: "Default Workspace", current: false },
+        ];
+        render(() => <HamburgerMenu />);
+        const open = sub("Open Workspace")?.subItems ?? [];
+        expect(open.map((i) => [i.label, i.checked])).toEqual([
+            ["Reviews", true],
+            ["Default Workspace", false],
+        ]);
+        open[1].onClick?.(new MouseEvent("click"));
+        await vi.waitFor(() => expect(h.actions.switchWorkspace).toHaveBeenCalledWith(h.workspaces.list[1]));
+    });
+
+    it("Open Workspace shows the open one before srv has answered", () => {
+        render(() => <HamburgerMenu />);
+        expect(sub("Open Workspace")?.subItems?.map((i) => [i.label, i.checked])).toEqual([["Default Workspace", true]]);
+    });
+
+    it("each item runs its action", async () => {
+        render(() => <HamburgerMenu />);
+        const runs: [string, keyof typeof h.actions][] = [
+            ["New Workspace…", "newWorkspace"],
+            ["Import…", "importWorkspace"],
+            ["Export…", "exportWorkspace"],
+            ["Rename workspace…", "renameWorkspacePrompt"],
+            ["Delete workspace…", "deleteWorkspacePrompt"],
+        ];
+        for (const [label, action] of runs) {
+            sub(label)?.onClick?.(new MouseEvent("click"));
+            await vi.waitFor(() => expect(h.actions[action]).toHaveBeenCalledTimes(1));
+        }
     });
 });
 
@@ -321,12 +384,12 @@ describe("Layouts entry", () => {
 describe("Theme and Opacity", () => {
     const sub = (label: string) => h.menu.items.find((i) => i.label === label)?.subItems ?? [];
 
-    it("keep the menu open; Layouts' items close it", () => {
+    it("keep the menu open; Workspaces' items close it", () => {
         render(() => <HamburgerMenu />);
         expect(sub("Theme").length).toBeGreaterThan(1);
         expect(sub("Theme").every((i) => i.keepOpen === true)).toBe(true);
         expect(sub("Opacity").every((i) => i.keepOpen === true)).toBe(true);
-        expect(sub("Layouts").some((i) => i.keepOpen)).toBe(false);
+        expect(sub("Workspaces").some((i) => i.keepOpen)).toBe(false);
         cleanup();
     });
 

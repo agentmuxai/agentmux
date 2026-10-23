@@ -291,6 +291,9 @@ pub(crate) enum Saved {
     /// A quit is closing the windows: it saved them all, and a save now
     /// would keep only the ones still open.
     HeldForQuit,
+    /// A switch is moving the windows to another workspace
+    /// (`user_workspace_switch`): a save now would store a mix of the two.
+    HeldForSwitch,
     NoWorkspace,
     Failed,
 }
@@ -388,6 +391,9 @@ pub(crate) fn save_now(store: &Store) -> Saved {
     let _guard = WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     // Read before the snapshot: a write after this is a change it may miss.
     let generation = store.layout_writes().changed();
+    if store.layout_writes().saves_held() {
+        return Saved::HeldForSwitch;
+    }
     if quit_holds_saves(store) {
         return Saved::HeldForQuit;
     }
@@ -436,8 +442,8 @@ pub(crate) fn spawn_saver(store: Arc<Store>) {
             }
             let s = Arc::clone(&store);
             match tokio::task::spawn_blocking(move || save_now(&s)).await {
-                // Try again once the quit is over (or never was).
-                Ok(Saved::HeldForQuit) => {}
+                // Try again once the quit or the switch is over.
+                Ok(Saved::HeldForQuit | Saved::HeldForSwitch) => {}
                 Ok(Saved::Failed) | Err(_) => pending = Some(Pending::changed(None, now, p.arranged)),
                 Ok(_) => {
                     pending = None;

@@ -4,14 +4,15 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { rename, flush, updateMeta, push } = vi.hoisted(() => ({
+const { rename, flush, updateMeta, push, list } = vi.hoisted(() => ({
+    list: vi.fn(async () => [] as unknown[]),
     rename: vi.fn(async (_id: string, _name: string) => {}),
     flush: vi.fn(async () => ({ saved: true })),
     updateMeta: vi.fn(async (_oref: string, _meta: unknown) => {}),
     push: vi.fn(),
 }));
 vi.mock("./services", () => ({
-    WorkspaceService: { RenameUserWorkspace: rename, Flush: flush },
+    WorkspaceService: { RenameUserWorkspace: rename, Flush: flush, ListUserWorkspaces: list },
     ObjectService: { UpdateObjectMeta: updateMeta },
 }));
 vi.mock("./mos", () => ({ makeORef: (otype: string, oid: string) => `${otype}:${oid}` }));
@@ -20,10 +21,14 @@ vi.mock("./flash-notifications", () => ({ pushNotification: push }));
 import {
     DEFAULT_WORKSPACE_NAME,
     installWorkspaceFlushOnBlur,
+    nextWorkspaceName,
+    refreshWorkspaceList,
     renameWorkspace,
     surfaceWorkspaceRestoreNotice,
     workspaceHeading,
+    workspaceList,
     workspaceName,
+    workspaceWindowsLine,
 } from "./user-workspace";
 
 const client = (meta: Record<string, unknown>): Client =>
@@ -88,5 +93,27 @@ describe("the restore notice", () => {
         surfaceWorkspaceRestoreNotice(null);
         expect(push).not.toHaveBeenCalled();
         expect(updateMeta).not.toHaveBeenCalled();
+    });
+});
+
+describe("several workspaces", () => {
+    it("suggests the next free Workspace N for a new one", () => {
+        expect(nextWorkspaceName(["Default Workspace"])).toBe("Workspace 2");
+        expect(nextWorkspaceName(["Default Workspace", "Workspace 2", "workspace 3 "])).toBe("Workspace 4");
+        expect(nextWorkspaceName(["Workspace 3"])).toBe("Workspace 2");
+    });
+
+    it("counts a workspace's windows, and its closed ones when it has some", () => {
+        expect(workspaceWindowsLine({ windows: 1, closed: 0 })).toBe("1 window");
+        expect(workspaceWindowsLine({ windows: 3, closed: 2 })).toBe("3 windows, 2 closed");
+    });
+
+    it("keeps the list srv gave, and the last one when srv can't answer", async () => {
+        const ws = [{ id: "a", name: "Default Workspace", current: true, opened_at: 1, windows: 1, closed: 0 }];
+        list.mockResolvedValueOnce(ws);
+        expect(await refreshWorkspaceList()).toEqual(ws);
+        expect(workspaceList()).toEqual(ws);
+        list.mockRejectedValueOnce(new Error("down"));
+        expect(await refreshWorkspaceList()).toEqual(ws);
     });
 });

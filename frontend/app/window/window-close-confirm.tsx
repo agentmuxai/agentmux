@@ -13,9 +13,15 @@ interface ConfirmText {
     description: string;
 }
 
-/** Closing a window with working agents. "Don't ask again" turns the warning off. */
+/** Closing a window with working agents, or a workspace (a switch). "Don't
+ *  ask again" turns the warning off. */
 export function WindowCloseConfirm(
-    props: ConfirmText & { onConfirm: (dontAskAgain: boolean) => void } & ModalCloseProps
+    props: ConfirmText & {
+        onConfirm: (dontAskAgain: boolean) => void;
+        /** Default "Close window". */
+        confirmLabel?: string;
+        onCancel?: () => void;
+    } & ModalCloseProps
 ): JSX.Element {
     const [dontAskAgain, setDontAskAgain] = createSignal(false);
     return (
@@ -23,12 +29,15 @@ export function WindowCloseConfirm(
             open={true}
             title={props.title}
             description={props.description}
-            confirmLabel="Close window"
+            confirmLabel={props.confirmLabel ?? "Close window"}
             onConfirm={() => {
                 props.close();
                 props.onConfirm(dontAskAgain());
             }}
-            onCancel={props.close}
+            onCancel={() => {
+                props.close();
+                props.onCancel?.();
+            }}
         >
             <label style={{ display: "flex", "align-items": "center", gap: "var(--space-2)", cursor: "pointer", "font-size": "var(--text-base)" }}>
                 <input

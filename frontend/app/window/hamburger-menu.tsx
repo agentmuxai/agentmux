@@ -12,7 +12,7 @@
 // Every menu action resolves to a module-level store/RPC primitive, so the
 // component is fully self-contained (no TabBar state coupling).
 
-import { createTab, getApi } from "@/store/global";
+import { atoms, createTab, getApi } from "@/store/global";
 import { FlyoutMenu } from "@/app/element/flyoutmenu";
 import { hostHas } from "@/app/host/host-caps";
 import { fireAndForget } from "@/util/util";
@@ -29,10 +29,8 @@ import { liveWindowOpacity, setWindowOpacityFor } from "@/app/store/window-opaci
 import { windowId } from "@/app/store/window-identity";
 import { THEME_OPTIONS } from "@/app/menu/base-menus";
 import { shortcutFor } from "@/app/keybindings";
-import { saveCurrentLayout } from "./save-layout";
-import { openLayoutFromFile } from "./open-layout";
-import { chooseLayoutFromOtherBuild } from "./restore-other-build";
-import { createMemo, onCleanup, type JSX } from "solid-js";
+import { refreshWorkspaceList, workspaceList, workspaceName } from "@/app/store/user-workspace";
+import { createEffect, createMemo, on, onCleanup, type JSX } from "solid-js";
 import "./hamburger-menu.scss";
 
 interface HamburgerMenuProps {
@@ -54,16 +52,42 @@ export function closeHamburgerMenu(): void {
     for (const close of hamburgerClosers) close();
 }
 
+/** Run one of ☰ → Workspaces' actions (workspaces.ts, loaded when used). */
+function workspaceAction(run: (m: typeof import("./workspaces")) => Promise<void> | void): () => void {
+    return () => fireAndForget(async () => run(await import("./workspaces")));
+}
+
 export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
     let close: (() => void) | undefined;
     onCleanup(() => {
         if (close) hamburgerClosers.delete(close);
     });
+    // Open Workspace lists the workspaces: asked for again whenever the open
+    // one, or its name, changes.
+    createEffect(
+        on(
+            () => [atoms.client()?.meta?.["workspace:current"], workspaceName(atoms.client())],
+            () => void refreshWorkspaceList()
+        )
+    );
+    // Every workspace, the most recently opened first, the open one checked.
+    // Before srv has answered, the open one alone.
+    const openWorkspaceItems = (): MenuItem[] => {
+        const list = workspaceList();
+        const shown = list.length > 0 ? list : [{ id: "", name: workspaceName(atoms.client()), current: true }];
+        return shown.map((w) => ({
+            label: w.name,
+            checked: w.current,
+            onClick: workspaceAction((m) => m.switchWorkspace(w)),
+        }));
+    };
+
     const menuItems = createMemo((): MenuItem[] => {
         // Theme and Opacity stay open while the user tries values (keepOpen),
         // so a choice must not rebuild the items: that would remount the open
-        // submenu under the cursor. The memo reads no reactive state; only
-        // each item's `checked` getter does, and FlyoutMenu reads it in JSX.
+        // submenu under the cursor. The memo reads no reactive state but the
+        // list of workspaces; each item's `checked` getter does, and
+        // FlyoutMenu reads it in JSX.
         //
         // Both act on this window only (SPEC_PER_WINDOW_THEME_AND_OPACITY_
         // 2026_10_12). Settings → Appearance holds the default for windows
@@ -138,25 +162,41 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
                   ]
                 : []),
             {
-                // SPEC_LAYOUT_FILES_2026_09_25.md §6.1 — placement per
-                // SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md §5.1.
-                label: "Layouts",
+                // SPEC_WORKSPACES_2026_10_23.md §3.2. Import… and Export…
+                // replace Save layout… and Open layout….
+                label: "Workspaces",
                 icon: "grip",
                 subItems: [
                     {
-                        label: "Save layout…",
-                        icon: "floppy-disk",
-                        onClick: () => fireAndForget(saveCurrentLayout),
+                        label: "New Workspace…",
+                        icon: "plus",
+                        onClick: workspaceAction((m) => m.newWorkspace()),
                     },
                     {
-                        label: "Open layout…",
+                        label: "Open Workspace",
                         icon: "folder-open",
-                        onClick: () => fireAndForget(openLayoutFromFile),
+                        subItems: openWorkspaceItems(),
                     },
                     {
-                        label: "Restore layout from another build…",
-                        icon: "clock-rotate-left",
-                        onClick: () => fireAndForget(chooseLayoutFromOtherBuild),
+                        label: "Import…",
+                        icon: "file-import",
+                        onClick: workspaceAction((m) => m.importWorkspace()),
+                    },
+                    {
+                        label: "Export…",
+                        icon: "file-export",
+                        onClick: workspaceAction((m) => m.exportWorkspace()),
+                    },
+                    { label: "", divider: true },
+                    {
+                        label: "Rename workspace…",
+                        icon: "pen",
+                        onClick: workspaceAction((m) => m.renameWorkspacePrompt()),
+                    },
+                    {
+                        label: "Delete workspace…",
+                        icon: "trash-can",
+                        onClick: workspaceAction((m) => m.deleteWorkspacePrompt()),
                     },
                 ],
             },

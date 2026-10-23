@@ -7,7 +7,8 @@
 // open on the client object's meta, so its name here follows a rename in any
 // window.
 
-import { ObjectService, WorkspaceService } from "./services";
+import { createSignal } from "solid-js";
+import { ObjectService, WorkspaceService, type UserWorkspaceInfo } from "./services";
 import { makeORef } from "./mos";
 import { pushNotification } from "./flash-notifications";
 
@@ -51,6 +52,40 @@ export async function renameWorkspace(name: string): Promise<void> {
     const trimmed = name.trim().slice(0, WORKSPACE_NAME_MAX_LEN);
     if (!trimmed) return;
     await WorkspaceService.RenameUserWorkspace("", trimmed);
+    void refreshWorkspaceList();
+}
+
+const [workspaceList, setWorkspaceList] = createSignal<UserWorkspaceInfo[]>([]);
+
+/** Every workspace, the most recently opened first, as last asked for
+ *  (☰ → Workspaces → Open Workspace lists it). */
+export { workspaceList };
+
+/** Ask srv for the workspaces again. Keeps the last list on failure. */
+export async function refreshWorkspaceList(): Promise<UserWorkspaceInfo[]> {
+    try {
+        const list = (await WorkspaceService.ListUserWorkspaces()) ?? [];
+        setWorkspaceList(list);
+        return list;
+    } catch (e) {
+        console.warn("[user-workspace] couldn't list the workspaces:", e);
+        return workspaceList();
+    }
+}
+
+/** The name New Workspace… suggests: "Workspace 2", or the next number no
+ *  workspace has (Default Workspace counts as the first). */
+export function nextWorkspaceName(names: string[]): string {
+    const taken = new Set(names.map((n) => n.trim().toLowerCase()));
+    let n = 2;
+    while (taken.has(`workspace ${n}`)) n++;
+    return `Workspace ${n}`;
+}
+
+/** "2 windows, 1 closed", for a workspace in a list. */
+export function workspaceWindowsLine(w: Pick<UserWorkspaceInfo, "windows" | "closed">): string {
+    const open = `${w.windows} window${w.windows === 1 ? "" : "s"}`;
+    return w.closed > 0 ? `${open}, ${w.closed} closed` : open;
 }
 
 let flushInstalled = false;
