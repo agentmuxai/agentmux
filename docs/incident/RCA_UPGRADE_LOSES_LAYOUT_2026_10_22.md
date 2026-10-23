@@ -1,5 +1,6 @@
 # RCA: an upgrade comes back with a starter tab instead of the layout it quit with
 
+**Status:** retro
 **Date:** 2026-10-22
 **Seen on:** macOS, installed build, in-app upgrade 0.59.38 → 0.59.39 (the same thing happened on 0.59.36 and 0.59.38)
 **Affects:** every installed or portable AgentMux whose channel folder still has the pre-versioning `channels/<ch>/data/db/` (installs from before data was kept per version), on every platform
