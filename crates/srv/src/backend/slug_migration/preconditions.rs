@@ -42,7 +42,9 @@ pub(super) fn old_instances(home: &Home, installs: &[Install]) -> Vec<String> {
     let mut seen: HashSet<u32> = HashSet::new();
     for install in installs {
         for version in &install.versions {
-            let Some(pid) = stamp::lock_pid(&version.srv_lock()).filter(|p| *p != 0 && pid_alive(*p)) else { continue };
+            let lock = version.srv_lock();
+            let written = std::fs::metadata(&lock).and_then(|m| m.modified()).ok();
+            let Some(pid) = stamp::lock_pid(&lock).filter(|p| *p != 0 && srv_alive(*p, written)) else { continue };
             seen.insert(pid);
             match stamp::read(&version.stamp()) {
                 Some(s) if s.pid == pid && s.has(stamp::FORMER_SLUGS) => {
@@ -67,7 +69,7 @@ pub(super) fn old_instances(home: &Home, installs: &[Install]) -> Vec<String> {
             let Some(entry) = std::fs::read(file.path()).ok().and_then(|b| serde_json::from_slice::<AgentEntry>(&b).ok()) else {
                 continue;
             };
-            if entry.pid == 0 || stamped.contains(&entry.pid) || !seen.insert(entry.pid) || !pid_alive(entry.pid) {
+            if entry.pid == 0 || stamped.contains(&entry.pid) || !seen.insert(entry.pid) || !srv_alive(entry.pid, None) {
                 continue;
             }
             out.push(format!(
@@ -77,6 +79,54 @@ pub(super) fn old_instances(home: &Home, installs: &[Install]) -> Vec<String> {
         }
     }
     out
+}
+
+/// How long after a lock was written its srv may still have started: the
+/// lock's modification time and the process's start time come from
+/// different clocks' rounding.
+const LOCK_SLACK_SECS: u64 = 5;
+
+/// Whether `pid` is still an srv, and, given when its lock was `written`, the
+/// one that wrote it. A stale lock's pid can belong to any program by now
+/// (chrome.exe, conhost.exe on the operator's home), which made a false
+/// "older AgentMux is running" blocker (#1270). The name rule is the
+/// launcher's (`stale_srv.rs`).
+fn srv_alive(pid: u32, written: Option<std::time::SystemTime>) -> bool {
+    #[cfg(test)]
+    if let Some(srv) = test_srv::is_srv(pid) {
+        return srv && pid_alive(pid);
+    }
+    let target = sysinfo::Pid::from(pid as usize);
+    let mut sys = sysinfo::System::new();
+    sys.refresh_processes_specifics(sysinfo::ProcessesToUpdate::Some(&[target]), true, sysinfo::ProcessRefreshKind::nothing());
+    let Some(process) = sys.process(target) else { return false };
+    let written_secs = written.and_then(|w| w.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs());
+    is_srv_that_wrote(&process.name().to_string_lossy(), process.start_time(), written_secs)
+}
+
+/// [`srv_alive`]'s rule on a process's executable `name` and start time: an
+/// `agentmux-srv` binary started no later than its lock was written.
+pub(super) fn is_srv_that_wrote(name: &str, started_secs: u64, written_secs: Option<u64>) -> bool {
+    name.to_ascii_lowercase().starts_with("agentmux-srv") && written_secs.is_none_or(|w| started_secs <= w + LOCK_SLACK_SECS)
+}
+
+/// Tests stand in for an srv with their own process, which isn't one by
+/// name: each test thread says which pids count.
+#[cfg(test)]
+pub(super) mod test_srv {
+    use std::cell::RefCell;
+    use std::collections::HashSet;
+
+    thread_local!(static SRV: RefCell<Option<HashSet<u32>>> = const { RefCell::new(None) });
+
+    /// From now on, on this thread, exactly `pids` are srv processes.
+    pub fn treat_as_srv(pids: &[u32]) {
+        SRV.with(|s| *s.borrow_mut() = Some(pids.iter().copied().collect()));
+    }
+
+    pub(super) fn is_srv(pid: u32) -> Option<bool> {
+        SRV.with(|s| s.borrow().as_ref().map(|set| set.contains(&pid)))
+    }
 }
 
 /// Whether another process holds the migration lock now. Reads only: a lock
