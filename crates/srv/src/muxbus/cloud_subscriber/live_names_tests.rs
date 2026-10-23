@@ -5,7 +5,8 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use super::{
-    delivery_name, is_held, live_agents, orphaned_subscriptions, seed, subscribe_missing, LiveAgent, NameDirectory,
+    delivery_name, in_grace, is_held, live_agents, orphaned_subscriptions, seed, subscribe_missing, LiveAgent,
+    NameDirectory, FORMER_SLUG_GRACE,
 };
 use crate::backend::reactive::handler::{LookupOutcome, ReactiveHandler};
 use crate::muxbus::cloud_subscriber::{CloudSubscriber, CtrlMsg};
@@ -144,4 +145,39 @@ fn a_slug_outranks_a_route_name_and_a_shared_name_names_no_one() {
     assert_eq!(dir.uid_of("twin"), None, "two agents answer to it");
     assert_eq!(dir.uid_of("twin-a"), Some("a"));
     assert_eq!(dir.uid_of("agent"), None, "an empty name gives no name");
+}
+
+/// Fork slug migration Phase 1: after Loap #3 is renamed to `loap-3`, its
+/// former slug stays subscribed, receive-only, for the grace period after
+/// the rename, and a message pulled for it goes to the pane under its
+/// current slug. Once the period is over the directory leaves it out, and
+/// the lease tick drops it as orphaned.
+#[test]
+fn a_former_slug_is_held_for_its_grace_period_then_dropped() {
+    let now: i64 = 1_760_000_000_000;
+    let day: i64 = 24 * 60 * 60 * 1000;
+    let grace_days = (FORMER_SLUG_GRACE.as_millis() as i64) / day;
+    assert_eq!(grace_days, 30);
+    assert!(in_grace(now - 29 * day, now));
+    assert!(!in_grace(now - 31 * day, now));
+    assert!(!in_grace(0, now), "an unknown retirement time is not held");
+
+    let h = ReactiveHandler::new();
+    h.register_agent_full("Loap-3", "blk-loap", None, 0, Some("loap-3"), Some(LOAP_UID), COUNTER).unwrap();
+    let live = live_agents(&h);
+    let defs = [(LOAP_UID, "loap-3", "Loap #3"), (AGENTX_UID, "agentx", "AgentX")];
+    let former = [(LOAP_UID, "loap-loap-2-loap-3"), (LOAP_UID, "agentx")];
+    let within = NameDirectory::from_defs_and_former(defs, former);
+    let (sub, mut rx) = subscriber(&["loap-3"]);
+
+    assert_eq!(subscribe_missing(&sub, &live, &within), ["loap-loap-2-loap-3"]);
+    assert_eq!(added(&mut rx), ["loap-loap-2-loap-3"]);
+    assert!(orphaned_subscriptions(&sub.subscribed_agents(), &live, &within).is_empty());
+    assert_eq!(delivery_name("loap-loap-2-loap-3", &live, &within), "loap-3");
+    assert!(!is_held("agentx", &live, &within), "another agent's slug is never held as a former one");
+
+    let after = NameDirectory::from_defs(defs);
+    assert_eq!(orphaned_subscriptions(&sub.subscribed_agents(), &live, &after), ["loap-loap-2-loap-3"]);
+    assert!(sub.drop_if_orphaned("loap-loap-2-loap-3", |a| h.has_live_name(a) || is_held(a, &live, &after)));
+    assert_eq!(sub.subscribed_agents(), ["loap-3"]);
 }

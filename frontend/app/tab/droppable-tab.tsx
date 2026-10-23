@@ -32,6 +32,7 @@ import { getApi } from "@/store/global";
 import { fireAndForget } from "@/util/util";
 import { setTabGrabOffset } from "./tab-grab-offset";
 import { prewarmWindowTabSnapshot } from "@/app/drag/tearoff-snapshot";
+import { hoverTabPill, leaveTabPill, pressTabPill } from "@/app/view/browser/hibernation";
 
 export interface DroppableTabProps {
     tabId: string;
@@ -93,9 +94,23 @@ export function DroppableTab(props: DroppableTabProps): JSX.Element {
         // tab's content isn't on screen to picture.
         const onPointerDown = (e: PointerEvent) => {
             if (e.button === 0 && props.isActive && isWindows()) prewarmWindowTabSnapshot(props.tabId);
+            // A sleeping browser pane in this tab starts waking now
+            // (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md §6).
+            if (e.button === 0 && !props.isActive) pressTabPill(props.tabId);
         };
         tabWrapRef.addEventListener("pointerdown", onPointerDown);
         onCleanup(() => tabWrapRef.removeEventListener("pointerdown", onPointerDown));
+        const onPointerEnter = () => {
+            if (!props.isActive) hoverTabPill(props.tabId);
+        };
+        const onPointerLeave = () => leaveTabPill(props.tabId);
+        tabWrapRef.addEventListener("pointerenter", onPointerEnter);
+        tabWrapRef.addEventListener("pointerleave", onPointerLeave);
+        onCleanup(() => {
+            tabWrapRef.removeEventListener("pointerenter", onPointerEnter);
+            tabWrapRef.removeEventListener("pointerleave", onPointerLeave);
+            leaveTabPill(props.tabId);
+        });
 
         const cleanupDraggable = draggable({
             element: tabWrapRef,

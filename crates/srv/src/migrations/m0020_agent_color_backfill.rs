@@ -283,6 +283,7 @@ mod tests {
                     container_volumes: "[]".to_string(),
                     container_name: String::new(),
                     use_ambient_login: 0,
+                    former_slugs: Vec::new(),
                     content: Vec::new(),
                     skills: Vec::new(),
                 },

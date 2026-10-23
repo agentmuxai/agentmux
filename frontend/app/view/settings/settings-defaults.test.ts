@@ -41,6 +41,8 @@ const KNOWN_MISMATCHES: Record<string, string> = {
 // only when listed here with the reason. The test fails when a listed key
 // gains a second source.
 const UNREAD = "nothing in frontend/ or crates/ reads it; only the template lists it";
+const DESKTOP_GATE =
+    "srv reads it through a named constant (`desktop_gate::SETTING_*`) in app_api/desktop.rs `policy`, which these patterns don't follow";
 const SINGLE_SOURCE: Record<string, string> = {
     "app:defaultnewblock":
         'the template and the pane leave it blank; blank and unset both open a terminal ("term", keymodel-blockcreate.ts)',
@@ -57,6 +59,10 @@ const SINGLE_SOURCE: Record<string, string> = {
     "window:savelastwindow": UNREAD,
     "window:showmenubar": UNREAD,
     "window:zoom": UNREAD,
+    "desktop:enabled": DESKTOP_GATE,
+    "desktop:blocklist": DESKTOP_GATE,
+    "desktop:allowlist": DESKTOP_GATE,
+    "desktop:grantminutes": DESKTOP_GATE,
 };
 
 // ── The schema ──────────────────────────────────────────────────────────────

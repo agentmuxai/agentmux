@@ -41,6 +41,9 @@ pub struct Store {
     /// in one channel is visible in every channel (cross-channel agent
     /// persistence, `docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md`).
     def_registry: Mutex<Option<Arc<DefinitionStore>>>,
+    /// Every former slug this channel can see, cached so a sender or target
+    /// that isn't one costs no store read (`agents/former_slugs.rs`).
+    pub(super) former_slugs: super::agents::FormerSlugSet,
     /// token → UID for attributing requests (identity M4a). `None` except on
     /// the channel's object store at runtime; see `attach_token_index`.
     pub(super) token_index: Mutex<Option<Arc<super::agent_tokens::TokenIndex>>>,
@@ -129,6 +132,7 @@ impl Store {
             conn: Mutex::new(conn),
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
+            former_slugs: Default::default(),
             token_index: Mutex::new(None),
             wan_identity: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
@@ -205,6 +209,7 @@ impl Store {
             conn: Mutex::new(conn),
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
+            former_slugs: Default::default(),
             token_index: Mutex::new(None),
             wan_identity: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
@@ -247,6 +252,7 @@ impl Store {
             conn: Mutex::new(conn),
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
+            former_slugs: Default::default(),
             token_index: Mutex::new(None),
             wan_identity: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
@@ -274,6 +280,7 @@ impl Store {
             conn: Mutex::new(conn),
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
+            former_slugs: Default::default(),
             token_index: Mutex::new(None),
             wan_identity: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
@@ -353,6 +360,7 @@ impl Store {
             conn: Mutex::new(conn),
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
+            former_slugs: Default::default(),
             token_index: Mutex::new(None),
             wan_identity: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
@@ -445,6 +453,7 @@ impl Store {
 
     pub fn set_def_registry(&self, def_registry: Arc<DefinitionStore>) {
         *self.def_registry.lock().unwrap_or_else(|e| e.into_inner()) = Some(def_registry);
+        self.former_slugs.invalidate();
     }
 
     /// Public accessor for the global agent-definition store. `None` when

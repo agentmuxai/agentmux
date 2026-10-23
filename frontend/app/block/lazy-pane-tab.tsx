@@ -18,6 +18,11 @@
  * forwarding to the real instance once it exists. When the real instance
  * arrives with a different set, the mismatch is logged as an error: update
  * `members` to match.
+ *
+ * The stand-in exists only while the code is on its way. Until then it fills
+ * the pane with the pane surface (`--main-bg-color`), not nothing, which let the
+ * frame's dark backdrop show for a moment. Once a type's module has loaded, its
+ * next panes are built at once, like a built-in pane's, with no stand-in at all.
  */
 
 import { Button } from "@/app/element/ui";
@@ -25,6 +30,8 @@ import { focusManager } from "@/app/store/focusManager";
 import { CenteredDiv } from "@/element/quickelems";
 import { createSignal, getOwner, onCleanup, runWithOwner, Show, untrack } from "solid-js";
 import type { PaneTabHostContext, PaneTabInstance, PaneTabManifest } from "./pane-tab-registry";
+
+import "./lazy-pane-tab.scss";
 
 /** An instance member besides `component` and `dispose`, which every stand-in has. */
 export type PaneTabMember = Exclude<keyof PaneTabInstance, "component" | "dispose">;
@@ -36,9 +43,45 @@ export interface LazyPaneTab extends Omit<PaneTabManifest, "create"> {
     load: () => Promise<{ create(ctx: PaneTabHostContext): PaneTabInstance }>;
 }
 
+type PaneTabModule = Awaited<ReturnType<LazyPaneTab["load"]>>;
+
 export function lazyPaneTab(spec: LazyPaneTab): PaneTabManifest {
     const { members, load, ...manifest } = spec;
-    return { ...manifest, create: (ctx) => createStandIn(manifest, members, load, ctx) };
+    // One load per pane type, shared by the panes waiting for it; forgotten if
+    // it fails, so Try again loads again.
+    let loaded: PaneTabModule | undefined;
+    let loading: Promise<PaneTabModule> | undefined;
+    const loadOnce = () =>
+        (loading ??= load().then(
+            (module) => (loaded = module),
+            (e) => {
+                loading = undefined;
+                throw e;
+            }
+        ));
+    return {
+        ...manifest,
+        create: (ctx) =>
+            loaded ? buildReal(manifest.view, members, loaded, ctx) : createStandIn(manifest, members, loadOnce, ctx),
+    };
+}
+
+/** The real instance, with drift in its members logged. */
+function buildReal(
+    view: string,
+    members: readonly PaneTabMember[],
+    module: PaneTabModule,
+    ctx: PaneTabHostContext
+): PaneTabInstance {
+    const instance = module.create(ctx);
+    if (instance == null) throw new Error("create(ctx) returned nothing");
+    const mismatch = memberMismatch(members, instance);
+    if (mismatch.length > 0) {
+        console.error(
+            `[pane-tab] ${view}: its lazy manifest's members differ from its instance's (${mismatch.join(", ")}); update \`members\``
+        );
+    }
+    return instance;
 }
 
 /** Members the real instance has but `members` doesn't list, and the reverse. */
@@ -74,14 +117,9 @@ function createStandIn(
         load()
             .then((module) => {
                 if (disposed) return;
-                const instance = runWithOwner(owner, () => untrack(() => module.create(ctx)));
-                if (instance == null) throw new Error("create(ctx) returned nothing");
-                const mismatch = memberMismatch(members, instance);
-                if (mismatch.length > 0) {
-                    console.error(
-                        `[pane-tab] ${manifest.view}: its lazy manifest's members differ from its instance's (${mismatch.join(", ")}); update \`members\``
-                    );
-                }
+                const instance = runWithOwner(owner, () =>
+                    untrack(() => buildReal(manifest.view, members, module, ctx))
+                )!;
                 setReal(() => instance);
                 if (progressEl) instance.progressMount?.(progressEl);
                 // The host's `focus()` for a tab that showed in a focused pane
@@ -136,16 +174,18 @@ function createStandIn(
                 when={real()}
                 keyed
                 fallback={
-                    <Show when={failure()}>
-                        <CenteredDiv>
-                            <div role="alert">
-                                {manifest.label} failed to load: {failure()}
-                            </div>
-                            <Button density="compact" onClick={start}>
-                                Try again
-                            </Button>
-                        </CenteredDiv>
-                    </Show>
+                    <div class="lazy-pane-standin">
+                        <Show when={failure()}>
+                            <CenteredDiv>
+                                <div role="alert">
+                                    {manifest.label} failed to load: {failure()}
+                                </div>
+                                <Button density="compact" onClick={start}>
+                                    Try again
+                                </Button>
+                            </CenteredDiv>
+                        </Show>
+                    </div>
                 }
             >
                 {(instance) => {

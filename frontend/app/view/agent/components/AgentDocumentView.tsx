@@ -31,6 +31,7 @@ import type { DocumentNode, DocumentState } from "../types";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { LayoutView } from "@/app/store/agent-pane-layout-store";
 import { AgentDocumentVirtualList } from "../virtualization/AgentDocumentVirtualList";
+import { AwayArrivals } from "../virtualization/held-release";
 import { useAgentDormant } from "../agent-dormancy";
 import { createAgentViewState } from "../virtualization/state";
 import { resolveTailPolicy } from "../virtualization/streaming-buffer";
@@ -161,9 +162,16 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
     // Only while the pane is shown: a tool that finishes in a hidden pane
     // didn't finish under anyone's eyes, so it isn't held, and its result can
     // leave memory like any collapsed row's (#4847's bound on hidden panes).
+    // Its id is kept instead (`AwayArrivals`): once the pane is shown and
+    // settled, the ones on screen are held, as they would have been had the
+    // reader been watching (`useScrolledOffRelease`).
     const dormant = useAgentDormant();
+    const away = new AwayArrivals();
     const holdNodeOpen = (nodeId: string): void => {
-        if (untrack(dormant)) return;
+        if (untrack(dormant)) {
+            away.add(nodeId);
+            return;
+        }
         setDocumentState((prev) => {
             if (prev.heldOpenNodes.has(nodeId)) return prev; // already held — no churn
             const heldOpenNodes = new Set(prev.heldOpenNodes);
@@ -206,6 +214,7 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
             onToggleCollapse={toggleCollapse}
             onTogglePin={togglePin}
             onHoldNodeOpen={holdNodeOpen}
+            awayArrivals={away}
             onReleaseNodeHold={releaseNodeHold}
             zoomFactor={props.zoomFactor}
             blockId={props.blockId}

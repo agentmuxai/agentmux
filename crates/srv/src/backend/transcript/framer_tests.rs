@@ -143,3 +143,23 @@ fn a_readers_file_counts_only_for_its_own_process() {
     assert!(!reads_frames(codec1_only.as_bytes(), 1000), "a build that reads codec 1 only can't read every frame");
     assert!(!reads_frames(b"not json", 1000));
 }
+
+#[test]
+fn two_srvs_framing_at_once_never_conflict() {
+    let (dir, fs) = open();
+    let data = transcript(&fs, "agent:a:current", 400 * P);
+    let path = dir.path().join("filestore.db");
+    // Two connections to the same store, as two srvs on one machine have.
+    let other = FileStore::open_global_transcripts(&path).unwrap();
+    let now = agentmux_common::time::now_ms();
+    let reports = std::thread::scope(|s| {
+        let a = s.spawn(|| pass_with(&fs, &nobody_blocks, 100, &mut HashSet::new(), now).unwrap());
+        let b = s.spawn(|| pass_with(&other, &nobody_blocks, 100, &mut HashSet::new(), now).unwrap());
+        [a.join().unwrap(), b.join().unwrap()]
+    });
+    // 400 parts, 128 within the margin: 272 parts before it, 17 frames, each written once.
+    assert_eq!(reports[0].frames + reports[1].frames, 17, "{reports:?}");
+    assert_eq!(fs.frame_starts("agent:a:current", "output").unwrap().len(), 17);
+    assert_eq!(fs.read_file("agent:a:current", "output").unwrap().unwrap(), data);
+    assert_eq!(other.read_file("agent:a:current", "output").unwrap().unwrap(), data);
+}

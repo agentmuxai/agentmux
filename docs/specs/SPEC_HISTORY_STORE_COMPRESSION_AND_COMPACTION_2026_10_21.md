@@ -3,7 +3,7 @@
 **Date:** 2026-10-21
 **Author:** Agent5@narko
 **Type:** Spec (a storage change; what a reader sees does not change)
-**Status:** active. The operator approved both parts on 2026-10-22 ("lets get the compaction and also cleaning out the streaming deltas"). PRs 1 and 2 of §9 (the frame table, both codecs, every read and write path, the store accepting version 3; nothing creates a frame yet) are in PR #5324. PR 3 (the framer, its settings, off, and its checks) is #5328; PR 4 (the recovery tool's decoders) is #5330; PR 5 (the Storage numbers) is stacked on #5328. Remaining: turning it on; `history.compact` and `decompress` (§5.3, §5.4) wait until dogfooding shows they are needed. Task #49.
+**Status:** active. The operator approved both parts on 2026-10-22 ("lets get the compaction and also cleaning out the streaming deltas"). Merged: PRs 1 and 2 of §9 (the frame table, both codecs, every read and write path, the store accepting version 3) in #5324; PR 3 (the framer, `agent:transcriptframes`, off by default, and its checks) in #5328; PR 4 (the recovery tool's decoders) in #5330. PR 5 (the Storage numbers) is #5331. Remaining: the operator turns the setting on once these are in a release; `history.compact` and `decompress` (§5.3, §5.4) wait until dogfooding shows they are needed. Task #49.
 **Builds on:** `REPORT_AGENT_HISTORY_STORE_DEDUP_COMPRESSION_2026_10_17.md` (AgentY: §4.3 compression, §7.3 "shrink the pane store"), `SPEC_AGENT_TRANSCRIPT_SINGLE_COPY_2026_10_19.md` (Maricon: one copy of each transcript), `docs/analysis/RCA_UPGRADE_0_59_30_TO_0_59_34_ISSUES_2026_10_19.md` §6 (the damaged parts).
 **Platform:** all.
 
@@ -99,7 +99,7 @@ db_file_frame (
 
 ### 5.1 The framer
 
-A background worker in the srv that owns the store's truncate lock (`filestore.db.owner`, #5201: one srv per machine), so two processes never frame the same file, and every process still reads frames. It runs on a blocking thread, at most 64 frames (about 64 MiB) per pass: a pass each minute, or every five seconds while work remains (`transcript/framer.rs`, driven by the truncate loop in `bootstrap/shutdown.rs`).
+A background worker in every srv whose own `agent:transcriptframes` is on. Settings are per channel (a dev build keeps its own), so the setting means "this instance compresses", and no single srv's setting can speak for the machine. Each frame is written in one transaction that checks its parts first (§5.1 steps 2 to 5), so two srvs framing at once never conflict: the later one finds the parts framed and skips them. Every process reads frames. It runs on a blocking thread, at most 64 frames (about 64 MiB) per pass: a pass each minute, or every five seconds while work remains (`transcript/framer.rs`, driven by the truncate loop in `bootstrap/shutdown.rs`).
 
 **Who else is running.** Every frames-aware srv writes a small file, `transcripts/readers/<pid>.json` (its pid, version and the frame format it reads), when it opens the store. The framer prunes the files of processes that have exited; the process start time in each file keeps a reused pid from passing for the srv that wrote it. Before each pass the framer lists the running processes named `agentmux-srv*` (sysinfo, already a dependency; crash monitors excluded by their `--crash-monitor` argument) and frames nothing while one of them has no such file. An older build, or another agent's dev build from an older branch, therefore holds framing off until it exits. The Storage view says so ("compression waits: AgentMux 0.59.36 is still running").
 
@@ -140,7 +140,7 @@ Turning `agent:transcriptframes` off stops new frames; the frames already writte
 | Agent record (`history/record.rs`), session ranges | none: they are byte ranges of the logical file |
 | Fork copy (`copy_older_session_history`, #5219) | a prefix ending inside a frame decodes that frame; whole-file copies copy frame rows |
 | Archive (`move_files_to_zone`) | frame rows move with the part rows |
-| Offline recovery tool | learns the frame table and both codecs (`recover.mjs`, in the framer's PR, before any frame can exist); a test vector written by the Rust encoder is decoded by the tool's own decoder |
+| Offline recovery tool | learns the frame table and both codecs (`recover.mjs`, PR 4, #5330, which lands before the setting is turned on); a test vector written by the Rust encoder is decoded by the tool's own decoder |
 | An older build | refuses the store (version gate) and runs from its own copy |
 
 **Measuring it:** `history.usage` answers a `compression` block for the shared store: frames, the bytes they hold and the bytes they take (one sum over `db_file_frame`), whether the setting is on, and what the framer waits for. Warden > History > Storage shows it as one line under the stores ("Pane history compressed: 14.0 GB of transcript in 2.1 GB (6.6×), 13,321 frames."). A scrub count comes with the scrub.

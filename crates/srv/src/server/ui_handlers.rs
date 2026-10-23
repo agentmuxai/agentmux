@@ -89,16 +89,8 @@ pub(crate) fn verified_block_id(
     {
         return Err("signature timestamp missing or outside the freshness window".to_string());
     }
-    let key = match state.mstore.agent_jekt_key_load(&auth.agent_id) {
-        Ok(Some(k)) => k,
-        Ok(None) => {
-            return Err(format!(
-                "no signing key on file for agent_id={:?} — respawn this agent to get one",
-                auth.agent_id
-            ))
-        }
-        Err(e) => return Err(format!("load signing key: {e}")),
-    };
+    // Refused for a former slug, even with a key still filed under it.
+    let key = super::reactive::former_slug::signing_key(state, &auth.agent_id)?;
     let ok = agentmux_common::jekt_sign::verify_jekt(
         &key,
         "ui-automation-identity",
@@ -209,7 +201,7 @@ pub(crate) async fn proxy_to_host_timeout(
     body: serde_json::Value,
     timeout: Option<std::time::Duration>,
 ) -> Result<serde_json::Value, String> {
-    super::host_http::post_to_host(&state.http_client, host, route, body, timeout).await
+    super::browser_hibernation::post_to_host_awake(state, host, route, body, timeout).await
 }
 
 pub(crate) fn err_response(status: StatusCode, e: String) -> Response {

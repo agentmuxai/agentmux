@@ -35,6 +35,13 @@ vi.mock("@/app/view/vault/vault-view", () => ({
         <div data-testid="vault-view" data-shown={String(props.model.shown())} data-zoom={String(props.model.zoomAtom())} />
     ),
 }));
+const ambientFailing = vi.hoisted(() => ({ n: 3 }));
+vi.mock("@/app/view/warden-ambient/warden-ambient-manager", () => ({
+    WardenAmbientManager: (props: { visible: boolean; onFailingCount?: (n: number) => void }) => {
+        props.onFailingCount?.(ambientFailing.n);
+        return <div data-testid="ambient-manager" data-visible={String(props.visible)} />;
+    },
+}));
 vi.mock("@/app/view/warden-history/warden-history-manager", () => ({
     WardenHistoryManager: (props: { wardenBlockId: string; visible: boolean }) => (
         <div data-testid="history-manager" data-block={props.wardenBlockId} data-visible={String(props.visible)} />
@@ -75,11 +82,11 @@ describe("WardenView rail", () => {
         ));
     }
 
-    it("orders the rail as Kanban, Vault, Host, LAN, Internet, Audit, History", () => {
+    it("orders the rail as Kanban, Vault, Host, LAN, Internet, Audit, History, Ambient", () => {
         renderWarden();
         const rail = screen.getByRole("tablist", { name: "Warden section" });
         const labels = Array.from(rail.querySelectorAll('[role="tab"]')).map((el) => el.textContent);
-        expect(labels).toEqual(["Kanban", "Vault", "Host", "LAN", "Internet", "Audit", "History"]);
+        expect(labels).toEqual(["Kanban", "Vault", "Host", "LAN", "Internet", "Audit", "History", "Ambient"]);
     });
 
     // The Vault became a section of Warden (vault-in-warden.ts): its protections follow the
@@ -230,8 +237,22 @@ describe("WardenView pane title", () => {
     it("selecting a section from the keyboard writes warden:section and updates viewName()", () => {
         const { model } = renderWarden();
         fireEvent.keyDown(screen.getByRole("tab", { name: "Host" }), { key: "End" });
-        expect(setMetaMock).toHaveBeenCalledWith({ "warden:section": "history" });
-        expect(model.viewName()).toBe("History");
+        expect(setMetaMock).toHaveBeenCalledWith({ "warden:section": "ambient" });
+        expect(model.viewName()).toBe("Ambient · 3 failing");
+    });
+
+    it("on the Ambient section, the title counts the failing kinds of call, and is plain with none", () => {
+        const { model } = renderWarden();
+        screen.getByRole("tab", { name: "Ambient" }).click();
+        expect(screen.getByTestId("ambient-manager").dataset.visible).toBe("true");
+        expect(model.viewName()).toBe("Ambient · 3 failing");
+        cleanup();
+        setBlockMeta({});
+        ambientFailing.n = 0;
+        const second = renderWarden();
+        screen.getByRole("tab", { name: "Ambient" }).click();
+        expect(second.model.viewName()).toBe("Ambient");
+        ambientFailing.n = 3;
     });
 
     // SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md

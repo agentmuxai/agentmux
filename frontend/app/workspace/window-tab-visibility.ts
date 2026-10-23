@@ -37,6 +37,16 @@ export function useWindowTabDisplayed(): Accessor<boolean> {
     return useContext(WindowTabDisplayedContext);
 }
 
+const WindowTabIdContext = createContext<string | null>(null);
+
+/** Provided per window tab by `workspace.tsx`: the id of the window tab a
+ *  component lives in. Null outside any window tab (a floating window). */
+export const WindowTabIdProvider = WindowTabIdContext.Provider;
+
+export function useWindowTabId(): string | null {
+    return useContext(WindowTabIdContext);
+}
+
 /** How a window tab's container hides or shows (`workspace.tsx`). */
 export interface TabContainerVisibility {
     "content-visibility": "visible" | "hidden";

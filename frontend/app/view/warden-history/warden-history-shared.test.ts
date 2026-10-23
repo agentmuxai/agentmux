@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { HistoryAgent } from "@/types/rpc/HistoryAgent";
-import { agentRows, historyTotals } from "./warden-history-shared";
+import { agentRows, historyTotals, typedAgents, typedTags } from "./warden-history-shared";
 
 function agent(id: string, extra: Partial<HistoryAgent> = {}): HistoryAgent {
     return {
@@ -50,5 +50,34 @@ describe("historyTotals", () => {
     it("adds current and archived history and counts archives", () => {
         const t = historyTotals([agent("a", { current_bytes: 10, archive_bytes: 5, archives: 2 }), agent("b", { current_bytes: 1 })]);
         expect(t).toEqual({ agents: 2, bytes: 16, archives: 2 });
+    });
+});
+
+
+describe("typedAgents", () => {
+    it("lists every defined agent by name, case-insensitively, falling back to the id", () => {
+        const defs = [
+            { id: "id-b", name: "beta" },
+            { id: "id-a", name: "Alpha" },
+            { id: "12345678-aaaa", name: "" },
+        ];
+        expect(typedAgents(defs)).toEqual([
+            { id: "12345678-aaaa", name: "12345678" },
+            { id: "id-a", name: "Alpha" },
+            { id: "id-b", name: "beta" },
+        ]);
+    });
+});
+
+describe("typedTags", () => {
+    it("says nothing for a plain message from the composer", () => {
+        expect(typedTags("message", "composer")).toEqual([]);
+    });
+
+    it("names a slash or shell command, a Swarm broadcast and a backfilled entry", () => {
+        expect(typedTags("slash", "composer")).toEqual(["slash command"]);
+        expect(typedTags("bang", "composer")).toEqual(["shell command"]);
+        expect(typedTags("message", "swarm")).toEqual(["from Swarm"]);
+        expect(typedTags("message", "backfill")).toEqual(["from an earlier conversation"]);
     });
 });

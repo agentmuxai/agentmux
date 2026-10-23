@@ -4,9 +4,10 @@
 //! The framer: compresses finished parts of the shared transcript store into
 //! frames (SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21.md §5).
 //!
-//! Off unless `agent:transcriptframes` is `true`. One srv on the machine runs
-//! it, the one that owns the store's truncate lock (`filestore.db.owner`).
-//! Before each pass it checks that **every** running `agentmux-srv` has said
+//! Off unless `agent:transcriptframes` is `true`. Every srv whose own setting
+//! is on runs it (settings are per channel, so no one srv's speaks for the
+//! machine); each frame is one transaction that checks its parts first, so
+//! two srvs framing at once never conflict. Before each pass it checks that **every** running `agentmux-srv` has said
 //! it reads frames, in a file under `readers/` beside the store (written by
 //! [`mark_reader`] when a srv opens the store). An older build, or another
 //! agent's dev build from an older branch, can't read frames: while one runs,

@@ -227,6 +227,11 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                 });
                 mstore_raw.set_def_registry(Arc::new(def_store));
                 tracing::info!(dir = %def_dir.display(), "def registry: global definition store attached");
+                // This channel's copy of every agent's former slugs, in step
+                // with the shared records (SPEC_FORK_SLUG_MIGRATION_2026_10_22.md Phase 1).
+                if let Err(e) = mstore_raw.agent_former_slugs_sync_from_shared() {
+                    tracing::warn!(error = %e, "former slugs: not copied from the shared definitions");
+                }
             }
             Err(e) => tracing::warn!(
                 dir = %def_dir.display(),

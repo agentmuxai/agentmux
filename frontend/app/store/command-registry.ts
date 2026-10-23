@@ -286,6 +286,30 @@ export function registerDefaultCommands(): void {
             void import("@/app/store/recycle").then(({ recycleWindow }) => recycleWindow("command"));
         },
     });
+    // Browser-pane hibernation, by hand while its policy is a spike
+    // (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md §9).
+    commandRegistry.register({
+        id: "browser:hibernate-hidden",
+        label: "Hibernate Hidden Browser Panes",
+        category: "Window",
+        icon: "moon",
+        keywords: "memory sleep hibernate browser free",
+        execute: () => {
+            void import("@/app/view/browser/hibernation").then(({ hibernateHiddenBrowserPanes }) =>
+                hibernateHiddenBrowserPanes(),
+            );
+        },
+    });
+    commandRegistry.register({
+        id: "browser:wake-all",
+        label: "Wake Sleeping Browser Panes",
+        category: "Window",
+        icon: "sun",
+        keywords: "wake hibernate browser",
+        execute: () => {
+            void import("@/app/view/browser/hibernation").then(({ wakeAllBrowserPanes }) => wakeAllBrowserPanes());
+        },
+    });
     commandRegistry.register({
         id: "window:minimize",
         label: "Minimize Window",

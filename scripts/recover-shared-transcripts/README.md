@@ -23,7 +23,10 @@ result in place is a manual step (see "Putting the result in place").
 5. Looks for damaged files in the recovered database. A file is damaged when its
    64 KB parts are not 0..N without a gap, do not add up to the recorded size, have
    no file row (or a file row has no parts), or, for transcripts, contain NUL bytes
-   (a lost page read back as zeros; `--skip-content-scan` skips that read).
+   (a lost page read back as zeros; `--skip-content-scan` skips that read). Parts may be
+   compressed frames (see "Compressed frames" below): a frame's parts count as parts, and
+   a frame that doesn't decode or doesn't match its hash is damage (`bad-frame`, found by
+   the content scan).
 6. Plans what to do with each damaged file:
    - `agent:<id>:current` / `output`: **rebuild** from the richest whole per-channel
      copy, the same source `crates/srv/src/backend/transcript_backfill.rs` uses (every
@@ -71,6 +74,16 @@ With every instance still stopped: move the old `filestore.db`, `filestore.db-wa
 first. Zones the report lists as `no-source`, `source-shorter` or `manual` still need a
 decision.
 
+## Compressed frames
+
+A store may hold compressed frames (`db_file_frame`, `docs/specs/SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21.md`):
+up to 64 consecutive 64 KB parts of a file in one row, compressed with zstd (codec 1),
+or with the streaming deltas stored once per block and then compressed (codec 2). A part
+with a row has no frame. `lib/frames.mjs` is the tool's own decoder for both codecs,
+written from `frames.rs` and `deltas.rs` and checked against every frame's SHA-256. Node's
+built-in zstd does the decompression, so the tool still needs no packages. Rebuilding or
+dropping a file deletes its frames with its rows, as the app does.
+
 ## Limits
 
 - It cannot see content that is wrong but well formed (an older version of a page).
@@ -86,3 +99,9 @@ decision.
 store with injected damage (a missing part, a lost page, a zero-filled hole, zones with
 no copy or a short one) and runs the dry run and `--apply` on it. The suite needs a
 `sqlite3` shell 3.51.3 or newer (`$SQLITE3` or on `PATH`) and is skipped without one.
+
+`frames.test.mjs` decodes `testdata/frames.json`, frames of both codecs written by the
+Rust encoder, and runs the damage scan and a rebuild on a store holding frames. The Rust
+side decodes the same file (`tests_frame_vector.rs` in the filestore), so the two decoders
+can't drift apart. After a change to the frame format, write the file again with
+`AGENTMUX_WRITE_FRAME_VECTOR=1 cargo test -p agentmux-srv --bins -- tests_vector`.

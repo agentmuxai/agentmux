@@ -16,6 +16,7 @@ import { ActivityDock } from "./ActivityDock";
 import { AgentCredentialsRevokedChip } from "./AgentCredentialsRevokedChip";
 import { AgentDecisionPanel } from "./AgentDecisionPanel";
 import { AgentDisconnectedBanner } from "./AgentDisconnectedBanner";
+import { DesktopDrivingBar } from "./DesktopDrivingBar";
 import { AgentAuthPanel } from "./AgentDocumentView";
 import { AgentWorkingRow } from "./AgentFooter";
 import { ApiRetryRow } from "./ApiRetryRow";
@@ -76,6 +77,8 @@ export const AgentBottomPanels = (props: {
     offline: ReturnType<typeof useOfflineInput>;
 }) => (
     <>
+        {/* An agent may control a native app: say so, and offer Stop. */}
+        <DesktopDrivingBar blockId={props.blockId} />
         {/* Login UI — bottom-docked like AgentDecisionPanel/
             AgentQuestionPanel below, not inside the scrollable document.
             See #2429 follow-up: it used to render inside

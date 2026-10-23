@@ -68,6 +68,16 @@ pub struct DefSkillBlob {
     pub content: String,
 }
 
+/// A slug a definition answered to before a rename. Only the shared record
+/// carries these (`SPEC_FORK_SLUG_MIGRATION_2026_10_22.md` §4); `retired_at`
+/// is epoch ms, like the record's other timestamps.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct FormerSlug {
+    pub slug: String,
+    #[serde(default)]
+    pub retired_at: i64,
+}
+
 /// v1 definition payload — a faithful mirror of `AgentDefinition`'s
 /// columns, PLUS the per-definition content + skills blobs (which live in
 /// separate per-version tables and must travel with the definition for a
@@ -131,6 +141,14 @@ pub struct DefinitionRecordV1 {
     /// the container_* fields — no envelope bump.
     #[serde(default)]
     pub use_ambient_login: i64,
+    /// The slugs this agent had before its current one, oldest first. Never
+    /// shortened: `DefinitionStore::upsert` keeps every entry already on disk,
+    /// and a mirror write can't put one of them back as `slug` (see
+    /// `merge_for_write`). Omitted when empty, so a writer that doesn't know
+    /// the field leaves the file's copy alone (`merge_known`); additive like
+    /// `use_ambient_login`, no envelope bump.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub former_slugs: Vec<FormerSlug>,
     /// System-prompt / mcp / env / soul / startup blobs (db_agent_content),
     /// embedded so a cross-channel agent launches with its instructions.
     #[serde(default)]
@@ -216,10 +234,31 @@ mod tests {
                 container_volumes: "[]".to_string(),
                 container_name: String::new(),
                 use_ambient_login: 0,
+                former_slugs: Vec::new(),
                 content: Vec::new(),
                 skills: Vec::new(),
             },
         }
+    }
+
+    /// `former_slugs` is optional both ways: a file without it reads as
+    /// empty, and an empty list isn't written, so an older reader sees the
+    /// same file it always did.
+    #[test]
+    fn former_slugs_default_empty_and_round_trip() {
+        let raw = serde_json::json!({
+            "schema_version": 1,
+            "data": { "id": "abc", "name": "Demo", "provider": "claude" }
+        });
+        let parsed: DefinitionRecord = serde_json::from_value(raw).unwrap();
+        assert!(parsed.data.former_slugs.is_empty());
+        let written = serde_json::to_value(&parsed).unwrap();
+        assert!(written.pointer("/data/former_slugs").is_none(), "an empty list is not written");
+
+        let mut r = rec("abc");
+        r.data.former_slugs = vec![FormerSlug { slug: "loap-loap-2".into(), retired_at: 7 }];
+        let back: DefinitionRecord = serde_json::from_value(serde_json::to_value(&r).unwrap()).unwrap();
+        assert_eq!(back, r);
     }
 
     #[test]

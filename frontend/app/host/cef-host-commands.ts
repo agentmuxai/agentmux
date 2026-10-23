@@ -70,6 +70,9 @@ export const cefBrowserPanes: BrowserPaneHostApi = {
     reload: async (blockId) => {
         await invokeCommand("browser_pane_reload", { block_id: blockId });
     },
+    hibernationCheck: (blockId) =>
+        invokeCommand<BrowserHibernationCheck>("browser_pane_hibernation_check", { block_id: blockId }),
+    memoryPressure: () => invokeCommand<"normal" | "warn" | "critical">("memory_pressure_level", {}),
     focus: async (blockId) => {
         await selectInput(ownWindowLabel(), blockId);
     },
@@ -242,6 +245,12 @@ export const cefApprovals: ApprovalHostApi = {
     appUpdate: (action, now) => invokeCommand("app_update_action", { action, now: now ?? false }),
     decideUpgrade: async (id, version, accept) => {
         await invokeCommand("upgrade_request_decide", { id, version, accept });
+    },
+    decideDesktop: async (id, choice) => {
+        await invokeCommand("desktop_request_decide", { id, choice });
+    },
+    stopDesktop: async (blockId) => {
+        await invokeCommand("desktop_stop", { block_id: blockId });
     },
     forgetWidgetKey: async (publisher) => {
         await invokeCommand("widget_approval_decide", { id: publisher, hash: "", decision: "forget_key" });

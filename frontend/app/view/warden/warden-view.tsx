@@ -10,6 +10,7 @@ import { WardenInternetStub } from "@/app/view/warden-internet/warden-internet-s
 import { WardenAuditManager } from "@/app/view/warden-audit/warden-audit-manager";
 import { WardenHistoryManager } from "@/app/view/warden-history/warden-history-manager";
 import { WardenKanbanManager } from "@/app/view/warden-kanban/warden-kanban-manager";
+import { WardenAmbientManager } from "@/app/view/warden-ambient/warden-ambient-manager";
 import { VaultView } from "@/app/view/vault/vault-view";
 import { WARDEN_SECTIONS, type WardenSection, type WardenViewModel } from "./warden-model";
 // The section panes use section-pane.scss's `.bundle-manager-section` / `-pane` rules (a pane that is not the
@@ -58,8 +59,8 @@ export function WardenView(props: { model: WardenViewModel }): JSX.Element {
                 <TabbedPane items={RAIL} value={section()} onChange={setSection} ariaLabel="Warden section" panelClass="bundle-manager-section">
                     {/*
                      * Each section mounts the first time it is shown, then stays mounted, so
-                     * switching back is instant. Host, LAN and Audit poll every 5s only while
-                     * shown; Kanban and History load while shown. The Vault mounts on first
+                     * switching back is instant. Host, LAN, Audit and Ambient poll every 5s only
+                     * while shown; Kanban and History load while shown. The Vault mounts on first
                      * show (listing it decrypts its entries, which can make the OS ask for the
                      * Vault key) and counts as shown, for its protections, only while selected
                      * (vault-in-warden.ts).
@@ -91,6 +92,9 @@ export function WardenView(props: { model: WardenViewModel }): JSX.Element {
                     </Lazy>
                     <Lazy id="history">
                         <WardenHistoryManager wardenBlockId={model.blockId} visible={shown("history")} />
+                    </Lazy>
+                    <Lazy id="ambient">
+                        <WardenAmbientManager visible={shown("ambient")} onFailingCount={model.setAmbientFailing} />
                     </Lazy>
                 </TabbedPane>
             </div>

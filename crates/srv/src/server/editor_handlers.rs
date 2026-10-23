@@ -279,13 +279,9 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // key-ensure failure just means this materialization goes
                 // out unsigned, same as any other spawn.
                 if let Some(pos) = cmd.files.iter().position(|f| f.path == ".mcp.json") {
-                    let agent_slug = serde_json::from_str::<serde_json::Value>(&cmd.files[pos].content)
-                        .ok()
-                        .and_then(|v| {
-                            v.pointer("/mcpServers/agentmux/env/AGENTMUX_AGENT_ID")
-                                .and_then(|s| s.as_str())
-                                .map(str::to_string)
-                        });
+                    // The definition's slug, over one the launch computed (P0.3).
+                    let agent_slug = crate::backend::mcp_json_identity::launch_agent_id(
+                        &mut cmd.files[pos].content, &mstore, cmd.agent_id.as_deref());
                     if let Some(agent_slug) = agent_slug {
                         crate::server::agent_self_keys::record_config_id_drift(
                             "m4d.config_id_drift.write_agent_config",

@@ -19,7 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AgentDocumentVirtualList } from "./AgentDocumentVirtualList";
 import { AgentDormancyProvider } from "../agent-dormancy";
-import { RETURN_SETTLE_MS } from "./held-release";
+import { AwayArrivals, RETURN_SETTLE_MS } from "./held-release";
 import { createAgentViewState } from "./state";
 import type { DocumentNode, DocumentState, ToolNode } from "../types";
 
@@ -74,11 +74,12 @@ const documentState = (heldOpenNodes: Set<string>): DocumentState => ({
     filter: { showThinking: true } as DocumentState["filter"],
 });
 
-function setup(heldOpenNodes: Set<string>, dormant: () => boolean = () => false) {
+function setup(heldOpenNodes: Set<string>, dormant: () => boolean = () => false, away?: AwayArrivals) {
     const documentAtom = createSignal<DocumentNode[]>([toolNode]);
     const viewState = createAgentViewState(documentAtom[0]);
     const [docState] = createSignal(documentState(heldOpenNodes));
     const onReleaseNodeHold = vi.fn();
+    const onHoldNodeOpen = vi.fn();
 
     const utils = render(() => (
         <AgentDormancyProvider dormant={dormant}>
@@ -88,13 +89,15 @@ function setup(heldOpenNodes: Set<string>, dormant: () => boolean = () => false)
                 onToggleCollapse={() => {}}
                 onTogglePin={() => {}}
                 onReleaseNodeHold={onReleaseNodeHold}
+                onHoldNodeOpen={onHoldNodeOpen}
+                awayArrivals={away}
             />
         </AgentDormancyProvider>
     ));
 
     const scrollRef = utils.container.querySelector(".agent-document") as HTMLElement;
     makeScrollable(scrollRef, { scrollTop: 0, scrollHeight: 500, clientHeight: 200 });
-    return { scrollRef, onReleaseNodeHold };
+    return { scrollRef, onReleaseNodeHold, onHoldNodeOpen };
 }
 
 const rect = (top: number, bottom: number): DOMRect =>
@@ -185,6 +188,78 @@ describe("AgentDocumentVirtualList — hidden-pane scroll-off collapse guard", (
         place(scrollRef, rect(-50, -10));
         scroll(scrollRef);
         expect(onReleaseNodeHold).toHaveBeenCalledWith("tc-1");
+    });
+
+    // Rows that finished or arrived while the pane was hidden (nobody watched
+    // them, so they weren't held then): the ones on screen once the show has
+    // settled are held, as if the reader had watched them land.
+    describe("rows that arrived while the pane was hidden", () => {
+        beforeEach(() => {
+            vi.useFakeTimers();
+        });
+        afterEach(() => {
+            vi.useRealTimers();
+            vi.restoreAllMocks();
+        });
+
+        function shownWithAway(rowRect: DOMRect | null, away = new AwayArrivals()) {
+            let now = 1_000;
+            vi.spyOn(performance, "now").mockImplementation(() => now);
+            away.add("tc-1");
+            const [dormant, setDormant] = createSignal(true);
+            const s = setup(new Set(), dormant, away);
+            if (rowRect) place(s.scrollRef, rowRect);
+            else s.scrollRef.getBoundingClientRect = () => rect(0, 200);
+            return {
+                ...s,
+                away,
+                show: () => {
+                    setDormant(false);
+                    now += RETURN_SETTLE_MS + 100;
+                    vi.advanceTimersByTime(RETURN_SETTLE_MS + 100);
+                },
+                hide: () => setDormant(true),
+            };
+        }
+
+        it("holds the one on screen once the show has settled", () => {
+            const t = shownWithAway(rect(50, 90));
+            expect(t.onHoldNodeOpen).not.toHaveBeenCalled(); // not while hidden
+            t.show();
+            expect(t.onHoldNodeOpen).toHaveBeenCalledExactlyOnceWith("tc-1");
+            expect(t.away.size).toBe(0);
+        });
+
+        it("leaves one that is already above the viewport to collapse", () => {
+            const t = shownWithAway(rect(-50, -10));
+            t.show();
+            expect(t.onHoldNodeOpen).not.toHaveBeenCalled();
+            expect(t.away.size).toBe(0);
+        });
+
+        it("ignores an id whose row is gone (removed or replaced)", () => {
+            const away = new AwayArrivals();
+            away.add("tc-gone");
+            const t = shownWithAway(rect(50, 90), away);
+            t.show();
+            expect(t.onHoldNodeOpen).toHaveBeenCalledExactlyOnceWith("tc-1");
+        });
+
+        it("keeps the ids if the pane is hidden again before the show settles, and holds them on the next show", () => {
+            const t = shownWithAway(rect(50, 90));
+            vi.spyOn(performance, "now").mockImplementation(() => 1_000);
+            t.hide();
+            vi.advanceTimersByTime(5_000);
+            expect(t.onHoldNodeOpen).not.toHaveBeenCalled();
+            expect(t.away.size).toBe(1);
+        });
+
+        it("holds nothing when the pane reports no size", () => {
+            const t = shownWithAway(null);
+            t.scrollRef.getBoundingClientRect = () => rect(0, 0);
+            t.show();
+            expect(t.onHoldNodeOpen).not.toHaveBeenCalled();
+        });
     });
 
     it("doesn't count a row as seen while the return is still settling", () => {
