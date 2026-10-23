@@ -1,7 +1,8 @@
 # SPEC: MuxBus — GitHub PR review notifications (end-to-end MVP)
 
 **Date:** 2026-06-20
-**Status:** proposed — Planned (superseded in part — see note below)
+**Status:** historical — the consumer side lives in the private cloud repo; this repo's side shipped across several PRs (agent registration with the cloud subscriber, #1617; signed review notifications, #2570). Superseded in part — see note below.
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
 **Author:** smike
 
 > **2026-08-07 note:** what this doc says about how the cloud consumer

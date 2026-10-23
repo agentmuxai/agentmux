@@ -13,7 +13,7 @@ that turned out not to exist in this repo (they were read from a *scratch* copy
 of a different repo; see the retro's correction). It proposed a `trust` field
 whose values (`host-verified`, `cross-channel-verified`, `network-claimed`)
 collided with this repo's *actual*, already-shipped JEKT trust vocabulary
-(`CLAUDE.md`'s "Is a jekt's sender identity actually verified?" — real
+(the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/ — real
 cryptographic HMAC-SHA256/Ed25519 sender verification, not a registry-presence
 check). Caught in review (reagentx-workflow P1, codex P1×3/P2×1 on PR #2702).
 This revision:

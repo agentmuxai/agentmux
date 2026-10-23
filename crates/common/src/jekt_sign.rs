@@ -1,22 +1,26 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Jekt sender signing/verification — three schemes, one signed-material
-//! format:
+//! Jekt sender signing/verification — one signed-material format, five schemes:
 //!   - Host-tier: HMAC-SHA256, one shared key per agent (`sign_jekt`/
 //!     `verify_jekt`). A 1:1 sender-to-local-srv relationship, so a
 //!     symmetric key is fine — the srv instance is the sole verifier.
 //!   - WAN, reagent only: Ed25519 against one pinned service keypair
-//!     (`verify_reagent_jekt`). Multi-party (any receiving instance must
-//!     verify without being able to forge), hence asymmetric.
+//!     (`verify_reagent_jekt`, `verify_trusted_reagent_jekt`). Multi-party
+//!     (receivers verify but can't forge), hence asymmetric.
 //!   - LAN, any agent: Ed25519, one keypair per agent
-//!     (`sign_lan_jekt`/`verify_lan_jekt`). Same multi-party reasoning as
-//!     WAN, but per-sender instead of one pinned key — see
-//!     docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md.
+//!     (`sign_lan_jekt`/`verify_lan_jekt`, and the UID-bound `_v2`). Same
+//!     multi-party reasoning as WAN, but per-sender instead of one pinned
+//!     key — see docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md.
+//!   - Cross-channel (same machine, other instance): the LAN keypair over a
+//!     domain-separated payload (`sign_channel_jekt`, and `_v2`).
+//!   - WAN, same account: Ed25519 per agent, certified by the sending
+//!     install (`sign_wan_jekt`/`verify_wan_jekt`).
 //!
-//! Shared between `agentmux-mcp` (the `SendMessage` tool signs an outgoing
-//! jekt with the calling agent's own key, read from its `AGENTMUX_JEKT_KEY`/
-//! `AGENTMUX_LAN_KEY` process env vars) and `agentmux-srv` (the reactive
+//! Shared between `agentmux-mcp` (the `Message` tool signs host, LAN and
+//! cross-channel jekts with the calling agent's own keys, fetched from srv's
+//! `GET /agentmux/agents/self/keys` with its env vars as a fallback; srv
+//! signs WAN jekts itself, at the origin) and `agentmux-srv` (the reactive
 //! handler verifies an incoming jekt's claimed signature against the
 //! claimed sender's key, looked up server-side by agent_id — see
 //! `crates/srv/src/backend/storage/agent_jekt_keys.rs` and
@@ -389,14 +393,10 @@ pub use lan_v2::{sign_lan_jekt_v2, verify_lan_jekt_v2};
 // published to muxbus's agent-ownership registry rather than fetched from a
 // peer, because a WAN counterpart is by definition unreachable directly.
 //
-// **Only the signing primitives live here.** Publication, lookup, and
-// verification wiring are deliberately NOT part of this change: verifying a
-// WAN signature means resolving `(sender_account, source_agent)` to exactly
-// one key, which waits on relay-side work tracked in the private cloud repo.
-// Minting and signing are safe
-// and useful ahead of that — an agent only gets a key when it is spawned, so
-// starting now is what makes verification meaningful later instead of
-// silently applying to nobody.
+// Only the primitives live here. srv signs at the origin
+// (`muxbus::relay::wan_sign_at_origin`), publishes keys
+// (`muxbus::wan_publish`) and verifies on delivery (`muxbus::wan_verify`)
+// (see https://docs.agentmux.ai/internals/jekt-protocol/).
 
 /// Domain separator for general agent-to-agent WAN signatures.
 ///

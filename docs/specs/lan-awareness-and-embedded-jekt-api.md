@@ -2,7 +2,8 @@
 
 **Date:** 2026-03-26
 **Author:** agent2
-**Status:** Draft — investigation & analysis
+**Status:** historical — investigation & analysis; LAN discovery shipped (mDNS Phase 1, #237; the LAN jekt tier, #1452).
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
 
 ---
 

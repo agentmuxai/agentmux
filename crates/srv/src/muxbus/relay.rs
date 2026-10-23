@@ -3,11 +3,14 @@
 
 //! Outbound cloud relay — jekt delivery **tier 4**.
 //!
-//! Tiers 1–3 (local handler, same-host registry, LAN peer) all live in
-//! `server/reactive.rs`. Tier 4 was, until this module existed, a comment
+//! Tiers 1–3 (local handler, same-host registry including this machine's
+//! other AgentMux channels, LAN peer) all live in `server/reactive.rs`, and
+//! so does the hold: a known agent of this AgentMux that no tier found
+//! running is held there before this tier is tried, unless the relay says
+//! another install runs it. Tier 4 was, until this module existed, a comment
 //! there — `// 4. Return original error (muxbus-client will fall back to cloud
 //! relay)` — delegating to a "muxbus-client" that the callers agents actually
-//! use are not. The MCP `SendMessage` tool POSTs to `/agentmux/reactive/inject`
+//! use are not. The MCP `SendMessage` tool (now `Message` send) POSTs to `/agentmux/reactive/inject`
 //! and bails on `success != true`, so the tier chain silently stopped at three
 //! while `SendMessage`'s own description promised "local → LAN → cloud". See
 //! `docs/reports/REPORT_NETWORK_ARCHITECTURE_DRYNESS_AND_ROBUST_LAN_2026_09_06.md` §5.

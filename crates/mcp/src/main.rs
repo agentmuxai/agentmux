@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! agentmux-mcp — MCP stdio server that exposes AgentMux's MuxAPI tools
-//! (`Shell`, `SendMessage`, memory, panes, …) to Claude.
+//! (`Terminal`, `Message`, `Memory`, `Pane`, …) to Claude.
 //!
 //! Claude Code launches this binary as an MCP server (via `.mcp.json`'s
 //! `"command": "agentmux-mcp"` entry, auto-injected by agent_config.rs).
 //! Communication is JSON-RPC 2.0 over stdin/stdout.
 //!
-//! The `Shell` tool starts a persistent shell process on agentmux-srv and
+//! The `Terminal` tool's background `run` (formerly `Shell`) starts a
+//! persistent shell process on agentmux-srv and
 //! returns immediately with a `shell_id`. Output streams live in the
 //! conversation as a `ShellNode` row without blocking the agent.
 //!

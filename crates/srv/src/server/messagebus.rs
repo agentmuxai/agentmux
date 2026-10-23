@@ -159,10 +159,12 @@ pub(super) async fn handle_inject(
     };
     // reagentx P0 on PR #2565: this endpoint used to call inject_message
     // directly with a fully client-controlled `source_agent`, bypassing
-    // host-tier signature verification entirely — closing that gap here
-    // means a claimed identity with a signing key on file (this endpoint
-    // never carries a signature) now correctly renders TRUST=unverified and
-    // forces TIER=sensitive, instead of silently passing as self-declared.
+    // host-tier signature verification entirely. Verifying here means a
+    // caller whose own identity token names the claimed sender renders
+    // TRUST=host-verified, and any other claim of an identity with a
+    // signing key on file (this endpoint carries no HMAC signature) renders
+    // TRUST=unverified and forces TIER=sensitive, instead of silently
+    // passing as self-declared.
     super::reactive::verify_jekt_signature(&state, &mut reactive_req);
     let resp = state.reactive_handler.inject_message(reactive_req);
     if resp.success {

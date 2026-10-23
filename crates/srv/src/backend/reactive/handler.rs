@@ -1090,16 +1090,12 @@ impl Handler {
         // network-tier exception below, and NARROWED by
         // SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15.md — repo-owner-
         // confirmed directly in a live conversation, not a jekt/muxbus claim):
-        //   1. WAN or LAN delivery, sender's identity check ACTIVELY FAILED
-        //      (a reagent_sig was present but didn't verify — SIG=invalid) →
-        //      always SENSITIVE, regardless of declared tier or keyword
-        //      content. A real red flag: someone tried to forge a signature.
-        //      Mere ABSENCE of any signature attempt (no reagent_sig sent at
-        //      all, or one verified only under the known-exposed dev key) is
-        //      NOT this case — that's rule 5's default, same as any other
-        //      self-declared sender. LAN never carries a signature attempt
-        //      at all, so it's never eligible for this rule either — see
-        //      rules 3/4 for what still catches a malicious LAN jekt.
+        //   1. WAN delivery, a reagent signature was present but failed, or
+        //      was valid only under an untrusted key such as `reagent-v1-dev`
+        //      (SIG=invalid) → always SENSITIVE, regardless of declared tier
+        //      or keyword content. No reagent signature at all is NOT this
+        //      case; that is rule 5's default. Failed LAN and WAN-instance
+        //      checks are their own forcing rules below.
         //   1b. WAN delivery, sender verified via reagent's pinned Ed25519
         //      key (`reagent_verified == Some(true)`) → NOT forced to
         //      SENSITIVE by delivery tier alone. As of the 2026-08-15
@@ -1111,8 +1107,9 @@ impl Handler {
         //      Rules 3/4 below still apply on top: a verified reagent
         //      message that declares SENSITIVE or matches the keyword scan
         //      still escalates.
-        //   2. Host delivery, sender identity checkable but signature missing
-        //      or wrong → always SENSITIVE (host-tier senders can now be
+        //   2. Host check failed, on any delivery tier (the claimed sender
+        //      has a host key on file and the signature is missing or wrong,
+        //      or it is a slug its agent was renamed from) → always SENSITIVE (host-tier senders can be
         //      verified when the claimed source_agent has a signing key —
         //      see `sig_verified`'s doc comment on `InjectionRequest` for
         //      exactly when this applies vs. is skipped). Same "an active
@@ -1187,41 +1184,22 @@ impl Handler {
         // repo-owner-confirmed directly in a live conversation, same channel
         // this policy's own STOP rule already treats as authoritative).
         //
-        // Cryptographic proof of identity is exactly what the STOP rule was
-        // protecting against the ABSENCE of (the spoofed-jekt-then-spoofed-
-        // muxbus-confirmation incident this whole tiering system exists to
-        // stop). Once a sender is actually verified — `sig_verified`,
-        // `reagent_verified`, or `lan_verified` all being `Some(true)` — that
-        // specific attack is no longer possible for this message, regardless
-        // of WHY it was marked sensitive (self-declared, or a keyword match
-        // on content a genuinely-signed sender is allowed to legitimately
-        // discuss, e.g. a code review of credential-handling code).
+        // Cryptographic proof of identity is what the STOP rule guards the
+        // absence of (a spoofed jekt followed by a spoofed "confirmation").
+        // Once this message's sender is verified on some tier (host
+        // `sig_verified`, reagent `reagent_verified` under the trusted key,
+        // `lan_verified`, cross-channel `channel_verified`
+        // (SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D3), or `wan_verified`
+        // from an `approved` or `new` install, W3-S §2.6), that attack is
+        // ruled out, whatever made the message sensitive (a declared tier, or
+        // a keyword in content a verified sender may legitimately discuss).
         //
-        // This can never accidentally cover an active-forgery case: the three
-        // rules above that force `is_sensitive` from a signature actively
-        // failing (`is_network_tier_sig_invalid`, `is_lan_sig_invalid`,
-        // `is_unverified_sender`) are each keyed on the SAME field this
-        // checks for `Some(true)` reading `Some(false)` instead — the two can
-        // never both be true for the same field at once, so a message that
-        // reaches STOP-required via one of those three rules is, by
-        // construction, never simultaneously "verified" on that same tier.
-        //
-        // `channel_verified` (SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md
-        // §D3) joins on the same terms. Its `Some(false)` is not among the
-        // forcing rules above (Phase C, held until keys propagate, §6/§10),
-        // but like every failed verdict it blocks the relaxation.
-        //
-        // `wan_verified` (W3-S §2.6, amended 2026-09-26) joins for any
-        // verified same-account install that isn't revoked — `approved` or
-        // `new`. The signature proves which install of this account sent it.
-        // Until #3881 every agent held the account login and could mint an
-        // install, so only a human-approved one relaxed anything; the
-        // operator chose to trust same-account installs once agents no
-        // longer hold it (a same-user process reading the srv's stored login
-        // from disk is the accepted residual, spec open question 5).
-        // `revoked` is forcing, above; a verdict with no instance proves no
-        // install and relaxes nothing.
-        // A FAILED check rules the relaxation out: another tier's success can't cancel it.
+        // Any failed verdict vetoes the relaxation (`any_failed`), so it never
+        // covers an active-forgery case and another tier's success can't
+        // cancel a failure. A failed `channel_verified` is not a forcing rule
+        // above, but it still blocks the relaxation. A revoked install is
+        // forcing, above; a WAN verdict with no instance relaxes nothing.
+        // (see https://docs.agentmux.ai/internals/jekt-protocol/)
         let any_failed = [req.sig_verified, req.reagent_verified, req.lan_verified, req.channel_verified, req.wan_verified].contains(&Some(false));
         let is_cryptographically_verified = !any_failed
             && (req.sig_verified == Some(true)
@@ -1240,12 +1218,9 @@ impl Handler {
         // verified sender when the RESPONDING agent's own
         // conversation_visibility is `ask` (or `trusted_peers` with a
         // non-allow-listed requester) — `req.transcript_request_escalate_forced`,
-        // resolved server-side by `resolve_transcript_request_tier_fields`
-        // against that agent's own setting, called from both delivery paths
-        // that reach `Handler` (`handle_reactive_inject` for
-        // host/cross-channel/LAN, `muxbus::cloud_subscriber::sync_agent_reactive`
-        // for WAN) — meaningless/always-false unless `is_transcript_request`
-        // is also true. A valid signature answers
+        // resolved by the server (`resolve_transcript_request_tier_fields`)
+        // against that agent's own setting before the marker is rendered;
+        // meaningless unless `is_transcript_request` is also true. A valid signature answers
         // *who is asking*, not *whether this content should be disclosed* —
         // identity proof alone doesn't relax that question, unlike every
         // other TIER=sensitive case above.

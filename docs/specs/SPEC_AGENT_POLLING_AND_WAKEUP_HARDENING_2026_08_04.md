@@ -1,6 +1,7 @@
 # Agent Recurring-Task / Polling Primitives — Design Hardening
 **Date:** 2026-08-04
-**Status:** active — Phase 0 shipped (Loop/Cron descriptions + max_age_secs bound); Phases 1-2 (durable:bool unification, tool renames) not started. Verified 2026-08-10. — PRs touching this work, newest first: #2418
+**Status:** implemented — Phase 0 (Loop/Cron descriptions + max_age_secs bound) in #2418; Phases 1-2 (one durable/session distinction, tool renames) as the single `Schedule` tool in #5006.
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
 **Scope:** `agentmux-mcp` (`Loop` tool), `agentmux-srv` (`Cron`, `/agentmux/reactive/inject`, `wrap_jekt_message`)
 **Trigger:** Live use of `mcp__agentmux__Loop` this session to babysit a GitHub PR's review status (poll every 1m, react when approved+mergeable). Concretely: ~20+ fires, most reporting "no change," each one arriving as a full agent-to-agent JEKT message with the complete envelope overhead; no way to express "wake me only when the review state changes" declaratively; no automatic detection of the ~26-consecutive-unchanged-checks stretch that made the loop unproductive; the human directly observed and flagged this as "poorly designed" in the moment.
 

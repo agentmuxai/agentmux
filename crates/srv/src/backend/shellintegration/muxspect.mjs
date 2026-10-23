@@ -368,8 +368,8 @@ export function checkSpawnerTier(name, env) {
 // check and is NOT the JEKT protocol's own sender-authentication
 // mechanism, which is per-message, automatic, and already computes a real
 // `TRUST=`/`SIG=` value on every delivered jekt (HMAC-SHA256 host tier /
-// Ed25519 LAN tier / pinned Ed25519 reagent WAN — see this repo's root
-// CLAUDE.md, "Is a jekt's sender identity actually verified?"). A
+// Ed25519 LAN, cross-channel and same-account WAN / pinned Ed25519 reagent
+// WAN — see https://docs.agentmux.ai/internals/jekt-protocol/). A
 // `status: "found"` result here means "an agent by this name is
 // currently registered" — it does NOT mean a specific JEKT claiming
 // FROM=X was actually sent by X. Deliberately no `trust`/`verified` field

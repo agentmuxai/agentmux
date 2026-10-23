@@ -2,7 +2,8 @@
 
 **Date:** 2026-09-10
 **Status:** superseded — go to the successor for current policy, design and implementation status.
-**Superseded-by:** [`docs/specs/SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`](SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md)
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
+**Superseded-by:** [`docs/specs/SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md`](SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md) (the intermediate successor, `SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`, is itself superseded by it)
 
 This document was never implemented; it is
 retained for its §2 root-cause analysis and the §4.2 ReAgent review history (four soundness gaps
@@ -27,7 +28,7 @@ typing into its pane is intentional steering, not the problem this spec addresse
 - [`docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md`](SPEC_ASK_USER_QUESTION_2026_06_15.md) — the mid-turn `tool_result` precedent this
   spec does **not** touch (it answers a question the model itself asked; it is not an
   externally-injected message racing the model's own output).
-- `agentmux/CLAUDE.md`'s "Jekt (agent-to-agent message) security rules" section — the marker
+- The jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/ — the marker
   format and delivery this spec's default policy applies to.
 
 ---

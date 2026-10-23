@@ -219,10 +219,10 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 .map_err(|e| anyhow::anyhow!("discovery response parse failed: {e}"))?;
             let block_to_agent = build_block_to_agent_map(&discovery);
 
-            // Same signed single-target delivery SendMessage uses, looped
-            // once per target — only this process holds AGENTMUX_JEKT_KEY,
-            // so per-message signing can only happen here (see this
-            // tool's own doc comment). Never a single aggregate result:
+            // Same signed single-target delivery `Message` send uses, looped
+            // once per target — this process signs with its copy of the
+            // agent's keys (srv mints, stores and serves them), so
+            // per-message signing happens here (see this tool's own doc comment). Never a single aggregate result:
             // per-target success/failure is collected below regardless of
             // how many targets fail. Sent in chunks with a pause between
             // them — `/agentmux/reactive/inject` shares ReactiveHandler's

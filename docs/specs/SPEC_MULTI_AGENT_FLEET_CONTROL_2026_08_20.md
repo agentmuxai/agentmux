@@ -1,7 +1,8 @@
 # SPEC: Multi-Agent Fleet Control — Select, Broadcast, and Bulk-Act on Many Agents at Once
 
-Status: Research complete, spec drafted — not yet implemented
-Date: 2026-08-20
+**Status:** implemented — #2687 (select, broadcast, bulk-stop); cross-channel, LAN and WAN targets in #2759 and #2762. An agent's `Message broadcast` is one signed jekt per target; a human Swarm broadcast is a user turn with a `[BROADCAST:...]` header, not a jekt. — Was: research complete, spec drafted.
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
+**Date:** 2026-08-20
 
 ## 0. Origin
 
@@ -349,7 +350,7 @@ throughout `handle_reactive_inject`, `reactive.rs:385+`). `sign_jekt`/
 multi-recipient envelope. Delivery-tier resolution
 (`agent_registry::lookup`/`lookup_all_shared`, `reactive.rs:452,571`) fans
 out over delivery *paths* for one recipient, not over multiple *distinct*
-recipients. CLAUDE.md's own jekt marker format (`TRUST=`/`TIER=`/
+recipients. The jekt marker format (https://docs.agentmux.ai/internals/jekt-protocol/; `TRUST=`/`TIER=`/
 `ESCALATE=`) is entirely phrased per single (sender, message) pair.
 
 </details>

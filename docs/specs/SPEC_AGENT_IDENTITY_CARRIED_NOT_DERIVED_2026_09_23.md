@@ -11,6 +11,7 @@ Redesign of `SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md` after its Phase
 2 was implemented and proven unable to fix the defect it targeted. Supersedes
 that spec's §6 phase plan; its §2 inventory and §5 WAN analysis remain valid
 and are cited rather than restated.
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
 **Trigger:** Repo owner, after Phase 2's failure: *"redesign the entire
 solution... the goal is agent id unique... do the most robust solution."*
 **Evidence base:** five review rounds on #3520 (four P1s, one P0), a data check
@@ -1324,6 +1325,8 @@ write has shipped and the `m4.actor_*` counters for that site are
 understood (#3573's stub-slug noise is expected).
 
 #### 6.5.10 M4d design — signing keys by UID, signed `source_uid`
+
+> **Note (later change):** WAN signing moved to srv in #4902; agents hold no WAN key, and `AGENTMUX_WAN_KEY` and `AGENTMUX_HOST_LABEL` are no longer written to an agent's env.
 
 Measured against main as of v0.57.0 (#3612). **Gated** (§6.5.6): no M4d
 step ships until M4b's agent-path `spawn.no_token.*` counters and the

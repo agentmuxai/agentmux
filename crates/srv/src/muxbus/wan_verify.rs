@@ -4,7 +4,7 @@
 //! Verify a same-account agent's WAN signature on a cloud-delivered jekt
 //! (`SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md` §2.3–2.6, step D2).
 //!
-//! Runs in `cloud_subscriber::sync_agent_reactive`, before transcript-request
+//! Runs in `cloud_subscriber::delivery::claim_and_deliver`, before transcript-request
 //! resolution, for each claimed injection. The checks run in the §2.3 order
 //! and every "couldn't check" outcome is `None` — only an active failure
 //! (envelope moved, certificate chain broken, record for something else,

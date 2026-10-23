@@ -29,13 +29,6 @@
 //!
 //! One keypair cannot have both lifecycles. Keeping them separate also means
 //! a compromise of one tier's key does not hand over the other's.
-//!
-//! **Scope note:** minting and signing ship ahead of verification on purpose.
-//! Verifying a WAN signature requires resolving `(sender_account,
-//! source_agent)` to exactly one key, which waits on relay-side work tracked
-//! in the private cloud repo. An agent
-//! only receives a key when it is spawned, so minting now is what makes
-//! verification meaningful later instead of applying to almost nobody.
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use rusqlite::params;

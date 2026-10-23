@@ -215,13 +215,13 @@ pub(super) async fn claim_and_deliver(
         // signing fields is present — a partial set (e.g. a sig but no
         // key_id) is treated the same as "not signed," not "signed but
         // broken," since a legitimate sender always sends all four
-        // together. TRUST is unaffected either way (WAN stays
-        // unconditionally TRUST=network-claimed). TIER is only FORCED to
-        // sensitive when `reagent_verified` is `Some(false)` — a signature
-        // present but which failed to cryptographically verify (see
+        // together. This verdict never changes TRUST; it renders as `SIG=`.
+        // `Some(false)` — a signature present but failed, or valid only
+        // under an untrusted key — forces TIER=sensitive (see
         // InjectionRequest::reagent_verified,
-        // SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15.md); as of that
-        // narrowing. `verify_trusted_reagent_jekt` yields `Some(true)` only
+        // SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15.md, and
+        // https://docs.agentmux.ai/internals/jekt-protocol/).
+        // `verify_trusted_reagent_jekt` yields `Some(true)` only
         // under the trusted production key; a signature under any other
         // registered key is `Some(false)`. `req.reagent_key_id` below must still be carried
         // through from `inj` so the marker's `SIG=` label and the SIG=verified

@@ -1,7 +1,8 @@
 # SPEC: 24h TTL / rotation for the host-tier jekt signing key
 
 **Date:** 2026-09-14
-**Status:** Implemented (this spec) — #3217
+**Status:** implemented — #3217; rotation now also happens when the MCP fetches its key (#4572).
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
 **Closes the gap tracked in:** `SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md`
 §non-goals ("Key rotation UX, revocation, or a management UI for per-agent
 signing keys — needed eventually, sized separately once the core mechanism is
@@ -74,7 +75,7 @@ respawn) after 24h has elapsed since its key was last minted/rotated.
 A hard-invalidate design (verification itself starts rejecting the key the
 instant it turns 24h old, independent of whether the agent has respawned)
 would force every long-running agent process into `TRUST=unverified` —
-which CLAUDE.md's jekt rules treat as an **active red flag**, unconditionally
+which the jekt rules (https://docs.agentmux.ai/internals/jekt-protocol/) treat as an **active red flag**, unconditionally
 forced to `TIER=sensitive`/`ESCALATE=required` — the moment its own key
 crosses 24h, even though nothing about that agent's identity actually
 changed. There is no live key-refresh push to an already-running MCP server
@@ -136,7 +137,7 @@ expiry column, no re-pin RPC, and `lan_peer_pubkey_pin_get_or_set` explicitly
 returns the *original* pinned key even when a caller supplies a different
 one, precisely so a later, different key claiming the same agent_id is
 treated as a mismatch (`lan_verified = Some(false)`) rather than silently
-trusted. That mismatch path is, per CLAUDE.md's jekt rules, one of the three
+trusted. That mismatch path is, per the jekt rules (https://docs.agentmux.ai/internals/jekt-protocol/), one of the
 cases "worse than unsigned" — unconditionally forced
 `TIER=sensitive`/`ESCALATE=required`, no exception.
 
