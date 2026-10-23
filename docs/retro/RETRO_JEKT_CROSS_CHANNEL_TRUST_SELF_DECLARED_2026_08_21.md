@@ -56,8 +56,8 @@ established. The `muxspect verify-sender` proposal should account for this case 
 
 ## Root cause — CORRECTED (see below; the first draft of this section was wrong)
 
-**Correction, second pass:** this section originally cited `docs/security/
-trust-model.md` and `docs/internals/interagent-comms.md` as defining the JEKT
+**Correction, second pass:** this section originally cited the trust-model and
+interagent-comms pages (they live in the agentmux-docs repo, not this one) as defining the JEKT
 `TRUST` vocabulary, and concluded the `self-declared` value meant an undefined
 tier gap. **Both citations were wrong** — those files don't exist anywhere in
 this repo's history (verified via `find`/`git log --all`). They were read from

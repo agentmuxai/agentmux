@@ -1109,9 +1109,8 @@ impl Handler {
         //      still escalates.
         //   2. Host check failed, on any delivery tier (the claimed sender
         //      has a host key on file and the signature is missing or wrong,
-        //      or it is a slug its agent was renamed from) → always SENSITIVE (host-tier senders can be
-        //      verified when the claimed source_agent has a signing key —
-        //      see `sig_verified`'s doc comment on `InjectionRequest` for
+        //      or it is a slug its agent was renamed from) → always
+        //      SENSITIVE (see `sig_verified` on `InjectionRequest` for
         //      exactly when this applies vs. is skipped). Same "an active
         //      verification FAILURE is the red flag, not mere absence of
         //      one" logic as rule 1 — this rule was already scoped that way.

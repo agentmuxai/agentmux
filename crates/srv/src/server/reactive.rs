@@ -1431,7 +1431,7 @@ pub(super) async fn try_cloud_relay(state: &AppState, req: &InjectionRequest, ca
                 channel_verified: None,
             };
             let mut body = serde_json::to_value(&body).unwrap_or_default();
-            // Passed through for `SendMessage`, which warns of a likely typo
+            // Passed through for the `Message` tool, which warns of a likely typo
             // on `false` (PLAN_JEKT_LOCAL_FIRST_ROUTING_2026_10_02.md R-3).
             if let (Some(in_account), Some(obj)) = (target_in_account, body.as_object_mut()) {
                 obj.insert("target_in_account".to_string(), serde_json::Value::Bool(in_account));

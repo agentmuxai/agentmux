@@ -8,8 +8,8 @@
 ## Revision history
 
 The first draft of this spec (and the PR's first commit) was written against
-`docs/security/trust-model.md` and `docs/internals/interagent-comms.md` — files
-that turned out not to exist in this repo (they were read from a *scratch* copy
+the trust-model and interagent-comms pages — files
+that turned out not to exist in this repo (they are docs-site pages, in agentmux-docs) (they were read from a *scratch* copy
 of a different repo; see the retro's correction). It proposed a `trust` field
 whose values (`host-verified`, `cross-channel-verified`, `network-claimed`)
 collided with this repo's *actual*, already-shipped JEKT trust vocabulary

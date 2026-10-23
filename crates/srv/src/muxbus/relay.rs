@@ -10,9 +10,9 @@
 //! another install runs it. Tier 4 was, until this module existed, a comment
 //! there — `// 4. Return original error (muxbus-client will fall back to cloud
 //! relay)` — delegating to a "muxbus-client" that the callers agents actually
-//! use are not. The MCP `SendMessage` tool (now `Message` send) POSTs to `/agentmux/reactive/inject`
+//! use are not. The MCP `Message` tool's send POSTs to `/agentmux/reactive/inject`
 //! and bails on `success != true`, so the tier chain silently stopped at three
-//! while `SendMessage`'s own description promised "local → LAN → cloud". See
+//! while the tool's own description promised "local → LAN → cloud". See
 //! `docs/reports/REPORT_NETWORK_ARCHITECTURE_DRYNESS_AND_ROBUST_LAN_2026_09_06.md` §5.
 //!
 //! This module makes tier 4 real and owned by the same handler as the other
@@ -543,7 +543,7 @@ mod tests {
     }
 
     /// The relay says whether the target is one of the
-    /// sender's own account's agents; `false` reaches `SendMessage` as a
+    /// sender's own account's agents; `false` reaches the `Message` tool as a
     /// likely-typo hint.
     #[tokio::test]
     async fn a_queued_injection_carries_whether_the_target_is_the_senders() {
