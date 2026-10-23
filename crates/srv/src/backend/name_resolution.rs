@@ -177,6 +177,27 @@ pub(crate) fn resolve_name_to_uid(
         });
     }
 
+    // (4) Nothing here by that name: every channel's definitions, by slug,
+    // by the route form of a display name ("Naki-2" for "Naki #2", the form
+    // agents sign with), or by a former name. An agent defined or running in
+    // another channel on this computer has no row in this channel's store
+    // until it is opened here, and the task queue is shared by every channel,
+    // so a task filed for it by name alone could never be claimed (#1257).
+    if candidates.is_empty() {
+        let defs = store
+            .agent_defs_for_target(typed)
+            .map_err(|e| store_fault(typed, e))?;
+        for def in defs.into_iter().filter(|d| d.is_seeded == 0) {
+            candidates.push(AgentCandidate {
+                uid: Some(def.id.clone()),
+                name: if def.name.is_empty() { def.slug.clone() } else { def.name.clone() },
+                slug: def.slug,
+                block_id: None,
+                live: false,
+            });
+        }
+    }
+
     match candidates.len() {
         // Only the outcomes that leave a row on the name path are counted
         // (§9.2 reads these as "must reach zero"); `One`, `None` and
@@ -433,6 +454,32 @@ mod tests {
 
     /// Templates are prototypes, never targets (spec §1.2): a provider key
     /// typed as a name must not resolve to the template row.
+    #[test]
+    fn a_display_names_route_form_resolves_to_its_agent() {
+        // "Naki #2" signs and is addressed as "Naki-2" (#1257).
+        let store = store_with(&[(UID_Y, "Naki #2", "naki-naki-2")]);
+        for typed in ["Naki-2", "naki-2", " NAKI-2 "] {
+            let r = resolve_name_to_uid(&store, &registry(), typed).unwrap();
+            assert!(matches!(r, NameResolution::One { ref uid, .. } if uid == UID_Y), "{typed}: {r:?}");
+        }
+    }
+
+    #[test]
+    fn two_display_names_with_one_route_form_are_ambiguous() {
+        let store = store_with(&[(UID_Y, "Naki #2", "naki-naki-2"), (UID_UP, "Naki 2", "naki-2-b")]);
+        let r = resolve_name_to_uid(&store, &registry(), "Naki-2").unwrap();
+        let NameResolution::Ambiguous { candidates } = r else { panic!("{r:?}") };
+        let mut uids: Vec<_> = candidates.iter().filter_map(|c| c.uid.clone()).collect();
+        uids.sort();
+        assert_eq!(uids, vec![UID_Y.to_string(), UID_UP.to_string()]);
+    }
+
+    #[test]
+    fn a_route_form_of_nothing_is_still_none() {
+        let store = store_with(&[(UID_Y, "Naki #2", "naki-naki-2")]);
+        assert_eq!(resolve_name_to_uid(&store, &registry(), "Naki-3").unwrap(), NameResolution::None);
+    }
+
     #[test]
     fn a_template_row_is_not_a_candidate() {
         let store = Store::open_in_memory().unwrap();
