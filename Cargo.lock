@@ -85,7 +85,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-bashwrap"
-version = "0.59.39"
+version = "0.59.40"
 dependencies = [
  "agentmux-common",
  "agentmux-procstats",
@@ -108,7 +108,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-cef"
-version = "0.59.39"
+version = "0.59.40"
 dependencies = [
  "agentmux-common",
  "agentmux-procstats",
@@ -152,7 +152,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-common"
-version = "0.59.39"
+version = "0.59.40"
 dependencies = [
  "base64 0.22.1",
  "dirs 5.0.1",
@@ -176,7 +176,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-launcher"
-version = "0.59.39"
+version = "0.59.40"
 dependencies = [
  "agentmux-common",
  "base64 0.22.1",
@@ -207,7 +207,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-mcp"
-version = "0.59.39"
+version = "0.59.40"
 dependencies = [
  "agentmux-common",
  "anyhow",
@@ -228,7 +228,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-procstats"
-version = "0.59.39"
+version = "0.59.40"
 dependencies = [
  "agentmux-common",
  "libc",
@@ -237,7 +237,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-remote"
-version = "0.59.39"
+version = "0.59.40"
 dependencies = [
  "agentmux-common",
  "agentmux-procstats",
@@ -247,7 +247,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-srv"
-version = "0.59.39"
+version = "0.59.40"
 dependencies = [
  "aes 0.8.4",
  "age",
