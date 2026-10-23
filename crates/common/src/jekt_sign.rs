@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Jekt sender signing/verification — one signed-material format, five schemes:
+//! Jekt sender signing/verification: five schemes, each over its own material:
 //!   - Host-tier: HMAC-SHA256, one shared key per agent (`sign_jekt`/
 //!     `verify_jekt`). A 1:1 sender-to-local-srv relationship, so a
 //!     symmetric key is fine — the srv instance is the sole verifier.
