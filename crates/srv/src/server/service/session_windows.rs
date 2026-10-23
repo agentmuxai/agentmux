@@ -470,24 +470,26 @@ pub(crate) fn forget_restored_window_meta(store: &Store, ws_id: &str) -> Option<
 /// whose workspace is gone since is left out.
 pub(crate) fn handle_take_restored_windows(state: &AppState, _call: &WebCallType) -> WebReturnType {
     let store = &state.mstore;
+    // One transaction moves them from waiting to opening, so no save sees
+    // them in neither list (#5358).
     let waiting = store
-        .get_all::<Client>()
-        .ok()
-        .and_then(|cs| cs.into_iter().next())
-        .and_then(|c| c.meta.get(WAITING_META_KEY).cloned())
-        .and_then(|v| v.as_array().cloned())
-        .unwrap_or_default();
-    set_client_meta(store, WAITING_META_KEY, None);
-    if !waiting.is_empty() {
-        let mut opening = store
-            .get_all::<Client>()
-            .ok()
-            .and_then(|cs| cs.into_iter().next())
-            .and_then(|c| c.meta.get(OPENING_META_KEY)?.as_array().cloned())
-            .unwrap_or_default();
-        opening.extend(waiting.iter().cloned());
-        set_client_meta(store, OPENING_META_KEY, Some(Value::Array(opening)));
-    }
+        .with_tx(|tx| {
+            let Some(mut client) = tx.get_all::<Client>()?.into_iter().next() else { return Ok(Vec::new()) };
+            let Some(waiting) = client.meta.remove(WAITING_META_KEY).and_then(|v| v.as_array().cloned()) else {
+                return Ok(Vec::new());
+            };
+            let mut opening = client.meta.get(OPENING_META_KEY).and_then(|v| v.as_array().cloned()).unwrap_or_default();
+            opening.extend(waiting.iter().cloned());
+            if !opening.is_empty() {
+                client.meta.insert(OPENING_META_KEY.to_string(), Value::Array(opening));
+            }
+            tx.update(&mut client)?;
+            Ok(waiting)
+        })
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "session_restore: couldn't take the restored windows");
+            Vec::new()
+        });
     let live: Vec<Value> = waiting
         .into_iter()
         .filter(|w| {
