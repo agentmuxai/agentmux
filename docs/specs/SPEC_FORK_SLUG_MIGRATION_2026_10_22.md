@@ -356,7 +356,10 @@ As built (`crates/srv/src/backend/slug_migration/`):
 ### 5.1 Which slugs are candidates
 
 A definition is a candidate only if all of these hold:
-1. it has a lineage root (follow `parent_id`);
+1. it is a fork (it has a branch label) and has a lineage root: follow `parent_id` only while the agent is a fork,
+   as `template.rs` `fork_lineage_root_id` does. The root is the first agent without a branch label, so an agent
+   made from a template, which keeps the template's id in `parent_id`, is a root, not a fork with a missing parent
+   (v0.59.40 followed every `parent_id` and found no candidate on a real home; fixed in the next patch);
 2. its slug equals the **old** rule's output (parent's slug, `-`, the label's slug);
 3. it differs from `fork_slug(root.slug, root.name, branch_label)`.
 
