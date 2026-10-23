@@ -15,11 +15,12 @@ use super::reducer_helpers::{dispatch_to_reducer, publish_events};
 //   1. Look up the window's workspace, and where the window is.
 //   2. Dispatch Command::CloseWindowInternal — emits
 //      SrvWindowClosed; subscriber prunes Client.windowids.
-//   3. If no other window points at the same workspace, keep it
-//      (`session_closed::keep_workspace`: its agents stop, its tabs and
-//      panes stay for the next launch and "Reopen closed window"), or
-//      delete it when the window asked for Close workspace.
-// Closing is not deleting: SPEC_OFFLINE_RESILIENCE_2026_10_20.md G8.
+//   3. If no other window points at the same workspace (the window's
+//      contents), keep it (`session_closed::keep_workspace`: its agents
+//      stop, its tabs and panes stay, and the window stays in the open
+//      workspace as a closed window), or delete it when the window was
+//      removed from the workspace.
+// Closing is not deleting: SPEC_WORKSPACES_2026_10_23.md §2, §5.
 pub(crate) async fn handle_close_window(state: &AppState, call: &WebCallType) -> WebReturnType {
     let store = &state.mstore;
     let args = &call.args;
@@ -145,8 +146,8 @@ pub(crate) async fn handle_close_window(state: &AppState, call: &WebCallType) ->
     WebReturnType::success_empty()
 }
 
-/// What a session record and the closed-window list keep of a closing
-/// window, read before its row is pruned.
+/// What a session record and the closed windows keep of a closing window,
+/// read before its row is pruned.
 #[derive(Default)]
 struct ClosingWindow {
     name: Option<String>,
@@ -158,14 +159,16 @@ struct ClosingWindow {
 ///
 /// The close that empties `Client.windowids` is the end of the session: it
 /// first saves the session record (restore-on-relaunch,
-/// SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13 Feature 1), now naming
-/// the kept workspace, so the next launch reopens it and rebuilds it from the
-/// record only if it is gone. Asked after this close's own prune and read
+/// SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13 Feature 1), naming the
+/// kept contents, so the next launch reopens them and rebuilds them from the
+/// record only if they are gone. Asked after this close's own prune and read
 /// fresh: of two concurrent closes that end a session, one sees it empty. Not
 /// asked for workspace sharing, which is true of nearly every close.
 ///
-/// The workspace is then kept (`session_closed::keep_workspace`), or deleted
-/// when the window asked for Close workspace, which saves no record of it.
+/// The contents are then kept (`session_closed::keep_workspace`), as a closed
+/// window unless this close ended the session, or deleted when the window was
+/// removed from the workspace (`DiscardWorkspaceOnClose`), which saves no
+/// record of it.
 async fn close_unshown_workspace(state: &AppState, window_id: &str, ws_id: String, closing: ClosingWindow) {
     let store = &state.mstore;
     let discard = super::session_closed::take_discard(window_id);
@@ -180,16 +183,17 @@ async fn close_unshown_workspace(state: &AppState, window_id: &str, ws_id: Strin
         super::session_windows::save_on_last_close(store, &ws_id, closing.name.as_deref(), &closing.appearance);
     }
     if discard {
-        tracing::info!(workspace_id = %ws_id, "CloseWindow: Close workspace — deleting the workspace");
+        tracing::info!(workspace_id = %ws_id, "CloseWindow: removed from the workspace; deleting its contents");
+        super::session_closed::forget(store, &ws_id);
         close_workspace(state, ws_id).await;
     } else {
-        super::session_closed::keep_workspace(state, ws_id, closing.placement).await;
+        super::session_closed::keep_workspace(state, ws_id, closing.placement, will_empty_windowids).await;
     }
 }
 
-/// Delete a workspace no window shows, every agent in it closed gracefully
-/// first (`agent_teardown`, `Policy::close()`): Close workspace, a closed
-/// window past the kept ones, or one with nothing to keep.
+/// Delete a window's contents no window shows, every agent in it closed
+/// gracefully first (`agent_teardown`, `Policy::close()`): a window removed
+/// from the workspace, open or closed, or one with nothing to keep.
 ///
 /// Detached (`agent_teardown::detached`): the host waits only 2 s for
 /// `CloseWindow`, less than a graceful close takes, and when it hangs up

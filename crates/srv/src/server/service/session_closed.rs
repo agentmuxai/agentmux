@@ -1,31 +1,35 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Closing is not deleting (`docs/specs/SPEC_OFFLINE_RESILIENCE_2026_10_20.md`
-//! G8, §4.7).
+//! Closed windows: closing a window keeps it in the open workspace
+//! (`docs/specs/SPEC_WORKSPACES_2026_10_23.md` §2, §5; closing is not
+//! deleting, `SPEC_OFFLINE_RESILIENCE_2026_10_20.md` G8).
 //!
-//! A window's close stops what runs in its workspace (its agents and shells,
-//! the ordinary graceful close) and keeps the workspace: its tabs, its panes
-//! with their ids and meta, and their layout. The workspace is then listed in
-//! the client's meta (`session:closed_windows`, newest first) with where its
-//! window was, its name and its appearance, for:
-//! - the next launch, when the session record names it: the restore reopens it
-//!   as it was instead of rebuilding it from the record
-//!   (`session_windows::restore_all`), which stays the fallback;
-//! - ☰ → "Reopen closed window" (`ListClosedWindows`, `TakeClosedWindow`).
+//! A window's close stops what runs in its contents (its agents and shells,
+//! the ordinary graceful close) and keeps them: its tabs, its panes with their
+//! ids and meta, and their layout. The window is then a **closed** window of
+//! the workspace, listed in the client's meta (`workspace:closed_windows`,
+//! newest first) with when it closed, where it was, its name and appearance.
+//! - The workspace record keeps each one as a `"state": "closed"` entry
+//!   ([`with_closed`]). A cold start keeps it closed ([`restore_closed`]): its
+//!   contents are reused when they are still here and rebuilt from the entry
+//!   when not, and no window opens for it.
+//! - The status bar panel lists them (`ListClosedWindows`), reopens one where
+//!   it was (`TakeClosedWindow`) and deletes one (`DeleteClosedWindow`). An
+//!   open window is deleted by marking its close (`DiscardWorkspaceOnClose`),
+//!   which then deletes its contents instead of keeping them.
 //!
-//! At most [`CLOSED_WINDOWS_KEPT`] are kept: closing another deletes the
-//! oldest, unless the session record still names it. A workspace with nothing
-//! of the user's in it (no pane, or only the untouched default layout) is
-//! deleted at its close, as every close did before.
-//!
-//! Only an explicit, confirmed Close workspace deletes one at once: the window
-//! asks for it (`DiscardWorkspaceOnClose`), then closes.
+//! They stay until the user deletes them: no cap. Not listed: the close that
+//! ends the session (the last window's, or one of a quit's), whose window
+//! stays open in the workspace and reopens at the next launch; and a window
+//! with nothing of the user's in it (no pane, or only the untouched default
+//! layout), whose contents are deleted at its close.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
+use agentmux_common::time::now_ms;
 use serde_json::{json, Value};
 
 use crate::backend::obj::{Client, Window, Workspace};
@@ -33,27 +37,30 @@ use crate::backend::service::{self, WebCallType, WebReturnType};
 use crate::backend::storage::store::Store;
 use crate::server::AppState;
 
-/// The closed windows' workspaces, newest first: `{workspaceid, closed_at_ms, window}`.
-pub(crate) const CLOSED_META_KEY: &str = "session:closed_windows";
+/// The open workspace's closed windows, newest first:
+/// `{workspaceid, closed_at_ms, window}`.
+pub(crate) const CLOSED_META_KEY: &str = "workspace:closed_windows";
 
-/// How many closed windows are kept for "Reopen closed window".
-pub(crate) const CLOSED_WINDOWS_KEPT: usize = 10;
+/// A workspace record entry's `state`: shown now, or reopened at the next launch.
+pub(crate) const STATE_OPEN: &str = "open";
+/// A workspace record entry's `state`: closed, kept to reopen.
+pub(crate) const STATE_CLOSED: &str = "closed";
 
-/// How long a Close workspace waits for its window's close to reach srv. A
-/// close that never comes (the window stayed open) must not make a later,
-/// ordinary close delete the workspace.
+/// How long a delete waits for its window's close to reach srv. A close that
+/// never comes (the window stayed open) must not make a later, ordinary close
+/// delete the window's contents.
 const DISCARD_FOR: Duration = Duration::from_secs(60);
 
 static DISCARD: LazyLock<Mutex<HashMap<String, Instant>>> = LazyLock::new(Default::default);
 
-/// Close workspace: the next close of `window_id` deletes its workspace.
+/// Delete an open window: the next close of `window_id` deletes its contents.
 pub(crate) fn mark_discard(window_id: &str) {
     let mut marks = DISCARD.lock().unwrap_or_else(|e| e.into_inner());
     marks.retain(|_, at| at.elapsed() < DISCARD_FOR);
     marks.insert(window_id.to_string(), Instant::now());
 }
 
-/// Whether this close of `window_id` is a Close workspace's. Asked once.
+/// Whether this close of `window_id` is a delete's. Asked once.
 pub(crate) fn take_discard(window_id: &str) -> bool {
     let mut marks = DISCARD.lock().unwrap_or_else(|e| e.into_inner());
     marks.remove(window_id).is_some_and(|at| at.elapsed() < DISCARD_FOR)
@@ -81,6 +88,15 @@ fn workspace_of(entry: &Value) -> Option<&str> {
     entry.get("workspaceid").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
 }
 
+fn closed_at(entry: &Value) -> i64 {
+    entry.get("closed_at_ms").and_then(|v| v.as_i64()).unwrap_or(0)
+}
+
+/// Whether a workspace record entry is a closed window's.
+pub(crate) fn is_closed(entry: &Value) -> bool {
+    entry.get("state").and_then(|v| v.as_str()) == Some(STATE_CLOSED)
+}
+
 fn client(store: &Store) -> Option<Client> {
     store.get_all::<Client>().ok().and_then(|cs| cs.into_iter().next())
 }
@@ -91,8 +107,9 @@ fn entries(store: &Store) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-/// Read, change and write back the list in one transaction: closes and
-/// reopens run concurrently. `None` when the store couldn't be written.
+/// Read, change and write back the list in one transaction: closes, reopens
+/// and deletes run concurrently. A change counts as one to the workspace's
+/// windows, so the saver saves it. `None` when the store couldn't be written.
 fn update<R>(store: &Store, f: impl FnOnce(&mut Vec<Value>) -> R) -> Option<R> {
     let result = store.with_tx(|tx| {
         let Some(mut client) = tx.get_all::<Client>()?.into_iter().next() else {
@@ -101,7 +118,8 @@ fn update<R>(store: &Store, f: impl FnOnce(&mut Vec<Value>) -> R) -> Option<R> {
         let mut list = client.meta.get(CLOSED_META_KEY).and_then(|v| v.as_array()).cloned().unwrap_or_default();
         let before = list.clone();
         let out = f(&mut list);
-        if list != before {
+        let changed = list != before;
+        if changed {
             if list.is_empty() {
                 client.meta.remove(CLOSED_META_KEY);
             } else {
@@ -109,15 +127,24 @@ fn update<R>(store: &Store, f: impl FnOnce(&mut Vec<Value>) -> R) -> Option<R> {
             }
             tx.update(&mut client)?;
         }
-        Ok(Some(out))
+        Ok(Some((out, changed)))
     });
-    result.unwrap_or_else(|e| {
-        tracing::warn!(error = %e, "session_closed: couldn't update the closed windows");
-        None
-    })
+    match result {
+        Ok(Some((out, changed))) => {
+            if changed {
+                store.layout_writes().wrote("window");
+            }
+            Some(out)
+        }
+        Ok(None) => None,
+        Err(e) => {
+            tracing::warn!(error = %e, "session_closed: couldn't update the closed windows");
+            None
+        }
+    }
 }
 
-/// The workspaces a window shows now.
+/// The window contents a window shows now.
 pub(crate) fn open_workspaces(store: &Store) -> HashSet<String> {
     client(store)
         .map(|c| c.windowids)
@@ -128,14 +155,15 @@ pub(crate) fn open_workspaces(store: &Store) -> HashSet<String> {
         .collect()
 }
 
-/// The workspaces the session record names: the next launch reopens them.
-fn record_workspaces(store: &Store) -> HashSet<String> {
-    super::session_restore::load_last_session_snapshot(store)
-        .map(|r| super::session_windows::windows_of(&r))
+/// How many full windows are open (a subwindow belongs to its parent's).
+fn open_window_count(store: &Store) -> usize {
+    client(store)
+        .map(|c| c.windowids)
         .unwrap_or_default()
         .iter()
-        .filter_map(|w| workspace_of(w).map(str::to_string))
-        .collect()
+        .filter_map(|id| store.get::<Window>(id).ok().flatten())
+        .filter(|w| w.kind.as_deref() != Some("subwindow"))
+        .count()
 }
 
 /// Whether `ws_id` holds anything of the user's: a tab with a pane that isn't
@@ -146,20 +174,22 @@ fn worth_keeping(store: &Store, ws_id: &str) -> bool {
         .is_some()
 }
 
-/// List `ws_id` as closed just now, its window at `window`.
-fn remember(store: &Store, ws_id: &str, window: Value) {
+/// List `ws_id` as closed at `closed_at_ms`, its window at `window`, keeping
+/// the list newest first.
+fn remember(store: &Store, ws_id: &str, window: Value, closed_at_ms: i64) {
     let entry = json!({
         "workspaceid": ws_id,
-        "closed_at_ms": agentmux_common::time::now_ms(),
+        "closed_at_ms": closed_at_ms,
         "window": window,
     });
     update(store, |list| {
         list.retain(|e| workspace_of(e) != Some(ws_id));
-        list.insert(0, entry);
+        list.push(entry);
+        list.sort_by_key(|e| std::cmp::Reverse(closed_at(e)));
     });
 }
 
-/// `ws_id` is open again: drop it from the list. Returns its entry.
+/// `ws_id` is open again, or deleted: drop it from the list. Returns its entry.
 pub(crate) fn forget(store: &Store, ws_id: &str) -> Option<Value> {
     update(store, |list| {
         let at = list.iter().position(|e| workspace_of(e) == Some(ws_id))?;
@@ -168,53 +198,20 @@ pub(crate) fn forget(store: &Store, ws_id: &str) -> Option<Value> {
     .flatten()
 }
 
-/// The entries to delete so at most [`CLOSED_WINDOWS_KEPT`] stay, oldest
-/// first out; dropped from `list`. An entry the session record names
-/// (`protected`) is kept and not counted. One whose workspace is gone
-/// (`exists` false) or open again (`open`) is dropped and not deleted.
-fn trim(
-    list: &mut Vec<Value>,
-    protected: &HashSet<String>,
-    open: &HashSet<String>,
-    exists: impl Fn(&str) -> bool,
-) -> Vec<String> {
-    let mut kept = 0usize;
-    let mut out = Vec::new();
-    list.retain(|e| {
-        let Some(ws) = workspace_of(e) else { return false };
-        if !exists(ws) || open.contains(ws) {
-            return false;
-        }
-        if protected.contains(ws) {
-            return true;
-        }
-        if kept < CLOSED_WINDOWS_KEPT {
-            kept += 1;
-            return true;
-        }
-        out.push(ws.to_string());
-        false
-    });
-    out
-}
-
-/// Delete the closed workspaces past [`CLOSED_WINDOWS_KEPT`].
-async fn evict(state: &AppState) {
-    let store = &state.mstore;
-    let protected = record_workspaces(store);
-    let open = open_workspaces(store);
-    let existing: HashSet<String> = store.get_all::<Workspace>().unwrap_or_default().into_iter().map(|w| w.oid).collect();
-    let evicted = update(store, |list| trim(list, &protected, &open, |ws| existing.contains(ws))).unwrap_or_default();
-    for ws_id in evicted {
-        tracing::info!(workspace_id = %ws_id, kept = CLOSED_WINDOWS_KEPT, "session_closed: deleting the oldest closed window's workspace");
-        super::window_close::close_workspace(state, ws_id).await;
-    }
+/// Whether a quit is closing the windows: its record is the session record,
+/// saved within the last two minutes.
+fn quit_under_way(store: &Store) -> bool {
+    super::session_restore::load_last_session_snapshot(store)
+        .is_some_and(|r| super::session_windows::is_recent_quit_record(&r, now_ms()))
 }
 
 /// A window onto `ws_id` closed, and no other window shows it (`window`: where
-/// it was): stop what runs in it and keep it. A workspace with nothing of the
-/// user's in it is deleted instead.
-pub(crate) async fn keep_workspace(state: &AppState, ws_id: String, window: Value) {
+/// it was). Stop what runs in it and keep its contents, listed as a closed
+/// window unless this close ends the session (`ends_session`: it emptied
+/// `Client.windowids`), or a quit is closing every window: then the window
+/// stays open in the workspace and the next launch reopens it. Contents with
+/// nothing of the user's in them are deleted instead.
+pub(crate) async fn keep_workspace(state: &AppState, ws_id: String, window: Value, ends_session: bool) {
     if !worth_keeping(&state.mstore, &ws_id) {
         super::window_close::close_workspace(state, ws_id).await;
         return;
@@ -222,8 +219,16 @@ pub(crate) async fn keep_workspace(state: &AppState, ws_id: String, window: Valu
     // Held until its agents have stopped: a reopen waits for it
     // (`TakeClosedWindow`), so it can't start them while they are stopping.
     let guard = crate::sagas::close_pane::workspace_close_lock(&ws_id).await;
-    remember(&state.mstore, &ws_id, window);
-    tracing::info!(workspace_id = %ws_id, "CloseWindow: keeping the workspace (its agents stop; Reopen closed window and the next launch bring it back)");
+    let listed = !ends_session && !quit_under_way(&state.mstore);
+    if listed {
+        remember(&state.mstore, &ws_id, window, now_ms());
+    }
+    tracing::info!(
+        workspace_id = %ws_id,
+        listed,
+        "CloseWindow: keeping the window's contents (its agents stop; {})",
+        if listed { "a closed window of the workspace" } else { "the next launch reopens it" }
+    );
     let st = state.clone();
     let done = crate::sagas::agent_teardown::detached(async move {
         let _guard = guard;
@@ -233,17 +238,118 @@ pub(crate) async fn keep_workspace(state: &AppState, ws_id: String, window: Valu
         for block_id in &block_ids {
             crate::sagas::close_pane::finish_close(&st, block_id).await;
         }
-        evict(&st).await;
     })
     .await;
     if done.is_none() {
-        tracing::warn!("CloseWindow: stopping a kept workspace's agents panicked");
+        tracing::warn!("CloseWindow: stopping a kept window's agents panicked");
     }
 }
 
-/// `window.ListClosedWindows`: the closed windows "Reopen closed window"
-/// offers, newest first, each `{workspaceid, closed_at_ms, name, tabs, panes,
-/// agents}`. One whose workspace is gone or open again is left out.
+/// The closed windows as workspace record entries, newest first: each one's
+/// contents (`snapshot_workspace`), where its window was (`window`), its
+/// `workspaceid`, `"state": "closed"` and `closed_at_ms`. One whose contents
+/// are gone or shown by a window is left out.
+pub(crate) fn closed_entries(store: &Store) -> Vec<Value> {
+    let open = open_workspaces(store);
+    entries(store)
+        .iter()
+        .filter_map(|e| {
+            let ws = workspace_of(e)?;
+            if open.contains(ws) {
+                return None;
+            }
+            let mut entry = super::session_restore::snapshot_workspace(store, ws)?;
+            entry["window"] = e.get("window").cloned().unwrap_or_else(|| json!({}));
+            entry["workspaceid"] = json!(ws);
+            entry["state"] = json!(STATE_CLOSED);
+            entry["closed_at_ms"] = json!(closed_at(e));
+            Some(entry)
+        })
+        .collect()
+}
+
+/// A session record (the open windows) as the workspace's record: each of its
+/// windows marked `"state": "open"`, then the closed windows
+/// ([`closed_entries`]) it doesn't already hold. A record with closed entries
+/// already comes back the same.
+pub(crate) fn with_closed(store: &Store, mut record: Value) -> Value {
+    if !record.is_object() {
+        return record;
+    }
+    let mut windows = super::session_windows::windows_of(&record);
+    for w in &mut windows {
+        if w.get("state").is_none() {
+            w["state"] = json!(STATE_OPEN);
+        }
+    }
+    let held: HashSet<String> = windows.iter().filter_map(|w| workspace_of(w).map(str::to_string)).collect();
+    windows.extend(
+        closed_entries(store)
+            .into_iter()
+            .filter(|e| !matches!(workspace_of(e), Some(ws) if held.contains(ws))),
+    );
+    record["windows"] = Value::Array(windows);
+    record
+}
+
+/// A cold start's closed windows: `record`'s `"state": "closed"` entries,
+/// kept closed. An entry whose contents are still here (its `workspaceid`, not
+/// shown by a window, not `main_ws`, not waiting to open) is listed as it is;
+/// one whose contents are gone (a new version's first start, which copied the
+/// record) is rebuilt from the entry, with new ids. No window opens for
+/// either. An entry naming contents in `skip` (an open window's in the record
+/// that was restored) is left out. Returns how many are listed.
+pub(crate) async fn restore_closed(state: &AppState, record: &Value, main_ws: &str, skip: &HashSet<String>) -> usize {
+    let store = &state.mstore;
+    let mut busy = open_workspaces(store);
+    busy.extend(super::session_windows::waiting_workspaces(store));
+    busy.insert(main_ws.to_string());
+    let mut listed = 0usize;
+    let mut rebuilt = 0usize;
+    for entry in super::session_windows::windows_of(record).iter().filter(|w| is_closed(w)) {
+        if workspace_of(entry).is_some_and(|ws| skip.contains(ws)) {
+            continue;
+        }
+        let here = match workspace_of(entry).filter(|ws| !busy.contains(*ws)) {
+            Some(ws) => {
+                let known = state.srv_state.lock().await.workspaces.contains_key(ws);
+                (known && super::session_restore::snapshot_workspace(store, ws).is_some()).then(|| ws.to_string())
+            }
+            None => None,
+        };
+        let ws_id = match here {
+            Some(ws) => ws,
+            None => match super::session_restore::restore_workspace(state, entry).await {
+                Ok(Some((ws, events))) => {
+                    super::reducer_helpers::publish_events(state, &events);
+                    rebuilt += 1;
+                    ws
+                }
+                Ok(None) => {
+                    tracing::warn!("session_closed: a closed window's tabs didn't come back; skipping it");
+                    continue;
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "session_closed: a closed window didn't come back");
+                    continue;
+                }
+            },
+        };
+        busy.insert(ws_id.clone());
+        let window = entry.get("window").cloned().unwrap_or_else(|| json!({}));
+        remember(store, &ws_id, window, closed_at(entry));
+        listed += 1;
+    }
+    if listed > 0 {
+        tracing::info!(listed, rebuilt, "session_closed: kept {} closed window(s) closed ({} rebuilt)", listed, rebuilt);
+    }
+    listed
+}
+
+/// `window.ListClosedWindows`: the open workspace's closed windows, newest
+/// first, each `{workspaceid, closed_at_ms, name, tabs, panes, agents}` for
+/// the status bar panel. One whose contents are gone or shown again is left
+/// out.
 pub(crate) fn handle_list_closed_windows(state: &AppState, _call: &WebCallType) -> WebReturnType {
     let store = &state.mstore;
     let open = open_workspaces(store);
@@ -256,7 +362,7 @@ pub(crate) fn handle_list_closed_windows(state: &AppState, _call: &WebCallType) 
             }
             let ws = store.get::<Workspace>(ws_id).ok().flatten()?;
             let snap = super::session_restore::snapshot_workspace(store, ws_id)?;
-            let summary = super::session_other_builds::summarize(&snap, "", "", 0)?;
+            let summary = super::session_other_builds::summarize(&snap, "", "", 0);
             let name = e
                 .get("window")
                 .and_then(|w| w.get("name"))
@@ -265,11 +371,11 @@ pub(crate) fn handle_list_closed_windows(state: &AppState, _call: &WebCallType) 
                 .unwrap_or(ws.name);
             Some(json!({
                 "workspaceid": ws_id,
-                "closed_at_ms": e.get("closed_at_ms").and_then(|v| v.as_i64()).unwrap_or(0),
+                "closed_at_ms": closed_at(e),
                 "name": name,
-                "tabs": summary.tabs,
-                "panes": summary.panes,
-                "agents": summary.agents,
+                "tabs": summary.as_ref().map_or(0, |s| s.tabs),
+                "panes": summary.as_ref().map_or(0, |s| s.panes),
+                "agents": summary.map(|s| s.agents).unwrap_or_default(),
             }))
         })
         .collect();
@@ -296,7 +402,7 @@ pub(crate) async fn handle_take_closed_window(state: &AppState, call: &WebCallTy
         return WebReturnType::error("that window isn't among the closed windows any more");
     };
     if store.get::<Workspace>(&ws_id).ok().flatten().is_none() {
-        return WebReturnType::error("that window's workspace is gone");
+        return WebReturnType::error("that window's contents are gone");
     }
     let window = entry.get("window").cloned().unwrap_or_else(|| json!({}));
     let patch = super::session_windows::patch_of(&window);
@@ -314,21 +420,47 @@ pub(crate) async fn handle_take_closed_window(state: &AppState, call: &WebCallTy
     WebReturnType::success(out)
 }
 
-/// `window.DiscardWorkspaceOnClose(windowId)`: Close workspace, confirmed in
-/// the window: its close, which the window starts next, deletes the workspace.
-pub(crate) fn handle_discard_workspace_on_close(_state: &AppState, call: &WebCallType) -> WebReturnType {
+/// `window.DeleteClosedWindow(workspaceId)`: remove a closed window from the
+/// workspace without reopening it. Its contents are deleted; its agents stay
+/// in My Agents.
+pub(crate) async fn handle_delete_closed_window(state: &AppState, call: &WebCallType) -> WebReturnType {
+    let ws_id: String = match service::get_arg(&call.args, 0) {
+        Ok(v) => v,
+        Err(e) => return WebReturnType::error(e),
+    };
+    // A close still stopping its agents finishes first.
+    drop(crate::sagas::close_pane::workspace_close_lock(&ws_id).await);
+    let store = &state.mstore;
+    if open_workspaces(store).contains(&ws_id) {
+        return WebReturnType::error("that window is open");
+    }
+    if forget(store, &ws_id).is_none() {
+        return WebReturnType::error("that window isn't among the closed windows any more");
+    }
+    tracing::info!(workspace_id = %ws_id, "session_closed: removing a closed window from the workspace");
+    super::window_close::close_workspace(state, ws_id).await;
+    WebReturnType::success_empty()
+}
+
+/// `window.DiscardWorkspaceOnClose(windowId)`: remove an open window from the
+/// workspace. Its close, which the window starts next, deletes its contents
+/// instead of keeping them. The only open window can't be removed.
+pub(crate) fn handle_discard_workspace_on_close(state: &AppState, call: &WebCallType) -> WebReturnType {
     let window_id: String = match service::get_arg(&call.args, 0) {
         Ok(v) => v,
         Err(e) => return WebReturnType::error(e),
     };
+    if open_window_count(&state.mstore) <= 1 {
+        return WebReturnType::error("the last window can't be removed from the workspace");
+    }
     mark_discard(&window_id);
-    tracing::info!(window_id = %window_id, "CloseWindow: Close workspace confirmed; the window's close deletes its workspace");
+    tracing::info!(window_id = %window_id, "CloseWindow: removing the window from the workspace; its close deletes its contents");
     WebReturnType::success_empty()
 }
 
-/// `window.WindowAgents(windowId)`: the agents running in the window's
-/// workspace, each `{block_id, name, working}` (`working`: mid-turn), for the
-/// window's close warning and Close workspace's confirmation.
+/// `window.WindowAgents(windowId)`: the agents running in the window, each
+/// `{block_id, name, working}` (`working`: mid-turn), for the close warning
+/// and the panel's delete.
 pub(crate) fn handle_window_agents(state: &AppState, call: &WebCallType) -> WebReturnType {
     let window_id: String = match service::get_arg(&call.args, 0) {
         Ok(v) => v,

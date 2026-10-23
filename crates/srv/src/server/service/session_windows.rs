@@ -169,8 +169,9 @@ pub(crate) fn snapshot_session(store: &Store, for_quit: bool) -> Option<Value> {
         .filter_map(|(w, ws)| {
             let mut entry = super::session_restore::snapshot_workspace(store, &ws)?;
             entry["window"] = super::session_closed::placement_of(store, &w);
-            // The close keeps the workspace itself (`session_closed`): the
-            // restore reopens it, and rebuilds it from this entry only if it is gone.
+            // A close keeps the window's contents (`session_closed`): the
+            // restore reopens them, and rebuilds them from this entry only if
+            // they are gone.
             entry["workspaceid"] = json!(ws);
             Some(entry)
         })
@@ -214,6 +215,20 @@ fn waiting_windows(store: &Store, live_ws: &std::collections::HashSet<String>) -
             entry["workspaceid"] = json!(ws);
             Some(entry)
         })
+        .collect()
+}
+
+/// The contents of the restored windows still waiting for the main window to
+/// open them.
+pub(crate) fn waiting_workspaces(store: &Store) -> std::collections::HashSet<String> {
+    store
+        .get_all::<Client>()
+        .ok()
+        .and_then(|cs| cs.into_iter().next())
+        .and_then(|c| c.meta.get(WAITING_META_KEY).and_then(|v| v.as_array().cloned()))
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|w| w.get("workspaceid").and_then(|v| v.as_str()).map(str::to_string))
         .collect()
 }
 
@@ -354,7 +369,9 @@ pub(crate) fn set_client_meta(store: &Store, key: &str, value: Option<Value>) {
 /// Restore every window in `record`: the first that comes back is the one
 /// being created (returned, as `restore_last_session` always did); each other
 /// one gets a workspace of its own, published and left for
-/// [`handle_take_restored_windows`].
+/// [`handle_take_restored_windows`]. A workspace record's closed windows
+/// (`"state": "closed"`) stay closed (`session_closed::restore_closed`), once
+/// a window came back.
 pub(crate) async fn restore_all(state: &AppState, record: &Value) -> Result<Option<(String, Vec<Event>)>, String> {
     let mut main = None;
     let mut waiting = Vec::new();
@@ -363,7 +380,9 @@ pub(crate) async fn restore_all(state: &AppState, record: &Value) -> Result<Opti
     let mut restored_count = 0usize;
     let mut reopened = 0usize;
     let mut taken = std::collections::HashSet::new();
-    for (i, window) in windows_of(record).iter().enumerate() {
+    let all = windows_of(record);
+    let open: Vec<&Value> = all.iter().filter(|w| !super::session_closed::is_closed(w)).collect();
+    for (i, window) in open.iter().copied().enumerate() {
         let restored = match reusable_workspace(state, window, &taken).await {
             Some(ws_id) => {
                 reopened += 1;
@@ -414,6 +433,13 @@ pub(crate) async fn restore_all(state: &AppState, record: &Value) -> Result<Opti
     }
     set_client_meta(&state.mstore, WAITING_META_KEY, (!waiting.is_empty()).then(|| Value::Array(waiting)));
     set_client_meta(&state.mstore, NAMES_META_KEY, (!waiting_meta.is_empty()).then(|| Value::Object(waiting_meta)));
+    if let Some((main_ws, _)) = &main {
+        let shown = open
+            .iter()
+            .filter_map(|w| w.get("workspaceid").and_then(|v| v.as_str()).map(str::to_string))
+            .collect();
+        super::session_closed::restore_closed(state, record, main_ws, &shown).await;
+    }
     match (main, first_err) {
         (Some(main), _) => Ok(Some(main)),
         (None, Some(e)) => Err(e),

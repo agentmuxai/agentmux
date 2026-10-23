@@ -17,7 +17,9 @@
 //!   an OS shutdown and the last window's close write it at once
 //!   ([`write_record_now`]), and so does a window losing focus
 //!   (`workspace.Flush`). A write that would store what is already there is
-//!   skipped; one with no window open is never made.
+//!   skipped; one with no window open is never made. Each window in the
+//!   record has a `state`: `open`, or `closed` for the windows the user closed
+//!   (`session_closed`), which a cold start keeps closed.
 //! - **Loading:** a cold start restores the newer of the session record and the
 //!   workspace's record, then falls back to the last record that loaded
 //!   cleanly (`previous`) and the copy made before an upgrade (`pre_upgrade`)
@@ -191,8 +193,13 @@ pub(crate) fn adopt_current(store: &Store, decided: Option<String>) {
     };
     let result = store.with_tx(|tx| {
         let Some(mut client) = tx.get_all::<Client>()?.into_iter().next() else { return Ok(()) };
-        let same = client.meta.get(CURRENT_META_KEY).and_then(|v| v.as_str()) == Some(row.id.as_str())
+        let was = client.meta.get(CURRENT_META_KEY).and_then(|v| v.as_str()).map(str::to_string);
+        let same = was.as_deref() == Some(row.id.as_str())
             && client.meta.get(NAME_META_KEY).and_then(|v| v.as_str()) == Some(row.name.as_str());
+        // The closed windows belong to the workspace that was open.
+        if was.is_some_and(|w| w != row.id) {
+            client.meta.remove(super::session_closed::CLOSED_META_KEY);
+        }
         if !same {
             client.meta.insert(CURRENT_META_KEY.to_string(), json!(row.id));
             client.meta.insert(NAME_META_KEY.to_string(), json!(row.name));
@@ -331,10 +338,12 @@ fn same_windows(a: &Value, b: &Value) -> bool {
     strip(a) == strip(b)
 }
 
-/// Store `record` as the open workspace's windows, unless it holds what is
+/// Store `record` (the open windows) as the open workspace's windows, with
+/// its closed windows (`session_closed::with_closed`), unless that is what is
 /// stored already. Takes no lock; callers hold [`WRITE_LOCK`].
-fn write_record(store: &Store, mut record: Value) -> Saved {
+fn write_record(store: &Store, record: Value) -> Saved {
     let Some(id) = current_id(store) else { return Saved::NoWorkspace };
+    let mut record = super::session_closed::with_closed(store, record);
     let row = match store.user_workspace_get(&id) {
         Ok(Some(row)) => row,
         Ok(None) => return Saved::NoWorkspace,
@@ -591,6 +600,17 @@ pub(crate) async fn restore_at_launch(state: &AppState) -> Result<Option<Restore
             Ok(Some(main)) => {
                 if let Some(which) = from.notice() {
                     tracing::warn!(copy = which, "user_workspace: the saved workspace didn't load; restored an older copy");
+                }
+                // The session record holds only the open windows: the closed
+                // ones come from the workspace's record (§5).
+                if from == LoadedFrom::Session {
+                    if let Some(own) = row.as_ref().and_then(|w| parse_copy("record", w.record.as_deref())) {
+                        let shown = super::session_windows::windows_of(&record)
+                            .iter()
+                            .filter_map(|w| w.get("workspaceid").and_then(|v| v.as_str()).map(str::to_string))
+                            .collect();
+                        super::session_closed::restore_closed(state, &own, &main.0, &shown).await;
+                    }
                 }
                 return Ok(Some(Restored { main, loaded: record, from }));
             }
