@@ -358,9 +358,10 @@ export type JektTier = "info" | "coord" | "sensitive";
 /** `channel`: another AgentMux instance on the same machine. */
 export type JektDeliveryTier = "host" | "channel" | "lan" | "wan";
 
-/** Sender trust classification. Host-tier deliveries are agent-originated on
- *  this machine; lan/wan cross a network boundary and are only as
- *  trustworthy as the sender's token. Spec §5. */
+/** Sender trust classification: how the sender's identity was proven, if at
+ *  all. Only the `*-verified` labels mean a signature (or the caller's own
+ *  identity token) proved it; see
+ *  https://docs.agentmux.ai/internals/jekt-protocol/. */
 export type JektTrust =
     | "host-verified"
     | "channel-verified"

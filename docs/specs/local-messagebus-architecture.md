@@ -1,6 +1,7 @@
 # Local MessageBus Architecture
 
-**Status:** proposed — Proposal
+**Status:** historical — a local MessageBus was built (merged as PR #9 of the earlier repository); jekt delivery has since been rebuilt on the reactive handler and the tiered muxbus. — Was: proposed.
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
 **Date:** 2026-03-04
 **Author:** AgentX
 

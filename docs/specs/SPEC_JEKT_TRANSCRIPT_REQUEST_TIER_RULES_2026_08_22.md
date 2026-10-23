@@ -1,9 +1,12 @@
 # SPEC: `transcript_request` jekt tier rules — repo-owner confirmation
 
 **Date:** 2026-08-22
-**Status:** Confirmed live, repo-owner in this conversation. Implements the
-CLAUDE.md change `SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md`
-flagged as its own blocking prerequisite for Phase B/C.
+**Status:** implemented — #2764; confirmed live by the repo owner in this conversation. No
+auto-responder exists: where this document says a request is "auto-resolved" (auto-deny,
+auto-approve), it describes intent, not code. Implements the CLAUDE.md rule change
+`SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md` flagged as its own blocking
+prerequisite for Phase B/C.
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
 **Author:** Korp
 **Related:** `docs/specs/SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md`
 (the design this unblocks), `docs/specs/SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17.md`

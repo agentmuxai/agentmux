@@ -1,7 +1,8 @@
 # MuxBus — Persistent-Agent Delivery & Unified Agent Discovery
 
 **Date:** 2026-06-16
-**Status:** Draft → in implementation
+**Status:** implemented — #1499 (persistent agents registered for Tier-1 delivery), #1500 (unified agent-discovery endpoint). The WAN discovery field is now `wan.local_agents_subscribed` (this host's own subscribed agents), not `wan.subscribed_agents` as §5.1 shows.
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
 **Relates to:** #1470, `SPEC_MUXBUS_DELIVERY_HIERARCHY_2026_06_15.md`, `SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md` §6, `SPEC_SHARED_AGENT_REGISTRY_2026_05_12.md`
 
 ---

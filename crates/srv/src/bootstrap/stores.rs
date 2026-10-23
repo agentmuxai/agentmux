@@ -265,11 +265,11 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         Err(e) => tracing::warn!(error = %e, "identity: agent token index unavailable — requests stay unattributed"),
     }
     // W3-S (SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md §2.2): the channel-wide
-    // WAN identity store. Opened and its instance minted here, once, so every
-    // spawn signs as the same instance. Best-effort and never redirected: if
-    // the file can't be opened or the instance can't be minted, WAN signing
-    // is simply off for this process (agents get no WAN key), which degrades
-    // every WAN jekt to today's unsigned `TRUST=network-claimed`.
+    // WAN identity store. Opened and its instance minted here, once, so srv
+    // signs every WAN jekt as the same instance. Best-effort and never
+    // redirected: if the file can't be opened or the instance can't be
+    // minted, WAN signing is simply off for this process, and its WAN jekts
+    // go unsigned (`TRUST=network-claimed` at the receiver).
     match backend::storage::wan_identity::resolve_wan_identity_path() {
         Some(path) => match crate::boot_timing::time("open_wan_db", || backend::storage::wan_identity::WanIdentityStore::open(&path)).and_then(|store| {
             let instance = store.instance_ensure(&crate::backend::reactive::registry::local_host_label())?;

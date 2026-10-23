@@ -280,8 +280,8 @@ const REAGENT_SIG_MAX_AGE_SECS: i64 = 600;
 /// partial set of the four fields (e.g. a sig but no key_id) is treated the
 /// same as "not signed" (`reagent_verified` stays `None`), not "signed but
 /// broken" — matches `cloud_subscriber.rs`'s identical policy: a legitimate
-/// sender always sends all four together, and this field never affects
-/// `TIER`/`TRUST` escalation either way, so a stripped signature can't buy
+/// sender always sends all four together, and a stripped signature reads
+/// exactly like an absent one (no `SIG=`, nothing forced), so it can't buy
 /// an attacker anything a fully-absent one couldn't already.
 ///
 /// Takes `now` explicitly (rather than calling `now_unix_secs()` itself),
@@ -998,8 +998,8 @@ pub(crate) async fn deliver(
         // same-host or LAN tier could place the message.
         //
         // This tier used to be a comment here delegating to a "muxbus-client"
-        // that the callers agents actually use are not — the MCP `SendMessage`
-        // tool POSTs to this very endpoint and bails on `success != true`, so
+        // that the callers agents actually use are not — the MCP `Message`
+        // tool's send action POSTs to this very endpoint and bails on `success != true`, so
         // the chain silently stopped at three while that tool's description
         // promised "local → LAN → cloud". Owning it here means every caller
         // inherits it. See `crate::muxbus::relay` and
@@ -1424,7 +1424,7 @@ pub(super) async fn try_cloud_relay(state: &AppState, req: &InjectionRequest, ca
                 channel_verified: None,
             };
             let mut body = serde_json::to_value(&body).unwrap_or_default();
-            // Passed through for `SendMessage`, which warns of a likely typo
+            // Passed through for the `Message` tool, which warns of a likely typo
             // on `false` (PLAN_JEKT_LOCAL_FIRST_ROUTING_2026_10_02.md R-3).
             if let (Some(in_account), Some(obj)) = (target_in_account, body.as_object_mut()) {
                 obj.insert("target_in_account".to_string(), serde_json::Value::Bool(in_account));
@@ -1776,9 +1776,9 @@ pub(super) struct EnsureSigningKeyRequest {
 /// (`agent_handlers/input.rs`), so any agent already holds it. Returning
 /// another agent's raw signing key to any caller with that shared key is
 /// secret-key exfiltration enabling cryptographic impersonation — it
-/// directly breaks the invariant `agent_jekt_keys.rs` documents ("never
-/// returned over any RPC ... only the agent it claims to be from ever held
-/// the key") and the entire premise `TRUST=host-verified` depends on.
+/// directly breaks the invariant `agent_jekt_keys.rs` documents (a key is
+/// served only to its own agent, by that agent's identity token) and the
+/// entire premise `TRUST=host-verified` depends on.
 ///
 /// There is no way to additionally verify "the HTTP caller genuinely IS
 /// `agent_id`" from this request alone — that's the exact problem host-tier

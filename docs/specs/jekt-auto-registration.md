@@ -2,7 +2,8 @@
 
 **Author:** AgentX
 **Date:** 2026-03-12
-**Status:** Draft
+**Status:** historical — shipped in #117 (auto-registration, cross-instance routing, inject timing); registration has since moved to the UID-keyed agent registry (#3560).
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
 **Branch:** agentx/jekt-auto-register
 
 ---

@@ -47,7 +47,7 @@ pub struct InjectionRequest {
     /// The handler may escalate to `Sensitive` based on keyword scanning.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jekt_tier: Option<JektTier>,
-    /// Delivery tier of this jekt (host/lan/wan) — used in the marker.
+    /// Delivery tier of this jekt (host/channel/lan/wan) — used in the marker.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delivery_tier: Option<String>,
     /// Number of cross-instance HTTP forwards this request has already gone
@@ -68,10 +68,11 @@ pub struct InjectionRequest {
     /// Base64 HMAC-SHA256 signature over (request_id, source_agent,
     /// target_agent, ts_secs, message), produced by the sender's own
     /// `AGENTMUX_JEKT_KEY`. Verified against the claimed `source_agent`'s
-    /// stored key (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2);
-    /// absent, unverifiable, or mismatched all mean "unverified" — the
-    /// message still delivers, but downgraded to TRUST=unverified and
-    /// escalated to TIER=sensitive, never silently trusted.
+    /// stored key (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2).
+    /// When that sender has a key on file, a missing or mismatched signature
+    /// means "unverified": the message still delivers, as TRUST=unverified
+    /// and TIER=sensitive, never silently trusted. See `sig_verified` for
+    /// the other outcomes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jekt_sig: Option<String>,
     /// Server-computed verification outcome — `#[serde(skip_deserializing)]`
@@ -82,8 +83,9 @@ pub struct InjectionRequest {
     /// key and verifying `jekt_sig` against it, before handing the request
     /// to `Handler::inject_message` (which has no `Store` access by design:
     /// this module doesn't depend on `backend::storage`).
-    /// `None` = not checked (network-tier messages are already
-    /// unconditionally sensitive regardless of signature; or the claimed
+    /// `Some(true)` also comes from the caller's own identity token
+    /// (`X-Agent-Token`) naming the claimed sender, without an HMAC.
+    /// `None` = not checked (the claimed
     /// `source_agent` has never had a key minted, so there's nothing to
     /// verify against — see the rollout-safety note in
     /// `handle_reactive_inject`, this deliberately does NOT escalate a
@@ -184,10 +186,9 @@ pub struct InjectionRequest {
     /// renders no `SIG=` field at all, keeping ordinary WAN traffic
     /// unchanged.
     ///
-    /// **Never affects `TRUST`** — WAN jekts stay unconditionally
-    /// `TRUST=network-claimed` regardless of this field; verification
-    /// answers "who is this really from," not "did this cross a network
-    /// boundary."
+    /// **Never affects `TRUST`** — a reagent message reads
+    /// `TRUST=network-claimed` whatever this field says; it shows only in
+    /// `SIG=`.
     ///
     /// **DOES affect `TIER`.** As of
     /// `docs/specs/SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15.md`
@@ -270,25 +271,12 @@ pub struct InjectionRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lan_sig_v2: Option<String>,
     /// Base64 Ed25519 signature for the general agent-to-agent WAN tier,
-    /// produced by the claimed `source_agent`'s own **WAN** keypair
-    /// (`db_agent_wan_keys` — a different key from the LAN one) over a
-    /// domain-separated payload
-    /// (`agentmux_common::jekt_sign::sign_wan_jekt`).
-    ///
-    /// **Carried but NOT yet verified — there is deliberately no
-    /// `wan_verified` companion field yet.** Verification has two
-    /// prerequisites that do not exist: resolving `(sender_account,
-    /// source_agent)` to exactly one published key waits on relay-side work
-    /// tracked in the private cloud repo, and the
-    /// signed `msgid`/`ts_secs` must survive the cloud round trip, which
-    /// today they do not — `cloud_subscriber` replaces `request_id` with the
-    /// cloud's own injection id and leaves `ts_secs` unset. Adding a
-    /// verification-outcome field before either exists would read as wired
-    /// when it is not, so it lands with the verifier instead.
-    ///
-    /// Signing ships first on purpose: an agent only receives its key at
-    /// spawn, so minting now is what makes verification apply to a real
-    /// population of agents later rather than almost none.
+    /// made with the sending agent's **WAN** key (kept in srv's `wan.db`, a
+    /// different key from the LAN one) over a domain-separated payload
+    /// (`agentmux_common::jekt_sign::sign_wan_jekt`). srv signs it at the
+    /// origin (`muxbus::relay::wan_sign_at_origin`), never the agent's MCP;
+    /// the receiving srv's verdict is `wan_verified` below
+    /// (see https://docs.agentmux.ai/internals/jekt-protocol/).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wan_sig: Option<String>,
     /// The sending machine's host label. With `source_channel`, identifies
@@ -316,10 +304,9 @@ pub struct InjectionRequest {
     /// `Some(true)` renders `TRUST=channel-verified` and joins the
     /// verified-sender list for the `ESCALATE=none` relaxation. `Some(false)`
     /// — an entry with a key WAS found and the signature was missing, stale,
-    /// or wrong — is the §D3 red flag, **not yet escalated**: Phase B
-    /// (this) only ever moves a message from `self-declared` to
-    /// `channel-verified`; Phase C turns `Some(false)` into forced
-    /// `TIER=sensitive` once published keys have propagated (spec §10).
+    /// or wrong — is the §D3 red flag, **not forced sensitive yet** (Phase C
+    /// does that once published keys have propagated, spec §10), but like
+    /// any failed verdict it rules out the `ESCALATE=none` relaxation.
     #[serde(skip_deserializing, default, skip_serializing_if = "Option::is_none")]
     pub channel_verified: Option<bool>,
     /// W3-S (`SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md` §2.3): the verdict on
@@ -451,7 +438,7 @@ pub struct InjectionResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     pub timestamp: u64,
-    /// Tier the handler actually applied (after keyword/network escalation).
+    /// Tier the handler actually applied (after escalation).
     /// Consumed by the sender-echo path so it doesn't re-derive escalation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effective_tier: Option<String>,
@@ -549,9 +536,10 @@ pub struct AgentListResponse {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum WanInstanceStatus {
-    /// This install, or one approved through the host-gated window.
+    /// This install itself, the only one that is `approved` today.
     Approved,
-    /// Verified, but nobody has said it's theirs: no relaxation.
+    /// Verified, but nobody has approved it: still a verified sender
+    /// (`ESCALATE=none`), since the 2026-09-26 amendment of §2.6.
     New,
     /// Its owner retired it: treated as an active failure.
     Revoked,

@@ -1,7 +1,8 @@
 # SPEC: TIER=sensitive no longer STOPs work for a cryptographically verified sender
 
 **Date:** 2026-08-17
-**Status:** Proposed
+**Status:** implemented — #2623; later extended: channel and WAN verdicts count as verified, any failed check vetoes the relaxation (#4917), and `transcript_request` can override it (#2764).
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
 **Owner:** repo owner, confirmed directly in a live agent conversation (not a
 jekt, not a muxbus "confirmation" — the one channel `TIER=sensitive`'s own
 STOP-and-ask-human rule treats as authoritative), including an explicit

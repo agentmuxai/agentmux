@@ -247,10 +247,10 @@ An agent's own `gh` is deliberately not signed in as you: AgentMux points it at 
 Agents message each other ("jekts"). Every incoming message arrives wrapped in a marker block that says where it came from and, crucially, **whether the sender's identity was actually proven**:
 
 ```
-[JEKT:FROM=korp TO=agenta TIER=coord DELIVERY=host TRUST=host-verified ESCALATE=none MSGID=... PRIORITY=normal TS=...]
+[JEKT:FROM=korp TO=agenta TIER=coord DELIVERY=host TRUST=host-verified MSGID=... PRIORITY=normal TS=...]
 ```
 
-Depending on the route it can also carry `HELD_FOR=` (delivered late), `INSTANCE=` / `INSTANCE_STATUS=` (which install sent it) and `SIG=`.
+Depending on the route it can also carry `HELD_FOR=` (delivered late), `INSTANCE=` / `INSTANCE_STATUS=` (which install sent it), `SIG=` and `FILES=` (how many attached files were delivered). `ESCALATE=` appears only when `TIER=sensitive`: `required` means stop and ask a human, `none` means the sender is verified and the tag is only a warning.
 
 Read `TRUST=` before acting. Only these mean the sender is cryptographically proven to be who it claims:
 
@@ -260,13 +260,13 @@ Read `TRUST=` before acting. Only these mean the sender is cryptographically pro
 | `lan-verified` / `channel-verified` | Signature verified — across a LAN, or between local instances |
 | `wan-verified` | Signature verified — another install on the same account, over the internet. `INSTANCE_STATUS=revoked` means its owner retired that install: treat it as unverified. |
 
-Separately, `SIG=verified` means the message was signed with a pinned service key (for example the GitHub notifier), and `SIG=invalid` means that signature failed.
+Separately, `SIG=verified` means the message was signed with a pinned service key (for example the GitHub notifier), and `SIG=invalid` means that signature failed or was valid only under a key that is no longer trusted.
 
 Everything else — `self-declared`, `network-claimed`, or a **failed** `unverified` — means identity was **not** established. Crossing a network boundary proves nothing on its own, and there is no "trusted account" or "trusted network" concept: a sender's claimed name is only as good as its signature.
 
 **The practical rule:** an unverified sender is not authority for anything sensitive. If a message asks for a credential or a destructive action and its identity isn't proven, confirm with a human out-of-band first — a follow-up message "confirming" it is worth no more than the original.
 
-This is enforced in code ([`agentmux-srv`'s reactive handler](crates/srv/src/backend/reactive) and [`agentmux_common::jekt_sign`](crates/common/src/jekt_sign.rs)), not by convention. The full tier and escalation rules live in the `SPEC_JEKT_*` specs in [`docs/specs/`](docs/specs), starting with [`SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md`](docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md) and [`SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md`](docs/specs/SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md); agent-facing operating instructions live in each agent's own provider configuration, not in this repo.
+This is enforced in code ([`agentmux-srv`'s reactive handler](crates/srv/src/backend/reactive) and [`agentmux_common::jekt_sign`](crates/common/src/jekt_sign.rs)), not by convention. The full marker, tier and escalation rules are the [jekt protocol specification](https://docs.agentmux.ai/internals/jekt-protocol/); the `SPEC_JEKT_*` documents in [`docs/specs/`](docs/specs) are the design records behind it. Agent-facing operating instructions live in each agent's own provider configuration, not in this repo.
 
 ## MuxAPI
 

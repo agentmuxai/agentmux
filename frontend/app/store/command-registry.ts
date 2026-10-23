@@ -509,6 +509,25 @@ export function registerDefaultCommands(): void {
         keywords: "global personal memory skills bundles abf",
         execute: () => openMemory(),
     });
+    // Settings and Toolchain left the ☰ menu (SPEC_WORKSPACES_2026_10_23.md
+    // §3); the palette is one of their ways in. The key binding's own handler
+    // (keymodel.ts) runs first for Ctrl+, / Cmd+,.
+    commandRegistry.register({
+        id: "app:settings",
+        label: "Settings",
+        category: "App",
+        icon: "cog",
+        keywords: "preferences options configure",
+        execute: () => fireAndForget(() => openOrFocusPaneByView("settings")),
+    });
+    commandRegistry.register({
+        id: "open:toolchain",
+        label: "Open Toolchain",
+        category: "Open",
+        icon: "wrench",
+        keywords: "cli install node npm git docker providers",
+        execute: () => fireAndForget(() => openOrFocusPaneByView("toolchain")),
+    });
     commandRegistry.register({
         id: "help:docs",
         label: "Online Docs",

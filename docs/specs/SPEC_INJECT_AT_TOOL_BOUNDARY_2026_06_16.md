@@ -1,18 +1,17 @@
 # SPEC: Deliver a queued message mid-turn (at the next tool-call boundary) instead of waiting for idle
 
 **Date:** 2026-06-16
-> **⚠ PARTIALLY SUPERSEDED (2026-09-23) by [`docs/specs/SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`](SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md).**
-> This spec's *reachability* work stands and is still live: mid-turn steering works, and the
-> reactive/MCP path can reach a stream-json pane's live stdin at all (it previously silently
-> missed it). What is reversed is its **default policy**. Making mid-turn steering the default for
-> *every* sender — including GitHub/ReAgent notifications, CI pings and bridge traffic — is what
-> allowed an unrelated automated message to cut an agent's explanation in half. Non-human senders
-> now default to deferring to the next turn boundary. Read the successor before changing delivery
-> timing.
+> **⚠ Delivery policy changed twice since.** [`SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`](SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md)
+> made non-human senders (GitHub/review notifications, CI pings, bridge traffic) defer to the next
+> turn boundary; [`SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md`](SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md)
+> (#3979) reversed that: jekts are delivered immediately, even mid-turn. This spec's *reachability*
+> work stands and is still live: the reactive/MCP path can reach a stream-json pane's live stdin
+> (it previously silently missed it). Read the current spec before changing delivery timing.
 
-**Status:** **Implemented** (Phase 3 of `SPEC_AGENT_CONTROL_PROTOCOL` — controller-aware
-delivery) on branch `agento/mid-turn-message-delivery`. Feasibility resolved empirically;
-cross-provider design below. — #1477
+**Status:** implemented — #1477 (Phase 3 of `SPEC_AGENT_CONTROL_PROTOCOL` — controller-aware
+delivery); feasibility resolved empirically, cross-provider design below. Non-human senders are no
+longer deferred (immediate delivery, #3979).
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
 
 > **Update (post-pull):** main now ships Claude as a **persistent** controller (the Agent
 > Control Protocol Phase 1 landed: `--permission-prompt-tool stdio --permission-mode default`,

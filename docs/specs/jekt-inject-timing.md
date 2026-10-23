@@ -1,5 +1,8 @@
 # Jekt Inject Timing Spec
 
+**Status:** implemented — #117 (inject timing, with jekt auto-registration and cross-instance routing).
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
+
 ## Problem
 Text injected into Claude Code's PTY via `handler.rs` appears but doesn't submit.
 Claude Code's readline requires Enter (`\r`) as a **separate PTY write** after the

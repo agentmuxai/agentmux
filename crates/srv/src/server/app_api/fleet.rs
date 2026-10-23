@@ -38,9 +38,10 @@
 //! The forward uses the same loopback auth as the stop forward, and reaches only
 //! what that channel's own `fleet.broadcast` already does.
 //! An AGENT-initiated broadcast instead loops the EXISTING signed single-target
-//! `SendMessage` MCP tool path client-side (see `agentmux-mcp`'s `FleetBroadcast`
-//! tool) — only the calling agent's own process holds its `AGENTMUX_JEKT_KEY`, so
-//! per-message signing can only happen there, never in a server-side batch RPC.
+//! `Message` send path client-side (`Message` broadcast in `agentmux-mcp`) —
+//! srv mints, stores and serves each agent's keys and the agent's MCP signs
+//! with its copy, so per-message signing happens there, never in a
+//! server-side batch RPC.
 //! `fleet.bulk-stop` has no such constraint (a controller stop involves no
 //! jekt signing at all, same as `agent.stop` today) and IS exposed over
 //! HTTP (`POST /api/v1/fleet/bulk-stop`) for `FleetBulkStop`.

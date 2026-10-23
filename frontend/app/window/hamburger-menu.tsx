@@ -12,8 +12,7 @@
 // Every menu action resolves to a module-level store/RPC primitive, so the
 // component is fully self-contained (no TabBar state coupling).
 
-import { createTab, getApi, openOrFocusPaneByView } from "@/store/global";
-import { openConnectors, openMemory } from "@/app/view/section-pane/panes";
+import { createTab, getApi } from "@/store/global";
 import { FlyoutMenu } from "@/app/element/flyoutmenu";
 import { hostHas } from "@/app/host/host-caps";
 import { fireAndForget } from "@/util/util";
@@ -162,32 +161,14 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
                 ],
             },
             { label: "", divider: true },
-            {
-                label: "Settings",
-                icon: "cog",
-                shortcut: shortcutFor("app:settings"),
-                onClick: () => fireAndForget(() => openOrFocusPaneByView("settings")),
-            },
+            // Settings, Connectors, Memory and Toolchain open from the widget
+            // bar, the palette and (Settings) its shortcut, not from here
+            // (SPEC_WORKSPACES_2026_10_23.md §3).
             {
                 label: "Command Palette",
                 icon: "magnifying-glass",
                 shortcut: shortcutFor("view:command-palette"),
                 onClick: () => openModal(CommandPaletteModal),
-            },
-            {
-                label: "Connectors",
-                icon: "plug",
-                onClick: () => fireAndForget(() => openConnectors()),
-            },
-            {
-                label: "Memory",
-                icon: "brain",
-                onClick: () => fireAndForget(() => openMemory()),
-            },
-            {
-                label: "Toolchain",
-                icon: "wrench",
-                onClick: () => fireAndForget(() => openOrFocusPaneByView("toolchain")),
             },
             {
                 label: "DevTools",

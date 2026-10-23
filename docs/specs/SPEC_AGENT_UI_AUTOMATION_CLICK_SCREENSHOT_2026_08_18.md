@@ -395,7 +395,7 @@ harden:
 blanket policy change** — recorded here specifically so it's a citable spec
 diff, not just a commit-message assertion, matching this repo's own
 established standard for distinguishing a genuine decision from an
-unverified one (see `CLAUDE.md`'s jekt security section for the same
+unverified one (see the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/, for the same
 pattern applied to a different subsystem: a real change ships with a spec
 diff and tests, not just prose).
 

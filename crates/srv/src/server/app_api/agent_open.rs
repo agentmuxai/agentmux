@@ -1107,12 +1107,12 @@ pub(super) fn write_agent_config_files(
     // (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2,
     // SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.1) — inject
     // AGENTMUX_JEKT_KEY / AGENTMUX_LAN_KEY into the agentmux MCP server's
-    // own env, right alongside AGENTMUX_AGENT_ID, so `SendMessage`/`Loop`
-    // can sign outgoing jekts as this agent. Best-effort: a failure here
-    // must never block agent spawn — the agent still launches, just
-    // without a key, and its jekts render TRUST=self-declared /
-    // TRUST=network-claimed instead of verified until the next successful
-    // materialization. Shared with `WriteAgentConfig`
+    // own env, right alongside AGENTMUX_AGENT_ID, so the `Message` tool
+    // can sign outgoing jekts as this agent. This copy is the fallback: the
+    // MCP first fetches its keys from srv (`GET /agentmux/agents/self/keys`).
+    // Best-effort: a failure here must never block agent spawn — the agent
+    // still launches; only with neither source do its jekts go unsigned.
+    // Shared with `WriteAgentConfig`
     // (server/editor_handlers.rs, the "click Launch" path) via
     // `agent_config::inject_jekt_signing_keys_into_mcp_json` — see that
     // function's doc comment for why this must not be duplicated inline

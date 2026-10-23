@@ -736,9 +736,9 @@ pub struct MuxspectVerifySenderQuery {
 /// it performs NO cryptographic check and must not be confused with the
 /// actual JEKT sender-authentication mechanism, which is per-message,
 /// automatic, and already computes a real `TRUST=`/`SIG=` value on every
-/// delivered jekt via HMAC-SHA256 (host tier) / Ed25519 (LAN tier) / a
-/// pinned Ed25519 key (reagent WAN) — see this repo's root `CLAUDE.md`,
-/// "Is a jekt's sender identity actually verified? — the real answer".
+/// delivered jekt via HMAC-SHA256 (host tier) / Ed25519 (LAN, cross-channel
+/// and same-account WAN) / a pinned Ed25519 key (reagent WAN) — see the jekt
+/// protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/.
 /// Earlier drafts of this route reused that exact vocabulary
 /// (`host-verified`/`network-claimed`) for a mere presence check, which
 /// collided with — and could be mistaken for — that real, stronger

@@ -1,7 +1,8 @@
 # SPEC: Narrow TIER=sensitive to real red flags only
 
 **Date:** 2026-08-15
-**Status:** Proposed
+**Status:** implemented — #2585; the dev-key rule in §3/§4 was reversed by #3657.
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
 **Owner:** repo owner, confirmed directly in a live agent conversation (not a
 jekt, not a muxbus "confirmation" — the one channel `TIER=sensitive`'s own
 STOP-and-ask-human rule treats as authoritative)
@@ -47,6 +48,8 @@ These are **not** loosened by this change — they are the actual red flags:
    `rm -rf`, etc.) — unchanged.
 
 ## 3. What narrows
+
+> **Note (later change):** the dev-key clause below no longer holds. Since #3657 a signature valid only under `reagent-v1-dev` renders `SIG=invalid` and forces `TIER=sensitive`, `ESCALATE=required`.
 
 **Ordinary unverified network-tier traffic with clean content is no longer
 forced sensitive merely for lacking proof of identity.** Concretely: a LAN

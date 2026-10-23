@@ -1,6 +1,8 @@
 # Spec: multi-tier discovery + remote API invocation over muxbus
 
 **Status:** active — §1 Tier-2b same-host cross-channel discovery shipped (PR #2350); §2 LAN pinned identity, §3 cloud directory, §4 typed RPC invocation layer not started. Verified 2026-08-10.
+**Note:** #2350 has merged; the body's "open PR" / "not yet merged" remarks are historical.
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
 **Author:** AgentY
 **Date:** 2026-07-29
 **Related:** [`docs/specs/SPEC_MUXBUS_DELIVERY_HIERARCHY_2026_06_15.md`](SPEC_MUXBUS_DELIVERY_HIERARCHY_2026_06_15.md),

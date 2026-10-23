@@ -1,10 +1,12 @@
 # Incident: jekt notifications never reach a renamed agent (stable ID vs. live display name)
 
-**Status:** implemented — fix in this PR (`agentmux-srv/src/backend/reactive/handler.rs`'s
+**Status:** historical — fixed in #3120 (`agentmux-srv/src/backend/reactive/handler.rs`'s
 `alias_to_block`/`register_agent_with_nonce`, `agentmux-srv/src/backend/blockcontroller/persistent.rs`'s
-`stable_agent_id`, `agentmux-srv/src/backend/blockcontroller/mod.rs`'s `Controller::stable_agent_id`).
-Not yet verified against a live GitHub PR-review jekt end-to-end (verified via unit tests and a
-live `DiscoverAgents`/`env` reproduction of the underlying mismatch instead).
+`stable_agent_id`, `agentmux-srv/src/backend/blockcontroller/mod.rs`'s `Controller::stable_agent_id`);
+the alias maps were later replaced by the UID-keyed agent registry (#3560). At the time it was
+verified via unit tests and a live `DiscoverAgents`/`env` reproduction, not a live GitHub
+PR-review jekt end-to-end.
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
 
 **Date:** 2026-09-09
 
