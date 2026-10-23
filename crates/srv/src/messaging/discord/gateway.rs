@@ -422,7 +422,7 @@ fn handle_dispatch(
                 forward_hops: 0,
                 ..Default::default()
             };
-            let result = crate::server::jekt_entry::inject_from_bridge(req);
+            let result = crate::server::jekt_entry::inject_from_bridge(req, &msg.content);
             if result.success {
                 tracing::debug!(
                     "discord_bridge: injected msg from {} to agent {}",

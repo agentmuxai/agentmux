@@ -201,7 +201,7 @@ fn handle_update(update: &Update, config: &TelegramConfig, health: &Arc<Mutex<Br
         forward_hops: 0,
         ..Default::default()
     };
-    let result = crate::server::jekt_entry::inject_from_bridge(req);
+    let result = crate::server::jekt_entry::inject_from_bridge(req, text);
     if result.success {
         tracing::debug!("telegram_bridge: injected msg from {username} to agent {target}");
     } else {

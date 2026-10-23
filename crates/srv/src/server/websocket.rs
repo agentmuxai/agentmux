@@ -605,9 +605,8 @@ async fn handle_incoming_text(
                         return Ok(None);
                     }
 
-                    // Non-"agent not found" error — report it
-                    let is_not_found = resp.error.as_deref().map(|e| e.contains("not found")).unwrap_or(false);
-                    if !is_not_found {
+                    // Not a fallback case (`jekt_entry::bus_fallback_allowed`) — report it
+                    if !super::jekt_entry::bus_fallback_allowed(&reactive_req, &resp) {
                         let err = json!({ "type": "bus:error", "error": resp.error });
                         let msg = serde_json::to_string(&err).unwrap_or_default();
                         if socket.send(Message::Text(msg.into())).await.is_err() {

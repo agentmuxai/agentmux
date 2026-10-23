@@ -155,7 +155,7 @@ pub(super) async fn handle_inject(
         req.priority.clone(),
         super::caller::attributed_uid(caller.as_deref()),
     );
-    let resp = state.reactive_handler.inject_message(reactive_req);
+    let resp = state.reactive_handler.inject_message(reactive_req.clone());
     if resp.success {
         return Json(json!({
             "status": "injected",
@@ -166,9 +166,9 @@ pub(super) async fn handle_inject(
     }
 
     // Agent not registered with a block_id — fall back to MessageBus WS push
-    // (only fall back on "agent not found", propagate other errors)
-    let is_not_found = resp.error.as_deref().map(|e| e.contains("not found")).unwrap_or(false);
-    if !is_not_found {
+    // (only on "agent not found", and never for a transcript request);
+    // propagate other errors.
+    if !super::jekt_entry::bus_fallback_allowed(&reactive_req, &resp) {
         return Json(json!({
             "status": "error",
             "error": resp.error,

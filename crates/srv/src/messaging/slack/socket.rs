@@ -519,7 +519,7 @@ fn route_event(
         forward_hops: 0,
         ..Default::default()
     };
-    let result = crate::server::jekt_entry::inject_from_bridge(req);
+    let result = crate::server::jekt_entry::inject_from_bridge(req, text);
     if result.success {
         tracing::debug!("slack_bridge: injected msg from {user} to agent {target}");
     } else {

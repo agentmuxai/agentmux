@@ -140,3 +140,49 @@ fn echo_trust_takes_every_verdict_from_the_request() {
     );
     assert_eq!(EchoTrust::of(&InjectionRequest::default()).delivery_tier, "host");
 }
+
+fn failed(error: &str) -> InjectionResponse {
+    serde_json::from_value(serde_json::json!({
+        "success": false,
+        "request_id": "m",
+        "error": error,
+        "timestamp": 0,
+    }))
+    .unwrap()
+}
+
+#[tokio::test]
+async fn a_transcript_request_never_falls_back_to_the_message_bus() {
+    let state = test_state();
+    let not_found = failed("agent not found: agent1");
+    let transcript = bus_inject_request(&state, "requester", "agent1", &transcript_request_message(), None, String::new());
+    assert!(!bus_fallback_allowed(&transcript, &not_found), "the bus queue renders no TIER=sensitive");
+
+    let plain = bus_inject_request(&state, "requester", "agent1", "hello", None, String::new());
+    assert!(bus_fallback_allowed(&plain, &not_found));
+    assert!(!bus_fallback_allowed(&plain, &failed("rate limited")), "only a missing registration falls back");
+}
+
+#[tokio::test]
+async fn a_bridge_message_whose_text_is_a_transcript_request_is_marked() {
+    let state = test_state();
+    let raw = transcript_request_message();
+    let enveloped = format!("[Discord @someone]: {raw}");
+    let mut req = bridge_request(enveloped.clone());
+    resolve_bridge_fields(Some(&state.mstore), &mut req, &raw);
+    assert!(req.is_transcript_request, "resolved from the raw text, before the envelope");
+    assert_eq!(req.message, enveloped, "the recipient still reads the envelope");
+
+    let mut direct = bridge_request(raw.clone());
+    resolve_transcript_request_tier_fields(&state.mstore, &mut direct);
+    assert_eq!(req.transcript_request_escalate_forced, direct.transcript_request_escalate_forced);
+}
+
+#[test]
+fn a_bridge_message_with_ordinary_text_is_not_marked() {
+    let mut req = bridge_request("[Slack #c @u]: hello".to_string());
+    resolve_bridge_fields(None, &mut req, "hello");
+    assert!(!req.is_transcript_request);
+    assert!(!req.transcript_request_escalate_forced);
+    assert_eq!(req.message, "[Slack #c @u]: hello");
+}

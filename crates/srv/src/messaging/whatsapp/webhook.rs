@@ -139,7 +139,7 @@ pub async fn handle_inbound(headers: HeaderMap, body: Bytes) -> impl IntoRespons
             forward_hops: 0,
             ..Default::default()
         };
-        let result = crate::server::jekt_entry::inject_from_bridge(req);
+        let result = crate::server::jekt_entry::inject_from_bridge(req, &msg.text);
         if !result.success {
             tracing::warn!(
                 "whatsapp_bridge: inject to agent {target} failed: {:?}",

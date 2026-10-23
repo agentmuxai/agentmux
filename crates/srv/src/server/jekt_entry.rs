@@ -46,12 +46,31 @@ pub(super) fn prepare_host_entry(state: &AppState, req: &mut InjectionRequest) {
     super::reactive::resolve_transcript_request_tier_fields(&state.mstore, req);
 }
 
+/// Whether a request the handler could not deliver may go to the MessageBus
+/// queue instead: only when the target has no registration ("not found"),
+/// and never for a transcript request, since that queue renders no marker
+/// and so no `TIER=sensitive`.
+pub(super) fn bus_fallback_allowed(req: &InjectionRequest, resp: &InjectionResponse) -> bool {
+    let not_found = resp.error.as_deref().is_some_and(|e| e.contains("not found"));
+    not_found && !req.is_transcript_request
+}
+
 /// Delivers a message a chat bridge (Slack, Discord, Telegram, WhatsApp)
 /// received, with its transcript-request fields resolved against this
-/// channel's store first.
-pub(crate) fn inject_from_bridge(mut req: InjectionRequest) -> InjectionResponse {
-    resolve_with_store(crate::backend::identity_spawn::row_store(), &mut req);
+/// channel's store first. `raw_text` is the sender's own text, before the
+/// bridge's `[Platform @user]: ` envelope in `req.message`.
+pub(crate) fn inject_from_bridge(mut req: InjectionRequest, raw_text: &str) -> InjectionResponse {
+    resolve_bridge_fields(crate::backend::identity_spawn::row_store(), &mut req, raw_text);
     crate::backend::reactive::handler::get_global_handler().inject_message(req)
+}
+
+/// Resolves the transcript-request fields of a bridge request from the raw
+/// text the platform delivered, leaving the enveloped `req.message` as the
+/// recipient sees it.
+pub(crate) fn resolve_bridge_fields(store: Option<&Arc<Store>>, req: &mut InjectionRequest, raw_text: &str) {
+    let enveloped = std::mem::replace(&mut req.message, raw_text.to_string());
+    resolve_with_store(store, req);
+    req.message = enveloped;
 }
 
 /// `resolve_transcript_request_tier_fields` for a caller that reaches the
