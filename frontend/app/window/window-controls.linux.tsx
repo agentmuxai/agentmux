@@ -15,6 +15,7 @@
 
 import { Button } from "@/app/element/ui/Button";
 import { getApi } from "@/store/global";
+import { requestCloseWindow } from "./window-close";
 import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
 import { createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { windowButtonLayout, type WindowButton } from "./window-button-layout";
@@ -111,7 +112,7 @@ function ControlButton(props: { kind: WindowButton; maximized: boolean }): JSX.E
                 return {
                     title: "Close",
                     glyph: <CloseGlyph />,
-                    click: () => void getApi().closeWindow().catch(console.error),
+                    click: () => void requestCloseWindow().catch(console.error),
                 };
         }
     };

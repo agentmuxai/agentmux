@@ -15,6 +15,20 @@ import type { ConnStatus } from "@/types/rpc/ConnStatus";
  *  was (physical pixels, from srv's window row). srv `session_windows.rs`. */
 export type RestoredWindow = { workspaceid: string; x?: number; y?: number; width?: number; height?: number };
 
+/** A closed window whose workspace is kept, for "Reopen closed window"
+ *  (srv `session_closed.rs`). `agents` are the names of its agents. */
+export type ClosedWindow = {
+    workspaceid: string;
+    closed_at_ms: number;
+    name: string;
+    tabs: number;
+    panes: number;
+    agents: string[];
+};
+
+/** An agent running in a window's workspace; `working` when it is mid-turn. */
+export type WindowAgent = { block_id: string; name: string; working: boolean };
+
 // blockservice.BlockService (block)
 class BlockServiceType {
     GetControllerStatus(arg2: string): Promise<BlockControllerRuntimeStatus> {
@@ -175,6 +189,24 @@ class WindowServiceType {
     // the last session's windows, each handed out once (srv `session_windows.rs`).
     TakeRestoredWindows(): Promise<RestoredWindow[]> {
         return MOS.callBackendService("window", "TakeRestoredWindows", Array.from(arguments))
+    }
+    // Closing is not deleting (srv `session_closed.rs`): the closed windows
+    // whose workspaces are kept, newest first.
+    ListClosedWindows(): Promise<ClosedWindow[]> {
+        return MOS.callBackendService("window", "ListClosedWindows", Array.from(arguments))
+    }
+    // Reopen one: drops it from the list and returns where it was, for
+    // `getApi().openRestoredWindow`.
+    TakeClosedWindow(workspaceId: string): Promise<RestoredWindow> {
+        return MOS.callBackendService("window", "TakeClosedWindow", Array.from(arguments))
+    }
+    // Close workspace, confirmed: the window's next close deletes its workspace.
+    DiscardWorkspaceOnClose(windowId: string): Promise<void> {
+        return MOS.callBackendService("window", "DiscardWorkspaceOnClose", Array.from(arguments))
+    }
+    // The agents running in the window's workspace, for the close warning.
+    WindowAgents(windowId: string): Promise<WindowAgent[]> {
+        return MOS.callBackendService("window", "WindowAgents", Array.from(arguments))
     }
 
     // move block to new window

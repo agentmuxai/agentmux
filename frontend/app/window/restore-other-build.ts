@@ -27,8 +27,12 @@ const pad = (n: number): string => String(n).padStart(2, "0");
 /** "closed 03:28 today", "closed yesterday at 22:10", "closed Oct 17 at 22:10".
  *  A layout whose save time isn't recorded says when its build last ran. */
 export function whenSaved(l: OtherBuildLayout, now: Date = new Date()): string {
-    const at = new Date(l.saved_at_ms);
-    const verb = l.saved_at_exact ? "closed" : "last used";
+    return whenAt(l.saved_at_ms, l.saved_at_exact ? "closed" : "last used", now);
+}
+
+/** "<verb> 03:28 today", "<verb> yesterday at 22:10", "<verb> Oct 17 at 22:10". */
+export function whenAt(atMs: number, verb: string, now: Date = new Date()): string {
+    const at = new Date(atMs);
     const time = `${pad(at.getHours())}:${pad(at.getMinutes())}`;
     const startOfDay = (d: Date): number => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
     const days = Math.round((startOfDay(now) - startOfDay(at)) / 86_400_000);

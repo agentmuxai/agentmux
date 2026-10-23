@@ -14,6 +14,7 @@
  */
 
 import { getApi } from "@/store/global";
+import { requestCloseWindow } from "./window-close";
 import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
 import { type JSX } from "solid-js";
 import "./window-controls.win32.scss";
@@ -70,7 +71,7 @@ const Win11CaptionButtons = (): JSX.Element => {
             </button>
             <button
                 class="window-action-btn close-btn"
-                onClick={() => getApi().closeWindow().catch(console.error)}
+                onClick={() => requestCloseWindow().catch(console.error)}
                 title="Close"
                 aria-label="Close"
                 data-testid="window-close-btn"
