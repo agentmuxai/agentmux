@@ -354,9 +354,13 @@ async function initHostNewWindow(seedView?: string | null, seedMeta?: Record<str
         // window whose close is on its way. One still opening (no window id
         // yet, as a second tray click makes) doesn't count: srv lets exactly
         // one opener restore (#5363).
-        const otherLiveWindows = await withTimeout(getApi().listWindowInstances(), RPC_TIMEOUT, "listWindowInstances")
-            .then((ws) => ws.filter((w) => w.label !== currentWindowLabel() && !!w.windowId).length)
+        const others = await withTimeout(getApi().listWindowInstances(), RPC_TIMEOUT, "listWindowInstances")
+            .then((ws) => ws.filter((w) => w.label !== currentWindowLabel()))
             .catch(() => null);
+        const otherLiveWindows = others ? others.filter((w) => !!w.windowId).length : null;
+        // Another window still opening beside this one (a double click on the
+        // tray icon): srv then doesn't wait for a close that isn't coming.
+        const anotherWindowOpening = !!others?.some((w) => !w.windowId);
         const restoreLast = restoresLastWindow({
             windowIds: clientData.windowids,
             otherLiveWindows,
@@ -374,7 +378,8 @@ async function initHostNewWindow(seedView?: string | null, seedMeta?: Record<str
                 seedView ?? undefined,
                 seedMeta ?? undefined,
                 // A reload keeps this window's own theme and opacity.
-                previousWindowId()
+                previousWindowId(),
+                anotherWindowOpening
             ),
             // A restore can wait for the last close and its agents' teardown.
             restoreLast ? RESTORE_TIMEOUT : RPC_TIMEOUT,

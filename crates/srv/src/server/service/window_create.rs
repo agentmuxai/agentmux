@@ -20,8 +20,9 @@ static RESTORE_ELECTION: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(
 /// When a window last asked for and got a restore (epoch ms, client meta).
 const RESTORED_AT_META_KEY: &str = "session:restored_at_ms";
 
-/// An opener arriving this soon after a restore opens the default panes at
-/// once: the window it would have waited for is the one just restored.
+/// An opener arriving this soon after a restore, beside another window still
+/// opening, opens the default panes at once: the window it would wait for is
+/// the one just restored, not one closing.
 const JUST_RESTORED_MS: i64 = 10_000;
 
 // Phase E.5.8 — CreateWindow migrated through the reducer.
@@ -64,7 +65,12 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
             .ok()
             .and_then(|cs| cs.into_iter().next())
             .and_then(|c| c.meta.get(RESTORED_AT_META_KEY).and_then(|v| v.as_i64()));
-        let just_restored = restored_at.is_some_and(|at| agentmux_common::time::now_ms() - at < JUST_RESTORED_MS);
+        // The host saw another window still opening (arg 7): the window srv
+        // lists is that concurrent opener's, not a restored window closing
+        // again, which this waits for like any close (#5363).
+        let another_opening: bool = service::get_optional_arg(args, 7).unwrap_or(None).unwrap_or(false);
+        let just_restored =
+            another_opening && restored_at.is_some_and(|at| agentmux_common::time::now_ms() - at < JUST_RESTORED_MS);
         // A window the tray opens right after the last one closed can arrive
         // before that close does (the host sends it on its own thread): wait
         // briefly for it, rather than open the default panes and lose the

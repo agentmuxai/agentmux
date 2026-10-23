@@ -34,6 +34,15 @@ async fn open_window(state: &AppState, label: &str, cold_start: bool) -> Window 
     serde_json::from_value(ret.data.unwrap()).unwrap()
 }
 
+/// A window the tray opens: it asks to restore; `another_opening` when the
+/// host has another window still opening beside it.
+async fn open_tray_window(state: &AppState, label: &str, another_opening: bool) -> Window {
+    let args = vec![Value::Null, json!(""), json!(label), json!(true), Value::Null, Value::Null, Value::Null, json!(another_opening)];
+    let ret = rpc(state, "CreateWindow", args).await;
+    assert!(ret.success, "CreateWindow failed: {:?}", ret.error);
+    serde_json::from_value(ret.data.unwrap()).unwrap()
+}
+
 /// A pane of the user's, so the window holds something to keep.
 async fn add_user_pane(state: &AppState, ws_id: &str, view: &str) -> String {
     let ws = state.mstore.get::<Workspace>(ws_id).unwrap().unwrap();
@@ -268,11 +277,36 @@ async fn of_two_tray_windows_exactly_one_restores() {
     close(&state, &main.oid).await;
 
     let started = std::time::Instant::now();
-    let (a, b) = tokio::join!(open_window(&state, "window-2", true), open_window(&state, "window-3", true));
+    let (a, b) = tokio::join!(open_tray_window(&state, "window-2", true), open_tray_window(&state, "window-3", true));
     let restored: Vec<&Window> = [&a, &b].into_iter().filter(|w| w.workspaceid == main.workspaceid).collect();
     assert_eq!(restored.len(), 1, "exactly one brings it back");
     assert_eq!(state.mstore.get_all::<Workspace>().unwrap().len(), 2, "the other got the default panes");
     assert!(started.elapsed() < std::time::Duration::from_secs(2), "without waiting: {:?}", started.elapsed());
+}
+
+/// A restored window closed again at once, and the tray clicked before that
+/// close reaches srv: with no other window opening, the restore waits for
+/// the close, as for any close, and brings the window back (#5363).
+#[tokio::test]
+async fn a_restored_window_closed_again_at_once_comes_back() {
+    let state = fresh_state().await;
+    let main = open_window(&state, "main", false).await;
+    add_user_pane(&state, &main.workspaceid, "term").await;
+    close(&state, &main.oid).await;
+    let restored = open_tray_window(&state, "window-2", false).await;
+    assert_eq!(restored.workspaceid, main.workspaceid);
+
+    let st = state.clone();
+    let closing = restored.oid.clone();
+    let late_close = tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        close(&st, &closing).await;
+    });
+    let again = open_tray_window(&state, "window-3", false).await;
+    late_close.await.unwrap();
+
+    assert_eq!(again.workspaceid, main.workspaceid, "the same contents, not the default panes");
+    assert_eq!(state.mstore.get_all::<Workspace>().unwrap().len(), 1, "nothing made beside it");
 }
 
 #[tokio::test]
