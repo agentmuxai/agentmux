@@ -11,6 +11,6 @@
 # cef-runtime-pins.sh in the same PR (release.yml fails if they differ). CEF_WINDOWS_LIBCEF_SHA256 is the SHA-256 of libcef.dll inside
 # the release zip (not the zip's own checksum). See
 # docs/specs/SPEC_WINDOWS_CEF_RUNTIME_VERIFY_OR_FAIL_2026_09_23.md.
-CEF_WINDOWS_RELEASE_TAG="cef-windows-x86_64-154.0.8037.58-r3"
-CEF_WINDOWS_ASSET="cef-windows-x86_64-154.0.8037.58-r3.zip"
-CEF_WINDOWS_LIBCEF_SHA256="2033f73dd81bb25b405f0ee40eb6557da497838877af53aa3dd14c4d19495a90"
+CEF_WINDOWS_RELEASE_TAG="cef-windows-x86_64-154.0.8037.58-r4"
+CEF_WINDOWS_ASSET="cef-windows-x86_64-154.0.8037.58-r4.zip"
+CEF_WINDOWS_LIBCEF_SHA256="7cd04fb69bcbd2d3597e62837b538bb5aedf38eca0c38879e3e245d462c7e939"

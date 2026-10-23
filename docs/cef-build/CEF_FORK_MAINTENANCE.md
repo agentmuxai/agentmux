@@ -6,8 +6,8 @@
 [build-patched-cef-windows.md](./build-patched-cef-windows.md),
 [build-patched-framework-macos.md](./build-patched-framework-macos.md)
 
-We maintain a fork of CEF carrying **six** AgentMux-specific changes — spanning
-23 CEF source files and 3 Chromium-side patches (§3). Every Chromium
+We maintain a fork of CEF carrying **eight** AgentMux-specific changes — spanning
+28 CEF source files and 3 Chromium-side patches (§3). Every Chromium
 milestone upgrade has to carry that set forward, for Windows, Linux and macOS
 together. This doc is the standing practice for doing that without losing pieces.
 
@@ -135,7 +135,7 @@ diverge in behaviour.
 
 ## 3. The carry-set (canonical inventory)
 
-**Six features.** Three of them are Layer B only, two are Layer A only, and one
+**Eight features.** Five of them are Layer B only, two are Layer A only, and one
 spans both — which is why a feature count and a file count are different
 questions and both get stated here:
 
@@ -147,8 +147,10 @@ questions and both get stated here:
 | Process requirement | A | 1 patch (macOS 26) |
 | Theme observer (Incognito panes on Views) | B | 2 |
 | Address bar autocomplete (`GetAutocompleteSuggestions`) | B | 3 |
+| Hidden windowed browsers (`WasHidden` for windowed Alloy browsers) | B | 3 (2 shared) |
+| In-place discard (`Discard`, `IsDiscarded`, `LoadIfNecessary`) | B | 5 (2 shared) |
 
-That totals **23 hand-written CEF source files** differing between upstream
+That totals **28 hand-written CEF source files** differing between upstream
 and the fork, plus **3 Chromium-side patches**. Measured, not estimated:
 
 ```bash
@@ -161,7 +163,12 @@ The 18 of the first four features agree with
 [`docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md`](../reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md) §5b, which reached
 that number independently while scoping the 152 port. The theme observer added
 two (agentmuxai/cef#11, 154 r2), and the autocomplete API three
-(agentmuxai/cef#12, 154 r3).
+(agentmuxai/cef#12, 154 r3), and the hibernation work five more
+(agentmuxai/cef#13 and #14, 154 r4): `include/cef_browser.h`,
+`libcef/browser/browser_host_base.h`, `browser_contents_delegate.cc`,
+`alloy/alloy_browser_host_impl.cc` and `browser_platform_delegate.h`; its two
+other files, `browser_host_base.cc` and `browser_platform_delegate.cc`, were
+already in the set.
 
 > An earlier revision of this table listed only 10 of the 18, omitting the entire
 > browser-side half of the transparency cascade. The §5 gate probed those 10 and
@@ -170,7 +177,7 @@ two (agentmuxai/cef#11, 154 r2), and the autocomplete API three
 > Layer B nothing fails loudly, so an inventory that is *almost* complete reads
 > exactly like one that is complete.
 
-### Layer B — CEF source (23 files, carried by the branch itself)
+### Layer B — CEF source (28 files, carried by the branch itself)
 
 | Feature | Files | Probe identifier |
 |---|---|---|
@@ -197,9 +204,16 @@ two (agentmuxai/cef#11, 154 r2), and the autocomplete API three
 | **Autocomplete API** (3) | `include/cef_request_context.h` | `GetAutocompleteSuggestions` |
 | | `libcef/browser/request_context_impl.h` | `GetAutocompleteSuggestions` |
 | | `libcef/browser/request_context_impl.cc` | `GetAutocompleteSuggestions` |
+| **Hibernation: windowed `WasHidden` and in-place discard** (7 probes, 5 new files) | `include/cef_browser.h` | `IsDiscarded` |
+| | `libcef/browser/browser_host_base.h` | `LoadIfNecessary` |
+| | `libcef/browser/browser_host_base.cc` | `LoadIfNecessary` |
+| | `libcef/browser/browser_contents_delegate.cc` | `CefBrowserHost::Discard` |
+| | `libcef/browser/alloy/alloy_browser_host_impl.cc` | `also for windowed browsers` |
+| | `libcef/browser/browser_platform_delegate.cc` | `windowed browsers too` |
+| | `libcef/browser/browser_platform_delegate.h` | `windowed browsers too` |
 
 Every probe identifier above is **absent upstream and present in the fork** —
-asserted for all 23, so each one actually discriminates rather than matching
+asserted for all 33, so each one actually discriminates rather than matching
 code that was already there.
 
 ### Layer A — Chromium-side patches (3)
@@ -285,7 +299,7 @@ scripts/cef-verify.sh --repo ~/src/cef   # explicit clone: validated, never gues
 scripts/cef-verify.sh --remote fork      # whatever you named agentmuxai/cef
 ```
 
-Exit 0 = all 26 present. It never modifies the repository it inspects.
+Exit 0 = all 33 present. It never modifies the repository it inspects.
 
 **This lives in [`scripts/cef-verify.sh`](../../scripts/cef-verify.sh), not in this document, and that is a
 deliberate correction.** These checks were originally markdown code blocks here,
@@ -304,7 +318,7 @@ which CI runs on every PR against synthetic fixtures. Shell embedded in
 markdown is untested by construction; that is the whole lesson, and it cost four
 rounds of review to learn.
 
-Expect **26 `OK`** against a complete `agentmuxai/<ms>`.
+Expect **33 `OK`** against a complete `agentmuxai/<ms>`.
 
 On a *feature* branch, `MISS agentmux_process_requirement` is normal rather than
 a defect -- it lives on `agentmux/<ms>-process-requirement`. That is the R4
@@ -327,7 +341,7 @@ $BR:libcef/renderer/blink_glue.h          -> agentmuxai/7778ibcef/renderer/blink
 ```
 
 So the hazard only bites if you **inline a path literally**. Do not — and if you
-do anyway, 20 of the 26 probes break: every `libcef/`-prefixed one. The
+do anyway, 27 of the 33 probes break: every `libcef/`-prefixed one. The
 remaining 6 are safe purely by first letter (`include/` -> `:i`, `patch/` ->
 `:p` are not modifiers), so a silent *partial* pass is the default outcome
 rather than an obvious total failure.
@@ -384,7 +398,7 @@ checklist would read that as a regression — a guaranteed false positive on eve
 upgrade, which is how a check gets ignored.
 
 Across milestones the equivalent question is *content*, not ancestry, and §5 is
-what answers it: the carry-set gate compares the same 26 things regardless of
+what answers it: the carry-set gate compares the same 33 things regardless of
 lineage. That is precisely how the 7977 gap in §1.2 was found, where this
 ancestry test could not have said anything.
 
@@ -403,7 +417,7 @@ ancestry test could not have said anything.
      changed underneath.
 3. **Merge every feature branch into `agentmuxai/<new-ms>`** (R4). Do not build from
    the feature branches.
-4. **Run §5 against `agentmuxai/<new-ms>`.** All **26** probes must print `OK`.
+4. **Run §5 against `agentmuxai/<new-ms>`.** All **33** probes must print `OK`.
 5. **Build all three platforms from that one commit** — record the commit SHA.
 6. **Verify the built artifacts** (§7), per platform.
 7. **Cut three tags and update the pins together** (§8).
@@ -486,6 +500,10 @@ nm "$BIN" | grep BeginWindowDrag      # expect __ZN13CefWindowImpl15BeginWindowD
 nm "$BIN" | grep -c __value_typeIN4base7raw_ptrI12ThemeService   # expect > 0 (2 on 154 r2)
 # agentmuxai/cef#12 (address bar autocomplete):
 nm -C "$BIN" | grep -c 'CefRequestContextImpl::GetAutocompleteSuggestions'   # expect > 0
+# agentmuxai/cef#13 and #14 (hibernation: windowed WasHidden, in-place discard):
+for s in Discard IsDiscarded LoadIfNecessary; do
+  echo "$s: $(nm -C "$BIN" | grep -c "CefBrowserHostBase::$s")"   # each > 0
+done
 
 # Layer A landed at all? These come only from CEF's Chromium-side patches.
 for s in IsUniqueForCEF IsAlloyContents HasExternalParent; do
@@ -630,7 +648,7 @@ mechanical instead of a convention.
 **Before building a release framework:**
 - [ ] Building from `agentmuxai/<ms>`, not a feature branch (R3)
 - [ ] All feature branches for this milestone are merged (R4)
-- [ ] All **26** §5 probes print `OK`
+- [ ] All **33** §5 probes print `OK`
 - [ ] `patcher.py` run with no args; Chromium tree shows hundreds of modified files (§7.1)
 
 **Before updating the pins:**
