@@ -103,6 +103,9 @@ window.removeNotificationById = removeNotificationById;
 window.modalsModel = modalsModel;
 
 const RPC_TIMEOUT = 5_000; // 5 seconds for individual RPC calls
+// A window restoring the last one closed: srv may wait for that close (3 s)
+// and for its agents to stop (up to 5 s) first (#5363).
+const RESTORE_TIMEOUT = 20_000;
 
 /**
  * Initialize the window-instance-number atom and seed the reducer
@@ -348,9 +351,11 @@ async function initHostNewWindow(seedView?: string | null, seedMeta?: Record<str
         // No window is open (AgentMux stayed in the tray after its last
         // window closed): bring that window back, not the default panes.
         // The host's open windows other than this one: srv can still list a
-        // window whose close is on its way (#5363).
+        // window whose close is on its way. One still opening (no window id
+        // yet, as a second tray click makes) doesn't count: srv lets exactly
+        // one opener restore (#5363).
         const otherLiveWindows = await withTimeout(getApi().listWindowInstances(), RPC_TIMEOUT, "listWindowInstances")
-            .then((ws) => ws.filter((w) => w.label !== currentWindowLabel()).length)
+            .then((ws) => ws.filter((w) => w.label !== currentWindowLabel() && !!w.windowId).length)
             .catch(() => null);
         const restoreLast = restoresLastWindow({
             windowIds: clientData.windowids,
@@ -371,7 +376,8 @@ async function initHostNewWindow(seedView?: string | null, seedMeta?: Record<str
                 // A reload keeps this window's own theme and opacity.
                 previousWindowId()
             ),
-            RPC_TIMEOUT,
+            // A restore can wait for the last close and its agents' teardown.
+            restoreLast ? RESTORE_TIMEOUT : RPC_TIMEOUT,
             "CreateWindow"
         );
         tlog("CreateWindow", t);

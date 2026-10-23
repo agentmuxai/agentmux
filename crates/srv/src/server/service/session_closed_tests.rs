@@ -257,6 +257,24 @@ async fn the_tray_window_waits_for_a_close_still_on_its_way() {
     assert_eq!(state.mstore.get_all::<Workspace>().unwrap().len(), 1, "nothing made beside it");
 }
 
+/// Two windows the tray opens together (a double click) both ask to
+/// restore: exactly one gets the closed window back, the other the default
+/// panes, without waiting for a close that isn't coming (#5363).
+#[tokio::test]
+async fn of_two_tray_windows_exactly_one_restores() {
+    let state = fresh_state().await;
+    let main = open_window(&state, "main", false).await;
+    add_user_pane(&state, &main.workspaceid, "term").await;
+    close(&state, &main.oid).await;
+
+    let started = std::time::Instant::now();
+    let (a, b) = tokio::join!(open_window(&state, "window-2", true), open_window(&state, "window-3", true));
+    let restored: Vec<&Window> = [&a, &b].into_iter().filter(|w| w.workspaceid == main.workspaceid).collect();
+    assert_eq!(restored.len(), 1, "exactly one brings it back");
+    assert_eq!(state.mstore.get_all::<Workspace>().unwrap().len(), 2, "the other got the default panes");
+    assert!(started.elapsed() < std::time::Duration::from_secs(2), "without waiting: {:?}", started.elapsed());
+}
+
 #[tokio::test]
 async fn quit_and_relaunch_reopens_every_window_and_lists_none_closed() {
     let state = fresh_state().await;
