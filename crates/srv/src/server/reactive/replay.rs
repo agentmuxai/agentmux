@@ -20,7 +20,8 @@ use super::InjectionRequest;
 /// Longer than every freshness window it guards (host and channel 300 s,
 /// LAN 600 s, either way), so a signature can't outlive its entry.
 const WINDOW_SECS: i64 = 1_260;
-/// Entries kept at most; the oldest go first past this.
+/// Entries kept at most. Past this, with every entry still live, a new
+/// signed message fails rather than evict one a copy could then pass as.
 const MAX_ENTRIES: usize = 20_000;
 
 type Key = (String, String, String);
@@ -97,9 +98,9 @@ impl Seen {
         if self.entries.len() >= MAX_ENTRIES {
             self.entries.retain(|_, e| e.until > now);
             if self.entries.len() >= MAX_ENTRIES {
-                if let Some(oldest) = self.entries.iter().min_by_key(|(_, e)| e.until).map(|(k, _)| k.clone()) {
-                    self.entries.remove(&oldest);
-                }
+                Self::fail_verdicts(req);
+                tracing::warn!(source = %key.0, target = %key.1, msgid = %key.2, "one-delivery memory full; signed jekt counted as failed");
+                return None;
             }
         }
         self.entries.insert(key.clone(), Entry { until: now + WINDOW_SECS, taken: false });

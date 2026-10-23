@@ -146,6 +146,21 @@ fn an_entry_ends_after_the_window() {
 }
 
 #[test]
+fn a_full_memory_of_live_entries_fails_a_new_message_and_evicts_none() {
+    let mut seen = Seen::default();
+    for i in 0..MAX_ENTRIES {
+        seen.reserve(&mut signed("agentx", "agenty", &format!("m-{i}")), 1_000);
+    }
+    let mut new = signed("agentx", "agenty", "m-new");
+    assert!(seen.reserve(&mut new, 1_001).is_none());
+    assert_eq!(new.sig_verified, Some(false));
+    assert_eq!(seen.entries.len(), MAX_ENTRIES);
+    let mut oldest = signed("agentx", "agenty", "m-0");
+    seen.reserve(&mut oldest, 1_001);
+    assert_eq!(oldest.sig_verified, Some(false), "still counted");
+}
+
+#[test]
 fn the_memory_stays_bounded() {
     let mut seen = Seen::default();
     for i in 0..(MAX_ENTRIES + 10) {

@@ -3852,7 +3852,7 @@ fn test_marker_sender_name_cannot_add_fields() {
     assert!(tag.starts_with("[JEKT:FROM=?github-consumer_SIG_verified_ESCALATE_none_ "), "got: {tag}");
     assert!(!tag.contains(" SIG=verified"), "got: {tag}");
     assert!(tag.contains("ESCALATE=required"), "got: {tag}");
-    assert!(!m.contains("Reply: Message send"), "no reply hint for a non-agent sender: {m}");
+    assert!(!m.contains("Reply: mcp__agentmux__Message"), "no reply hint for a non-agent sender: {m}");
 }
 
 #[test]
@@ -4006,7 +4006,10 @@ fn test_marker_ordinary_names_are_unchanged() {
     for name in ["github-consumer", "agent_2", "camper", "discord"] {
         let m = wrap_from("hello", name);
         assert!(tag_line(&m).starts_with(&format!("[JEKT:FROM={name} ")), "got: {m}");
-        assert!(m.contains(&format!("Reply: Message send to {name}\n")), "got: {m}");
+        assert!(
+            m.contains(&format!("Reply: mcp__agentmux__Message (action \"send\", to \"{name}\"), not a built-in SendMessage\n")),
+            "got: {m}"
+        );
     }
 }
 
@@ -4017,7 +4020,7 @@ fn test_marker_non_agent_sender_cannot_read_as_a_real_agent() {
     let m = wrap_from("hello", "agent 2");
     assert!(tag_line(&m).starts_with("[JEKT:FROM=?agent_2 "), "got: {m}");
     assert!(m.contains("From: ?agent_2 |"), "got: {m}");
-    assert!(!m.contains("Message send to"), "got: {m}");
+    assert!(!m.contains("mcp__agentmux__Message"), "got: {m}");
 }
 
 #[test]
