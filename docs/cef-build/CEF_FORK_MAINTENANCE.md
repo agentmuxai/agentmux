@@ -341,8 +341,8 @@ $BR:libcef/renderer/blink_glue.h          -> agentmuxai/7778ibcef/renderer/blink
 ```
 
 So the hazard only bites if you **inline a path literally**. Do not — and if you
-do anyway, 27 of the 33 probes break: every `libcef/`-prefixed one. The
-remaining 6 are safe purely by first letter (`include/` -> `:i`, `patch/` ->
+do anyway, 26 of the 33 probes break: every `libcef/`-prefixed one. The
+remaining 7 are safe purely by first letter (`include/` -> `:i`, `patch/` ->
 `:p` are not modifiers), so a silent *partial* pass is the default outcome
 rather than an obvious total failure.
 
