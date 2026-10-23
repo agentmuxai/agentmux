@@ -350,10 +350,13 @@ pub(crate) fn forget_windows_left_by_quit(store: &Store) -> usize {
 /// names: they belong to the workspace that was open, which a switch closes
 /// (`user_workspace_switch`).
 pub(crate) fn forget_restore_lists(meta: &mut crate::backend::obj::MetaMapType) {
-    for key in [WAITING_META_KEY, OPENING_META_KEY, NAMES_META_KEY] {
+    for key in RESTORE_LIST_KEYS {
         meta.remove(key);
     }
 }
+
+/// The client meta keys of the restored windows' queues.
+pub(crate) const RESTORE_LIST_KEYS: [&str; 3] = [WAITING_META_KEY, OPENING_META_KEY, NAMES_META_KEY];
 
 /// Set (or, with `None`, remove) one of the client's meta keys.
 pub(crate) fn set_client_meta(store: &Store, key: &str, value: Option<Value>) {

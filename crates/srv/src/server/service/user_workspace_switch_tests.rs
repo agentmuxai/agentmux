@@ -321,6 +321,31 @@ async fn a_switch_that_cant_happen_changes_nothing() {
     assert!(!state.mstore.layout_writes().saves_held());
 }
 
+/// A switch that fails after the other workspace became the open one puts
+/// the open workspace back: still current, its windows still open, its closed
+/// windows still listed, and nothing left pointing at a deleted workspace
+/// (#5360).
+#[tokio::test]
+async fn a_switch_that_fails_halfway_leaves_the_open_workspace_open() {
+    let state = fresh_state().await;
+    let t = three_windows(&state).await;
+    let closed_before = closed_list(&state);
+
+    let failed = workspace_rpc(&state, "CreateUserWorkspace", vec![json!(super::FAIL_OPEN_NAME), json!(t.main.oid)]).await;
+    assert!(!failed.success);
+    wait_for_switch().await;
+
+    assert_eq!(state.mstore.user_workspace_list().unwrap().len(), 1, "the new workspace is gone");
+    assert_eq!(current_id(&state.mstore).as_deref(), Some(t.default_id.as_str()));
+    assert_eq!(client(&state.mstore).unwrap().meta["workspace:name"], "Default Workspace");
+    assert_eq!(client(&state.mstore).unwrap().windowids, vec![t.main.oid.clone(), t.second.oid.clone()], "both windows stay open");
+    assert_eq!(shown_by(&state, &t.main.oid), t.main.workspaceid);
+    assert_eq!(shown_by(&state, &t.second.oid), t.second.workspaceid);
+    assert_eq!(closed_list(&state), closed_before);
+    assert!(!state.mstore.layout_writes().saves_held());
+    assert_eq!(user_workspace::save_now(&state.mstore), user_workspace::Saved::Unchanged, "and it saves as before");
+}
+
 #[tokio::test]
 async fn saves_wait_while_a_switch_moves_the_windows() {
     let state = fresh_state().await;

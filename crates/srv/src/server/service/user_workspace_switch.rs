@@ -188,25 +188,107 @@ pub(crate) async fn switch_to(state: &AppState, target_id: &str, window_id: &str
         Saved::HeldForSwitch | Saved::Failed => return Err("the open workspace couldn't be saved".to_string()),
     }
     let held = SavesHeld::new(store);
+    let others: Vec<Window> =
+        super::session_windows::live_windows(store).into_iter().map(|(w, _)| w).filter(|w| w.oid != acting.oid).collect();
 
-    // 2. Its other windows close; their contents stay.
-    let mut leaving: Vec<String> = Vec::new();
-    let mut closed = Vec::new();
-    for (w, _) in super::session_windows::live_windows(store) {
-        if w.oid == acting.oid {
-            continue;
+    // 2. The other workspace is the open one, and the window that asked shows
+    // it. Until this has worked nothing else changes: a failure puts the
+    // client back as it was, so the open workspace stays the open one and its
+    // windows stay open (#5360).
+    let before = client_meta_of(store, &SWITCH_META_KEYS);
+    let main_ws = match open_target(state, &target, &acting).await {
+        Ok(ws) => ws,
+        Err(e) => {
+            restore_client_meta(store, before);
+            tracing::warn!(workspace = %target.id, error = %e, "user_workspace: the switch failed; the open workspace stays open");
+            return Err(e);
         }
+    };
+    let mut leaving: Vec<String> = Vec::new();
+    if acting.workspaceid != main_ws {
+        leaving.push(acting.workspaceid.clone());
+    }
+
+    // 3. The other windows close; their contents stay.
+    let mut closed = Vec::new();
+    for w in others {
         let label = w.meta.get("host:label").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-        if let Some(ws) = super::window_close::detach_window(state, &w.oid).await? {
-            leaving.push(ws);
+        match super::window_close::detach_window(state, &w.oid).await {
+            Ok(Some(ws)) => leaving.push(ws),
+            Ok(None) => {}
+            Err(e) => tracing::warn!(window = %w.oid, error = %e, "user_workspace: a window of the closed workspace didn't detach"),
         }
         closed.push((w.oid.clone(), label));
     }
 
-    // 3. The other workspace is the open one.
-    set_current(store, &target)?;
+    drop(held);
+    let saving = Arc::clone(store);
+    let _ = tokio::task::spawn_blocking(move || super::user_workspace::save_now(&saving)).await;
 
-    // 4. Its windows come back, or the default panes for a new one.
+    // 4. The closed workspace's agents and shells stop, after the reply.
+    let st = state.clone();
+    tokio::spawn(async move {
+        for ws in leaving {
+            super::session_closed::keep_workspace(&st, ws, json!({}), true).await;
+        }
+        drop(guard);
+    });
+
+    let beside = super::session_windows::waiting_workspaces(store).len();
+    tracing::info!(workspace = %target.id, name = %target.name, closed = closed.len(), beside, "user_workspace: switched");
+    Ok(Switched { id: target.id, name: target.name, closed, beside })
+}
+
+/// A workspace by this name fails to open after it became the open one.
+#[cfg(test)]
+pub(crate) const FAIL_OPEN_NAME: &str = "fail-open (test)";
+
+/// The client meta keys a switch changes: the open workspace, its closed
+/// windows, the restored windows' queues and the quit's session record.
+const SWITCH_META_KEYS: [&str; 7] = [
+    CURRENT_META_KEY,
+    NAME_META_KEY,
+    super::session_closed::CLOSED_META_KEY,
+    super::session_windows::RESTORE_LIST_KEYS[0],
+    super::session_windows::RESTORE_LIST_KEYS[1],
+    super::session_windows::RESTORE_LIST_KEYS[2],
+    super::session_restore::SNAPSHOT_META_KEY,
+];
+
+fn client_meta_of(store: &Store, keys: &[&str]) -> Vec<(String, Option<Value>)> {
+    let meta = client(store).map(|c| c.meta).unwrap_or_default();
+    keys.iter().map(|k| (k.to_string(), meta.get(*k).cloned())).collect()
+}
+
+/// Put `saved` (from [`client_meta_of`]) back, in one transaction.
+fn restore_client_meta(store: &Store, saved: Vec<(String, Option<Value>)>) {
+    let result = store.with_tx(|tx| {
+        let Some(mut client) = tx.get_all::<Client>()?.into_iter().next() else { return Ok(()) };
+        for (key, value) in saved {
+            match value {
+                Some(v) => client.meta.insert(key, v),
+                None => client.meta.remove(&key),
+            };
+        }
+        tx.update(&mut client)?;
+        Ok(())
+    });
+    if let Err(e) = result {
+        tracing::warn!(error = %e, "user_workspace: couldn't put the open workspace back after a failed switch");
+    }
+}
+
+/// Make `target` the open workspace and show its first window in `acting`;
+/// returns that window's contents.
+async fn open_target(state: &AppState, target: &UserWorkspaceRow, acting: &Window) -> Result<String, String> {
+    let store = &state.mstore;
+    set_current(store, target)?;
+    #[cfg(test)]
+    if target.name == FAIL_OPEN_NAME {
+        return Err("a test failed this switch".into());
+    }
+
+    // Its windows come back, or the default panes for a new one.
     let mut opened = None;
     for (from, record) in super::user_workspace::launch_candidates(None, Some(&target)) {
         match super::session_windows::restore_all(state, &record).await {
@@ -231,7 +313,7 @@ pub(crate) async fn switch_to(state: &AppState, target_id: &str, window_id: &str
         }
     };
 
-    // 5. The window that asked shows its first window.
+    // The window that asked shows its first window.
     apply(state, &dispatch_to_reducer(state, Command::SwitchWorkspace { window_id: acting.oid.clone(), workspace_id: main_ws.clone() }).await)
         .await?;
     let patch = window_patch(super::session_windows::restored_window_meta(store, &main_ws));
@@ -243,26 +325,7 @@ pub(crate) async fn switch_to(state: &AppState, target_id: &str, window_id: &str
     }
     super::session_windows::restored_window_opened(store, &main_ws);
     super::session_closed::forget(store, &main_ws);
-    if acting.workspaceid != main_ws {
-        leaving.push(acting.workspaceid.clone());
-    }
-
-    drop(held);
-    let saving = Arc::clone(store);
-    let _ = tokio::task::spawn_blocking(move || super::user_workspace::save_now(&saving)).await;
-
-    // 6. The closed workspace's agents and shells stop, after the reply.
-    let st = state.clone();
-    tokio::spawn(async move {
-        for ws in leaving {
-            super::session_closed::keep_workspace(&st, ws, json!({}), true).await;
-        }
-        drop(guard);
-    });
-
-    let beside = super::session_windows::waiting_workspaces(store).len();
-    tracing::info!(workspace = %target.id, name = %target.name, closed = closed.len(), beside, "user_workspace: switched");
-    Ok(Switched { id: target.id, name: target.name, closed, beside })
+    Ok(main_ws)
 }
 
 // ---- Service handlers ----
