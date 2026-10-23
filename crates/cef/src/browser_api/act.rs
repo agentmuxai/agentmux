@@ -857,7 +857,7 @@ pub async fn act_route(
     if !super::routes::authorized_pub(&headers, &state.ipc_token) {
         return unauthorized();
     }
-    let Some(table) = state.browser_api.ref_tables.get(&req.block_id) else {
+    let Some((table, epoch)) = state.browser_api.ref_tables.get_at(&req.block_id) else {
         return fail("no snapshot of this pane yet: take one with Browser's snapshot action first, or find the element");
     };
     let Some(&backend) = table.refs.get(&req.ref_) else {
@@ -867,6 +867,10 @@ pub async fn act_route(
         Ok(c) => c,
         Err(e) => return fail(e),
     };
+    if !state.browser_api.ref_tables.still_at(&req.block_id, epoch) {
+        let _ = cdp.close().await;
+        return fail("the page closed while this was starting; take a new snapshot");
+    }
     let frame = table.frames.get(&req.ref_).cloned();
     let result = act(&mut cdp, &table, backend, frame.as_ref(), &req).await;
     let _ = cdp.close().await;
@@ -1311,7 +1315,7 @@ pub async fn set_files_route(
     if req.files.is_empty() {
         return fail("no files given");
     }
-    let Some(table) = state.browser_api.ref_tables.get(&req.block_id) else {
+    let Some((table, epoch)) = state.browser_api.ref_tables.get_at(&req.block_id) else {
         return fail("no snapshot of this pane yet: take one with Browser's snapshot action first");
     };
     let Some(&backend) = table.refs.get(&req.ref_) else {
@@ -1321,6 +1325,10 @@ pub async fn set_files_route(
         Ok(c) => c,
         Err(e) => return fail(e),
     };
+    if !state.browser_api.ref_tables.still_at(&req.block_id, epoch) {
+        let _ = cdp.close().await;
+        return fail("the page closed while this was starting; take a new snapshot");
+    }
     if table.frames.contains_key(&req.ref_) {
         let _ = cdp.close().await;
         return fail("uploading a file into a field inside an iframe isn't supported yet: ask the user to choose the file in the pane");

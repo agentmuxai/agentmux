@@ -76,6 +76,20 @@ impl RefTables {
         self.lock().tables.get(block_id).map(|(_, t)| t.clone())
     }
 
+    /// The pane's table with the epoch it belongs to, read together. A route that acts on a
+    /// reference checks [`still_at`](Self::still_at) once it has opened the pane, so a table it
+    /// took before the page closed and came back can't point at the new page's elements.
+    pub(super) fn get_at(&self, block_id: &str) -> Option<(RefTable, u64)> {
+        let g = self.lock();
+        let (_, table) = g.tables.get(block_id)?;
+        Some((table.clone(), g.marks.get(block_id).map(|m| m.epoch).unwrap_or(0)))
+    }
+
+    /// Whether the pane's page is still the one `epoch` was noted for.
+    pub(super) fn still_at(&self, block_id: &str, epoch: u64) -> bool {
+        Self::epoch_is(&self.lock(), block_id, epoch)
+    }
+
     /// Forget the references of a pane whose page is gone (closed, or put to sleep). A
     /// reference is a DevTools node id, which a new page in a new renderer process numbers from
     /// the start again: kept, an old `e5` would name whatever element has that number on the
@@ -212,5 +226,17 @@ mod tests {
         let started = tables.epoch("later");
         tables.forget("later");
         assert!(!tables.put_at("later", started, RefTable::default()));
+    }
+
+    #[test]
+    fn a_table_taken_before_the_page_closed_is_seen_to_be_stale() {
+        let tables = RefTables::default();
+        tables.put("pane", RefTable { url: "https://example.com/".into(), refs: HashMap::from([("e5".to_string(), 42)]), ..RefTable::default() });
+        let (table, epoch) = tables.get_at("pane").unwrap();
+        assert_eq!(table.refs.get("e5"), Some(&42));
+        assert!(tables.still_at("pane", epoch));
+        tables.forget("pane");
+        assert!(!tables.still_at("pane", epoch));
+        assert!(tables.get_at("pane").is_none());
     }
 }
