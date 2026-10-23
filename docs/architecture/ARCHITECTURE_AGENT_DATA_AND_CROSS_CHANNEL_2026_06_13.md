@@ -1,6 +1,7 @@
 # Architecture — Agent data, channels, and cross-channel persistence
 
 **Date:** 2026-06-13
+**Status:** historical — a code-anchored snapshot dated 2026-06-13; the cross-channel persistence it maps shipped in #1383–#1390.
 **Why this doc:** "My Agents" (sessions) is empty in a fresh channel/version even though cross-channel persistence shipped (#1383–#1390). Stepping back to map the whole agent-data architecture, where it's documented, what's actually broken, and the architectural improvements worth making.
 
 **Where it's documented:** the `agentmux-docs` repo is an Astro/typedoc **API site**, not prose architecture. **This is the canonical, code-anchored overview of the agent-data model.** Start here.

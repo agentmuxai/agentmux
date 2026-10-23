@@ -7,10 +7,11 @@
 //!
 //! Mirrors agent_jekt_keys.rs exactly, asymmetric instead of symmetric: one
 //! row per locally-registered agent_id, minted once (first call to
-//! `agent_lan_key_ensure`) and never leaves this srv instance except by the
-//! PRIVATE half being injected into that ONE agent's own MCP server process
-//! env (`AGENTMUX_LAN_KEY`) — never into any other agent's env, and never
-//! returned over any RPC. The public half is not secret — it's what gets
+//! `agent_lan_key_ensure`); the PRIVATE half leaves this srv instance only
+//! for that ONE agent (its MCP fetches it with its own identity token from
+//! `GET /agentmux/agents/self/keys`, with a copy in its MCP config as
+//! `AGENTMUX_LAN_KEY`) — never into any other agent's env, and never served
+//! to any other caller. The public half is not secret — it's what gets
 //! handed to LAN peers on request (see `LanDiscovery::find_agent_lan_pubkey`)
 //! so they can verify this agent's outgoing signatures.
 

@@ -172,10 +172,11 @@ pub(crate) fn build_block_to_agent_map(discovery: &Value) -> std::collections::H
 
 /// Build the id/timestamp/host-signature/LAN-signature quadruple for an
 /// outgoing jekt (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2,
-/// SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.3). Reads this process's OWN
-/// `AGENTMUX_JEKT_KEY`/`AGENTMUX_LAN_KEY` — injected at spawn alongside
-/// `AGENTMUX_AGENT_ID`, into this agent's env only, never any other
-/// agent's — and signs over the same (msgid, source_agent, target_agent,
+/// SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.3). Uses this agent's OWN
+/// host and LAN keys — fetched from srv with its own token (`self_keys.rs`,
+/// `GET /agentmux/agents/self/keys`), falling back to the
+/// `AGENTMUX_JEKT_KEY`/`AGENTMUX_LAN_KEY` written into this agent's env only
+/// — and signs over the same (msgid, source_agent, target_agent,
 /// ts_secs, message) material both schemes share.
 ///
 /// Both signatures are computed unconditionally, regardless of which
@@ -189,11 +190,10 @@ pub(crate) fn build_block_to_agent_map(discovery: &Value) -> std::collections::H
 /// message body's own claim), so an irrelevant signature is simply ignored.
 ///
 /// Returns `(request_id, ts_secs, jekt_sig, lan_sig)`. Either signature is
-/// `None` — not an error — when its key is unavailable (an agent whose
-/// `.mcp.json` predates this feature, or `source_agent` itself unresolved):
-/// srv treats an absent signature as "unverified," never as a reason to
-/// fail delivery, so a missing key here must never block
-/// `SendMessage`/`Loop` from sending.
+/// `None` — not an error — when its key is unavailable (no key from srv or
+/// env, or `source_agent` itself unresolved): srv never treats an absent
+/// signature as a reason to fail delivery, so a missing key here must never
+/// block the `Message` tool from sending.
 ///
 /// The cross-channel signature (`channel_sig`,
 /// `SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md` §D5) rides along on the

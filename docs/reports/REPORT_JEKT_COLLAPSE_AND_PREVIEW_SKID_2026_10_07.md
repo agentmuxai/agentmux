@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-07
 **Author:** agent3 (Agent3@narko), at the operator's request
-**Status:** active — built in this report's PR. D1–D3 were taken on the recommendations (operator, 2026-10-07: "take all opportunities to DRY it out"). Beyond §2, the same pass also:
+**Status:** implemented — #4473. D1–D3 were taken on the recommendations (operator, 2026-10-07: "take all opportunities to DRY it out"). Beyond §2, the same pass also:
 - **renamed the hold** `expandedTools` to `heldOpenNodes`, with its handlers (`onHoldNodeOpen`, `onReleaseNodeHold`, `releaseScrolledOffHolds`), now that it holds jekts as well as tools;
 - **shared the arrival check:** `arrivedLive()` (`virtualization/live-arrival.ts`) replaces `ToolBlock`'s private window check, and the jekt uses it;
 - **shared the toggle:** the three message rows (agent message, jekt, context delivery) take their open state and click from the shared rule in `DocumentRow`, through one `flipRow()` that the `e` key also uses, instead of each reading a set directly;

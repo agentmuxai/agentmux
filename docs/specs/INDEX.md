@@ -247,6 +247,7 @@ partial list.
 | [`SPEC_AGENT_PANE_ZONE_ORDER_WORKED_FOOTER_2026_04_24`](SPEC_AGENT_PANE_ZONE_ORDER_WORKED_FOOTER_2026_04_24.md) | Spec: Agent Pane Zone Reorder + Enriched "Worked" Footer |
 | [`SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17`](SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17.md) | SPEC: Filter/search box atop the AgentPicker |
 | [`SPEC_AGENT_PICKER_TWO_TIER_2026_05_24`](SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md) | SPEC: Two-tier agent picker — "My Agents" + "Templates" |
+| [`SPEC_AGENT_POLLING_AND_WAKEUP_HARDENING_2026_08_04`](SPEC_AGENT_POLLING_AND_WAKEUP_HARDENING_2026_08_04.md) | Agent Recurring-Task / Polling Primitives — Design Hardening |
 | [`SPEC_AGENT_QUICK_FORK_NEW_TAB_2026_08_21`](SPEC_AGENT_QUICK_FORK_NEW_TAB_2026_08_21.md) | SPEC: Quick-fork an agent into a new pane-stack tab (hot clone, full identity) |
 | [`SPEC_AGENT_RUNTIME_DROPUP_CLOSE_BUTTON_2026_08_07`](SPEC_AGENT_RUNTIME_DROPUP_CLOSE_BUTTON_2026_08_07.md) | SPEC: Explicit close button on the Runtime (Mode/Model/Effort) dropup |
 | [`SPEC_AGENT_SESSION_COST_TOTALS_2026_07_02`](SPEC_AGENT_SESSION_COST_TOTALS_2026_07_02.md) | SPEC: Agent Pane Session Cost/Token Totals |
@@ -367,7 +368,10 @@ partial list.
 | [`SPEC_JEKT_HOST_KEY_TTL_ROTATION_2026_09_14`](SPEC_JEKT_HOST_KEY_TTL_ROTATION_2026_09_14.md) | SPEC: 24h TTL / rotation for the host-tier jekt signing key |
 | [`SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28`](SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md) | SPEC: jekts reach the agent immediately; only the pane waits for the block to end |
 | [`SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15`](SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md) | SPEC: LAN-tier Ed25519 jekt signing |
-| [`SPEC_JEKT_REAGENT_TRUST_RELAXATION_2026_08_14`](SPEC_JEKT_REAGENT_TRUST_RELAXATION_2026_08_14.md) | SPEC — Relax TIER=sensitive for cryptographically-verified WAN jekts |
+| [`SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15`](SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15.md) | SPEC: Narrow TIER=sensitive to real red flags only |
+| [`SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17`](SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17.md) | SPEC: TIER=sensitive no longer STOPs work for a cryptographically verified sender |
+| [`SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22`](SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md) | SPEC: `transcript_request` jekt tier rules — repo-owner confirmation |
+| [`SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13`](SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md) | Spec: Completing the jekt sender-trust layer (host-tier signing + WAN binding enforcement) |
 | [`SPEC_LAN_DISCOVERY_TXT_CLOBBER_FIX_2026_08_16`](SPEC_LAN_DISCOVERY_TXT_CLOBBER_FIX_2026_08_16.md) | SPEC: LAN discovery peer metadata gets clobbered blank by TXT-less mDNS re-resolutions |
 | [`SPEC_LAN_FLEET_FEED_2026_10_03`](SPEC_LAN_FLEET_FEED_2026_10_03.md) | SPEC: A names-only fleet feed for LAN peers — snapshot, event stream, UDP siblings |
 | [`SPEC_LAN_UDP_PEER_DISCOVERY_2026_10_02`](SPEC_LAN_UDP_PEER_DISCOVERY_2026_10_02.md) | SPEC: Desktops find each other without mDNS — UDP broadcast peer discovery |
@@ -391,6 +395,8 @@ partial list.
 | [`SPEC_MIGRATION_FRAMEWORK_2026_06_24`](SPEC_MIGRATION_FRAMEWORK_2026_06_24.md) | Migration Framework Spec |
 | [`SPEC_MONOLITH_MODULE_SPLITS_2026_09_22`](SPEC_MONOLITH_MODULE_SPLITS_2026_09_22.md) | SPEC — Split the two largest `agentmux-srv` files into directory modules |
 | [`SPEC_MOUSE_SIDE_BUTTONS_PANE_AND_TAB_NAV_2026_10_19`](SPEC_MOUSE_SIDE_BUTTONS_PANE_AND_TAB_NAV_2026_10_19.md) | Mouse side buttons walk back and forward through the panes you selected, and the caret follows |
+| [`SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20`](SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md) | SPEC: Multi-Agent Fleet Control — Select, Broadcast, and Bulk-Act on Many Agents at Once |
+| [`SPEC_MUXBUS_AGENT_DISCOVERY_AND_PERSISTENT_DELIVERY_2026_06_16`](SPEC_MUXBUS_AGENT_DISCOVERY_AND_PERSISTENT_DELIVERY_2026_06_16.md) | MuxBus — Persistent-Agent Delivery & Unified Agent Discovery |
 | [`SPEC_MUXBUS_CROSS_CHANNEL_DUPLICATE_DELIVERY_2026_07_04`](SPEC_MUXBUS_CROSS_CHANNEL_DUPLICATE_DELIVERY_2026_07_04.md) | Plan: muxbus cross-channel duplicate delivery |
 | [`SPEC_MUXBUS_KEYCHAIN_PER_CHANNEL_2026_10_02`](SPEC_MUXBUS_KEYCHAIN_PER_CHANNEL_2026_10_02.md) | MuxBus cloud sign-in: scope the keychain tokens to the channel |
 | [`SPEC_MUXBUS_SIGN_IN_PER_CHANNEL_2026_10_08`](SPEC_MUXBUS_SIGN_IN_PER_CHANNEL_2026_10_08.md) | SPEC: each channel signs in to MuxBus on its own |
@@ -551,6 +557,7 @@ partial list.
 | [`dev-build-env-isolation`](dev-build-env-isolation.md) | Dev-Build Env Isolation |
 | [`frontend-log-pipe`](frontend-log-pipe.md) | Spec: Frontend Log Pipe |
 | [`instance-panel-floating-panes`](instance-panel-floating-panes.md) | Spec: Instance Panel — Floating-Pane Focus Fix, Opacity Controls, Condensed Rows |
+| [`jekt-inject-timing`](jekt-inject-timing.md) | Jekt Inject Timing Spec |
 | [`jekt-visibility-completion`](jekt-visibility-completion.md) | Spec: Jekt Visibility Completion — persistent-agent visibility + outgoing echo |
 | [`lan-discovery-toggle`](lan-discovery-toggle.md) | Spec: LAN Discovery Toggle (HostPopover) |
 | [`multi-window-pane-and-newwindow-fixes-linux-2026-05-15`](multi-window-pane-and-newwindow-fixes-linux-2026-05-15.md) | Multi-window correctness on Linux: pane RequestContext, new-window client, tab-switch overlay visibility |
@@ -605,7 +612,6 @@ partial list.
 | [`SPEC_AGENT_PANE_TOOL_OUTPUT_RETENTION_2026_10_13`](SPEC_AGENT_PANE_TOOL_OUTPUT_RETENTION_2026_10_13.md) | Spec: an agent pane holds a bounded amount of tool output text |
 | [`SPEC_AGENT_PANE_VIRTUALIZATION_ZOOM_OVERLAP_2026_06_01`](SPEC_AGENT_PANE_VIRTUALIZATION_ZOOM_OVERLAP_2026_06_01.md) | Agent-Pane Virtualization Overlap Under Zoom |
 | [`SPEC_AGENT_PICKER_INLINE_CREATE_2026_10_18`](SPEC_AGENT_PICKER_INLINE_CREATE_2026_10_18.md) | SPEC: start a new agent inline, below the harness card, and one CLI-detection truth for picker and Toolchain |
-| [`SPEC_AGENT_POLLING_AND_WAKEUP_HARDENING_2026_08_04`](SPEC_AGENT_POLLING_AND_WAKEUP_HARDENING_2026_08_04.md) | Agent Recurring-Task / Polling Primitives — Design Hardening |
 | [`SPEC_AGENT_SAME_PROCESS_DUPLICATE_PANE_RECOVERY_2026_10_01`](SPEC_AGENT_SAME_PROCESS_DUPLICATE_PANE_RECOVERY_2026_10_01.md) | SPEC: a second pane of an agent that is live in another pane of the same AgentMux must recover, not go silent |
 | [`SPEC_AGENT_SELF_QUIT_2026_09_24`](SPEC_AGENT_SELF_QUIT_2026_09_24.md) | SPEC: Agent self-quit — `/quit` for the user, `QuitSelf` for the agent (on direct user instruction only) |
 | [`SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24`](SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md) | SPEC: one live instance per agent — an agent identity is driven by at most one process, across host, LAN and WAN |
@@ -684,7 +690,6 @@ partial list.
 | [`SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09`](SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md) | Spec: Instruction and Memory Portability |
 | [`SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02`](SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md) | SPEC: Cross-channel jekt trust — closing the last unverifiable same-machine tier |
 | [`SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01`](SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md) | SPEC: jekt delivery that tells the truth — receiver state, one mailbox, receipts |
-| [`SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13`](SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md) | Spec: Completing the jekt sender-trust layer (host-tier signing + WAN binding enforcement) |
 | [`SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22`](SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md) | Spec: agents put Kanban tasks on hold and take them off hold |
 | [`SPEC_KANBAN_REMINDER_OFF_BY_DEFAULT_2026_10_22`](SPEC_KANBAN_REMINDER_OFF_BY_DEFAULT_2026_10_22.md) | Spec: the Kanban's backlog reminder off by default, with a setting to turn it on |
 | [`SPEC_KEYED_SLOT_RETENTION_FIX_2026_10_12`](SPEC_KEYED_SLOT_RETENTION_FIX_2026_10_12.md) | Spec: `<Key>` slots must not keep old rows alive |
@@ -842,8 +847,6 @@ partial list.
 | [`SPEC_GPU_PROCESS_MEMORY_2026_10_13`](SPEC_GPU_PROCESS_MEMORY_2026_10_13.md) | Spec: why the GPU process holds 394 MB in the field, and what stops it |
 | [`SPEC_HOST_VS_CONTAINER_AGENTS_2026_06_18`](SPEC_HOST_VS_CONTAINER_AGENTS_2026_06_18.md) | Spec: Host vs Container Agent Differentiation |
 | [`SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06`](SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md) | Spec: Make isolated auth the default for every non-`stable` channel |
-| [`SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15`](SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15.md) | SPEC: Narrow TIER=sensitive to real red flags only |
-| [`SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17`](SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17.md) | SPEC: TIER=sensitive no longer STOPs work for a cryptographically verified sender |
 | [`SPEC_LAN_FIREWALL_SETUP_2026_10_01`](SPEC_LAN_FIREWALL_SETUP_2026_10_01.md) | SPEC: LAN that works on a fresh install, with no manual firewall steps |
 | [`SPEC_LAUNCHER_LINUX_PACKAGED_AND_SPLASH_2026_06_05`](SPEC_LAUNCHER_LINUX_PACKAGED_AND_SPLASH_2026_06_05.md) | SPEC: Launcher + reducer/saga parity on Linux + Linux splash |
 | [`SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30`](SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30.md) | SPEC: Integrating `agentmux-launcher` into macOS / Linux `task dev` |
@@ -872,7 +875,6 @@ partial list.
 | [`SPEC_MODEL_EFFORT_CAPABILITY_VALIDATION_2026_07_02`](SPEC_MODEL_EFFORT_CAPABILITY_VALIDATION_2026_07_02.md) | SPEC — Per-model effort-capability validation for the composer strip |
 | [`SPEC_MULTIWINDOW_TASKBAR_GROUPING`](SPEC_MULTIWINDOW_TASKBAR_GROUPING.md) | SPEC: Multi-Window Taskbar Behaviour — Full Instances + Sub-Windows |
 | [`SPEC_MUXBUS_CLOUD_RELAYED_LOGIN_CALLBACK_2026_08_15`](SPEC_MUXBUS_CLOUD_RELAYED_LOGIN_CALLBACK_2026_08_15.md) | SPEC: MuxBus cloud-relayed login callback (no loopback listener) |
-| [`SPEC_MUXBUS_GITHUB_REVIEW_NOTIFICATIONS_2026_06_20`](SPEC_MUXBUS_GITHUB_REVIEW_NOTIFICATIONS_2026_06_20.md) | SPEC: MuxBus — GitHub PR review notifications (end-to-end MVP) |
 | [`SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02`](SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02.md) | muxspect Phase 2: cross-tier instance inspection (same-host channels + LAN) |
 | [`SPEC_NAMED_AGENT_CONTINUATION_2026_05_12`](SPEC_NAMED_AGENT_CONTINUATION_2026_05_12.md) | Spec: Named agent continuation — launch modal dropdown of existing agents |
 | [`SPEC_ORPHAN_THINKING_NODES_2026_05_27`](SPEC_ORPHAN_THINKING_NODES_2026_05_27.md) | SPEC: Orphan in-progress nodes — cancel + collapse on session reopen |
@@ -952,7 +954,6 @@ partial list.
 | [`launch-modal-rearchitecture-2026-05-01`](launch-modal-rearchitecture-2026-05-01.md) | Launch Agent Modal — Performance & Per-Tab Scoping |
 | [`layoutmodel-modularization`](layoutmodel-modularization.md) | LayoutModel Modularization Spec |
 | [`linux-icon-and-desktop-2026-05-03`](linux-icon-and-desktop-2026-05-03.md) | Linux Taskbar Icon & Desktop Registration |
-| [`local-messagebus-architecture`](local-messagebus-architecture.md) | Local MessageBus Architecture |
 | [`magnify-bugs`](magnify-bugs.md) | Spec: Magnify Button + Z-Index Bugs |
 | [`magnify-z-index-analysis`](magnify-z-index-analysis.md) | Analysis: Magnified Pane Z-Index Stacking Bug |
 | [`network-top-hosts-visibility`](network-top-hosts-visibility.md) | Spec: Per-Host Network Visibility (Top External Hosts + Data Transferred) |
@@ -1076,7 +1077,6 @@ partial list.
 | [`SPEC_INSTALL_MODAL_TERM_THEME_BINDING_2026_05_18`](SPEC_INSTALL_MODAL_TERM_THEME_BINDING_2026_05_18.md) | SPEC: Install-Modal xterm Theme Binding |
 | [`SPEC_INSTALL_MODAL_VERSION_DISPLAY_2026_06_25`](SPEC_INSTALL_MODAL_VERSION_DISPLAY_2026_06_25.md) | SPEC: Show CLI Version in Agent Install Modal |
 | [`SPEC_INSTANCE_PANEL_FLOATING_PANES_SECTION_2026_06_24`](SPEC_INSTANCE_PANEL_FLOATING_PANES_SECTION_2026_06_24.md) | Spec: Floating Panes Section in Instance Panel |
-| [`SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01`](SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md) | Spec: Jekt Security & Visibility |
 | [`SPEC_LAUNCHER_DEV_INTEGRATION_2026-05-13`](SPEC_LAUNCHER_DEV_INTEGRATION_2026-05-13.md) | SPEC: Integrating `agentmux-launcher` into `task dev` |
 | [`SPEC_LAUNCH_MODAL_INTEGRATION_TESTS_2026_05_19`](SPEC_LAUNCH_MODAL_INTEGRATION_TESTS_2026_05_19.md) | SPEC: Launch Modal — Integration Tests (jsdom-based) |
 | [`SPEC_LAUNCH_MODAL_PLAIN_LANGUAGE_2026_04_24`](SPEC_LAUNCH_MODAL_PLAIN_LANGUAGE_2026_04_24.md) | Spec: Launch Modal Plain-Language Rewrite |
@@ -1108,8 +1108,6 @@ partial list.
 | [`SPEC_MULTI_FORMAT_RELEASE_MATRIX_2026_09_10`](SPEC_MULTI_FORMAT_RELEASE_MATRIX_2026_09_10.md) | Multi-Format, Multi-Arch Release Matrix |
 | [`SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03`](SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md) | SPEC: Multi-Instance Isolation Hardening & Crash-Safety Verification |
 | [`SPEC_MULTI_SESSION_AGENT_FORK_2026_06_06`](SPEC_MULTI_SESSION_AGENT_FORK_2026_06_06.md) | SPEC: Multi-Session Agent Fork |
-| [`SPEC_MUXBUS_AGENT_DISCOVERY_AND_PERSISTENT_DELIVERY_2026_06_16`](SPEC_MUXBUS_AGENT_DISCOVERY_AND_PERSISTENT_DELIVERY_2026_06_16.md) | MuxBus — Persistent-Agent Delivery & Unified Agent Discovery |
-| [`SPEC_MUXBUS_DELIVERY_HIERARCHY_2026_06_15`](SPEC_MUXBUS_DELIVERY_HIERARCHY_2026_06_15.md) | MuxBus Delivery Hierarchy |
 | [`SPEC_NATIVE_BROWSER_PANE_2026_04_17`](SPEC_NATIVE_BROWSER_PANE_2026_04_17.md) | SPEC: Native Browser Pane via CefBrowserView |
 | [`SPEC_NIGHTLY_RELEASE_CHANNEL_2026_08_23`](SPEC_NIGHTLY_RELEASE_CHANNEL_2026_08_23.md) | Nightly Release Automation — Auto-Publish the Latest Pending Version Bump |
 | [`SPEC_OBJ_UPDATE_BRIDGE_2026-05-14`](SPEC_OBJ_UPDATE_BRIDGE_2026-05-14.md) | SPEC: Internal-event → frontend WaveObjUpdate bridge |
@@ -1192,8 +1190,6 @@ partial list.
 | [`agentmux-isolated-auth`](agentmux-isolated-auth.md) | Spec: AgentMux Isolated Claude/Anthropic Authentication |
 | [`codex-gemini-cli-integration`](codex-gemini-cli-integration.md) | Spec: Codex CLI & Gemini CLI — Install, Auth, and Launch Integration |
 | [`instance-indicator`](instance-indicator.md) | Spec: Window Instance Indicator |
-| [`jekt-auto-registration`](jekt-auto-registration.md) | Jekt Auto-Registration via AGENTMUX_AGENT_ID |
-| [`lan-awareness-and-embedded-jekt-api`](lan-awareness-and-embedded-jekt-api.md) | Analysis: LAN Instance Awareness & Embedded Jekt API |
 | [`linux-appimage-cold-launch-tax-2026-05-08`](linux-appimage-cold-launch-tax-2026-05-08.md) | Linux AppImage cold-launch tax |
 | [`openclaw-agent-runtime`](openclaw-agent-runtime.md) | OpenClaw Agent Runtime Integration |
 | [`per-pane-process-tree-metrics`](per-pane-process-tree-metrics.md) | Spec: Per-Pane Process Tree CPU + Memory Metrics |
@@ -1222,7 +1218,6 @@ partial list.
 | [`TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17`](TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) | TRACKING — Agent availability & automatic backgrounding |
 | [`TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23`](TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md) | TRACKING — Agent pane bounded live window (phase progress) |
 | [`TRACKING_TYPING_AND_TERMINAL_RESPONSIVENESS_2026_09_21`](TRACKING_TYPING_AND_TERMINAL_RESPONSIVENESS_2026_09_21.md) | TRACKING — Typing & terminal input responsiveness |
-| [`TRACKING_WAN_JEKT_VERIFICATION_2026_09_25`](TRACKING_WAN_JEKT_VERIFICATION_2026_09_25.md) | TRACKING — WAN jekt verification (same-account, W3-S) |
 | [`app-api-status`](app-api-status.md) | MuxAPI — Implementation Status |
 | [`frontend-reducer-conventions-2026-05-03`](frontend-reducer-conventions-2026-05-03.md) | Frontend Reducer Conventions |
 
@@ -1252,11 +1247,19 @@ partial list.
 | [`REPORT_SWARM_SUBAGENT_INTERRUPTED_STATUS_2026_07_20`](REPORT_SWARM_SUBAGENT_INTERRUPTED_STATUS_2026_07_20.md) | REPORT — why every subagent under a long-running pane shows "Interrupted" |
 | [`SAGA_ARCHITECTURE_EXECUTION_PLAN_2026-05-01`](SAGA_ARCHITECTURE_EXECUTION_PLAN_2026-05-01.md) | Saga Architecture — Execution Plan |
 | [`SPEC_ACTIVE_TAB_COLOR_LINE_STOP_AT_TAB_STRIP_2026_07_13`](SPEC_ACTIVE_TAB_COLOR_LINE_STOP_AT_TAB_STRIP_2026_07_13.md) | SPEC — active-tab color line: stop at the tab strip's right edge, not the viewport edge |
+| [`SPEC_JEKT_REAGENT_TRUST_RELAXATION_2026_08_14`](SPEC_JEKT_REAGENT_TRUST_RELAXATION_2026_08_14.md) | SPEC — Relax TIER=sensitive for cryptographically-verified WAN jekts |
+| [`SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01`](SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md) | Spec: Jekt Security & Visibility |
 | [`SPEC_LAUNCH_AUTH_STATE_MACHINE_2026_05_14`](SPEC_LAUNCH_AUTH_STATE_MACHINE_2026_05_14.md) | Pre-launch auth — complete user stories + state machine |
+| [`SPEC_MUXBUS_DELIVERY_HIERARCHY_2026_06_15`](SPEC_MUXBUS_DELIVERY_HIERARCHY_2026_06_15.md) | MuxBus Delivery Hierarchy |
+| [`SPEC_MUXBUS_GITHUB_REVIEW_NOTIFICATIONS_2026_06_20`](SPEC_MUXBUS_GITHUB_REVIEW_NOTIFICATIONS_2026_06_20.md) | SPEC: MuxBus — GitHub PR review notifications (end-to-end MVP) |
 | [`SPEC_PERSISTENCE_LAYER_ANALYSIS_2026-05-14`](SPEC_PERSISTENCE_LAYER_ANALYSIS_2026-05-14.md) | SPEC: Persistence layer analysis — keep SQLite, or move? |
 | [`SPEC_SAGA_ARCHITECTURE_TARGET_2026-05-01`](SPEC_SAGA_ARCHITECTURE_TARGET_2026-05-01.md) | Saga + Reducer + IPC Architecture — Target End State |
+| [`TRACKING_WAN_JEKT_VERIFICATION_2026_09_25`](TRACKING_WAN_JEKT_VERIFICATION_2026_09_25.md) | TRACKING — WAN jekt verification (same-account, W3-S) |
 | [`browser-pane-state-catalog`](browser-pane-state-catalog.md) | Browser pane state catalog |
 | [`container-agent-runtime`](container-agent-runtime.md) | Spec: Container Agent Runtime |
+| [`jekt-auto-registration`](jekt-auto-registration.md) | Jekt Auto-Registration via AGENTMUX_AGENT_ID |
+| [`lan-awareness-and-embedded-jekt-api`](lan-awareness-and-embedded-jekt-api.md) | Analysis: LAN Instance Awareness & Embedded Jekt API |
+| [`local-messagebus-architecture`](local-messagebus-architecture.md) | Local MessageBus Architecture |
 | [`modal-cleanup-migration-2026-05-01`](modal-cleanup-migration-2026-05-01.md) | Modal Cleanup — Migration Audit & Plan |
 | [`replace-pane-widget`](replace-pane-widget.md) | Replace Pane Context Menu |
 | [`service-update-consolidation`](service-update-consolidation.md) | Analysis: Consolidate Object Update Return Paths |
@@ -1337,7 +1340,6 @@ Fix one when you touch it and know its real state.
 | [`SPEC_MODULARIZE_LAUNCHER_MAIN_2026_07_02`](SPEC_MODULARIZE_LAUNCHER_MAIN_2026_07_02.md) | Spec: Modularize `agentmux-launcher/src/main.rs` |
 | [`SPEC_MODULARIZE_SHELL_2026_07_02`](SPEC_MODULARIZE_SHELL_2026_07_02.md) | Spec: Modularize `blockcontroller/shell.rs` |
 | [`SPEC_MSIX_PACKAGING_2026_05_30`](SPEC_MSIX_PACKAGING_2026_05_30.md) | SPEC: MSIX Packaging for the Microsoft Store |
-| [`SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20`](SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md) | SPEC: Multi-Agent Fleet Control — Select, Broadcast, and Bulk-Act on Many Agents at Once |
 | [`SPEC_NIGHTLY_CROSS_PLATFORM_BUILDS_2026_06_23`](SPEC_NIGHTLY_CROSS_PLATFORM_BUILDS_2026_06_23.md) | SPEC — Nightly cross-platform CI builds |
 | [`SPEC_PANE_REFLOW_ANIMATION_2026_05_29`](SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md) | SPEC: Coordinated Pane Reflow Animation (DOM + native browser panes) |
 | [`SPEC_PARK_AND_BLANK_CLOSE_2026_07_09`](SPEC_PARK_AND_BLANK_CLOSE_2026_07_09.md) | SPEC — Park-and-blank for non-demotable window closes (renderer-zombie commit leak) |
@@ -1378,7 +1380,6 @@ Fix one when you touch it and know its real state.
 | [`forge-responsive`](forge-responsive.md) | Spec: Responsive Forge Pane |
 | [`forge-widget`](forge-widget.md) | Spec: Forge Widget |
 | [`integration-vision`](integration-vision.md) | AgentMux Integration Vision |
-| [`jekt-inject-timing`](jekt-inject-timing.md) | Jekt Inject Timing Spec |
 | [`openclaw-widget`](openclaw-widget.md) | OpenClaw Widget Spec |
 | [`pane-highlight-fix-plan`](pane-highlight-fix-plan.md) | Pane Highlight Border — Fix Implementation Plan |
 | [`pane-popout-to-new-window`](pane-popout-to-new-window.md) | Spec: Pane Pop-Out to New Window |
@@ -1461,12 +1462,6 @@ section above, do not bulk-restamp them.
 | Spec | Title |
 |---|---|
 | [`SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30`](SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026_06_30.md) | Pillar 1 — Host Reproject: Open-Question Resolutions & Design Foundation |
-
-**`confirmed`**
-
-| Spec | Title |
-|---|---|
-| [`SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22`](SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md) | SPEC: `transcript_request` jekt tier rules — repo-owner confirmation |
 
 **`consolidation`**
 

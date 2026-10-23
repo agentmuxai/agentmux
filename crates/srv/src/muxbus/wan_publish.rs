@@ -23,8 +23,8 @@
 //! directory is keyed by account.
 //!
 //! Nothing here ever makes a jekt fail: until a key is confirmed published,
-//! the relay simply sends that agent's jekts unsigned (`reactive.rs`'s carry
-//! gate, condition 4).
+//! the relay simply sends that agent's jekts unsigned
+//! (`relay::wan_sign_at_origin`, condition 2).
 
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;

@@ -9,7 +9,7 @@
 `SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10.md` (ClosePane, own-pane vs fleet tiers, `verified_block_id`),
 `SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14.md` (the slash-command registry `/quit` joins),
 `SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md` (why quitting loses no conversation),
-`CLAUDE.md` "Jekt security rules" (why an agent-to-agent message must never be able to trigger this).
+the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/ (why an agent-to-agent message must never be able to trigger this).
 
 ---
 

@@ -1,6 +1,7 @@
 # Architecture: network credential → route map
 
 **Status:** Living
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right. WAN agent keys live only in srv's channel-wide `wan.db`, and the dev reagent key (`reagent-v1-dev`) has been untrusted since #3657.
 **Date:** 2026-09-06
 **Author:** Agent2
 **Origin:** [`docs/reports/REPORT_NETWORK_ARCHITECTURE_DRYNESS_AND_ROBUST_LAN_2026_09_06.md`](../reports/REPORT_NETWORK_ARCHITECTURE_DRYNESS_AND_ROBUST_LAN_2026_09_06.md) §8
@@ -99,7 +100,7 @@ that motivated the gate is PR #3023.
 None of these gate a route. All three are evaluated after the request is
 already in, and only affect the `TRUST=` field on the marker the receiving agent
 reads. The authoritative rules for how each maps to `TIER=`/`ESCALATE=` are in
-CLAUDE.md's "Jekt security rules" section and the specs it cites — this table
+the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/ — this table
 only says what each signature *is*.
 
 | Signature | Tier | Scheme | Proves |

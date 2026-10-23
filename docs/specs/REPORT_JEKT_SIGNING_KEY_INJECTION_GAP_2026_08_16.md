@@ -3,7 +3,8 @@
 **Date:** 2026-08-16
 **Author:** Clamk (agent, `~/.agentmux/agents/clamk-0612a`)
 **Status:** analysis — root cause confirmed with direct evidence (live `.mcp.json`, server logs, code); fix implemented,
-tested, and included in this same change (see §4). Not yet merged.
+tested, and included in this same change (see §4); fixed in #2604.
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
 **Ground truth basis:** `agentmuxai/agentmux` `origin/main` at `72aefad4d` / worktree branch
 `clamk/agent-identity-history-protocol`. Live evidence gathered directly from this machine's own running
 AgentMux instance (srv `v0.55.9`) — not inferred from code reading alone.
@@ -105,7 +106,7 @@ the same way, on any install running v0.55.7+.
 
 ## 2. Why this matters
 
-Per `CLAUDE.md`'s jekt security rules, `TRUST=self-declared` and `TRUST=host-verified` are treated very
+Per the jekt rules (https://docs.agentmux.ai/internals/jekt-protocol/), `TRUST=self-declared` and `TRUST=host-verified` are treated very
 differently: a self-declared sender's identity is *not proven*, which is precisely the gap the signing
 feature was built to close (`SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md`'s own incident writeup: a
 spoofed jekt asking for a GitHub PAT, followed by a spoofed "confirmation" over muxbus). If the primary launch

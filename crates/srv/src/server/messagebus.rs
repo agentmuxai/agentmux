@@ -144,9 +144,11 @@ pub(super) async fn handle_inject(
         Some(&req.from),
     );
     // Try direct PTY injection via ReactiveHandler (agent has registered
-    // block_id). The request carries no signature, so a claimed identity
-    // with a signing key on file reads TRUST=unverified and TIER=sensitive;
-    // a transcript_request body reads TIER=sensitive too (`jekt_entry`).
+    // block_id). The request carries no signature: a caller whose own token
+    // names the claimed sender reads TRUST=host-verified, and any other claim
+    // of an identity with a signing key on file reads TRUST=unverified and
+    // TIER=sensitive; a transcript_request body reads TIER=sensitive too
+    // (`jekt_entry`).
     let reactive_req = super::jekt_entry::bus_inject_request(
         &state,
         &req.from,

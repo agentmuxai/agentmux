@@ -4,7 +4,8 @@
 **Type:** Tracking doc for `SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md` — where
 each step stands, what is live, what still needs a person, and what is
 deliberately not built. Not a design spec.
-**Status:** living — updated with every W3-S PR and after the C1 deploy.
+**Status:** historical — tracker closed; signing moved to srv in #4902. — Was living, updated with every W3-S PR and after the C1 deploy.
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
 **Tracks:** issue #2586 (WAN half). Design of record for the cross-account
 phases W0–W2: the 2026-09-17 WAN-tier signing spec (no longer in this repo).
 
