@@ -115,14 +115,19 @@ pub(crate) fn continuity_problem(db_dir: &Path, from: &str) -> Option<String> {
     if !from_db.join("objects.db").is_file() {
         return None;
     }
+    // Either way the layout `from` quit with isn't here. Which cause it is
+    // can't be told from here: this version may have run before (a rollback,
+    // then this upgrade again), or something else put its databases in place.
     match carried_from(db_dir) {
         Some(source) if source == from => None,
         Some(source) => Some(format!(
-            "this version's data was copied from {source}, not from {from}, the version this upgrade was from"
+            "this version's data was copied from {source}, not from {from}, the version this upgrade was from \
+             (it has run before, or was copied from another version)"
         )),
         None => Some(format!(
             "this version's data wasn't copied from {from}, the version this upgrade was from: \
-             its databases were already in {} before srv's copy-forward",
+             its databases were already in {} (it has run before, or something other than srv's \
+             copy-forward put them there)",
             db_dir.display()
         )),
     }
