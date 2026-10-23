@@ -123,9 +123,13 @@ impl Handler {
         refuse_former_slug_sender(req, |name| self.name_to_blocks.contains_key(name), |name| resolver(name))
     }
 
-    /// `resolve_target` for a name no block is bound under: its former slug's
-    /// agent, logged ([`note_delivery`]), else not found.
+    /// `resolve_target` for a name no block is bound under: the agent whose
+    /// current display name routes to it, else its former slug's agent,
+    /// logged ([`note_delivery`]), else not found.
     pub(super) fn former_slug_target(&self, key: &str, target: &str) -> super::TargetResolution {
+        if let Some((block, uid)) = self.display_route_block(key) {
+            return super::TargetResolution::FormerSlug { block, uid };
+        }
         match self.former_slug_block(key) {
             Some((block, uid)) => {
                 note_delivery(target, &uid);
@@ -138,6 +142,28 @@ impl Handler {
     /// See [`FormerSlugResolver`].
     pub fn set_former_slug_resolver(&mut self, resolver: FormerSlugResolver) {
         self.former_slug_resolver = Some(resolver);
+    }
+
+    /// The UID of the agent whose current display name routes to a name
+    /// (`Store::display_route_owner`): the same delivery-only rules as a
+    /// former slug, tried first, since a current name wins over a former one.
+    /// Never consulted for a sender (#1459).
+    pub fn set_display_route_resolver(&mut self, resolver: FormerSlugResolver) {
+        self.display_route_resolver = Some(resolver);
+    }
+
+    /// The block and UID `name` reaches as the route form of an agent's
+    /// current display name: its agent is registered here by UID.
+    pub(super) fn display_route_block(&self, name: &str) -> Option<(String, String)> {
+        let uid = self.display_route_resolver.as_ref()?(name)?;
+        let block = self.uid_to_block.get(&uid)?.clone();
+        Some((block, uid))
+    }
+
+    /// A delivery target by a name nothing is bound under: a current display
+    /// name's route first, then a former slug or display name.
+    pub(super) fn delivery_alias_block(&self, name: &str) -> Option<(String, String)> {
+        self.display_route_block(name).or_else(|| self.former_slug_block(name))
     }
 
     /// The block and UID `name` reaches as a former slug: its agent is
@@ -163,6 +189,11 @@ impl ReactiveHandler {
     /// See the inner [`Handler::set_former_slug_resolver`].
     pub fn set_former_slug_resolver(&self, resolver: FormerSlugResolver) {
         self.inner.lock().unwrap().set_former_slug_resolver(resolver);
+    }
+
+    /// See the inner [`Handler::set_display_route_resolver`].
+    pub fn set_display_route_resolver(&self, resolver: FormerSlugResolver) {
+        self.inner.lock().unwrap().set_display_route_resolver(resolver);
     }
 }
 

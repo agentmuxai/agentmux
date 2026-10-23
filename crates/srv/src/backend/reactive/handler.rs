@@ -78,6 +78,10 @@ pub struct Handler {
     block_liveness: Option<BlockLivenessProbe>,
     /// Tries a name nothing is bound under as a former slug (`former_slug.rs`).
     former_slug_resolver: Option<FormerSlugResolver>,
+    /// Tries a name nothing is bound under as the route form of an agent's
+    /// current display name, before former names (`former_slug.rs`, #1459).
+    /// Delivery only, never a sender.
+    display_route_resolver: Option<FormerSlugResolver>,
     audit_log: Vec<AuditLogEntry>,
     /// The UID of the delivery in flight
     /// (`InjectionRequest::audit_source_uid`), copied onto every audit entry
@@ -167,6 +171,7 @@ impl Handler {
             uid_identity_confirmer: None,
             block_liveness: None,
             former_slug_resolver: None,
+            display_route_resolver: None,
             audit_log: Vec::with_capacity(AUDIT_LOG_MAX),
             delivery_source_uid: String::new(),
             delivery_wan: None,
@@ -539,7 +544,7 @@ impl Handler {
         let key = target.to_lowercase();
         let blocks = self.name_to_blocks.get(&key).cloned().unwrap_or_default();
         match blocks.len() {
-            0 => Ok(former.then(|| self.former_slug_block(&key)).flatten().map(|(block, _)| block)),
+            0 => Ok(former.then(|| self.delivery_alias_block(&key)).flatten().map(|(block, _)| block)),
             1 => Ok(Some(blocks[0].clone())),
             _ => {
                 let live: Vec<String> = blocks.into_iter().filter(|b| self.is_live(b)).collect();

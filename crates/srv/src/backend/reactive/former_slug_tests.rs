@@ -287,3 +287,83 @@ fn a_rename_never_retires_a_name_the_pane_still_holds() {
     assert_eq!(r.retired, None);
     assert!(h.has_live_name("zed") && h.has_live_name("zork"));
 }
+
+// ── #1459: a current display name's route form ("Naki-2" for "Naki #2") ──
+
+const NAKI: &str = "e4790000-0000-4000-8000-000000000001";
+
+/// A store holding `Naki #2` (slug `naki-naki-2`), and a handler where it runs
+/// registered by its slug only, as a pane is before any typed turn, with both
+/// resolvers installed the way srv installs them.
+fn display_route_agent() -> (Arc<crate::backend::storage::store::Store>, Handler, Arc<Mutex<Vec<String>>>) {
+    let store = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+    let mut def = crate::backend::storage::agents::test_agent_def(NAKI, "Naki #2", "claude", "host", 1, "");
+    def.slug = "naki-naki-2".into();
+    store.agent_def_insert(&mut def).unwrap();
+    let sent = Arc::new(Mutex::new(Vec::new()));
+    let mut h = Handler::new();
+    let sink = sent.clone();
+    h.set_input_sender(Arc::new(move |block: &str, _data: &[u8]| {
+        sink.lock().unwrap().push(block.to_string());
+        Ok(())
+    }));
+    let former = store.clone();
+    h.set_former_slug_resolver(Arc::new(move |n: &str| former.former_name_owner(n).ok().flatten().map(|o| o.uid)));
+    let current = store.clone();
+    h.set_display_route_resolver(Arc::new(move |n: &str| current.display_route_owner(n).ok().flatten().map(|o| o.uid)));
+    h.register_agent_full("naki-naki-2", "block-naki", None, 0, Some("naki-naki-2"), Some(NAKI), "test.display_route").unwrap();
+    (store, h, sent)
+}
+
+#[tokio::test]
+async fn a_message_to_a_current_display_names_route_reaches_the_agent() {
+    let (_store, mut h, sent) = display_route_agent();
+    let resp = inject(&mut h, "Naki-2");
+    assert!(resp.success, "{:?}", resp.error);
+    assert_eq!(resp.block_id.as_deref(), Some("block-naki"));
+    assert_eq!(sent.lock().unwrap().first().map(String::as_str), Some("block-naki"));
+    assert!(matches!(h.lookup_delivery_target("naki-2"), LookupOutcome::One(r) if r.uid.as_deref() == Some(NAKI)));
+    // Delivery only: the lookups that authenticate and act never answer it.
+    assert!(h.get_agent("naki-2").is_none());
+    assert!(matches!(h.lookup_by_name("Naki-2"), LookupOutcome::NotFound));
+}
+
+/// Two display names that route the same way: no guess, not found here.
+#[tokio::test]
+async fn an_ambiguous_display_route_is_not_found() {
+    let (store, mut h, sent) = display_route_agent();
+    let mut other = crate::backend::storage::agents::test_agent_def("uid-naki-b", "Naki 2", "claude", "host", 2, "");
+    other.slug = "naki-b".into();
+    store.agent_def_insert(&mut other).unwrap();
+    let resp = inject(&mut h, "Naki-2");
+    assert!(resp.error.as_deref().is_some_and(|e| e.starts_with("agent not found")), "{:?}", resp.error);
+    assert!(sent.lock().unwrap().is_empty());
+}
+
+/// A name that is one agent's current display route and another's former
+/// display name goes to its current holder.
+#[tokio::test]
+async fn the_current_holder_of_a_name_wins_over_its_former_owner() {
+    let (store, mut h, sent) = display_route_agent();
+    let mut old = crate::backend::storage::agents::test_agent_def("uid-was-naki", "Naki #2", "claude", "host", 3, "");
+    old.slug = "was-naki".into();
+    store.agent_def_insert(&mut old).unwrap();
+    old.name = "Renamed".into();
+    store.agent_def_update(&mut old).unwrap();
+    h.register_agent_full("was-naki", "block-was", None, 0, Some("was-naki"), Some("uid-was-naki"), "test.display_route").unwrap();
+    let resp = inject(&mut h, "Naki-2");
+    assert_eq!(resp.block_id.as_deref(), Some("block-naki"), "{:?}", resp.error);
+    let sent = sent.lock().unwrap();
+    assert!(!sent.is_empty() && sent.iter().all(|b| b == "block-naki"), "{sent:?}");
+}
+
+/// A display route never names a sender: the sender rule asks the former
+/// slug resolver alone, so a claim of "Naki-2" is not refused as a former
+/// name (it is verified, or not, by its signature as before).
+#[test]
+fn a_display_route_is_never_a_former_sender() {
+    let (_store, h, _) = display_route_agent();
+    let mut req = InjectionRequest { source_agent: Some("Naki-2".into()), ..Default::default() };
+    assert!(!h.refuse_former_slug_sender(&mut req));
+    assert_eq!(req.sig_verified, None);
+}

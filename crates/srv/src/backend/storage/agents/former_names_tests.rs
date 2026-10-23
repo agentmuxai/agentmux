@@ -228,3 +228,33 @@ fn a_display_name_and_its_route_fold_to_one_key() {
     }
     assert_eq!(super::route_key("Loap #3"), super::route_key("loap-3"));
 }
+
+/// #1459: `display_route_owner` names the one agent whose current display
+/// name routes to a name; a slug holder, two such agents, a template or a
+/// deleted agent give none.
+#[test]
+fn display_route_owner_is_the_one_current_display_name() {
+    let store = Store::open_in_memory().unwrap();
+    let mut naki = crate::backend::storage::agents::test_agent_def("uid-naki", "Naki #2", "claude", "host", 1, "");
+    naki.slug = "naki-naki-2".into();
+    store.agent_def_insert(&mut naki).unwrap();
+    let owner = store.display_route_owner(" NAKI-2 ").unwrap().unwrap();
+    assert_eq!((owner.uid.as_str(), owner.slug.as_str()), ("uid-naki", "naki-naki-2"));
+    assert!(store.display_route_owner("naki-naki-2").unwrap().is_none(), "a slug is found as a slug");
+    assert!(store.display_route_owner("Naki-3").unwrap().is_none());
+
+    let mut tpl = crate::backend::storage::agents::test_agent_def("tpl", "Tpl #1", "claude", "agent", 2, "");
+    tpl.slug = "tpl-1".into();
+    tpl.is_seeded = 1;
+    store.agent_def_insert(&mut tpl).unwrap();
+    assert!(store.display_route_owner("Tpl-1").unwrap().is_none(), "the slug check covers it; never a template");
+
+    let mut twin = crate::backend::storage::agents::test_agent_def("uid-twin", "Naki 2", "claude", "host", 3, "");
+    twin.slug = "twin".into();
+    store.agent_def_insert(&mut twin).unwrap();
+    assert!(store.display_route_owner("Naki-2").unwrap().is_none(), "two display names: no guess");
+    store.agent_def_delete("uid-twin").unwrap();
+    assert_eq!(store.display_route_owner("Naki-2").unwrap().map(|o| o.uid).as_deref(), Some("uid-naki"));
+    store.agent_def_delete("uid-naki").unwrap();
+    assert!(store.display_route_owner("Naki-2").unwrap().is_none(), "a deleted agent is never reached");
+}

@@ -154,3 +154,43 @@ async fn ui_automation_signed_as_a_former_slug_is_refused() {
     let accepted = crate::server::ui_handlers::verified_block_id(&state, None, &auth(&new_key, "fs-ui-2"));
     assert_eq!(accepted.as_deref(), Ok("block-fs-ui"));
 }
+
+/// #1459: a message sent from another channel to "Naki-2", the route form of
+/// "Naki #2", is looked for under the slug the agent runs as, where the
+/// cross-channel registry files it, instead of falling to the cloud relay;
+/// the request is forwarded as sent, so the signature over "Naki-2" still
+/// verifies at the receiver, and an entry found under the slug isn't evicted
+/// for a failure on a name its instance may not know.
+#[tokio::test]
+async fn a_display_routes_message_is_looked_for_under_the_slug_and_still_verifies() {
+    let state = test_state();
+    let mut def = test_agent_def("uid-dr-naki", "Dr Naki #2", "claude", "host", 1, "");
+    def.slug = "dr-naki-dr-naki-2".into();
+    state.mstore.agent_def_insert(&mut def).unwrap();
+    assert_eq!(delivery_alias(&state, "Dr-Naki-2").as_deref(), Some("dr-naki-dr-naki-2"));
+    assert_eq!(delivery_alias(&state, "dr-naki-dr-naki-2"), None, "a slug is looked for as itself");
+
+    let dir = tempfile::tempdir().unwrap();
+    agent_registry::write_shared(dir.path(), "dr-naki-dr-naki-2", "http://127.0.0.1:9103", "block-dr", "dev-b");
+    let alias = delivery_alias(&state, "Dr-Naki-2");
+    let (found_as, entries) = shared_entries(dir.path(), "Dr-Naki-2", alias.as_deref());
+    assert_eq!((found_as.as_str(), entries.len()), ("dr-naki-dr-naki-2", 1));
+
+    // The sender's own key; the request keeps target "Dr-Naki-2" end to end.
+    let key = state.mstore.agent_jekt_key_ensure("agenty").unwrap();
+    let ts = agentmux_common::time::now_secs();
+    let mut req = InjectionRequest {
+        target_agent: "Dr-Naki-2".into(),
+        message: "hello".into(),
+        source_agent: Some("agenty".into()),
+        delivery_tier: Some("host".into()),
+        request_id: Some("msg-dr".into()),
+        ts_secs: Some(ts),
+        jekt_sig: Some(agentmux_common::jekt_sign::sign_jekt(&key, "msg-dr", "agenty", "Dr-Naki-2", ts, "hello")),
+        ..Default::default()
+    };
+    assert!(!may_evict(&found_as, &req));
+    verify_jekt_signature(&state, &mut req);
+    assert_eq!(req.sig_verified, Some(true));
+    assert_eq!(req.target_agent, "Dr-Naki-2");
+}

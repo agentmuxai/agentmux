@@ -480,4 +480,34 @@ impl Store {
         };
         Ok(defs.into_iter().filter(|d| d.id == owner.uid).collect())
     }
+
+    /// The one agent whose current display name routes to `name` ("Naki-2"
+    /// for "Naki #2", the form agents sign with), in any channel, for a
+    /// message's delivery only (#1459): a registry entry is filed under the
+    /// slug it runs as, so a message sent to the route form is looked for
+    /// under this slug. `None` when a definition holds `name` as its slug
+    /// (its holder is found by that), when two display names route to it
+    /// (logged: never a guess), and for templates.
+    pub fn display_route_owner(&self, name: &str) -> Result<Option<super::FormerSlugOwner>, StoreError> {
+        let fold = |s: &str| s.trim().to_lowercase();
+        let target = fold(name);
+        if target.is_empty() {
+            return Ok(None);
+        }
+        let defs = self.agent_def_list()?;
+        if defs.iter().any(|d| fold(&d.slug) == target) {
+            return Ok(None);
+        }
+        let mut owners = defs.iter().filter(|d| {
+            d.is_seeded == 0
+                && !d.slug.trim().is_empty()
+                && fold(&agentmux_common::slug::agent_route_name(&d.name)) == target
+        });
+        let owner = owners.next();
+        if owners.next().is_some() {
+            tracing::info!(name = %name, "two agents' display names route to this name; not delivering by it");
+            return Ok(None);
+        }
+        Ok(owner.map(|d| super::FormerSlugOwner { uid: d.id.clone(), slug: d.slug.clone() }))
+    }
 }
