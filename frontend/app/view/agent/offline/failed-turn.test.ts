@@ -231,11 +231,14 @@ describe("a turn that failed on the network", () => {
         p.dispose();
     });
 
-    it("is only offered with the setting off", async () => {
+    it("is only offered with the setting off, and leaves network failures to the row's timed retry", async () => {
         const p = makePane();
         p.setAutoRetryOn(false);
+        // As before retry-on-reconnect: the row counts down and retries by itself.
+        expect(p.ui.waitsForReconnect("network")).toBe(false);
         p.failLive();
         expect(p.ui.reconnectHint()).toBeNull();
+        expect(p.ui.pending()).toBe(false);
         p.setApi("online");
         await flush();
         expect(p.sent).toEqual([]);

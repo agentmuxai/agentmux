@@ -34,9 +34,10 @@
  * a background pane recovers on its own. It counts down to a fixed `retryAt`
  * rather than decrementing per tick, so a throttled background window fires on
  * time when its timer finally runs instead of falling behind. A network
- * failure whose API srv tracks arms no countdown: it waits for the API to
- * answer, and its Retry goes through the pane's failed-turn recovery
- * (`reconnect`, offline/failed-turn.ts).
+ * failure whose API srv tracks arms no countdown while the retry on
+ * reconnect is on: it waits for the API to answer. Its Retry goes through
+ * the pane's failed-turn recovery either way (`reconnect`,
+ * offline/failed-turn.ts).
  *
  * Spec: docs/specs/SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md §4–§6,
  * docs/analysis/REPORT_TIMERS_DEADLINES_AND_CLOCKS_AUDIT_2026_10_17.md §4.2,

@@ -6,7 +6,8 @@
  * answers again (docs/specs/SPEC_OFFLINE_RESILIENCE_2026_10_20.md §4.3).
  *
  * For a provider whose API srv tracks (Claude's always), a network failure
- * waits for the API instead of the failure row's timed retry. When the API is
+ * waits for the API instead of the failure row's timed retry, unless
+ * `agent:retryonreconnect` is off: then the row's timed retry stays. When the API is
  * back, the turn is retried once by itself if nothing argues against it: the
  * operator started the turn from this pane while it was open (a failure read
  * back on mount, from `agent:last_failure` or the event's replay, may have
@@ -185,7 +186,9 @@ export interface FailedTurnRecovery {
     notices: Accessor<OfflineNotice[]>;
     dismissNotice: (id: number) => void;
     /** The failure row arms no timed retry for this: retrying into an
-     *  unreachable API only waits out another round of the CLI's retries. */
+     *  unreachable API only waits out another round of the CLI's retries.
+     *  Only with the retry on reconnect on: with it off, the row's timed
+     *  retry is what retries a network failure by itself. */
     waitsForReconnect: (code: AgentFailure["code"]) => boolean;
     /** For the failure row's meta line. */
     reconnectHint: Accessor<string | null>;
@@ -476,7 +479,7 @@ export function createFailedTurnRecovery(deps: FailedTurnDeps): FailedTurnRecove
             if (id === offerId) drop();
             else setNotices((list) => list.filter((n) => n.id !== id));
         },
-        waitsForReconnect: (code) => code === "network" && untrack(deps.tracked),
+        waitsForReconnect: (code) => code === "network" && untrack(deps.tracked) && untrack(deps.autoRetryOn),
         reconnectHint,
         retry,
         retryBusy: () => !!turn() && flying(),
