@@ -170,6 +170,9 @@ impl StoreTx<'_> {
 #[derive(Debug, Default)]
 pub struct LayoutWrites {
     changed: AtomicU64,
+    /// The writes that change the arrangement: everything but a block, whose
+    /// settings an agent pane writes all the time as it works.
+    arranged: AtomicU64,
     saved: AtomicU64,
 }
 
@@ -183,7 +186,15 @@ impl LayoutWrites {
     pub(crate) fn wrote(&self, otype: &str) {
         if Self::tracks(otype) {
             self.changed.fetch_add(1, Ordering::Relaxed);
+            if otype != "block" {
+                self.arranged.fetch_add(1, Ordering::Relaxed);
+            }
         }
+    }
+
+    /// The count of writes that changed the arrangement so far.
+    pub fn arranged(&self) -> u64 {
+        self.arranged.load(Ordering::Relaxed)
     }
 
     /// The count of writes so far.

@@ -163,6 +163,7 @@ pub(crate) fn has_live_window(store: &Store) -> bool {
 pub(crate) fn snapshot_session(store: &Store, for_quit: bool) -> Option<Value> {
     let live = live_windows(store);
     let window_ids: Vec<String> = live.iter().map(|(w, _)| w.oid.clone()).collect();
+    let live_ws: std::collections::HashSet<String> = live.iter().map(|(_, ws)| ws.clone()).collect();
     let windows: Vec<Value> = live
         .into_iter()
         .filter_map(|(w, ws)| {
@@ -182,6 +183,7 @@ pub(crate) fn snapshot_session(store: &Store, for_quit: bool) -> Option<Value> {
             }
             Some(entry)
         })
+        .chain(waiting_windows(store, &live_ws))
         .collect();
     let mut record = windows.first()?.clone();
     if let Some(obj) = record.as_object_mut() {
@@ -195,6 +197,32 @@ pub(crate) fn snapshot_session(store: &Store, for_quit: bool) -> Option<Value> {
         record["window_ids"] = json!(window_ids);
     }
     Some(record)
+}
+
+/// The restored windows still waiting for the main window to open them
+/// (`restore_all`), as record entries: their workspaces exist, but no window
+/// shows them yet, so a snapshot of the live windows alone would drop them
+/// (#5358).
+fn waiting_windows(store: &Store, live_ws: &std::collections::HashSet<String>) -> Vec<Value> {
+    let waiting = store
+        .get_all::<Client>()
+        .ok()
+        .and_then(|cs| cs.into_iter().next())
+        .and_then(|c| c.meta.get(WAITING_META_KEY).and_then(|v| v.as_array().cloned()))
+        .unwrap_or_default();
+    waiting
+        .into_iter()
+        .filter_map(|mut placement| {
+            let ws = placement.get("workspaceid")?.as_str()?.to_string();
+            if live_ws.contains(&ws) {
+                return None;
+            }
+            let mut entry = super::session_restore::snapshot_workspace(store, &ws)?;
+            placement.as_object_mut()?.remove("workspaceid");
+            entry["window"] = placement;
+            Some(entry)
+        })
+        .collect()
 }
 
 /// The windows a record holds: its `windows`, or the record itself for one

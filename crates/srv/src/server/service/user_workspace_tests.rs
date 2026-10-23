@@ -124,29 +124,55 @@ fn client_meta(state: &AppState, key: &str) -> Option<Value> {
 
 #[test]
 fn a_change_is_saved_a_second_after_the_last_one() {
-    let p = Pending::changed(None, 1_000);
+    let p = Pending::changed(None, 1_000, true);
     assert!(!p.due(1_999));
     assert!(p.due(2_000));
     // Another change pushes it back.
-    let p = Pending::changed(Some(p), 1_800);
-    assert_eq!(p, Pending { first_ms: 1_000, last_ms: 1_800 });
+    let p = Pending::changed(Some(p), 1_800, false);
+    assert_eq!(p, Pending { first_ms: 1_000, last_ms: 1_800, arranged: true });
     assert!(!p.due(2_500));
     assert!(p.due(2_800));
 }
 
 #[test]
 fn changes_that_keep_coming_are_saved_every_fifteen_seconds() {
-    let mut p = Pending::changed(None, 0);
+    let mut p = Pending::changed(None, 0, true);
     let mut now = 0;
     // A change every half second, as a long drag-resize makes.
     while now < CEILING_MS - 500 {
         now += 500;
-        p = Pending::changed(Some(p), now);
+        p = Pending::changed(Some(p), now, true);
         assert!(!p.due(now), "not before the ceiling ({now} ms)");
     }
     now += 500;
-    p = Pending::changed(Some(p), now);
+    p = Pending::changed(Some(p), now, true);
     assert!(p.due(now), "at the ceiling, even with a change just now");
+}
+
+/// A working agent pane writes its block's settings every few seconds: those
+/// alone are saved every thirty seconds, not every second.
+#[test]
+fn blocks_settings_alone_are_saved_every_thirty_seconds() {
+    let mut p = Pending::changed(None, 0, false);
+    assert!(!p.due(DEBOUNCE_MS), "not a second later");
+    assert!(!p.due(CEILING_MS));
+    assert!(p.due(SETTINGS_ONLY_MS));
+    // An arrangement change among them saves a second after the last change.
+    p = Pending::changed(Some(p), 5_000, true);
+    assert!(p.due(5_000 + DEBOUNCE_MS));
+}
+
+#[test]
+fn only_writes_to_the_arrangement_count_as_arranged() {
+    let w = crate::backend::storage::user_workspaces::LayoutWrites::default();
+    w.wrote("block");
+    assert_eq!((w.changed(), w.arranged()), (1, 0));
+    for otype in ["window", "workspace", "tab", "layout"] {
+        w.wrote(otype);
+    }
+    assert_eq!((w.changed(), w.arranged()), (5, 4));
+    w.wrote("client");
+    assert_eq!((w.changed(), w.arranged()), (5, 4), "other objects aren't counted");
 }
 
 // ---- Startup ----
@@ -583,4 +609,32 @@ async fn the_saver_saves_the_start_and_then_each_change() {
         .unwrap();
     dispatch_apply(&state, Command::CreateBlock { tab_id, meta: json!({ "view": "term" }) }).await;
     assert!(wait_for(2).await, "a change is saved about a second later");
+}
+
+/// The windows a cold start restored but the main window hasn't opened yet
+/// are saved too: a save in between must not shrink the record to the main
+/// window (#5358).
+#[tokio::test]
+async fn a_save_before_the_restored_windows_open_keeps_them() {
+    let state = state_with_workspace();
+    let id = current_id(&state.mstore).unwrap();
+    let tab = |v: &str| json!({ "name": "t", "blocks": [{ "meta": { "view": v } }], "rootnode": null });
+    let two = json!({
+        "tabs": [tab("term")],
+        "windows": [
+            { "tabs": [tab("term")], "window": { "x": 0, "y": 0, "width": 800, "height": 600 } },
+            { "tabs": [tab("sysinfo")], "window": { "x": 900, "y": 0, "width": 800, "height": 600, "name": "Second" } },
+        ],
+        "saved_at_ms": 5_000,
+    });
+    state.mstore.user_workspace_save_record(&id, &two.to_string(), 5_000).unwrap();
+    no_windows(&state);
+    cold_start(&state).await;
+
+    assert_eq!(save_now(&state.mstore), Saved::Written);
+    let saved: Value = serde_json::from_str(&row(&state).record.unwrap()).unwrap();
+    let windows = windows_of(&saved);
+    assert_eq!(windows.len(), 2, "{saved}");
+    assert_eq!(windows[1]["window"]["name"], json!("Second"));
+    assert!(windows[1]["window"].get("workspaceid").is_none());
 }

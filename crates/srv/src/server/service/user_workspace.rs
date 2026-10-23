@@ -31,6 +31,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use agentmux_common::ipc::Event;
+use agentmux_common::time::now_ms;
 use serde_json::{json, Value};
 
 use crate::backend::obj::{mux_obj_to_value, Client, MuxObjUpdate};
@@ -61,14 +62,15 @@ const TICK: Duration = Duration::from_millis(250);
 pub(crate) const DEBOUNCE_MS: i64 = 1_000;
 /// ...and no later than this after the first one not yet saved.
 pub(crate) const CEILING_MS: i64 = 15_000;
+/// A change to blocks' settings alone (an agent pane writes them as it works)
+/// waits this long instead; a close, a quit or focus loss saves it at once.
+pub(crate) const SETTINGS_ONLY_MS: i64 = 30_000;
 
 /// One save at a time: the saver, a flush and a boundary write never
 /// interleave their read-compare-write.
 static WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-fn now_ms() -> i64 {
-    agentmux_common::time::now_ms()
-}
+
 
 fn client(store: &Store) -> Option<Client> {
     store.get_all::<Client>().ok()?.into_iter().next()
@@ -286,22 +288,33 @@ pub(crate) enum Saved {
     Failed,
 }
 
-/// A change not yet saved: when the first came, and the last.
+/// A change not yet saved: when the first came, and the last, and whether
+/// any changed the arrangement (not only blocks' settings).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Pending {
     pub first_ms: i64,
     pub last_ms: i64,
+    pub arranged: bool,
 }
 
 impl Pending {
-    /// A change seen at `now`, after `prev`.
-    pub(crate) fn changed(prev: Option<Pending>, now: i64) -> Pending {
-        Pending { first_ms: prev.map_or(now, |p| p.first_ms), last_ms: now }
+    /// A change seen at `now`, after `prev`; `arranged` when it changed the
+    /// arrangement.
+    pub(crate) fn changed(prev: Option<Pending>, now: i64, arranged: bool) -> Pending {
+        Pending {
+            first_ms: prev.map_or(now, |p| p.first_ms),
+            last_ms: now,
+            arranged: arranged || prev.is_some_and(|p| p.arranged),
+        }
     }
 
-    /// Whether to save now: nothing changed for [`DEBOUNCE_MS`], or the first
-    /// unsaved change is [`CEILING_MS`] old.
+    /// Whether to save now. The arrangement: nothing changed for
+    /// [`DEBOUNCE_MS`], or the first unsaved change is [`CEILING_MS`] old.
+    /// Blocks' settings alone: the first is [`SETTINGS_ONLY_MS`] old.
     pub(crate) fn due(&self, now: i64) -> bool {
+        if !self.arranged {
+            return now - self.first_ms >= SETTINGS_ONLY_MS;
+        }
         now - self.last_ms >= DEBOUNCE_MS || now - self.first_ms >= CEILING_MS
     }
 }
@@ -388,7 +401,8 @@ pub(crate) fn save_now(store: &Store) -> Saved {
 pub(crate) fn spawn_saver(store: Arc<Store>) {
     tokio::spawn(async move {
         let mut seen = store.layout_writes().changed();
-        let mut pending = Some(Pending::changed(None, now_ms()));
+        let mut seen_arranged = store.layout_writes().arranged();
+        let mut pending = Some(Pending::changed(None, now_ms(), true));
         let mut first = true;
         let mut tick = tokio::time::interval(TICK);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -397,8 +411,10 @@ pub(crate) fn spawn_saver(store: Arc<Store>) {
             let now = now_ms();
             let changed = store.layout_writes().changed();
             if changed != seen {
+                let arranged = store.layout_writes().arranged();
+                pending = Some(Pending::changed(pending, now, arranged != seen_arranged));
                 seen = changed;
-                pending = Some(Pending::changed(pending, now));
+                seen_arranged = arranged;
             }
             let Some(p) = pending else { continue };
             if !first && !store.layout_writes().dirty() {
@@ -413,7 +429,7 @@ pub(crate) fn spawn_saver(store: Arc<Store>) {
             match tokio::task::spawn_blocking(move || save_now(&s)).await {
                 // Try again once the quit is over (or never was).
                 Ok(Saved::HeldForQuit) => {}
-                Ok(Saved::Failed) | Err(_) => pending = Some(Pending::changed(None, now)),
+                Ok(Saved::Failed) | Err(_) => pending = Some(Pending::changed(None, now, p.arranged)),
                 Ok(_) => {
                     pending = None;
                     first = false;
