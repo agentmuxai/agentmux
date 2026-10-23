@@ -512,11 +512,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // See SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §4.
     let mstore_rn = state.mstore.clone();
     let broker_rn = state.broker.clone();
+    let event_bus_rn = state.event_bus.clone();
     engine.register_typed(
         COMMAND_RENAME_AGENT_DEFINITION_TITLE,
         move |cmd: CommandRenameAgentDefinitionTitleData, _ctx| {
             let mstore = mstore_rn.clone();
             let broker = broker_rn.clone();
+            let event_bus = event_bus_rn.clone();
             async move {
                 let title = cmd.title.trim();
                 if title.is_empty() {
@@ -568,11 +570,14 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
 
-                // Tell the running agent, which otherwise keeps its old name
-                // until it is launched again.
+                // The agent's open pane shows the new name (an earlier pane
+                // title outranks the name, so it is cleared), whichever UI the
+                // rename came from, and the running agent, which otherwise keeps
+                // its old name until it is launched again, is told.
                 let old_title = if old.branch_label.is_empty() { &old.name } else { &old.branch_label };
-                if old_title.as_str() != title {
-                    if let Some(block_id) = crate::backend::reactive::get_global_handler().block_for_uid(&cmd.id) {
+                if let Some(block_id) = crate::backend::reactive::get_global_handler().block_for_uid(&cmd.id) {
+                    show_new_name(&mstore, &event_bus, &block_id, title);
+                    if old_title.as_str() != title {
                         let note = renamed_note(old_title, title);
                         crate::backend::blockcontroller::system_note_into_turn_or_hold(&block_id, &format!("renamed:{title}"), &note);
                     }
@@ -583,6 +588,17 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         },
     );
 
+}
+
+/// Set the pane's `agentName` to `title` and clear an earlier `frame:title`.
+fn show_new_name(mstore: &Store, event_bus: &crate::backend::eventbus::EventBus, block_id: &str, title: &str) {
+    let mut meta = crate::backend::obj::MetaMapType::new();
+    meta.insert("agentName".to_string(), serde_json::json!(title));
+    meta.insert("frame:title".to_string(), serde_json::Value::Null);
+    match crate::server::service::update_object_meta(mstore, &format!("block:{block_id}"), &meta) {
+        Ok(_) => crate::backend::blockcontroller::core::broadcast_block_update(mstore, event_bus, block_id),
+        Err(e) => tracing::warn!(block_id, error = %e, "renameagentdefinitiontitle: the pane keeps its old title until relaunch"),
+    }
 }
 
 /// The `[AgentMux]` note an agent gets when it is renamed. Both names come
