@@ -33,10 +33,14 @@
  * not the pane is visible, like the question timeout, so a transient failure in
  * a background pane recovers on its own. It counts down to a fixed `retryAt`
  * rather than decrementing per tick, so a throttled background window fires on
- * time when its timer finally runs instead of falling behind.
+ * time when its timer finally runs instead of falling behind. A network
+ * failure whose API srv tracks arms no countdown: it waits for the API to
+ * answer, and its Retry goes through the pane's failed-turn recovery
+ * (`reconnect`, offline/failed-turn.ts).
  *
  * Spec: docs/specs/SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md §4–§6,
- * docs/analysis/REPORT_TIMERS_DEADLINES_AND_CLOCKS_AUDIT_2026_10_17.md §4.2.
+ * docs/analysis/REPORT_TIMERS_DEADLINES_AND_CLOCKS_AUDIT_2026_10_17.md §4.2,
+ * docs/specs/SPEC_OFFLINE_RESILIENCE_2026_10_20.md §4.3.
  */
 
 import { createEffect, createSignal, onCleanup, onMount, type Accessor } from "solid-js";
@@ -44,9 +48,11 @@ import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import * as MOS from "@/app/store/mos";
 import { getBlockMetaKeyAtom } from "@/app/store/global";
+import { setBlockMeta } from "@/app/store/block-meta";
 import { addEventListener as addPaneEventListener } from "@/app/store/agent-pane-state-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import type { PaneFailure } from "@/app/store/agent-pane-state/types";
+import type { FailedTurnRecovery } from "../offline/failed-turn";
 import { failureToRow, isTransient, type FailureRow } from "../failure/failure-accessory";
 import { registerRecycleBlocker } from "@/app/store/recycle-blockers";
 import { copyErrorReport } from "@/app/errors/CopyErrorButton";
@@ -147,6 +153,10 @@ export interface UseAgentFailureOptions {
      * no Take over. Spec: SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md §4.6.
      */
     onTakeOver?: (turnAttempted: boolean) => Promise<void>;
+    /** The pane's failed-turn recovery (offline/failed-turn.ts): a failure
+     *  it waits on gets no timed retry, its Retry goes there, and the row's
+     *  meta says what happens once the API is back. */
+    reconnect?: Pick<FailedTurnRecovery, "waitsForReconnect" | "reconnectHint" | "retry" | "retryBusy" | "failureDismissed">;
 }
 
 export interface UseAgentFailureResult {
@@ -225,10 +235,13 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
     };
 
     const doRetry = () => {
+        // This turn's retry is already on its way: nothing more to send.
+        if (opts.reconnect?.retryBusy()) return;
         cancelCountdown();
         setRetrying(true);
         selfInitiatedClear = true;
-        opts.onRetry();
+        // A failed turn the recovery tracks is retried there: once, with its attachments.
+        if (!opts.reconnect?.retry()) opts.onRetry();
         // The next turn's lifecycle clears the row (a new turn = no failure);
         // also clear locally so the banner goes away immediately. Keep
         // `autoRetries` — an auto-fired retry stays within the episode's cap
@@ -277,7 +290,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 // Reducer-side: records state.failure AND unconditionally ends
                 // a still-working turn — see FailureObserved's reducer case.
                 opts.model.dispatchPane({ type: "FailureObserved", failure: f, at: Date.now() });
-                if (isTransient(f.code)) armAutoRetry();
+                if (isTransient(f.code) && !opts.reconnect?.waitsForReconnect(f.code)) armAutoRetry();
             }, MOS.makeORef("block", opts.blockId));
 
         // Restore the full auto-retry budget once the LAST turn genuinely
@@ -408,7 +421,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
             {
                 expanded: expanded(),
                 autoRetryIn: autoRetryIn(),
-                retrying: retrying(),
+                retrying: retrying() || (opts.reconnect?.retryBusy() ?? false),
                 // Selects the auth arm's "Log in" vs "Login Again" label and
                 // the row's accent — see failure-accessory's FailureViewState.
                 turnAttempted: pf.turnAttempted,
@@ -416,6 +429,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 takeoverArmed: takeoverArmed(),
                 takingOver: takingOver(),
                 copyState: copyState(),
+                reconnectHint: opts.reconnect?.reconnectHint() ?? null,
             },
             {
                 retry: doRetry,
@@ -431,7 +445,19 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 bindAccount: opts.onBindAccount ?? (() => {}),
                 newSession: opts.onNewSession,
                 toggleDetails: () => setExpanded((v) => !v),
-                dismiss: endEpisode,
+                dismiss: () => {
+                    // Dismissed is done with: don't read a network failure back
+                    // on the next mount, where it would be offered again.
+                    // Network only: srv reads the usage-limit and sign-in
+                    // classes to route work by account.
+                    if (f.code === "network") {
+                        setBlockMeta(opts.blockId, { "agent:last_failure": null }).catch(() => {});
+                    }
+                    // Before the row clears: a clear the recovery didn't hear
+                    // about first reads as the operator's send, not a dismiss.
+                    opts.reconnect?.failureDismissed();
+                    endEpisode();
+                },
                 takeOver: opts.onTakeOver ? () => takeOver(pf.turnAttempted ?? true) : undefined,
             },
         );

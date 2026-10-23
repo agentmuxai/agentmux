@@ -198,10 +198,22 @@ export function heldForText(ms: number): string {
     return min < 1 ? "held under a minute" : `held ${min} min`;
 }
 
-/** A line the pane shows after it sent, or couldn't send, held input. */
+/** A line the pane shows after it sent, or couldn't send, held input, or
+ *  about a failed turn (failed-turn.ts). */
 export interface OfflineNotice {
     id: number;
     text: string;
+    /** The offered retry of a failed turn, when there is one. */
+    retry?: () => void;
+    /** That retry is on its way: the button sends nothing more. */
+    retryDisabled?: boolean;
+}
+
+let nextNoticeSeq = 0;
+
+/** A notice id, unique across every list the pane shows together. */
+export function newNoticeId(): number {
+    return nextNoticeSeq++;
 }
 
 export interface OfflineInputDeps {
@@ -267,7 +279,6 @@ export function createOfflineInput(deps: OfflineInputDeps): OfflineInput {
     const [unknownTooLong, setUnknownTooLong] = createSignal(false);
     let unknownTimer: ReturnType<typeof setTimeout> | null = null;
     let nextAttempt = 0;
-    let nextNoticeId = 0;
     let disposed = false;
     /** Held messages sent since the list was last empty, for one notice. */
     let burst: { noticeId: number; sent: number; oldest: number } | null = null;
@@ -288,11 +299,11 @@ export function createOfflineInput(deps: OfflineInputDeps): OfflineInput {
         const api = deps.api();
         return holdsInput(deps.retrying(), api === "unknown" && unknownTooLong() ? null : api);
     };
-    const notice = (text: string) => setNotices((list) => [...list, { id: nextNoticeId++, text }]);
+    const notice = (text: string) => setNotices((list) => [...list, { id: newNoticeId(), text }]);
     const dismissNotice = (id: number) => setNotices((list) => list.filter((n) => n.id !== id));
 
     const noteSent = (item: HeldInput) => {
-        const b = burst ?? { noticeId: nextNoticeId++, sent: 0, oldest: Infinity };
+        const b = burst ?? { noticeId: newNoticeId(), sent: 0, oldest: Infinity };
         burst = { ...b, sent: b.sent + 1, oldest: Math.min(b.oldest, item.heldAt) };
         const what = burst.sent === 1 ? "Sent your held message" : `Sent your ${burst.sent} held messages`;
         const text = `${what} (${heldForText(now() - burst.oldest)}).`;

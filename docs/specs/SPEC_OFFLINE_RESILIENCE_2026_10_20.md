@@ -175,6 +175,6 @@ Ordered by how much control each returns; A, B and C are independent and can go 
 
 ## 9. Open questions
 
-1. Automatic retry of a network-failed turn (§4.3): on by default? Proposed: on, only for turns that failed before any tool ran. **Proposed answer kept, pending E3:** as proposed, with a setting to turn it off.
+1. Automatic retry of a network-failed turn (§4.3): on by default? Proposed: on, only for turns that failed before any tool ran. **Decided (E3):** on by default, only for a turn the operator started from that pane while it was open, that failed before any tool ran and isn't itself a failed automatic retry; any other is offered. `agent:retryonreconnect` (Settings › Advanced) turns it off.
 2. Where held messages are stored: with the pane's persisted state (proposed) or the agent's history store. **Decided (#5246):** the block's meta (`agent:held_input`), sent by the pane once it is open and the API answers.
 3. Whether the first launch of a new channel should copy the previous channel's layout automatically or ask (proposed: ask once).
