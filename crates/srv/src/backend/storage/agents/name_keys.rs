@@ -283,6 +283,20 @@ pub(super) fn frontend_fallback_id(name: &str) -> String {
     agentmux_common::slug::js_ascii_slug(name)
 }
 
+/// A fork's name is its `branch_label`, so renaming a fork records the old
+/// label too, as `trg_agents_former_name` does for a root's `name`
+/// (`migrations.rs`). Applied after `db_agents` and `db_agent_former_names`
+/// exist.
+pub(in crate::backend::storage) const FORMER_BRANCH_LABEL_TRIGGER: &str = "
+    CREATE TRIGGER IF NOT EXISTS trg_agents_former_branch_label
+        AFTER UPDATE OF branch_label ON db_agents
+        WHEN old.is_template = 0 AND old.branch_label <> new.branch_label
+         AND trim(old.branch_label) <> ''
+    BEGIN
+        INSERT OR IGNORE INTO db_agent_former_names (agent_id, name, recorded_at)
+        VALUES (old.id, old.branch_label, CAST(strftime('%s', 'now') AS INTEGER) * 1000);
+    END;";
+
 /// Every display / instance name `id` has had before its current ones
 /// (`db_agent_former_names`, recorded by trigger on every rename path).
 pub(super) fn former_names(conn: &rusqlite::Connection, id: &str) -> Result<Vec<String>, StoreError> {

@@ -284,6 +284,19 @@
     }
 
     #[test]
+    fn renaming_a_fork_records_its_old_label_among_its_former_names() {
+        let store = make_store();
+        let mut fork = crate::backend::storage::agents::test_agent_def("uid-fork", "Korp", "claude", "host", 1, "");
+        fork.branch_label = "Korp #2".to_string();
+        store.agent_def_insert(&mut fork).unwrap();
+        fork.branch_label = "BrowserLeader".to_string();
+        assert!(store.agent_def_update(&mut fork).unwrap());
+        let former = store.agent_former_names("uid-fork").unwrap();
+        assert!(former.contains(&"Korp #2".to_string()), "{former:?}");
+        assert!(!former.contains(&"BrowserLeader".to_string()), "{former:?}");
+    }
+
+    #[test]
     fn test_agent_def_insert_collision_resolves_at_runtime() {
         // Two agents whose names derive to the same slug must both
         // insert successfully, with the second getting a `-2` suffix.

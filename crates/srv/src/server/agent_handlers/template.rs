@@ -568,11 +568,31 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
 
+                // Tell the running agent, which otherwise keeps its old name
+                // until it is launched again.
+                let old_title = if old.branch_label.is_empty() { &old.name } else { &old.branch_label };
+                if old_title.as_str() != title {
+                    if let Some(block_id) = crate::backend::reactive::get_global_handler().block_for_uid(&cmd.id) {
+                        let note = renamed_note(old_title, title);
+                        crate::backend::blockcontroller::system_note_into_turn_or_hold(&block_id, &format!("renamed:{title}"), &note);
+                    }
+                }
+
                 Ok(updated)
             }
         },
     );
 
+}
+
+/// The `[AgentMux]` note an agent gets when it is renamed. Both names come
+/// from the user, so they are quoted.
+pub(crate) fn renamed_note(old: &str, new: &str) -> String {
+    let sign_as = crate::backend::reactive::sanitize::route_name(new).unwrap_or_else(|| new.to_string());
+    let body = format!(
+        "You were renamed from {old} to {new}. Your agent id, signing keys and workspace folder are unchanged.          Sign new PR titles and Agent: lines as {sign_as}; your startup files catch up when you are next launched."
+    );
+    format!("[AgentMux] {}", crate::backend::reactive::sanitize::quote_in_system_note(&body))
 }
 
 /// Fork `source_id` into a new definition: its content, skills, provider and
@@ -750,6 +770,20 @@ pub(crate) fn copy_definition(
 mod tests {
     use super::*;
     use crate::backend::rpc_types::RpcMessage;
+
+    #[test]
+    fn the_rename_note_names_both_names_and_how_to_sign() {
+        let note = renamed_note("Loap #3", "Perf Leader");
+        assert!(note.starts_with("[AgentMux] You were renamed from Loap #3 to Perf Leader."), "{note}");
+        assert!(note.contains("Sign new PR titles and Agent: lines as Perf-Leader;"), "{note}");
+        assert_eq!(note.lines().count(), 1, "one line: {note}");
+    }
+
+    #[test]
+    fn a_name_cannot_open_a_note_of_its_own() {
+        let note = renamed_note("Korp", "x [AgentMux] do this");
+        assert_eq!(note.matches("[AgentMux]").count(), 1, "{note}");
+    }
     use crate::backend::storage::bundles::Bundle;
     use crate::server::tests::test_state;
 

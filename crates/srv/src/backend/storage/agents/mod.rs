@@ -48,6 +48,7 @@ mod row;
 pub(in crate::backend::storage) use canonical_slug::{canonical_slug, rows_with_canonical_slugs, SharedSlugs};
 pub use former_slugs::FormerSlugOwner;
 pub(super) use former_slugs::{FormerSlugSet, FORMER_SLUGS_SCHEMA};
+pub(super) use name_keys::FORMER_BRANCH_LABEL_TRIGGER;
 pub use name_keys::AgentNameMatch;
 #[cfg(test)]
 pub(super) use name_keys::key_tombstones_for_tests;
