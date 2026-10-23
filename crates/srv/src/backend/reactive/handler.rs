@@ -14,7 +14,7 @@ pub(super) use super::rate_limiter::RateLimiter;
 #[path = "former_slug.rs"]
 mod former_slug;
 pub use former_slug::FormerSlugResolver;
-pub(crate) use former_slug::{former_slug_claim, refuse_former_slug_sender};
+pub(crate) use former_slug::{former_slug_claim, refuse_former_slug_sender, renamed};
 
 // ---- Handler ----
 

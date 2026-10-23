@@ -469,6 +469,7 @@ impl Store {
             )?;
             (rows, scope)
         };
+        self.former_names_changed();
         let mut registry_renamed = 0usize;
         if let Some(reg) = self.registry() {
             match reg.set_instance_name_for_agent(id, scope, instance_name) {
@@ -639,24 +640,23 @@ impl Store {
     /// M3, spec §5): exact (canonical) slug, or `name`/`instance_name`
     /// ASCII-case-insensitively, as SQLite's `NOCASE` compared them. Lists
     /// rather than picks — the caller decides what to do with several. A name
-    /// none of them answers to may be a slug an agent was renamed from: that
-    /// agent's row (`former_slug_owner_in`; fork slug migration Phase 1).
+    /// none of them answers to may be a slug or display name an agent was
+    /// renamed from: that agent's row (`former_names`).
     pub fn agents_matching_name(&self, typed: &str) -> Result<Vec<AgentNameMatch>, StoreError> {
         let typed = typed.trim();
         if typed.is_empty() {
             return Ok(Vec::new());
         }
         // Asked before the lock: it may re-read the store.
-        let maybe_former = self.former_slug_known(typed);
+        let maybe_former = self.former_name_candidate(typed);
         let shared = self.shared_slugs();
         let conn = self.conn.lock().unwrap();
         let rows = rows_with_canonical_slugs(&conn, "WHERE is_template = 0 AND user_hidden = 0", &shared)?;
         let matched: Vec<AgentNameMatch> = rows.iter().filter(|r| answers_to(r, typed)).cloned().collect();
-        if !matched.is_empty() || !maybe_former {
+        let Some(key) = maybe_former.filter(|_| matched.is_empty()) else {
             return Ok(matched);
-        }
-        let all = rows_with_canonical_slugs(&conn, "", &shared)?;
-        let Some(owner) = former_slug_owner_in(&conn, &shared, &all, &typed.to_lowercase())? else {
+        };
+        let Some(owner) = FormerNameIndex::read(&conn, &shared)?.owner(&key).map(str::to_string) else {
             return Ok(Vec::new());
         };
         if let Some(row) = rows.into_iter().find(|r| r.id == owner) {
