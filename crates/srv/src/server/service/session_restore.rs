@@ -446,7 +446,7 @@ pub(crate) struct ReplayedTab {
 /// Rebuild `tabs` inside an existing workspace: per tab `CreateTab`, each
 /// block `CreateBlock` (its saved meta), then `LayoutSetTree` with the tree's
 /// placeholders resolved to the new block ids. Shared by restore-on-relaunch
-/// (into a fresh workspace) and Layouts → Open layout… (into the current
+/// (into a fresh workspace) and `layout.open` (into the current
 /// window's) — `SPEC_LAYOUT_FILES_2026_09_25.md` §1.1.
 ///
 /// Per-tab and per-block failures are logged and skipped, never fatal: a

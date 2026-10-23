@@ -67,6 +67,9 @@ describe("the delete confirmation", () => {
             title: "Delete “Reviews”?",
             description: "Its 3 windows and their tabs and panes are deleted. Its agents stay in My Agents, with their conversations.",
         });
+        expect(deleteWorkspaceText(ws("c", "Solo", false, 1, 0)).description).toBe(
+            "Its window and its tabs and panes are deleted. Its agents stay in My Agents, with their conversations."
+        );
     });
 
     it("deletes only when confirmed", async () => {

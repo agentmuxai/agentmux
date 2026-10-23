@@ -117,7 +117,7 @@ export function deleteWorkspaceText(w: UserWorkspaceInfo): { title: string; desc
     return {
         title: `Delete “${w.name}”?`,
         description:
-            `Its ${windows} window${windows === 1 ? "" : "s"} and their tabs and panes are deleted. ` +
+            (windows === 1 ? "Its window and its tabs and panes are deleted. " : `Its ${windows} windows and their tabs and panes are deleted. `) +
             `Its agents stay in My Agents, with their conversations.`,
     };
 }

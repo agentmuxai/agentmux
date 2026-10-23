@@ -1,12 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// ☰ → Workspaces and the palette's workspace commands
-// (SPEC_WORKSPACES_2026_10_23.md §3.2, §6). srv does the switch
-// (`user_workspace_switch.rs`): it saves the open workspace, closes it and
-// opens the other in the window the user acted from. This side asks first
-// when an agent is working, then closes the windows srv closed and opens the
-// ones waiting beside this one. Loaded when used, like window-close.ts.
+// ☰ → Workspaces and the palette's workspace commands (SPEC_WORKSPACES_2026_10_23.md
+// §3.2, §6). srv switches (`user_workspace_switch.rs`); this side asks first when
+// an agent is working, then closes the windows srv closed and opens the ones
+// waiting beside this one. Loaded when used, like window-close.ts.
 
 import { reopenRestoredWindows } from "@/app/init/restored-windows";
 import { openModal } from "@/app/store/modalmodel";
