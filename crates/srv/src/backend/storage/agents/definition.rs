@@ -951,6 +951,8 @@ impl Store {
         // Reflect the persisted timestamp back to the caller's struct so an
         // RPC response carries the fresh value, not the pre-update one.
         agent.updated_at = now;
+        // A renamed agent's old display name is a former name from now on.
+        self.former_names_changed();
         if rows > 0 {
             // Mirror the updated definition into the global store. (P0.2b.)
             self.registry_def_upsert(&agent.id);

@@ -782,6 +782,13 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // recent sessions via `ListRecentSessionsCommand`). The card grid
     // below the My Agents list renders only the templates tier.
     const templates = createMemo(() => agents().filter((a) => a.is_seeded === 1));
+    // The harnesses whose CLI is installed come first; each group keeps its
+    // own order (the sort is stable). A card whose check is still out counts
+    // as not installed, and moves up when its answer comes.
+    const orderedTemplates = createMemo(() => {
+        const installed = installState();
+        return [...templates()].sort((a, b) => Number(installed[b.id] === true) - Number(installed[a.id] === true));
+    });
 
     // Refresh install state whenever the agent list changes.
     // Session-zone probes were removed in the Phase 1 cleanup
@@ -914,7 +921,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                             <CardGrid
                                 class="agent-picker-list"
                                 ariaLabel="New agent"
-                                items={templates()}
+                                items={orderedTemplates()}
                                 keyOf={(agent) => agent.id}
                                 minCardWidth={240}
                                 selectedKey={openTemplate()}
@@ -939,7 +946,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                                         // Templates have no session zone: no
                                         // "+ New" pill.
                                         hasCurrentSession={false}
-                                        defaultFocus={templates()[0]?.id === agent.id}
+                                        defaultFocus={orderedTemplates()[0]?.id === agent.id}
                                         blockId={props.model.blockId}
                                     />
                                 )}

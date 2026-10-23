@@ -54,8 +54,10 @@ export const agentPaneTab: PaneTabDescriptor = {
             // picker) — if this fails nothing has been written anywhere.
             await RpcApi.RenameAgentDefinitionTitleCommand(TabRpcClient, { id: definitionId, title });
             // Denormalized copy the pill and pane title read; it also catches
-            // up on the agent's next launch, so a failure here is harmless.
-            await setBlockMeta(blockId, { agentName: title }).catch(() => {});
+            // up on the agent's next launch, so a failure here is harmless. A
+            // pane title set earlier (`frame:title`, which outranks the name)
+            // is cleared, so the pane shows the name it was just given.
+            await setBlockMeta(blockId, { agentName: title, "frame:title": null }).catch(() => {});
         };
     },
 };

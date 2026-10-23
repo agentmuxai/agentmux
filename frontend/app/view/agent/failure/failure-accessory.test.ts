@@ -138,6 +138,16 @@ describe("failureToRow", () => {
         expect(action(row, "Retry now (5s)")).toBeTruthy();
     });
 
+    it("a network failure waiting for its API says what happens when it's back", () => {
+        const row = failureToRow(
+            mkFailure({ code: "network", retryable: true }),
+            mkView({ reconnectHint: "retries by itself when the API is back" }),
+            mkActions(),
+        );
+        expect(row.meta).toBe("network · retryable · retries by itself when the API is back");
+        expect(action(row, "Retry now")).toBeTruthy();
+    });
+
     it("retry is disabled while a retry is in flight", () => {
         const row = failureToRow(mkFailure({ code: "network" }), mkView({ retrying: true }), mkActions());
         expect(action(row, "Retry now")?.disabled).toBe(true);

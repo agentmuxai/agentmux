@@ -38,6 +38,14 @@ export const ADVANCED_SETTINGS = {
         section: "advanced",
         keywords: ["same file", "conflict", "other agents", "Presence", "agent:overlapnotes"],
     },
+    retryOnReconnect: {
+        id: "advanced.retry_on_reconnect",
+        label: "Retry after the API is back",
+        description:
+            "When a turn failed because the model API couldn't be reached, retry it once by itself when the API answers again, unless a tool ran in it or you typed in that pane since",
+        section: "advanced",
+        keywords: ["offline", "network", "auto retry", "reconnect", "agent:retryonreconnect"],
+    },
     kanbanReminders: {
         id: "advanced.kanban_reminders",
         label: "Remind idle agents of their backlog",
@@ -130,6 +138,17 @@ export function AdvancedSection(): JSX.Element {
                     <ToggleControl
                         checked={(s()["agent:overlapnotes"] as boolean) ?? true}
                         onChange={(v) => set("agent:overlapnotes", v)}
+                    />
+                }
+            />
+            <SettingRow
+                id={ADVANCED_SETTINGS.retryOnReconnect.id}
+                label={ADVANCED_SETTINGS.retryOnReconnect.label}
+                description={ADVANCED_SETTINGS.retryOnReconnect.description}
+                control={
+                    <ToggleControl
+                        checked={(s()["agent:retryonreconnect"] as boolean) ?? true}
+                        onChange={(v) => set("agent:retryonreconnect", v)}
                     />
                 }
             />

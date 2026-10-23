@@ -177,3 +177,113 @@ fn the_rule_refuses_a_former_slug_only() {
     let mut r = InjectionRequest::default();
     assert!(!refuse_former_slug_sender(&mut r, |_| false, owner));
 }
+
+// ---- Former display names (`former_names`, `display_rename`) ----
+
+const ZED: &str = "a0dfc499-0000-4000-8000-0000000000ed";
+
+/// A store whose agent `ZED` (slug `zed`) was renamed from "Zed Prime" to
+/// "Zork", and a handler resolving former names through it, with the agent's
+/// pane registered under its new name.
+fn renamed_display() -> (std::sync::Arc<crate::backend::storage::store::Store>, Handler, Arc<Mutex<Vec<String>>>) {
+    let store = std::sync::Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+    let mut def = crate::backend::storage::agents::test_agent_def(ZED, "Zed Prime", "claude", "host", 1, "");
+    def.slug = "zed".into();
+    store.agent_def_insert(&mut def).unwrap();
+    def.name = "Zork".into();
+    store.agent_def_update(&mut def).unwrap();
+    let sent = Arc::new(Mutex::new(Vec::new()));
+    let mut h = Handler::new();
+    let sink = sent.clone();
+    h.set_input_sender(Arc::new(move |block: &str, _data: &[u8]| {
+        sink.lock().unwrap().push(block.to_string());
+        Ok(())
+    }));
+    let resolver = store.clone();
+    h.set_former_slug_resolver(Arc::new(move |n: &str| resolver.former_name_owner(n).ok().flatten().map(|o| o.uid)));
+    h.register_agent_full("Zork", "block-zed", None, 0, Some("zed"), Some(ZED), "test.former_name").unwrap();
+    (store, h, sent)
+}
+
+#[tokio::test]
+async fn a_message_to_a_former_display_name_reaches_the_agent() {
+    let (_store, mut h, sent) = renamed_display();
+    let resp = inject(&mut h, "Zed-Prime");
+    assert!(resp.success, "{:?}", resp.error);
+    assert_eq!(resp.block_id.as_deref(), Some("block-zed"));
+    assert_eq!(sent.lock().unwrap().first().map(String::as_str), Some("block-zed"));
+    assert!(matches!(h.lookup_delivery_target("zed-prime"), LookupOutcome::One(r) if r.uid.as_deref() == Some(ZED)));
+    assert!(h.get_agent("zed-prime").is_none(), "a generic lookup never answers it");
+    assert!(matches!(h.lookup_by_name("Zed-Prime"), LookupOutcome::NotFound));
+}
+
+/// Another agent listing the same former name, or holding it now, leaves it
+/// unresolved: not found here, so the miss path may look elsewhere.
+#[tokio::test]
+async fn an_ambiguous_former_display_name_is_not_found() {
+    let (store, mut h, _) = renamed_display();
+    let mut other = crate::backend::storage::agents::test_agent_def("uid-other", "Zed Prime", "claude", "host", 2, "");
+    other.slug = "other".into();
+    store.agent_def_insert(&mut other).unwrap();
+    let resp = inject(&mut h, "Zed-Prime");
+    assert!(resp.error.as_deref().is_some_and(|e| e.starts_with("agent not found")), "held now: {:?}", resp.error);
+    other.name = "Other".into();
+    store.agent_def_update(&mut other).unwrap();
+    let resp = inject(&mut h, "zed-prime");
+    assert!(resp.error.as_deref().is_some_and(|e| e.starts_with("agent not found")), "listed twice: {:?}", resp.error);
+}
+
+/// A sender claiming a former display name is unverified, whatever verdict
+/// it carried; the same agent's slug and current display name are not.
+#[tokio::test]
+async fn a_sender_claiming_a_former_display_name_is_unverified() {
+    let (_store, mut h, _) = renamed_display();
+    h.register_agent_full("AgentY", "block-y", None, 0, Some("agenty"), Some("uid-y"), "test.former_name").unwrap();
+    let from = |source: &str| InjectionRequest {
+        target_agent: "agenty".into(),
+        message: "hello".into(),
+        source_agent: Some(source.into()),
+        request_id: Some(format!("req-from-{source}")),
+        sig_verified: Some(true),
+        ..Default::default()
+    };
+    let resp = h.inject_message(from("Zed-Prime"));
+    assert!(resp.success, "{:?}", resp.error);
+    assert_eq!(resp.effective_tier.as_deref(), Some("sensitive"));
+    assert_eq!(resp.requires_stop, Some(true));
+    for current in ["zed", "Zork"] {
+        let resp = h.inject_message(from(current));
+        assert!(resp.success, "{:?}", resp.error);
+        assert_ne!(resp.requires_stop, Some(true), "{current}");
+    }
+}
+
+/// A rename moves the pane's display binding at once: the old name is no
+/// longer held (it resolves as a former name only), the stable name, UID, tab
+/// and nonce stay.
+#[test]
+fn a_rename_rebinds_the_pane_and_retires_the_old_name() {
+    let mut h = Handler::new();
+    h.register_agent_full("Zed-Prime", "block-zed", Some("tab-1"), 7, Some("zed"), Some(ZED), "test.former_name").unwrap();
+    assert_eq!(h.rebind_renamed(ZED, "Other Title", "Zork"), None, "a pane under another name keeps it");
+    let r = h.rebind_renamed(ZED, "Zed Prime", "Zork").unwrap();
+    assert_eq!((r.display.as_str(), r.retired.as_deref()), ("Zork", Some("Zed-Prime")));
+    assert_eq!(r.names, ["Zork", "zed"]);
+    assert!(!h.has_live_name("zed-prime"));
+    let reg = h.get_agent("zork").unwrap();
+    assert_eq!((reg.block_id.as_str(), reg.tab_id.as_deref(), reg.registration_nonce), ("block-zed", Some("tab-1"), 7));
+    assert_eq!(h.get_agent("zed").map(|r| r.block_id.clone()).as_deref(), Some("block-zed"));
+    assert_eq!(h.rebind_renamed(ZED, "Zork", "zork"), None, "nothing changes");
+    assert_eq!(h.rebind_renamed("uid-none", "Zork", "Zap"), None);
+}
+
+/// A pane whose display binding is still its stable name (before its first
+/// turn) is rebound, and that name stays held.
+#[test]
+fn a_rename_never_retires_a_name_the_pane_still_holds() {
+    let mut h = Handler::new();
+    h.register_agent_full("zed", "block-zed", None, 0, Some("zed"), Some(ZED), "test.former_name").unwrap();
+    let r = h.rebind_renamed(ZED, "zed", "Zork").unwrap();
+    assert_eq!(r.retired, None);
+    assert!(h.has_live_name("zed") && h.has_live_name("zork"));
+}

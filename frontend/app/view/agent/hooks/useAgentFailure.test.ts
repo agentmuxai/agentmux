@@ -53,6 +53,8 @@ vi.mock("@/app/store/mos", () => ({ makeORef: (a: string, b: string) => `${a}:${
 vi.mock("@/app/store/global", () => ({
     getBlockMetaKeyAtom: (_blockId: string, _key: string) => () => hub.persistedFailure,
 }));
+const setBlockMetaMock = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock("@/app/store/block-meta", () => ({ setBlockMeta: setBlockMetaMock }));
 const writeTextMock = vi.fn();
 vi.mock("@/util/clipboard", () => ({ writeText: (text: string) => writeTextMock(text) }));
 
@@ -108,7 +110,7 @@ const makeFakeModel = () => {
 const simulateFreshTurnStartClearingFailure = (model: { dispatchPane: (c: unknown) => AgentPaneEvent[] }) =>
     model.dispatchPane({ type: "FailureCleared" });
 
-const mkUI = (onRetry: () => void) => {
+const mkUI = (onRetry: () => void, reconnect?: Parameters<typeof useAgentFailure>[0]["reconnect"]) => {
     const { model, failure } = makeFakeModel();
     const ui = useAgentFailure({
         blockId: BLOCK_ID,
@@ -119,6 +121,7 @@ const mkUI = (onRetry: () => void) => {
         onLoginViaTerminal() {},
         onOpenAccounts() {},
         onNewSession() {},
+        reconnect,
     });
     return { ui, model };
 };
@@ -698,6 +701,104 @@ describe("useAgentFailure — Copy error", () => {
             fire("agentfailure", transient());
             expect(button(ui, "Copied")).toBeUndefined();
             expect(button(ui, "Copy error")).toBeDefined();
+            dispose();
+        });
+    });
+});
+
+describe("useAgentFailure — a network failure that waits for its API", () => {
+    beforeEach(() => {
+        hub.handlers.clear();
+        hub.persistedFailure = null;
+        __resetListeners();
+        vi.useFakeTimers();
+    });
+    afterEach(() => vi.useRealTimers());
+
+    const counting = (ui: UseAgentFailureResult) => (ui.row()?.actions ?? []).some((a) => a.label?.startsWith("Retry now ("));
+    const network = (): AgentFailure => ({ code: "network", title: "Can't reach the API", detail: "", retryable: true });
+    const recovery = (over: Partial<NonNullable<Parameters<typeof useAgentFailure>[0]["reconnect"]>> = {}) => ({
+        waitsForReconnect: (code: AgentFailure["code"]) => code === "network",
+        reconnectHint: () => "retries by itself when the API is back",
+        retry: vi.fn(() => true),
+        retryBusy: () => false,
+        failureDismissed: vi.fn(),
+        ...over,
+    });
+
+    it("arms no timed retry, shows what happens when the API is back, and retries through the recovery", async () => {
+        await createRoot(async (dispose) => {
+            const onRetry = vi.fn();
+            const reconnect = recovery();
+            const { ui } = mkUI(onRetry, reconnect);
+            await Promise.resolve();
+            fire("agentfailure", network());
+            vi.advanceTimersByTime(600_000);
+            expect(reconnect.retry).not.toHaveBeenCalled();
+            expect(ui.row()?.meta).toContain("retries by itself when the API is back");
+            ui.row()!.actions.find((a) => a.label === "Retry now")!.onClick();
+            expect(reconnect.retry).toHaveBeenCalledTimes(1);
+            expect(onRetry).not.toHaveBeenCalled();
+            // Other transient classes keep their ladder.
+            fire("agentfailure", transient());
+            expect(counting(ui)).toBe(true);
+            dispose();
+        });
+    });
+
+    it("falls back to its own retry for a turn the recovery doesn't take", async () => {
+        await createRoot(async (dispose) => {
+            const onRetry = vi.fn();
+            const { ui } = mkUI(onRetry, recovery({ retry: vi.fn(() => false) }));
+            await Promise.resolve();
+            fire("agentfailure", network());
+            ui.row()!.actions.find((a) => a.label === "Retry now")!.onClick();
+            expect(onRetry).toHaveBeenCalledTimes(1);
+            dispose();
+        });
+    });
+
+    it("disables Retry, and keeps the row, while the recovery's retry is on its way", async () => {
+        await createRoot(async (dispose) => {
+            const reconnect = recovery({ retryBusy: () => true });
+            const { ui } = mkUI(vi.fn(), reconnect);
+            await Promise.resolve();
+            fire("agentfailure", network());
+            const retry = ui.row()!.actions.find((a) => a.label === "Retry now")!;
+            expect(retry.disabled).toBe(true);
+            retry.onClick();
+            expect(reconnect.retry).not.toHaveBeenCalled();
+            expect(ui.row()).not.toBeNull();
+            dispose();
+        });
+    });
+
+    it("dismissing a network failure drops its turn and the stored failure, so a reload doesn't offer it again", async () => {
+        await createRoot(async (dispose) => {
+            setBlockMetaMock.mockClear();
+            const reconnect = recovery();
+            const { ui } = mkUI(vi.fn(), reconnect);
+            await Promise.resolve();
+            fire("agentfailure", network());
+            ui.row()!.actions.find((a) => a.title === "Dismiss")!.onClick();
+            expect(setBlockMetaMock).toHaveBeenCalledWith(BLOCK_ID, { "agent:last_failure": null });
+            expect(reconnect.failureDismissed).toHaveBeenCalledTimes(1);
+            expect(ui.row()).toBeNull();
+            // Other classes stay stored: srv routes work by them.
+            setBlockMetaMock.mockClear();
+            fire("agentfailure", transient());
+            ui.row()!.actions.find((a) => a.title === "Dismiss")!.onClick();
+            expect(setBlockMetaMock).not.toHaveBeenCalled();
+            dispose();
+        });
+    });
+
+    it("keeps the timed retry for a network failure nothing waits on", async () => {
+        await createRoot(async (dispose) => {
+            const { ui } = mkUI(vi.fn(), recovery({ waitsForReconnect: () => false }));
+            await Promise.resolve();
+            fire("agentfailure", network());
+            expect(counting(ui)).toBe(true);
             dispose();
         });
     });

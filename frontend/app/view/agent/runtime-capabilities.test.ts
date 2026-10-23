@@ -1,9 +1,25 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { replaceProviderModels } from "./providers";
 import type { PermissionMode } from "./types";
-import { effectiveModel, effectiveRuntime, effortFromFlags, permissionModeFromFlags, permissionModeText, effortApplies, effortNotUsedReason, modelFromFlags, modelTakesEffort } from "./runtime-capabilities";
+import {
+    codexEffort,
+    codexModeFor,
+    codexModes,
+    codexSandbox,
+    effectiveModel,
+    effectiveRuntime,
+    effortFromFlags,
+    effortLevels,
+    permissionModeFromFlags,
+    permissionModeText,
+    effortApplies,
+    effortNotUsedReason,
+    modelFromFlags,
+    modelTakesEffort,
+} from "./runtime-capabilities";
 
 describe("modelTakesEffort", () => {
     it("Haiku does not, by alias or by concrete id, in any case", () => {
@@ -30,7 +46,46 @@ describe("effortApplies", () => {
     it("says why when it does not", () => {
         expect(effortNotUsedReason("claude", "sonnet")).toBeNull();
         expect(effortNotUsedReason("claude", "haiku")).toMatch(/Haiku/);
-        expect(effortNotUsedReason("codex", "gpt-5.5")).toMatch(/codex has no effort/);
+        expect(effortNotUsedReason("codex", "gpt-5.5")).toMatch(/models aren't known yet/);
+    });
+});
+
+describe("Codex: each model's own effort levels, and its sandbox modes", () => {
+    afterEach(() => replaceProviderModels("codex", []));
+    const ASTRA = { value: "gpt-6-astra", label: "GPT-6-Astra", efforts: ["low", "medium", "ultra"], defaultEffort: "low" };
+
+    it("offers the levels the account lists for the model, none while the list is unknown", () => {
+        expect(effortLevels("codex", "gpt-6-astra")).toEqual([]);
+        expect(effortApplies("codex", "gpt-6-astra")).toBe(false);
+        replaceProviderModels("codex", [ASTRA, { value: "gpt-5.6-luna", label: "GPT-5.6-Luna" }]);
+        expect(effortLevels("codex", "gpt-6-astra")).toEqual(["low", "medium", "ultra"]);
+        expect(effortApplies("codex", "gpt-6-astra")).toBe(true);
+        expect(effortNotUsedReason("codex", "gpt-6-astra")).toBeNull();
+        // A model whose entry lists no levels.
+        expect(effortApplies("codex", "gpt-5.6-luna")).toBe(false);
+        expect(effortNotUsedReason("codex", "gpt-5.6-luna")).toMatch(/takes no effort/);
+    });
+
+    it("runs a level the model doesn't take at the model's default, and passes nothing for it", () => {
+        replaceProviderModels("codex", [ASTRA]);
+        expect(codexEffort("gpt-6-astra", "ultra")).toEqual({ effort: "ultra", passed: true });
+        // "max" is a Claude level (and other Codex models'), not this one's.
+        expect(codexEffort("gpt-6-astra", "max")).toEqual({ effort: "low", passed: false });
+    });
+
+    it("runs every mode in a Codex sandbox, the Claude-only ones in the nearest", () => {
+        const modes: PermissionMode[] = ["bypass", "acceptEdits", "auto", "plan", "default"];
+        expect(modes.map((m) => codexSandbox(m, false))).toEqual([null, "workspace-write", "workspace-write", "read-only", "read-only"]);
+        expect(permissionModeText("bypass", false, "codex").label).toBe("Full access");
+        expect(permissionModeText("default", false, "codex").label).toBe("Read only");
+    });
+
+    // Codex 0.154.0 on Windows: workspace-write blocked a write in the cwd like read-only.
+    it("offers no Workspace write on Windows, and runs the writing modes read-only there", () => {
+        expect(codexModes(false).map((m) => m.label)).toEqual(["Full access", "Workspace write", "Read only"]);
+        expect(codexModes(true).map((m) => m.label)).toEqual(["Full access", "Read only"]);
+        expect(codexSandbox("acceptEdits", true)).toBe("read-only");
+        expect(codexModeFor("acceptEdits", true).label).toBe("Read only");
     });
 });
 
@@ -87,7 +142,8 @@ describe("permissionModeFromFlags / effectiveRuntime's mode", () => {
 
 describe("permissionModeText", () => {
     it("makes no claim for a provider whose CLI was not observed", () => {
-        for (const id of ["gemini", "kimi", "qwen", "codex", ""]) {
+        // Codex's modes are its own sandbox, observed (codexSandbox): not here.
+        for (const id of ["gemini", "kimi", "qwen", ""]) {
             for (const persistent of [true, false]) {
                 for (const m of ["bypass", "default", "acceptEdits", "auto", "plan"] as const) {
                     const t = permissionModeText(m, persistent, id);

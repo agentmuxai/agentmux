@@ -628,12 +628,12 @@ export function update(
         }
 
         case "ContextReported": {
-            const model = command.model ?? state.lastContextModel;
-            const reading = makeContextReading(
-                { tokens: command.tokens, model, source: "live", at: nowMs },
-                { reported: state.reportedContextWindows, learned: state.learnedContextWindows },
-            );
-            const next = { ...state, lastContextModel: model, contextSeedable: false };
+            const model = command.model ?? state.lastContextModel; // and the window it was measured against:
+            const said = command.window != null && model != null ? { [model]: command.window } : null;
+            const reportedContextWindows = said ? mergeContextWindows(state.reportedContextWindows, said) : state.reportedContextWindows;
+            const known = { reported: reportedContextWindows, learned: state.learnedContextWindows };
+            const reading = makeContextReading({ tokens: command.tokens, model, source: "live", at: nowMs }, known);
+            const next = { ...state, reportedContextWindows, lastContextModel: model, contextSeedable: false };
             return withReading(next, reading, plausibleReading(state.context) != null);
         }
 

@@ -307,6 +307,26 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         expect(screen.queryByTestId("agent-card-user-maks")).toBeNull();
     });
 
+    it("lists the harnesses whose CLI is installed first, each group in its own order", async () => {
+        const template = (id: string, provider: string) => baseDef({ id, slug: id, name: id, provider, is_seeded: 1 });
+        vi.mocked(RpcApi.ListAgentDefinitionsCommand).mockResolvedValue([
+            template("tpl-a", "claude"),
+            template("tpl-b", "codex"),
+            template("tpl-c", "gemini"),
+            template("tpl-d", "codex"),
+        ]);
+        vi.mocked(RpcApi.InstallCheckCommand).mockImplementation(
+            async (_client: unknown, req: { providerId: string }) => ({ installed: req.providerId === "codex", version: null }) as any
+        );
+        const model = makeMockModel();
+        render(() => <AgentPicker model={model as any} />);
+        const order = () =>
+            [...screen.getByTestId("agent-templates-list").querySelectorAll("[data-testid^='agent-card-']")].map((el) =>
+                el.getAttribute("data-testid")!.replace("agent-card-", "")
+            );
+        await waitFor(() => expect(order()).toEqual(["tpl-b", "tpl-d", "tpl-a", "tpl-c"]));
+    });
+
     it("renders the 'New Agent' section header", async () => {
         const model = makeMockModel();
         render(() => <AgentPicker model={model as any} />);

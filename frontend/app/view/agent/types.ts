@@ -1081,7 +1081,9 @@ export type LogFn = (tag: string, text: string, level?: "info" | "error" | "warn
  * Applied as CLI flags on each turn (between --resume spawns).
  */
 export type PermissionMode = "bypass" | "auto" | "acceptEdits" | "plan" | "default";
-export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
+// "ultra": some Codex models' deepest level (their account's list says which
+// levels each model takes, runtime-capabilities.ts effortLevels).
+export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 
 export interface AgentRuntimeConfig {
     permissionMode: PermissionMode;

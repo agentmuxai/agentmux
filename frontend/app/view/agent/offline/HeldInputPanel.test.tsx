@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HeldInputPanel } from "./HeldInputPanel";
 
@@ -71,5 +72,28 @@ describe("HeldInputPanel", () => {
         expect(screen.getByText("Sent your held message (held 4 min).")).toBeTruthy();
         fireEvent.click(screen.getByLabelText("Dismiss"));
         expect(onDismissNotice).toHaveBeenCalledWith(1);
+    });
+
+    it("offers a failed turn's Retry, disabled while that retry is on its way", () => {
+        const retry = vi.fn();
+        const [disabled, setDisabled] = createSignal(false);
+        render(() => (
+            <HeldInputPanel
+                held={[]}
+                notices={[
+                    { id: 1, text: "Back online: sent your message from 14:32 again." },
+                    { id: 2, text: "Back online. Your message from 14:32 failed.", retry, retryDisabled: disabled() },
+                ]}
+                onSendNow={() => {}}
+                onCancel={() => {}}
+                onDismissNotice={() => {}}
+                clockTime={String}
+            />
+        ));
+        expect(screen.getAllByText("Retry")).toHaveLength(1);
+        fireEvent.click(screen.getByText("Retry"));
+        expect(retry).toHaveBeenCalledTimes(1);
+        setDisabled(true);
+        expect((screen.getByText("Retry").closest("button") as HTMLButtonElement).disabled).toBe(true);
     });
 });

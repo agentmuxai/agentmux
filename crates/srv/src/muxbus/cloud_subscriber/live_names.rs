@@ -18,6 +18,9 @@
 //! agent was renamed from (`SPEC_FORK_SLUG_MIGRATION_2026_10_22.md` Phase 1):
 //! review notices for PRs opened under the old id still arrive. Receive-only:
 //! nothing is sent as a former slug, which can't sign (`actor::uid_owns_name`).
+//! A display name the agent was renamed from is held the same way, by its
+//! route, while it still resolves to that agent alone
+//! (`Store::agent_former_display_names_routable`).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -245,14 +248,32 @@ pub(super) async fn directory() -> Arc<NameDirectory> {
     }
 }
 
+/// A rename changed which names are current: the next lookup reads the
+/// directory again rather than wait out [`DIRECTORY_TTL`].
+pub(crate) fn names_changed() {
+    *DIRECTORY.lock().unwrap() = None;
+}
+
 fn load_directory() -> Option<NameDirectory> {
-    let store = crate::backend::identity_spawn::row_store()?;
-    let now = agentmux_common::time::now_ms();
+    directory_from(crate::backend::identity_spawn::row_store()?, agentmux_common::time::now_ms())
+}
+
+/// The directory `store` gives at `now` (epoch ms): every definition's names,
+/// and the former slugs and former display names still in their grace period.
+pub(super) fn directory_from(store: &crate::backend::storage::store::Store, now: i64) -> Option<NameDirectory> {
     let former = store.agent_former_slugs_all().unwrap_or_else(|e| {
         tracing::warn!(error = %e, "cloud_subscriber: former slugs not read; none held");
         Vec::new()
     });
-    let former = former.iter().filter(|(_, f)| in_grace(f.retired_at, now)).map(|(uid, f)| (uid.as_str(), f.slug.as_str()));
+    let display = store.agent_former_display_names_routable().unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "cloud_subscriber: former display names not read; none held");
+        Vec::new()
+    });
+    let former = former
+        .iter()
+        .filter(|(_, f)| in_grace(f.retired_at, now))
+        .map(|(uid, f)| (uid.as_str(), f.slug.as_str()))
+        .chain(display.iter().filter(|(_, _, at)| in_grace(*at, now)).map(|(uid, key, _)| (uid.as_str(), key.as_str())));
     match store.agent_def_list() {
         Ok(defs) => Some(NameDirectory::from_defs_and_former(
             defs.iter().map(|d| (d.id.as_str(), d.slug.as_str(), d.name.as_str())),
