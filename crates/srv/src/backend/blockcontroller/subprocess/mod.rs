@@ -55,6 +55,7 @@ use crate::backend::mps;
 // other item in `argv` keeps its own narrower visibility.
 pub(crate) mod argv;
 mod codex_compact;
+mod codex_context;
 mod container_spawn;
 mod host_spawn;
 mod session;
