@@ -16,10 +16,10 @@ fn pulled(extra: serde_json::Value) -> PendingInj {
 }
 
 #[test]
-fn a_declared_tier_travels_with_a_wan_jekt() {
-    for (raw, want) in [("sensitive", JektTier::Sensitive), ("info", JektTier::Info), ("coord", JektTier::Coord)] {
+fn a_declared_sensitive_tier_travels_with_a_wan_jekt() {
+    for (raw, want) in [("sensitive", Some(JektTier::Sensitive)), ("info", None), ("coord", None)] {
         let req = wan_request(&pulled(serde_json::json!({ "jekt_tier": raw })), "agent2");
-        assert_eq!(req.jekt_tier, Some(want), "{raw}");
+        assert_eq!(req.jekt_tier, want, "{raw}: only sensitive is taken from the relay");
         assert_eq!(req.delivery_tier.as_deref(), Some("wan"));
         assert_eq!(req.target_agent, "agent2");
         assert_eq!(req.request_id.as_deref(), Some("inj-1"));

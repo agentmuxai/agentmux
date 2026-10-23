@@ -69,12 +69,12 @@ pub(super) struct PendingInj {
     jekt_tier: Option<String>,
 }
 
-/// The sender's declared tier, read strictly: one of the three lowercase
-/// names, or none. The handler's trust rules apply on top as for any jekt,
-/// so a declared tier can raise a message to `sensitive` but never relax
-/// what those rules decide.
+/// The sender's declared tier as the relay carries it. The tier is not part
+/// of the signed material, so only `sensitive` is taken: a carried tier can
+/// mark a message sensitive, never lower it below the default `coord`. The
+/// handler's trust rules apply on top as for any jekt.
 fn declared_tier(raw: Option<&str>) -> Option<crate::backend::reactive::types::JektTier> {
-    raw.and_then(|s| serde_json::from_value(serde_json::Value::String(s.to_string())).ok())
+    (raw == Some("sensitive")).then_some(crate::backend::reactive::types::JektTier::Sensitive)
 }
 
 /// The request a pulled injection is delivered as, before the signature
