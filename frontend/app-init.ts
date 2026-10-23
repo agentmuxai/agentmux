@@ -347,8 +347,14 @@ async function initHostNewWindow(seedView?: string | null, seedMeta?: Record<str
         if (reattached) getApi().sendLog(`[initCefNewWindow] reload: re-attached to window ${reattached.oid}`);
         // No window is open (AgentMux stayed in the tray after its last
         // window closed): bring that window back, not the default panes.
+        // The host's open windows other than this one: srv can still list a
+        // window whose close is on its way (#5363).
+        const otherLiveWindows = await withTimeout(getApi().listWindowInstances(), RPC_TIMEOUT, "listWindowInstances")
+            .then((ws) => ws.filter((w) => w.label !== currentWindowLabel()).length)
+            .catch(() => null);
         const restoreLast = restoresLastWindow({
             windowIds: clientData.windowids,
+            otherLiveWindows,
             workspaceId: tearOffWsId,
             view: seedView ?? new URLSearchParams(window.location.search).get("initialView"),
             reattached: !!reattached,

@@ -233,6 +233,30 @@ async fn the_window_the_tray_opens_after_the_last_close_is_that_window() {
     );
 }
 
+/// The tray's window can ask before the last window's close has reached srv
+/// (the host sends it on its own thread): the restore waits for that close
+/// and brings the window back, not the default panes (#5363).
+#[tokio::test]
+async fn the_tray_window_waits_for_a_close_still_on_its_way() {
+    let state = fresh_state().await;
+    let main = open_window(&state, "main", false).await;
+    add_user_pane(&state, &main.workspaceid, "term").await;
+    let before = block_ids(&state, &main.workspaceid);
+    let st = state.clone();
+    let closing = main.oid.clone();
+    let late_close = tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        close(&st, &closing).await;
+    });
+
+    let reopened = open_window(&state, "window-2", true).await;
+    late_close.await.unwrap();
+
+    assert_eq!(reopened.workspaceid, main.workspaceid, "the same contents, not the default panes");
+    assert_eq!(block_ids(&state, &main.workspaceid), before);
+    assert_eq!(state.mstore.get_all::<Workspace>().unwrap().len(), 1, "nothing made beside it");
+}
+
 #[tokio::test]
 async fn quit_and_relaunch_reopens_every_window_and_lists_none_closed() {
     let state = fresh_state().await;

@@ -13,7 +13,12 @@
  * "main", so without this it got the default panes, and the next save
  * replaced the workspace's window with them. It asks srv to restore the
  * workspace instead, as the main window does at a launch; srv checks again
- * that no window is open.
+ * that no window is open, and waits briefly for a close still on its way.
+ *
+ * "No window open" is the host's answer when it has one: right after the
+ * last window closes, srv can still list it (the host sends that close on
+ * its own thread), and judging by srv's list alone would open the default
+ * panes (#5363).
  *
  * Only a plain new window: one opened onto given contents (a tear-off, a
  * closed window reopening, a toast's pane), or with a pane of its own (a
@@ -23,6 +28,8 @@
 export function restoresLastWindow(opts: {
     /** `Client.windowids` as this window found it. */
     windowIds: string[] | null | undefined;
+    /** How many other windows the host has open; `null` when it couldn't say. */
+    otherLiveWindows?: number | null;
     /** The contents it was opened onto (`workspaceId` in its URL), if any. */
     workspaceId: string;
     /** The pane it was opened with, from the pool's promote or its URL. */
@@ -30,5 +37,6 @@ export function restoresLastWindow(opts: {
     /** A reload found its own window again. */
     reattached: boolean;
 }): boolean {
-    return !opts.reattached && !opts.workspaceId && !opts.view && (opts.windowIds?.length ?? 0) === 0;
+    const open = opts.otherLiveWindows ?? opts.windowIds?.length ?? 0;
+    return !opts.reattached && !opts.workspaceId && !opts.view && open === 0;
 }

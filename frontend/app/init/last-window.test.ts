@@ -17,6 +17,12 @@ describe("restoresLastWindow", () => {
 
     it("opens the default panes beside an open window, as New Window does", () => {
         expect(restoresLastWindow({ ...plain, windowIds: ["w1"] })).toBe(false);
+        expect(restoresLastWindow({ ...plain, windowIds: ["w1"], otherLiveWindows: 1 })).toBe(false);
+    });
+
+    it("goes by the host's open windows: srv can still list the one just closed", () => {
+        expect(restoresLastWindow({ ...plain, windowIds: ["closing"], otherLiveWindows: 0 })).toBe(true);
+        expect(restoresLastWindow({ ...plain, windowIds: ["closing"], otherLiveWindows: null })).toBe(false);
     });
 
     it("opens what it was asked for: given contents, or a pane of its own", () => {

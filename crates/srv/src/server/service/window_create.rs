@@ -10,6 +10,9 @@ use crate::backend::service::{self, WebCallType, WebReturnType};
 use super::super::AppState;
 use super::reducer_helpers::{dispatch_to_reducer, publish_events};
 
+/// How long a restore asks for waits for a window close still on its way.
+pub(crate) const RESTORE_WAITS_FOR_CLOSE: std::time::Duration = std::time::Duration::from_secs(3);
+
 // Phase E.5.8 — CreateWindow migrated through the reducer.
 // Two paths: (1) empty workspace_id → CreateWorkspace +
 // CreateTab + CreateWindow as a multi-step dispatch (mirrors
@@ -35,14 +38,23 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
     // misused call with `restoreIfAvailable: true` mid-session (when other
     // windows are legitimately still open) can't resurrect the last snapshot
     // into a spurious extra workspace.
-    let client_windowids_empty = store
-        .get_all::<Client>()
-        .ok()
-        .and_then(|cs| cs.into_iter().next())
-        .map(|c| c.windowids.is_empty())
-        .unwrap_or(true);
-    let restore_if_available: bool =
-        service::get_arg(args, 3).unwrap_or(false) && client_windowids_empty;
+    let windowids_empty = || {
+        store.get_all::<Client>().ok().and_then(|cs| cs.into_iter().next()).map(|c| c.windowids.is_empty()).unwrap_or(true)
+    };
+    let wants_restore: bool = service::get_arg(args, 3).unwrap_or(false);
+    let mut client_windowids_empty = windowids_empty();
+    // A window the tray opens right after the last one closed can arrive
+    // before that close does (the host sends it on its own thread): wait
+    // briefly for it, rather than open the default panes and lose the
+    // window it closed (#5363).
+    if wants_restore && !client_windowids_empty {
+        let deadline = std::time::Instant::now() + RESTORE_WAITS_FOR_CLOSE;
+        while !client_windowids_empty && std::time::Instant::now() < deadline {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            client_windowids_empty = windowids_empty();
+        }
+    }
+    let restore_if_available: bool = wants_restore && client_windowids_empty;
     // "Open in New Window" from a widget's context menu (arg 4/5, optional,
     // same additive pattern as restoreIfAvailable above) — when present,
     // seed the fresh tab with ONLY this one block instead of the default
