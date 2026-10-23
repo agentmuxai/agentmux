@@ -54,21 +54,31 @@ impl Seen {
         [req.sig_verified, req.lan_verified, req.channel_verified].contains(&Some(true))
     }
 
+    fn fail_verdicts(req: &mut InjectionRequest) {
+        for verdict in [&mut req.sig_verified, &mut req.lan_verified, &mut req.channel_verified] {
+            if *verdict == Some(true) {
+                *verdict = Some(false);
+            }
+        }
+    }
+
     /// Check and reserve in one step. A signed message already seen here has
     /// every verified verdict turned into a failure; a signed message not seen
     /// yet is reserved. Either way the claim lets a delivered copy keep the
-    /// entry, so the first copy failing later can't free it for a third.
+    /// entry, so the first copy failing later can't free it for a third. A
+    /// signed message with no message id or sender can't be counted, so it
+    /// fails too: every signer sends both.
     pub(super) fn reserve(&mut self, req: &mut InjectionRequest, now: i64) -> Option<Claim> {
         if !Self::signed(req) {
             return None;
         }
-        let key = Self::key(req)?;
+        let Some(key) = Self::key(req) else {
+            Self::fail_verdicts(req);
+            tracing::warn!(target = %req.target_agent, "signed jekt without a message id or sender; counted as failed");
+            return None;
+        };
         if self.entries.get(&key).is_some_and(|e| e.until > now) {
-            for verdict in [&mut req.sig_verified, &mut req.lan_verified, &mut req.channel_verified] {
-                if *verdict == Some(true) {
-                    *verdict = Some(false);
-                }
-            }
+            Self::fail_verdicts(req);
             tracing::warn!(source = %key.0, target = %key.1, msgid = %key.2, "signed jekt already delivered here; counted as failed");
             return Some(Claim { key, first: false });
         }

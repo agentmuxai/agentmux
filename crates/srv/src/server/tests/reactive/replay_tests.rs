@@ -110,15 +110,28 @@ fn another_message_id_sender_or_target_is_a_different_message() {
 }
 
 #[test]
-fn unsigned_and_id_less_messages_are_ignored() {
+fn unsigned_messages_are_ignored() {
     let mut seen = Seen::default();
     let mut unsigned = signed("agentx", "agenty", "m-1");
     unsigned.sig_verified = None;
     assert!(seen.reserve(&mut unsigned, 1_000).is_none());
-    let mut no_id = signed("agentx", "agenty", "");
-    assert!(seen.reserve(&mut no_id, 1_000).is_none());
     assert!(seen.entries.is_empty());
-    assert_eq!(no_id.sig_verified, Some(true));
+    assert_eq!(unsigned.sig_verified, None);
+}
+
+#[test]
+fn a_signed_message_without_an_id_or_sender_fails() {
+    // It can't be counted, so each copy would pass again (#5346).
+    let mut seen = Seen::default();
+    let mut no_id = signed("agentx", "agenty", "");
+    no_id.lan_verified = Some(true);
+    assert!(seen.reserve(&mut no_id, 1_000).is_none());
+    assert_eq!(no_id.sig_verified, Some(false));
+    assert_eq!(no_id.lan_verified, Some(false));
+    let mut no_source = signed("", "agenty", "m-1");
+    seen.reserve(&mut no_source, 1_000);
+    assert_eq!(no_source.sig_verified, Some(false));
+    assert!(seen.entries.is_empty());
 }
 
 #[test]
