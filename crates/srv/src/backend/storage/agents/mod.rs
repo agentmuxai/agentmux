@@ -12,8 +12,9 @@
 //! (`agent_def_*`) and `instance` (`instance_*`), the shared column lists and
 //! row mappers in `row`, slugs and name-keyed rows in `name_keys`, which of
 //! an agent's two stored slugs is its slug in `canonical_slug`, the slugs it
-//! answered to before a rename in `former_slugs`, and the delete cascade in
-//! `purge`.
+//! answered to before a rename in `former_slugs`, the display names it was
+//! renamed from (and the one resolver for both kinds) in `former_names`, and
+//! the delete cascade in `purge`.
 //!
 //! Every method in both groups reads and writes `db_agents` only, as of the
 //! agent-concept consolidation's definition flip
@@ -39,6 +40,7 @@ use crate::registry::RecordScope;
 
 mod canonical_slug;
 mod definition;
+mod former_names;
 mod former_slugs;
 mod instance;
 mod name_keys;
@@ -55,7 +57,7 @@ pub(super) use name_keys::key_tombstones_for_tests;
 #[cfg(test)]
 pub(super) use purge::purge_agent_dependents_for_tests;
 #[allow(unused_imports)]
-use self::{canonical_slug::*, former_slugs::*, name_keys::*, purge::*, row::*};
+use self::{canonical_slug::*, former_names::*, former_slugs::*, name_keys::*, purge::*, row::*};
 
 /// A user-defined AI agent in the user's agent-definition catalog.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]

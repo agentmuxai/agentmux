@@ -3,7 +3,9 @@
 
 //! Former slugs on this instance's message routes
 //! (`docs/specs/SPEC_FORK_SLUG_MIGRATION_2026_10_22.md` Phase 1): a slug an
-//! agent was renamed from still reaches it, and never speaks for it.
+//! agent was renamed from still reaches it, and never speaks for it. So does a
+//! display name it was renamed from, by its route (`Store::former_name_owner`
+//! answers for both kinds).
 //!
 //! The registries other instances write are keyed by the name an agent runs
 //! under now, so a miss on a former slug is looked up again under its current
@@ -18,13 +20,13 @@ use super::{agent_registry, AppState, InjectionRequest};
 use crate::backend::reactive::registry::AgentEntry;
 use crate::backend::storage::agents::FormerSlugOwner;
 
-/// The agent `name` is a former slug of, unless a live registration here
-/// holds `name` itself (a live name always wins).
+/// The agent `name` is a former slug or display name of, unless a live
+/// registration here holds `name` itself (a live name always wins).
 pub(super) fn owner(state: &AppState, name: &str) -> Option<FormerSlugOwner> {
     if state.reactive_handler.has_live_name(name) {
         return None;
     }
-    state.mstore.former_slug_owner(name).ok().flatten()
+    state.mstore.former_name_owner(name).ok().flatten()
 }
 
 /// The same-channel registry entry for `target`, else for the slug `alias`
@@ -61,7 +63,7 @@ pub(super) fn refuse_former_sender(state: &AppState, req: &mut InjectionRequest)
     crate::backend::reactive::handler::refuse_former_slug_sender(
         req,
         |name| state.reactive_handler.has_live_name(name),
-        |name| state.mstore.former_slug_owner(name).ok().flatten().map(|o| o.uid),
+        |name| state.mstore.former_name_owner(name).ok().flatten().map(|o| o.uid),
     )
 }
 
@@ -72,11 +74,11 @@ pub(crate) fn signing_key(state: &AppState, name: &str) -> Result<Vec<u8>, Strin
     let former = crate::backend::reactive::handler::former_slug_claim(
         name,
         |n| state.reactive_handler.has_live_name(n),
-        |n| state.mstore.former_slug_owner(n).ok().flatten().map(|o| o.uid),
+        |n| state.mstore.former_name_owner(n).ok().flatten().map(|o| o.uid),
     );
     if former.is_some() {
-        tracing::warn!(agent_id = %name, "signed as a slug its agent was renamed from, which can't sign: refused");
-        return Err(format!("agent_id={name:?} is a slug its agent was renamed from, which can't sign"));
+        tracing::warn!(agent_id = %name, "signed as a name its agent was renamed from, which can't sign: refused");
+        return Err(format!("agent_id={name:?} is a name its agent was renamed from, which can't sign"));
     }
     match state.mstore.agent_jekt_key_load(name) {
         Ok(Some(k)) => Ok(k),
