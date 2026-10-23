@@ -18,7 +18,7 @@
 // see the spec's §2 for why these are resolved fresh at capture time
 // instead of hand-maintained pixel coordinates.
 
-import { openWidget } from "./widget-shots.mjs";
+import { openWidget as openBarWidget } from "./widget-shots.mjs";
 
 const FOCUSED_PANE = ".pane-stack.pane-stack-focused, .pane-stack.pane-stack-focused-alone";
 
@@ -94,7 +94,7 @@ export const shots = [
         description: "The Settings pane, Appearance tab, reached from the widget bar.",
         selector: ".settings-view-container",
         prep: async (session) => {
-            await openWidget(session, { label: "Settings", icon: "cog" });
+            await openBarWidget(session, { label: "Settings", icon: "cog" });
             await session.wait(500);
             await session.clickText(null, "Appearance");
         },
