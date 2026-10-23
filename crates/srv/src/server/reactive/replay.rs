@@ -4,9 +4,11 @@
 //! with `wan_seen_sigs` (`muxbus/wan_verify.rs`). A signature stays fresh for
 //! minutes; within that time it proves its sender for one delivery.
 //!
-//! A message counts as delivered when this instance gave it to a local agent;
-//! a request this instance only forwarded is not recorded, so a forward that
-//! comes back here is still delivered once. Entries live longer than any
+//! The check and the reservation are one step under one lock, so two copies
+//! arriving together can't both pass. A message counts once it is delivered
+//! to a local agent; when this instance doesn't deliver it (it forwards it,
+//! or delivery fails), the reservation is dropped, so a forward that comes
+//! back here is still delivered once. Entries live longer than any
 //! signature's freshness window.
 
 use std::collections::HashMap;
@@ -38,35 +40,23 @@ impl Seen {
         [req.sig_verified, req.lan_verified, req.channel_verified].contains(&Some(true))
     }
 
-    /// Turn every verified verdict on `req` into a failure when this exact
-    /// signed message (sender, target, message id) was already delivered here.
-    pub(super) fn check(&self, req: &mut InjectionRequest, now: i64) -> bool {
+    /// Check and reserve in one step. A signed message already seen here has
+    /// every verified verdict turned into a failure and reserves nothing; a
+    /// signed message not seen yet is reserved and its key returned.
+    pub(super) fn reserve(&mut self, req: &mut InjectionRequest, now: i64) -> Option<Key> {
         if !Self::signed(req) {
-            return false;
+            return None;
         }
-        let Some(key) = Self::key(req) else {
-            return false;
-        };
-        let seen = self.entries.get(&key).is_some_and(|until| *until > now);
-        if seen {
+        let key = Self::key(req)?;
+        if self.entries.get(&key).is_some_and(|until| *until > now) {
             for verdict in [&mut req.sig_verified, &mut req.lan_verified, &mut req.channel_verified] {
                 if *verdict == Some(true) {
                     *verdict = Some(false);
                 }
             }
             tracing::warn!(source = %key.0, target = %key.1, msgid = %key.2, "signed jekt already delivered here; counted as failed");
+            return None;
         }
-        seen
-    }
-
-    /// Remember a signed message that was just delivered to a local agent.
-    pub(super) fn record(&mut self, req: &InjectionRequest, now: i64) {
-        if !Self::signed(req) {
-            return;
-        }
-        let Some(key) = Self::key(req) else {
-            return;
-        };
         if self.entries.len() >= MAX_ENTRIES {
             self.entries.retain(|_, until| *until > now);
             if self.entries.len() >= MAX_ENTRIES {
@@ -75,7 +65,13 @@ impl Seen {
                 }
             }
         }
-        self.entries.insert(key, now + WINDOW_SECS);
+        self.entries.insert(key.clone(), now + WINDOW_SECS);
+        Some(key)
+    }
+
+    /// Drop a reservation for a message this instance didn't deliver.
+    pub(super) fn release(&mut self, key: &Key) {
+        self.entries.remove(key);
     }
 }
 
@@ -84,18 +80,30 @@ fn seen() -> &'static Mutex<Seen> {
     SEEN.get_or_init(Default::default)
 }
 
-/// [`Seen::check`] against this process's memory.
-pub(super) fn check(req: &mut InjectionRequest, now: i64) {
-    if let Ok(seen) = seen().lock() {
-        seen.check(req, now);
+/// A reservation in this process's memory, dropped unless
+/// [`Reservation::delivered`] is called.
+pub(super) struct Reservation(Option<Key>);
+
+impl Reservation {
+    /// The message reached a local agent: keep it counted.
+    pub(super) fn delivered(mut self) {
+        self.0 = None;
     }
 }
 
-/// [`Seen::record`] into this process's memory.
-pub(super) fn record(req: &InjectionRequest, now: i64) {
-    if let Ok(mut seen) = seen().lock() {
-        seen.record(req, now);
+impl Drop for Reservation {
+    fn drop(&mut self) {
+        if let Some(key) = self.0.take() {
+            if let Ok(mut seen) = seen().lock() {
+                seen.release(&key);
+            }
+        }
     }
+}
+
+/// [`Seen::reserve`] against this process's memory.
+pub(super) fn reserve(req: &mut InjectionRequest, now: i64) -> Reservation {
+    Reservation(seen().lock().ok().and_then(|mut seen| seen.reserve(req, now)))
 }
 
 #[cfg(test)]

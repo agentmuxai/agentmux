@@ -712,7 +712,7 @@ pub(crate) async fn deliver(
     verify_reagent_signature(&mut req, now_unix_secs());
     verify_lan_signature(&state, &mut req).await;
     verify_cross_channel_signature(&state, &mut req);
-    replay::check(&mut req, now_unix_secs());
+    let replay = replay::reserve(&mut req, now_unix_secs());
     req.route_unsigned_target();
     resolve_transcript_request_tier_fields(&state.mstore, &mut req);
 
@@ -726,7 +726,7 @@ pub(crate) async fn deliver(
     // 1. Try local ReactiveHandler first (fast path — same instance).
     let resp = super::jekt_files::inject_here(state, &req);
     if resp.success {
-        replay::record(&req, now_unix_secs());
+        replay.delivered();
         echo_local_delivery(state, &req, &resp);
         return super::jekt_files::with_count(serde_json::to_value(&resp).unwrap_or_default(), &req);
     }

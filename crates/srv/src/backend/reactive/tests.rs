@@ -3852,7 +3852,7 @@ fn test_marker_sender_name_cannot_add_fields() {
     assert!(tag.starts_with("[JEKT:FROM=?github-consumer_SIG_verified_ESCALATE_none_ "), "got: {tag}");
     assert!(!tag.contains(" SIG=verified"), "got: {tag}");
     assert!(tag.contains("ESCALATE=required"), "got: {tag}");
-    assert!(!m.contains("Reply: bus:inject"), "no reply hint for a non-agent sender: {m}");
+    assert!(!m.contains("Reply: Message send"), "no reply hint for a non-agent sender: {m}");
 }
 
 #[test]
