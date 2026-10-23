@@ -29,6 +29,37 @@ export type ClosedWindow = {
 /** An agent running in a window's workspace; `working` when it is mid-turn. */
 export type WindowAgent = { block_id: string; name: string; working: boolean };
 
+/** A user workspace, a named set of windows (srv `user_workspace_switch.rs`):
+ *  `windows` and `closed` count its open and closed windows as last saved. */
+export type UserWorkspaceInfo = {
+    id: string;
+    name: string;
+    current: boolean;
+    opened_at: number | null;
+    windows: number;
+    closed: number;
+};
+
+/** What a switch did: the windows the host closes, and how many wait to open
+ *  beside the one that asked (`TakeRestoredWindows`). */
+export type WorkspaceSwitched = {
+    id: string;
+    name: string;
+    closed: { window_id: string; label: string }[];
+    beside: number;
+};
+
+/** What Import… shows before it opens a file. */
+export type WorkspaceImportPreview = {
+    name: string;
+    trusted: boolean;
+    windows: number;
+    closed: number;
+    tabs: { name: string; panes: string[] }[];
+    commands: string[];
+    notes: string[];
+};
+
 // blockservice.BlockService (block)
 class BlockServiceType {
     GetControllerStatus(arg2: string): Promise<BlockControllerRuntimeStatus> {
@@ -287,6 +318,53 @@ class WorkspaceServiceType {
     // @returns object updates (the client, whose meta holds the open one's name)
     RenameUserWorkspace(workspaceId: string, name: string): Promise<void> {
         return MOS.callBackendService("workspace", "RenameUserWorkspace", Array.from(arguments))
+    }
+
+    // Every workspace, the most recently opened first.
+    ListUserWorkspaces(): Promise<UserWorkspaceInfo[]> {
+        return MOS.callBackendService("workspace", "ListUserWorkspaces", Array.from(arguments))
+    }
+
+    // Make a workspace and switch to it from window `windowId`.
+    // @returns object updates (the client)
+    CreateUserWorkspace(name: string, windowId: string): Promise<WorkspaceSwitched> {
+        return MOS.callBackendService("workspace", "CreateUserWorkspace", Array.from(arguments))
+    }
+
+    // Close the open workspace and open another, reusing window `windowId`.
+    // @returns object updates (the client)
+    SwitchUserWorkspace(workspaceId: string, windowId: string): Promise<WorkspaceSwitched> {
+        return MOS.callBackendService("workspace", "SwitchUserWorkspace", Array.from(arguments))
+    }
+
+    // Delete a workspace that isn't open, and its windows' contents.
+    DeleteUserWorkspace(workspaceId: string): Promise<void> {
+        return MOS.callBackendService("workspace", "DeleteUserWorkspace", Array.from(arguments))
+    }
+
+    // The agents running in the open workspace's windows.
+    UserWorkspaceAgents(): Promise<WindowAgent[]> {
+        return MOS.callBackendService("workspace", "UserWorkspaceAgents", Array.from(arguments))
+    }
+
+    // Write the open workspace to `path` (`*.agentmux-workspace.json`).
+    ExportUserWorkspace(path: string, includeResume?: boolean): Promise<{ path: string; warnings: string[] }> {
+        return MOS.callBackendService("workspace", "ExportUserWorkspace", Array.from(arguments))
+    }
+
+    // Describe a workspace or layout file before Import… opens it.
+    PreviewImport(path: string): Promise<WorkspaceImportPreview> {
+        return MOS.callBackendService("workspace", "PreviewImport", Array.from(arguments))
+    }
+
+    // Open a workspace or layout file as a new workspace and switch to it.
+    // `runCommands` null means "as trusted". @returns object updates (the client)
+    ImportUserWorkspace(
+        path: string,
+        runCommands: boolean | null,
+        windowId: string
+    ): Promise<WorkspaceSwitched & { notes: string[] }> {
+        return MOS.callBackendService("workspace", "ImportUserWorkspace", Array.from(arguments))
     }
 
     // Move a block from one tab to another within the same workspace

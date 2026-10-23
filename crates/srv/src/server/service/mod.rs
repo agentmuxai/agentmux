@@ -36,6 +36,8 @@ mod session_closed;
 mod session_windows;
 pub(crate) use session_windows::forget_windows_left_by_quit;
 pub(crate) mod user_workspace;
+mod user_workspace_files;
+mod user_workspace_switch;
 mod tab_lifecycle;
 mod tab_move;
 mod tear_off;

@@ -80,6 +80,14 @@ pub(super) async fn handle_workspace_service(state: &AppState, call: &WebCallTyp
         // the window's contents the methods above act on.
         "Flush" => super::user_workspace::handle_flush(state, call).await,
         "RenameUserWorkspace" => super::user_workspace::handle_rename(state, call),
+        "ListUserWorkspaces" => super::user_workspace_switch::handle_list(state, call),
+        "CreateUserWorkspace" => super::user_workspace_switch::handle_create(state, call).await,
+        "SwitchUserWorkspace" => super::user_workspace_switch::handle_switch(state, call).await,
+        "DeleteUserWorkspace" => super::user_workspace_switch::handle_delete(state, call).await,
+        "UserWorkspaceAgents" => super::user_workspace_switch::handle_agents(state, call),
+        "ExportUserWorkspace" => super::user_workspace_files::handle_export(state, call).await,
+        "PreviewImport" => super::user_workspace_files::handle_preview(state, call).await,
+        "ImportUserWorkspace" => super::user_workspace_files::handle_import(state, call).await,
         _ => WebReturnType::error(format!("unknown workspace method: {}", call.method)),
     }
 }

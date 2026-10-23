@@ -134,7 +134,7 @@ const QUIT_RECORD_KEPT_FOR_MS: i64 = 120_000;
 /// The live full windows, the main one first, each with its workspace.
 /// Subwindows belong to their parent's window; a window whose workspace is
 /// gone, or an id with no window row, is skipped.
-fn live_windows(store: &Store) -> Vec<(Window, String)> {
+pub(crate) fn live_windows(store: &Store) -> Vec<(Window, String)> {
     let Some(client) = store.get_all::<Client>().ok().and_then(|cs| cs.into_iter().next()) else {
         return Vec::new();
     };
@@ -345,6 +345,18 @@ pub(crate) fn forget_windows_left_by_quit(store: &Store) -> usize {
     tracing::info!(windows = left.len(), "session_restore: forgot windows a quit left behind; the session restores them");
     left.len()
 }
+
+/// Forget the restored windows waiting to open, those opening, and their
+/// names: they belong to the workspace that was open, which a switch closes
+/// (`user_workspace_switch`).
+pub(crate) fn forget_restore_lists(meta: &mut crate::backend::obj::MetaMapType) {
+    for key in RESTORE_LIST_KEYS {
+        meta.remove(key);
+    }
+}
+
+/// The client meta keys of the restored windows' queues.
+pub(crate) const RESTORE_LIST_KEYS: [&str; 3] = [WAITING_META_KEY, OPENING_META_KEY, NAMES_META_KEY];
 
 /// Set (or, with `None`, remove) one of the client's meta keys.
 pub(crate) fn set_client_meta(store: &Store, key: &str, value: Option<Value>) {

@@ -324,7 +324,7 @@ pub(crate) async fn open_agent_impl(
 
 /// `agent.open`, but launching into an existing, empty agent pane
 /// (`{view:"agent"}`, the picker) instead of creating a new one and
-/// inserting it into the layout. Used by Layouts → Open layout…
+/// inserting it into the layout. Used by `layout.open` and Workspaces → Import…
 /// (`SPEC_LAYOUT_FILES_2026_09_25.md` §3.5), which rebuilds the saved split
 /// tree first and then launches each agent into its placeholder — so every
 /// check `agent.open` makes (admission, one live instance, provider, CLI,
@@ -836,7 +836,7 @@ pub(super) async fn open_agent_inner(
                 let meta_val = serde_json::to_value(&meta)
                     .map_err(|e| format!("agent.open: meta serialize: {e}"))?;
                 let block_id = if let Some(target) = into_block {
-                    // Layouts → Open layout…: the pane already exists and sits
+                    // `layout.open` and Import…: the pane already exists and sits
                     // in the rebuilt tree — give it the agent's meta through
                     // the reducer (like `pane.open`'s editor reuse) and skip
                     // the layout insert below.

@@ -283,6 +283,27 @@ export function registerDefaultCommands(): void {
                 await requestCloseWindow();
             }),
     });
+    // ---- workspace (SPEC_WORKSPACES_2026_10_23.md §3.2) ----
+    // Loaded when run, like window-close.ts: the actions read the window's stores.
+    const workspaceCommand = (
+        id: string,
+        label: string,
+        icon: string,
+        run: (m: typeof import("@/app/window/workspaces")) => Promise<void> | void
+    ) =>
+        commandRegistry.register({
+            id,
+            label,
+            category: "Workspace",
+            icon,
+            keywords: "workspace windows",
+            execute: () => fireAndForget(async () => run(await import("@/app/window/workspaces"))),
+        });
+    workspaceCommand("workspace:new", "New Workspace…", "plus", (m) => m.newWorkspace());
+    workspaceCommand("workspace:open", "Open Workspace…", "folder-open", (m) => m.openWorkspacePicker());
+    workspaceCommand("workspace:rename", "Rename Workspace…", "pen", (m) => m.renameWorkspacePrompt());
+    workspaceCommand("workspace:export", "Export Workspace…", "file-export", (m) => m.exportWorkspace());
+    workspaceCommand("workspace:import", "Import Workspace…", "file-import", (m) => m.importWorkspace());
     commandRegistry.register({
         id: "window:recycle",
         label: "Reload Window (Free Memory)",

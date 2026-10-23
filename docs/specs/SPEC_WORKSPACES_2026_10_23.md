@@ -1,7 +1,7 @@
 # SPEC: Workspaces — a named set of windows, saved as you go
 
 **Date:** 2026-10-23
-**Status:** active — a running spec, refined with the operator. PR 1 (§3, §3.1) shipped in #5357; PR 2 (the saved Default Workspace, §2, §4, §5 header, §8) in #5358; PR 3 (closed windows, §5) in #5359; PRs 4–5 not started. Supersedes the user-facing parts of `SPEC_OFFLINE_RESILIENCE_2026_10_20.md` §4.7 as built in PR #5356 (unmerged; its srv work ships in PR 3), and the naming decision of `SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md` §3.
+**Status:** active — a running spec, refined with the operator. PR 1 (§3, §3.1) shipped in #5357; PR 2 (the saved Default Workspace, §2, §4, §5 header, §8) in #5358; PR 3 (closed windows, §5) in #5359; PR 4 (several workspaces: the ☰ Workspaces menu, switching, export and import, §3.2, §6) in #5360; PR 5 not started. Supersedes the user-facing parts of `SPEC_OFFLINE_RESILIENCE_2026_10_20.md` §4.7 as built in PR #5356 (unmerged; its srv work ships in PR 3), and the naming decision of `SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md` §3.
 **Trigger:** Operator, 2026-10-23, reviewing #5356 ("closing a window keeps its workspace"): *"remove the entries from the hamburger that already have widgets … change the "layouts" to "Workspaces". A workspace to the user (lets define it in the glossary) is a set of windows/panes. Opening a workspace necessarily means closing the existing one. … Start with Default Workspace and it is a running file. Users can also create New Workspace. … if he closes that window, it becomes "greyed" out in the status panel. We need a reopen and delete buttons …"*
 **Related:** `SPEC_LAYOUT_FILES_2026_09_25.md` (the `agentmux.layout` file this extends), `SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08.md` (proposed, unbuilt: continuous session record), `SPEC_OFFLINE_RESILIENCE_2026_10_20.md` G8 ("closing is not deleting"), `SPEC_VERSION_INSTANCE_PANEL_2026_04_25.md` (the status bar panel).
 
@@ -99,6 +99,17 @@ Only the defaults change: a user who has customized the bar (`widget:pinned` in 
 
 "Restore layout from another build…" goes away for upgrades: a new version copies the previous version's workspaces on its first launch (§4.2). Bringing a workspace over from another channel's build stays possible through #5236's offer and through Export… / Import…. #5356's "Reopen closed window" and "Close workspace…" don't ship; the status panel does both jobs (§5).
 
+**As built (#5360).**
+- ☰ → **Workspaces** (in Layouts' place, after Opacity): **New Workspace…**, **Open Workspace** › (every workspace, the most recently opened first, the open one checked), **Import…**, **Export…**, then **Rename workspace…** and **Delete workspace…**. Save layout…, Open layout… and Restore layout from another build… are gone from ☰; the other-build offer at a cold start (#5236) stays.
+- **New Workspace…** asks for a name in a dialog, prefilled with the first free "Workspace N" (from 2), then switches (§6) to a new workspace whose one window shows the default panes. A blank name can't be created.
+- **Open Workspace** lists the workspaces srv returns (`workspace.ListUserWorkspaces`: name, whether it is open, its open and closed windows as last saved), asked for again whenever the open workspace or its name changes. Choosing another one switches to it; choosing the open one does nothing.
+- **Rename workspace…** renames the open one in a dialog (double-clicking the version panel's heading still does too).
+- **Delete workspace…** lists the other workspaces, then confirms ("Delete “Reviews”? Its 3 windows and their tabs and panes are deleted. Its agents stay in My Agents, with their conversations."). srv (`DeleteUserWorkspace`) refuses the open one, deletes the row and then the contents of every window its record (and its last clean load) names that are still kept here, unless a window shows them, the open workspace lists them as closed, or they wait to open.
+- **Export…** opens the host's Save dialog (Save layout…'s, now with a `kind: "workspace"`: `*.agentmux-workspace.json`, in `~/.agentmux/shared/workspaces/`) and srv writes the open workspace there (`ExportUserWorkspace`): every open window, then the closed ones, each with its name and `state`. Same allowlist as a layout file, no `resume` references (srv takes `includeResume`; the menu doesn't offer it).
+- **The file stays `agentmux.layout` version 1.** A workspace export has `scope: "workspace"`, its `name`, and per window optional `name` and `state` (`open`/`closed`), which the schema (`schema/agentmux-layout.v1.schema.json`) now lists. Optional fields need no new version: an older build keeps them as unknown fields, and a file without them reads as open, unnamed windows. A version 2 would have made every older build refuse the file for nothing.
+- **Import…** opens the host's Open dialog for an exported workspace or an older `*.agentmux-layout.json`, shows a preview (`PreviewImport`: its windows, tabs and panes, what can't be reproduced, and every terminal command with "Run these commands", ticked only for a file this AgentMux saved in its own folders), then srv (`ImportUserWorkspace`) makes a new workspace named after the file ("Ops", or "Ops 2" when one has that name) whose record holds the file's windows without contents, and switches to it: the switch builds them as it rebuilds a record whose contents are gone. Every pane is new (template mode, as Open layout… was); the agent panes of the windows that open start their agents; an agent pane in a closed window shows the agent picker when reopened (the notice says so). An agent pane that showed the picker when exported opens the picker again, with no note.
+- **Palette:** New Workspace…, Open Workspace… (the same list in a dialog), Rename Workspace…, Export Workspace…, Import Workspace….
+
 ## 4. Saving
 
 ### 4.1 When
@@ -177,7 +188,7 @@ Default Workspace — 3 windows                    ✎
   - closed: a rotate-left icon, "Reopen", as is a click on the row: `window.TakeClosedWindow` waits for its agents to finish stopping and returns where it was; the host's `open_restored_window` opens it there, and its agents resume. Right-click → **Remove from workspace** (`window.DeleteClosedWindow`) deletes the contents without reopening.
   - The list is asked for when the panel opens, whenever a window opens or closes, and after each reopen or delete.
 - **The close warning** (§6, §7: never "layout"): every in-app close (caption buttons, ☰ → Exit, the palette's Close Window) asks for the window's agents; with one mid-turn: "Korp is working. Close this window?", "This stops N agents. The window stays in Default Workspace, and you can reopen it from the version panel." (for the last window: "AgentMux closes; the window stays in Default Workspace and opens again at the next launch."). "Don't ask again" and Settings → Window & Panes turn it off (`window:confirmcloseworking`). A close the OS starts (Alt+F4, the taskbar) and the tray's Quit don't warn. `window-close.ts` is loaded when a close runs, so pane code doesn't import the window's stores.
-- **Switching workspaces** (PR 4): `adopt_current` clears the list when the open workspace changes.
+- **Switching workspaces** (#5360): the switch drops the list of the workspace it closes (its record keeps them) and lists the other one's closed windows (§6); `adopt_current` does the same at a start that opens another workspace.
 - **Not shipped from #5356:** ☰ → Reopen closed window, ☰ and palette Close workspace… with its dialog, the palette's Reopen Closed Window, and the 10-window cap.
 
 ## 6. Switching workspaces
@@ -187,6 +198,19 @@ Opening another workspace (or creating one):
 2. Save the current workspace, stop its agents and shells, and close its windows. Nothing is deleted.
 3. Open the other workspace's `open` windows. The window the user acted from is reused for its first window, so the screen doesn't flash empty.
 4. Remember it as the last open workspace; the next launch opens it.
+
+**As built (#5360)** (`server/service/user_workspace_switch.rs`).
+- **The warning** (frontend): srv lists the agents in the open workspace's windows (`workspace.UserWorkspaceAgents`); with one mid-turn, "Korp and Loap are working. Close Default Workspace?", "This stops N agents. Default Workspace keeps its windows, and they open again, agents resuming, when you go back to it.", with the close warning's "Don't ask again" and the same setting (`window:confirmcloseworking`).
+- **srv switches** (`SwitchUserWorkspace(workspaceId, windowId)`, also the end of `CreateUserWorkspace` and of an import), one switch at a time:
+  1. The open workspace is saved; then saves are held (`LayoutWrites::hold_saves`, `Saved::HeldForSwitch`) until the windows have moved, so no save stores a mix of the two.
+  2. Its windows other than the one the user acted from close in srv (`window_close::detach_window`: the row goes, the contents stay). Their record entries stay `open`, so they open again with the workspace. The reply names them for the host to close; the host's close then finds nothing left to do.
+  3. The other workspace becomes the open one (`workspace:current`, `workspace:name`, `opened_at`). The one before's closed-window list, its restored windows waiting to open and the session record are dropped: its record holds them.
+  4. Its record is restored as a cold start restores one (`session_windows::restore_all`), falling back to `previous` and `pre_upgrade`: contents still kept here are reused (same ids, agents resume), those that are gone are rebuilt from the record, closed windows are listed closed. A workspace with nothing to restore (a new one) gets the default panes (`window_create::create_default_contents`, New Window's seed).
+  5. The window that asked shows the first window's contents (`SwitchWorkspace` on the window, the object update the window already follows), and takes that window's name, theme and opacity, dropping its own where the record has none. The other open windows wait for it (`TakeRestoredWindows`).
+  6. Saves resume and the new workspace is saved at once. After the reply, the closed workspace's contents have their agents and shells stopped (`session_closed::keep_workspace`, unlisted; contents with nothing of the user's are deleted as at any close). The next switch, and a delete, wait for that.
+- **The frontend** then closes the windows srv closed (by host label) and opens the waiting ones beside it (`reopenRestoredWindows`).
+- **The next launch** opens the workspace that was open last: the client names it (`adopt_current`), and its record (saved at the switch) is what a cold start restores.
+- **New Window** still opens the default panes, in the open workspace (§9.2).
 
 ## 7. Terminology and the glossary
 
@@ -235,7 +259,7 @@ All decided by the operator on 2026-10-23.
 | 1 | ☰ cleanup: remove Settings, Connectors, Memory, Toolchain; new default pinned widgets (§3, §3.1). Independent, small |
 | 2 | Workspace record + continuous save + Default Workspace migration; status panel header shows its name (§2, §4, §5 header, §8) |
 | 3 | Closed windows: a close keeps the window in the workspace; status panel greyed rows with reopen/delete (§5). Reuses #5356's srv work (keep on close, reopen with same ids); drops its capped closed-window list, Close workspace… and ☰ item. Shipped in #5359 |
-| 4 | New / Open / Rename / Delete workspace, Export…, Import… (§3, §6) |
+| 4 | New / Open / Rename / Delete workspace, Export…, Import… (§3, §6). Shipped in #5360 |
 | 5 | Glossary, `internals/persistence.md`, Workspaces docs page (agentmux-docs) |
 
 PR #5356 stops here: PR 3 (#5359) supersedes it.

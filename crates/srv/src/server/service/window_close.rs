@@ -232,6 +232,39 @@ pub(crate) async fn close_workspace(state: &AppState, ws_id: String) {
     }
 }
 
+/// A workspace switch closes window `window_id` (`user_workspace_switch`):
+/// the window's row goes, as `CloseWindow` drops it, and its contents stay
+/// for the caller to keep. The host closes the OS window afterwards; that
+/// close then finds nothing left to do. Returns the contents when no other
+/// window shows them.
+pub(crate) async fn detach_window(state: &AppState, window_id: &str) -> Result<Option<String>, String> {
+    let store = &state.mstore;
+    let Some(ws_id) = store.get::<Window>(window_id).map_err(|e| e.to_string())?.map(|w| w.workspaceid) else {
+        return Ok(None);
+    };
+    let events = dispatch_to_reducer(
+        state,
+        agentmux_common::ipc::Command::CloseWindowInternal { window_id: window_id.to_string() },
+    )
+    .await;
+    if let Some(err) = events.iter().find_map(|e| match e {
+        agentmux_common::ipc::Event::Error { message, .. } => Some(message.clone()),
+        _ => None,
+    }) {
+        return Err(err);
+    }
+    if events.is_empty() {
+        // A window the reducer never knew (#2051): prune the store directly.
+        crate::persist_subscriber::apply_srv_window_closed(store, window_id).map_err(|e| e.to_string())?;
+    }
+    for ev in &events {
+        crate::persist_subscriber::apply_event_to_mstore(ev, store).map_err(|e| e.to_string())?;
+    }
+    publish_events(state, &events);
+    let shown = store.get_all::<Window>().map(|ws| ws.iter().any(|w| w.workspaceid == ws_id)).unwrap_or(true);
+    Ok((!shown).then_some(ws_id))
+}
+
 /// Every block in a workspace's tabs (regular and pinned), read from the store.
 pub(crate) fn store_block_ids(store: &crate::backend::storage::store::Store, ws_id: &str) -> Vec<String> {
     let Ok(Some(ws)) = store.get::<Workspace>(ws_id) else { return Vec::new() };

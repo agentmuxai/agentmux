@@ -17,7 +17,7 @@
 //! Also here: [`LayoutWrites`], the counter of writes to the objects a
 //! workspace is saved from, which says when it has changed since its last save.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
@@ -145,6 +145,13 @@ impl Store {
         Ok(n > 0)
     }
 
+    /// Delete workspace `id`'s row. Returns whether it existed.
+    pub fn user_workspace_delete(&self, id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let n = conn.execute("DELETE FROM db_workspaces WHERE id = ?1", params![id])?;
+        Ok(n > 0)
+    }
+
     /// The writes to windows, window contents, tabs, layouts and blocks.
     pub fn layout_writes(&self) -> &LayoutWrites {
         &self.layout_writes
@@ -174,6 +181,9 @@ pub struct LayoutWrites {
     /// settings an agent pane writes all the time as it works.
     arranged: AtomicU64,
     saved: AtomicU64,
+    /// Set while a workspace switch moves the windows from one workspace to
+    /// the other: a save then would store a mix of the two.
+    held: AtomicBool,
 }
 
 impl LayoutWrites {
@@ -211,6 +221,16 @@ impl LayoutWrites {
     /// Whether anything was written since the last save covered it.
     pub fn dirty(&self) -> bool {
         self.changed() > self.saved.load(Ordering::Relaxed)
+    }
+
+    /// Hold saves (`true`) or let them run again (`false`).
+    pub fn hold_saves(&self, held: bool) {
+        self.held.store(held, Ordering::SeqCst);
+    }
+
+    /// Whether saves are held.
+    pub fn saves_held(&self) -> bool {
+        self.held.load(Ordering::SeqCst)
     }
 }
 
@@ -280,6 +300,17 @@ mod tests {
         assert_eq!(s.user_workspace_get("b").unwrap().unwrap(), ws("b", "B", None));
         // An unknown id writes nothing, and says so.
         assert!(!s.user_workspace_save_record("zzz", "{}", NOW).unwrap());
+    }
+
+    #[test]
+    fn delete_removes_only_its_row() {
+        let (_d, s) = store();
+        s.user_workspace_insert(&ws("a", "A", None)).unwrap();
+        s.user_workspace_insert(&ws("b", "B", None)).unwrap();
+        assert!(s.user_workspace_delete("a").unwrap());
+        assert!(!s.user_workspace_delete("a").unwrap(), "already gone");
+        let ids: Vec<String> = s.user_workspace_list().unwrap().into_iter().map(|w| w.id).collect();
+        assert_eq!(ids, vec!["b"]);
     }
 
     #[test]

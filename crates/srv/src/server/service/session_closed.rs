@@ -21,7 +21,9 @@
 //!
 //! They stay until the user deletes them: no cap. Not listed: the close that
 //! ends the session (the last window's, or one of a quit's), whose window
-//! stays open in the workspace and reopens at the next launch; and a window
+//! stays open in the workspace and reopens at the next launch; a workspace
+//! switch's closes (`user_workspace_switch`), whose windows stay open in the
+//! workspace they leave and open again with it; and a window
 //! with nothing of the user's in it (no pane, or only the untouched default
 //! layout), whose contents are deleted at its close.
 
@@ -207,11 +209,12 @@ fn quit_under_way(store: &Store) -> bool {
 
 /// A window onto `ws_id` closed, and no other window shows it (`window`: where
 /// it was). Stop what runs in it and keep its contents, listed as a closed
-/// window unless this close ends the session (`ends_session`: it emptied
-/// `Client.windowids`), or a quit is closing every window: then the window
-/// stays open in the workspace and the next launch reopens it. Contents with
-/// nothing of the user's in them are deleted instead.
-pub(crate) async fn keep_workspace(state: &AppState, ws_id: String, window: Value, ends_session: bool) {
+/// window unless `unlisted`, or a quit is closing every window: then the
+/// window stays open in its workspace's record and opens again with it.
+/// `unlisted` is the close that ends the session (it emptied
+/// `Client.windowids`) and a workspace switch's closes. Contents with nothing
+/// of the user's in them are deleted instead.
+pub(crate) async fn keep_workspace(state: &AppState, ws_id: String, window: Value, unlisted: bool) {
     if !worth_keeping(&state.mstore, &ws_id) {
         super::window_close::close_workspace(state, ws_id).await;
         return;
@@ -219,7 +222,7 @@ pub(crate) async fn keep_workspace(state: &AppState, ws_id: String, window: Valu
     // Held until its agents have stopped: a reopen waits for it
     // (`TakeClosedWindow`), so it can't start them while they are stopping.
     let guard = crate::sagas::close_pane::workspace_close_lock(&ws_id).await;
-    let listed = !ends_session && !quit_under_way(&state.mstore);
+    let listed = !unlisted && !quit_under_way(&state.mstore);
     if listed {
         remember(&state.mstore, &ws_id, window, now_ms());
     }
@@ -227,7 +230,7 @@ pub(crate) async fn keep_workspace(state: &AppState, ws_id: String, window: Valu
         workspace_id = %ws_id,
         listed,
         "CloseWindow: keeping the window's contents (its agents stop; {})",
-        if listed { "a closed window of the workspace" } else { "the next launch reopens it" }
+        if listed { "a closed window of the workspace" } else { "it opens again with its workspace" }
     );
     let st = state.clone();
     let done = crate::sagas::agent_teardown::detached(async move {
@@ -471,7 +474,13 @@ pub(crate) fn handle_window_agents(state: &AppState, call: &WebCallType) -> WebR
     let Some(window) = store.get::<Window>(&window_id).ok().flatten() else {
         return WebReturnType::success(json!([]));
     };
-    let agents: Vec<Value> = super::window_close::store_block_ids(store, &window.workspaceid)
+    WebReturnType::success(Value::Array(agents_in(store, &window.workspaceid)))
+}
+
+/// The agents running in window contents `ws_id`, each `{block_id, name,
+/// working}` (`working`: mid-turn).
+pub(crate) fn agents_in(store: &Store, ws_id: &str) -> Vec<Value> {
+    super::window_close::store_block_ids(store, ws_id)
         .into_iter()
         .filter_map(|block_id| {
             let status = crate::backend::blockcontroller::get_controller(&block_id)?.get_runtime_status();
@@ -490,8 +499,7 @@ pub(crate) fn handle_window_agents(state: &AppState, call: &WebCallType) -> WebR
             let name = meta_str("agentName").or_else(|| meta_str("agentId")).unwrap_or_else(|| block_id.clone());
             Some(json!({ "block_id": block_id, "name": name, "working": status.turn_active }))
         })
-        .collect();
-    WebReturnType::success(Value::Array(agents))
+        .collect()
 }
 
 #[cfg(test)]
