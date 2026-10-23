@@ -25,10 +25,14 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         async move {
             not_an_agent_api(&ctx)?;
             if !req.refresh {
-                if let Some((at, usage)) = LAST.lock().unwrap().as_ref() {
-                    if at.elapsed() < FRESH_FOR {
-                        return Ok(usage.clone());
-                    }
+                let cached = LAST.lock().unwrap().as_ref().filter(|(at, _)| at.elapsed() < FRESH_FOR).map(|(_, u)| u.clone());
+                if let Some(mut usage) = cached {
+                    // The sizes keep; whether compression is on, and what it
+                    // waits for, can change any minute and cost little to read.
+                    usage.compression = tokio::task::spawn_blocking(history_usage::compression_now)
+                        .await
+                        .map_err(|e| format!("history.usage: {e}"))?;
+                    return Ok(usage);
                 }
             }
             let Some(roots) = history_usage::Roots::on_this_machine() else {
