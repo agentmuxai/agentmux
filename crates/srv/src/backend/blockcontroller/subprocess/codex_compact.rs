@@ -70,6 +70,9 @@ impl SubprocessController {
             }
         };
         self.emit_message_accepted(&config);
+        // In the transcript like any delivered turn's message, so it is still
+        // there after a reload and in History.
+        self.user_record_sink().write(&config.message);
         let (kill_tx, mut kill_rx) = tokio::sync::oneshot::channel::<bool>();
         {
             let mut inner = self.inner.lock().unwrap();
@@ -173,8 +176,16 @@ impl SubprocessController {
                 failed_frame(error, &uuid, &now)
             }
             None => {
-                tracing::info!(block_id = %self.block_id, "codex compact stopped");
-                failed_frame("stopped before it finished", &uuid, &now)
+                // Stopped: what was queued behind the compaction is dropped, or
+                // the next turn's drain would send it after the user stopped.
+                let dropped = std::mem::take(&mut self.inner.lock().unwrap().pending_messages).len();
+                tracing::info!(block_id = %self.block_id, dropped, "codex compact stopped");
+                let note = match dropped {
+                    0 => "stopped before it finished".to_string(),
+                    1 => "stopped before it finished; the message queued behind it was not sent".to_string(),
+                    n => format!("stopped before it finished; the {n} messages queued behind it were not sent"),
+                };
+                failed_frame(&note, &uuid, &now)
             }
         };
         if let Some(broker) = &self.broker {

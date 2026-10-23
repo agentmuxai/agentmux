@@ -97,8 +97,21 @@ pub fn models_every_account_lists(dirs: impl IntoIterator<Item = PathBuf>) -> Ve
     };
     newest
         .iter()
-        .filter(|m| others.iter().all(|(_, list)| list.iter().any(|o| o.id == m.id)))
-        .cloned()
+        .filter_map(|m| {
+            let same: Vec<&CatalogModel> =
+                others.iter().map(|(_, list)| list.iter().find(|o| o.id == m.id)).collect::<Option<_>>()?;
+            // Effort is passed to whichever account a pane is bound to, so only
+            // the levels every account takes for this model, and a default only
+            // when they all have the same one.
+            let mut model = m.clone();
+            model.efforts.retain(|e| same.iter().all(|o| o.efforts.contains(e)));
+            if same.iter().any(|o| o.default_effort != model.default_effort)
+                || model.default_effort.as_ref().is_some_and(|d| !model.efforts.contains(d))
+            {
+                model.default_effort = None;
+            }
+            Some(model)
+        })
         .collect()
 }
 
@@ -217,6 +230,33 @@ mod tests {
         assert_eq!(ids(models_every_account_lists([plus.clone(), none, pro.clone()])), ["gpt-6-astra", "gpt-5.6-sol"]);
         // One account: its own list.
         assert_eq!(ids(models_every_account_lists([pro])), ["gpt-6-pro", "gpt-6-astra", "gpt-5.6-sol"]);
+    }
+
+    /// One shared list serves every Codex pane, whichever account it is bound
+    /// to, so a level is offered only when every account takes it.
+    #[test]
+    fn offers_only_the_effort_levels_every_account_takes() {
+        let root = tempfile::tempdir().unwrap();
+        let (a, b) = (root.path().join("a"), root.path().join("b"));
+        for d in [&a, &b] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let with_levels = |fetched_at: &str, levels: &[&str], default: &str| {
+            let levels: Vec<serde_json::Value> = levels.iter().map(|l| serde_json::json!({ "effort": l })).collect();
+            serde_json::json!({ "fetched_at": fetched_at, "models": [{
+                "slug": "gpt-6-astra", "visibility": "list", "priority": 1,
+                "default_reasoning_level": default, "supported_reasoning_levels": levels
+            }] })
+            .to_string()
+        };
+        std::fs::write(a.join(MODELS_CACHE_FILE), with_levels("2026-10-22T00:00:00Z", &["low", "medium", "high", "ultra"], "low")).unwrap();
+        std::fs::write(b.join(MODELS_CACHE_FILE), with_levels("2026-10-21T00:00:00Z", &["low", "medium", "high"], "low")).unwrap();
+        let models = models_every_account_lists([a.clone(), b.clone()]);
+        assert_eq!(models[0].efforts, ["low", "medium", "high"], "no ultra: account b's model doesn't take it");
+        assert_eq!(models[0].default_effort.as_deref(), Some("low"), "both default to low");
+        // Defaults that differ: none is claimed, and the CLI uses each account's own.
+        std::fs::write(b.join(MODELS_CACHE_FILE), with_levels("2026-10-21T00:00:00Z", &["low", "medium", "high"], "medium")).unwrap();
+        assert_eq!(models_every_account_lists([a, b])[0].default_effort, None);
     }
 
     #[test]
