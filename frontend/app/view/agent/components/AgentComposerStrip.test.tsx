@@ -1196,6 +1196,12 @@ describe("AgentComposerStrip — a Codex pane gets the runtime panel and Compact
         expect(screen.getByRole("button", { name: "Compact" })).toBeDisabled();
     });
 
+    it("offers no Compact in a container, where srv can't compact a Codex thread", () => {
+        codex({ "agent:sessionid": "t1" }, { agentMode: "container" });
+        expect(screen.queryByRole("button", { name: "Compact" })).toBeNull();
+        expect(screen.getByRole("button", { name: /Runtime settings/i })).toBeInTheDocument();
+    });
+
     it("gives neither to a provider without them", () => {
         render(() => (
             <AgentComposerStrip {...baseProps} providerId="gemini" blockId="block-1" blockAtom={() => ({ meta: {} }) as never} onCompact={() => {}} sessionTotals={{ input_tokens: 1, output_tokens: 1 }} />

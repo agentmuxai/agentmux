@@ -766,15 +766,14 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         return compactionCountdownText(t, w, props.autoCompact);
     };
 
-    // Only offer manual compaction for Claude and Codex (the providers this has
-    // been verified against — see onCompact's doc comment), only once
-    // there's something to compact, and not while a turn is already in
-    // flight or a compaction is already running.
-    // Codex reports no context reading; compacting needs its thread (the session id).
+    // Manual compaction: Claude, and Codex on the host only (onCompact's doc), once there's
+    // something to compact (Codex: a thread; it reports no context), never mid-turn or twice.
+    const offersCompact = (): boolean =>
+        props.onCompact != null && (props.providerId === "claude" || (props.providerId === "codex" && props.agentMode !== "container"));
     const canCompact = (): boolean => {
-        if (props.onCompact == null || props.loading || props.compacting) return false;
+        if (!offersCompact() || props.loading || props.compacting) return false;
         if (props.providerId === "codex") return !!props.blockAtom?.()?.meta?.["agent:sessionid"];
-        return props.providerId === "claude" && ctxText() != null;
+        return ctxText() != null;
     };
 
     // Dynamic left/right pooling — see the file-header comment for why a
@@ -922,7 +921,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 // in reading order either way.
                 render: (rowSide) => {
                     const compactBtn = () => (
-                        <Show when={(props.providerId === "claude" || props.providerId === "codex") && props.onCompact != null}>
+                        <Show when={offersCompact()}>
                             <button
                                 type="button"
                                 class="agent-composer-strip-compact-btn"

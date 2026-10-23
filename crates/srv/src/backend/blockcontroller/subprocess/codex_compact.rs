@@ -18,6 +18,8 @@
 //! that `codex exec` made came back at 4,706 in about 2 s, and
 //! `codex exec resume` carried on from it, remembering the earlier turn.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
@@ -49,6 +51,8 @@ impl SubprocessController {
     /// Compact the pane's Codex thread instead of running `/compact` as a turn.
     /// Called from `spawn_turn` holding the run lock, which it keeps until the
     /// compaction ends, so a message sent meanwhile is queued and sent after.
+    /// Like a turn it holds the session's cross-process lease, and Stop
+    /// (`stop_subprocess`, through `kill_tx`) cancels it.
     pub(super) fn compact_codex_thread(
         &self,
         config: SubprocessSpawnConfig,
@@ -58,10 +62,19 @@ impl SubprocessController {
             self.unlock_run();
             return Err("Nothing to compact yet: this Codex agent hasn't run a turn.".to_string());
         };
+        let lease = match self.claim_compact_lease(&config, &thread_id) {
+            Ok(lease) => lease,
+            Err(e) => {
+                self.unlock_run();
+                return Err(e);
+            }
+        };
         self.emit_message_accepted(&config);
+        let (kill_tx, mut kill_rx) = tokio::sync::oneshot::channel::<bool>();
         {
             let mut inner = self.inner.lock().unwrap();
             Self::set_status(&mut inner, STATUS_RUNNING);
+            inner.kill_tx = Some(kill_tx);
         }
         self.health_monitor.set_active_turn(true);
         self.health_monitor.note_spawned();
@@ -79,30 +92,89 @@ impl SubprocessController {
                 0,
             );
         }
+        let done = Arc::new(AtomicBool::new(false));
+        self.renew_compact_lease(lease.clone(), Arc::clone(&done));
         let weak = self.self_ref.lock().unwrap().clone().unwrap_or_default();
         let block_id = self.block_id.clone();
         tokio::spawn(async move {
             let started = Instant::now();
-            let outcome = run(&block_id, &config, &thread_id).await;
+            // Stop sends on `kill_tx`. Dropping `run` then drops its App Server
+            // process, which `kill_on_drop` stops.
+            let outcome = tokio::select! {
+                outcome = run(&block_id, &config, &thread_id) => Some(outcome),
+                Ok(_) = &mut kill_rx => None,
+            };
+            done.store(true, Ordering::SeqCst);
             if let Some(ctrl) = weak.upgrade() {
-                ctrl.finish_codex_compact(outcome, started.elapsed());
+                ctrl.finish_codex_compact(outcome, started.elapsed(), lease);
             }
         });
         Ok(())
     }
 
-    /// Tell the pane how it went, end the "turn" and send what was queued.
-    fn finish_codex_compact(&self, outcome: Result<Compacted, String>, took: Duration) {
+    /// The session lease a turn claims (`host_spawn::spawn_turn`), so a
+    /// compaction never changes a thread another AgentMux process is running a
+    /// turn on. `None` when leasing is off for this pane or its store failed.
+    fn claim_compact_lease(&self, config: &SubprocessSpawnConfig, thread_id: &str) -> Result<Option<crate::registry::Lease>, String> {
+        if config.instance_id.is_empty() {
+            return Ok(None);
+        }
+        let Some(store) = &self.lease_store else { return Ok(None) };
+        match store.claim(&config.instance_id, &self.boot_id, &self.block_id, Some(thread_id)) {
+            Ok(lease) => Ok(Some(lease)),
+            Err(crate::registry::LeaseError::HeldByOther { owner_boot_id, age_ms, .. }) => Err(format!(
+                "session '{}' is already owned by another AgentMux process (boot {owner_boot_id}, renewed {age_ms}ms ago): \
+                 refusing to compact it from two processes at once",
+                config.instance_id
+            )),
+            Err(crate::registry::LeaseError::Io(e)) => {
+                tracing::warn!(block_id = %self.block_id, error = %e, "lease claim failed (io); compacting without a lease");
+                Ok(None)
+            }
+        }
+    }
+
+    /// Renew the lease while the compaction runs, as a turn's renewal task does.
+    fn renew_compact_lease(&self, lease: Option<crate::registry::Lease>, done: Arc<AtomicBool>) {
+        let (Some(store), Some(lease)) = (self.lease_store.clone(), lease) else { return };
+        let block_id = self.block_id.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_millis(crate::registry::RENEW_INTERVAL_MS));
+            loop {
+                interval.tick().await;
+                if done.load(Ordering::SeqCst) {
+                    break;
+                }
+                let (s, l) = (Arc::clone(&store), lease.clone());
+                let renewed = tokio::task::spawn_blocking(move || s.renew(&l).map_err(|e| e.to_string()))
+                    .await
+                    .unwrap_or_else(|e| Err(format!("renew task failed: {e}")));
+                if let Err(e) = renewed {
+                    tracing::warn!(block_id = %block_id, error = %e, "lease renew failed during a codex compact");
+                    break;
+                }
+            }
+        });
+    }
+
+    /// Tell the pane how it went, release the lease and end the "turn". After
+    /// a finished compaction, send what was queued; after Stop (`None`), leave
+    /// the status Stop set and send nothing: the user stopped the agent.
+    fn finish_codex_compact(&self, outcome: Option<Result<Compacted, String>>, took: Duration, lease: Option<crate::registry::Lease>) {
         let now = chrono::Utc::now().to_rfc3339();
         let uuid = uuid::Uuid::new_v4().to_string();
         let frame = match &outcome {
-            Ok(c) => {
+            Some(Ok(c)) => {
                 tracing::info!(block_id = %self.block_id, pre = c.pre_tokens, post = c.post_tokens, "codex thread compacted");
                 boundary_frame(c, took, &uuid, &now)
             }
-            Err(error) => {
+            Some(Err(error)) => {
                 tracing::warn!(block_id = %self.block_id, error = %error, "codex compact failed");
                 failed_frame(error, &uuid, &now)
+            }
+            None => {
+                tracing::info!(block_id = %self.block_id, "codex compact stopped");
+                failed_frame("stopped before it finished", &uuid, &now)
             }
         };
         if let Some(broker) = &self.broker {
@@ -116,10 +188,22 @@ impl SubprocessController {
                 global_zone.as_deref(),
             );
         }
+        if let (Some(store), Some(lease)) = (&self.lease_store, &lease) {
+            if let Err(e) = crate::backend::blocking::off_async_worker(|| store.release(lease)) {
+                tracing::warn!(block_id = %self.block_id, error = %e, "lease release failed after a codex compact (self-heals via TTL expiry)");
+            }
+        }
+        let Some(outcome) = outcome else {
+            self.health_monitor.set_active_turn(false);
+            self.publish_status();
+            self.unlock_run();
+            return;
+        };
         let exit_code = if outcome.is_ok() { 0 } else { 1 };
         {
             let mut inner = self.inner.lock().unwrap();
             inner.proc_exit_code = exit_code;
+            inner.kill_tx = None;
             Self::set_status(&mut inner, STATUS_DONE);
         }
         self.health_monitor.set_exited(exit_code);
