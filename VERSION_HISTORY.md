@@ -1,5 +1,31 @@
 # AgentMux Version History
 
+## 0.59.40 — 2026-10-23
+
+- The Vault imports a password-protected Bitwarden export, asking for the password it was protected with
+- Browser: a browser pane forgets the element references from before its page was closed, so a click or a Vault fill asked for before the pane went to sleep can't land on a different element of the reloaded page.
+- Codex agents get the composer's Mode · Model · Effort panel and Compact. Effort lists each model's own levels from the account (low to ultra) and applies on the next turn. Mode is Codex's sandbox: Full access, Workspace write (not on Windows, where Codex can't yet write in a sandbox) or Read only. Compact shrinks the conversation through a short-lived Codex App Server.
+- Warden > History > Storage says how compressed the shared pane history is, and what compression is waiting for
+- Settings › Agents can update forks whose agent id an older build chained (loap-loap-2 becomes loap-2): it shows the plan first, stops running panes through the usual override, backs everything up, and can undo the update. The old id keeps receiving messages and review notices for 30 days. A one-time notice points there when such agents exist.
+- A new Editor, Hangar, Tower or other lazily loaded pane no longer flashes black while it opens: the pane shows its surface while its code loads, and opens at once after the first
+- The Message tool's description now says a message for a known agent that isn't running is held before the cloud relay is tried; old jekt design documents and code comments now point to the jekt protocol specification and no longer contradict the code
+- A signed message between agents proves its sender for one delivery: delivering the same signed message again counts as a failed check, and the reply line of a received message now names the Message tool
+- Every route that delivers a message between agents treats transcript requests the same way, and a message-bus sender's own copy of a message shows the trust its recipient sees.
+- A jekt sent over the cloud relay carries the tier its sender declared (info, coord or sensitive), and the receiving computer shows it with that tier, as it does for a jekt sent on the same computer or network.
+- In a new agent pane, the harnesses whose CLI is installed are listed first
+- Renaming an agent updates its pane title even if one was set earlier, records a fork's old name like any other, and tells the running agent its new name
+- Codex agent panes show how full their context is, read from Codex's own record of its last model call
+- An upgrade comes back with the windows, tabs and panes it quit with: it no longer starts from the channel's pre-versioning data
+- A turn that failed because the model API couldn't be reached is retried once by itself when the API is back, with its images and files, if no tool ran in it and you haven't typed in that pane since; otherwise it's offered with a Retry. Turn it off in Settings › Advanced (Retry after the API is back).
+- A message addressed to the name an agent had before you renamed it still reaches that agent, and the old name stops being held as its current one
+- The ☰ menu no longer lists Settings, Connectors, Memory and Toolchain (open them from the widget bar, the palette or Ctrl+,), and a fresh widget bar pins Agent, Swarm, Memory, Connectors, Hangar, Browser, Settings and Help; Kanban, Terminal, Editor, Messengers and Sysinfo move to its + menu
+- Your windows now belong to a named workspace, Default Workspace, which AgentMux saves about a second after every change; its name heads the window list in the version panel, and double-click or F2 renames it.
+- Closing a window keeps it in your workspace: the version panel lists it greyed with when it closed, a Reopen button that brings it back where it was with the same panes and agents, and Remove from workspace on a right-click; an open window's row has a delete button. Closed windows stay closed across restarts and upgrades, with no limit on how many are kept.
+- Several workspaces: ☰ → Workspaces makes a new one, opens another (the open one closes, keeping its windows, and comes back as it was), renames, deletes, exports to a file and imports one, an older layout file included. Save layout, Open layout and Restore layout from another build leave the menu.
+- Updated DOMPurify, which Mermaid diagrams use to sanitize their output, from 3.4.16 to 3.4.17, which hardens several sanitizer edge cases.
+- The command palette can delete a workspace (Delete Workspace…), and with "Keep running in the tray" on, opening AgentMux again from the tray after closing its last window brings that window back with its panes instead of an empty default window.
+- AgentMux now ships CEF 154 r4 on Windows, macOS and Linux. It lets a sleeping browser pane keep its page state, and makes freezing hidden panes safe.
+
 ## 0.59.39 — 2026-10-22
 
 - A new Desktop tool lets an agent look at and control a native Windows app, such as Notepad: off until you turn it on in Settings (desktop:enabled), asks you before each app, shows Driving with a Stop button in the agent's pane, refuses browsers and password managers, and logs every action
