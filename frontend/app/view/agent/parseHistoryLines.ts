@@ -17,7 +17,7 @@ import { sessionOutcomeNodeId } from "@/app/store/agent-document/session-outcome
 import { buildMemoryInjectedNode, supersededCard } from "./memory-injected";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import { mainAgentUsage, readsMainAgentUsage } from "./main-agent-usage";
-import { acpContextTrackerFor, type AcpContextTracker } from "./acp-context";
+import { contextReaderFor, type ContextReader } from "./context-reader";
 import { reportedContextWindowsFromResult } from "@/app/store/agent-pane-state/context-reading";
 import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "./types";
 
@@ -165,8 +165,8 @@ export class HistoryParser {
     private awaitingCompactionSize: ContextCompactedNode | null = null;
     /** The stream carries Claude Code's per-call usage (`readsMainAgentUsage`). */
     private readonly readsUsage: boolean;
-    /** An ACP agent's own context reports (`readsAcpContext`). */
-    private readonly acpContext: AcpContextTracker | null;
+    /** A provider's own context reports (context-reader.ts). */
+    private readonly contextReader: ContextReader;
     /** Context windows the lines' `result` frames reported
      *  (`modelUsage[*].contextWindow`), later frames winning. */
     reportedContextWindows: Record<string, number> = {};
@@ -180,7 +180,7 @@ export class HistoryParser {
     ) {
         this.translator = createTranslator(outputFormat, { replay: true });
         this.readsUsage = readsMainAgentUsage(outputFormat);
-        this.acpContext = acpContextTrackerFor(outputFormat);
+        this.contextReader = contextReaderFor(outputFormat);
         if (agentName) this.parser.setAgentId(agentName);
     }
 
@@ -362,11 +362,11 @@ export class HistoryParser {
                 const windows = reportedContextWindowsFromResult(rawEvent);
                 if (windows) this.reportedContextWindows = { ...this.reportedContextWindows, ...windows };
             }
-            const reported = this.acpContext?.observe(rawEvent);
+            const reported = this.contextReader.observe(rawEvent);
             if (reported) {
-                this.lastModel = reported.model;
-                if (reported.window != null) {
-                    this.reportedContextWindows = { ...this.reportedContextWindows, [reported.model]: reported.window };
+                if (reported.model) this.lastModel = reported.model;
+                if (reported.window != null && this.lastModel) {
+                    this.reportedContextWindows = { ...this.reportedContextWindows, [this.lastModel]: reported.window };
                 }
                 this.lastContext = { tokens: reported.tokens, model: this.lastModel, at: stampFor(lineIdx) ?? null };
             }

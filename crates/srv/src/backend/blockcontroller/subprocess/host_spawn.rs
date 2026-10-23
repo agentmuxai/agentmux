@@ -68,6 +68,12 @@ impl SubprocessController {
         // built after it.
         let session_id_hint = self.inner.lock().unwrap().session_id.clone();
 
+        // A Codex `/compact` compacts the thread through a short-lived App
+        // Server instead of running as an `exec` turn (codex_compact.rs).
+        if super::codex_compact::is_compact_request(&config) {
+            return self.compact_codex_thread(config, session_id_hint);
+        }
+
         // Build continuation argv before claiming the lease or acknowledging
         // the message. A malformed provider configuration must fail as an
         // unstarted turn, not strand the pane in an accepted/running state.
@@ -543,6 +549,11 @@ impl SubprocessController {
         // frames, so muxspect's last_error_frame could never see it after
         // the live moment passed).
         let filestore_wait = self.filestore.clone();
+        // A Codex turn's context, read from its session file once it exits
+        // (codex_context.rs): `codex exec` reports only the thread's totals.
+        let codex_home_wait = (config.resume_strategy == "codex-exec")
+            .then(|| super::codex_context::codex_home(&config.env_vars))
+            .flatten();
         tokio::spawn(async move {
             // Classified failure cause, surfaced to the pane after the readers drain.
             let mut run_failure: Option<crate::agents::failure::AgentFailure> = None;
@@ -674,6 +685,21 @@ impl SubprocessController {
                         &combined_tail,
                         result_frame.as_ref(),
                     ));
+                }
+                let thread_id = inner_wait.lock().unwrap().session_id.clone();
+                if let (Some(home), Some(thread_id), Some(broker)) = (codex_home_wait, thread_id, broker_wait.as_ref()) {
+                    let read = tokio::task::spawn_blocking(move || super::codex_context::read(&home, &thread_id)).await;
+                    if let Ok(Some(ctx)) = read {
+                        let zone = crate::backend::transcript::append::resolve_global_output_zone(&mstore_wait, &block_id_wait);
+                        crate::backend::blockcontroller::shell::handle_append_block_file(
+                            broker,
+                            &block_id_wait,
+                            SUBPROCESS_OUTPUT_SUBJECT,
+                            format!("{}\n", super::codex_context::frame(&ctx)).as_bytes(),
+                            filestore_wait.as_ref(),
+                            zone.as_deref(),
+                        );
+                    }
                 }
             }
 

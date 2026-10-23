@@ -49,7 +49,9 @@ pub(crate) const FORMER_SLUGS_SCHEMA: &str = "
 /// slug index's stats, no parse unless a file changed); a write through this
 /// store clears the set at once. Former slugs appear only by a migration,
 /// which runs with the agents stopped, so the lag never meets a message.
-const KNOWN_FOR: Duration = Duration::from_secs(2);
+/// Former display names appear on a rename, which clears the sets when it
+/// goes through this store (`agent_def_update`, `instance_rename`).
+pub(super) const KNOWN_FOR: Duration = Duration::from_secs(2);
 
 /// Every former slug this channel can see, lowercased, from the shared slug
 /// index and this table: a sender or target not in it is no former slug, and
@@ -57,6 +59,9 @@ const KNOWN_FOR: Duration = Duration::from_secs(2);
 #[derive(Default)]
 pub(in crate::backend::storage) struct FormerSlugSet {
     known: Mutex<Option<(Instant, HashSet<String>)>>,
+    /// The same for former display names no agent holds now, by route key
+    /// (`former_names`).
+    pub(super) display: Mutex<Option<(Instant, HashSet<String>)>>,
     /// Store reads it caused (the set's re-reads and full lookups), for tests.
     #[cfg(test)]
     pub(super) reads: std::sync::atomic::AtomicUsize,
@@ -66,9 +71,10 @@ impl FormerSlugSet {
     /// Forget the set, after this process wrote a former slug.
     pub(in crate::backend::storage) fn invalidate(&self) {
         *self.known.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        *self.display.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 
-    fn read(&self) {
+    pub(super) fn read(&self) {
         #[cfg(test)]
         self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
@@ -76,8 +82,10 @@ impl FormerSlugSet {
     /// Age the set past [`KNOWN_FOR`], as time passing would.
     #[cfg(test)]
     pub(super) fn expire(&self) {
-        if let Some((at, _)) = self.known.lock().unwrap().as_mut() {
-            *at -= KNOWN_FOR * 2;
+        for set in [&self.known, &self.display] {
+            if let Some((at, _)) = set.lock().unwrap().as_mut() {
+                *at -= KNOWN_FOR * 2;
+            }
         }
     }
 }

@@ -586,46 +586,17 @@ async fn handle_incoming_text(
                 if let (Some(ref target), Some(ref message)) =
                     (&incoming.target, &incoming.bus_message_text)
                 {
-                    // Try direct PTY injection via ReactiveHandler first
-                    let mut reactive_req = crate::backend::reactive::InjectionRequest {
-                        target_agent: target.clone(),
-                        message: message.clone(),
-                        source_agent: Some(from.to_string()),
-                        request_id: None,
-                        priority: incoming.priority.clone(),
-                        jekt_tier: None,   // auto-detected from keywords
-                        delivery_tier: Some("host".to_string()),
-                        forward_hops: 0,
-                        ..Default::default()
-                    };
-                    // reagentx P0 on PR #2565: same bypass as
-                    // messagebus.rs::handle_inject — this WS message type
-                    // built InjectionRequest from client-controlled
-                    // `incoming.from` and called inject_message directly,
-                    // never going through host-tier signature verification.
-                    super::reactive::verify_jekt_signature(state, &mut reactive_req);
-                    let resp = state.reactive_handler.inject_message(reactive_req);
+                    // Try direct PTY injection via ReactiveHandler first, with
+                    // the same signature check and transcript-request fields
+                    // as /api/bus/inject (`jekt_entry`).
+                    let reactive_req = super::jekt_entry::bus_inject_request(
+                        state, from, target, message, incoming.priority.clone(), String::new(),
+                    );
+                    let resp = state.reactive_handler.inject_message(reactive_req.clone());
                     if resp.success {
-                        // Sender-side echo (SPEC_JEKT_SECURITY_AND_VISIBILITY §3.2)
-                        super::reactive::echo_jekt_to_sender(
-                            state,
-                            Some(from),
-                            target,
-                            message,
-                            &resp.request_id,
-                            resp.effective_tier.as_deref(),
-                            resp.requires_stop,
-                            // Always host-tier here (this is the pane's own outbound
-                            // send) — reagent/lan verification never applies.
-                            super::reactive::EchoTrust {
-                                delivery_tier: "host",
-                                sig_verified: None,
-                                reagent_verified: None,
-                                lan_verified: None,
-                                channel_verified: None,
-                            },
-                            incoming.priority.as_deref().unwrap_or("normal"),
-                        );
+                        // Sender-side echo (SPEC_JEKT_SECURITY_AND_VISIBILITY §3.2),
+                        // carrying the verdicts the delivery was decided on.
+                        super::reactive::echo_local_delivery(state, &reactive_req, &resp);
                         let ack = json!({ "type": "bus:injected", "via": "pty", "block_id": resp.block_id });
                         let msg = serde_json::to_string(&ack).unwrap_or_default();
                         if socket.send(Message::Text(msg.into())).await.is_err() {
@@ -634,9 +605,8 @@ async fn handle_incoming_text(
                         return Ok(None);
                     }
 
-                    // Non-"agent not found" error — report it
-                    let is_not_found = resp.error.as_deref().map(|e| e.contains("not found")).unwrap_or(false);
-                    if !is_not_found {
+                    // Not a fallback case (`jekt_entry::bus_fallback_allowed`) — report it
+                    if !super::jekt_entry::bus_fallback_allowed(&reactive_req, &resp) {
                         let err = json!({ "type": "bus:error", "error": resp.error });
                         let msg = serde_json::to_string(&err).unwrap_or_default();
                         if socket.send(Message::Text(msg.into())).await.is_err() {

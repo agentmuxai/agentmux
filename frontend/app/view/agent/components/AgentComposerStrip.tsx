@@ -684,7 +684,8 @@ interface AgentComposerStripProps {
     compacting?: CompactionState | null;
     /**
      * Manually trigger compaction now, instead of waiting for the CLI's
-     * own auto-compact threshold. Only meaningful for Claude — sends the
+     * own auto-compact threshold. Claude and Codex (srv compacts a Codex
+     * thread on "/compact", subprocess/codex_compact.rs). Sends the
      * literal text "/compact" through the normal send-message path
      * (agent-view.tsx's handleSendMessage), which the CLI's persistent
      * stream-json stdin protocol recognizes as its real /compact command
@@ -708,10 +709,9 @@ interface AgentComposerStripProps {
 // ── Component ──────────────────────────────────────────────────────────────
 
 export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element => {
-    // Show model/effort controls only for Claude agents (controls are claude-specific;
-    // non-claude providers (codex/gemini/kimi) have different model enumerations and
-    // buildRuntimeArgs silently drops effort for them — spec §1.3).
-    const showControls = () => props.blockAtom != null && props.providerId === "claude";
+    // Mode · Model · Effort for Claude and Codex (Codex's own models, levels and sandbox
+    // modes, runtime-capabilities.ts). Others have their own model lists — spec §1.3.
+    const showControls = () => props.blockAtom != null && (props.providerId === "claude" || props.providerId === "codex");
 
     // Context text color based on proximity to compaction threshold.
     const ctxClass = (): string => {
@@ -766,16 +766,15 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         return compactionCountdownText(t, w, props.autoCompact);
     };
 
-    // Only offer manual compaction for Claude (the only provider this has
-    // been verified against — see onCompact's doc comment), only once
-    // there's something to compact, and not while a turn is already in
-    // flight or a compaction is already running.
-    const canCompact = (): boolean =>
-        props.providerId === "claude"
-        && props.onCompact != null
-        && ctxText() != null
-        && !props.loading
-        && !props.compacting;
+    // Manual compaction: Claude, and Codex on the host only (onCompact's doc), once there's
+    // something to compact (Codex: a thread; it reports no context), never mid-turn or twice.
+    const offersCompact = (): boolean =>
+        props.onCompact != null && (props.providerId === "claude" || (props.providerId === "codex" && props.agentMode !== "container"));
+    const canCompact = (): boolean => {
+        if (!offersCompact() || props.loading || props.compacting) return false;
+        if (props.providerId === "codex") return !!props.blockAtom?.()?.meta?.["agent:sessionid"];
+        return ctxText() != null;
+    };
 
     // Dynamic left/right pooling — see the file-header comment for why a
     // static per-item zone assignment left the controls zone empty for
@@ -922,7 +921,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 // in reading order either way.
                 render: (rowSide) => {
                     const compactBtn = () => (
-                        <Show when={props.providerId === "claude" && props.onCompact != null}>
+                        <Show when={offersCompact()}>
                             <button
                                 type="button"
                                 class="agent-composer-strip-compact-btn"

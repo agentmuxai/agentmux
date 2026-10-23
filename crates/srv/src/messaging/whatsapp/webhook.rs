@@ -40,7 +40,6 @@ use sha2::Sha256;
 
 use super::types::WebhookPayload;
 use super::WhatsAppBridge;
-use crate::backend::reactive::handler::get_global_handler;
 use crate::backend::reactive::types::InjectionRequest;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -129,7 +128,6 @@ pub async fn handle_inbound(headers: HeaderMap, body: Bytes) -> impl IntoRespons
         };
 
         let envelope = format!("[WhatsApp {}]: {}", msg.from, msg.text);
-        let handler = get_global_handler();
         let req = InjectionRequest {
             target_agent: target.clone(),
             message: envelope,
@@ -141,7 +139,7 @@ pub async fn handle_inbound(headers: HeaderMap, body: Bytes) -> impl IntoRespons
             forward_hops: 0,
             ..Default::default()
         };
-        let result = handler.inject_message(req);
+        let result = crate::server::jekt_entry::inject_from_bridge(req, &msg.text);
         if !result.success {
             tracing::warn!(
                 "whatsapp_bridge: inject to agent {target} failed: {:?}",

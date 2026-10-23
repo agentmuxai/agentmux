@@ -28,7 +28,8 @@ pub struct ProvidersModelsParams {
 #[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ProvidersModelsResult {
-    /// `CatalogModel` serializes to `{ id, display_name }`.
+    /// `CatalogModel` serializes to `{ id, display_name }`, plus Codex's
+    /// `efforts` and `default_effort` for each model.
     pub models: Vec<CatalogModel>,
 }
 
@@ -61,7 +62,6 @@ pub fn register_providers_handlers(engine: &Arc<WshRpcEngine>, _state: &AppState
                     let models = tokio::task::spawn_blocking(move || {
                         crate::backend::codex_models::models_every_account_lists(crate::backend::codex_models::codex_dirs(
                             &paths.identities_dir(),
-                            paths.provider_auth_dir(auth_dir_name),
                             auth_dir_name,
                         ))
                     })

@@ -43,9 +43,16 @@ describe("/effort", () => {
     });
 
     it("says so for a provider with no effort setting", async () => {
+        patchRuntime.mockResolvedValue({ permissionMode: "bypass", model: "gemini-3-pro", effort: "low" });
+        const r = (await effort.handler(ctx("gemini"), "low")) as { message: string };
+        expect(r.message).toMatch(/no effect now — gemini has no effort setting/);
+    });
+
+    // Codex takes effort per model, from its account's list (runtime-capabilities.ts).
+    it("says so for a Codex model whose levels aren't known yet", async () => {
         patchRuntime.mockResolvedValue({ permissionMode: "bypass", model: "gpt-5.5", effort: "low" });
         const r = (await effort.handler(ctx("codex"), "low")) as { message: string };
-        expect(r.message).toMatch(/no effect now — codex has no effort setting/);
+        expect(r.message).toMatch(/no effect now — the account's models aren't known yet/);
     });
 
     it("still reports a failure to apply", async () => {

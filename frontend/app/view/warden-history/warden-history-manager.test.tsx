@@ -105,5 +105,34 @@ describe("Warden History section", () => {
         expect(screen.getByText(/Agent history is kept forever/)).toBeInTheDocument();
         fireEvent.click(screen.getByRole("button", { name: "Measure again" }));
         await waitFor(() => expect(HistoryUsageCommand).toHaveBeenCalledWith({}, { refresh: true }));
+        expect(screen.queryByTestId("history-compression")).toBeNull();
+    });
+
+    it("Storage says how compressed the shared pane history is, and what compression waits for", async () => {
+        HistoryUsageCommand.mockResolvedValue({
+            total_bytes: 4096,
+            stores: [{ key: "pane-history", label: "Pane history", bytes: 4096, files: 3 }],
+            agents: [],
+            computed_at_ms: Date.now(),
+            compression: { enabled: true, frames: 13321, logical_bytes: 6_600, stored_bytes: 1_000, waiting: "agentmux-srv.exe (pid 7) can't read compressed history" },
+        });
+        render(() => <WardenHistoryManager wardenBlockId="warden-1" visible={true} />);
+        fireEvent.click(screen.getByRole("radio", { name: "Storage" }));
+        const line = await screen.findByTestId("history-compression");
+        expect(line.textContent).toMatch(/Pane history compressed: .* of transcript in .* \(6\.6×\), 13,321 frames\./);
+        expect(line.textContent).toMatch(/Compression waits: agentmux-srv\.exe \(pid 7\)/);
+    });
+
+    it("Storage says when pane history isn't compressed", async () => {
+        HistoryUsageCommand.mockResolvedValue({
+            total_bytes: 4096,
+            stores: [],
+            agents: [],
+            computed_at_ms: Date.now(),
+            compression: { enabled: false, frames: 0, logical_bytes: 0, stored_bytes: 0 },
+        });
+        render(() => <WardenHistoryManager wardenBlockId="warden-1" visible={true} />);
+        fireEvent.click(screen.getByRole("radio", { name: "Storage" }));
+        expect((await screen.findByTestId("history-compression")).textContent).toBe("Pane history isn't compressed (setting agent:transcriptframes).");
     });
 });

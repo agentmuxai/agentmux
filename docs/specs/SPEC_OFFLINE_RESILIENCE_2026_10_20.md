@@ -1,7 +1,7 @@
 # SPEC: Stay in control of every agent when the internet drops, and recover by itself
 
 **Date:** 2026-10-20
-**Status:** active — §8 PRs shipped: A in #5213 (MuxBus: offline is not signed out), B in #5221 (notes ride with the next turn), C in #5215 (the pane shows an API retry), D in #5236 (offer the layout another build saved); E's first part (§4.1 connectivity state, the status bar's Offline indicator) in #5241, its second (§4.4 held input) in #5246. E3 (§4.3 recovery of failed turns), F and G remain.
+**Status:** active — §8 PRs shipped: A in #5213 (MuxBus: offline is not signed out), B in #5221 (notes ride with the next turn), C in #5215 (the pane shows an API retry), D in #5236 (offer the layout another build saved); E's first part (§4.1 connectivity state, the status bar's Offline indicator) in #5241, its second (§4.4 held input) in #5246, E3 in #5353 (§4.3 recovery of failed turns). F and G remain.
 **Related:** [`SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md`](SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md) (the per-class recovery banner),
 [`SPEC_PERSISTENT_CONTROLLER_FAILURE_CLASSIFICATION_2026_08_04.md`](SPEC_PERSISTENT_CONTROLLER_FAILURE_CLASSIFICATION_2026_08_04.md),
 [`SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md`](SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md).
@@ -158,7 +158,7 @@ Ordered by how much control each returns; A, B and C are independent and can go 
 | C | `api_retry` → `agent:retrying` and the retry row with Stop / Retry now; Network classification; Network turn-end banner | G1, G2 (pane) |
 | D | Close keeps the workspace, restores on launch; close warning; persistence docs | G8, G5 (layout) |
 | E | `connectivity` module; status-bar Offline per service (#5241); held input (§4.4, #5246) | G2, G3 |
-| E3 | Recovery of failed turns (§4.3): automatic retry on reconnect, the offer when the operator typed since. See the notes below | G6 |
+| E3 | Recovery of failed turns (§4.3): automatic retry on reconnect, the offer when the operator typed since. See the notes below. Shipped in #5353 | G6 |
 | F | MuxBus resubscribe and provision every live agent and alias after reconnect; uid-keyed subscriptions; fork slug migration | G6, §4.8 |
 | G | Fault proxy and the §7.2 scenarios as a scripted run | all |
 
@@ -175,6 +175,6 @@ Ordered by how much control each returns; A, B and C are independent and can go 
 
 ## 9. Open questions
 
-1. Automatic retry of a network-failed turn (§4.3): on by default? Proposed: on, only for turns that failed before any tool ran. **Proposed answer kept, pending E3:** as proposed, with a setting to turn it off.
+1. Automatic retry of a network-failed turn (§4.3): on by default? Proposed: on, only for turns that failed before any tool ran. **Decided (E3):** on by default, only for a turn the operator started from that pane while it was open, that failed before any tool ran and isn't itself a failed automatic retry; any other is offered. `agent:retryonreconnect` (Settings › Advanced) turns it off.
 2. Where held messages are stored: with the pane's persisted state (proposed) or the agent's history store. **Decided (#5246):** the block's meta (`agent:held_input`), sent by the pane once it is open and the API answers.
 3. Whether the first launch of a new channel should copy the previous channel's layout automatically or ask (proposed: ask once).

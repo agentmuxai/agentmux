@@ -4,7 +4,8 @@
 //! §4 Phase 2 step 5: re-read every location after an agent's steps and say
 //! what is wrong, if anything. The new slug everywhere; the old one only as a
 //! former slug; no signing key under the old name; and both names resolve to
-//! the uid, by the same rule message delivery uses (`Store::former_slug_owner`).
+//! the uid, by the same rule message delivery uses (`Store::former_name_owner`,
+//! which resolves former slugs and former display names alike).
 
 use std::path::Path;
 use std::sync::Arc;
@@ -102,7 +103,7 @@ fn verify_objects_db(db: &Path, defs: &Arc<crate::registry::DefinitionStore>, a:
     // Resolution, by srv's own rule, on this database as it is.
     let store = crate::backend::storage::store::Store::open_source_readonly(db).map_err(|e| e.to_string())?;
     store.set_def_registry(defs.clone());
-    match store.former_slug_owner(&a.old) {
+    match store.former_name_owner(&a.old) {
         Ok(Some(owner)) if owner.uid == a.uid && owner.slug == a.new => {}
         Ok(other) => problems.push(format!("{place}: {} resolves to {other:?}, not to {}", a.old, a.uid)),
         Err(e) if too_old(&e) => {}

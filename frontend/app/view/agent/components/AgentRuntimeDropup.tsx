@@ -43,7 +43,16 @@ import { runningModelNote } from "../resolved-model";
 import { compareRuntime, useProcessRuntime, type AxisDrift, type RuntimeAgreement } from "../process-runtime";
 import { patchRuntime } from "../runtime-apply";
 import { isPersistentLaunch, PROVIDER_FLAGS_META_KEY } from "../launch-args";
-import { effectiveRuntime, effortApplies, effortNotUsedReason, permissionModeText } from "../runtime-capabilities";
+import {
+    codexEffort,
+    codexModeFor,
+    codexModes,
+    effectiveRuntime,
+    effortApplies,
+    effortLevels,
+    effortNotUsedReason,
+    permissionModeText,
+} from "../runtime-capabilities";
 import type { AgentRuntimeConfig, EffortLevel, PermissionMode } from "../types";
 
 const PERMISSION_COLORS: Record<PermissionMode, string> = {
@@ -238,7 +247,14 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
     const modelLabel = (value: string): string =>
         modelOptions().find((o) => o.value === value)?.label ?? (value === "" ? "CLI default" : value);
     const effortLabel = (value: string): string => EFFORT_OPTIONS.find((o) => o.value === value)?.label ?? value;
-    const modeLabel = (value: string): string => MODE_OPTIONS.find((o) => o.value === value)?.label ?? value;
+    const modeLabel = (value: string): string =>
+        isCodex()
+            ? codexModeFor(value as PermissionMode).label
+            : (MODE_OPTIONS.find((o) => o.value === value)?.label ?? value);
+    // The effort the agent runs at. Codex: the selection when its model takes
+    // it, otherwise that model's default (codexEffort).
+    const runningEffort = (): string =>
+        isCodex() ? (codexEffort(runningModel(), shown().effort).effort ?? shown().effort) : shown().effort;
 
     // What the process actually runs. An agent definition's own `--model` /
     // `--effort` (appended after the runtime's) win over the stored selection, so
@@ -254,7 +270,7 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
         // Effort is left out when it does nothing for this pane: the label says
         // what the agent runs, and "Haiku · high" would claim an effort it never gets.
         const parts = [modeLabel(r.permissionMode), modelLabel(r.model)];
-        if (effortApplies(props.providerId, runningModel())) parts.push(effortLabel(r.effort));
+        if (effortApplies(props.providerId, runningModel())) parts.push(effortLabel(runningEffort()));
         return parts.join(" · ");
     };
 
@@ -297,11 +313,14 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
         const autoAnswers = !!provider && isPersistentLaunch(provider, meta?.["agentMode"] as string | undefined);
         addSection(
             "mode",
-            MODE_OPTIONS.map((o) => {
-                const t = permissionModeText(o.value, autoAnswers, props.providerId);
-                return { ...o, menuLabel: t.label, description: t.note, detail: t.detail };
-            }),
-            r.permissionMode,
+            // Codex: its own three sandbox modes; a Claude-only mode it holds shows as the one it runs.
+            isCodex()
+                ? codexModes().map((m) => ({ value: m.value, label: m.label, menuLabel: m.menuLabel, description: m.note }))
+                : MODE_OPTIONS.map((o) => {
+                      const t = permissionModeText(o.value, autoAnswers, props.providerId);
+                      return { ...o, menuLabel: t.label, description: t.note, detail: t.detail };
+                  }),
+            isCodex() ? codexModeFor(r.permissionMode).value : r.permissionMode,
             true,
         );
         addSection("model", modelOptions(), r.model, false);
@@ -321,10 +340,14 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
                 ? { kind: "note", section: "model", text: last.differs ? `⚠ ${last.text}` : last.text }
                 : { kind: "note", section: "model", text: "Running model: shown after the first reply", placeholder: true }
         );
-        // The five rows whether or not effort applies (Haiku), so picking Haiku
-        // doesn't shrink the panel; they are just not selectable then.
+        // Claude: the five rows whether or not effort applies (Haiku), so picking
+        // Haiku doesn't shrink the panel; they are just not selectable then.
+        // Codex: the running model's own levels, which differ per model.
         const notUsed = effortNotUsedReason(props.providerId, runningModel());
-        addSection("effort", EFFORT_OPTIONS, r.effort, false, notUsed === null ? undefined : `Not applied — ${notUsed}`);
+        const effortRows = isCodex()
+            ? effortLevels("codex", runningModel()).map((v) => ({ value: v, label: v }))
+            : EFFORT_OPTIONS;
+        addSection("effort", effortRows, runningEffort(), false, notUsed === null ? undefined : `Not applied — ${notUsed}`);
         return { rows, options };
     };
 

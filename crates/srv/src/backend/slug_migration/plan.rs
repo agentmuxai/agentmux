@@ -168,7 +168,9 @@ fn routes_to(name: &str, folded: &str) -> bool {
 
 /// Who holds `target` other than `uid`, if anyone: a shared definition's
 /// slug, former slug or display route; a row's slug, former slug, display or
-/// instance route in any `objects.db` on disk; another candidate's new id; a
+/// instance route, or former display name's route (which still addresses
+/// its agent, as `resolve_slug_collision` keeps it) in any `objects.db` on
+/// disk; another candidate's new id; a
 /// live cross-channel registration; or a live per-version registration of
 /// another agent's pane. A display route counts because a message to the
 /// target would otherwise reach whichever agent holds it as its slug, and
@@ -241,6 +243,19 @@ pub(super) fn holder_of(
                     .map_err(failed)?;
                 if let Some(id) = former {
                     return Ok(Some(format!("agent {id} was renamed from it in {}", place(install, version))));
+                }
+            }
+            if table_exists(&conn, "db_agent_former_names") {
+                let mut stmt = conn.prepare("SELECT agent_id, name FROM db_agent_former_names WHERE agent_id != ?1").map_err(failed)?;
+                let rows = stmt.query_map([uid], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))).map_err(failed)?;
+                for row in rows {
+                    let (id, name) = row.map_err(failed)?;
+                    if routes_to(&name, &t) {
+                        return Ok(Some(format!(
+                            "agent {id} was called {name:?} in {}, and messages to that name still reach it",
+                            place(install, version)
+                        )));
+                    }
                 }
             }
             if let Some(entry) = super::running::registration(&version.registrations(), &t) {

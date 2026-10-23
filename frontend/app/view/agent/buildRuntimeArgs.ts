@@ -11,7 +11,7 @@
 import type { AgentRuntimeConfig, PermissionMode } from "./types";
 import { DEFAULT_RUNTIME_CONFIG } from "./types";
 import { getProvider, isAccountListed } from "./providers";
-import { effectiveModel, effortApplies, modelTakesEffort } from "./runtime-capabilities";
+import { codexEffort, codexSandbox, effectiveModel, effortLevels, modelTakesEffort } from "./runtime-capabilities";
 import { selectLaunchArgs, withoutOverriddenFlags, withProviderFlags, type LaunchArgsProvider } from "./launch-args";
 
 /**
@@ -119,7 +119,8 @@ export function buildRuntimeArgs(
     // Codex takes no appended permission flag: its bypass
     // (--dangerously-bypass-approvals-and-sandbox) is baked into its base args,
     // `codex exec` has no --permission-mode, and its prompt positional `-` must
-    // stay last (anything appended after it is parsed as a stray arg).
+    // stay last (anything appended after it is parsed as a stray arg). Its
+    // other modes are sandbox config overrides, in its own branch below.
     // An ACP or MSP agent takes none either: permission is asked inside the
     // protocol (`session/request_permission`, `approval/request`), which srv's
     // controller answers, so a CLI flag would only be one it never declared.
@@ -167,7 +168,9 @@ export function buildRuntimeArgs(
     // it; older CLIs forwarded it and the API answered 400, see modelTakesEffort)
     // (effort is supported on Opus/Sonnet only). Skip it so a Haiku pane
     // doesn't error out on every turn. Matches a concrete Haiku id too.
-    if (effortApplies(providerId, effectiveModelId ?? config.model)) {
+    // Codex's effort is its own config override, below. Only a level Claude
+    // takes: a pane can hold one remembered from a Codex pick ("ultra").
+    if (supportsModel && effortLevels(providerId, effectiveModelId ?? config.model).includes(config.effort)) {
         args.push("--effort", config.effort);
     }
 
@@ -197,6 +200,20 @@ export function buildRuntimeArgs(
         const model = picked ?? (config.model === "" && !isAccountListed("codex") ? undefined : fallback);
         const promptPositional = args[args.length - 1] === "-" ? args.pop()! : null;
         if (model) args.push("--model", model);
+        // Effort and sandbox are config overrides: `codex exec resume`, which
+        // every turn after the first runs, takes `-c` but has no `--sandbox`.
+        // An effort the model doesn't take is left out, so the CLI uses the
+        // model's own default (codexEffort).
+        const effort = model ? codexEffort(model, config.effort) : { effort: undefined, passed: false };
+        if (effort.passed) args.push("-c", `model_reasoning_effort=${effort.effort}`);
+        const sandbox = codexSandbox(config.permissionMode);
+        if (sandbox) {
+            // Full access is the base args' bypass flag; a sandbox replaces it.
+            // Nobody can answer an approval in `exec`, so none is asked.
+            const bypass = args.indexOf("--dangerously-bypass-approvals-and-sandbox");
+            if (bypass >= 0) args.splice(bypass, 1);
+            args.push("-c", `sandbox_mode=${sandbox}`, "-c", "approval_policy=never");
+        }
         if (promptPositional !== null) args.push(promptPositional);
     }
 

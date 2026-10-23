@@ -79,7 +79,6 @@ use tokio_tungstenite::{
     connect_async_tls_with_config, tungstenite::Message, MaybeTlsStream, WebSocketStream,
 };
 
-use crate::backend::reactive::handler::get_global_handler;
 use crate::backend::reactive::types::InjectionRequest;
 use crate::messaging::{BridgeHealth, BridgeStatus, OutboundMsg};
 
@@ -509,7 +508,6 @@ fn route_event(
     let text = event.text.as_deref().unwrap_or("");
     let envelope = format!("[Slack #{channel_id} @{user}]: {text}");
 
-    let handler = get_global_handler();
     let req = InjectionRequest {
         target_agent: target.clone(),
         message: envelope,
@@ -521,7 +519,7 @@ fn route_event(
         forward_hops: 0,
         ..Default::default()
     };
-    let result = handler.inject_message(req);
+    let result = crate::server::jekt_entry::inject_from_bridge(req, text);
     if result.success {
         tracing::debug!("slack_bridge: injected msg from {user} to agent {target}");
     } else {

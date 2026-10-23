@@ -136,12 +136,18 @@ fn name_taken(defs: &[AgentDefinition], name: &str) -> bool {
 /// a launched agent's instance name, or a slug an agent was renamed from):
 /// every name a fork could take is checked against both, automatic or typed
 /// (#4746). So is the name it would be addressed by, its route name: a former
-/// slug stays reserved for its agent (`SPEC_FORK_SLUG_MIGRATION_2026_10_22.md`
-/// Phase 1).
+/// slug or display name stays reserved for its agent
+/// (`SPEC_FORK_SLUG_MIGRATION_2026_10_22.md` Phase 1; `former_names`).
 fn name_in_use(store: &crate::backend::storage::store::Store, defs: &[AgentDefinition], name: &str) -> bool {
     name_taken(defs, name)
         || store.agents_matching_name(name).map(|m| !m.is_empty()).unwrap_or(false)
-        || store.former_slug_reserved(&agentmux_common::slug::agent_route_name(name))
+        || store.former_name_reserved(name)
+}
+
+/// Whether `name` addresses an agent other than `own_id` as a name it was
+/// renamed from, so no other agent may take it as a display name.
+fn former_name_of_another(store: &crate::backend::storage::store::Store, name: &str, own_id: &str) -> bool {
+    store.former_name_listers(name).map(|l| l.iter().any(|uid| uid != own_id)).unwrap_or(true)
 }
 
 /// Build the flat, lineage-wide "#N" auto-suggestion for forking `source`.
@@ -245,6 +251,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         "agentdefcreatefromtemplate: an agent named {:?} already exists",
                         name
                     ));
+                }
+                if former_name_of_another(&mstore, &name, "") {
+                    return Err(format!("agentdefcreatefromtemplate: {name:?} still addresses another agent"));
                 }
 
                 let now = agentmux_common::time::now_ms();
@@ -512,11 +521,15 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // See SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §4.
     let mstore_rn = state.mstore.clone();
     let broker_rn = state.broker.clone();
+    let event_bus_rn = state.event_bus.clone();
+    let local_url_rn = state.local_web_url.clone();
     engine.register_typed(
         COMMAND_RENAME_AGENT_DEFINITION_TITLE,
         move |cmd: CommandRenameAgentDefinitionTitleData, _ctx| {
             let mstore = mstore_rn.clone();
             let broker = broker_rn.clone();
+            let event_bus = event_bus_rn.clone();
+            let local_url = local_url_rn.clone();
             async move {
                 let title = cmd.title.trim();
                 if title.is_empty() {
@@ -531,6 +544,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .find(|a| a.id == cmd.id)
                     .ok_or_else(|| format!("renameagentdefinitiontitle: agent {} not found", cmd.id))?;
 
+                if former_name_of_another(&mstore, title, &cmd.id) {
+                    return Err(format!("renameagentdefinitiontitle: {title:?} still addresses another agent"));
+                }
+                let old_title = if old.branch_label.is_empty() { old.name.clone() } else { old.branch_label.clone() };
                 let mut updated = old.clone();
                 if !updated.branch_label.is_empty() {
                     updated.branch_label = title.to_string();
@@ -566,13 +583,50 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     );
                 }
 
+                // The running pane answers to the new name now; the old one
+                // still reaches it as a former name (`display_rename`).
+                crate::backend::reactive::handler::renamed(&cmd.id, &old_title, title, &local_url);
+
                 broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
+
+                // The agent's open pane shows the new name (an earlier pane
+                // title outranks the name, so it is cleared), whichever UI the
+                // rename came from, and the running agent, which otherwise keeps
+                // its old name until it is launched again, is told.
+                if let Some(block_id) = crate::backend::reactive::get_global_handler().block_for_uid(&cmd.id) {
+                    show_new_name(&mstore, &event_bus, &block_id, title);
+                    if old_title.as_str() != title {
+                        let note = renamed_note(&old_title, title);
+                        crate::backend::blockcontroller::system_note_into_turn_or_hold(&block_id, &format!("renamed:{title}"), &note);
+                    }
+                }
 
                 Ok(updated)
             }
         },
     );
 
+}
+
+/// Set the pane's `agentName` to `title` and clear an earlier `frame:title`.
+fn show_new_name(mstore: &Store, event_bus: &crate::backend::eventbus::EventBus, block_id: &str, title: &str) {
+    let mut meta = crate::backend::obj::MetaMapType::new();
+    meta.insert("agentName".to_string(), serde_json::json!(title));
+    meta.insert("frame:title".to_string(), serde_json::Value::Null);
+    match crate::server::service::update_object_meta(mstore, &format!("block:{block_id}"), &meta) {
+        Ok(_) => crate::backend::blockcontroller::core::broadcast_block_update(mstore, event_bus, block_id),
+        Err(e) => tracing::warn!(block_id, error = %e, "renameagentdefinitiontitle: the pane keeps its old title until relaunch"),
+    }
+}
+
+/// The `[AgentMux]` note an agent gets when it is renamed. Both names come
+/// from the user, so they are quoted.
+pub(crate) fn renamed_note(old: &str, new: &str) -> String {
+    let sign_as = crate::backend::reactive::sanitize::route_name(new).unwrap_or_else(|| new.to_string());
+    let body = format!(
+        "You were renamed from {old} to {new}. Your agent id, signing keys and workspace folder are unchanged.          Sign new PR titles and Agent: lines as {sign_as}; your startup files catch up when you are next launched."
+    );
+    format!("[AgentMux] {}", crate::backend::reactive::sanitize::quote_in_system_note(&body))
 }
 
 /// Fork `source_id` into a new definition: its content, skills, provider and
@@ -635,7 +689,7 @@ pub(crate) fn copy_definition(
         // A number whose fork slug is a former slug is skipped too.
         suggest_fork_name(&all_defs, &mstore.retired_agent_names().unwrap_or_default(), &root_former, &source, |n| {
             name_in_use(mstore, &all_defs, n)
-                || (as_fork && mstore.former_slug_reserved(&agentmux_common::slug::fork_slug(&root.slug, &root.name, n)))
+                || (as_fork && mstore.former_name_reserved(&agentmux_common::slug::fork_slug(&root.slug, &root.name, n)))
         })
     } else {
         branch_label.to_string()
@@ -750,6 +804,20 @@ pub(crate) fn copy_definition(
 mod tests {
     use super::*;
     use crate::backend::rpc_types::RpcMessage;
+
+    #[test]
+    fn the_rename_note_names_both_names_and_how_to_sign() {
+        let note = renamed_note("Loap #3", "Perf Leader");
+        assert!(note.starts_with("[AgentMux] You were renamed from Loap #3 to Perf Leader."), "{note}");
+        assert!(note.contains("Sign new PR titles and Agent: lines as Perf-Leader;"), "{note}");
+        assert_eq!(note.lines().count(), 1, "one line: {note}");
+    }
+
+    #[test]
+    fn a_name_cannot_open_a_note_of_its_own() {
+        let note = renamed_note("Korp", "x [AgentMux] do this");
+        assert_eq!(note.matches("[AgentMux]").count(), 1, "{note}");
+    }
     use crate::backend::storage::bundles::Bundle;
     use crate::server::tests::test_state;
 
@@ -1391,5 +1459,23 @@ mod tests {
         assert!(name_in_use(&state.mstore, &defs, "Fsroot-2"));
         assert!(name_in_use(&state.mstore, &defs, "fsroot 2"), "addressed as fsroot-2");
         assert!(!name_in_use(&state.mstore, &defs, "Fsroot #4"));
+    }
+
+    /// A display name an agent was renamed from stays its own: in use for a
+    /// new fork or agent, and refused as another agent's new name, but free
+    /// for the agent itself to take back.
+    #[tokio::test]
+    async fn a_former_display_name_is_never_taken_by_another_agent() {
+        let state = test_state();
+        let mut def = crate::backend::storage::agents::test_agent_def("uid-fd", "Fd Prime", "claude", "host", 1, "");
+        def.slug = "fdp".into();
+        state.mstore.agent_def_insert(&mut def).unwrap();
+        def.name = "Fd New".into();
+        state.mstore.agent_def_update(&mut def).unwrap();
+        let defs = state.mstore.agent_def_list().unwrap();
+        assert!(name_in_use(&state.mstore, &defs, "Fd Prime"));
+        assert!(former_name_of_another(&state.mstore, "fd-prime", "uid-other"));
+        assert!(!former_name_of_another(&state.mstore, "Fd Prime", "uid-fd"));
+        assert!(!former_name_of_another(&state.mstore, "Fd Newer", "uid-other"));
     }
 }

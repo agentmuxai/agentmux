@@ -309,6 +309,19 @@ is `VACUUM INTO` a temporary file, renamed into place:
 - srv first prints `AGENTMUXSRV-MIGRATING`, so the launcher allows 30 minutes
   instead of 30 s for a large `filestore.db`.
 
+**Shadowed until 2026-10-22** on installs that still have the old unversioned
+`channels/<ch>/data/db/`. The launcher copied that folder into every new
+version's `data/db/` before srv started (`migrate_legacy_data_dir`, meant as
+a one-time move to per-version data), so srv found an `objects.db` in place
+and copied nothing. Each upgrade started from that months-old data, without
+the layout the quit had saved
+(`docs/incident/RCA_UPGRADE_LOSES_LAYOUT_2026_10_22.md`). Now srv alone seeds
+a version's databases:
+- it copies that old folder only while no version in the channel has data;
+- each copy records its source in `data/db/carried-from`;
+- the first start after an upgrade logs `upgrade continuity:` at ERROR when
+  its data isn't the previous version's.
+
 **Browser profiles too** (added 2026-10-18, after the operator's own upgrade
 signed every browser pane out: 17 cookies for 4 sites in 0.59.31's jar, an
 empty one in 0.59.32). CEF's cache folder is per version as well

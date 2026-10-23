@@ -81,6 +81,25 @@ fn another_agents_former_slug_holds_a_target() {
     assert!(by_name(&plan.candidates, "Naki #2").refused.as_deref().is_some_and(|r| r.contains("renamed from it")));
 }
 
+/// A display name another agent was renamed from still reaches it by its
+/// route, so it holds a target as a former slug does; the candidate's own
+/// former display names don't.
+#[test]
+fn another_agents_former_display_name_holds_a_target() {
+    let fx = Fx::empty();
+    let data = fx.version("stable", "0.59.1");
+    fx.chains(&data, true);
+    fx.agent(&data, "uid-old", "Old", "old", "", "", true);
+    let db = data.join("db/objects.db");
+    fx.exec(&db, &format!("INSERT INTO db_agent_former_names (agent_id, name, recorded_at) VALUES ('{LOAP3}', 'Loap #3', 1)"));
+    let plan = super::super::plan(&fx.home, false).unwrap();
+    assert!(by_name(&plan.candidates, "Loap #3").refused.is_none(), "its own former name is free");
+    fx.exec(&db, "INSERT INTO db_agent_former_names (agent_id, name, recorded_at) VALUES ('uid-old', 'Naki #2', 1)");
+    let plan = super::super::plan(&fx.home, false).unwrap();
+    let naki2 = by_name(&plan.candidates, "Naki #2");
+    assert!(naki2.refused.as_deref().is_some_and(|r| r.contains("uid-old") && r.contains("Naki #2")), "{:?}", naki2.refused);
+}
+
 /// A target held only by the agent itself, its own display binding (a
 /// live registration of its own pane under `loap-3`), is free.
 #[test]
