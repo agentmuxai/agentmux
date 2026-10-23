@@ -35,6 +35,7 @@
     // "window:nativetitlebar":    false,
     // "window:confirmclose":      false,
     // "tab:confirmclose":         false,
+    // "window:confirmcloseworking": true,
     // "mouse:sidebuttons":        true,
     // "window:savelastwindow":    true,
     // "window:keepinactivetabslaidout": true,

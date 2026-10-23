@@ -12,13 +12,14 @@ use super::reducer_helpers::{dispatch_to_reducer, publish_events};
 
 // Phase E.5.8 — CloseWindow migrated through the reducer.
 // Sequence:
-//   1. Look up the window's workspace (for cascade decision).
+//   1. Look up the window's workspace, and where the window is.
 //   2. Dispatch Command::CloseWindowInternal — emits
 //      SrvWindowClosed; subscriber prunes Client.windowids.
-//   3. If no other window points at the same workspace, dispatch
-//      Command::DeleteWorkspace which cascades through tabs+blocks.
-// Each window owns one workspace today; the conditional delete keeps
-// a future multi-window-on-same-workspace flow from dropping user state.
+//   3. If no other window points at the same workspace, keep it
+//      (`session_closed::keep_workspace`: its agents stop, its tabs and
+//      panes stay for the next launch and "Reopen closed window"), or
+//      delete it when the window asked for Close workspace.
+// Closing is not deleting: SPEC_OFFLINE_RESILIENCE_2026_10_20.md G8.
 pub(crate) async fn handle_close_window(state: &AppState, call: &WebCallType) -> WebReturnType {
     let store = &state.mstore;
     let args = &call.args;
@@ -28,16 +29,18 @@ pub(crate) async fn handle_close_window(state: &AppState, call: &WebCallType) ->
     };
     // Look up the window's workspace before we close it.
     // Read SQLite (source of truth during migration).
-    // And its name, which the last close's session record keeps: the row is
-    // gone by then.
-    let (ws_id, window_name, window_appearance): (Option<String>, Option<String>, serde_json::Map<String, serde_json::Value>) =
-        match store.get::<Window>(&window_id) {
+    // And its name, appearance and placement, which the session record and
+    // the closed-window list keep: the row is gone by then.
+    let (ws_id, closing): (Option<String>, ClosingWindow) = match store.get::<Window>(&window_id) {
         Ok(Some(w)) => (
             Some(w.workspaceid.clone()),
-            super::session_windows::saved_name(store, &w),
-            super::session_windows::saved_appearance(store, &w),
+            ClosingWindow {
+                name: super::session_windows::saved_name(store, &w),
+                appearance: super::session_windows::saved_appearance(store, &w),
+                placement: super::session_closed::placement_of(store, &w),
+            },
         ),
-        Ok(None) => (None, None, Default::default()),
+        Ok(None) => (None, ClosingWindow::default()),
         Err(e) => {
             return WebReturnType::error(format!(
                 "CloseWindow: window lookup failed: {}",
@@ -111,43 +114,7 @@ pub(crate) async fn handle_close_window(state: &AppState, call: &WebCallType) ->
                 .map(|ws| ws.iter().any(|w| w.workspaceid == ws_id))
                 .unwrap_or(true);
             if !any_other_window {
-                // Restore-on-relaunch (SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13
-                // Feature 1) — is THIS close the one that empties
-                // `Client.windowids`, i.e. a genuine "the user is fully
-                // quitting" moment? Deliberately NOT the same question as
-                // `!any_other_window` above (that's workspace-sharing,
-                // answered independently per window, true for basically
-                // every close in the common 1:1 window:workspace case) —
-                // reviewer-caught bug (reagentx P1 on PR #2560): gating on
-                // workspace-destruction alone still let closing a small
-                // independent tear-off window (its own small 1:1 workspace,
-                // so `!any_other_window` is true for it too) AFTER the real
-                // main window overwrite the just-saved full-session
-                // snapshot with the tear-off's tiny one. Gating on
-                // "windowids is about to be empty" instead ties the
-                // snapshot to the same trigger `restore_last_session` itself
-                // waits for on the read side.
-                //
-                // Read FRESH here, not once up front at function entry
-                // (reagentx P1 on PR #2560, re-review): `apply_srv_window_closed`
-                // above already pruned this window's id, so this reflects
-                // the post-prune state. A stale pre-dispatch read let
-                // concurrent CloseWindow calls during a multi-window quit
-                // each independently see "the other window is still there"
-                // and conclude `will_empty_windowids = false` for BOTH,
-                // losing the snapshot entirely even though the user
-                // genuinely closed everything.
-                let will_empty_windowids = store
-                    .get_all::<Client>()
-                    .ok()
-                    .and_then(|cs| cs.into_iter().next())
-                    .map(|c| c.windowids.is_empty())
-                    .unwrap_or(false);
-                // Best-effort: a failure here must never block the close itself.
-                if will_empty_windowids {
-                    super::session_windows::save_on_last_close(store, &ws_id, window_name.as_deref(), &window_appearance);
-                }
-                close_workspace(state, ws_id).await;
+                close_unshown_workspace(state, &window_id, ws_id, closing).await;
             }
         }
         return WebReturnType::success_empty();
@@ -161,47 +128,15 @@ pub(crate) async fn handle_close_window(state: &AppState, call: &WebCallType) ->
         }
     }
     publish_events(state, &close_events);
-    // Step 2: cascade delete the workspace if no other window
-    // points at it. The reducer keeps state.windows updated;
-    // check there.
-    //
-    // Step 5 PR 2 — route the user-initiated cascade through
-    // the `delete_workspace` saga instead of dispatching
-    // `Command::DeleteWorkspace` inline. The saga records
-    // lifecycle brackets in the durable saga log so a crash
-    // mid-cascade is recoverable via `recovery::compensate_unresolved`.
-    // The saga also takes a snapshot of the workspace's
-    // tabs+blocks before issuing the cascade, so the durable
-    // log captures what was deleted (provenance for
-    // `--diag sagas`).
+    // Step 2: the workspace, if no other window points at it. The
+    // reducer keeps state.windows updated; check there.
     if let Some(ws_id) = ws_id {
         let any_other_window = {
             let s = state.srv_state.lock().await;
             s.windows.values().any(|w| w.workspace_id == ws_id)
         };
         if !any_other_window {
-            // Restore-on-relaunch (SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13
-            // Feature 1) — see the divergence-path branch above for why this
-            // is gated on "windowids is now empty" rather than
-            // `!any_other_window` (a workspace-sharing question, not a
-            // full-quit one). Workspace tabs/blocks are still fully intact
-            // at this point — `CloseWindowInternal`'s already-applied events
-            // (line 182-189 above) only touched Window/Client, the actual
-            // tab/block cascade is the saga call right below this — so
-            // `Client.windowids` reflects this window's own prune already,
-            // and reading it fresh here (not a stale function-entry
-            // snapshot — reagentx P1 on PR #2560, re-review) is what makes
-            // this correct under a concurrent multi-window quit.
-            let will_empty_windowids = store
-                .get_all::<Client>()
-                .ok()
-                .and_then(|cs| cs.into_iter().next())
-                .map(|c| c.windowids.is_empty())
-                .unwrap_or(false);
-            if will_empty_windowids {
-                super::session_windows::save_on_last_close(store, &ws_id, window_name.as_deref(), &window_appearance);
-            }
-            close_workspace(state, ws_id).await;
+            close_unshown_workspace(state, &window_id, ws_id, closing).await;
         }
     }
     // Subscriber's apply_srv_window_closed already pruned
@@ -210,8 +145,51 @@ pub(crate) async fn handle_close_window(state: &AppState, call: &WebCallType) ->
     WebReturnType::success_empty()
 }
 
-/// Delete a closed window's workspace, every agent in it closed gracefully
-/// first (`agent_teardown`, `Policy::close()`).
+/// What a session record and the closed-window list keep of a closing
+/// window, read before its row is pruned.
+#[derive(Default)]
+struct ClosingWindow {
+    name: Option<String>,
+    appearance: serde_json::Map<String, serde_json::Value>,
+    placement: serde_json::Value,
+}
+
+/// `ws_id` lost its last window (`window_id`, now closed).
+///
+/// The close that empties `Client.windowids` is the end of the session: it
+/// first saves the session record (restore-on-relaunch,
+/// SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13 Feature 1), now naming
+/// the kept workspace, so the next launch reopens it and rebuilds it from the
+/// record only if it is gone. Asked after this close's own prune and read
+/// fresh: of two concurrent closes that end a session, one sees it empty. Not
+/// asked for workspace sharing, which is true of nearly every close.
+///
+/// The workspace is then kept (`session_closed::keep_workspace`), or deleted
+/// when the window asked for Close workspace, which saves no record of it.
+async fn close_unshown_workspace(state: &AppState, window_id: &str, ws_id: String, closing: ClosingWindow) {
+    let store = &state.mstore;
+    let discard = super::session_closed::take_discard(window_id);
+    let will_empty_windowids = store
+        .get_all::<Client>()
+        .ok()
+        .and_then(|cs| cs.into_iter().next())
+        .map(|c| c.windowids.is_empty())
+        .unwrap_or(false);
+    // Best-effort: a failure here must never block the close itself.
+    if will_empty_windowids && !discard {
+        super::session_windows::save_on_last_close(store, &ws_id, closing.name.as_deref(), &closing.appearance);
+    }
+    if discard {
+        tracing::info!(workspace_id = %ws_id, "CloseWindow: Close workspace — deleting the workspace");
+        close_workspace(state, ws_id).await;
+    } else {
+        super::session_closed::keep_workspace(state, ws_id, closing.placement).await;
+    }
+}
+
+/// Delete a workspace no window shows, every agent in it closed gracefully
+/// first (`agent_teardown`, `Policy::close()`): Close workspace, a closed
+/// window past the kept ones, or one with nothing to keep.
 ///
 /// Detached (`agent_teardown::detached`): the host waits only 2 s for
 /// `CloseWindow`, less than a graceful close takes, and when it hangs up
@@ -224,7 +202,7 @@ pub(crate) async fn handle_close_window(state: &AppState, call: &WebCallType) ->
 /// the saga's reducer dispatch error out, so its agents are closed here, the
 /// store cascades directly, and each block's close is finished as the saga
 /// would (`close_pane::finish_close`).
-async fn close_workspace(state: &AppState, ws_id: String) {
+pub(crate) async fn close_workspace(state: &AppState, ws_id: String) {
     let st = state.clone();
     let done = crate::sagas::agent_teardown::detached(async move {
         let reducer_knows_ws = st.srv_state.lock().await.workspaces.contains_key(&ws_id);
@@ -251,7 +229,7 @@ async fn close_workspace(state: &AppState, ws_id: String) {
 }
 
 /// Every block in a workspace's tabs (regular and pinned), read from the store.
-fn store_block_ids(store: &crate::backend::storage::store::Store, ws_id: &str) -> Vec<String> {
+pub(crate) fn store_block_ids(store: &crate::backend::storage::store::Store, ws_id: &str) -> Vec<String> {
     let Ok(Some(ws)) = store.get::<Workspace>(ws_id) else { return Vec::new() };
     ws.tabids
         .iter()

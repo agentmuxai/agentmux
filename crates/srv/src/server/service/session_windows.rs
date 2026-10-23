@@ -167,19 +167,10 @@ pub(crate) fn snapshot_session(store: &Store, for_quit: bool) -> Option<Value> {
         .into_iter()
         .filter_map(|(w, ws)| {
             let mut entry = super::session_restore::snapshot_workspace(store, &ws)?;
-            entry["window"] = json!({
-                "x": w.pos.x,
-                "y": w.pos.y,
-                "width": w.winsize.width,
-                "height": w.winsize.height,
-            });
-            if let Some(name) = saved_name(store, &w) {
-                entry["window"]["name"] = json!(name);
-            }
-            let appearance = saved_appearance(store, &w);
-            if !appearance.is_empty() {
-                entry["window"]["meta"] = Value::Object(appearance);
-            }
+            entry["window"] = super::session_closed::placement_of(store, &w);
+            // The close keeps the workspace itself (`session_closed`): the
+            // restore reopens it, and rebuilds it from this entry only if it is gone.
+            entry["workspaceid"] = json!(ws);
             Some(entry)
         })
         .collect();
@@ -216,8 +207,8 @@ fn is_recent_quit_record(record: &Value, now_ms: i64) -> bool {
             .is_some_and(|at| (0..QUIT_RECORD_KEPT_FOR_MS).contains(&(now_ms - at)))
 }
 
-/// The close that empties `Client.windowids`, before `ws_id` is deleted:
-/// saves that workspace as the session, with the closing window's `name` and
+/// The close that empties `Client.windowids`, before `ws_id` is kept or
+/// deleted: saves that workspace as the session, with the closing window's `name` and
 /// `appearance` (read before its row was pruned), unless this close is one of
 /// a quit's that already saved every window.
 pub(crate) fn save_on_last_close(
@@ -245,6 +236,8 @@ pub(crate) fn save_on_last_close(
         }
         // When it was closed, for another build offering it (`session_other_builds`).
         snapshot["saved_at_ms"] = json!(agentmux_common::time::now_ms());
+        // The close keeps the workspace: the restore reopens it as it was.
+        snapshot["workspaceid"] = json!(ws_id);
         super::session_restore::save_last_session_snapshot(store, snapshot);
     }
 }
@@ -255,17 +248,28 @@ pub(crate) fn save_on_last_close(
 /// closes windows concurrently and srv can exit first; seen in a simulated
 /// upgrade, where the second window's row survived and the main window then
 /// took it instead of restoring the session. The record holds that window, so
-/// forget its row and its workspace (with its tabs and panes): the first
-/// window then restores every window as designed. Only the windows the quit
-/// saved (its `window_ids`) are forgotten: a record left from an older quit
-/// never costs a later run its windows. Returns how many it forgot.
+/// forget its row: the first window then restores every window as designed.
+/// Its workspace stays when the record names it (the restore reopens it), and
+/// goes with its tabs and panes when it doesn't (a record an older build
+/// wrote, which rebuilds it instead). Only the windows the quit saved (its
+/// `window_ids`) are forgotten: a record left from an older quit never costs a
+/// later run its windows. Returns how many it forgot.
 pub(crate) fn forget_windows_left_by_quit(store: &Store) -> usize {
-    let saved: std::collections::HashSet<String> = super::session_restore::load_last_session_snapshot(store)
-        .filter(|r| r.get("saved_for").and_then(|v| v.as_str()) == Some("quit"))
+    let record = super::session_restore::load_last_session_snapshot(store)
+        .filter(|r| r.get("saved_for").and_then(|v| v.as_str()) == Some("quit"));
+    let saved: std::collections::HashSet<String> = record
+        .as_ref()
         .and_then(|r| r.get("window_ids").and_then(|v| v.as_array()).cloned())
         .unwrap_or_default()
         .into_iter()
         .filter_map(|v| v.as_str().map(str::to_string))
+        .collect();
+    let named: std::collections::HashSet<String> = record
+        .as_ref()
+        .map(windows_of)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|w| w.get("workspaceid").and_then(|v| v.as_str()).map(str::to_string))
         .collect();
     let Some(mut client) = store.get_all::<Client>().ok().and_then(|cs| cs.into_iter().next()) else {
         return 0;
@@ -277,7 +281,7 @@ pub(crate) fn forget_windows_left_by_quit(store: &Store) -> usize {
     client.windowids = kept;
     for id in &left {
         if let Some(w) = store.get::<Window>(id).ok().flatten() {
-            if store.get::<Workspace>(&w.workspaceid).ok().flatten().is_some() {
+            if !named.contains(&w.workspaceid) && store.get::<Workspace>(&w.workspaceid).ok().flatten().is_some() {
                 let _ = crate::backend::wcore::delete_workspace(store, &w.workspaceid);
             }
             let _ = store.delete::<Window>(id);
@@ -325,8 +329,18 @@ pub(crate) async fn restore_all(state: &AppState, record: &Value) -> Result<Opti
     let mut waiting_meta = serde_json::Map::new();
     let mut first_err = None;
     let mut restored_count = 0usize;
+    let mut reopened = 0usize;
+    let mut taken = std::collections::HashSet::new();
     for (i, window) in windows_of(record).iter().enumerate() {
-        let restored = super::session_restore::restore_workspace(state, window).await;
+        let restored = match reusable_workspace(state, window, &taken).await {
+            Some(ws_id) => {
+                reopened += 1;
+                taken.insert(ws_id.clone());
+                super::session_closed::forget(&state.mstore, &ws_id);
+                Ok(Some((ws_id, Vec::new())))
+            }
+            None => super::session_restore::restore_workspace(state, window).await,
+        };
         if let Ok(Some((ws_id, _))) = &restored {
             let patch = window.get("window").map(patch_of).unwrap_or_default();
             if !patch.is_empty() {
@@ -357,7 +371,14 @@ pub(crate) async fn restore_all(state: &AppState, record: &Value) -> Result<Opti
     // unless this says the layout came back from the record.
     if restored_count > 0 {
         let from = if record.get("saved_for").and_then(|v| v.as_str()) == Some("quit") { "quit" } else { "last-close" };
-        tracing::info!(windows = restored_count, "session_restore: restored {} window(s) from the {} record", restored_count, from);
+        tracing::info!(
+            windows = restored_count,
+            reopened,
+            "session_restore: restored {} window(s) from the {} record ({} kept as they were, the rest rebuilt)",
+            restored_count,
+            from,
+            reopened
+        );
     }
     set_client_meta(&state.mstore, WAITING_META_KEY, (!waiting.is_empty()).then(|| Value::Array(waiting)));
     set_client_meta(&state.mstore, NAMES_META_KEY, (!waiting_meta.is_empty()).then(|| Value::Object(waiting_meta)));
@@ -366,6 +387,29 @@ pub(crate) async fn restore_all(state: &AppState, record: &Value) -> Result<Opti
         (None, Some(e)) => Err(e),
         (None, None) => Ok(None),
     }
+}
+
+/// The workspace a record entry names, when it is still there to reopen as it
+/// was: the reducer and the store have it, it holds a pane, no window shows
+/// it, and no earlier entry of this restore took it. `None` means rebuild the
+/// entry from the record.
+async fn reusable_workspace(
+    state: &AppState,
+    window: &Value,
+    taken: &std::collections::HashSet<String>,
+) -> Option<String> {
+    let ws_id = window.get("workspaceid").and_then(|v| v.as_str()).filter(|s| !s.is_empty())?;
+    if taken.contains(ws_id) || !state.srv_state.lock().await.workspaces.contains_key(ws_id) {
+        return None;
+    }
+    // A close still stopping its agents (srv kept running with no window) finishes first.
+    drop(crate::sagas::close_pane::workspace_close_lock(ws_id).await);
+    let store = &state.mstore;
+    super::session_restore::snapshot_workspace(store, ws_id)?;
+    if super::session_closed::open_workspaces(store).contains(ws_id) {
+        return None;
+    }
+    Some(ws_id.to_string())
 }
 
 /// Add restored workspaces for the main window to open beside it

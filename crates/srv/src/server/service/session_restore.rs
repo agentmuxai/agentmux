@@ -1401,6 +1401,8 @@ mod tests {
         );
         let mut top = snapshot;
         top.as_object_mut().unwrap().remove("windows");
+        // It names the workspace, which the close keeps for the restore.
+        assert_eq!(top.as_object_mut().unwrap().remove("workspaceid"), Some(json!(ws_id)));
         assert_eq!(
             top, expected,
             "must resolve to and capture the real workspace, not silently skip it"
@@ -1466,6 +1468,8 @@ mod tests {
         );
         let mut top = snapshot;
         top.as_object_mut().unwrap().remove("windows");
+        // It names the workspace, which the close keeps for the restore.
+        assert_eq!(top.as_object_mut().unwrap().remove("workspaceid"), Some(json!(live_ws_id)));
         assert_eq!(
             top, expected,
             "must resolve to and capture the live workspace, not the dead one it's paired with"

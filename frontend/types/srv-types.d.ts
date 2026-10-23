@@ -1079,6 +1079,7 @@ declare global {
         "window:magnifiedblockblurprimarypx"?: number;
         "window:magnifiedblockblursecondarypx"?: number;
         "window:confirmclose"?: boolean;
+        "window:confirmcloseworking"?: boolean;
         "window:savelastwindow"?: boolean;
         "window:keepinactivetabslaidout"?: boolean;
         "window:dimensions"?: string;
