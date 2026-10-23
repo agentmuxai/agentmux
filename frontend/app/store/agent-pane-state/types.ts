@@ -742,11 +742,12 @@ export type AgentPaneCommand =
      */
     | { type: "ContextWindowsReported"; windows: ReportedContextWindows }
     /**
-     * An agent reported how full its context is (view/agent/acp-context.ts):
-     * the meter's reading, on `model` (else the last one seen). Unlike
-     * `TokensIn` it starts no call, so the turn's counters are untouched.
+     * An agent reported how full its context is (view/agent/context-reader.ts):
+     * the meter's reading, on `model` (else the last one seen), with the
+     * window it was measured against when it said. Unlike `TokensIn` it starts
+     * no call, so the turn's counters are untouched.
      */
-    | { type: "ContextReported"; tokens: number; model?: string }
+    | { type: "ContextReported"; tokens: number; model?: string; window?: number }
     /**
      * The conversation the reading measured is gone — a `fresh` session
      * replaced it, or the transcript was archived or restored. Clears
