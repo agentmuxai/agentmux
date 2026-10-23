@@ -40,8 +40,10 @@ pub struct AgentNameMatch {
 /// A slug the shared definitions hold is taken too (`shared`, read before the
 /// lock): every other agent's current slug, which may not have reached this
 /// channel's row yet, and every former slug, which is never handed out again
-/// (`SPEC_FORK_SLUG_MIGRATION_2026_10_22.md` §4). `own_id` is the row being
-/// inserted, whose own shared record (a cross-channel backfill) doesn't count.
+/// (`SPEC_FORK_SLUG_MIGRATION_2026_10_22.md` §4). So is a display name another
+/// agent was renamed from, by its route (`former_names`): it still addresses
+/// that agent. `own_id` is the row being inserted, whose own shared record (a
+/// cross-channel backfill) doesn't count.
 pub(super) fn resolve_slug_collision(
     conn: &rusqlite::Connection,
     base: &str,
@@ -62,7 +64,10 @@ pub(super) fn resolve_slug_collision(
             |row| row.get(0),
         )?;
         let held = |s: &String| s.eq_ignore_ascii_case(&candidate);
-        if count == 0 && !shared.others(own_id).any(|names| held(&names.slug) || names.former.iter().any(held)) {
+        if count == 0
+            && !shared.others(own_id).any(|names| held(&names.slug) || names.former.iter().any(held))
+            && !former_display_name_of_another(conn, &candidate.to_lowercase(), own_id)?
+        {
             return Ok(candidate);
         }
         // Trimmed so the suffixed slug stays a valid agent id (at most 64
@@ -442,8 +447,8 @@ impl Store {
     /// The definitions a message's target names: the one whose slug it is,
     /// else every one whose display name routes to it (`agent_route_name`: a
     /// fork "Loap #3" is `Loap-3`, and a root `Claude` may hold the slug
-    /// `claude-2`) (#4744), else the one it was renamed from
-    /// (`former_slug_owner`). Folded like the key tables.
+    /// `claude-2`) (#4744), else the one it was renamed from, by a former
+    /// slug or display name (`former_name_owner`). Folded like the key tables.
     pub fn agent_defs_for_target(&self, target: &str) -> Result<Vec<AgentDefinition>, StoreError> {
         let fold = |s: &str| s.trim().to_lowercase();
         let target = fold(target);
@@ -456,7 +461,7 @@ impl Store {
         if !by_route.is_empty() {
             return Ok(by_route);
         }
-        let Some(owner) = self.former_slug_owner(&target)? else {
+        let Some(owner) = self.former_name_owner(&target)? else {
             return Ok(Vec::new());
         };
         Ok(defs.into_iter().filter(|d| d.id == owner.uid).collect())

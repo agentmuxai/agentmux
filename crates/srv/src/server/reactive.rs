@@ -358,7 +358,7 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
         // elsewhere).
         crate::backend::lan_discovery::LanPubkeyLookup::NotFound => return,
         crate::backend::lan_discovery::LanPubkeyLookup::Renamed(current) => {
-            tracing::warn!(agent_id = %claimed, current = %current, "LAN jekt signed as a slug its agent was renamed from, which never signs: counted as failed");
+            tracing::warn!(agent_id = %claimed, current = %current, "LAN jekt signed as a name its agent was renamed from, which never signs: counted as failed");
             req.lan_verified = Some(false);
             return;
         }

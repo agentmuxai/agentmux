@@ -5,8 +5,8 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use super::{
-    delivery_name, in_grace, is_held, live_agents, orphaned_subscriptions, seed, subscribe_missing, LiveAgent,
-    NameDirectory, FORMER_SLUG_GRACE,
+    delivery_name, directory_from, in_grace, is_held, live_agents, orphaned_subscriptions, seed, subscribe_missing,
+    wanted, LiveAgent, NameDirectory, FORMER_SLUG_GRACE,
 };
 use crate::backend::reactive::handler::{LookupOutcome, ReactiveHandler};
 use crate::muxbus::cloud_subscriber::{CloudSubscriber, CtrlMsg};
@@ -180,4 +180,31 @@ fn a_former_slug_is_held_for_its_grace_period_then_dropped() {
     assert_eq!(orphaned_subscriptions(&sub.subscribed_agents(), &live, &after), ["loap-loap-2-loap-3"]);
     assert!(sub.drop_if_orphaned("loap-loap-2-loap-3", |a| h.has_live_name(a) || is_held(a, &live, &after)));
     assert_eq!(sub.subscribed_agents(), ["loap-3"]);
+}
+
+/// A display name an agent was renamed from is held like a former slug: its
+/// route is subscribed, receive-only, for the grace period after the rename,
+/// and a message pulled for it goes to the agent's pane under a name it holds
+/// now. Afterwards the directory leaves it out.
+#[test]
+fn a_former_display_name_is_held_for_its_grace_period() {
+    let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+    let mut def = crate::backend::storage::agents::test_agent_def(LOAP_UID, "Zed Prime", "claude", "host", 1, "");
+    def.slug = "zed".into();
+    store.agent_def_insert(&mut def).unwrap();
+    def.name = "Zork".into();
+    store.agent_def_update(&mut def).unwrap();
+    let h = ReactiveHandler::new();
+    h.register_agent_full("Zork", "blk-zed", None, 0, Some("zed"), Some(LOAP_UID), COUNTER).unwrap();
+    let live = live_agents(&h);
+
+    let now = agentmux_common::time::now_ms();
+    let within = directory_from(&store, now).unwrap();
+    assert!(wanted(&live, &within).contains(&"zed-prime".to_string()));
+    assert!(is_held("zed-prime", &live, &within));
+    assert!(["zork", "zed"].contains(&delivery_name("zed-prime", &live, &within).as_str()));
+
+    let after = directory_from(&store, now + FORMER_SLUG_GRACE.as_millis() as i64 + 1).unwrap();
+    assert!(!wanted(&live, &after).contains(&"zed-prime".to_string()));
+    assert!(!is_held("zed-prime", &live, &after));
 }
