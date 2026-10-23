@@ -28,6 +28,24 @@ export function workspaceHeading(name: string, windows: number): string {
     return `${name} — ${windows} window${windows !== 1 ? "s" : ""}`;
 }
 
+const pad = (n: number): string => String(n).padStart(2, "0");
+
+/** When a closed window closed, for its row in the status bar panel:
+ *  "closed 14:02" today, "closed yesterday 22:10", "closed Oct 17" before. */
+export function closedAtLabel(atMs: number, now: Date = new Date()): string {
+    if (!atMs) return "closed";
+    const at = new Date(atMs);
+    const time = `${pad(at.getHours())}:${pad(at.getMinutes())}`;
+    const startOfDay = (d: Date): number => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const days = Math.round((startOfDay(now) - startOfDay(at)) / 86_400_000);
+    if (days <= 0) return `closed ${time}`;
+    if (days === 1) return `closed yesterday ${time}`;
+    return `closed ${at.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+}
+
+/** The title of the only open window's disabled delete. */
+export const LAST_WINDOW_TITLE = "The last window; use New Workspace to start over";
+
 /** Rename the open workspace. A blank name is no change. */
 export async function renameWorkspace(name: string): Promise<void> {
     const trimmed = name.trim().slice(0, WORKSPACE_NAME_MAX_LEN);

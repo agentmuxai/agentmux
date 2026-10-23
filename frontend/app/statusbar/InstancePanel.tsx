@@ -10,8 +10,12 @@
  *
  * Spec: SPEC_VERSION_INSTANCE_PANEL_2026_04_25.md
  *
- * The window list is headed by the open workspace's name (a named set of
- * windows, SPEC_WORKSPACES_2026_10_23.md §5), renamed by double-click or F2.
+ * The window list is the open workspace's (a named set of windows,
+ * SPEC_WORKSPACES_2026_10_23.md §5): headed by its name, renamed by
+ * double-click or F2; its open windows, then its closed ones greyed. Each row
+ * has one action: an open window's removes it from the workspace (disabled
+ * for the only one), a closed window's reopens it; right-click a closed one
+ * to remove it.
  *
  * V1 scope: about-info + windows + actions. LAN peers stay in
  * HostPopover (they already have a richer hover-rich detail view).
@@ -26,12 +30,14 @@ import { launcherEventsActive } from "@/util/launcher-events";
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { formatUtcTimestamp } from "@/util/format-time";
-import { ObjectService } from "@/store/services";
+import { ObjectService, WindowService, type ClosedWindow } from "@/store/services";
+import { ContextMenuModel } from "@/app/store/contextmenu";
+import { removeClosedWindow, reopenClosedWindow, requestRemoveWindow } from "@/app/window/window-close";
 import { getObjectValue, makeORef } from "@/store/mos";
 import { liveWindowOpacity, setWindowOpacityFor } from "@/app/store/window-opacity-store";
 import { opacityFor, openNewWindowFromHere } from "@/app/store/window-appearance";
 import { settingsAtom } from "@/app/store/config-signals";
-import { createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js";
 import {
     DISPLAY_NAME_MAX_LEN,
     DISPLAY_NAME_META_KEY,
@@ -39,7 +45,14 @@ import {
     resolveWindowName,
 } from "@/util/window-title";
 import { Button } from "@/app/element/ui";
-import { renameWorkspace, WORKSPACE_NAME_MAX_LEN, workspaceHeading, workspaceName } from "@/app/store/user-workspace";
+import {
+    closedAtLabel,
+    LAST_WINDOW_TITLE,
+    renameWorkspace,
+    WORKSPACE_NAME_MAX_LEN,
+    workspaceHeading,
+    workspaceName,
+} from "@/app/store/user-workspace";
 
 interface InstancePanelProps {
     /** The status bar's version chip. */
@@ -95,6 +108,28 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
             })
             .catch(() => {});
     }
+
+    // The workspace's closed windows (srv `session_closed.rs`), asked again
+    // whenever a window opens or closes, and after a reopen or delete.
+    const [closed, setClosed] = createSignal<ClosedWindow[]>([]);
+    const refreshClosed = () =>
+        WindowService.ListClosedWindows()
+            .then((list) => setClosed(list ?? []))
+            .catch((e) => console.warn("[InstancePanel] couldn't list the closed windows:", e));
+    createEffect(on(() => entries().length, () => void refreshClosed()));
+    const onlyOpenWindow = () => entries().length <= 1;
+    const reopen = (w: ClosedWindow) => {
+        void reopenClosedWindow(w.workspaceid).then(refreshClosed);
+    };
+    const removeClosed = (w: ClosedWindow) => {
+        void removeClosedWindow(w.workspaceid).then(refreshClosed);
+    };
+    // Asks first when an agent in it is mid-turn (window-close.ts).
+    const removeOpen = (entry: WindowEntry) => {
+        const windowId = resolveEntryWindowId(entry);
+        if (!windowId || onlyOpenWindow()) return;
+        void requestRemoveWindow({ windowId, label: entry.label }).then(refreshClosed);
+    };
 
     // Rename mode state — keyed by host label so the row's identity
     // survives entries() reordering. Single rename at a time.
@@ -505,7 +540,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                 >
                     <Show
                         when={editingWorkspace()}
-                        fallback={workspaceHeading(currentWorkspaceName(), entries().length)}
+                        fallback={workspaceHeading(currentWorkspaceName(), entries().length + closed().length)}
                     >
                         <input
                             ref={(el) => {
@@ -647,10 +682,69 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                         currentOpacity={currentOpacity}
                                     />
                                 </Show>
+                                <button
+                                    type="button"
+                                    class="instance-panel-row-action"
+                                    title={onlyOpenWindow() ? LAST_WINDOW_TITLE : "Remove from workspace"}
+                                    aria-label={onlyOpenWindow() ? LAST_WINDOW_TITLE : "Remove from workspace"}
+                                    disabled={onlyOpenWindow()}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        removeOpen(entry);
+                                    }}
+                                    onDblClick={(e) => e.stopPropagation()}
+                                    onKeyDown={(e) => e.stopPropagation()}
+                                >
+                                    <i class="fa-solid fa-trash-can" aria-hidden="true" />
+                                </button>
                             </div>
                             </>
                         );
                     }}
+                </For>
+                {/* Closed windows, greyed: a click reopens one where it was;
+                    right-click removes it without reopening it. */}
+                <For each={closed()}>
+                    {(w) => (
+                        <div
+                            class="instance-panel-window-row instance-panel-window-row-closed"
+                            title="Closed: click to reopen, right-click to remove"
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => reopen(w)}
+                            onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                    e.preventDefault();
+                                    reopen(w);
+                                }
+                            }}
+                            onContextMenu={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                ContextMenuModel.showContextMenu(
+                                    [{ label: "Remove from workspace", click: () => removeClosed(w) }],
+                                    e
+                                );
+                            }}
+                        >
+                            <span class="instance-panel-window-dot">◌</span>
+                            <span class="instance-panel-window-name">{w.name.trim() || "Window"}</span>
+                            <span class="instance-panel-window-closed-at">{closedAtLabel(w.closed_at_ms)}</span>
+                            <button
+                                type="button"
+                                class="instance-panel-row-action"
+                                title="Reopen"
+                                aria-label="Reopen"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    reopen(w);
+                                }}
+                                onKeyDown={(e) => e.stopPropagation()}
+                            >
+                                <i class="fa-solid fa-rotate-left" aria-hidden="true" />
+                            </button>
+                        </div>
+                    )}
                 </For>
             </div>
             <div class="instance-panel-divider" />

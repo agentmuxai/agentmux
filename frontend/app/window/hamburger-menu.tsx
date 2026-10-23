@@ -32,7 +32,6 @@ import { shortcutFor } from "@/app/keybindings";
 import { saveCurrentLayout } from "./save-layout";
 import { openLayoutFromFile } from "./open-layout";
 import { chooseLayoutFromOtherBuild } from "./restore-other-build";
-import { chooseClosedWindow, requestCloseWindow, requestCloseWorkspace } from "./window-close";
 import { createMemo, onCleanup, type JSX } from "solid-js";
 import "./hamburger-menu.scss";
 
@@ -121,12 +120,6 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
                           shortcut: shortcutFor("window:new"),
                           onClick: () => openNewWindowFromHere().catch(console.error),
                       },
-                      {
-                          // Closing a window keeps its workspace (window-close.ts).
-                          label: "Reopen closed window",
-                          icon: "rotate-left",
-                          onClick: () => fireAndForget(chooseClosedWindow),
-                      },
                       { label: "", divider: true },
                   ]
                 : []),
@@ -189,15 +182,14 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
             },
             { label: "", divider: true },
             {
-                // The one close that deletes: confirmed first.
-                label: "Close workspace…",
-                icon: "trash-can",
-                onClick: () => fireAndForget(requestCloseWorkspace),
-            },
-            {
                 label: "Exit",
                 icon: "right-from-bracket",
-                onClick: () => fireAndForget(requestCloseWindow),
+                // Warns first when an agent in this window is working.
+                onClick: () =>
+                    fireAndForget(async () => {
+                        const { requestCloseWindow } = await import("./window-close");
+                        await requestCloseWindow();
+                    }),
             },
         ];
     });

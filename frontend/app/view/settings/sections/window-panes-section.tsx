@@ -50,7 +50,7 @@ export const WINDOW_SETTINGS = {
         id: "window.confirm_close_working",
         label: "Warn before closing a window with working agents",
         description:
-            "Ask before closing a window while an agent in it is mid-turn. Closing stops its agents; the layout is kept either way",
+            "Ask before closing a window while an agent in it is mid-turn. Closing stops its agents; the window stays in the workspace, to reopen from the version panel",
         section: "window",
         keywords: ["close window prompt", "running agents", "quit warning", "window:confirmcloseworking"],
     },

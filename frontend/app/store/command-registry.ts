@@ -28,7 +28,6 @@ import { userInThisWindow } from "@/app/store/input-owner";
 import { openConnectors, openMemory } from "@/app/view/section-pane/panes";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
 import { paneHistoryBack, paneHistoryForward } from "@/app/store/pane-history";
-import { chooseClosedWindow, requestCloseWindow, requestCloseWorkspace } from "@/app/window/window-close";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -275,25 +274,14 @@ export function registerDefaultCommands(): void {
         label: "Close Window",
         category: "Window",
         icon: "xmark",
-        // Keeps the window's workspace; warns first when an agent in it is working.
-        execute: () => fireAndForget(requestCloseWindow),
-    });
-    commandRegistry.register({
-        id: "window:reopen-closed",
-        label: "Reopen Closed Window",
-        category: "Window",
-        icon: "rotate-left",
-        keywords: "restore undo closed window workspace",
-        requires: "multiWindow",
-        execute: () => fireAndForget(chooseClosedWindow),
-    });
-    commandRegistry.register({
-        id: "window:close-workspace",
-        label: "Close Workspace…",
-        category: "Window",
-        icon: "trash-can",
-        keywords: "delete workspace discard tabs",
-        execute: () => fireAndForget(requestCloseWorkspace),
+        // Keeps it in the workspace as a closed window; warns first when an
+        // agent in it is working. Loaded when run: window-close.ts reads the
+        // window's stores, which pane code must not import.
+        execute: () =>
+            fireAndForget(async () => {
+                const { requestCloseWindow } = await import("@/app/window/window-close");
+                await requestCloseWindow();
+            }),
     });
     commandRegistry.register({
         id: "window:recycle",

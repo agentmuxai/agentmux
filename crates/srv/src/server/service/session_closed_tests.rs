@@ -160,8 +160,8 @@ async fn the_record_says_which_windows_are_open_and_which_closed() {
     assert_eq!(windows_of(&session).len(), 1);
 }
 
-#[test]
-fn with_closed_adds_nothing_twice() {
+#[tokio::test]
+async fn with_closed_adds_nothing_twice() {
     let state = test_state();
     let record = json!({ "tabs": [], "windows": [
         { "workspaceid": "a", "tabs": [] },
@@ -228,7 +228,7 @@ async fn a_cold_start_keeps_closed_windows_closed() {
     let main = open_window(&state, "main", false).await;
     add_user_pane(&state, &main.workspaceid, "term").await;
     let other = open_window(&state, "window-2", false).await;
-    add_user_pane(&state, &other.workspaceid, "sysinfo").await;
+    add_user_pane(&state, &other.workspaceid, "term").await;
     let other_blocks = block_ids(&state, &other.workspaceid);
     close(&state, &other.oid).await;
     close(&state, &main.oid).await;
@@ -249,7 +249,7 @@ async fn a_cold_start_rebuilds_a_closed_window_whose_contents_are_gone() {
     let main = open_window(&state, "main", false).await;
     add_user_pane(&state, &main.workspaceid, "term").await;
     let other = open_window(&state, "window-2", false).await;
-    add_user_pane(&state, &other.workspaceid, "sysinfo").await;
+    add_user_pane(&state, &other.workspaceid, "term").await;
     close(&state, &other.oid).await;
     close(&state, &main.oid).await;
     // As in a new version's first start, which copied only the record.
@@ -266,7 +266,7 @@ async fn a_cold_start_rebuilds_a_closed_window_whose_contents_are_gone() {
     let closed = closed_ids(&state);
     assert_eq!(closed.len(), 1, "listed as closed again");
     assert_ne!(closed[0], other.workspaceid, "rebuilt, with new ids");
-    assert!(views(&state, &closed[0]).contains(&"sysinfo".to_string()));
+    assert!(views(&state, &closed[0]).contains(&"term".to_string()));
 }
 
 #[tokio::test]

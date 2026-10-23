@@ -15,8 +15,8 @@ import type { ConnStatus } from "@/types/rpc/ConnStatus";
  *  was (physical pixels, from srv's window row). srv `session_windows.rs`. */
 export type RestoredWindow = { workspaceid: string; x?: number; y?: number; width?: number; height?: number };
 
-/** A closed window whose workspace is kept, for "Reopen closed window"
- *  (srv `session_closed.rs`). `agents` are the names of its agents. */
+/** A closed window of the open workspace, for the status bar panel (srv
+ *  `session_closed.rs`). `agents` are the names of its agents. */
 export type ClosedWindow = {
     workspaceid: string;
     closed_at_ms: number;
@@ -190,8 +190,7 @@ class WindowServiceType {
     TakeRestoredWindows(): Promise<RestoredWindow[]> {
         return MOS.callBackendService("window", "TakeRestoredWindows", Array.from(arguments))
     }
-    // Closing is not deleting (srv `session_closed.rs`): the closed windows
-    // whose workspaces are kept, newest first.
+    // The open workspace's closed windows (srv `session_closed.rs`), newest first.
     ListClosedWindows(): Promise<ClosedWindow[]> {
         return MOS.callBackendService("window", "ListClosedWindows", Array.from(arguments))
     }
@@ -200,7 +199,12 @@ class WindowServiceType {
     TakeClosedWindow(workspaceId: string): Promise<RestoredWindow> {
         return MOS.callBackendService("window", "TakeClosedWindow", Array.from(arguments))
     }
-    // Close workspace, confirmed: the window's next close deletes its workspace.
+    // Remove a closed window from the workspace: deletes its contents.
+    DeleteClosedWindow(workspaceId: string): Promise<void> {
+        return MOS.callBackendService("window", "DeleteClosedWindow", Array.from(arguments))
+    }
+    // Remove an open window from the workspace: its next close deletes its
+    // contents instead of keeping them. Refused for the only open window.
     DiscardWorkspaceOnClose(windowId: string): Promise<void> {
         return MOS.callBackendService("window", "DiscardWorkspaceOnClose", Array.from(arguments))
     }

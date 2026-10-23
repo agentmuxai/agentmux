@@ -143,6 +143,43 @@
     }
 }
 
+// A closed window of the workspace: greyed, with when it closed.
+.instance-panel-window-row-closed {
+    color: var(--secondary-text-color);
+
+    .instance-panel-window-dot {
+        color: var(--secondary-text-color);
+    }
+}
+
+.instance-panel-window-closed-at {
+    flex: 0 0 auto;
+    font-size: var(--text-2xs);
+    color: var(--secondary-text-color);
+}
+
+// Each window row's one action: remove an open window, reopen a closed one.
+.instance-panel-row-action {
+    flex: 0 0 auto;
+    margin-left: auto;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--secondary-text-color);
+    cursor: default;
+    padding: 2px 4px;
+    border-radius: 0;
+    font-size: var(--text-xs);
+    line-height: 1;
+
+    &:hover:not(:disabled) {
+        border-color: var(--border-color);
+        color: var(--main-text-color);
+    }
+    &:disabled {
+        opacity: 0.4;
+    }
+}
+
 .instance-panel-window-row-current {
     background: rgb(from var(--accent-color) r g b / 0.08);
 }

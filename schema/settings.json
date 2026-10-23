@@ -260,7 +260,7 @@
         "window:confirmcloseworking": {
           "type": "boolean",
           "default": true,
-          "description": "Ask before closing a window while an agent in it is mid-turn. Closing stops its agents and keeps the layout."
+          "description": "Ask before closing a window while an agent in it is mid-turn. Closing stops its agents; the window stays in the workspace, to reopen from the version panel."
         },
         "window:savelastwindow": {
           "type": "boolean"
