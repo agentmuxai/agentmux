@@ -21,7 +21,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setup as agentSetup } from "./agent-shots.mjs";
-import { closeTab, openNewTab } from "./widget-shots.mjs";
+import { closeTab, openNewTab, openWidget } from "./widget-shots.mjs";
 
 const VIEWPORT = { width: 1100, height: 760, scale: 1 };
 
@@ -173,11 +173,14 @@ async function maximize(session, pane) {
     throw new Error("the pane didn't maximize");
 }
 
-/** Opens the widget bar's `item` (Memory, Connectors or Settings, pinned by
- *  default; the hamburger menu has none of them since #5357) in the current
- *  tab, maximized, and returns its pane. */
+/** Widget-bar icons (widgets.json) of the panes these shots open. */
+const WIDGET_ICONS = { Memory: "brain", Connectors: "plug", Settings: "cog" };
+
+/** Opens `item` (Memory, Connectors or Settings) from the widget bar, by its
+ *  icon or the More list (the hamburger menu has none of them since #5357),
+ *  in the current tab, maximized, and returns its pane. */
 async function openFromMenu(session, item, marker) {
-    await session.clickText(".action-widgets", item);
+    await openWidget(session, { label: item, icon: WIDGET_ICONS[item] });
     let pane = null;
     for (let i = 0; i < 40 && !pane; i++) {
         await session.wait(250);
