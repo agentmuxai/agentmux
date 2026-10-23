@@ -1,7 +1,7 @@
 # SPEC: Workspaces — a named set of windows, saved as you go
 
 **Date:** 2026-10-23
-**Status:** active — a running spec, refined with the operator. PR 1 (§3, §3.1) shipped in #5357; PR 2 (the saved Default Workspace, §2, §4, §5 header, §8) in #5358; PRs 3–5 not started. Supersedes the user-facing parts of `SPEC_OFFLINE_RESILIENCE_2026_10_20.md` §4.7 as built in PR #5356 (unmerged), and the naming decision of `SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md` §3.
+**Status:** active — a running spec, refined with the operator. PR 1 (§3, §3.1) shipped in #5357; PR 2 (the saved Default Workspace, §2, §4, §5 header, §8) in #5358; PR 3 (closed windows, §5) in #5359; PRs 4–5 not started. Supersedes the user-facing parts of `SPEC_OFFLINE_RESILIENCE_2026_10_20.md` §4.7 as built in PR #5356 (unmerged; its srv work ships in PR 3), and the naming decision of `SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md` §3.
 **Trigger:** Operator, 2026-10-23, reviewing #5356 ("closing a window keeps its workspace"): *"remove the entries from the hamburger that already have widgets … change the "layouts" to "Workspaces". A workspace to the user (lets define it in the glossary) is a set of windows/panes. Opening a workspace necessarily means closing the existing one. … Start with Default Workspace and it is a running file. Users can also create New Workspace. … if he closes that window, it becomes "greyed" out in the status panel. We need a reopen and delete buttons …"*
 **Related:** `SPEC_LAYOUT_FILES_2026_09_25.md` (the `agentmux.layout` file this extends), `SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08.md` (proposed, unbuilt: continuous session record), `SPEC_OFFLINE_RESILIENCE_2026_10_20.md` G8 ("closing is not deleting"), `SPEC_VERSION_INSTANCE_PANEL_2026_04_25.md` (the status bar panel).
 
@@ -167,6 +167,19 @@ Default Workspace — 3 windows                    ✎
   - **closed → reopen** (rotate-left icon, "Reopen"). Opens it where it was; its agents resume. Right-click → **Remove from workspace** deletes it without reopening it (§9.1).
 - Floating panes and Maintenance stay as they are.
 
+**As built (#5359).**
+- **A close keeps the window** (`server/service/session_closed.rs`, #5356's srv work). When no other window shows its contents, `CloseWindow` stops their agents and shells (`agent_teardown`, `Policy::close()`), lifts each pane's respawn guard, and keeps the tabs, the panes (same ids and meta) and their layout. The window is listed in `Client.meta["workspace:closed_windows"]`, newest first, with `closed_at_ms`, its placement, name and appearance. No cap (§9.3).
+- **Not a closed window:** the close that empties `Client.windowids` (the last window: closing it quits, §2) and each close of a quit. Those windows stay `open` and reopen at the next launch. A window with nothing of the user's in it (no pane, or only the untouched default panes) has its contents deleted at its close, as every close did before #5356.
+- **The record** (§4.2): each window entry has `"state": "open"` or `"closed"`. A closed entry holds its contents' snapshot, `window` (placement, name, appearance), `workspaceid` and `closed_at_ms`, and is added at every save (`session_closed::with_closed`), never alongside a waiting restored window of the same contents. The session record (`session:last_topology`, which older builds and #5236's offer read) still holds the open windows only.
+- **Cold start:** the open windows reopen as before. Each closed entry is listed again without opening a window: its contents are reused when still here, and rebuilt from the entry (new ids) when not, as on a new version's first start. When the session record is the newer copy, the closed windows come from the workspace's own record. A crash leaves the rows in place; the old ids of secondary windows the host reprojects are closed, which lists their contents as closed windows.
+- **The panel:** the open windows' rows, then the closed ones greyed (`◌`, "closed 14:02", "closed yesterday 22:10", or the date). The header counts both. Every row ends in its one action slot:
+  - open: a trash icon, "Remove from workspace". It asks srv for the window's agents (`window.WindowAgents`) and confirms only when one is mid-turn ("Korp is working. Remove this window from Default Workspace?"), then marks the window's close (`window.DiscardWorkspaceOnClose`, good for 60 s, refused for the only open window) and closes it through the host (`close_window` by label); that close deletes the contents. The only open window's slot is disabled, titled "The last window; use New Workspace to start over".
+  - closed: a rotate-left icon, "Reopen", as is a click on the row: `window.TakeClosedWindow` waits for its agents to finish stopping and returns where it was; the host's `open_restored_window` opens it there, and its agents resume. Right-click → **Remove from workspace** (`window.DeleteClosedWindow`) deletes the contents without reopening.
+  - The list is asked for when the panel opens, whenever a window opens or closes, and after each reopen or delete.
+- **The close warning** (§6, §7: never "layout"): every in-app close (caption buttons, ☰ → Exit, the palette's Close Window) asks for the window's agents; with one mid-turn: "Korp is working. Close this window?", "This stops N agents. The window stays in Default Workspace, and you can reopen it from the version panel." (for the last window: "AgentMux closes; the window stays in Default Workspace and opens again at the next launch."). "Don't ask again" and Settings → Window & Panes turn it off (`window:confirmcloseworking`). A close the OS starts (Alt+F4, the taskbar) and the tray's Quit don't warn. `window-close.ts` is loaded when a close runs, so pane code doesn't import the window's stores.
+- **Switching workspaces** (PR 4): `adopt_current` clears the list when the open workspace changes.
+- **Not shipped from #5356:** ☰ → Reopen closed window, ☰ and palette Close workspace… with its dialog, the palette's Reopen Closed Window, and the 10-window cap.
+
 ## 6. Switching workspaces
 
 Opening another workspace (or creating one):
@@ -196,7 +209,7 @@ And `window` gains: "Belongs to one [workspace](#workspace); closing it keeps it
 ## 8. Migration
 
 - **First launch with this:** the windows open now (or the session record's, at a cold start) become **Default Workspace**, saved at once.
-- **#5356's closed windows** (if it ever shipped): become closed windows of Default Workspace.
+- **#5356's closed windows:** #5356 never shipped, so there are none to migrate. Its srv work (keep on close, reopen with the same ids) is PR 3's, with the list renamed `workspace:closed_windows`.
 - **Old layout files** open through **Import…** as a new workspace (template mode: fresh agents, as today).
 - **Older builds' session records** (#5236): if this channel has no workspace yet, the offer stays, and accepting it creates Default Workspace from it.
 - **Removed:** `session:last_topology` writes (the workspace record replaces them; kept readable for one release), `session:closed_windows`, the Layouts submenu items.
@@ -221,10 +234,10 @@ All decided by the operator on 2026-10-23.
 |---|---|
 | 1 | ☰ cleanup: remove Settings, Connectors, Memory, Toolchain; new default pinned widgets (§3, §3.1). Independent, small |
 | 2 | Workspace record + continuous save + Default Workspace migration; status panel header shows its name (§2, §4, §5 header, §8) |
-| 3 | Closed windows: a close keeps the window in the workspace; status panel greyed rows with reopen/delete (§5). Reuses #5356's srv work (keep on close, reopen with same ids); drops its closed-window list, Close workspace… and ☰ item |
+| 3 | Closed windows: a close keeps the window in the workspace; status panel greyed rows with reopen/delete (§5). Reuses #5356's srv work (keep on close, reopen with same ids); drops its capped closed-window list, Close workspace… and ☰ item. Shipped in #5359 |
 | 4 | New / Open / Rename / Delete workspace, Export…, Import… (§3, §6) |
 | 5 | Glossary, `internals/persistence.md`, Workspaces docs page (agentmux-docs) |
 
-PR #5356 stops here: close it, or turn it into PR 3.
+PR #5356 stops here: PR 3 (#5359) supersedes it.
 
 **Follow-up, separate spec (operator, 2026-10-23):** instances stay independent beyond workspaces too: two versions of one channel running side by side should stop sharing agent definitions and settings, which they share today by design. Not in this spec's scope.

@@ -1,7 +1,7 @@
 # SPEC: Stay in control of every agent when the internet drops, and recover by itself
 
 **Date:** 2026-10-20
-**Status:** active — §8 PRs shipped: A in #5213 (MuxBus: offline is not signed out), B in #5221 (notes ride with the next turn), C in #5215 (the pane shows an API retry), D in #5236 (offer the layout another build saved) and #5356 (closing is not deleting: a close keeps the workspace, the next launch reopens it, Close workspace deletes); E's first part (§4.1 connectivity state, the status bar's Offline indicator) in #5241, its second (§4.4 held input) in #5246, E3 in #5353 (§4.3 recovery of failed turns). F and G remain.
+**Status:** active — §8 PRs shipped: A in #5213 (MuxBus: offline is not signed out), B in #5221 (notes ride with the next turn), C in #5215 (the pane shows an API retry), D in #5236 (offer the layout another build saved) and #5359 (closing is not deleting: a close keeps the window in the workspace as a closed window, `SPEC_WORKSPACES_2026_10_23.md` §5; it supersedes #5356); E's first part (§4.1 connectivity state, the status bar's Offline indicator) in #5241, its second (§4.4 held input) in #5246, E3 in #5353 (§4.3 recovery of failed turns). F and G remain.
 **Related:** [`SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md`](SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md) (the per-class recovery banner),
 [`SPEC_PERSISTENT_CONTROLLER_FAILURE_CLASSIFICATION_2026_08_04.md`](SPEC_PERSISTENT_CONTROLLER_FAILURE_CLASSIFICATION_2026_08_04.md),
 [`SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md`](SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md).
@@ -96,7 +96,7 @@ When a turn ends with `Network` and connectivity for that provider later becomes
 - Closing a window that has running agents warns: "This stops N agents. Their conversations are kept." with **Quit** and **Cancel**.
 - On the first launch of a new channel, offer to bring over the previous channel's layout (the most recent channel this user ran), and its MuxBus sign-in.
 
-**As built (D, closing is not deleting, #5356).** What each way of ending a window did before D:
+**As built (D, closing is not deleting, #5359).** What each way of ending a window did before D:
 
 | Path | Before D | Next launch |
 |---|---|---|
@@ -108,15 +108,7 @@ When a turn ends with `Network` and connectivity for that provider later becomes
 
 ☰ → Exit closes this window; it is not a quit.
 
-Now (`server/service/session_closed.rs`, `window_close.rs`, `session_windows.rs`):
-
-- **A close keeps the workspace.** When no other window shows it, `CloseWindow` stops its agents and shells as before (`agent_teardown`, `Policy::close()`), lifts each pane's respawn guard, and keeps the workspace with its tabs, panes (same ids, same meta) and layout. It is listed in `Client.meta["session:closed_windows"]`, newest first, with the window's place, name and appearance. A workspace with nothing of the user's in it (no pane, or the untouched default layout) is deleted, as every close did before.
-- **The next launch reopens it as it was.** Every entry of the session record now names its `workspaceid`; the restore opens a window onto that workspace when it is still there, and rebuilds the entry from the record only when it is gone (or the record came from an older build), so the record stays the fallback. Panes mount as they are and each agent pane's launch flow resumes its session, as a crash recovery's do. A window a quit left behind keeps its workspace when the record names it.
-- **Bounded.** At most 10 closed windows are kept; the close of another deletes the oldest (`delete_workspace`), unless the session record still names it. A reopened one leaves the list.
-- **Several windows.** The next launch restores the windows that were open when the session ended (the last close, or the quit). A window closed earlier in the session is kept but not reopened by itself: ☰ → **Reopen closed window** (and the palette's "Reopen Closed Window") reopens it where it was, waiting for its agents to finish stopping first.
-- **Close workspace.** ☰ → **Close workspace…** and the palette's "Close Workspace…" confirm first (destructive, naming the agents it stops), then mark the window (`window.DiscardWorkspaceOnClose`, good for 60 s) and close it; that close runs `delete_workspace` and saves no record of it. It is the only path to `delete_workspace` for a user's workspace.
-- **The close warning.** Every in-app close (the caption buttons on all three platforms, ☰ → Exit, the palette's and macOS File menu's Close Window) asks srv which agents run in the window (`window.WindowAgents`). When one is mid-turn it asks first: "Korp is working. Close this window?", "This stops N agents; the layout is saved. Their conversations are kept, and the window comes back on the next launch or from ☰ → Reopen closed window. An agent's own task dev build stops with its pane." With no turn running it closes at once. "Don't ask again" sets `window:confirmcloseworking` to false; Settings → Window & Panes has the toggle (default on).
-- **Not covered.** A close the OS starts (Alt+F4, the taskbar) and the tray's Quit don't pass through the renderer, so they don't warn; they keep the workspace all the same. Crash-reprojected secondary windows still open fresh workspaces; their old ones are now kept and listed under Reopen closed window instead of deleted. The first-launch offer of the previous channel's layout is #5236's.
+Now (#5359, which supersedes #5356): a close keeps the window in the open workspace as a closed window, its agents stopped and its panes kept with the same ids; the version panel lists it greyed, to reopen or remove. How it is built, the close warning's wording and what #5356 had that didn't ship (☰ → Reopen closed window, Close workspace…, the cap of 10) are in `SPEC_WORKSPACES_2026_10_23.md` §5 "As built".
 
 ### 4.8 Stable agent address
 
@@ -178,7 +170,7 @@ Ordered by how much control each returns; A, B and C are independent and can go 
 | A | Broker: transport errors are `Offline`, never needs-reauth; Offline vs Needs sign-in in delivery status; guarded Sign out and Sign in; log `muxbus.disconnect` | G5, G6 (MuxBus) |
 | B | Notes never start turns; queue, coalesce, deliver with the next turn; hold scheduled prompts while offline | G4 |
 | C | `api_retry` → `agent:retrying` and the retry row with Stop / Retry now; Network classification; Network turn-end banner | G1, G2 (pane) |
-| D | Close keeps the workspace, restores on launch; close warning; persistence docs. Shipped: the other-build offer (#5236), and closing is not deleting (#5356, §4.7 As built) | G8, G5 (layout) |
+| D | Close keeps the workspace, restores on launch; close warning; persistence docs. Shipped: the other-build offer (#5236), and closing is not deleting (#5359, §4.7 As built) | G8, G5 (layout) |
 | E | `connectivity` module; status-bar Offline per service (#5241); held input (§4.4, #5246) | G2, G3 |
 | E3 | Recovery of failed turns (§4.3): automatic retry on reconnect, the offer when the operator typed since. See the notes below. Shipped in #5353 | G6 |
 | F | MuxBus resubscribe and provision every live agent and alias after reconnect; uid-keyed subscriptions; fork slug migration | G6, §4.8 |
