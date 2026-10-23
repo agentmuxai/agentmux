@@ -56,6 +56,11 @@ use crate::server::AppState;
 /// Restored workspaces waiting for the main window to open them.
 const WAITING_META_KEY: &str = "session:restored_windows";
 
+/// Restored workspaces the main window took (`TakeRestoredWindows`) and is
+/// opening: kept for saves until a window shows each, so a save in between
+/// doesn't drop one that opens slowly or not at all (#5358).
+const OPENING_META_KEY: &str = "session:restored_windows_opening";
+
 /// Restored windows' names and appearance, by workspace, waiting for their
 /// windows. (Named for what it first held: a name.)
 const NAMES_META_KEY: &str = "session:restored_window_names";
@@ -204,14 +209,13 @@ pub(crate) fn snapshot_session(store: &Store, for_quit: bool) -> Option<Value> {
 /// shows them yet, so a snapshot of the live windows alone would drop them
 /// (#5358).
 fn waiting_windows(store: &Store, live_ws: &std::collections::HashSet<String>) -> Vec<Value> {
-    let waiting = store
-        .get_all::<Client>()
-        .ok()
-        .and_then(|cs| cs.into_iter().next())
-        .and_then(|c| c.meta.get(WAITING_META_KEY).and_then(|v| v.as_array().cloned()))
-        .unwrap_or_default();
-    waiting
+    let client = store.get_all::<Client>().ok().and_then(|cs| cs.into_iter().next());
+    let list = |key: &str| client.as_ref().and_then(|c| c.meta.get(key)?.as_array().cloned()).unwrap_or_default();
+    let mut seen = std::collections::HashSet::new();
+    list(WAITING_META_KEY)
         .into_iter()
+        .chain(list(OPENING_META_KEY))
+        .filter(|p| p.get("workspaceid").and_then(|v| v.as_str()).is_some_and(|ws| seen.insert(ws.to_string())))
         .filter_map(|mut placement| {
             let ws = placement.get("workspaceid")?.as_str()?.to_string();
             if live_ws.contains(&ws) {
@@ -391,6 +395,7 @@ pub(crate) async fn restore_all(state: &AppState, record: &Value) -> Result<Opti
         tracing::info!(windows = restored_count, "session_restore: restored {} window(s) from the {} record", restored_count, from);
     }
     set_client_meta(&state.mstore, WAITING_META_KEY, (!waiting.is_empty()).then(|| Value::Array(waiting)));
+    set_client_meta(&state.mstore, OPENING_META_KEY, None);
     set_client_meta(&state.mstore, NAMES_META_KEY, (!waiting_meta.is_empty()).then(|| Value::Object(waiting_meta)));
     match (main, first_err) {
         (Some(main), _) => Ok(Some(main)),
@@ -473,6 +478,16 @@ pub(crate) fn handle_take_restored_windows(state: &AppState, _call: &WebCallType
         .and_then(|v| v.as_array().cloned())
         .unwrap_or_default();
     set_client_meta(store, WAITING_META_KEY, None);
+    if !waiting.is_empty() {
+        let mut opening = store
+            .get_all::<Client>()
+            .ok()
+            .and_then(|cs| cs.into_iter().next())
+            .and_then(|c| c.meta.get(OPENING_META_KEY)?.as_array().cloned())
+            .unwrap_or_default();
+        opening.extend(waiting.iter().cloned());
+        set_client_meta(store, OPENING_META_KEY, Some(Value::Array(opening)));
+    }
     let live: Vec<Value> = waiting
         .into_iter()
         .filter(|w| {
@@ -482,6 +497,24 @@ pub(crate) fn handle_take_restored_windows(state: &AppState, _call: &WebCallType
         })
         .collect();
     WebReturnType::success(Value::Array(live))
+}
+
+/// A window now shows restored workspace `ws_id`: saves take it from the
+/// live windows from here on.
+pub(crate) fn restored_window_opened(store: &Store, ws_id: &str) {
+    let _ = store.with_tx(|tx| {
+        let Some(mut client) = tx.get_all::<Client>()?.into_iter().next() else { return Ok(()) };
+        let Some(opening) = client.meta.get(OPENING_META_KEY).and_then(|v| v.as_array().cloned()) else { return Ok(()) };
+        let left: Vec<Value> =
+            opening.into_iter().filter(|e| e.get("workspaceid").and_then(|v| v.as_str()) != Some(ws_id)).collect();
+        if left.is_empty() {
+            client.meta.remove(OPENING_META_KEY);
+        } else {
+            client.meta.insert(OPENING_META_KEY.to_string(), Value::Array(left));
+        }
+        tx.update(&mut client)?;
+        Ok(())
+    });
 }
 
 #[cfg(test)]

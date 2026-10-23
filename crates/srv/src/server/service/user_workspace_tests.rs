@@ -638,3 +638,38 @@ async fn a_save_before_the_restored_windows_open_keeps_them() {
     assert_eq!(windows[1]["window"]["name"], json!("Second"));
     assert!(windows[1]["window"].get("workspaceid").is_none());
 }
+
+/// The main window takes the waiting windows before their windows register:
+/// a save in between still keeps them, until a window shows each (#5358).
+#[tokio::test]
+async fn a_save_while_the_taken_windows_are_opening_keeps_them() {
+    let state = state_with_workspace();
+    let id = current_id(&state.mstore).unwrap();
+    let tab = |v: &str| json!({ "name": "t", "blocks": [{ "meta": { "view": v } }], "rootnode": null });
+    let two = json!({
+        "tabs": [tab("term")],
+        "windows": [{ "tabs": [tab("term")] }, { "tabs": [tab("sysinfo")], "window": { "x": 900, "y": 0, "width": 800, "height": 600 } }],
+        "saved_at_ms": 5_000,
+    });
+    state.mstore.user_workspace_save_record(&id, &two.to_string(), 5_000).unwrap();
+    no_windows(&state);
+    cold_start(&state).await;
+    let take = WebCallType { service: "window".into(), method: "TakeRestoredWindows".into(), args: vec![], uicontext: None };
+    let taken = handle_window_service(&state, &take).await.data.unwrap();
+    let second = taken[0]["workspaceid"].as_str().unwrap().to_string();
+
+    assert_eq!(save_now(&state.mstore), Saved::Written);
+    let saved: Value = serde_json::from_str(&row(&state).record.unwrap()).unwrap();
+    assert_eq!(windows_of(&saved).len(), 2, "kept while it opens: {saved}");
+
+    // Its window registers: from here the live window carries it, once.
+    super::super::session_windows::restored_window_opened(&state.mstore, &second);
+    let mut w = Window { oid: "win-second".into(), workspaceid: second.clone(), ..Default::default() };
+    state.mstore.insert(&mut w).unwrap();
+    let mut client = state.mstore.get_all::<Client>().unwrap().into_iter().next().unwrap();
+    client.windowids.push(w.oid.clone());
+    state.mstore.update(&mut client).unwrap();
+    save_now(&state.mstore);
+    let saved: Value = serde_json::from_str(&row(&state).record.unwrap()).unwrap();
+    assert_eq!(windows_of(&saved).len(), 2, "not twice: {saved}");
+}
