@@ -91,7 +91,7 @@ import { useAgentControllerStatus } from "./hooks/useAgentControllerStatus";
 import { useAgentDecisions } from "./hooks/useAgentDecisions";
 import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
 import { useAgentFailure } from "./hooks/useAgentFailure";
-import { useOfflineInput } from "./offline/useOfflineInput";
+import { lastUserMessage, useOfflineInput } from "./offline/useOfflineInput";
 import { useAccountBinding } from "./failure/useAccountBinding";
 import { useAuthHealth, useSyntheticAuthRow } from "./failure/useAuthHealth";
 import { requestAgentTakeover } from "./failure/takeover";
@@ -1008,10 +1008,9 @@ export const AgentPresentationView = ({
     // auto-retry ladder for transient throttling — see AUTO_RETRY_BACKOFF_S in
     // useAgentFailure.ts). SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.
     const retryLastTurn = () => {
-        const last = [...getDocument()].reverse().find((n) => n.type === "user_message");
-        const msg = last && "message" in last ? (last as { message?: string }).message : undefined;
-        if (msg) {
-            void handleSendMessage(msg);
+        const last = lastUserMessage(getDocument()); // with its attachments
+        if (last) {
+            void handleSendMessage(last.text, last.attachments);
         } else {
             // No prior user message (e.g. the agent failed on its first
             // launch/spawn) — fall back to respawning the agent rather than
@@ -1020,7 +1019,7 @@ export const AgentPresentationView = ({
             void status.startLaunchFlow();
         }
     };
-    // Input held while the model API is unreachable, sent once it is back (offline/useOfflineInput.ts).
+    // Input held while the model API is unreachable; a network-failed turn retried when it's back.
     const offline = useOfflineInput({
         blockId: model.blockId, paneModel, provider, agentId: () => agentId, send: handleSendMessage, stop: commands.stopAgent,
     });
@@ -1051,6 +1050,7 @@ export const AgentPresentationView = ({
         model: paneModel,
         failure: (() => paneModel.state.failure),
         onRetry: retryLastTurn,
+        reconnect: offline.recovery,
         // live_elsewhere — take the agent over from the other AgentMux
         // instance running it, then re-run the refused turn if there was one
         // (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md §4.6).

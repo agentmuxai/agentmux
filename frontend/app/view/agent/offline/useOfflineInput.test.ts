@@ -22,7 +22,7 @@ vi.mock("@/app/store/agent-pane-state-store", () => ({ addEventListener: () => (
 vi.mock("../hooks/useApiRetryState", () => ({ useApiRetryState: () => () => null }));
 vi.mock("@/store/muxbus-delivery", () => ({ clockTime: String }));
 
-import { blockMetaStorage, HELD_INPUT_META_KEY } from "./useOfflineInput";
+import { blockMetaStorage, blockRetryMarkStorage, HELD_INPUT_META_KEY, RETRY_MARK_META_KEY } from "./useOfflineInput";
 
 const msg = (id: string) => ({ id, text: id, heldAt: 1 });
 
@@ -53,5 +53,30 @@ describe("blockMetaStorage", () => {
         // A stale meta copy must not bring a sent message back.
         hub.meta["b3"] = { [HELD_INPUT_META_KEY]: { agentId: "agent-a", messages: [msg("one")] } };
         expect(blockMetaStorage("b3", () => "agent-a").held()).toEqual([]);
+    });
+});
+
+describe("blockRetryMarkStorage", () => {
+    beforeEach(() => {
+        hub.meta = {};
+        hub.writes = [];
+    });
+
+    const mark = { text: "go", at: 5, auto: true, state: "sending" as const };
+
+    it("stores the retry with its agent before it goes, and every mount sees it on its way", () => {
+        const storage = blockRetryMarkStorage("r1", () => "agent-a");
+        storage.saveMark(mark);
+        expect(hub.writes.at(-1)).toEqual({ blockId: "r1", meta: { [RETRY_MARK_META_KEY]: { agentId: "agent-a", ...mark } } });
+        expect(blockRetryMarkStorage("r1", () => "agent-a").mark()).toEqual(mark);
+        storage.saveMark(null);
+        expect(hub.writes.at(-1)?.meta).toEqual({ [RETRY_MARK_META_KEY]: null });
+    });
+
+    it("reads one an earlier load left on its way as possibly gone, and never another agent's", () => {
+        hub.meta["r2"] = { [RETRY_MARK_META_KEY]: { agentId: "agent-a", ...mark } };
+        expect(blockRetryMarkStorage("r2", () => "agent-a").mark()).toEqual({ ...mark, state: "unknown" });
+        hub.meta["r3"] = { [RETRY_MARK_META_KEY]: { agentId: "agent-a", ...mark } };
+        expect(blockRetryMarkStorage("r3", () => "agent-b").mark()).toBeNull();
     });
 });

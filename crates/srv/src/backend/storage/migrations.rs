@@ -1311,10 +1311,10 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
     //     container_image / container_volumes / container_name on both tables.
     //     Host-agent rows default to '', '[]', '' respectively — ContainerManager
     //     populates them on first container spawn.
-    // v7: create db_muxbus_credentials if it doesn't exist yet (existing DBs
-    //     won't have it since it's a new table, not an added column).
+    // v7: db_muxbus_credentials, a new table (CREATE TABLE IF NOT EXISTS).
     // v10: standalone skill + MCP server tables (new tables, handled via
     //     CREATE TABLE IF NOT EXISTS in the flat batch above; no ALTER needed).
+    conn.execute_batch(super::agents::FORMER_BRANCH_LABEL_TRIGGER)?; // fork renames join the former names
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS db_muxbus_credentials (
             id             TEXT PRIMARY KEY DEFAULT 'global',

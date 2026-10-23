@@ -263,6 +263,31 @@ describe("AgentRuntimeDropup — superseded persisted model migration", () => {
     });
 });
 
+describe("AgentRuntimeDropup — a Codex pane", () => {
+    afterEach(() => replaceProviderModels("codex", []));
+
+    it("offers Codex's own modes and the running model's own effort levels", async () => {
+        replaceProviderModels("codex", [
+            { value: "gpt-6-astra", label: "GPT-6-Astra", efforts: ["low", "medium", "ultra"], defaultEffort: "low" },
+        ]);
+        const meta = { "agent:runtime": { model: "gpt-6-astra", permissionMode: "bypass", effort: "max" } };
+        render(() => <AgentRuntimeDropup blockId="block-1" blockAtom={() => ({ meta }) as any} providerId="codex" />);
+        // "max" isn't one of this model's levels: it runs at the model's default.
+        const trigger = screen.getByRole("button", { name: /Runtime settings/i });
+        expect(trigger.textContent).toContain("Full access · GPT-6-Astra · low");
+        await openPanel();
+        const rows = screen.getAllByRole("option").map((o) => o.textContent ?? "");
+        for (const mode of ["Full access", "Workspace write", "Read only"]) {
+            expect(rows.some((r) => r.includes(mode)), mode).toBe(true);
+        }
+        expect(rows.some((r) => r.includes("Bypass"))).toBe(false);
+        expect(rows.some((r) => /^ultra/.test(r))).toBe(true);
+        expect(rows.some((r) => /^max/.test(r))).toBe(false);
+        await userEvent.click(screen.getAllByRole("option").find((o) => /^ultra/.test(o.textContent ?? ""))!);
+        expect(patchRuntime.mock.calls.at(-1)?.[2]).toEqual({ effort: "ultra" });
+    });
+});
+
 describe("AgentRuntimeDropup — a change is a patch, and a failure is visible", () => {
     const rowByName = (name: RegExp) => screen.getAllByRole("option").find((o) => name.test(o.textContent ?? ""))!;
 

@@ -166,8 +166,17 @@ static STATE: OnceLock<Option<State>> = OnceLock::new();
 pub fn init(store: Arc<crate::backend::storage::store::Store>) {
     let state = agentmux_common::DataPaths::from_env().and_then(|paths| {
         let dir = paths.instance_dir.clone();
-        let upgraded = observe_start(&dir, env!("CARGO_PKG_VERSION"), agentmux_common::time::now_ms())?;
+        let now = agentmux_common::time::now_ms();
+        let upgraded = observe_start(&dir, env!("CARGO_PKG_VERSION"), now)?;
         tracing::info!(from = %upgraded.from, to = %upgraded.to, "upgrade notice: resumed agents will be told of the upgrade");
+        // This start made the upgrade: its data must be the previous version's,
+        // or nothing that version's quit saved (windows, tabs, panes) comes back.
+        if upgraded.at_ms == now {
+            let db_dir = paths.data_dir.join("db");
+            if let Some(problem) = crate::bootstrap::carry_forward::continuity_problem(&db_dir, &upgraded.from) {
+                tracing::error!(from = %upgraded.from, to = %upgraded.to, "upgrade continuity: {problem}");
+            }
+        }
         let noted = Mutex::new(upgraded.notified.iter().cloned().collect());
         Some(State { upgraded, dir, store, noted })
     });

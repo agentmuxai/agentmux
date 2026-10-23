@@ -248,6 +248,7 @@ pub(crate) async fn relay_inject(
     priority: &str,
     wan: Option<&WanCarried>,
     files: Option<&[agentmux_common::jekt_files::CloudFile]>,
+    jekt_tier: Option<&crate::backend::reactive::types::JektTier>,
 ) -> RelayOutcome {
     if message.len() > MAX_RELAY_MESSAGE_BYTES {
         return RelayOutcome::Failed(format!(
@@ -273,6 +274,13 @@ pub(crate) async fn relay_inject(
     // Files sent with it, uploaded already (server::jekt_cloud).
     if let (Some(files), Some(obj)) = (files, body.as_object_mut()) {
         obj.insert("files".to_string(), serde_json::to_value(files).unwrap_or_default());
+    }
+    // The tier the sender declared, when it declared one, so the receiver
+    // renders the same tier it would for a local jekt. The receiver's own
+    // trust rules still apply on top: a declared tier can raise a message to
+    // `sensitive`, never lower what those rules decide.
+    if let (Some(tier), Some(obj)) = (jekt_tier, body.as_object_mut()) {
+        obj.insert("jekt_tier".to_string(), serde_json::Value::String(tier.to_string()));
     }
     let resp = http
         .post(&url)
@@ -467,7 +475,7 @@ mod tests {
             "clare",
             "hello",
             "normal",
-            None, None,
+            None, None, None,
         )
         .await;
         match out {
@@ -495,7 +503,7 @@ mod tests {
             "clare",
             "hello",
             "urgent",
-            None, None,
+            None, None, None,
         )
         .await;
 
@@ -530,7 +538,7 @@ mod tests {
             "clare",
             "hello",
             "normal",
-            None, None,
+            None, None, None,
         )
         .await;
         match out {
@@ -552,7 +560,7 @@ mod tests {
             (r#"{"success":true,"injection_id":"inj-8","target_in_account":true}"#, Some(true)),
         ] {
             let (url, _seen, _g) = stub_relay(axum::http::StatusCode::OK, body).await;
-            let out = relay_inject(&url, &reqwest::Client::new(), "tok", "agent2", "agnetx", "hello", "normal", None, None).await;
+            let out = relay_inject(&url, &reqwest::Client::new(), "tok", "agent2", "agnetx", "hello", "normal", None, None, None).await;
             match out {
                 RelayOutcome::Queued { target_in_account, .. } => assert_eq!(target_in_account, want, "{body}"),
                 other => panic!("expected Queued, got {other:?}"),
@@ -575,7 +583,7 @@ mod tests {
             "clare",
             "hello",
             "normal",
-            None, None,
+            None, None, None,
         )
         .await;
         assert!(matches!(out, RelayOutcome::Failed(_)), "got {out:?}");
@@ -594,7 +602,7 @@ mod tests {
             "clare",
             &big,
             "normal",
-            None, None,
+            None, None, None,
         )
         .await;
         match out {
@@ -617,7 +625,7 @@ mod tests {
             "clare",
             "hello",
             "normal",
-            None, None,
+            None, None, None,
         )
         .await;
         assert!(matches!(out, RelayOutcome::Failed(_)), "got {out:?}");
@@ -762,7 +770,7 @@ mod tests {
         let (url, seen, _g) = stub_relay(axum::http::StatusCode::OK, r#"{"success":true}"#).await;
         let (_dir, wan, req) = origin_request();
         let carried = wan_sign_at_origin(&req, Some("camper"), Some(&wan), Some(TEST_DIR), "stable", NOW).unwrap();
-        let _ = relay_inject(&url, &reqwest::Client::new(), "tok", "camper", "agent2", "hello", "normal", Some(&carried), None)
+        let _ = relay_inject(&url, &reqwest::Client::new(), "tok", "camper", "agent2", "hello", "normal", Some(&carried), None, None)
             .await;
         {
             let c = seen.lock().unwrap();
@@ -776,7 +784,7 @@ mod tests {
             assert_eq!(body["wan_ts_secs"], serde_json::json!(NOW));
         }
 
-        let _ = relay_inject(&url, &reqwest::Client::new(), "tok", "camper", "agent2", "hello", "normal", None, None).await;
+        let _ = relay_inject(&url, &reqwest::Client::new(), "tok", "camper", "agent2", "hello", "normal", None, None, None).await;
         let c = seen.lock().unwrap();
         let keys: std::collections::BTreeSet<_> =
             c.as_ref().unwrap().body.as_object().unwrap().keys().cloned().collect();
@@ -797,11 +805,25 @@ mod tests {
             key: "A".repeat(43) + "=",
             blob_id: "blob-0123abcd-0000-4000-8000-0123456789ab".into(),
         }];
-        let _ = relay_inject(&url, &reqwest::Client::new(), "tok", "camper", "agent2", "hello", "normal", None, Some(&files)).await;
+        let _ = relay_inject(&url, &reqwest::Client::new(), "tok", "camper", "agent2", "hello", "normal", None, Some(&files), None).await;
         let c = seen.lock().unwrap();
         let body = &c.as_ref().unwrap().body;
         assert_eq!(body["files"][0]["blob_id"], "blob-0123abcd-0000-4000-8000-0123456789ab");
         assert_eq!(body["files"][0]["sha256"], "ab".repeat(32), "the file's fields sit beside key and blob_id");
         assert_eq!(body["files"][0]["key"], "A".repeat(43) + "=");
+    }
+
+    /// A declared tier travels with a WAN jekt, as its lowercase name; with
+    /// none declared the body has no `jekt_tier` key (the shape pinned in
+    /// `the_carried_tuple_rides_the_body_and_its_absence_keeps_the_old_shape`).
+    #[tokio::test]
+    async fn a_declared_tier_rides_the_body() {
+        use crate::backend::reactive::types::JektTier;
+        let (url, seen, _g) = stub_relay(axum::http::StatusCode::OK, r#"{"success":true}"#).await;
+        for (tier, want) in [(JektTier::Sensitive, "sensitive"), (JektTier::Info, "info"), (JektTier::Coord, "coord")] {
+            let _ = relay_inject(&url, &reqwest::Client::new(), "tok", "camper", "agent2", "hello", "normal", None, None, Some(&tier)).await;
+            let c = seen.lock().unwrap();
+            assert_eq!(c.as_ref().unwrap().body["jekt_tier"], want);
+        }
     }
 }

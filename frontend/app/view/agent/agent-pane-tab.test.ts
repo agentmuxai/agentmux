@@ -7,7 +7,10 @@ vi.mock("@/app/store/global", () => ({
     MOS: { makeORef: (t: string, id: string) => `${t}:${id}` },
     atoms: { fullConfigAtom: () => ({ widgets: {} }) },
 }));
-vi.mock("@/app/store/rpc-api", () => ({ RpcApi: {} }));
+const renameCommand = vi.fn(async (_client: unknown, _args: unknown) => ({}));
+vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { RenameAgentDefinitionTitleCommand: (c: unknown, a: unknown) => renameCommand(c, a) } }));
+const setBlockMeta = vi.fn(async (_blockId: string, _meta: Record<string, unknown>) => {});
+vi.mock("@/app/store/block-meta", () => ({ setBlockMeta: (b: string, m: Record<string, unknown>) => setBlockMeta(b, m) }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 import { describePaneTab } from "@/element/pane-tab-model";
@@ -54,5 +57,13 @@ describe("agent pane tab", () => {
     it("a history tab with no agent name still says whose kind of pane it is", () => {
         const tab = describeAgent({ "agent:historyTabFor": "b0" });
         expect(tab.label).toBe("Agent's History");
+    });
+
+    it("a rename renames the definition and clears an earlier pane title, so the new name shows", async () => {
+        const tab = describeAgent({ agentId: "def-1", agentName: "Korp", "frame:title": "old pane title" });
+        expect(tab.rename).toBeDefined();
+        await tab.rename!("BrowserLeader");
+        expect(renameCommand).toHaveBeenCalledWith(expect.anything(), { id: "def-1", title: "BrowserLeader" });
+        expect(setBlockMeta).toHaveBeenCalledWith("b1", { agentName: "BrowserLeader", "frame:title": null });
     });
 });

@@ -17,6 +17,11 @@
 //! handler a request directly can't skip it; the server applies it too while
 //! verifying, before a request is forwarded.
 //!
+//! The resolver answers for a display name an agent was renamed from too, by
+//! its route (`Store::former_name_owner`), under the same rules: delivery
+//! only, never a sender. When a rename retires the display name a running
+//! pane is registered under, [`renamed`] moves the registration to the new one.
+//!
 //! A child of `handler`, for its private maps.
 
 use std::collections::HashMap;
@@ -27,8 +32,9 @@ use super::{Handler, LookupOutcome, ReactiveHandler};
 use crate::backend::reactive::types::AgentRegistration;
 use crate::backend::reactive::types::InjectionRequest;
 
-/// The UID a name is a former slug of (`Store::former_slug_owner`), `None`
-/// when it is not one. Runs under the handler's lock, on a miss only.
+/// The UID a name is a former slug or display name of
+/// (`Store::former_name_owner`), `None` when it is not one. Runs under the
+/// handler's lock, on a miss only.
 pub type FormerSlugResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 /// How often one name's delivery through its former slug is logged.
@@ -46,7 +52,7 @@ pub(super) fn note_delivery(name: &str, uid: &str) {
         return;
     }
     last.insert(key, Instant::now());
-    tracing::info!(former_slug = name, uid, "reactive: delivered to a former slug (logged once an hour per name)");
+    tracing::info!(former_name = name, uid, "reactive: delivered to a former name (logged once an hour per name)");
 }
 
 /// Count a request whose sender claims a former slug as unverified
@@ -71,7 +77,7 @@ pub(crate) fn refuse_former_slug_sender(
         claimed = %claimed,
         uid = %uid,
         tier = req.delivery_tier.as_deref().unwrap_or("host"),
-        "jekt claims a slug its agent was renamed from; a former slug can't sign, counting it unverified"
+        "jekt claims a name its agent was renamed from; a former name can't sign, counting it unverified"
     );
     req.sig_verified = Some(false);
     true
@@ -159,6 +165,10 @@ impl ReactiveHandler {
         self.inner.lock().unwrap().set_former_slug_resolver(resolver);
     }
 }
+
+#[path = "display_rename.rs"]
+mod display_rename;
+pub(crate) use display_rename::renamed;
 
 #[cfg(test)]
 #[path = "former_slug_tests.rs"]

@@ -25,7 +25,12 @@ export function refreshCodexModels(now: number = Date.now()): void {
         .then((res) =>
             replaceProviderModels(
                 "codex",
-                (res?.models ?? []).map((m) => ({ value: m.id, label: m.display_name })),
+                (res?.models ?? []).map((m) => ({
+                    value: m.id,
+                    label: m.display_name,
+                    efforts: m.efforts,
+                    defaultEffort: m.default_effort,
+                })),
             ),
         )
         .catch(() => {

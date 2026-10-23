@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // `ContextReported`: an agent's own report of its context fill
-// (view/agent/acp-context.ts), as OpenCode's `usage_update` gives it.
+// (view/agent/context-reader.ts), as OpenCode's `usage_update` gives it.
 
 import { describe, expect, it } from "vitest";
 import { plausibleReading } from "./context-reading";
@@ -40,6 +40,18 @@ describe("ContextReported", () => {
         s = update(s, { type: "ContextReported", tokens: 13_000, model: "opencode/big-pickle" }).state;
         s = update(s, { type: "ContextReported", tokens: 14_000 }).state;
         expect(s.context).toMatchObject({ tokens: 14_000, model: "opencode/big-pickle", window: 200_000 });
+    });
+
+    // srv's `agentmux_context` frame carries its window (Codex's session file).
+    it("files the window a report carries under its model, or the last one seen", () => {
+        let s = update(streaming(), { type: "ContextReported", tokens: 14_331, model: "gpt-6-astra", window: 258_400 }).state;
+        expect(s.context).toMatchObject({ tokens: 14_331, window: 258_400, windowSource: "reported" });
+        expect(s.reportedContextWindows).toEqual({ "gpt-6-astra": 258_400 });
+        s = update(s, { type: "ContextReported", tokens: 94_399, window: 258_400 }).state;
+        expect(s.context).toMatchObject({ tokens: 94_399, model: "gpt-6-astra", window: 258_400 });
+        // With no model at all, nothing to file it under: the window stays unknown.
+        const none = update(streaming(), { type: "ContextReported", tokens: 9_000, window: 258_400 }).state;
+        expect(none.context).toMatchObject({ tokens: 9_000, model: null, window: null });
     });
 
     it("is a live reading, so a history seed can't replace it", () => {

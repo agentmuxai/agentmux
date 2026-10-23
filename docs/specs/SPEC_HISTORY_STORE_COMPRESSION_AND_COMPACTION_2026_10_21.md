@@ -3,7 +3,7 @@
 **Date:** 2026-10-21
 **Author:** Agent5@narko
 **Type:** Spec (a storage change; what a reader sees does not change)
-**Status:** active. The operator approved both parts on 2026-10-22 ("lets get the compaction and also cleaning out the streaming deltas"). PRs 1 and 2 of §9 (the frame table, both codecs, every read and write path, the store accepting version 3; nothing creates a frame yet) merged in #5324. PR 3 (the framer, its settings, off, and its checks) is #5328; PR 4 (the recovery tool's decoders) is #5330. Remaining: the Storage numbers, then turning it on. Task #49.
+**Status:** active. The operator approved both parts on 2026-10-22 ("lets get the compaction and also cleaning out the streaming deltas"). Merged: PRs 1 and 2 of §9 (the frame table, both codecs, every read and write path, the store accepting version 3) in #5324; PR 3 (the framer, `agent:transcriptframes`, off by default, and its checks) in #5328; PR 4 (the recovery tool's decoders) in #5330. PR 5 (the Storage numbers) is #5331. Remaining: the operator turns the setting on once these are in a release; `history.compact` and `decompress` (§5.3, §5.4) wait until dogfooding shows they are needed. Task #49.
 **Builds on:** `REPORT_AGENT_HISTORY_STORE_DEDUP_COMPRESSION_2026_10_17.md` (AgentY: §4.3 compression, §7.3 "shrink the pane store"), `SPEC_AGENT_TRANSCRIPT_SINGLE_COPY_2026_10_19.md` (Maricon: one copy of each transcript), `docs/analysis/RCA_UPGRADE_0_59_30_TO_0_59_34_ISSUES_2026_10_19.md` §6 (the damaged parts).
 **Platform:** all.
 
@@ -117,11 +117,11 @@ Frames cover parts that are at least 8 MiB behind the end of the file **and** wh
 
 ### 5.3 Setting and rollout
 
-`agent:transcriptframes` (off by default). Off: no new frames; existing frames still decode. `agent:transcriptdeltas` (on by default once frames are on) chooses codec 2 where it applies; off, every frame is codec 1. A `history.compact` command (PR 4) runs one pass on demand (used by tests and by the operator's "Compress now" in Warden > History > Storage).
+`agent:transcriptframes` (off by default). Off: no new frames; existing frames still decode. `agent:transcriptdeltas` (on by default once frames are on) chooses codec 2 where it applies; off, every frame is codec 1. A `history.compact` command, one pass on demand (a "Compress now" in Warden > History > Storage), is not built: the framer already runs a pass each minute.
 
 ### 5.4 Rollback
 
-`decompress` (a CLI and a command) unframes every frame of a store, a zone or a file back to part rows, in the same one-transaction-per-frame way, and a setting reverts the store version stamp. The per-channel copies and the provider's session files stay as they are, so even a lost frame has two independent sources (§6).
+Turning `agent:transcriptframes` off stops new frames; the frames already written keep reading, so no rollback is needed to stop. Going back to a build older than the frames needs every frame undone: `decompress` would unframe every frame of a store, a zone or a file back to part rows, in the same one-transaction-per-frame way, and lower the version stamp to 2 once no frame is left (`FileStore::unframe_file` is the building block). Not built yet; until it is, such a build runs from its own per-channel copy (rule 4). The per-channel copies and the provider's session files stay as they are, so even a lost frame has two independent sources (§6).
 
 ## 6. Damage and recovery
 
@@ -143,7 +143,7 @@ Frames cover parts that are at least 8 MiB behind the end of the file **and** wh
 | Offline recovery tool | learns the frame table and both codecs (`recover.mjs`, PR 4, #5330, which lands before the setting is turned on); a test vector written by the Rust encoder is decoded by the tool's own decoder |
 | An older build | refuses the store (version gate) and runs from its own copy |
 
-**Measuring it:** Warden > History > Storage gets, per store, the **stored size** and the **logical size** (what the files hold decoded), the ratio, bytes framed and not yet framed, and a count of frames checked by the scrub with any failures. `history.usage` already reads file sizes; it adds `SUM(length(data))` per table.
+**Measuring it:** `history.usage` answers a `compression` block for the shared store: frames, the bytes they hold and the bytes they take (one sum over `db_file_frame`), whether the setting is on, and what the framer waits for. Warden > History > Storage shows it as one line under the stores ("Pane history compressed: 14.0 GB of transcript in 2.1 GB (6.6×), 13,321 frames."). A scrub count comes with the scrub.
 
 ## 8. Cleaning out the streaming deltas (codec 2)
 
@@ -167,7 +167,8 @@ Tool input streams the same way, as `input_json_delta` / `partial_json`.
 |---|---|---|
 | 1 + 2 | `db_file_frame`, codec 1, every read and write path of §4; codec 2 (§8): the encoder, the decoder, the verification, tests on synthetic transcripts (real transcripts are private and never go in the repository); the store accepting `user_version` 3 without writing it. One PR (#5324), so the first build that accepts 3 reads every codec | no: nothing creates a frame yet |
 | 3 | The framer (§5), its settings (off), the readers file and the running-instance check, the version stamp | only once the operator turns it on |
-| 4 | The recovery tool's decoders for both codecs (with a test vector the Rust encoder writes), `history.compact`, `decompress`, the Storage numbers. Lands before the operator turns frames on | no |
+| 4 | The recovery tool's decoders for both codecs, with a test vector the Rust encoder writes (#5330). Lands before the operator turns frames on | no |
+| 5 | The Storage numbers (§7) | no |
 | — | Offline run on a copy of the real store: every frame encoded and decoded under both codecs, byte for byte; the real ratio and codec 2 rate. Done 2026-10-22, §2.1 | no (a copy) |
 | — | The operator turns `agent:transcriptframes` on | yes |
 

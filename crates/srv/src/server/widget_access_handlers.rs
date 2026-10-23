@@ -164,15 +164,17 @@ async fn call(st: &AppState, packages: &[WidgetPackageInfo], req: WidgetCallReq)
             let id = uuid::Uuid::new_v4().to_string();
             // As a message from the widget, with no signature: the agent
             // reads TRUST=self-declared and treats it like any unverified
-            // message.
-            let resp = st.reactive_handler.inject_message(InjectionRequest {
+            // message, and a transcript_request body reads TIER=sensitive.
+            let mut req = InjectionRequest {
                 target_agent: agent.to_string(),
                 message: text.to_string(),
                 source_agent: Some(format!("widget:{}", pkg.id)),
                 request_id: Some(id.clone()),
                 delivery_tier: Some("host".to_string()),
                 ..Default::default()
-            });
+            };
+            super::jekt_entry::prepare_host_entry(st, &mut req);
+            let resp = st.reactive_handler.inject_message(req);
             if !resp.success {
                 return Err(AccessError::internal(resp.error.unwrap_or_else(|| "the message wasn't delivered".to_string())));
             }

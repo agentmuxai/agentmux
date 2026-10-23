@@ -18,7 +18,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AgentRuntimeConfig, EffortLevel, PermissionMode } from "./types";
 
 const PERMISSION_MODES: readonly PermissionMode[] = ["bypass", "auto", "acceptEdits", "plan", "default"];
-const EFFORT_LEVELS: readonly EffortLevel[] = ["low", "medium", "high", "xhigh", "max"];
+const EFFORT_LEVELS: readonly EffortLevel[] = ["low", "medium", "high", "xhigh", "max", "ultra"];
 
 /**
  * The remembered settings that are still valid for this provider: a stored

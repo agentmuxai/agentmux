@@ -35,6 +35,8 @@ export class CodexTranslator implements OutputTranslator {
 
         switch (rawEvent.type) {
             case "thread.started":
+            // srv's context reading (context-reader.ts), not Codex's.
+            case "agentmux_context":
                 return [];
             case "turn.started":
                 this.resetTurn();

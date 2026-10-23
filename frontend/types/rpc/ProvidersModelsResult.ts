@@ -3,6 +3,7 @@ import type { CatalogModel } from "./CatalogModel";
 
 export type ProvidersModelsResult = { 
 /**
- * `CatalogModel` serializes to `{ id, display_name }`.
+ * `CatalogModel` serializes to `{ id, display_name }`, plus Codex's
+ * `efforts` and `default_effort` for each model.
  */
 models: Array<CatalogModel>, };

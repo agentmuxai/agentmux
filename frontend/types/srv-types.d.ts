@@ -856,6 +856,16 @@ declare global {
                 unconfirmed?: boolean;
             }[];
         } | null;
+        /** The latest retry of a turn that failed while the model API was
+         *  unreachable, stored before it is sent, so it never goes twice.
+         *  Frontend-only, as above (view/agent/offline/failed-turn.ts). */
+        "agent:retried_turn"?: {
+            agentId: string;
+            text: string;
+            at: number;
+            auto: boolean;
+            state: "sending" | "sent" | "unknown";
+        } | null;
         "agent:runtime"?: {
             permissionMode?: string;
             model?: string | null;
@@ -1138,6 +1148,7 @@ declare global {
         "attachments:retentiondays"?: number;
         "agent:askquestiontimeoutms"?: number;
         "agent:overlapnotes"?: boolean;
+        "agent:retryonreconnect"?: boolean;
         "kanban:reminders"?: boolean;
         "agent:mcpselfheal"?: boolean;
         "agent:transcriptsinglecopy"?: boolean;
