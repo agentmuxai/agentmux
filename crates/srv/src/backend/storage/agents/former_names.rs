@@ -3,10 +3,13 @@
 
 //! The display names an agent was renamed from, as addresses that still reach
 //! it: the former slugs' rules (`former_slugs`), applied to the names
-//! `db_agent_former_names` records on every rename (a root's `name`, an
-//! `instance_name`, a fork's `branch_label`). A display name is addressed by
-//! its route name (`agent_route_name`: "Loap #3" is `Loap-3`), so that is the
-//! key here, folded.
+//! `db_agent_former_names` holds. Three triggers on `db_agents` write it, so no
+//! rename path can miss one: `trg_agents_former_name` (a root's `name`) and
+//! `trg_agents_former_instance_name` (`instance_name`), both in
+//! `run_object_schema`, and `trg_agents_former_branch_label` (a fork's
+//! `branch_label`, `FORMER_BRANCH_LABEL_TRIGGER`). A display name is addressed
+//! by its route name (`agent_route_name`: "Loap #3" is `Loap-3`), so that is
+//! the key here, folded.
 //!
 //! One resolver answers for both kinds, [`Store::former_name_owner`]: a name
 //! resolves when exactly one agent lists it, as a former slug or as a former
@@ -51,7 +54,8 @@ pub(super) struct FormerNameIndex {
     current: HashSet<String>,
     /// Former name key → every uid that lists it, slug or display.
     owners: HashMap<String, BTreeSet<String>>,
-    /// `(uid, key, recorded_at)` for each former display name.
+    /// `(uid, key, recorded_at)` for each `db_agent_former_names` row (a
+    /// former `name`, `instance_name` or `branch_label`, one trigger each).
     display: Vec<(String, String, i64)>,
 }
 

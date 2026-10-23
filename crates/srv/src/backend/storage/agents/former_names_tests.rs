@@ -64,13 +64,23 @@ fn a_former_display_name_resolves_to_its_agent_and_its_slug() {
     assert_eq!(defs.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(), vec!["uid-zed"]);
 }
 
-/// A fork's former label, recorded however the row got it, resolves the same.
+/// A renamed fork's former label, recorded by the branch-label trigger,
+/// resolves the same.
 #[test]
-fn a_recorded_former_label_resolves_too() {
-    let (_t, store) = store_with(&[("uid-fork", "Loap #3", "loap-3")]);
-    record_former_name(&store, "uid-fork", "Experiment", 5);
-    store.former_names_changed();
+fn a_renamed_forks_former_label_resolves_too() {
+    let (_t, store) = store_with(&[("uid-root", "Loap", "loap")]);
+    let mut fork = test_agent_def("uid-fork", "Loap #3", "claude", "host", 2, "");
+    fork.slug = "loap-3".into();
+    fork.parent_id = "uid-root".into();
+    fork.branch_label = "Experiment".into();
+    store.agent_def_insert(&mut fork).unwrap();
+    assert_eq!(owner_uid(&store, "experiment"), None, "its current label");
+    fork.branch_label = "Trial".into();
+    assert!(store.agent_def_update(&mut fork).unwrap());
+    assert!(store.agent_former_names("uid-fork").unwrap().contains(&"Experiment".to_string()));
     assert_eq!(owner_uid(&store, "experiment").as_deref(), Some("uid-fork"));
+    assert_eq!(owner_uid(&store, "Experiment").as_deref(), Some("uid-fork"));
+    assert_eq!(owner_uid(&store, "trial"), None, "its new label is current");
 }
 
 /// A former display name two agents list resolves to neither, and so does one
