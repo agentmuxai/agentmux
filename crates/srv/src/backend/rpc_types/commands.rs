@@ -640,6 +640,9 @@ pub const COMMAND_LAYOUT_PREVIEW: &str = "layout.preview";
 pub const COMMAND_LAYOUT_OPEN: &str = "layout.open";
 /// Layouts other builds saved, and restoring one here (`session_other_builds`).
 pub const COMMAND_LAYOUT_OTHER_BUILDS: &str = "layout.otherBuilds";
+/// The fork slug migration: plan, stop, apply, rollback, restore
+/// (`backend::slug_migration`).
+pub const COMMAND_AGENTS_MIGRATE_FORK_SLUGS: &str = "agents.migrateForkSlugs";
 pub const COMMAND_LAYOUT_RESTORE_OTHER_BUILD: &str = "layout.restoreOtherBuild";
 /// Apply one layout edit (split, move, resize, close, ...) to a tab's tree in
 /// the reducer — `Command::LayoutApplyIntent`.

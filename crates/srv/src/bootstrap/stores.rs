@@ -29,6 +29,17 @@ pub fn load_config() -> config::Config {
         std::process::exit(code);
     }
 
+    if let Some(config::SrvCommand::MigrateForkSlugs { plan: _, apply, rollback, restore }) = &args.command {
+        use crate::backend::rpc_types::ForkSlugMigrationMode as Mode;
+        let (mode, journal) = match (apply, rollback, restore) {
+            (true, _, _) => (Mode::Apply, None),
+            (_, Some(j), _) => (Mode::Rollback, Some(j.as_str())),
+            (_, _, Some(j)) => (Mode::Restore, Some(j.as_str())),
+            _ => (Mode::Plan, None),
+        };
+        std::process::exit(crate::backend::slug_migration::run_cli(mode, journal));
+    }
+
     let config = config::Config::from_env_and_args(&args).unwrap_or_else(|e| {
         tracing::error!("Failed to load config: {}", e);
         std::process::exit(1);
@@ -114,6 +125,9 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         tracing::error!("Failed to ensure db dir: {}", e);
         std::process::exit(1);
     });
+    // What this srv can do, beside the lock that names its pid, for a fork
+    // slug migration's precondition (`slug_migration::stamp`).
+    crate::backend::slug_migration::stamp::write(&base::get_mux_data_dir());
 
     // Startup diagnostics
     tracing::info!(

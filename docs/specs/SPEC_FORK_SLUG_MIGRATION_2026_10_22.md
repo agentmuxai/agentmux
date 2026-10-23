@@ -1,7 +1,7 @@
 # SPEC: Give pre-fix forks their clean agent id, without breaking anything keyed by the old one
 
 **Date:** 2026-10-22
-**Status:** active — Phase 0 in #5325, Phase 1 in #5329; Phases 2–3 remain.
+**Status:** active — Phase 0 in #5325, Phase 1 in #5329, Phase 2 in #5342; Phase 3 remains.
 **Related:** [`SPEC_OFFLINE_RESILIENCE_2026_10_20.md`](SPEC_OFFLINE_RESILIENCE_2026_10_20.md) §4.8 and plan row F
 (this is its "fork slug migration" half; the subscription half shipped in #5238),
 [`REPORT_FORK_AGENT_ISOLATION_2026_10_12.md`](../reports/REPORT_FORK_AGENT_ISOLATION_2026_10_12.md) F4 and §5 (why
@@ -222,8 +222,8 @@ reversible.
 **6. Roll back.**
 - **Journal mode:** `--rollback <journal>` undoes the completed steps in reverse order (each step records its
   before-image).
-- **Restore mode:** restoring the backup is offered only while nothing has written to those files since; checksums
-  and mtimes are compared.
+- **Restore mode:** the backed-up files go back only while nothing has written to them since; checksums and mtimes
+  are compared. Databases go back row by row, never as a copy of the whole file (other panes write to them).
 - Keys retired in S3 come back from the backup in either mode.
 
 **7. After.** Relaunching the agents gives them the new `AGENTMUX_AGENT_ID`, fresh keys, a new WAN key publication
@@ -233,6 +233,116 @@ lists what can't be changed from here:
   subscription cover them);
 - other agents' notes and memory that mention the old name;
 - LAN peers that will re-pin.
+
+As built (`crates/srv/src/backend/slug_migration/`):
+- **Where it runs.** On the disk, not on the running instance's stores: every `channels/<ch>/versions/<v>/data`,
+  `channels/<ch>/data` and `dev/<branch>[/<clone>]/data` on the root, each install's `wan.db`, and the host's
+  `store.db` and `identity-store.db`. Another version's `objects.db` is opened raw, never through `Store::open`, so
+  it is changed only where a step says and never upgraded. The same code serves the CLI (`agentmux-srv
+  migrate-fork-slugs [--plan|--apply|--rollback <journal>|--restore <journal>]`) and the RPC
+  `agents.migrateForkSlugs {mode: plan|stop|apply|rollback|restore, journal?, quick?}`. `stop` and `restore` are
+  additions: `stop` asks each pane the plan finds running to stop through the agents' 15 s user override
+  (`fleet_bulk_stop_with_override`); `restore` is restore mode. `quick` finds the candidates only, for the notice.
+- **Plan.** Candidates are read from the shared definitions; a definition with no shared record isn't considered.
+  The old rule is matched against the parent's slug and its former slugs, so a parent migrated first (or by an
+  earlier, interrupted run) doesn't hide its child. A target is held by:
+  - another uid's shared slug, former slug or display route (`agent_route_name` of its name, case-insensitive);
+  - a row's slug, former slug, display route or instance route in any `objects.db`;
+  - another candidate's target;
+  - a live cross-channel registration under it that isn't this uid's;
+  - a live per-version registration whose pane (by `agentId`) is another agent's.
+
+  A display route counts because `agent_defs_for_target` prefers a slug: an agent `Loap 2` with the suffixed
+  slug `loap-2-2` would lose its messages to an agent renamed `loap-2`. A database that can't be read (corrupt
+  or incompatible) blocks the plan, naming the file, and every candidate waits; no target reads as free.
+
+  A refusal suggests the first free `-N`. Locations are listed through each step's own before-image, so the plan
+  shows exactly what a run touches. A key row is reported by its presence, never its value.
+- **Preconditions.** "Runs nowhere" means no fresh lease whose holder is still alive, and no live registration
+  under the agent's slug, former slugs or route name.
+- **Version signal.** Nothing on disk said reliably which build a running srv is: the srv lock names a pid only, a
+  lease names a version only while it holds an agent, and the registry lists only instances with agents. So each
+  srv now writes `<data>/srv-features.json` (pid, version, features) at startup beside `srv.lock`. An instance counts
+  as new enough when the stamp's pid is the lock's live pid and it lists `former-slugs-v1`. A live srv in the
+  registry with no such stamp counts as too old, as does every build before this one.
+- **Lock.** `shared/locks/slug-migration.lock`, an OS file lock held for the whole run or rollback.
+- **The target, again, before S1.** The plan comes before the backup, and another channel may create an agent
+  with a planned id meanwhile. So before an agent's first write the run takes the host-wide slug allocation lock
+  (`DefinitionStore::lock_slug_allocation`, which every agent creation holds while it picks and publishes a slug),
+  checks the target again by the plan's rules, and holds the lock through S1 and S2, which publish the new id. A
+  target taken since leaves that agent out with nothing written for it (`Skipped` in the journal, a note in the
+  report); the others still migrate. The lock isn't held during the backup.
+- **Backup.** `shared/backups/slug-migration-<UTC time>/` holds:
+  - every database, copied through `VACUUM INTO` (`db_copy::copy_database`);
+  - the definitions, workspace `.mcp.json` files and stale registrations, as files.
+
+  Each copy's SHA-256 is in the journal header. S8's moves need no copy. On Unix the folder and its subfolders are
+  0700, and every file in it is 0600: each database copy is set so as soon as `VACUUM INTO` has written it, and the
+  journal is created 0600. The backup holds keys and credentials, and the report says so. The journal holds none:
+  a key row's before-image names the row, and the row comes back from the backup's database copy.
+- **File writes never widen a file.** Every file the migration writes goes through a temporary file created 0600
+  on Unix from the start. A file it replaces keeps its own mode, except a `.mcp.json`, which holds signing keys
+  and is always 0600, as AgentMux writes it. A new file stays 0600. On Windows a file takes its folder's ACL, as
+  every `Workdir` write does. Databases are only ever opened, never re-created, so they keep their modes.
+- **Journal.** `journal.jsonl` records, in order:
+  - a header: the plan, the backups, and the run's `retired_at` in epoch ms;
+  - per step, an intent with its before-image, then a result;
+  - a verification per agent;
+  - a finish, with the fingerprints restore mode compares.
+
+  A resume reuses the recorded before-image and `retired_at`, so a step that stopped halfway finishes the same way.
+  An apply resumes the latest unfinished run, after re-checking the preconditions. Each record is synced (the
+  file, and the folder when the journal is created) before the step it allows runs. A last record cut short by a
+  crash is discarded on open and cut off the file, and an append onto a file that doesn't end in a newline starts
+  a new line first, so a torn write never merges with the next record.
+- **Steps.**
+  - S1 rewrites the record's raw JSON under `with_record_locked` (`LockedRecord::replace_raw`, the one write that
+    may change a non-empty slug). The former slug is stored lowercased, with the run's `retired_at`.
+  - S2 creates `db_agent_former_slugs` where an older version lacks it.
+  - S3 and S4 also clear any key row left under the new name, so the next spawn mints fresh keys instead of
+    inheriting one. Their undo restores the old name's rows from the backup copy of the same database, and drops
+    rows minted under the new name since.
+  - S4 deletes the old name's `wan.db` key and publication rows. The account directory's record stays: no client
+    call removes one, and the report says so.
+  - S6 rewrites cron jobs (`store.db`), open or claimed queue items (`identity-store.db`) and trust grants (each
+    `objects.db`).
+  - S7 rewrites `AGENTMUX_AGENT_ID`, `MUXBUS_AGENT_ID`, `AGENTMUX_AGENT_SLUG` and the git name and email in the
+    agent's panes and every layout snapshot. A pane is matched by its `agentId`, or without one by the old id
+    itself; another agent's is never touched.
+  - S7 **retargets** the workspace `.mcp.json` instead of deleting it. The agentmux entry signs as the new id with
+    the old keys dropped, the user's other servers stay, and the spawn's realignment writes the new keys. A deleted
+    file would leave a respawn, which doesn't regenerate it, without AgentMux's tools.
+  - S8 deletes only registrations whose srv is gone; the preconditions guarantee there are no others.
+- **Verify.** Re-reads K1, K2, K5, K9, K12, K13 and the key tables. Then it resolves the old and the new name
+  through srv's own resolver (`Store::former_slug_owner`, `agent_ids_for_slug_folded`) on each `objects.db`. A
+  version too old for that query is checked by its rows only.
+- **Both ways back refuse first** while an agent the run touched runs anywhere on the host, under its old id or
+  its new one (a relaunch takes the new one), or while an AgentMux too old for former slugs runs. Nothing is
+  written, the journal included.
+- **Rollback, journal mode.** Undoes every recorded intent, newest first, and is resumable.
+  - A file still holding what its step wrote gets the backup's bytes back. One edited since is reverted field by
+    field (S1) or left as it is and reported (`.mcp.json`).
+  - Database undos put back the recorded fields. S7 also puts back each row's version, when nothing else has written
+    the row.
+- **Rollback, restore mode.** Needs a finished run, and refuses when any backed-up file's bytes or modification time
+  changed since the finish. It puts those files back from the backup, runs the database undos journal mode runs
+  (S2–S4, S6 and S7's rows), and moves S8's folders back. It never copies a database back whole: other panes write
+  to the same databases during and after the run, and a whole copy would silently drop those writes (Codex P1 on
+  #5342). The database backups stay in the run's folder, for S3's and S4's undos and for recovery by hand.
+- **Resume.** A run interrupted after S1's intent but before its write holds no reservation, so the resume checks the
+  target again under the allocation lock until S1 is done; taken by then, the run stops for a rollback (Codex P1 on
+  #5342).
+- **Taken targets** include another agent's current display, instance and branch-label routes, and its former
+  display names (#5355), across every `objects.db` and every shared definition.
+- **Surfaces.**
+  - Settings › Agents, a new section, holds the card: the plan's line, "Update them", the list with "Show where the
+    old ids are stored", what blocks it, the report with the PR searches, and "Undo the update".
+  - The plan names the latest run until it is rolled back (`last_run`): a run that stopped partway shows "Finish the
+    update" (an apply, which resumes it), and "Undo the update" works on the latest run after Settings is reopened.
+  - A running pane is stopped only after a confirmation, and the plan is read again before the run.
+  - The startup notice stays until it is closed or acted on. Either turns `agent:outdatedidsnotice` off, and it
+    doesn't ask again.
+- **Phase 3.** `retired_at` is the run's start: the same for every agent of a run, and kept on a resume.
 
 ### Phase 3, contract (after the grace period; one small PR or a timer)
 

@@ -161,6 +161,7 @@ import type { CommandMcpUpsertData } from "@/types/rpc/CommandMcpUpsertData";
 import type { CommandMemoryDeliveryClaimFallbackData } from "@/types/rpc/CommandMemoryDeliveryClaimFallbackData";
 import type { CommandMemoryDeliveryComposeData } from "@/types/rpc/CommandMemoryDeliveryComposeData";
 import type { CommandMemoryLaunchCostData } from "@/types/rpc/CommandMemoryLaunchCostData";
+import type { CommandMigrateForkSlugsData } from "@/types/rpc/CommandMigrateForkSlugsData";
 import type { CommandNativeMemoryAdoptionListData } from "@/types/rpc/CommandNativeMemoryAdoptionListData";
 import type { CommandNativeMemoryClaimsData } from "@/types/rpc/CommandNativeMemoryClaimsData";
 import type { CommandNativeMemoryDiffData } from "@/types/rpc/CommandNativeMemoryDiffData";
@@ -333,6 +334,7 @@ import type { McpServerReach } from "@/types/rpc/McpServerReach";
 import type { McpUnbindResult } from "@/types/rpc/McpUnbindResult";
 import type { MemoryDeliveryClaimFallbackResult } from "@/types/rpc/MemoryDeliveryClaimFallbackResult";
 import type { MemoryDeliveryComposeResult } from "@/types/rpc/MemoryDeliveryComposeResult";
+import type { MigrateForkSlugsResult } from "@/types/rpc/MigrateForkSlugsResult";
 import type { MoveScratchFileReq } from "@/types/rpc/MoveScratchFileReq";
 import type { MoveScratchFileResult } from "@/types/rpc/MoveScratchFileResult";
 import type { MuxBusCloudConfigResp } from "@/types/rpc/MuxBusCloudConfigResp";
@@ -1789,6 +1791,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<OtherBuildLayoutsResult> {
     return client.rpcCall("layout.otherBuilds", data, opts);
+  },
+  // command "agents.migrateForkSlugs"
+  AgentsMigrateForkSlugsCommand(
+    client: RpcClient,
+    data: CommandMigrateForkSlugsData,
+    opts?: RpcOpts
+  ): Promise<MigrateForkSlugsResult> {
+    return client.rpcCall("agents.migrateForkSlugs", data, { timeout: 120000, ...opts });
   },
   // command "layout.restoreOtherBuild"
   RestoreOtherBuildLayoutCommand(
