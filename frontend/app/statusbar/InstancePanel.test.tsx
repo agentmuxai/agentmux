@@ -179,9 +179,9 @@ describe("InstancePanel closed windows", () => {
         await flush();
         fireEvent.click(screen.getByText("Scratch"));
         expect(reopen).toHaveBeenCalledWith("ws-2");
-        fireEvent.click(screen.getByTitle("Reopen"));
+        fireEvent.click(screen.getByRole("button", { name: "Reopen" }));
         expect(reopen).toHaveBeenCalledTimes(2);
-        expect(screen.queryByTitle("Remove from workspace")).toBeNull();
+        expect(screen.queryByRole("button", { name: "Remove from workspace" })).toBeNull();
     });
 
     it("removes a closed window from its right-click menu, without reopening it", async () => {
@@ -202,7 +202,7 @@ describe("InstancePanel closed windows", () => {
             { label: "window-2", windowId: "win2" },
         ]);
         renderPanel();
-        const slots = screen.getAllByTitle("Remove from workspace");
+        const slots = screen.getAllByRole("button", { name: "Remove from workspace" });
         expect(slots).toHaveLength(2);
         fireEvent.click(slots[1]);
         expect(removeOpen).toHaveBeenCalledWith({ windowId: "win2", label: "window-2" });
@@ -212,7 +212,7 @@ describe("InstancePanel closed windows", () => {
         closedList.current = [closedWindow("ws-2", "Scratch", at)];
         renderPanel();
         await flush();
-        const slot = screen.getByTitle("The last window; use New Workspace to start over");
+        const slot = screen.getByRole("button", { name: "The last window; use New Workspace to start over" });
         expect(slot).toBeDisabled();
         fireEvent.click(slot);
         expect(removeOpen).not.toHaveBeenCalled();

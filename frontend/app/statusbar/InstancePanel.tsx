@@ -44,7 +44,7 @@ import {
     resolveFloatingPaneName,
     resolveWindowName,
 } from "@/util/window-title";
-import { Button } from "@/app/element/ui";
+import { Button, IconButton } from "@/app/element/ui";
 import {
     closedAtLabel,
     LAST_WINDOW_TITLE,
@@ -682,11 +682,11 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                         currentOpacity={currentOpacity}
                                     />
                                 </Show>
-                                <button
-                                    type="button"
+                                <IconButton
+                                    icon="trash-can"
+                                    density="compact"
                                     class="instance-panel-row-action"
-                                    title={onlyOpenWindow() ? LAST_WINDOW_TITLE : "Remove from workspace"}
-                                    aria-label={onlyOpenWindow() ? LAST_WINDOW_TITLE : "Remove from workspace"}
+                                    label={onlyOpenWindow() ? LAST_WINDOW_TITLE : "Remove from workspace"}
                                     disabled={onlyOpenWindow()}
                                     onClick={(e) => {
                                         e.stopPropagation();
@@ -694,9 +694,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                     }}
                                     onDblClick={(e) => e.stopPropagation()}
                                     onKeyDown={(e) => e.stopPropagation()}
-                                >
-                                    <i class="fa-solid fa-trash-can" aria-hidden="true" />
-                                </button>
+                                />
                             </div>
                             </>
                         );
@@ -730,19 +728,17 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                             <span class="instance-panel-window-dot">◌</span>
                             <span class="instance-panel-window-name">{w.name.trim() || "Window"}</span>
                             <span class="instance-panel-window-closed-at">{closedAtLabel(w.closed_at_ms)}</span>
-                            <button
-                                type="button"
+                            <IconButton
+                                icon="rotate-left"
+                                density="compact"
                                 class="instance-panel-row-action"
-                                title="Reopen"
-                                aria-label="Reopen"
+                                label="Reopen"
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     reopen(w);
                                 }}
                                 onKeyDown={(e) => e.stopPropagation()}
-                            >
-                                <i class="fa-solid fa-rotate-left" aria-hidden="true" />
-                            </button>
+                            />
                         </div>
                     )}
                 </For>
