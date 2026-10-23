@@ -412,6 +412,8 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
     // it had (session_windows.rs): the main one, and each reopened beside it.
     // They are forgotten only once written.
     super::session_windows::restored_window_opened(store, &ws_id);
+    // A closed window reopening (`TakeClosedWindow`) is open now.
+    super::session_closed::forget(store, &ws_id);
     let restored_meta = super::session_windows::restored_window_meta(store, &ws_id);
     let name_events = match (!restored_meta.is_empty()).then_some(restored_meta) {
         None => Vec::new(),

@@ -383,10 +383,11 @@ pub(crate) fn handle_list_closed_windows(state: &AppState, _call: &WebCallType) 
 }
 
 /// `window.TakeClosedWindow(workspaceId)`: reopen a closed window. Waits for
-/// its agents to finish stopping, drops it from the list and returns where it
-/// was (`{workspaceid, x, y, width, height}`) for the host to open it there;
-/// its name and appearance wait for that window (`CreateWindow`). Errors when
-/// it isn't a closed window any more.
+/// its agents to finish stopping and returns where it was (`{workspaceid, x,
+/// y, width, height}`) for the host to open it there; its name and appearance
+/// wait for that window (`CreateWindow`). It stays listed until that window
+/// registers, so a window that fails to open can be reopened again and is
+/// still saved (#5359). Errors when it isn't a closed window any more.
 pub(crate) async fn handle_take_closed_window(state: &AppState, call: &WebCallType) -> WebReturnType {
     let ws_id: String = match service::get_arg(&call.args, 0) {
         Ok(v) => v,
@@ -398,7 +399,7 @@ pub(crate) async fn handle_take_closed_window(state: &AppState, call: &WebCallTy
         forget(store, &ws_id);
         return WebReturnType::error("that window is open");
     }
-    let Some(entry) = forget(store, &ws_id) else {
+    let Some(entry) = entries(store).into_iter().find(|e| workspace_of(e) == Some(ws_id.as_str())) else {
         return WebReturnType::error("that window isn't among the closed windows any more");
     };
     if store.get::<Workspace>(&ws_id).ok().flatten().is_none() {

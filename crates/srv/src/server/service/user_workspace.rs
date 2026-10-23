@@ -632,6 +632,14 @@ pub(crate) async fn restore_at_launch(state: &AppState) -> Result<Option<Restore
 /// the window a note to say so.
 pub(crate) fn after_clean_load(store: &Store, loaded: &Value, from: LoadedFrom) {
     if let Some(id) = current_id(store) {
+        // A quit's record holds the open windows only: keep the closed ones
+        // the restore listed with it, so `previous` recovers them too (#5359).
+        let has_closed = super::session_windows::windows_of(loaded).iter().any(super::session_closed::is_closed);
+        let loaded = if has_closed || super::session_closed::closed_entries(store).is_empty() {
+            loaded.clone()
+        } else {
+            super::session_closed::with_closed(store, loaded.clone())
+        };
         if let Err(e) = store.user_workspace_set_previous(&id, &loaded.to_string()) {
             tracing::warn!(error = %e, "user_workspace: couldn't keep the loaded copy");
         }

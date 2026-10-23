@@ -241,6 +241,14 @@ async fn a_cold_start_keeps_closed_windows_closed() {
     assert_eq!(closed_ids(&state), vec![other.workspaceid.clone()], "still listed");
     assert_eq!(block_ids(&state, &other.workspaceid), other_blocks, "as it was");
     assert_eq!(state.mstore.get_all::<Workspace>().unwrap().len(), 2, "no rebuilt copies");
+    // The clean load's backup holds the closed window too, though the record
+    // that won was the last close's, which holds the open ones only (#5359).
+    let id = user_workspace::current_id(&state.mstore).unwrap();
+    let previous: Value = serde_json::from_str(&state.mstore.user_workspace_get(&id).unwrap().unwrap().previous.unwrap()).unwrap();
+    assert!(
+        windows_of(&previous).iter().any(|w| w["workspaceid"] == json!(other.workspaceid) && w["state"] == json!("closed")),
+        "{previous}"
+    );
 }
 
 #[tokio::test]
@@ -284,15 +292,22 @@ async fn reopening_a_closed_window_brings_back_the_same_panes() {
     let taken = rpc(&state, "TakeClosedWindow", vec![json!(other.workspaceid)]).await;
     assert!(taken.success, "{:?}", taken.error);
     assert_eq!(taken.data.unwrap()["workspaceid"], json!(other.workspaceid));
-    assert!(closed_ids(&state).is_empty());
+    // Listed, and saved, until its window registers: one that fails to open
+    // can be taken again (#5359).
+    assert_eq!(closed_ids(&state), [other.workspaceid.clone()]);
+    user_workspace::save_now(&state.mstore);
+    assert!(record_states(&state).contains(&(other.workspaceid.clone(), "closed".to_string())));
     let again = rpc(&state, "TakeClosedWindow", vec![json!(other.workspaceid)]).await;
-    assert!(!again.success, "handed out once");
+    assert!(again.success, "{:?}", again.error);
 
     // Its window reopens onto its contents and gets its name back.
     let ret = rpc(&state, "CreateWindow", vec![Value::Null, json!(other.workspaceid)]).await;
     let reopened: Window = serde_json::from_value(ret.data.unwrap()).unwrap();
     assert_eq!(reopened.meta.get("window:displayname"), Some(&json!("Ops")));
     assert_eq!(block_ids(&state, &other.workspaceid), before);
+    assert!(closed_ids(&state).is_empty(), "open now");
+    let late = rpc(&state, "TakeClosedWindow", vec![json!(other.workspaceid)]).await;
+    assert!(!late.success, "not closed any more");
 }
 
 #[tokio::test]
