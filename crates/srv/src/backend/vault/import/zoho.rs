@@ -52,7 +52,9 @@ pub(super) fn read(text: &str) -> Result<Imported, ReadError> {
         }
         let (mut username, mut password) = (String::new(), String::new());
         let mut kept: Vec<String> = Vec::new();
-        for (k, v) in pairs(c(&["secretdata"])).into_iter().chain(pairs(c(&["customdata"]))) {
+        // The raw cells: trimming them would take the spaces off the end of a password.
+        let raw = |names: &[&str]| t.col(names).and_then(|i| row.get(i)).unwrap_or("");
+        for (k, v) in pairs(raw(&["secretdata"])).into_iter().chain(pairs(raw(&["customdata"]))) {
             let lower = k.to_ascii_lowercase();
             if lower == "secrettype" {
                 continue;
