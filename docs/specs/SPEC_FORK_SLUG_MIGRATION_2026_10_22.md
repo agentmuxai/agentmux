@@ -265,6 +265,9 @@ As built (`crates/srv/src/backend/slug_migration/`):
   srv now writes `<data>/srv-features.json` (pid, version, features) at startup beside `srv.lock`. An instance counts
   as new enough when the stamp's pid is the lock's live pid and it lists `former-slugs-v1`. A live srv in the
   registry with no such stamp counts as too old, as does every build before this one.
+  A lock's pid counts as a running srv only if that process is an `agentmux-srv` binary (the launcher's
+  `stale_srv.rs` rule) started no later than the lock was written. A stale lock whose pid another program now
+  has (chrome.exe, conhost.exe on the operator's home) is not an older AgentMux running (#1270).
 - **Lock.** `shared/locks/slug-migration.lock`, an OS file lock held for the whole run or rollback.
 - **The target, again, before S1.** The plan comes before the backup, and another channel may create an agent
   with a planned id meanwhile. So before an agent's first write the run takes the host-wide slug allocation lock
