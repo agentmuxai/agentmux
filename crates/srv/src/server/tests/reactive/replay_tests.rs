@@ -18,11 +18,11 @@ fn signed(source: &str, target: &str, msgid: &str) -> InjectionRequest {
 fn a_signed_message_counts_once_and_fails_the_second_time() {
     let mut seen = Seen::default();
     let mut first = signed("agentx", "agenty", "m-1");
-    assert!(seen.reserve(&mut first, 1_000).is_some());
+    assert!(seen.reserve(&mut first, 1_000).unwrap().first);
     assert_eq!(first.sig_verified, Some(true));
 
     let mut again = signed("AgentX", "AgentY", "m-1");
-    assert!(seen.reserve(&mut again, 1_100).is_none());
+    assert!(!seen.reserve(&mut again, 1_100).unwrap().first);
     assert_eq!(again.sig_verified, Some(false));
 }
 
@@ -32,9 +32,8 @@ fn two_copies_arriving_together_cannot_both_pass() {
     let mut seen = Seen::default();
     let mut first = signed("agentx", "agenty", "m-1");
     let mut second = signed("agentx", "agenty", "m-1");
-    let reserved = seen.reserve(&mut first, 1_000);
-    assert!(reserved.is_some());
-    assert!(seen.reserve(&mut second, 1_000).is_none());
+    assert!(seen.reserve(&mut first, 1_000).unwrap().first);
+    assert!(!seen.reserve(&mut second, 1_000).unwrap().first);
     assert_eq!(second.sig_verified, Some(false));
 }
 
@@ -45,8 +44,44 @@ fn a_released_reservation_lets_the_message_through_again() {
     let key = seen.reserve(&mut forwarded, 1_000).unwrap();
     seen.release(&key);
     let mut back = signed("agentx", "agenty", "m-1");
-    assert!(seen.reserve(&mut back, 1_001).is_some());
+    assert!(seen.reserve(&mut back, 1_001).unwrap().first);
     assert_eq!(back.sig_verified, Some(true));
+}
+
+#[test]
+fn a_later_copy_delivered_keeps_the_entry_when_the_first_fails() {
+    // The first copy is still on a slow path when a second is delivered here
+    // (unverified); the first then fails. A third copy still fails.
+    let mut seen = Seen::default();
+    let first = seen.reserve(&mut signed("agentx", "agenty", "m-1"), 1_000).unwrap();
+    let second = seen.reserve(&mut signed("agentx", "agenty", "m-1"), 1_001).unwrap();
+    seen.taken(&second);
+    seen.release(&first);
+    let mut third = signed("agentx", "agenty", "m-1");
+    assert!(!seen.reserve(&mut third, 1_002).unwrap().first);
+    assert_eq!(third.sig_verified, Some(false));
+}
+
+#[test]
+fn only_the_first_copy_releases_the_entry() {
+    let mut seen = Seen::default();
+    let _first = seen.reserve(&mut signed("agentx", "agenty", "m-1"), 1_000).unwrap();
+    let second = seen.reserve(&mut signed("agentx", "agenty", "m-1"), 1_001).unwrap();
+    seen.release(&second);
+    let mut third = signed("agentx", "agenty", "m-1");
+    seen.reserve(&mut third, 1_002);
+    assert_eq!(third.sig_verified, Some(false));
+}
+
+#[test]
+fn a_taken_first_copy_is_never_released() {
+    let mut seen = Seen::default();
+    let first = seen.reserve(&mut signed("agentx", "agenty", "m-1"), 1_000).unwrap();
+    seen.taken(&first);
+    seen.release(&first);
+    let mut again = signed("agentx", "agenty", "m-1");
+    seen.reserve(&mut again, 1_001);
+    assert_eq!(again.sig_verified, Some(false));
 }
 
 #[test]
@@ -69,7 +104,7 @@ fn another_message_id_sender_or_target_is_a_different_message() {
     let mut seen = Seen::default();
     seen.reserve(&mut signed("agentx", "agenty", "m-1"), 1_000);
     for mut other in [signed("agentx", "agenty", "m-2"), signed("korp", "agenty", "m-1"), signed("agentx", "korp", "m-1")] {
-        assert!(seen.reserve(&mut other, 1_001).is_some());
+        assert!(seen.reserve(&mut other, 1_001).unwrap().first);
         assert_eq!(other.sig_verified, Some(true));
     }
 }
@@ -91,7 +126,7 @@ fn an_entry_ends_after_the_window() {
     let mut seen = Seen::default();
     seen.reserve(&mut signed("agentx", "agenty", "m-1"), 1_000);
     let mut later = signed("agentx", "agenty", "m-1");
-    assert!(seen.reserve(&mut later, 1_000 + WINDOW_SECS + 1).is_some());
+    assert!(seen.reserve(&mut later, 1_000 + WINDOW_SECS + 1).unwrap().first);
     assert_eq!(later.sig_verified, Some(true));
 }
 
@@ -103,5 +138,5 @@ fn the_memory_stays_bounded() {
     }
     assert!(seen.entries.len() <= MAX_ENTRIES);
     let mut newest = signed("agentx", "agenty", &format!("m-{}", MAX_ENTRIES + 9));
-    assert!(seen.reserve(&mut newest, 1_000 + MAX_ENTRIES as i64 + 9).is_none());
+    assert!(!seen.reserve(&mut newest, 1_000 + MAX_ENTRIES as i64 + 9).unwrap().first);
 }

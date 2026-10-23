@@ -7,10 +7,10 @@
 //! Used by `deliver()` and by the files path (`jekt_files::receive`). The
 //! check and the reservation are one step under one lock, so two copies
 //! arriving together can't both pass. A message counts once it is delivered
-//! to a local agent or held here for one; when this instance doesn't take it
-//! (it forwards it, or delivery fails), the reservation is dropped, so a
-//! forward that comes back here is still delivered once. Entries live longer than any
-//! signature's freshness window.
+//! to a local agent or held here for one, by whichever copy; when no copy is
+//! taken (it is forwarded, or delivery fails), the reservation is dropped, so
+//! a forward that comes back here is still delivered once. Entries live
+//! longer than any signature's freshness window.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -25,9 +25,22 @@ const MAX_ENTRIES: usize = 20_000;
 
 type Key = (String, String, String);
 
+struct Entry {
+    until: i64,
+    /// A copy of the message was delivered or held here: the entry stays.
+    taken: bool,
+}
+
+/// What [`Seen::reserve`] hands out for a signed message: its key, and whether
+/// this copy made the reservation (the first) or found it (a later copy).
+pub(super) struct Claim {
+    key: Key,
+    first: bool,
+}
+
 #[derive(Default)]
 pub(super) struct Seen {
-    entries: HashMap<Key, i64>,
+    entries: HashMap<Key, Entry>,
 }
 
 impl Seen {
@@ -42,37 +55,48 @@ impl Seen {
     }
 
     /// Check and reserve in one step. A signed message already seen here has
-    /// every verified verdict turned into a failure and reserves nothing; a
-    /// signed message not seen yet is reserved and its key returned.
-    pub(super) fn reserve(&mut self, req: &mut InjectionRequest, now: i64) -> Option<Key> {
+    /// every verified verdict turned into a failure; a signed message not seen
+    /// yet is reserved. Either way the claim lets a delivered copy keep the
+    /// entry, so the first copy failing later can't free it for a third.
+    pub(super) fn reserve(&mut self, req: &mut InjectionRequest, now: i64) -> Option<Claim> {
         if !Self::signed(req) {
             return None;
         }
         let key = Self::key(req)?;
-        if self.entries.get(&key).is_some_and(|until| *until > now) {
+        if self.entries.get(&key).is_some_and(|e| e.until > now) {
             for verdict in [&mut req.sig_verified, &mut req.lan_verified, &mut req.channel_verified] {
                 if *verdict == Some(true) {
                     *verdict = Some(false);
                 }
             }
             tracing::warn!(source = %key.0, target = %key.1, msgid = %key.2, "signed jekt already delivered here; counted as failed");
-            return None;
+            return Some(Claim { key, first: false });
         }
         if self.entries.len() >= MAX_ENTRIES {
-            self.entries.retain(|_, until| *until > now);
+            self.entries.retain(|_, e| e.until > now);
             if self.entries.len() >= MAX_ENTRIES {
-                if let Some(oldest) = self.entries.iter().min_by_key(|(_, until)| **until).map(|(k, _)| k.clone()) {
+                if let Some(oldest) = self.entries.iter().min_by_key(|(_, e)| e.until).map(|(k, _)| k.clone()) {
                     self.entries.remove(&oldest);
                 }
             }
         }
-        self.entries.insert(key.clone(), now + WINDOW_SECS);
-        Some(key)
+        self.entries.insert(key.clone(), Entry { until: now + WINDOW_SECS, taken: false });
+        Some(Claim { key, first: true })
     }
 
-    /// Drop a reservation for a message this instance didn't deliver.
-    pub(super) fn release(&mut self, key: &Key) {
-        self.entries.remove(key);
+    /// A copy of the message was delivered or held here: keep its entry.
+    pub(super) fn taken(&mut self, claim: &Claim) {
+        if let Some(entry) = self.entries.get_mut(&claim.key) {
+            entry.taken = true;
+        }
+    }
+
+    /// The copy that made the reservation wasn't taken here: drop the entry,
+    /// unless another copy was.
+    pub(super) fn release(&mut self, claim: &Claim) {
+        if claim.first && self.entries.get(&claim.key).is_some_and(|e| !e.taken) {
+            self.entries.remove(&claim.key);
+        }
     }
 }
 
@@ -81,23 +105,27 @@ fn seen() -> &'static Mutex<Seen> {
     SEEN.get_or_init(Default::default)
 }
 
-/// A reservation in this process's memory, dropped unless
+/// A claim in this process's memory, released on drop unless
 /// [`Reservation::delivered`] is called.
-pub(in crate::server) struct Reservation(Option<Key>);
+pub(in crate::server) struct Reservation(Option<Claim>);
 
 impl Reservation {
     /// The message reached a local agent, or is held here for one: keep it
     /// counted.
     pub(in crate::server) fn delivered(&mut self) {
-        self.0 = None;
+        if let Some(claim) = self.0.take() {
+            if let Ok(mut seen) = seen().lock() {
+                seen.taken(&claim);
+            }
+        }
     }
 }
 
 impl Drop for Reservation {
     fn drop(&mut self) {
-        if let Some(key) = self.0.take() {
+        if let Some(claim) = self.0.take() {
             if let Ok(mut seen) = seen().lock() {
-                seen.release(&key);
+                seen.release(&claim);
             }
         }
     }
