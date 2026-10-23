@@ -49,9 +49,17 @@ fn agents(candidates: &[ForkSlugCandidate]) -> Vec<Agent> {
 /// apply resumes.
 fn unfinished(home: &Home) -> Result<Option<Journal>, String> {
     for path in journals(&home.backups()) {
-        let j = Journal::open(&path)?;
+        // A journal whose header a crash tore holds no run to resume, and
+        // must not block new ones (#5342).
+        let j = match Journal::read(&path) {
+            Ok(j) => j,
+            Err(e) => {
+                tracing::warn!(journal = %path.display(), error = %e, "fork slug migration: skipped a journal it can't read");
+                continue;
+            }
+        };
         if j.finished().is_none() && !j.rolled_back() {
-            return Ok(Some(j));
+            return Journal::open(&path).map(Some);
         }
     }
     Ok(None)

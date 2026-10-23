@@ -41,6 +41,9 @@ pub(super) fn s2_before(ctx: &Ctx, a: &Agent) -> Result<Value, String> {
     let mut out = Vec::new();
     for db in ctx.objects_dbs() {
         let conn = open_ro(&db)?;
+        if !super::home::has_agent_slugs(&conn) {
+            continue;
+        }
         let row: Option<Option<String>> =
             conn.query_row("SELECT slug FROM db_agents WHERE id = ?1", [&a.uid], |r| r.get(0)).optional().map_err(err)?;
         let Some(slug) = row else { continue };

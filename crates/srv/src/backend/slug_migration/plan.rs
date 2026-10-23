@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-use super::home::{fold, has_column, open_ro, place, table_exists, Home, Install};
+use super::home::{fold, has_agent_slugs, has_column, open_ro, place, table_exists, Home, Install};
 use crate::backend::rpc_types::{ForkSlugBlocker, ForkSlugBlockerKind, ForkSlugCandidate, ForkSlugPlan, ForkSlugSkipped};
 use agentmux_common::slug::{agent_route_name, definition_slug, fork_slug, is_agent_id};
 use rusqlite::OptionalExtension;
@@ -209,18 +209,25 @@ pub(super) fn holder_of(
             let db = version.objects_db();
             let failed = |e: rusqlite::Error| format!("{} can't be read: {e}", db.display());
             let conn = open_ro(&db)?;
-            let row: Option<String> = conn
-                .query_row("SELECT id FROM db_agents WHERE slug = ?1 COLLATE NOCASE AND id != ?2 LIMIT 1", [&t, uid], |r| r.get(0))
-                .optional()
-                .map_err(failed)?;
+            let slugs = has_agent_slugs(&conn);
+            let row: Option<String> = if slugs {
+                conn.query_row("SELECT id FROM db_agents WHERE slug = ?1 COLLATE NOCASE AND id != ?2 LIMIT 1", [&t, uid], |r| r.get(0))
+                    .optional()
+                    .map_err(failed)?
+            } else {
+                None
+            };
             if let Some(id) = row {
                 return Ok(Some(format!("agent {id} has it in {}", place(install, version))));
             }
-            let routed: Option<(String, String)> = {
-                // A fork's branch label routes to it too; an older db_agents has no such column.
-                let label = if has_column(&conn, "db_agents", "branch_label") { "COALESCE(branch_label, '')" } else { "''" };
+            let routed: Option<(String, String)> = if !slugs {
+                None
+            } else {
+                // An older db_agents may lack a route column: it routes nothing.
+                let col = |c: &str| if has_column(&conn, "db_agents", c) { format!("COALESCE({c}, '')") } else { "''".to_string() };
+                let (name, instance, label) = (col("name"), col("instance_name"), col("branch_label"));
                 let mut stmt = conn
-                    .prepare(&format!("SELECT id, name, COALESCE(instance_name, ''), {label} FROM db_agents WHERE id != ?1"))
+                    .prepare(&format!("SELECT id, {name}, {instance}, {label} FROM db_agents WHERE id != ?1"))
                     .map_err(failed)?;
                 let rows = stmt
                     .query_map([uid], |r| {
@@ -350,8 +357,9 @@ pub(super) fn plan_with(home: &Home, quick: bool, check_lock: bool) -> Result<Fo
 /// The latest run, unless it was rolled back. A journal that can't be read
 /// counts as no run: the plan still shows, and an apply reports the error.
 fn last_run(home: &Home) -> Option<crate::backend::rpc_types::ForkSlugLastRun> {
-    let path = super::journal::journals(&home.backups()).into_iter().next()?;
-    let journal = super::journal::Journal::open(&path).ok()?;
+    let (path, journal) = super::journal::journals(&home.backups())
+        .into_iter()
+        .find_map(|p| super::journal::Journal::read(&p).ok().map(|j| (p, j)))?;
     if journal.rolled_back() {
         return None;
     }
@@ -378,7 +386,9 @@ pub(super) fn unreadable_stores(home: &Home, installs: &[Install]) -> Vec<String
     };
     for install in installs {
         for version in &install.versions {
-            probe(&version.objects_db(), "SELECT id, slug, name, COALESCE(instance_name, '') FROM db_agents LIMIT 1", &mut out);
+            // An objects.db older than `db_agents.slug` holds no slug: only a
+            // database that can't be read at all blocks (#5342).
+            probe(&version.objects_db(), "SELECT name FROM sqlite_master LIMIT 1", &mut out);
         }
         if let Some(wan) = install.wan_db() {
             probe(&wan, "SELECT name FROM sqlite_master LIMIT 1", &mut out);

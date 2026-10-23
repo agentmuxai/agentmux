@@ -66,10 +66,13 @@ fn verify_objects_db(db: &Path, defs: &Arc<crate::registry::DefinitionStore>, a:
     let place = db.display().to_string();
     {
         let conn = open_ro(db)?;
-        let row: Option<Option<String>> = conn
-            .query_row("SELECT slug FROM db_agents WHERE id = ?1", [&a.uid], |r| r.get(0))
-            .optional()
-            .map_err(|e| e.to_string())?;
+        let row: Option<Option<String>> = if super::home::has_agent_slugs(&conn) {
+            conn.query_row("SELECT slug FROM db_agents WHERE id = ?1", [&a.uid], |r| r.get(0))
+                .optional()
+                .map_err(|e| e.to_string())?
+        } else {
+            None
+        };
         if let Some(slug) = &row {
             if slug.as_deref() != Some(a.new.as_str()) {
                 problems.push(format!("{place}: db_agents.slug is {:?}, not {}", slug.as_deref().unwrap_or(""), a.new));

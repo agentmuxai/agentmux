@@ -215,6 +215,12 @@ pub fn table_exists(conn: &Connection, table: &str) -> bool {
         .is_ok()
 }
 
+/// Whether an `objects.db` has agent slugs to read; one older than
+/// `db_agents.slug` (or `db_agents` itself) holds none.
+pub fn has_agent_slugs(conn: &Connection) -> bool {
+    has_column(conn, "db_agents", "slug")
+}
+
 pub fn has_column(conn: &Connection, table: &str, column: &str) -> bool {
     let Ok(mut stmt) = conn.prepare(&format!("PRAGMA table_info({table})")) else { return false };
     let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(1)) else { return false };

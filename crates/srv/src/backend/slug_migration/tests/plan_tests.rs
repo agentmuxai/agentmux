@@ -187,3 +187,22 @@ fn another_agents_display_route_holds_a_target() {
     let plan = super::super::plan(&fx.home, false).unwrap();
     assert!(by_name(&plan.candidates, "Naki #2").refused.as_deref().is_some_and(|r| r.contains("uid-inst")));
 }
+
+/// An objects.db from a version older than `db_agents.slug` holds no slug:
+/// it neither blocks the plan nor fails the run (#5342).
+#[test]
+fn an_objects_db_older_than_agent_slugs_holds_nothing() {
+    let fx = Fx::standard();
+    let old = fx.root().join("channels/stable/versions/0.40.0/data/db");
+    std::fs::create_dir_all(&old).unwrap();
+    rusqlite::Connection::open(old.join("objects.db"))
+        .unwrap()
+        .execute_batch("CREATE TABLE db_agent_definitions (id TEXT PRIMARY KEY, name TEXT);")
+        .unwrap();
+    let plan = super::super::plan(&fx.home, false).unwrap();
+    assert!(plan.blockers.is_empty(), "{:?}", plan.blockers);
+    assert!(plan.candidates.iter().all(|c| c.refused.is_none()), "{:?}", plan.candidates);
+    let report = super::apply(&fx.home).unwrap();
+    assert_eq!(report.failed, None);
+    assert_eq!(report.migrated.len(), 3);
+}

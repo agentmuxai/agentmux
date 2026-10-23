@@ -97,6 +97,17 @@ impl Journal {
     /// a line of its own. A complete record missing only its newline is kept.
     /// Any other line that doesn't parse is an error.
     pub fn open(path: &Path) -> Result<Journal, String> {
+        Self::load(path, true)
+    }
+
+    /// [`Journal::open`] without the repair: a torn last record is left out
+    /// but the file isn't touched, for a reader that doesn't hold the
+    /// migration lock while a run may be appending (the plan).
+    pub fn read(path: &Path) -> Result<Journal, String> {
+        Self::load(path, false)
+    }
+
+    fn load(path: &Path, repair: bool) -> Result<Journal, String> {
         let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
         let mut keep = bytes.len();
         // The last line, and where it starts.
@@ -107,7 +118,7 @@ impl Journal {
             keep = start;
             tracing::warn!(journal = %path.display(), discarded = last.len(), "fork slug migration: discarded a torn last journal record");
         }
-        if keep < bytes.len() {
+        if repair && keep < bytes.len() {
             let f = std::fs::OpenOptions::new().write(true).open(path).map_err(|e| format!("{}: {e}", path.display()))?;
             f.set_len(keep as u64).map_err(|e| format!("{}: {e}", path.display()))?;
             f.sync_all().map_err(|e| format!("{}: {e}", path.display()))?;

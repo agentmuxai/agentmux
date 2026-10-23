@@ -91,3 +91,29 @@ fn a_run_resumes_and_rolls_back_after_a_torn_record() {
     assert!(diff.is_empty(), "{diff:?}");
     assert!(Journal::open(&path).unwrap().rolled_back());
 }
+
+/// The plan reads journals without holding the migration lock, while a run
+/// may be appending: its read leaves a torn tail on disk (#5342).
+#[test]
+fn a_read_leaves_the_file_as_it_is() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = new_journal(dir.path()).path;
+    append_raw(&path, br#"{"t":"done","uid":"u","st"#);
+    let on_disk = std::fs::read(&path).unwrap();
+    let j = Journal::read(&path).unwrap();
+    assert_eq!(j.records.len(), 2, "the torn record is left out");
+    assert_eq!(std::fs::read(&path).unwrap(), on_disk, "and the file is untouched");
+}
+
+/// A journal whose header a crash tore holds no run, and doesn't block a
+/// new one (#5342).
+#[test]
+fn a_journal_with_a_torn_header_doesnt_block_a_new_run() {
+    let fx = Fx::standard();
+    let torn = fx.home.backups().join("slug-migration-99991231T000000.000Z");
+    std::fs::create_dir_all(&torn).unwrap();
+    std::fs::write(torn.join("journal.jsonl"), br#"{"t":"header","version":1,"started_at":1,"ret"#).unwrap();
+    let report = super::apply(&fx.home).unwrap();
+    assert_eq!(report.failed, None);
+    assert_eq!(report.migrated.len(), 3);
+}
