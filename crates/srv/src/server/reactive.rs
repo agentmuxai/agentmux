@@ -421,7 +421,7 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
 mod channel_v2;
 pub(crate) mod former_slug;
 mod lan_v2;
-mod replay;
+pub(super) mod replay;
 
 /// Anti-replay window for cross-channel `channel_sig` —
 /// SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D6: host-tier's tighter

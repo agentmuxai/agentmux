@@ -394,6 +394,7 @@ async fn receive<R: tokio::io::AsyncRead + Unpin>(
     verify_reagent_signature(&mut req, agentmux_common::time::now_secs());
     verify_lan_signature(state, &mut req).await;
     verify_cross_channel_signature(state, &mut req);
+    let replay = replay::reserve(&mut req, agentmux_common::time::now_secs());
     req.route_unsigned_target();
     resolve_transcript_request_tier_fields(&state.mstore, &mut req);
 
@@ -447,6 +448,9 @@ async fn receive<R: tokio::io::AsyncRead + Unpin>(
     prepare(&mut req).await;
     let delivered = req.files_delivery.as_ref().map_or(0, |d| d.delivered);
     let resp = inject_here(state, &req);
+    if resp.success {
+        replay.delivered();
+    }
     if claimed && !resp.success {
         release(&msgid);
     }

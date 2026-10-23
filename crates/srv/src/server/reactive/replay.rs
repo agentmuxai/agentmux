@@ -4,7 +4,8 @@
 //! with `wan_seen_sigs` (`muxbus/wan_verify.rs`). A signature stays fresh for
 //! minutes; within that time it proves its sender for one delivery.
 //!
-//! The check and the reservation are one step under one lock, so two copies
+//! Used by `deliver()` and by the files path (`jekt_files::receive`). The
+//! check and the reservation are one step under one lock, so two copies
 //! arriving together can't both pass. A message counts once it is delivered
 //! to a local agent; when this instance doesn't deliver it (it forwards it,
 //! or delivery fails), the reservation is dropped, so a forward that comes
@@ -82,11 +83,11 @@ fn seen() -> &'static Mutex<Seen> {
 
 /// A reservation in this process's memory, dropped unless
 /// [`Reservation::delivered`] is called.
-pub(super) struct Reservation(Option<Key>);
+pub(in crate::server) struct Reservation(Option<Key>);
 
 impl Reservation {
     /// The message reached a local agent: keep it counted.
-    pub(super) fn delivered(mut self) {
+    pub(in crate::server) fn delivered(mut self) {
         self.0 = None;
     }
 }
@@ -102,7 +103,7 @@ impl Drop for Reservation {
 }
 
 /// [`Seen::reserve`] against this process's memory.
-pub(super) fn reserve(req: &mut InjectionRequest, now: i64) -> Reservation {
+pub(in crate::server) fn reserve(req: &mut InjectionRequest, now: i64) -> Reservation {
     Reservation(seen().lock().ok().and_then(|mut seen| seen.reserve(req, now)))
 }
 
