@@ -30,6 +30,30 @@ fn the_three_real_chains_are_candidates_parent_first() {
     assert!(plan.blockers.is_empty(), "{:?}", plan.blockers);
 }
 
+/// Agents made from a template keep the template's id as their `parent_id`:
+/// they are lineage roots, not forks with a missing parent, so the chains
+/// below them are found (the operator's home, v0.59.40).
+#[test]
+fn template_parents_are_lineage_roots() {
+    let fx = Fx::empty();
+    let data = fx.version("stable", "0.59.1");
+    fx.agent(&data, LOAP, "Loap", "loap", "claude", "", true);
+    fx.agent(&data, LOAP2, "Loap #2", "loap-loap-2", LOAP, "Loap #2", true);
+    fx.agent(&data, LOAP3, "Loap #3", "loap-loap-2-loap-3", LOAP2, "Loap #3", true);
+    fx.agent(&data, NAKI, "Naki", "naki", "claude", "", true);
+    fx.agent(&data, NAKI2, "Naki #2", "naki-naki-2", NAKI, "Naki #2", true);
+    fx.agent(&data, "uid-first", "Solo", "solo", "kimi", "", true);
+    let plan = super::super::plan(&fx.home, false).unwrap();
+    let names: Vec<(&str, &str, &str)> =
+        plan.candidates.iter().map(|c| (c.name.as_str(), c.old_slug.as_str(), c.new_slug.as_str())).collect();
+    assert_eq!(
+        names,
+        vec![("Loap #2", "loap-loap-2", "loap-2"), ("Naki #2", "naki-naki-2", "naki-2"), ("Loap #3", "loap-loap-2-loap-3", "loap-3")]
+    );
+    assert!(plan.candidates.iter().all(|c| c.refused.is_none()), "{:?}", plan.candidates);
+    assert!(plan.skipped.is_empty(), "first-generation agents aren't forks: {:?}", plan.skipped);
+}
+
 /// A collision suffix and a missing parent are listed as left alone; a fork
 /// that already has its clean id isn't listed at all.
 #[test]

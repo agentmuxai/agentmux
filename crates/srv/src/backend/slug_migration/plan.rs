@@ -97,7 +97,10 @@ pub(super) fn find_candidates(defs: &[Def]) -> (Vec<Found>, Vec<ForkSlugSkipped>
     let by_id: BTreeMap<&str, &Def> = defs.iter().map(|d| (d.uid.as_str(), d)).collect();
     let mut found = Vec::new();
     let mut skipped = Vec::new();
-    for def in defs.iter().filter(|d| !d.parent_id.trim().is_empty()) {
+    // Only forks: an agent without a branch label is a lineage root, whatever
+    // its `parent_id` says (one made from a template keeps the template's id
+    // there), as `fork_lineage_root_id` reads it.
+    for def in defs.iter().filter(|d| !d.parent_id.trim().is_empty() && !d.branch_label.trim().is_empty()) {
         let skip = |reason: &str| ForkSlugSkipped {
             uid: def.uid.clone(),
             name: def.name.clone(),
@@ -112,10 +115,6 @@ pub(super) fn find_candidates(defs: &[Def]) -> (Vec<Found>, Vec<ForkSlugSkipped>
             skipped.push(skip("its lineage root is missing"));
             continue;
         };
-        if def.branch_label.trim().is_empty() {
-            skipped.push(skip("it has no branch label"));
-            continue;
-        }
         if root.slug.trim().is_empty() {
             skipped.push(skip("its lineage root has no slug"));
             continue;
@@ -144,13 +143,16 @@ pub(super) fn find_candidates(defs: &[Def]) -> (Vec<Found>, Vec<ForkSlugSkipped>
     (found, skipped)
 }
 
-/// The lineage root of `def` (following `parent_id`) and how many
-/// generations below it `def` is; `None` if a link is missing or loops.
+/// The lineage root of `def` and how many generations below it `def` is:
+/// `parent_id` is followed only while the agent is a fork (it has a branch
+/// label), so the root is the first agent without one, and a template in
+/// its `parent_id` ends the walk there (template.rs `fork_lineage_root_id`).
+/// `None` if a fork's parent is missing or the links loop.
 fn lineage_root<'a>(by_id: &BTreeMap<&str, &'a Def>, def: &'a Def) -> Option<(&'a Def, usize)> {
     let mut seen = HashSet::new();
     let mut cur = def;
     let mut depth = 0;
-    while !cur.parent_id.trim().is_empty() {
+    while !cur.branch_label.trim().is_empty() && !cur.parent_id.trim().is_empty() {
         if !seen.insert(cur.uid.as_str()) {
             return None;
         }
