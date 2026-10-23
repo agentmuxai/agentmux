@@ -754,10 +754,8 @@ pub async fn snapshot_route(
     let rendered = snapshot::render_with_frames(&nodes, &facts, scope, &prefix, &frame_trees);
     // A scoped snapshot adds its references to the full snapshot's table, so
     // those stay usable; but never across a navigation. It reads no frames.
-    match scope {
-        Some(_) => {
-            state.browser_api.ref_tables.merge_at(&req.block_id, Some(epoch), &url, &rendered.refs);
-        }
+    let kept = match scope {
+        Some(_) => state.browser_api.ref_tables.merge_at(&req.block_id, Some(epoch), &url, &rendered.refs),
         None => {
             let mut table = RefTable { url: url.clone(), ..RefTable::default() };
             table.refs.extend(rendered.refs.iter().cloned());
@@ -766,10 +764,14 @@ pub async fn snapshot_route(
                     table.frames.insert(r.clone(), f.clone());
                 }
             }
-            state.browser_api.ref_tables.put_at(&req.block_id, epoch, table);
+            state.browser_api.ref_tables.put_at(&req.block_id, epoch, table)
         }
-    }
+    };
     let _ = cdp.close().await;
+    // The references were not kept, so they would all be unknown to the next click.
+    if !kept {
+        return fail("the page closed while this was being read; take a new snapshot");
+    }
     (
         StatusCode::OK,
         Json(ApiResponse::ok(SnapshotData {
@@ -835,7 +837,9 @@ pub async fn find_route(
     let _ = cdp.close().await;
     let prefix = state.browser_api.ref_tables.next_find_prefix(&req.block_id);
     let found = snapshot::find(&nodes, &facts, q, &prefix);
-    state.browser_api.ref_tables.merge_at(&req.block_id, Some(find_epoch), &url, &found.refs);
+    if !state.browser_api.ref_tables.merge_at(&req.block_id, Some(find_epoch), &url, &found.refs) {
+        return fail("the page closed while this was being read; take a new snapshot");
+    }
     (
         StatusCode::OK,
         Json(ApiResponse::ok(FindData {
