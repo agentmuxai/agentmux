@@ -173,12 +173,11 @@ async function maximize(session, pane) {
     throw new Error("the pane didn't maximize");
 }
 
-/** Opens the hamburger menu's `item` (Memory, Connectors or Settings) in the
- *  current tab, maximized, and returns its pane. */
+/** Opens the widget bar's `item` (Memory, Connectors or Settings, pinned by
+ *  default; the hamburger menu has none of them since #5357) in the current
+ *  tab, maximized, and returns its pane. */
 async function openFromMenu(session, item, marker) {
-    await session.clickSelector(".hamburger-btn");
-    await session.wait(300);
-    await session.clickText(".menu", item);
+    await session.clickText(".action-widgets", item);
     let pane = null;
     for (let i = 0; i < 40 && !pane; i++) {
         await session.wait(250);

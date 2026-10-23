@@ -89,12 +89,10 @@ export const shots = [
     {
         id: "settings-appearance",
         title: "Settings — Appearance",
-        description: "The Settings pane, Appearance tab, reached from the hamburger menu.",
+        description: "The Settings pane, Appearance tab, reached from the widget bar.",
         selector: ".settings-view-container",
         prep: async (session) => {
-            await session.clickSelector(".hamburger-btn");
-            await session.wait(300);
-            await session.clickText(".menu", "Settings");
+            await session.clickText(".action-widgets", "Settings");
             await session.wait(500);
             await session.clickText(null, "Appearance");
         },
