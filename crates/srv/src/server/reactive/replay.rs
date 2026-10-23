@@ -54,6 +54,14 @@ impl Seen {
         [req.sig_verified, req.lan_verified, req.channel_verified].contains(&Some(true))
     }
 
+    /// Carries a signature someone could capture and send again. A caller
+    /// proven by its token alone (`muxsh agent send`) carries none.
+    fn carries_signature(req: &InjectionRequest) -> bool {
+        [&req.jekt_sig, &req.lan_sig, &req.lan_sig_v2, &req.channel_sig, &req.channel_sig_v2]
+            .iter()
+            .any(|sig| sig.as_deref().is_some_and(|s| !s.is_empty()))
+    }
+
     fn fail_verdicts(req: &mut InjectionRequest) {
         for verdict in [&mut req.sig_verified, &mut req.lan_verified, &mut req.channel_verified] {
             if *verdict == Some(true) {
@@ -67,12 +75,16 @@ impl Seen {
     /// yet is reserved. Either way the claim lets a delivered copy keep the
     /// entry, so the first copy failing later can't free it for a third. A
     /// signed message with no message id or sender can't be counted, so it
-    /// fails too: every signer sends both.
+    /// fails too (every signer sends both); one proven by its token alone
+    /// has nothing to replay and is left as it is.
     pub(super) fn reserve(&mut self, req: &mut InjectionRequest, now: i64) -> Option<Claim> {
         if !Self::signed(req) {
             return None;
         }
         let Some(key) = Self::key(req) else {
+            if !Self::carries_signature(req) {
+                return None;
+            }
             Self::fail_verdicts(req);
             tracing::warn!(target = %req.target_agent, "signed jekt without a message id or sender; counted as failed");
             return None;

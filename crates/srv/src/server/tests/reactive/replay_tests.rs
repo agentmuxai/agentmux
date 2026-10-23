@@ -124,11 +124,13 @@ fn a_signed_message_without_an_id_or_sender_fails() {
     // It can't be counted, so each copy would pass again (#5346).
     let mut seen = Seen::default();
     let mut no_id = signed("agentx", "agenty", "");
+    no_id.jekt_sig = Some("sig".to_string());
     no_id.lan_verified = Some(true);
     assert!(seen.reserve(&mut no_id, 1_000).is_none());
     assert_eq!(no_id.sig_verified, Some(false));
     assert_eq!(no_id.lan_verified, Some(false));
     let mut no_source = signed("", "agenty", "m-1");
+    no_source.channel_sig_v2 = Some("sig".to_string());
     seen.reserve(&mut no_source, 1_000);
     assert_eq!(no_source.sig_verified, Some(false));
     assert!(seen.entries.is_empty());
