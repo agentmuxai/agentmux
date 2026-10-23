@@ -421,6 +421,7 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
 mod channel_v2;
 pub(crate) mod former_slug;
 mod lan_v2;
+mod replay;
 
 /// Anti-replay window for cross-channel `channel_sig` —
 /// SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D6: host-tier's tighter
@@ -699,12 +700,10 @@ pub(crate) async fn deliver(
     mut req: InjectionRequest,
 ) -> serde_json::Value {
     req.delivery_tier = Some(resolve_delivery_tier(auth_via, req.delivery_tier.as_deref()));
-    // Identity M4c-2d: the sender's UID, for the audit entry only — never
-    // forwarded (`#[serde(skip)]`).
+    // Identity M4c-2d: the sender's UID, for the audit only (`#[serde(skip)]`).
     req.audit_source_uid = caller_uid.to_string();
     super::actor::source_from_token(&state.mstore, caller_uid, &mut req);
-    // Identity M4d-6: the signed source_uid is the sender's to set; this srv
-    // only counts one that isn't the UID its token named.
+    // Identity M4d-6: count a signed source_uid other than the token's UID.
     if !caller_uid.is_empty() && req.source_uid.as_deref().is_some_and(|s| s != caller_uid) {
         crate::backend::agent_resolve::record_uid_fallback("m4.source_uid_mismatch");
     }
@@ -713,12 +712,12 @@ pub(crate) async fn deliver(
     verify_reagent_signature(&mut req, now_unix_secs());
     verify_lan_signature(&state, &mut req).await;
     verify_cross_channel_signature(&state, &mut req);
+    replay::check(&mut req, now_unix_secs());
     req.route_unsigned_target();
     resolve_transcript_request_tier_fields(&state.mstore, &mut req);
 
-    // Files sent with it (SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §3.3, §6):
-    // refused outright unless the msgid binds them, then prepared for the
-    // agent here, since the handler does no I/O.
+    // Files (SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §3.3, §6): refused unless the
+    // msgid binds them, then prepared here, since the handler does no I/O.
     if let Err(error) = super::jekt_files::check(&req) {
         return super::jekt_files::refused(&req, error);
     }
@@ -727,6 +726,7 @@ pub(crate) async fn deliver(
     // 1. Try local ReactiveHandler first (fast path — same instance).
     let resp = super::jekt_files::inject_here(state, &req);
     if resp.success {
+        replay::record(&req, now_unix_secs());
         echo_local_delivery(state, &req, &resp);
         return super::jekt_files::with_count(serde_json::to_value(&resp).unwrap_or_default(), &req);
     }

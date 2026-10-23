@@ -4006,7 +4006,7 @@ fn test_marker_ordinary_names_are_unchanged() {
     for name in ["github-consumer", "agent_2", "camper", "discord"] {
         let m = wrap_from("hello", name);
         assert!(tag_line(&m).starts_with(&format!("[JEKT:FROM={name} ")), "got: {m}");
-        assert!(m.contains(&format!("Reply: bus:inject to {name}\n")), "got: {m}");
+        assert!(m.contains(&format!("Reply: Message send to {name}\n")), "got: {m}");
     }
 }
 
@@ -4017,7 +4017,7 @@ fn test_marker_non_agent_sender_cannot_read_as_a_real_agent() {
     let m = wrap_from("hello", "agent 2");
     assert!(tag_line(&m).starts_with("[JEKT:FROM=?agent_2 "), "got: {m}");
     assert!(m.contains("From: ?agent_2 |"), "got: {m}");
-    assert!(!m.contains("bus:inject to"), "got: {m}");
+    assert!(!m.contains("Message send to"), "got: {m}");
 }
 
 #[test]

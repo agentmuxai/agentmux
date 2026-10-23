@@ -499,7 +499,7 @@ pub fn wrap_jekt_message_with_files(
     };
 
     let reply_hint = if from_is_agent {
-        format!("Reply: bus:inject to {from}")
+        format!("Reply: Message send to {from}")
     } else {
         "Reply: not available — the sender is not an agent id".to_string()
     };
