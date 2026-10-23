@@ -69,6 +69,7 @@ import { installFocusFollowsSelection } from "@/app/store/focusManager";
 import { installPaneHistory } from "@/app/store/pane-history";
 import { installSideButtons } from "@/app/store/side-buttons";
 import { reopenRestoredWindows } from "@/app/init/restored-windows";
+import { restoresLastWindow } from "@/app/init/last-window";
 import { installWorkspaceFlushOnBlur, surfaceWorkspaceRestoreNotice } from "@/app/store/user-workspace";
 
 // Deferred — assigned inside initApp() after window.api is ready.
@@ -344,12 +345,21 @@ async function initHostNewWindow(seedView?: string | null, seedMeta?: Record<str
             (id) => withTimeout(retryTransient(() => WorkspaceService.GetWorkspace(id)), RPC_TIMEOUT, "GetWorkspace")
         );
         if (reattached) getApi().sendLog(`[initCefNewWindow] reload: re-attached to window ${reattached.oid}`);
+        // No window is open (AgentMux stayed in the tray after its last
+        // window closed): bring that window back, not the default panes.
+        const restoreLast = restoresLastWindow({
+            windowIds: clientData.windowids,
+            workspaceId: tearOffWsId,
+            view: seedView ?? new URLSearchParams(window.location.search).get("initialView"),
+            reattached: !!reattached,
+        });
+        if (restoreLast) getApi().sendLog("[initCefNewWindow] no window open: restoring the workspace's last window");
         const newWindow = reattached ?? await withTimeout(
             WindowService.CreateWindow(
                 null,
                 tearOffWsId,
                 currentWindowLabel(),
-                false,
+                restoreLast,
                 seedView ?? undefined,
                 seedMeta ?? undefined,
                 // A reload keeps this window's own theme and opacity.
@@ -360,6 +370,8 @@ async function initHostNewWindow(seedView?: string | null, seedMeta?: Record<str
         );
         tlog("CreateWindow", t);
         rememberWindowId(newWindow.oid);
+        // Any other window the restore brought back opens beside this one.
+        if (restoreLast) void reopenRestoredWindows();
 
         // Register label→window_id with the host NOW, not at the end of
         // initMux (which also registers — idempotently — after render):

@@ -195,6 +195,44 @@ async fn closing_the_last_window_leaves_it_open_for_the_next_launch() {
     assert_eq!(state.mstore.get_all::<Workspace>().unwrap().len(), 1, "nothing left over");
 }
 
+/// "Keep running in the tray" (`app:runinbackground`): the last window closes
+/// and srv keeps running with no window. A save meanwhile keeps that window
+/// open in the record, and the window the tray opens next (a new window, not
+/// "main", which asks to restore because none is open) shows the same
+/// contents, not the default panes. A window closed before it stays closed.
+#[tokio::test]
+async fn the_window_the_tray_opens_after_the_last_close_is_that_window() {
+    let state = fresh_state().await;
+    let main = open_window(&state, "main", false).await;
+    add_user_pane(&state, &main.workspaceid, "term").await;
+    let other = open_window(&state, "window-2", false).await;
+    add_user_pane(&state, &other.workspaceid, "term").await;
+    let before = block_ids(&state, &main.workspaceid);
+    close(&state, &other.oid).await;
+    close(&state, &main.oid).await;
+
+    assert_eq!(user_workspace::save_now(&state.mstore), user_workspace::Saved::NoWindow);
+    assert_eq!(
+        record_states(&state),
+        vec![(main.workspaceid.clone(), "open".to_string()), (other.workspaceid.clone(), "closed".to_string())],
+        "no window is open, and the record still says which is"
+    );
+
+    let reopened = open_window(&state, "window-3", true).await;
+
+    assert_eq!(reopened.workspaceid, main.workspaceid, "the same contents, not the default panes");
+    assert_eq!(block_ids(&state, &main.workspaceid), before);
+    assert_eq!(closed_ids(&state), vec![other.workspaceid.clone()], "the closed one stays closed");
+    let others = rpc(&state, "TakeRestoredWindows", vec![]).await.data.unwrap();
+    assert!(others.as_array().unwrap().is_empty());
+    assert_eq!(state.mstore.get_all::<Workspace>().unwrap().len(), 2, "nothing made beside them");
+    user_workspace::save_now(&state.mstore);
+    assert_eq!(
+        record_states(&state),
+        vec![(main.workspaceid.clone(), "open".to_string()), (other.workspaceid.clone(), "closed".to_string())]
+    );
+}
+
 #[tokio::test]
 async fn quit_and_relaunch_reopens_every_window_and_lists_none_closed() {
     let state = fresh_state().await;
