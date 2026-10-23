@@ -46,6 +46,14 @@ export const WINDOW_SETTINGS = {
         section: "window",
         keywords: ["close tab prompt", "confirm close", "tab:confirmclose"],
     },
+    confirmCloseWorking: {
+        id: "window.confirm_close_working",
+        label: "Warn before closing a window with working agents",
+        description:
+            "Ask before closing a window while an agent in it is mid-turn. Closing stops its agents; the window stays in the workspace, to reopen from the version panel",
+        section: "window",
+        keywords: ["close window prompt", "running agents", "quit warning", "window:confirmcloseworking"],
+    },
 } satisfies Record<string, SettingsIndexEntry>;
 
 // ── Section: Window & Panes ───────────────────────────────────────────────────
@@ -110,6 +118,17 @@ export function WindowPanesSection(): JSX.Element {
                     <ToggleControl
                         checked={(s()["tab:confirmclose"] ?? false) as boolean}
                         onChange={(v) => set("tab:confirmclose", v)}
+                    />
+                }
+            />
+            <SettingRow
+                id={WINDOW_SETTINGS.confirmCloseWorking.id}
+                label={WINDOW_SETTINGS.confirmCloseWorking.label}
+                description={WINDOW_SETTINGS.confirmCloseWorking.description}
+                control={
+                    <ToggleControl
+                        checked={s()["window:confirmcloseworking"] !== false}
+                        onChange={(v) => set("window:confirmcloseworking", v)}
                     />
                 }
             />

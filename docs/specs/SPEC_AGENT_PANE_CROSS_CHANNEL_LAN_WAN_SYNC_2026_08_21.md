@@ -3,6 +3,7 @@
 **Date:** 2026-08-21
 **Status:** Draft — architecture proposal + research, no code landed, opinion piece
 on feasibility and sequencing as requested
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
 **Scope:** WebSocket pub/sub (`agentmux-srv/src/server/websocket.rs`), cross-channel
 discovery/forwarding (`backend/reactive/registry.rs`), jekt trust model
 (`backend/reactive/{handler.rs,sanitize.rs}`, `agentmux_common::jekt_sign`)
@@ -129,28 +130,12 @@ enable multi-viewer mirroring; `GetAgentTranscript`'s poll-the-transcript-file
 pattern is a reasonable *fallback* sync mechanism (§5.4) but is explicitly the
 weaker alternative to a live socket, not evidence one exists.
 
-**The jekt trust model — this is the part any mirror-input path must sit inside,
-verbatim, not a simplified version of it.** Summarized from this repo's own
-`CLAUDE.md` (authoritative, code-anchored):
-
-| `DELIVERY` | Proof mechanism | Outcomes |
-|---|---|---|
-| `host` | Per-agent HMAC-SHA256 (`AGENTMUX_JEKT_KEY`, injected at spawn, never shared) | `host-verified` (proven), `unverified` (active forgery — always `sensitive`), `self-declared` (no key exists — not "trusted," just unauthenticated-by-construction) |
-| `lan` | Per-agent Ed25519 keypair, pubkey fetched from the LAN peer hosting that agent (`SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md`) | `lan-verified` (proven, own distinct label), a *found-but-failed* signature is always forced `sensitive` (forged-identity case), unsigned/key-not-found defaults to `network-claimed` (no longer auto-sensitive as of 2026-08-15) |
-| `wan` | Only reagent's own service has a pinned key today; general agent-to-agent WAN signing **does not exist yet** (issue #2586's unbuilt half) | reagent `SIG=verified` ≈ `host-verified`; `SIG=invalid` always forced `sensitive`; any other WAN sender is `network-claimed`, exactly as forgeable as before |
-
-**The load-bearing default:** crossing a network boundary **never proves identity
-by itself** — `TRUST=network-claimed` is the default for LAN/WAN absent one of the
-two narrow cryptographic exceptions above, and clean-content traffic at that trust
-level now settles at the *declared* tier (default `coord`) rather than being
-auto-escalated — but `sensitive`-forcing red flags (an active signature failure,
-a declared-sensitive tier, credential keywords) still apply on top regardless of
-trust level, and `ESCALATE=required` on those cases explicitly **cannot be
-satisfied by another agent's confirmation over the same network** — only a human,
-in-pane. This last rule exists because of a real incident pattern (a spoofed
-request followed by a spoofed "confirmation" over the same channel) that maps
-directly onto the risk a naive pane-mirror-input feature would recreate if it let
-remote keystrokes act with implicit trust.
+**The jekt trust model — any mirror-input path must sit inside it, not a simplified
+version of it:** its current rules (delivery tiers, `TRUST` outcomes, the forced-`sensitive`
+cases and `ESCALATE`) are the jekt protocol specification,
+https://docs.agentmux.ai/internals/jekt-protocol/, and the one that matters most here is that
+`ESCALATE=required` cannot be satisfied by another agent's confirmation over the same channel,
+which a naive pane-mirror-input feature would undo if it let remote keystrokes act with implicit trust.
 
 ## 3. Design goals / non-goals
 
@@ -268,7 +253,7 @@ resolve a peer to a `HostLabel`, not mint or reconcile any name.
   not silent, not automatic discovery-based connection. A LAN mirror-input event
   with a signature that fails verification against a known pairing key is a
   forged-identity case and must be treated with the same unconditional-`sensitive`
-  severity as a failed LAN jekt signature (§2's table) — worse than unpaired, never
+  severity as a failed LAN jekt signature (see the jekt protocol specification) — worse than unpaired, never
   a lesser version of it.
 - **Unpaired/unsigned LAN mirror requests:** default-deny for *write* access
   (input) always; *read-only* mirroring (view but don't type) for an unpaired

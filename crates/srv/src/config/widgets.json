@@ -29,7 +29,7 @@
         }
     },
     "defwidget@browser": {
-        "display:order": 8,
+        "display:order": 6,
         "display:pinned": true,
         "icon": "globe",
         "label": "Browser",
@@ -41,8 +41,8 @@
         }
     },
     "defwidget@editor": {
-        "display:order": 7,
-        "display:pinned": true,
+        "display:order": 11,
+        "display:pinned": false,
         "icon": "file-code",
         "label": "Editor",
         "description": "Open and view any file: code, text, images, video, audio, binary",
@@ -55,7 +55,7 @@
         }
     },
     "defwidget@files": {
-        "display:order": 4,
+        "display:order": 5,
         "display:pinned": true,
         "icon": "folder-open",
         "label": "Hangar",
@@ -67,8 +67,8 @@
         }
     },
     "defwidget@terminal": {
-        "display:order": 6,
-        "display:pinned": true,
+        "display:order": 10,
+        "display:pinned": false,
         "icon": "terminal",
         "label": "Terminal",
         "blockdef": {
@@ -79,8 +79,8 @@
         }
     },
     "defwidget@sysinfo": {
-        "display:order": 10,
-        "display:pinned": true,
+        "display:order": 13,
+        "display:pinned": false,
         "icon": "chart-line",
         "label": "Sysinfo",
         "blockdef": {
@@ -90,7 +90,7 @@
         }
     },
     "defwidget@tower": {
-        "display:order": 16,
+        "display:order": 18,
         "display:pinned": false,
         "icon": "tower-observation",
         "label": "Tower",
@@ -102,7 +102,7 @@
         }
     },
     "defwidget@drone": {
-        "display:order": 12,
+        "display:order": 14,
         "display:pinned": false,
         "icon": "diagram-project",
         "label": "Drone",
@@ -114,7 +114,7 @@
         }
     },
     "defwidget@help": {
-        "display:order": 11,
+        "display:order": 8,
         "display:pinned": true,
         "icon": "circle-question",
         "label": "Help",
@@ -126,8 +126,8 @@
         }
     },
     "defwidget@kanban": {
-        "display:order": 2.5,
-        "display:pinned": true,
+        "display:order": 9,
+        "display:pinned": false,
         "icon": "table-columns",
         "label": "Kanban",
         "description": "What every agent is working on, what waits for them, and what needs you (Warden's Kanban section)",
@@ -139,7 +139,7 @@
         }
     },
     "defwidget@warden": {
-        "display:order": 13,
+        "display:order": 15,
         "display:pinned": false,
         "icon": "shield-halved",
         "label": "Warden",
@@ -151,7 +151,7 @@
         }
     },
     "defwidget@vault": {
-        "display:order": 14,
+        "display:order": 16,
         "display:pinned": false,
         "icon": "lock",
         "label": "Vault",
@@ -164,8 +164,8 @@
         }
     },
     "defwidget@messengers": {
-        "display:order": 9,
-        "display:pinned": true,
+        "display:order": 12,
+        "display:pinned": false,
         "icon": "comments",
         "label": "Messengers",
         "description": "Team chat and messaging apps",
@@ -252,7 +252,7 @@
         }
     },
     "defwidget@toolchain": {
-        "display:order": 15,
+        "display:order": 17,
         "display:pinned": false,
         "icon": "wrench",
         "label": "Toolchain",
@@ -264,7 +264,7 @@
         }
     },
     "defwidget@connectors": {
-        "display:order": 5,
+        "display:order": 4,
         "display:pinned": true,
         "icon": "plug",
         "label": "Connectors",
@@ -288,8 +288,8 @@
         }
     },
     "defwidget@settings": {
-        "display:order": 99,
-        "display:pinned": false,
+        "display:order": 7,
+        "display:pinned": true,
         "icon": "cog",
         "label": "Settings",
         "description": "App settings — appearance, terminal, agent, sounds, and more",

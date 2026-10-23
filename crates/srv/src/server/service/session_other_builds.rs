@@ -122,6 +122,38 @@ fn db_files(roots: &ScanRoots) -> Vec<DbFile> {
     out
 }
 
+/// The channel this process's own database belongs to: the `<ch>` of
+/// `<channels root>/<ch>/versions/<v>/data/db`. `None` for a database
+/// elsewhere (a dev build's, under `dev/`).
+fn own_channel(roots: &ScanRoots) -> Option<String> {
+    let own = roots.own_db_dir.as_deref()?;
+    // db → data → <v> → versions → <ch>
+    let versions = own.parent()?.parent()?.parent()?;
+    if versions.file_name()? != "versions" {
+        return None;
+    }
+    let channel = versions.parent()?;
+    if !same_dir(channel.parent()?, &roots.channels_root) {
+        return None;
+    }
+    Some(channel.file_name()?.to_string_lossy().into_owned())
+}
+
+/// The most recently written database of another version of this process's
+/// own channel: the version a new one follows (`user_workspace`'s upgrade
+/// copy, SPEC_WORKSPACES_2026_10_23.md §4.2). `None` outside a channel.
+pub(crate) fn newest_other_version_db(roots: &ScanRoots) -> Option<PathBuf> {
+    let channel = own_channel(roots)?;
+    db_files(roots)
+        .into_iter()
+        .filter(|f| f.channel == channel)
+        .max_by_key(|f| f.written_ms)
+        .map(|f| {
+            tracing::debug!(version = %f.version, "session_other_builds: newest other version of this channel");
+            f.path
+        })
+}
+
 fn wal_of(db: &Path) -> PathBuf {
     let mut name = db.as_os_str().to_owned();
     name.push("-wal");
@@ -139,12 +171,12 @@ fn immutable_uri(path: &Path) -> String {
     format!("file:{sep}{p}?immutable=1")
 }
 
-/// The session record in the database at `path`, read-only. A database with
-/// nothing in its `-wal` is opened immutable, so not even the reader's
-/// `-wal`/`-shm` files are created; one with WAL content is opened as an
-/// ordinary reader, which reads that content and may add the `-shm` index.
-pub(crate) fn read_record(path: &Path) -> Result<Option<Value>, String> {
-    use rusqlite::{OpenFlags, OptionalExtension};
+/// Another build's database at `path`, read-only. A database with nothing in
+/// its `-wal` is opened immutable, so not even the reader's `-wal`/`-shm`
+/// files are created; one with WAL content is opened as an ordinary reader,
+/// which reads that content and may add the `-shm` index.
+pub(crate) fn open_other_db(path: &Path) -> Result<rusqlite::Connection, String> {
+    use rusqlite::OpenFlags;
     let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
     let conn = if wal_len(&wal_of(path)) == 0 {
         rusqlite::Connection::open_with_flags(immutable_uri(path), flags | OpenFlags::SQLITE_OPEN_URI)
@@ -153,6 +185,13 @@ pub(crate) fn read_record(path: &Path) -> Result<Option<Value>, String> {
     }
     .map_err(|e| format!("open {}: {e}", path.display()))?;
     conn.busy_timeout(BUSY_TIMEOUT).map_err(|e| e.to_string())?;
+    Ok(conn)
+}
+
+/// The session record in the database at `path`, read-only ([`open_other_db`]).
+pub(crate) fn read_record(path: &Path) -> Result<Option<Value>, String> {
+    use rusqlite::OptionalExtension;
+    let conn = open_other_db(path)?;
     let data: Option<Vec<u8>> = conn
         .query_row("SELECT data FROM db_client LIMIT 1", [], |row| row.get(0))
         .optional()

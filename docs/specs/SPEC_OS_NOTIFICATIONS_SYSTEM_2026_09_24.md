@@ -8,7 +8,7 @@
 - [`SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md`](SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md): the tray, background-service mode and autostart. Issue #2977.
 - [`SPEC_SOUND_NOTIFICATIONS_2026_06_05.md`](SPEC_SOUND_NOTIFICATIONS_2026_06_05.md): the in-renderer sound bus. This spec sits beside it and does not replace it.
 - [`SPEC_OS_TASKBAR_AGENT_ACTIVITY_INDICATOR_2026_05_23.md`](SPEC_OS_TASKBAR_AGENT_ACTIVITY_INDICATOR_2026_05_23.md): a draft that was never implemented (taskbar overlay, flash, dock badge). This spec absorbs its "attention" half as Phase 4.
-- `CLAUDE.md` "Jekt security rules". Notification content derived from jekts must follow them (§9).
+- The jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. Notification content derived from jekts must follow its rules (§9).
 
 ## User's request (verbatim)
 

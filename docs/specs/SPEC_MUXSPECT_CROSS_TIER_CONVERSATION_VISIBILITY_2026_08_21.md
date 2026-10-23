@@ -2,10 +2,10 @@
 
 **Date:** 2026-08-21
 **Author:** Camper
-**Status:** active — Phase A implemented. Phase B/C's CLAUDE.md jekt rule change
+**Status:** active — Phase A implemented in #2715. Phase B/C's jekt rule change
 confirmed live 2026-08-22 — see `SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md`
-and `CLAUDE.md`'s jekt security rules section. Phase B's policy
-infrastructure and jekt-rule enforcement are now implemented — see
+and the jekt protocol specification (https://docs.agentmux.ai/internals/jekt-protocol/).
+Phase B's policy infrastructure and jekt-rule enforcement are implemented in #2764 — see
 `SPEC_MUXSPECT_PHASE_B_POLICY_AND_TIER_ENFORCEMENT_2026_08_22.md`
 (`conversation_visibility` setting, `db_conversation_trust_grants`, the
 `transcript_request`/`transcript_response` wire payload, and the actual
@@ -22,6 +22,9 @@ gap. Phase C (WAN) tier enforcement now also implemented — see
 entirely). Phase C's own WAN-specific differences (settings-UI guidance,
 no-cache `ask` approval, bench-tuned `max_lines`) are all N/A until the
 same deferred auto-responder/settings-UI pieces above are built. — #2765
+Still true on 2026-10-22: no auto-responder exists, so under `private` nothing auto-denies a
+request.
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
 **Motivated by:** direct request — agents need a fast way to see what every
 other agent (this host, other channels on this host, LAN, connected WAN) is
 currently saying/doing, without manual filesystem archaeology or a

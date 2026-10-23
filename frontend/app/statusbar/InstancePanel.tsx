@@ -10,6 +10,13 @@
  *
  * Spec: SPEC_VERSION_INSTANCE_PANEL_2026_04_25.md
  *
+ * The window list is the open workspace's (a named set of windows,
+ * SPEC_WORKSPACES_2026_10_23.md §5): headed by its name, renamed by
+ * double-click or F2; its open windows, then its closed ones greyed. Each row
+ * has one action: an open window's removes it from the workspace (disabled
+ * for the only one), a closed window's reopens it; right-click a closed one
+ * to remove it.
+ *
  * V1 scope: about-info + windows + actions. LAN peers stay in
  * HostPopover (they already have a richer hover-rich detail view).
  * Per-window token totals deferred until token-usage is per-window.
@@ -23,19 +30,29 @@ import { launcherEventsActive } from "@/util/launcher-events";
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { formatUtcTimestamp } from "@/util/format-time";
-import { ObjectService } from "@/store/services";
+import { ObjectService, WindowService, type ClosedWindow } from "@/store/services";
+import { ContextMenuModel } from "@/app/store/contextmenu";
+import { removeClosedWindow, reopenClosedWindow, requestRemoveWindow } from "@/app/window/window-close";
 import { getObjectValue, makeORef } from "@/store/mos";
 import { liveWindowOpacity, setWindowOpacityFor } from "@/app/store/window-opacity-store";
 import { opacityFor, openNewWindowFromHere } from "@/app/store/window-appearance";
 import { settingsAtom } from "@/app/store/config-signals";
-import { createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js";
 import {
     DISPLAY_NAME_MAX_LEN,
     DISPLAY_NAME_META_KEY,
     resolveFloatingPaneName,
     resolveWindowName,
 } from "@/util/window-title";
-import { Button } from "@/app/element/ui";
+import { Button, IconButton } from "@/app/element/ui";
+import {
+    closedAtLabel,
+    LAST_WINDOW_TITLE,
+    renameWorkspace,
+    WORKSPACE_NAME_MAX_LEN,
+    workspaceHeading,
+    workspaceName,
+} from "@/app/store/user-workspace";
 
 interface InstancePanelProps {
     /** The status bar's version chip. */
@@ -92,10 +109,53 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
             .catch(() => {});
     }
 
+    // The workspace's closed windows (srv `session_closed.rs`), asked again
+    // whenever a window opens or closes, and after a reopen or delete.
+    const [closed, setClosed] = createSignal<ClosedWindow[]>([]);
+    const refreshClosed = () =>
+        WindowService.ListClosedWindows()
+            .then((list) => setClosed(list ?? []))
+            .catch((e) => console.warn("[InstancePanel] couldn't list the closed windows:", e));
+    createEffect(on(() => entries().length, () => void refreshClosed()));
+    const onlyOpenWindow = () => entries().length <= 1;
+    const reopen = (w: ClosedWindow) => {
+        void reopenClosedWindow(w.workspaceid).then(refreshClosed);
+    };
+    const removeClosed = (w: ClosedWindow) => {
+        void removeClosedWindow(w.workspaceid).then(refreshClosed);
+    };
+    // Asks first when an agent in it is mid-turn (window-close.ts).
+    const removeOpen = (entry: WindowEntry) => {
+        const windowId = resolveEntryWindowId(entry);
+        if (!windowId || onlyOpenWindow()) return;
+        void requestRemoveWindow({ windowId, label: entry.label }).then(refreshClosed);
+    };
+
     // Rename mode state — keyed by host label so the row's identity
     // survives entries() reordering. Single rename at a time.
     const [editingLabel, setEditingLabel] = createSignal<string | null>(null);
     const [editValue, setEditValue] = createSignal("");
+
+    // The workspace heading's rename: one at a time, like a window's.
+    const currentWorkspaceName = () => workspaceName(atoms.client());
+    const [editingWorkspace, setEditingWorkspace] = createSignal(false);
+    const [workspaceEditValue, setWorkspaceEditValue] = createSignal("");
+    const enterWorkspaceRename = () => {
+        setWorkspaceEditValue(currentWorkspaceName());
+        setEditingWorkspace(true);
+    };
+    const cancelWorkspaceRename = () => {
+        setEditingWorkspace(false);
+        setWorkspaceEditValue("");
+    };
+    // Enter or blur. Blank is no change (as for a window's name).
+    const commitWorkspaceRename = () => {
+        if (!editingWorkspace()) return;
+        const value = workspaceEditValue();
+        cancelWorkspaceRename();
+        if (value.trim() === currentWorkspaceName()) return;
+        renameWorkspace(value).catch((e) => console.error("[InstancePanel] workspace rename failed:", e));
+    };
 
     // Defer single-click focus past the dblclick threshold so
     // double-clicking a row enters rename mode WITHOUT first
@@ -340,6 +400,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     //      (codex PR #569 round-2 P1)
     onCleanup(() => {
         cancelPendingFocus();
+        commitWorkspaceRename();
         const editing = editingLabel();
         if (!editing) return;
         const entry = entries().find((e) => e.label === editing);
@@ -458,8 +519,58 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
             </div>
             <div class="instance-panel-divider" />
             <div class="instance-panel-section">
-                <div class="instance-panel-section-title">
-                    This process — {entries().length} window{entries().length !== 1 ? "s" : ""}
+                <div
+                    class="instance-panel-section-title instance-panel-workspace-title"
+                    classList={{ "instance-panel-workspace-title-editing": editingWorkspace() }}
+                    title="The open workspace — double-click to rename (F2)"
+                    role="button"
+                    tabIndex={0}
+                    onDblClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (!editingWorkspace()) enterWorkspaceRename();
+                    }}
+                    onKeyDown={(e) => {
+                        if (editingWorkspace()) return; // the input owns its keys
+                        if (e.key === "F2") {
+                            e.preventDefault();
+                            enterWorkspaceRename();
+                        }
+                    }}
+                >
+                    <Show
+                        when={editingWorkspace()}
+                        fallback={workspaceHeading(currentWorkspaceName(), entries().length + closed().length)}
+                    >
+                        <input
+                            ref={(el) => {
+                                if (el) {
+                                    queueMicrotask(() => {
+                                        el.focus();
+                                        el.select();
+                                    });
+                                }
+                            }}
+                            class="instance-panel-window-name-input instance-panel-workspace-name-input"
+                            aria-label="Workspace name"
+                            value={workspaceEditValue()}
+                            maxLength={WORKSPACE_NAME_MAX_LEN}
+                            onInput={(e) => setWorkspaceEditValue(e.currentTarget.value)}
+                            onKeyDown={(e) => {
+                                e.stopPropagation();
+                                if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    commitWorkspaceRename();
+                                } else if (e.key === "Escape") {
+                                    e.preventDefault();
+                                    cancelWorkspaceRename();
+                                }
+                            }}
+                            onBlur={() => commitWorkspaceRename()}
+                            onClick={(e) => e.stopPropagation()}
+                            onDblClick={(e) => e.stopPropagation()}
+                        />
+                    </Show>
                 </div>
                 <For each={entries()}>
                     {(entry, i) => {
@@ -571,10 +682,65 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                                         currentOpacity={currentOpacity}
                                     />
                                 </Show>
+                                <IconButton
+                                    icon="trash-can"
+                                    density="compact"
+                                    class="instance-panel-row-action"
+                                    label={onlyOpenWindow() ? LAST_WINDOW_TITLE : "Remove from workspace"}
+                                    disabled={onlyOpenWindow()}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        removeOpen(entry);
+                                    }}
+                                    onDblClick={(e) => e.stopPropagation()}
+                                    onKeyDown={(e) => e.stopPropagation()}
+                                />
                             </div>
                             </>
                         );
                     }}
+                </For>
+                {/* Closed windows, greyed: a click reopens one where it was;
+                    right-click removes it without reopening it. */}
+                <For each={closed()}>
+                    {(w) => (
+                        <div
+                            class="instance-panel-window-row instance-panel-window-row-closed"
+                            title="Closed: click to reopen, right-click to remove"
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => reopen(w)}
+                            onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                    e.preventDefault();
+                                    reopen(w);
+                                }
+                            }}
+                            onContextMenu={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                ContextMenuModel.showContextMenu(
+                                    [{ label: "Remove from workspace", click: () => removeClosed(w) }],
+                                    e
+                                );
+                            }}
+                        >
+                            <span class="instance-panel-window-dot">◌</span>
+                            <span class="instance-panel-window-name">{w.name.trim() || "Window"}</span>
+                            <span class="instance-panel-window-closed-at">{closedAtLabel(w.closed_at_ms)}</span>
+                            <IconButton
+                                icon="rotate-left"
+                                density="compact"
+                                class="instance-panel-row-action"
+                                label="Reopen"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    reopen(w);
+                                }}
+                                onKeyDown={(e) => e.stopPropagation()}
+                            />
+                        </div>
+                    )}
                 </For>
             </div>
             <div class="instance-panel-divider" />

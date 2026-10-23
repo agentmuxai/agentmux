@@ -8,6 +8,7 @@
 
 use serde::Deserialize;
 
+use super::bitwarden_encrypted;
 use super::{Imported, Incoming, ReadError, Source, MAX_ITEMS};
 
 /// A list that an export may leave out or write as `null`.
@@ -101,10 +102,28 @@ fn expiry(month: &Option<String>, year: &Option<String>) -> Option<String> {
     Some(format!("{m:02}/{y}"))
 }
 
-pub fn read(text: &str) -> Result<Imported, ReadError> {
+/// Reads the export, opening it with `passphrase` first when it is a password-protected one.
+pub fn read(text: &str, passphrase: Option<&str>) -> Result<Imported, ReadError> {
     let export: Export = serde_json::from_str(text).map_err(|_| ReadError::from("this looks like JSON but isn't a Bitwarden export"))?;
     if export.encrypted {
-        return Err("this Bitwarden export is password-protected, which AgentMux can't open yet: export it again as an unencrypted .json".into());
+        let protected: bitwarden_encrypted::Protected = serde_json::from_str(text).map_err(|_| ReadError::from("this looks like a Bitwarden export but isn't one"))?;
+        if !protected.password_protected {
+            return Err("this Bitwarden export is encrypted with the account's own key, which only Bitwarden can open: export it again unencrypted, or password-protected".into());
+        }
+        // The export inside is the ordinary one: read the same way, and wiped when done. A file that
+        // was encrypted is not a plaintext file lying around, so the pane doesn't offer to delete it.
+        let inside = bitwarden_encrypted::open(&protected, passphrase.unwrap_or(""))?;
+        let imported = read_plain(&inside).map(|i| Imported { plaintext: false, ..i });
+        drop(inside);
+        return imported;
+    }
+    read_plain(text)
+}
+
+fn read_plain(text: &str) -> Result<Imported, ReadError> {
+    let export: Export = serde_json::from_str(text).map_err(|_| ReadError::from("this looks like JSON but isn't a Bitwarden export"))?;
+    if export.encrypted {
+        return Err("this Bitwarden export is encrypted inside an encrypted export, which isn't a file Bitwarden writes".into());
     }
     if export.items.is_empty() && export.folders.is_empty() {
         return Err("this JSON has no items: it isn't a Bitwarden export".into());

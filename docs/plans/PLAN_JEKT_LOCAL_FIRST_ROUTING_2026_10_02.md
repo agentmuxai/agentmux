@@ -1,7 +1,8 @@
 # PLAN: jekt routing that works without the relay — local first, the relay as an addition
 
 **Date:** 2026-10-02
-**Status:** active — R-1 and R-2 built 2026-10-02 (§6 option C): the relay's holder query is a merged cloud-side change, the client and routing are in the agentmux PR that adds this plan. R-3 built 2026-10-02 as a hint rather than a refusal (§7.2): a merged cloud-side change and the agentmux PR that follows it. R-4 and R-5 are proposed.
+**Status:** active — R-1 and R-2 built 2026-10-02 (§6 option C): the relay's holder query is a merged cloud-side change, the client and routing shipped in #4236. R-3 built 2026-10-02 as a hint rather than a refusal (§7.2): a merged cloud-side change and #4249. R-4 and R-5 are proposed.
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
 **Author:** AgentY, at the owner's request
 **Amends:** [`docs/specs/SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md`](../specs/SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md) Phase 0 item 2 (G2), and adds the relay-side work that item depends on.
 **Related:** `SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md` (the lease), `SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md` (the 24 h hold), `SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md`, `SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md`, PRs #4122, #4211, #4212.

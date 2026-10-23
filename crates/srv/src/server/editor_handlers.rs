@@ -276,8 +276,8 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // jekts rendering TRUST=self-declared, since the frontend's
                 // `agent-config-builder.ts` only ever sets AGENTMUX_AGENT_ID.
                 // Best-effort — a missing/unresolvable agent slug or a
-                // key-ensure failure just means this materialization goes
-                // out unsigned, same as any other spawn.
+                // key-ensure failure just means this config carries no key; the
+                // MCP still fetches its keys from srv (`/agentmux/agents/self/keys`).
                 if let Some(pos) = cmd.files.iter().position(|f| f.path == ".mcp.json") {
                     // The definition's slug, over one the launch computed (P0.3).
                     let agent_slug = crate::backend::mcp_json_identity::launch_agent_id(

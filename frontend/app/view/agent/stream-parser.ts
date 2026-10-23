@@ -935,9 +935,8 @@ export class ClaudeCodeStreamParser {
 
         // Direction mirrors agentMessageToNode: incoming when this agent is
         // the declared recipient, outgoing when it's the declared sender
-        // (spec §3.2's outgoing echo — not yet emitted by any producer today,
-        // but handled here so JektBubble is ready when it is). Falls back to
-        // incoming, the only case any current producer emits.
+        // (spec §3.2's outgoing echo, emitted by srv's `server/jekt_echo.rs`).
+        // Falls back to incoming.
         const lowerAgentId = this.currentAgentId?.toLowerCase();
         const direction: "incoming" | "outgoing" =
             lowerAgentId && fields.FROM.toLowerCase() === lowerAgentId && fields.TO.toLowerCase() !== lowerAgentId

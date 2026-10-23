@@ -233,13 +233,14 @@ async fn a_window_a_quit_left_behind_is_forgotten_at_startup_and_restored() {
     let client = state.mstore.get_all::<Client>().unwrap().into_iter().next().unwrap();
     assert!(client.windowids.is_empty());
     assert!(state.mstore.get::<Window>(&left_id).unwrap().is_none());
-    assert!(state.mstore.get::<Workspace>(&left_ws).unwrap().is_none(), "its workspace isn't left behind");
-    // Both windows come back from the record.
+    assert!(state.mstore.get::<Workspace>(&left_ws).unwrap().is_some(), "its workspace stays: the record names it");
+    // Both windows come back from the record, the left one onto its own workspace.
     let (main_ws, _) = restore_last_session(&state).await.unwrap().unwrap();
     assert_eq!(views(&state, &main_ws), ["agent"]);
     let take = WebCallType { service: "window".into(), method: "TakeRestoredWindows".into(), args: vec![], uicontext: None };
     let others = handle_take_restored_windows(&state, &take).data.unwrap();
-    assert_eq!(views(&state, others[0]["workspaceid"].as_str().unwrap()), ["memory"]);
+    assert_eq!(others[0]["workspaceid"], json!(left_ws));
+    assert_eq!(views(&state, &left_ws), ["memory"]);
 }
 
 #[tokio::test]

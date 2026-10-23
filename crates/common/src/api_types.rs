@@ -325,11 +325,11 @@ pub struct PtyShellStopResponse {
     pub released: bool,
 }
 
-// ── Inject (SendMessage + Loop) ───────────────────────────────────────────────
+// ── Inject (Message + Schedule) ───────────────────────────────────────────────
 
 /// `POST /agentmux/reactive/inject` — deliver a message to an agent.
 ///
-/// Used by the `SendMessage` and `Loop` MCP tools.
+/// Used by the `Message` and `Schedule` MCP tools.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct InjectRequest {
     pub target_agent: String,

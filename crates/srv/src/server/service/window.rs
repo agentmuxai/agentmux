@@ -38,6 +38,14 @@ pub(super) async fn handle_window_service(state: &AppState, call: &WebCallType) 
         // The windows a restore rebuilt beside the main one, for the main
         // window to open (`session_windows`).
         "TakeRestoredWindows" => super::session_windows::handle_take_restored_windows(state, call),
+        // Closed windows of the open workspace (`session_closed`), for the
+        // status bar panel: list, reopen and delete one, delete an open one,
+        // and the agents a close would stop.
+        "ListClosedWindows" => super::session_closed::handle_list_closed_windows(state, call),
+        "TakeClosedWindow" => super::session_closed::handle_take_closed_window(state, call).await,
+        "DeleteClosedWindow" => super::session_closed::handle_delete_closed_window(state, call).await,
+        "DiscardWorkspaceOnClose" => super::session_closed::handle_discard_workspace_on_close(state, call),
+        "WindowAgents" => super::session_closed::handle_window_agents(state, call),
         "SwitchWorkspace" => handle_switch_workspace(state, call).await,
         "SetWindowPosAndSize" => handle_set_window_pos_and_size(state, call).await,
         "SetWindowOpacity" => handle_set_window_opacity(state, call).await,

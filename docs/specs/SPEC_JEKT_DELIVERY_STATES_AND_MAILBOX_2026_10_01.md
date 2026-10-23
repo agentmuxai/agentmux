@@ -2,7 +2,8 @@
 
 **Author:** AgentY (narko), at operator request
 **Created:** 2026-10-01
-**Status:** active — Phase 0 item 1 (pull on subscribe, connect and a timer) shipped in PR #4122 (v0.59.3); items 3 (`SendMessage` reports the state, the receiver's condition where known, and the id) and 4 (a spawn-gate refusal is held for sign-in) are built (see §6); everything else is proposed. Designs what `SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md` §3 recorded as "Phase 2" and fixes the gaps found in the 2026-10-01 incident (§1).
+**Status:** active — Phase 0 shipped: pull on subscribe, connect and a timer in #4122 (v0.59.3); the sender is told the state, the receiver's condition where known, and the id in #4211; a spawn-gate refusal is held for sign-in in #4212; an absent local agent's message is held here before the relay is tried in #4236 (see §6). The state machine, the inbox and receipts (the later phases) are not built. Designs what `SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md` §3 recorded as "Phase 2" and fixes the gaps found in the 2026-10-01 incident (§1).
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
 **Related (read these first):**
 - `SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md` — current policy: a live agent gets the jekt at once; only a starting, restarting or stopping process queues. Implemented.
 - `SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md` — the 24 h hold (`db_jekt_held`) for an absent agent. Phase 1 shipped (#3632); its Phase 2 is this spec.
