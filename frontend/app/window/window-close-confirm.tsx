@@ -15,7 +15,7 @@ interface ConfirmText {
 
 /** Closing a window with working agents. "Don't ask again" turns the warning off. */
 export function WindowCloseConfirm(
-    props: ConfirmText & { onConfirm: (dontAskAgain: boolean) => void; onCancel: () => void } & ModalCloseProps
+    props: ConfirmText & { onConfirm: (dontAskAgain: boolean) => void } & ModalCloseProps
 ): JSX.Element {
     const [dontAskAgain, setDontAskAgain] = createSignal(false);
     return (
@@ -28,10 +28,7 @@ export function WindowCloseConfirm(
                 props.close();
                 props.onConfirm(dontAskAgain());
             }}
-            onCancel={() => {
-                props.close();
-                props.onCancel();
-            }}
+            onCancel={props.close}
         >
             <label style={{ display: "flex", "align-items": "center", gap: "var(--space-2)", cursor: "pointer", "font-size": "var(--text-base)" }}>
                 <input
@@ -47,7 +44,7 @@ export function WindowCloseConfirm(
 
 /** Close workspace: the one close that deletes. */
 export function CloseWorkspaceConfirm(
-    props: ConfirmText & { onConfirm: () => Promise<void>; onCancel: () => void } & ModalCloseProps
+    props: ConfirmText & { onConfirm: () => Promise<void> } & ModalCloseProps
 ): JSX.Element {
     return (
         <ConfirmModal
@@ -60,10 +57,7 @@ export function CloseWorkspaceConfirm(
                 await props.onConfirm();
                 props.close();
             }}
-            onCancel={() => {
-                props.close();
-                props.onCancel();
-            }}
+            onCancel={props.close}
         />
     );
 }

@@ -16,6 +16,7 @@ const h = vi.hoisted(() => ({
     modals: [] as { component: unknown; props: any }[],
     pushNotification: vi.fn(),
     discardFails: false,
+    open: [] as unknown[],
 }));
 
 vi.mock("@/app/store/services", () => ({
@@ -62,6 +63,7 @@ vi.mock("@/app/store/modalmodel", () => ({
         h.modals.push({ component, props });
         return { close: () => {} };
     },
+    modalsModel: { isModalOpen: (component: unknown) => h.open.includes(component) },
 }));
 vi.mock("@/app/notification/usenotification", () => ({ setNotificationAction: () => {} }));
 vi.mock("./window-close-confirm", () => ({ WindowCloseConfirm: "WindowCloseConfirm", CloseWorkspaceConfirm: "CloseWorkspaceConfirm" }));
@@ -88,6 +90,7 @@ beforeEach(() => {
     h.settings = {};
     h.modals = [];
     h.discardFails = false;
+    h.open = [];
     h.pushNotification.mockReset();
 });
 
@@ -123,13 +126,19 @@ describe("the close warning", () => {
         await requestCloseWindow();
         expect(h.calls).toEqual(["agents:win-1"]);
         expect(h.modals).toHaveLength(1);
-        h.modals[0].props.onCancel();
-        expect(h.calls).toEqual(["agents:win-1"]);
-
-        await requestCloseWindow();
-        h.modals[1].props.onConfirm(false);
+        expect(h.modals[0].component).toBe("WindowCloseConfirm");
+        h.modals[0].props.onConfirm(false);
         await tick();
-        expect(h.calls.at(-1)).toBe("close");
+        expect(h.calls).toEqual(["agents:win-1", "close"]);
+    });
+
+    it("asks only once while a confirmation is open", async () => {
+        h.agents = [agent("Korp", true)];
+        h.open = ["WindowCloseConfirm"];
+        await requestCloseWindow();
+        await requestCloseWorkspace();
+        expect(h.modals).toHaveLength(0);
+        expect(h.calls).toEqual([]);
     });
 
     it("Don't ask again turns the warning off", async () => {
@@ -153,7 +162,7 @@ describe("Close workspace", () => {
     it("deletes nothing until confirmed", async () => {
         await requestCloseWorkspace();
         expect(h.modals).toHaveLength(1);
-        h.modals[0].props.onCancel();
+        expect(h.modals[0].component).toBe("CloseWorkspaceConfirm");
         expect(h.calls).toEqual(["agents:win-1"]);
     });
 

@@ -8,7 +8,7 @@
 // the taskbar) reaches the host without passing through here.
 
 import { setNotificationAction } from "@/app/notification/usenotification";
-import { openModal } from "@/app/store/modalmodel";
+import { modalsModel, openModal } from "@/app/store/modalmodel";
 import { WindowService, type ClosedWindow, type WindowAgent } from "@/app/store/services";
 import { windowId } from "@/app/store/window-identity";
 import { settingsAtom } from "@/store/config-signals";
@@ -93,29 +93,37 @@ function notify(type: "info" | "error", title: string, message: string): void {
 
 const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
+/** Set while the agents are being asked for, before a confirmation opens. */
 let asking = false;
+
+/** This window's agents, unless a close is already being asked about. */
+async function agentsUnlessAsking(): Promise<WindowAgent[] | null> {
+    const open = modalsModel.isModalOpen(WindowCloseConfirm) || modalsModel.isModalOpen(CloseWorkspaceConfirm);
+    if (asking || open) return null;
+    asking = true;
+    try {
+        return await agentsInThisWindow();
+    } finally {
+        asking = false;
+    }
+}
 
 /** Close this window, as the close button, ☰ → Exit and the palette do.
  *  Warns first when an agent in it is mid-turn. */
 export async function requestCloseWindow(): Promise<void> {
-    if (asking) return;
-    const agents = await agentsInThisWindow();
+    const agents = await agentsUnlessAsking();
+    if (!agents) return;
     if (!warnsBeforeClosing(agents, settingsAtom() as Record<string, unknown>)) {
         await getApi().closeWindow();
         return;
     }
-    asking = true;
     openModal(WindowCloseConfirm, {
         ...closeWarningText(agents),
         onConfirm: (dontAskAgain: boolean) => {
-            asking = false;
             if (dontAskAgain) {
                 RpcApi.SetConfigCommand(TabRpcClient, DONT_ASK_AGAIN as any).catch(console.error);
             }
             getApi().closeWindow().catch(console.error);
-        },
-        onCancel: () => {
-            asking = false;
         },
     });
 }
@@ -123,13 +131,11 @@ export async function requestCloseWindow(): Promise<void> {
 /** ☰ → Close workspace…: confirm, naming the agents it stops, then close this
  *  window and delete its workspace. */
 export async function requestCloseWorkspace(): Promise<void> {
-    if (asking) return;
-    asking = true;
-    const agents = await agentsInThisWindow();
+    const agents = await agentsUnlessAsking();
+    if (!agents) return;
     openModal(CloseWorkspaceConfirm, {
         ...closeWorkspaceText(agents),
         onConfirm: async () => {
-            asking = false;
             try {
                 await WindowService.DiscardWorkspaceOnClose(windowId());
             } catch (err) {
@@ -137,9 +143,6 @@ export async function requestCloseWorkspace(): Promise<void> {
                 return;
             }
             await getApi().closeWindow();
-        },
-        onCancel: () => {
-            asking = false;
         },
     });
 }
