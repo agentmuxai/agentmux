@@ -301,6 +301,54 @@ impl LockedRecord<'_> {
         }
         self.store.upsert_locked(rec)
     }
+
+    /// The active file's bytes, as they are on disk; `None` if there is none.
+    pub fn raw(&self) -> Result<Option<Vec<u8>>, DefStoreError> {
+        match std::fs::read(self.store.active_path(&self.id)) {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Replace the active file with `bytes`, as they are: the one write that
+    /// may change a non-empty slug, which [`Self::upsert`] never does. For
+    /// the fork slug migration's rename and its undo
+    /// (`SPEC_FORK_SLUG_MIGRATION_2026_10_22.md` §4 Phase 2, S1). `bytes`
+    /// must be a record of this id and a schema this build writes; nothing is
+    /// written otherwise, and a missing active file (a deleted agent) is not
+    /// recreated.
+    pub fn replace_raw(&self, bytes: &[u8]) -> Result<(), DefStoreError> {
+        let path = self.store.active_path(&self.id);
+        if !path.exists() {
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, format!("{}.json is not active", self.id)).into());
+        }
+        let value: Value = serde_json::from_slice(bytes)?;
+        let version = value.get("schema_version").and_then(Value::as_u64).unwrap_or(0);
+        if version == 0 || version > u64::from(DEF_MAX_SUPPORTED_SCHEMA) {
+            return Err(DefValidationError::UnsupportedSchema {
+                version: version as u32,
+                min: super::def_schema::DEF_MIN_SUPPORTED_SCHEMA,
+                max: DEF_MAX_SUPPORTED_SCHEMA,
+            }
+            .into());
+        }
+        if value.pointer("/data/id").and_then(Value::as_str) != Some(self.id.as_str()) {
+            let id = value.pointer("/data/id").and_then(Value::as_str).unwrap_or("").to_string();
+            return Err(DefValidationError::IdMismatch { filename: self.id.clone(), id }.into());
+        }
+        write_atomic(&path, bytes)?;
+        self.store.slugs.invalidate(&self.id);
+        Ok(())
+    }
+}
+
+/// A definition record as [`DefinitionStore`] writes one after a merge:
+/// pretty JSON and a trailing newline.
+pub fn record_bytes(value: &Value) -> Result<Vec<u8>, serde_json::Error> {
+    let mut bytes = serde_json::to_vec_pretty(value)?;
+    bytes.push(b'\n');
+    Ok(bytes)
 }
 
 fn read_and_validate(path: &Path, stem: &str) -> Result<DefinitionRecord, DefStoreError> {

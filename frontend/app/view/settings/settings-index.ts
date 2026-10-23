@@ -19,6 +19,7 @@ import { RECORDING_SETTINGS } from "./sections/recording-section";
 import { DEVICES_SETTINGS } from "./sections/devices-section";
 import { WIDGETS_SETTINGS } from "./sections/widgets-section";
 import { WIDGET_BAR_SETTINGS } from "./sections/widget-bar-settings";
+import { AGENTS_SETTINGS } from "./sections/agents-section";
 import { ADVANCED_SETTINGS } from "./sections/advanced-section";
 
 export const SETTINGS_INDEX: SettingsIndexEntry[] = [
@@ -32,6 +33,7 @@ export const SETTINGS_INDEX: SettingsIndexEntry[] = [
     ...Object.values(DEVICES_SETTINGS),
     ...Object.values(WIDGET_BAR_SETTINGS),
     ...Object.values(WIDGETS_SETTINGS),
+    ...Object.values(AGENTS_SETTINGS),
     ...Object.values(ADVANCED_SETTINGS),
 ];
 

@@ -1151,6 +1151,7 @@ declare global {
         "agent:retryonreconnect"?: boolean;
         "kanban:reminders"?: boolean;
         "agent:mcpselfheal"?: boolean;
+        "agent:outdatedidsnotice"?: boolean;
         "agent:transcriptsinglecopy"?: boolean;
         "desktop:enabled"?: boolean;
         "desktop:blocklist"?: string[];

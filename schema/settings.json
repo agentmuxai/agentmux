@@ -631,6 +631,11 @@
           "default": true,
           "description": "When an agent's AgentMux MCP server (its AgentMux tools) doesn't connect, AgentMux reconnects it twice, then restarts the agent once without the shell prefix (the conversation continues), and otherwise tells the agent and shows it in the pane. Set false to only show and tell, with no automatic repair. See docs/specs/SPEC_AGENT_MCP_SELF_HEAL_2026_10_10.md."
         },
+        "agent:outdatedidsnotice": {
+          "type": "boolean",
+          "default": true,
+          "description": "Tell you once, at startup, when some agents have an id an older build chained (loap-loap-2), pointing to Settings › Agents, where they can be updated. Turned off when the notice is dismissed. See docs/specs/SPEC_FORK_SLUG_MIGRATION_2026_10_22.md."
+        },
         "agent:transcriptsinglecopy": {
           "type": "boolean",
           "default": false,
