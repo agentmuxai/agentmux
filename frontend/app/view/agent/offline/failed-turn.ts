@@ -20,8 +20,9 @@
  * Every retry of the turn goes through here: it re-sends the message with its
  * attachments, and stores the attempt before it goes, so a second click, a
  * click during the automatic one, or a remount sends nothing more. One whose
- * answer never comes stays possibly sent: the failure row comes back with its
- * Retry and says the retry may have gone already. Dismissing the row drops
+ * answer never comes stays possibly sent: once the pane is idle, the failure
+ * row comes back with its Retry and says the retry may have gone already,
+ * unless the turn it started completed, which settles it as sent. Dismissing the row drops
  * the turn.
  *
  * {@link createFailedTurnRecovery} holds the rules over injected inputs, so
@@ -201,7 +202,7 @@ export interface FailedTurnRecovery {
     failureDismissed: () => void;
     /** The operator sent something from the composer. */
     typed: () => void;
-    /** A turn completed in the pane. */
+    /** A turn completed in the pane: a retry it started went. */
     turnCompleted: () => void;
     /** A live failure waits for the API, or a retry is on its way: a reload would lose it. */
     pending: Accessor<boolean>;
@@ -317,12 +318,24 @@ export function createFailedTurnRecovery(deps: FailedTurnDeps): FailedTurnRecove
         else if (byItself) notice(`Back online: sent ${which(snapshotOf(t))} again, since its turn failed while the API was unreachable.`);
     };
 
-    /** It didn't go, or may not have: the row (or the offer) comes back with its Retry. */
-    const putBack = (t: FailedTurn) => {
-        const cur = turn();
-        if (disposed || !isTurn(cur, t.failure.at) || cur!.offered || deps.failure()) return;
-        deps.restoreFailure(t.failure);
-    };
+    /** It didn't go, or may not have: the row (or the offer) comes back with
+     *  its Retry, once the pane is idle. Putting a failure back ends a turn
+     *  that is running, and an unanswered retry's own turn may be. */
+    const [putBackDue, setPutBackDue] = createSignal<FailedTurn | null>(null);
+    const putBack = (t: FailedTurn) => setPutBackDue(t);
+    createEffect(() => {
+        const t = putBackDue();
+        if (!t || deps.working()) return;
+        untrack(() => {
+            setPutBackDue(null);
+            const cur = turn();
+            if (disposed || !isTurn(cur, t.failure.at) || cur!.offered || deps.failure()) return;
+            // Settled while the turn ran: a late answer, the transcript, or the turn completing.
+            const m = deps.storage.mark();
+            if (m?.state === "sent" && m.text === snapshotOf(t).message?.text) return;
+            deps.restoreFailure(t.failure);
+        });
+    });
 
     const isCurrent = (mark: RetryMark) => {
         const m = deps.storage.mark();
@@ -330,7 +343,8 @@ export function createFailedTurnRecovery(deps: FailedTurnDeps): FailedTurnRecove
     };
 
     const settle = (t: FailedTurn, mark: RetryMark, prev: RetryMark | null, byItself: boolean, outcome: DeliveryOutcome) => {
-        if (!isCurrent(mark)) return;
+        // Already settled: the turn it started completed first.
+        if (!isCurrent(mark) || deps.storage.mark()?.state === "sent") return;
         if (outcome === "accepted") {
             deps.storage.saveMark({ ...mark, state: "sent" });
             went(t, mark, prev, byItself);
@@ -494,6 +508,15 @@ export function createFailedTurnRecovery(deps: FailedTurnDeps): FailedTurnRecove
             if (untrack(deps.storage.mark)?.state === "sent") deps.storage.saveMark(null);
         },
         turnCompleted: () => {
+            const m = untrack(deps.storage.mark);
+            const s = untrack(deps.started);
+            // The retry this pane started completed: it went, whatever its answer said.
+            if (m && m.state !== "sent" && s && !s.hidden && s.content === m.text && s.at >= m.at) {
+                deps.storage.saveMark({ ...m, state: "sent" });
+                const t = untrack(turn);
+                if (t && untrack(() => snapshotOf(t)).message?.text === m.text) untrack(() => went(t, m, null, m.auto));
+            }
+            // A turn that completed is done with its retry.
             if (untrack(deps.storage.mark)?.state === "sent") deps.storage.saveMark(null);
         },
         pending: () => {

@@ -85,7 +85,15 @@ describe("pure rules", () => {
 });
 
 /** A pane: plain signals for what the recovery reads, a recording deliver. */
-function makePane(opts: { api?: Reachability | null; doc?: DocumentNode[]; mark?: ReturnType<typeof createSignal<RetryMark | null>> } = {}) {
+function makePane(
+    opts: {
+        api?: Reachability | null;
+        doc?: DocumentNode[];
+        mark?: ReturnType<typeof createSignal<RetryMark | null>>;
+        /** A send starts a turn that keeps running (Submitting, then Streaming). */
+        startsTurn?: boolean;
+    } = {}
+) {
     const [failure, setFailure] = createSignal<PaneFailure | null>(null);
     const [api, setApi] = createSignal<Reachability | null>(opts.api === undefined ? "offline" : opts.api);
     const [tracked, setTracked] = createSignal(true);
@@ -107,6 +115,10 @@ function makePane(opts: { api?: Reachability | null; doc?: DocumentNode[]; mark?
         sent.push(attachments ? { text, attachments } : { text });
         // The pane's send starts a turn, and TurnStart clears the row.
         setFailure(null);
+        if (opts.startsTurn) {
+            setStarted({ at: 5_000, content: text, hidden: false });
+            setWorking(true);
+        }
         const outcome = outcomes.length > 0 ? outcomes.shift()! : "accepted";
         if (outcome === "unknown" && onLate) late.push(onLate);
         if (outcome === "pending") return new Promise((resolve) => (answer = resolve));
@@ -447,6 +459,64 @@ describe("a turn that failed on the network", () => {
         await flush();
         expect(p.sent).toHaveLength(2);
         expect(p.ui.notices().map((n) => n.text)).toEqual(["Sent your message again. It may have gone once already."]);
+        p.dispose();
+    });
+
+    it("an unknown outcome doesn't end the retried turn: the row comes back once the pane is idle, if still unknown", async () => {
+        const p = makePane({ api: "online", startsTurn: true });
+        p.outcomes.push("unknown");
+        const at = p.failLive();
+        await flush();
+        expect(p.mark()?.state).toBe("unknown");
+        // The retried turn still runs: putting the failure back would end it.
+        expect(p.restoreFailure).not.toHaveBeenCalled();
+        expect(p.failure()).toBeNull();
+        p.setWorking(false);
+        expect(p.restoreFailure).toHaveBeenCalledTimes(1);
+        expect(p.failure()?.at).toBe(at);
+        p.dispose();
+
+        // Settled while it ran: nothing to put back.
+        const q = makePane({ api: "online", startsTurn: true });
+        q.outcomes.push("unknown");
+        q.failLive();
+        await flush();
+        q.late[0](true);
+        q.setWorking(false);
+        expect(q.restoreFailure).not.toHaveBeenCalled();
+        expect(q.failure()).toBeNull();
+        q.dispose();
+    });
+
+    it("the retried turn completing settles an unanswered retry as sent", async () => {
+        const p = makePane({ api: "online", startsTurn: true });
+        p.outcomes.push("unknown");
+        p.failLive();
+        await flush();
+        p.ui.turnCompleted();
+        p.setWorking(false);
+        expect(p.restoreFailure).not.toHaveBeenCalled();
+        expect(p.failure()).toBeNull();
+        expect(p.ui.retry()).toBe(false);
+        expect(p.ui.notices().map((n) => n.text)).toEqual([
+            "Back online: sent your message from t1000 again, since its turn failed while the API was unreachable.",
+        ]);
+        // Done with: a late answer changes nothing.
+        p.late[0](false);
+        expect(p.mark()).toBeNull();
+        p.dispose();
+    });
+
+    it("a rejected retry waits for the pane to be idle before putting the row back", async () => {
+        // The send path left the pane looking busy.
+        const p = makePane({ api: "online", startsTurn: true });
+        p.outcomes.push("rejected");
+        p.failLive();
+        await flush();
+        expect(p.sent).toHaveLength(1);
+        expect(p.restoreFailure).not.toHaveBeenCalled();
+        p.setWorking(false);
+        expect(p.restoreFailure).toHaveBeenCalledTimes(1);
         p.dispose();
     });
 
