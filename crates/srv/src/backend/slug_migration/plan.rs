@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-use super::home::{fold, open_ro, place, table_exists, Home, Install};
+use super::home::{fold, has_column, open_ro, place, table_exists, Home, Install};
 use crate::backend::rpc_types::{ForkSlugBlocker, ForkSlugBlockerKind, ForkSlugCandidate, ForkSlugPlan, ForkSlugSkipped};
 use agentmux_common::slug::{agent_route_name, definition_slug, fork_slug, is_agent_id};
 use rusqlite::OptionalExtension;
@@ -196,6 +196,10 @@ pub(super) fn holder_of(
         if routes_to(&d.name, &t) {
             return Ok(Some(format!("messages to it reach agent {} ({}), whose name routes there", d.name, d.uid)));
         }
+        // A fork's name is its branch label, and messages reach it too.
+        if routes_to(&d.branch_label, &t) {
+            return Ok(Some(format!("messages to it reach agent {} ({}), whose branch label routes there", d.name, d.uid)));
+        }
     }
     if let Some(other) = taken.get(&t).filter(|o| o.as_str() != uid) {
         return Ok(Some(format!("this run renames agent {other} to it")));
@@ -213,17 +217,21 @@ pub(super) fn holder_of(
                 return Ok(Some(format!("agent {id} has it in {}", place(install, version))));
             }
             let routed: Option<(String, String)> = {
+                // A fork's branch label routes to it too; an older db_agents has no such column.
+                let label = if has_column(&conn, "db_agents", "branch_label") { "COALESCE(branch_label, '')" } else { "''" };
                 let mut stmt = conn
-                    .prepare("SELECT id, name, COALESCE(instance_name, '') FROM db_agents WHERE id != ?1")
+                    .prepare(&format!("SELECT id, name, COALESCE(instance_name, ''), {label} FROM db_agents WHERE id != ?1"))
                     .map_err(failed)?;
                 let rows = stmt
-                    .query_map([uid], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))
+                    .query_map([uid], |r| {
+                        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?))
+                    })
                     .map_err(failed)?;
                 let mut hit = None;
                 for row in rows {
-                    let (id, name, instance) = row.map_err(failed)?;
-                    if routes_to(&name, &t) || routes_to(&instance, &t) {
-                        hit = Some((id, if routes_to(&name, &t) { name } else { instance }));
+                    let (id, name, instance, branch_label) = row.map_err(failed)?;
+                    if let Some(route) = [name, instance, branch_label].into_iter().find(|n| routes_to(n, &t)) {
+                        hit = Some((id, route));
                         break;
                     }
                 }

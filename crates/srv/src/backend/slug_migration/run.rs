@@ -162,10 +162,15 @@ pub(super) fn apply(home: &Home, opts: &Options) -> Result<ForkSlugReport, Strin
 /// handed the id out since. The lock is held through S1 and S2, which
 /// publish the new id in the shared definition and every `objects.db`, and
 /// released before the rest. A target taken in the meantime leaves the agent
-/// out of the run with nothing written for it (`Record::Skipped`). A resumed
-/// agent whose S1 already has an intent had its id checked then.
+/// out of the run with nothing written for it (`Record::Skipped`).
+///
+/// Only a finished S1 reserves the id (the shared definition then holds it),
+/// so a resume checks again until S1 is done: a run interrupted between S1's
+/// intent and its write released the lock with nothing reserved, and another
+/// channel may have handed the id out since (Codex P1 on #5342). Taken by
+/// then, the run stops for a rollback instead of publishing a duplicate.
 fn run_agent_reserved(ctx: &Ctx, journal: &mut Journal, a: &Agent, opts: &Options) -> Result<(), String> {
-    if journal.intent(&a.uid, Step::S1).is_some() {
+    if journal.done(&a.uid, Step::S1) {
         return run_agent(ctx, journal, a, opts, &STEPS);
     }
     #[cfg(test)]
@@ -181,6 +186,12 @@ fn run_agent_reserved(ctx: &Ctx, journal: &mut Journal, a: &Agent, opts: &Option
         Some(format!("the shared definitions can't all be read ({})", unreadable.join("; ")))
     };
     if let Some(holder) = holder {
+        if journal.intent(&a.uid, Step::S1).is_some() {
+            return Err(format!(
+                "{}: {} was taken while the run was interrupted ({holder}); roll this run back from its journal",
+                a.name, a.new
+            ));
+        }
         let reason = format!("{} wasn't updated: {} was taken after the plan ({holder})", a.name, a.new);
         tracing::warn!(uid = %a.uid, target = %a.new, %holder, "fork slug migration: target taken since the plan; agent left out");
         journal.append(Record::Skipped { uid: a.uid.clone(), reason })?;
@@ -340,10 +351,14 @@ pub(super) fn rollback(home: &Home, path: Option<&str>) -> Result<ForkSlugReport
     })
 }
 
-/// Restore mode: put the backup back as it was, only while every file the
-/// run left is unchanged since it finished (a database's rows, a file's
-/// bytes and modification time). The moved folders go back through the
-/// journal.
+/// Restore mode: put the backed-up files back as they were, only while every
+/// one the run left is unchanged since it finished (its bytes and
+/// modification time); the moved folders go back through the journal.
+///
+/// Databases never go back as a whole copy: other panes write to them during
+/// and after the run, and a copy would silently drop those writes (Codex P1
+/// on #5342). They go back row by row instead, through the same database
+/// undos journal mode runs, which touch only what the run wrote.
 pub(super) fn restore(home: &Home, path: Option<&str>) -> Result<ForkSlugReport, String> {
     let _lock = preconditions::take_lock(home)?;
     let mut journal = pick(home, path)?;
@@ -353,10 +368,9 @@ pub(super) fn restore(home: &Home, path: Option<&str>) -> Result<ForkSlugReport,
     let after = journal.finished().ok_or("this run didn't finish: roll it back from its journal instead")?.to_vec();
     refuse_undo_while_running(home, &home.installs()?, &journal)?;
     let mut changed = Vec::new();
-    for f in &after {
-        let database = is_database(&journal, &f.path);
-        let now = backup::fingerprint(Path::new(&f.path), database)?;
-        if now.digest != f.digest || (!database && now.mtime_ms != f.mtime_ms) {
+    for f in after.iter().filter(|f| !is_database(&journal, &f.path)) {
+        let now = backup::fingerprint(Path::new(&f.path), false)?;
+        if now.digest != f.digest || now.mtime_ms != f.mtime_ms {
             changed.push(f.path.clone());
         }
     }
@@ -367,22 +381,25 @@ pub(super) fn restore(home: &Home, path: Option<&str>) -> Result<ForkSlugReport,
     let (plan, backups) = (plan.clone(), backups.to_vec());
     let dir = journal.dir();
     let mut notes = Vec::new();
-    for b in &backups {
+    for b in backups.iter().filter(|b| !b.database) {
         let copy = backup::copy_of(&dir, &backups, Path::new(&b.original))?;
-        if b.database {
-            restore_database(&copy, Path::new(&b.original))?;
-        } else {
-            let bytes = std::fs::read(&copy).map_err(|e| e.to_string())?;
-            super::home::write_file(Path::new(&b.original), &bytes)?;
-        }
+        let bytes = std::fs::read(&copy).map_err(|e| e.to_string())?;
+        super::home::write_file(Path::new(&b.original), &bytes)?;
         notes.push(format!("restored {}", b.original));
     }
     let installs = home.installs()?;
     let ctx = Ctx { home, installs: &installs, run_dir: dir.clone(), backups: &backups, retired_at };
-    for (uid, step, before) in journal.intents().into_iter().rev().filter(|(_, s, _)| *s == Step::S8) {
+    for (uid, step, before) in journal.intents().into_iter().rev() {
         let Some(c) = plan.candidates.iter().find(|c| c.uid == uid) else { continue };
         let a = Agent { uid: uid.clone(), name: c.name.clone(), old: c.old_slug.clone(), new: c.new_slug.clone() };
-        notes.extend(steps::undo(&ctx, &a, step, &before)?);
+        let changes = match step {
+            // S1's file came back with the others above; S5 changes nothing.
+            Step::S1 | Step::S5 => continue,
+            Step::S2 | Step::S3 | Step::S4 | Step::S6 | Step::S8 => steps::undo(&ctx, &a, step, &before)?,
+            // Its `.mcp.json` files came back above; its rows go back here.
+            Step::S7 => super::steps_db::s7_undo(&a, &before)?,
+        };
+        notes.extend(changes.iter().map(|c| format!("{} {step:?}: {c}", a.name)));
     }
     journal.append(Record::RolledBack { at: agentmux_common::time::now_ms(), mode: "restore".into() })?;
     Ok(ForkSlugReport { journal: journal.path.display().to_string(), backup_dir: dir.display().to_string(), notes, ..Default::default() })
@@ -390,16 +407,4 @@ pub(super) fn restore(home: &Home, path: Option<&str>) -> Result<ForkSlugReport,
 
 fn is_database(journal: &Journal, path: &str) -> bool {
     journal.header().2.iter().any(|b| b.original == path && b.database)
-}
-
-/// Copy `copy` over the live database `target` through SQLite's online
-/// backup, which takes the database's locks like any writer, so another
-/// connection never sees a half-copied file.
-fn restore_database(copy: &Path, target: &Path) -> Result<(), String> {
-    let src = super::home::open_ro(copy)?;
-    let mut dst = super::home::open_rw(target)?;
-    let backup = rusqlite::backup::Backup::new(&src, &mut dst).map_err(|e| format!("{}: {e}", target.display()))?;
-    backup
-        .run_to_completion(256, std::time::Duration::from_millis(5), None)
-        .map_err(|e| format!("{}: {e}", target.display()))
 }

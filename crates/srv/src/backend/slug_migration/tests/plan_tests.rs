@@ -100,6 +100,19 @@ fn another_agents_former_display_name_holds_a_target() {
     assert!(naki2.refused.as_deref().is_some_and(|r| r.contains("uid-old") && r.contains("Naki #2")), "{:?}", naki2.refused);
 }
 
+/// Another fork whose branch label routes to the target holds it: messages
+/// to that label reach that fork, so the target isn't free.
+#[test]
+fn another_forks_branch_label_holds_a_target() {
+    let fx = Fx::empty();
+    let data = fx.version("stable", "0.59.1");
+    fx.chains(&data, true);
+    fx.agent(&data, "uid-other", "Other", "other-fork", NAKI, "Loap #3", true);
+    let plan = super::super::plan(&fx.home, false).unwrap();
+    let loap3 = by_name(&plan.candidates, "Loap #3");
+    assert!(loap3.refused.as_deref().is_some_and(|r| r.contains("branch label")), "{:?}", loap3.refused);
+}
+
 /// A target held only by the agent itself, its own display binding (a
 /// live registration of its own pane under `loap-3`), is free.
 #[test]

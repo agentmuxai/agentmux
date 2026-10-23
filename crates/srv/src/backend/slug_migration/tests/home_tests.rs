@@ -61,14 +61,29 @@ fn restore_mode_puts_the_backup_back_only_while_nothing_changed() {
     run::restore(&fx.home, Some(&report.journal)).unwrap();
     assert_eq!(fx.snapshot(), original);
 
+    // A database written since the run keeps that write: its rows go back
+    // one by one, never as a copy of the whole file (Codex P1 on #5342).
     let fx = Fx::standard();
     let report = super::apply(&fx.home).unwrap();
     let db = fx.root().join("channels/stable/versions/0.59.2/data/db/objects.db");
     fx.exec(&db, "UPDATE db_agents SET description = 'edited since' WHERE id = 'uid-naki'");
+    run::restore(&fx.home, Some(&report.journal)).unwrap();
+    assert_eq!(query::<String>(&db, "SELECT description FROM db_agents WHERE id = 'uid-naki'").as_deref(), Some("edited since"));
+    for v in ["0.59.1", "0.59.2"] {
+        let db = fx.root().join(format!("channels/stable/versions/{v}/data/db/objects.db"));
+        assert_eq!(query::<String>(&db, "SELECT slug FROM db_agents WHERE id = 'uid-loap-2'").as_deref(), Some("loap-loap-2"), "{v}");
+    }
+
+    // A file written since the run can't be put back from the backup.
+    let fx = Fx::standard();
+    let report = super::apply(&fx.home).unwrap();
+    let def = fx.home.definitions().join("uid-loap-2.json");
+    let mut bytes = std::fs::read(&def).unwrap();
+    bytes.extend_from_slice(b" ");
+    std::fs::write(&def, &bytes).unwrap();
     let err = run::restore(&fx.home, Some(&report.journal)).unwrap_err();
     assert!(err.contains("written since the run"), "{err}");
     run::rollback(&fx.home, Some(&report.journal)).unwrap();
-    assert_eq!(query::<String>(&db, "SELECT description FROM db_agents WHERE id = 'uid-naki'").as_deref(), Some("edited since"), "journal mode keeps later edits");
 }
 
 /// Writes the fixture home to `SLUG_MIGRATION_FIXTURE_OUT`, for a live run of
@@ -159,4 +174,30 @@ fn a_target_taken_after_the_plan_leaves_that_agent_out_untouched() {
     );
     let journal = super::super::journal::Journal::open(std::path::Path::new(&report.journal)).unwrap();
     assert!(journal.intent(LOAP2, super::super::journal::Step::S1).is_none(), "no step of it was even begun");
+}
+
+/// A run interrupted after S1's intent but before its write holds no
+/// reservation, so another channel can hand the id out meanwhile. The resume
+/// checks again and stops for a rollback instead of publishing a duplicate
+/// (Codex P1 on #5342).
+#[test]
+fn a_resume_checks_the_target_again_until_s1_is_done() {
+    let fx = Fx::standard();
+    let def = fx.home.definitions().join(format!("{LOAP2}.json"));
+    let def_before = std::fs::read(&def).unwrap();
+    let opts = run::Options { crash: Some((LOAP2.to_string(), run::Crash::BeforeDone(super::super::journal::Step::S1))), ..Default::default() };
+    assert_eq!(run::apply(&fx.home, &opts).unwrap_err(), run::CRASHED);
+    // As if S1's write never landed, and another channel then took the id.
+    std::fs::write(&def, &def_before).unwrap();
+    let db = fx.root().join("channels/stable/versions/0.59.1/data/db/objects.db");
+    let store = crate::backend::storage::store::Store::open(&db).unwrap();
+    store.set_def_registry(fx.defs.clone());
+    let mut newcomer = crate::backend::storage::agents::test_agent_def("uid-new", "Newcomer", "claude", "host", 2_000, "");
+    newcomer.slug = "loap-2".into();
+    store.agent_def_insert(&mut newcomer).unwrap();
+    drop(store);
+    let err = run::apply(&fx.home, &run::Options::default()).unwrap_err();
+    assert!(err.contains("was taken while the run was interrupted") && err.contains("uid-new"), "{err}");
+    run::rollback(&fx.home, None).unwrap();
+    assert_eq!(std::fs::read(&def).unwrap(), def_before);
 }

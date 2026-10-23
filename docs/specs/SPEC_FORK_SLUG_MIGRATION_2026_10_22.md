@@ -222,8 +222,8 @@ reversible.
 **6. Roll back.**
 - **Journal mode:** `--rollback <journal>` undoes the completed steps in reverse order (each step records its
   before-image).
-- **Restore mode:** restoring the backup is offered only while nothing has written to those files since; checksums
-  and mtimes are compared.
+- **Restore mode:** the backed-up files go back only while nothing has written to them since; checksums and mtimes
+  are compared. Databases go back row by row, never as a copy of the whole file (other panes write to them).
 - Keys retired in S3 come back from the backup in either mode.
 
 **7. After.** Relaunching the agents gives them the new `AGENTMUX_AGENT_ID`, fresh keys, a new WAN key publication
@@ -324,10 +324,16 @@ As built (`crates/srv/src/backend/slug_migration/`):
     field (S1) or left as it is and reported (`.mcp.json`).
   - Database undos put back the recorded fields. S7 also puts back each row's version, when nothing else has written
     the row.
-- **Rollback, restore mode.** Needs a finished run, and refuses when any database's rows, or any file's bytes or
-  modification time, changed since the finish. It copies each database back through SQLite's online backup and
-  moves S8's folders back. A database is compared by its rows, not its file: a WAL checkpoint changes the file
-  without changing a row.
+- **Rollback, restore mode.** Needs a finished run, and refuses when any backed-up file's bytes or modification time
+  changed since the finish. It puts those files back from the backup, runs the database undos journal mode runs
+  (S2–S4, S6 and S7's rows), and moves S8's folders back. It never copies a database back whole: other panes write
+  to the same databases during and after the run, and a whole copy would silently drop those writes (Codex P1 on
+  #5342). The database backups stay in the run's folder, for S3's and S4's undos and for recovery by hand.
+- **Resume.** A run interrupted after S1's intent but before its write holds no reservation, so the resume checks the
+  target again under the allocation lock until S1 is done; taken by then, the run stops for a rollback (Codex P1 on
+  #5342).
+- **Taken targets** include another agent's current display, instance and branch-label routes, and its former
+  display names (#5355), across every `objects.db` and every shared definition.
 - **Surfaces.**
   - Settings › Agents, a new section, holds the card: the plan's line, "Update them", the list with "Show where the
     old ids are stored", what blocks it, the report with the PR searches, and "Undo the update".
