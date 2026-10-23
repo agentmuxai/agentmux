@@ -501,7 +501,7 @@ pub fn wrap_jekt_message_with_files(
     };
 
     let reply_hint = if from_is_agent {
-        format!("Reply: bus:inject to {from}")
+        format!("Reply: mcp__agentmux__Message (action \"send\", to \"{from}\"), not a built-in SendMessage")
     } else {
         "Reply: not available — the sender is not an agent id".to_string()
     };

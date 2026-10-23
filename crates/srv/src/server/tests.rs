@@ -6679,6 +6679,50 @@ async fn a_target_running_under_another_name_is_delivered_by_uid_not_held() {
     assert!(!err.starts_with("agent not found"), "delivered to the UID's block: {v}");
 }
 
+/// A signed jekt this instance takes for a local agent, by UID or by holding
+/// it, keeps its one-delivery reservation (#5346): a copy that arrives later
+/// fails its signature. Held here, since the test handler has
+/// no pane to deliver into; the by-UID branch keeps it the same way.
+#[tokio::test]
+async fn a_held_signed_jekt_proves_its_sender_once() {
+    use crate::backend::storage::agents::test_agent_def;
+    let state = test_state();
+    let slug = format!("heldr-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+    let uid = format!("uid-{slug}");
+    let mut def = test_agent_def(&uid, "Held R", "claude", "agent", 1, "");
+    def.slug = slug.clone();
+    state.mstore.agent_def_insert(&mut def).unwrap();
+    let sender = format!("{slug}-sender");
+    let key = state.mstore.agent_jekt_key_ensure(&sender).unwrap();
+    let id = format!("req-{slug}");
+    let ts = agentmux_common::time::now_secs();
+    let sig = agentmux_common::jekt_sign::sign_jekt(&key, &id, &sender, &slug, ts, "hi");
+    let body = serde_json::json!({
+        "target_agent": slug, "message": "hi", "source_agent": sender,
+        "request_id": id, "ts_secs": ts, "jekt_sig": sig,
+    });
+    let mut v = serde_json::Value::Null;
+    for _ in 0..25 {
+        v = m4c1_send(&state, None, "/agentmux/reactive/inject", body.clone()).await.1;
+        if v["error"] != "rate limit exceeded" {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    assert_eq!(v["held"], true, "{v}");
+    assert_eq!(state.mstore.jekt_held_for_target(&uid, 10).unwrap()[0].sig_verified, Some(true));
+
+    let mut copy = crate::backend::reactive::types::InjectionRequest {
+        source_agent: Some(sender.clone()),
+        target_agent: slug.clone(),
+        request_id: Some(id.clone()),
+        sig_verified: Some(true),
+        ..Default::default()
+    };
+    let _ = super::reactive::replay::reserve(&mut copy, ts);
+    assert_eq!(copy.sig_verified, Some(false), "the held message is counted");
+}
+
 /// Phase 0 item 4 of SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md: a
 /// jekt the target's spawn gate refused (not signed in) is held with
 /// `held_reason: needs_login`, never redelivered by UID at once (the target is
@@ -6723,6 +6767,7 @@ async fn a_jekt_refused_by_the_spawn_gate_is_held_for_sign_in() {
         &req,
         &refused,
         super::reactive::HoldReason::NeedsLogin,
+        &mut super::reactive::replay::reserve(&mut req.clone(), 0),
     )
     .await
     .expect("held");
@@ -6746,6 +6791,7 @@ async fn a_jekt_refused_by_the_spawn_gate_is_held_for_sign_in() {
         &req,
         &refused,
         super::reactive::HoldReason::NeedsLogin,
+        &mut super::reactive::replay::reserve(&mut req.clone(), 0),
     )
     .await
     .is_none());

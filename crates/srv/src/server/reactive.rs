@@ -421,6 +421,7 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
 mod channel_v2;
 pub(crate) mod former_slug;
 mod lan_v2;
+pub(super) mod replay;
 
 /// Anti-replay window for cross-channel `channel_sig` —
 /// SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D6: host-tier's tighter
@@ -699,12 +700,10 @@ pub(crate) async fn deliver(
     mut req: InjectionRequest,
 ) -> serde_json::Value {
     req.delivery_tier = Some(resolve_delivery_tier(auth_via, req.delivery_tier.as_deref()));
-    // Identity M4c-2d: the sender's UID, for the audit entry only — never
-    // forwarded (`#[serde(skip)]`).
+    // Identity M4c-2d: the sender's UID, for the audit only (`#[serde(skip)]`).
     req.audit_source_uid = caller_uid.to_string();
     super::actor::source_from_token(&state.mstore, caller_uid, &mut req);
-    // Identity M4d-6: the signed source_uid is the sender's to set; this srv
-    // only counts one that isn't the UID its token named.
+    // Identity M4d-6: count a signed source_uid other than the token's UID.
     if !caller_uid.is_empty() && req.source_uid.as_deref().is_some_and(|s| s != caller_uid) {
         crate::backend::agent_resolve::record_uid_fallback("m4.source_uid_mismatch");
     }
@@ -713,12 +712,12 @@ pub(crate) async fn deliver(
     verify_reagent_signature(&mut req, now_unix_secs());
     verify_lan_signature(&state, &mut req).await;
     verify_cross_channel_signature(&state, &mut req);
+    let mut replay = replay::reserve(&mut req, now_unix_secs());
     req.route_unsigned_target();
     resolve_transcript_request_tier_fields(&state.mstore, &mut req);
 
-    // Files sent with it (SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §3.3, §6):
-    // refused outright unless the msgid binds them, then prepared for the
-    // agent here, since the handler does no I/O.
+    // Files (SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §3.3, §6): refused unless the
+    // msgid binds them, then prepared here, since the handler does no I/O.
     if let Err(error) = super::jekt_files::check(&req) {
         return super::jekt_files::refused(&req, error);
     }
@@ -727,6 +726,7 @@ pub(crate) async fn deliver(
     // 1. Try local ReactiveHandler first (fast path — same instance).
     let resp = super::jekt_files::inject_here(state, &req);
     if resp.success {
+        replay.delivered();
         echo_local_delivery(state, &req, &resp);
         return super::jekt_files::with_count(serde_json::to_value(&resp).unwrap_or_default(), &req);
     }
@@ -736,7 +736,7 @@ pub(crate) async fn deliver(
     // (SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md Phase 0 item 4).
     // No other tier can run it either: the agent lives on this instance.
     if resp.error.as_deref().is_some_and(super::jekt_held::is_spawn_gate_refusal) {
-        if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NeedsLogin).await {
+        if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NeedsLogin, &mut replay).await {
             return held;
         }
         return serde_json::to_value(&resp).unwrap_or_default();
@@ -1012,10 +1012,10 @@ pub(crate) async fn deliver(
         // the relay's 30 min expiry instead of the 24 h hold, and only a
         // sender NOT signed in to the cloud ever reached the hold.
         if req.files.is_some() {
-            return super::jekt_files::no_route(state, auth_via, caller_uid, &req, &resp, candidate_seen, files_too_old).await;
+            return super::jekt_files::no_route(state, auth_via, caller_uid, &req, &resp, candidate_seen, files_too_old, &mut replay).await;
         }
         if !candidate_seen && route_for_absent(state, auth_via, &req, &resp).await == AbsentRoute::HoldHere {
-            if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NotRunning).await {
+            if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NotRunning, &mut replay).await {
                 return held;
             }
         }
@@ -1025,7 +1025,7 @@ pub(crate) async fn deliver(
         // 5. No tier knew the target: hold it for the agent's return, when
         //    the durable jekt conditions hold.
         if !candidate_seen {
-            if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NotRunning).await {
+            if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NotRunning, &mut replay).await {
                 return held;
             }
         }
@@ -1068,13 +1068,15 @@ pub(super) fn echo_local_delivery(
 ///
 /// The same rules hold a jekt the target's spawn gate refused
 /// ([`HoldReason::NeedsLogin`]); the replay then waits for sign-in
-/// (`jekt_held::still_needs_login`).
-pub(crate) async fn hold_for_absent_target(
+/// (`jekt_held::still_needs_login`). Delivered by UID or held, a message
+/// keeps its one-delivery `replay` reservation.
+pub(in crate::server) async fn hold_for_absent_target(
     state: &AppState,
     auth_via: super::ReactiveAuthVia,
     req: &InjectionRequest,
     resp: &crate::backend::reactive::types::InjectionResponse,
     reason: HoldReason,
+    replay: &mut replay::Reservation,
 ) -> Option<serde_json::Value> {
     use crate::backend::storage::jekt_held::{HeldJekt, HoldOutcome, HELD_TTL_MS};
     if !hold_applies(auth_via, req, resp) {
@@ -1132,6 +1134,7 @@ pub(crate) async fn hold_for_absent_target(
         by_uid.target_agent = outcome.target_uid.clone();
         let resp = state.reactive_handler.inject_message(by_uid);
         if resp.success {
+            replay.delivered();
             // As addressed, so the sender's echo names whom it wrote to
             // (ReAgent P1 on #3632: this path skipped the echo).
             echo_local_delivery(state, req, &resp);
@@ -1151,6 +1154,7 @@ pub(crate) async fn hold_for_absent_target(
     let target = &req.target_agent;
     match outcome {
         Ok(HoldOutcome::Held) | Ok(HoldOutcome::AlreadyHeld) => {
+            replay.delivered();
             crate::backend::agent_resolve::record_uid_fallback("jekt.held");
             let error = match reason {
                 HoldReason::NotRunning => format!(
