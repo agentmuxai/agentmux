@@ -54,6 +54,7 @@ use crate::backend::mps;
 // `server/agent_handlers/side_question.rs`, outside this module. Every
 // other item in `argv` keeps its own narrower visibility.
 pub(crate) mod argv;
+mod codex_compact;
 mod container_spawn;
 mod host_spawn;
 mod session;
@@ -66,7 +67,7 @@ pub const SUBPROCESS_OUTPUT_SUBJECT: &str = "output";
 pub const BLOCK_CONTROLLER_SUBPROCESS: &str = "subprocess";
 
 /// Configuration for spawning a subprocess turn.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SubprocessSpawnConfig {
     /// CLI executable (e.g., "claude").
     pub cli_command: String,

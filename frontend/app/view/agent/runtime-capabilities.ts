@@ -1,7 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isWindows } from "@/util/platformutil";
 import { parseProviderFlags } from "./launch-args";
+import { getProvider } from "./providers";
 import type { PermissionMode } from "./types";
 
 /**
@@ -28,19 +30,109 @@ export function modelTakesEffort(model: string): boolean {
     return !/haiku/i.test(model);
 }
 
+/** Claude's `--effort` levels, in order. */
+export const CLAUDE_EFFORTS: readonly string[] = ["low", "medium", "high", "xhigh", "max"];
+
+/** A Codex model as its account's list describes it, or undefined while that list is unknown. */
+function codexModel(model: string) {
+    return getProvider("codex")?.models?.find((m) => m.value === model);
+}
+
 /**
- * Whether the effort setting changes anything for this pane: only Claude takes
- * `--effort`, and not on Haiku.
+ * The effort levels this pane's model takes, in order; empty when the effort
+ * setting does nothing. Claude: its five, none on Haiku. Codex: the model's
+ * own, from its account's list (`low` … `ultra`, different per model; none
+ * until that list is known). Others: none.
+ */
+export function effortLevels(providerId: string | undefined, model: string): readonly string[] {
+    if (!providerId || providerId === "claude") return modelTakesEffort(model) ? CLAUDE_EFFORTS : [];
+    if (providerId === "codex") return codexModel(model)?.efforts ?? [];
+    return [];
+}
+
+/**
+ * Whether the effort setting changes anything for this pane: Claude's
+ * `--effort` (not on Haiku), and Codex's `model_reasoning_effort` for a model
+ * whose levels its account lists.
  */
 export function effortApplies(providerId: string | undefined, model: string): boolean {
-    return (!providerId || providerId === "claude") && modelTakesEffort(model);
+    return effortLevels(providerId, model).length > 0;
+}
+
+/**
+ * The effort a Codex turn runs at: the selection when the model takes it, or
+ * the model's own default (nothing is passed then, and the CLI uses that).
+ * Selections are shared with Claude's levels, so a pane can hold one this
+ * model doesn't take ("max" on a model that stops at "xhigh").
+ */
+export function codexEffort(model: string, selected: string): { effort: string | undefined; passed: boolean } {
+    const levels = effortLevels("codex", model);
+    if (levels.includes(selected)) return { effort: selected, passed: true };
+    return { effort: codexModel(model)?.defaultEffort, passed: false };
 }
 
 /** Why effort does nothing for this pane, for a message to the user; null when it applies. */
 export function effortNotUsedReason(providerId: string | undefined, model: string): string | null {
     if (effortApplies(providerId, model)) return null;
+    if (providerId === "codex") {
+        return codexModel(model) ? "this model takes no effort setting" : "the account's models aren't known yet";
+    }
     if (providerId && providerId !== "claude") return `${providerId} has no effort setting`;
     return "Haiku does not use it";
+}
+
+/**
+ * Codex's sandbox for a permission mode (`-c sandbox_mode=…`; `codex exec
+ * resume` has no `--sandbox` flag, so the config override serves both).
+ * Bypass is the full-access default its base args already carry. The
+ * Claude-only modes a pane may still hold fall to the nearest one: Auto
+ * writes like Accept Edits, Default can't ask anyone in `exec`, so it reads only.
+ *
+ * On Windows, Codex has no workspace-write sandbox yet: observed with
+ * codex-cli 0.154.0 on 2026-10-22, `sandbox_mode=workspace-write` blocked a
+ * write in the working directory, in a git repo too, exactly as `read-only`
+ * did (its Windows sandbox service is "under development"). So there the
+ * writing modes are Read only, and the menu says so rather than offering a
+ * Workspace write that doesn't write.
+ */
+export function codexSandbox(mode: PermissionMode, onWindows: boolean = isWindows()): "workspace-write" | "read-only" | null {
+    switch (mode) {
+        case "bypass":
+            return null;
+        case "acceptEdits":
+        case "auto":
+            return onWindows ? "read-only" : "workspace-write";
+        case "plan":
+        case "default":
+            return "read-only";
+    }
+}
+
+interface CodexMode {
+    value: PermissionMode;
+    label: string;
+    menuLabel: string;
+    note: string;
+}
+
+const CODEX_FULL_ACCESS: CodexMode = { value: "bypass", label: "Full access", menuLabel: "Full access", note: "no sandbox, no prompts" };
+const CODEX_WORKSPACE_WRITE: CodexMode = {
+    value: "acceptEdits",
+    label: "Workspace write",
+    menuLabel: "Workspace write",
+    note: "sandboxed: edits in the workspace only",
+};
+const CODEX_READ_ONLY: CodexMode = { value: "plan", label: "Read only", menuLabel: "Read only", note: "sandboxed: no edits or writes" };
+
+/** The modes a Codex pane offers, as Codex names them: no Workspace write on Windows (codexSandbox). */
+export function codexModes(onWindows: boolean = isWindows()): readonly CodexMode[] {
+    return onWindows ? [CODEX_FULL_ACCESS, CODEX_READ_ONLY] : [CODEX_FULL_ACCESS, CODEX_WORKSPACE_WRITE, CODEX_READ_ONLY];
+}
+
+/** The Codex mode a stored permission mode runs as. */
+export function codexModeFor(mode: PermissionMode, onWindows: boolean = isWindows()): CodexMode {
+    const sandbox = codexSandbox(mode, onWindows);
+    return codexModes(onWindows).find((m) => codexSandbox(m.value, onWindows) === sandbox) ?? CODEX_FULL_ACCESS;
 }
 
 /**
@@ -163,6 +255,11 @@ export function permissionModeText(
     autoAnswersPrompts: boolean,
     providerId = "claude",
 ): { label: string; note?: string; detail?: string } {
+    if (providerId === "codex") {
+        // Codex's own sandbox modes (codexSandbox): a Claude-only mode shows as the one it runs.
+        const m = codexModeFor(mode);
+        return { label: m.menuLabel, note: m.note };
+    }
     if (providerId !== "claude") {
         // Gemini, Kimi and Qwen get `--yolo` for every non-default mode and Codex
         // gets no permission flag at all (buildRuntimeArgs.ts), and none of their

@@ -68,6 +68,12 @@ impl SubprocessController {
         // built after it.
         let session_id_hint = self.inner.lock().unwrap().session_id.clone();
 
+        // A Codex `/compact` compacts the thread through a short-lived App
+        // Server instead of running as an `exec` turn (codex_compact.rs).
+        if super::codex_compact::is_compact_request(&config) {
+            return self.compact_codex_thread(config, session_id_hint);
+        }
+
         // Build continuation argv before claiming the lease or acknowledging
         // the message. A malformed provider configuration must fail as an
         // unstarted turn, not strand the pane in an accepted/running state.

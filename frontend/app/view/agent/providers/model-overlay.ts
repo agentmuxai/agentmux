@@ -150,7 +150,13 @@ export function replaceProviderModels(id: string, accountModels: ProviderModel[]
         setAccountListed((prev) => new Set([...prev].filter((p) => p !== canonical)));
         return;
     }
-    const models = accountModels.map((m, i) => ({ value: m.value, label: m.label, default: i === 0 }));
+    const models = accountModels.map((m, i) => ({
+        value: m.value,
+        label: m.label,
+        default: i === 0,
+        ...(m.efforts?.length ? { efforts: m.efforts } : {}),
+        ...(m.defaultEffort ? { defaultEffort: m.defaultEffort } : {}),
+    }));
     setModelOverlay((prev) => ({ ...prev, [canonical]: models }));
     setAccountListed((prev) => new Set([...prev, canonical]));
 }

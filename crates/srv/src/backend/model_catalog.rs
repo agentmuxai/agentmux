@@ -48,11 +48,21 @@ const CLAUDE_OAUTH_TOKEN_ACCOUNT: &str = "system:claude-code-oauth-token";
 /// One entry in the model dropdown. `id` is the concrete `--model` value the
 /// CLI accepts (e.g. `claude-sonnet-5`); `display_name` is the label to show
 /// (e.g. "Claude Sonnet 5"), taken verbatim from the API.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CatalogModel {
     pub id: String,
     pub display_name: String,
+    /// The reasoning efforts this model takes, in the CLI's order (Codex:
+    /// `low` … `ultra`, different per model). Empty when the source doesn't
+    /// say (Claude's catalog), and the frontend keeps its own levels.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(optional, as = "Option<Vec<String>>")]
+    pub efforts: Vec<String>,
+    /// The effort the CLI uses when none is passed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub default_effort: Option<String>,
 }
 
 /// Read the Claude OAuth access token from an isolated auth dir's
@@ -178,7 +188,7 @@ fn parse_models(body: &serde_json::Value) -> Vec<CatalogModel> {
                         .and_then(|v| v.as_str())
                         .unwrap_or(id.as_str())
                         .to_string();
-                    Some(CatalogModel { id, display_name })
+                    Some(CatalogModel { id, display_name, ..Default::default() })
                 })
                 .collect()
         })
@@ -292,7 +302,7 @@ mod tests {
         });
         let got = parse_models(&body);
         assert_eq!(got.len(), 2);
-        assert_eq!(got[0], CatalogModel { id: "claude-sonnet-5".into(), display_name: "Claude Sonnet 5".into() });
+        assert_eq!(got[0], CatalogModel { id: "claude-sonnet-5".into(), display_name: "Claude Sonnet 5".into(), ..Default::default() });
         assert_eq!(got[1].display_name, "claude-opus-4-8");
     }
 

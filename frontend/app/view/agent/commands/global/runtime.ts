@@ -19,7 +19,7 @@
 import { getRuntimeConfig } from "../../buildRuntimeArgs";
 import { patchRuntime } from "../../runtime-apply";
 import { isPersistentLaunch, PROVIDER_FLAGS_META_KEY } from "../../launch-args";
-import { effectiveModel, effectiveRuntime, effortNotUsedReason, permissionModeText } from "../../runtime-capabilities";
+import { effectiveModel, effectiveRuntime, effortLevels, effortNotUsedReason, permissionModeText } from "../../runtime-capabilities";
 import type { AgentRuntimeConfig, EffortLevel, PermissionMode } from "../../types";
 import type { SlashChoice, SlashCommand, SlashCommandContext, SlashResult } from "../types";
 
@@ -110,6 +110,11 @@ function effortChoices(ctx: SlashCommandContext): SlashChoice[] {
         current: current === effort,
         aliases,
     });
+    // Codex: the running model's own levels (they differ per model).
+    if (ctx.provider()?.id === "codex") {
+        const model = effectiveModel(shownRuntime(ctx).model, ctx.block()?.meta?.[PROVIDER_FLAGS_META_KEY]);
+        return effortLevels("codex", model).map((v) => make(v, v, "Codex reasoning effort", v as EffortLevel));
+    }
     return [
         make("low", "low", "Minimal reasoning effort", "low"),
         make("medium", "medium", "Balanced reasoning effort", "medium", ["med"]),
