@@ -472,7 +472,10 @@ fn finished_text(id: &str, v: &Value) -> String {
 /// Why `Tasks enqueue` refuses a target no agent answers to (#1257).
 fn no_such_target(name: &str) -> String {
     format!(
-        "No agent on this computer is called \"{name}\", so nobody could take this task.          Name it by its AGENTMUX_AGENT_ID (Agents list shows each one), its display name, the          display name's route form (\"Loap-3\" for \"Loap #3\"), or its uid; or leave          target_agent out to file it for anyone."
+        "No agent on this computer is called \"{name}\", so nobody could take this task. \
+         Name it by its AGENTMUX_AGENT_ID (Agents list shows each one), its display name, the \
+         display name's route form (\"Loap-3\" for \"Loap #3\"), or its uid; or leave \
+         target_agent out to file it for anyone."
     )
 }
 
@@ -504,5 +507,6 @@ mod tests {
     fn a_target_nobody_answers_to_is_refused_with_how_to_name_one() {
         let msg = no_such_target("Naki-9");
         assert!(msg.contains("\"Naki-9\"") && msg.contains("AGENTMUX_AGENT_ID") && msg.contains("for anyone"), "{msg}");
+        assert!(!msg.contains("  "), "no source indentation in the text: {msg}");
     }
 }

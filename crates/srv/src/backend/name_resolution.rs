@@ -452,8 +452,6 @@ mod tests {
         );
     }
 
-    /// Templates are prototypes, never targets (spec §1.2): a provider key
-    /// typed as a name must not resolve to the template row.
     #[test]
     fn a_display_names_route_form_resolves_to_its_agent() {
         // "Naki #2" signs and is addressed as "Naki-2" (#1257).
@@ -480,6 +478,8 @@ mod tests {
         assert_eq!(resolve_name_to_uid(&store, &registry(), "Naki-3").unwrap(), NameResolution::None);
     }
 
+    /// Templates are prototypes, never targets (spec §1.2): a provider key
+    /// typed as a name must not resolve to the template row.
     #[test]
     fn a_template_row_is_not_a_candidate() {
         let store = Store::open_in_memory().unwrap();
