@@ -29,32 +29,32 @@ afterEach(() => {
 });
 
 describe("the default widget bar", () => {
-    it("pins twelve widgets, in the operator's order", () => {
+    // SPEC_WORKSPACES_2026_10_23.md §3.1.
+    it("pins eight widgets, in the operator's order", () => {
         expect(getPinnedKeys({}, wmap)).toEqual([
             "agent",
             "swarm",
-            // Warden's Kanban section (SPEC_WARDEN_KANBAN_2026_10_20.md §6.1).
-            "kanban",
             "memory",
-            "files",
             "connectors",
-            "terminal",
-            "editor",
+            "files",
             "browser",
-            "messengers",
-            "sysinfo",
+            "settings",
             "help",
         ]);
     });
 
     it("puts the rest in More", () => {
         expect(getMoreWidgets({}, wmap).map((w) => w.key.replace("defwidget@", ""))).toEqual([
+            "kanban",
+            "terminal",
+            "editor",
+            "messengers",
+            "sysinfo",
             "drone",
             "warden",
             "vault",
             "toolchain",
             "tower",
-            "settings",
         ]);
     });
 

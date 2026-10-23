@@ -177,17 +177,6 @@ const ITEMS: {
         action: () => h.openModal,
         oldLabel: { platforms: ["darwin"], keys: { key: "p", code: "KeyP", ctrlKey: true } },
     },
-    {
-        label: "Settings",
-        command: "app:settings",
-        shown: { darwin: "⌘,", win32: "Ctrl+,", linux: "Ctrl+," },
-        press: {
-            darwin: { key: ",", code: "Comma", metaKey: true },
-            win32: { key: ",", code: "Comma", ctrlKey: true },
-            linux: { key: ",", code: "Comma", ctrlKey: true },
-        },
-        action: () => h.store.openOrFocusPaneByView,
-    },
 ];
 
 function menuItem(label: string): MenuItem {
@@ -245,7 +234,21 @@ describe.each(["darwin", "win32", "linux"] as Platform[])("hamburger menu shortc
 
     it("shows a shortcut on exactly the items that have one", () => {
         const shown = h.menu.items.filter((item) => item.shortcut);
-        expect(shown.map((item) => item.label)).toEqual(["New Tab", "New Window", "Settings", "Command Palette"]);
+        expect(shown.map((item) => item.label)).toEqual(["New Tab", "New Window", "Command Palette"]);
+    });
+
+    // SPEC_WORKSPACES_2026_10_23.md §3: these open from the widget bar instead.
+    it("leaves out the panes the widget bar opens", () => {
+        const labels = h.menu.items.map((item) => item.label);
+        for (const gone of ["Settings", "Connectors", "Memory", "Toolchain"]) {
+            expect(labels).not.toContain(gone);
+        }
+    });
+
+    it("still opens Settings from its shortcut", () => {
+        const comma = platform === "darwin" ? { metaKey: true } : { ctrlKey: true };
+        expect(pressKeys({ key: ",", code: "Comma", ...comma })).toBe(true);
+        expect(h.store.openOrFocusPaneByView).toHaveBeenCalledTimes(1);
     });
 });
 
