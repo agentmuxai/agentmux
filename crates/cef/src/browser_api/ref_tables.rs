@@ -17,14 +17,26 @@ pub struct RefTable {
     pub refs: HashMap<String, i64>,
     /// For each reference inside an iframe (`f1e3`), how to find its frame.
     pub frames: HashMap<String, FrameRef>,
-    /// How many `find`s (and snapshots scoped by name) this pane has had: the
-    /// `k` of their `n{k}e1` references. Kept when the table is replaced, so a
-    /// reference from an earlier find never comes to name another element.
-    pub finds: u32,
-    /// How many times this pane's page has gone away. A snapshot or find notes it when it starts
-    /// and its references are kept only if it is still the same when they are ready, so a request
-    /// that was in flight as the page closed can't put the dead page's node ids back.
-    pub epoch: u64,
+}
+
+/// What a pane keeps across its tables: how many `find`s (and snapshots scoped by name) it has
+/// had, the `k` of their `n{k}e1` references, so a reference from an earlier find never comes to
+/// name another element; and how many times its page has gone away. A snapshot or find notes the
+/// second when it starts and its references are kept only if it is still the same when they are
+/// ready, so a request that was in flight as the page closed can't put the dead page's node ids
+/// back. Kept apart from the tables, which are bounded, so closed panes can't push a live pane's
+/// table out. It costs a few bytes for each pane that has ever been closed.
+#[derive(Default)]
+struct PaneMark {
+    finds: u32,
+    epoch: u64,
+}
+
+#[derive(Default)]
+struct Tables {
+    clock: u64,
+    tables: HashMap<String, (u64, RefTable)>,
+    marks: HashMap<String, PaneMark>,
 }
 
 /// Per-host store of each pane's latest reference table, by block id.
@@ -32,8 +44,6 @@ pub struct RefTable {
 /// dropped (its agent just takes a new snapshot).
 #[derive(Default)]
 pub struct RefTables(std::sync::Mutex<Tables>);
-
-type Tables = (u64, HashMap<String, (u64, RefTable)>);
 
 const MAX_TABLES: usize = 64;
 
@@ -47,19 +57,15 @@ impl RefTables {
         Self::put_locked(&mut self.lock(), block_id, table);
     }
 
-    fn put_locked(g: &mut Tables, block_id: &str, mut table: RefTable) {
-        if let Some((_, old)) = g.1.get(block_id) {
-            table.finds = table.finds.max(old.finds);
-            table.epoch = table.epoch.max(old.epoch);
-        }
-        g.0 += 1;
-        let stamp = g.0;
-        g.1.insert(block_id.to_string(), (stamp, table));
-        while g.1.len() > MAX_TABLES {
-            let oldest = g.1.iter().min_by_key(|(_, (t, _))| *t).map(|(k, _)| k.clone());
+    fn put_locked(g: &mut Tables, block_id: &str, table: RefTable) {
+        g.clock += 1;
+        let stamp = g.clock;
+        g.tables.insert(block_id.to_string(), (stamp, table));
+        while g.tables.len() > MAX_TABLES {
+            let oldest = g.tables.iter().min_by_key(|(_, (t, _))| *t).map(|(k, _)| k.clone());
             match oldest {
                 Some(k) => {
-                    g.1.remove(&k);
+                    g.tables.remove(&k);
                 }
                 None => break,
             }
@@ -67,7 +73,7 @@ impl RefTables {
     }
 
     pub(super) fn get(&self, block_id: &str) -> Option<RefTable> {
-        self.lock().1.get(block_id).map(|(_, t)| t.clone())
+        self.lock().tables.get(block_id).map(|(_, t)| t.clone())
     }
 
     /// Forget the references of a pane whose page is gone (closed, or put to sleep). A
@@ -77,20 +83,25 @@ impl RefTables {
     /// so an earlier find's `n1e3` still never names another element.
     pub(crate) fn forget(&self, block_id: &str) {
         let mut g = self.lock();
-        let (finds, epoch) = g.1.remove(block_id).map(|(_, old)| (old.finds, old.epoch)).unwrap_or((0, 0));
+        g.tables.remove(block_id);
         // Even for a pane with no table yet: a first snapshot may be in flight.
-        Self::put_locked(&mut g, block_id, RefTable { finds, epoch: epoch + 1, ..RefTable::default() });
+        g.marks.entry(block_id.to_string()).or_default().epoch += 1;
     }
 
-    /// The pane's epoch now (see [`RefTable::epoch`]); noted when a request starts.
+    /// The pane's epoch now (see [`PaneMark`]). A request notes it before it opens the pane, so
+    /// a close at any point after that is seen.
     pub(super) fn epoch(&self, block_id: &str) -> u64 {
-        self.lock().1.get(block_id).map(|(_, t)| t.epoch).unwrap_or(0)
+        self.lock().marks.get(block_id).map(|m| m.epoch).unwrap_or(0)
+    }
+
+    fn epoch_is(g: &Tables, block_id: &str, epoch: u64) -> bool {
+        g.marks.get(block_id).map(|m| m.epoch).unwrap_or(0) == epoch
     }
 
     /// [`put`](Self::put), unless the pane's page has gone away since `epoch`.
     pub(super) fn put_at(&self, block_id: &str, epoch: u64, table: RefTable) -> bool {
         let mut g = self.lock();
-        if g.1.get(block_id).map(|(_, t)| t.epoch).unwrap_or(0) != epoch {
+        if !Self::epoch_is(&g, block_id, epoch) {
             return false;
         }
         Self::put_locked(&mut g, block_id, table);
@@ -101,11 +112,9 @@ impl RefTables {
     /// Counted under one lock, so two finds at once can't share one.
     pub(super) fn next_find_prefix(&self, block_id: &str) -> String {
         let mut g = self.lock();
-        let mut table = g.1.get(block_id).map(|(_, t)| t.clone()).unwrap_or_default();
-        table.finds += 1;
-        let k = table.finds;
-        Self::put_locked(&mut g, block_id, table);
-        format!("n{k}")
+        let mark = g.marks.entry(block_id.to_string()).or_default();
+        mark.finds += 1;
+        format!("n{}", mark.finds)
     }
 
     /// Add references to the pane's table for `url`, the way a scoped
@@ -119,12 +128,12 @@ impl RefTables {
     /// [`merge`](Self::merge), unless the pane's page has gone away since `epoch`.
     pub(super) fn merge_at(&self, block_id: &str, epoch: Option<u64>, url: &str, refs: &[(String, i64)]) -> bool {
         let mut g = self.lock();
-        if epoch.is_some_and(|e| g.1.get(block_id).map(|(_, t)| t.epoch).unwrap_or(0) != e) {
+        if epoch.is_some_and(|e| !Self::epoch_is(&g, block_id, e)) {
             return false;
         }
-        let mut table = g.1.get(block_id).map(|(_, t)| t.clone()).unwrap_or_default();
+        let mut table = g.tables.get(block_id).map(|(_, t)| t.clone()).unwrap_or_default();
         if table.url != url {
-            table = RefTable { finds: table.finds, ..RefTable::default() };
+            table = RefTable::default();
         }
         table.url = url.to_string();
         table.refs.extend(refs.iter().cloned());
@@ -146,7 +155,7 @@ mod tests {
         let table = RefTable { url: "https://example.com/".into(), refs: HashMap::from([("e5".to_string(), 42)]), ..RefTable::default() };
         assert!(!tables.put_at("pane", started, table.clone()));
         assert!(!tables.merge_at("pane", Some(started), "https://example.com/", &[("n1e1".to_string(), 7)]));
-        assert!(tables.get("pane").unwrap().refs.is_empty());
+        assert!(tables.get("pane").is_none());
         // One that began after it is.
         let after = tables.epoch("pane");
         assert!(tables.put_at("pane", after, table));
@@ -161,12 +170,13 @@ mod tests {
     #[test]
     fn a_pane_whose_page_is_gone_keeps_no_references_but_keeps_counting_finds() {
         let tables = RefTables::default();
-        let table = RefTable { url: "https://example.com/".into(), refs: HashMap::from([("e5".to_string(), 42)]), finds: 2, ..RefTable::default() };
+        let table = RefTable { url: "https://example.com/".into(), refs: HashMap::from([("e5".to_string(), 42)]), ..RefTable::default() };
         tables.put("pane", table);
+        assert_eq!(tables.next_find_prefix("pane"), "n1");
+        assert_eq!(tables.next_find_prefix("pane"), "n2");
         assert_eq!(tables.get("pane").unwrap().refs.get("e5"), Some(&42));
         tables.forget("pane");
-        let after = tables.get("pane").unwrap();
-        assert!(after.refs.is_empty() && after.frames.is_empty() && after.url.is_empty());
+        assert!(tables.get("pane").is_none());
         assert_eq!(tables.next_find_prefix("pane"), "n3", "an earlier find's references are never reused");
     }
 
@@ -188,5 +198,19 @@ mod tests {
         assert_eq!((t.url.as_str(), t.refs.len()), ("https://b.example/", 1));
         assert_eq!(tables.next_find_prefix("b"), "n3");
         assert_eq!(tables.next_find_prefix("other"), "n1");
+    }
+
+    #[test]
+    fn closed_panes_do_not_push_a_live_panes_table_out() {
+        let tables = RefTables::default();
+        tables.put("live", RefTable { url: "https://example.com/".into(), refs: HashMap::from([("e1".to_string(), 3)]), ..RefTable::default() });
+        for i in 0..(MAX_TABLES * 2) {
+            tables.forget(&format!("closed{i}"));
+        }
+        assert_eq!(tables.get("live").unwrap().refs.get("e1"), Some(&3));
+        // A close is still seen by a request that began before it.
+        let started = tables.epoch("later");
+        tables.forget("later");
+        assert!(!tables.put_at("later", started, RefTable::default()));
     }
 }

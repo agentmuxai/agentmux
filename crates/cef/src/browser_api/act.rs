@@ -659,11 +659,12 @@ pub async fn snapshot_route(
     if req.scope.is_some() && req.scope_match.is_some() {
         return fail("give scope as a reference or as a role and name, not both");
     }
+    // Before the pane is opened, so a close any time after is seen when the references are kept.
+    let epoch = state.browser_api.ref_tables.epoch(&req.block_id);
     let mut cdp = match super::routes::open_dedicated_pane(&state, &req.block_id, "snapshot").await {
         Ok(c) => c,
         Err(e) => return fail(e),
     };
-    let epoch = state.browser_api.ref_tables.epoch(&req.block_id);
     let scope = match &req.scope {
         Some(r) => {
             let table = state.browser_api.ref_tables.get(&req.block_id).unwrap_or_default();
@@ -800,11 +801,12 @@ pub async fn find_route(
     if q.name.trim().is_empty() && q.role.as_deref().unwrap_or("").trim().is_empty() {
         return fail("find needs a name (part of the element's accessible name), a role, or both");
     }
+    // Before the pane is opened, so a close any time after is seen when the references are kept.
+    let find_epoch = state.browser_api.ref_tables.epoch(&req.block_id);
     let mut cdp = match super::routes::open_dedicated_pane(&state, &req.block_id, "find").await {
         Ok(c) => c,
         Err(e) => return fail(e),
     };
-    let find_epoch = state.browser_api.ref_tables.epoch(&req.block_id);
     let _ = cdp.call("Accessibility.enable", json!({})).await;
     let tree = match call(&mut cdp, "Accessibility.getFullAXTree", json!({})).await {
         Ok(t) => t,
@@ -1121,8 +1123,6 @@ pub(super) fn redact_secret(mut after: Value, facts: &DomFacts) -> Value {
 mod tests {
     use super::*;
 
-
-
     fn facts(tag: &str, attrs: &[(&str, &str)]) -> DomFacts {
         DomFacts { local_name: tag.into(), attrs: attrs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(), label: String::new() }
     }
@@ -1238,7 +1238,6 @@ Connection: close
         assert_eq!(out["value"], "[secret: hidden]");
         assert_eq!(out["type"], "password");
     }
-
 
     #[test]
     fn an_ordinary_fields_value_is_kept() {
