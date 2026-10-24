@@ -90,6 +90,28 @@ async fn the_list_shows_each_job_with_its_runs_spend_and_whether_it_is_failing()
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_failure_stays_failing_behind_more_skips_than_the_strip_shows_until_a_success() {
+    let (state, _) = state();
+    job(&state, "jobs-f", "uid-a");
+    finished(&state, "jobs-f", infra::ERROR, 0.0, 100_000);
+    let store = ledger_of(&state).store().clone();
+    for i in 0..20 {
+        let started = now_ms() - 90_000 + i * 1_000;
+        let mut skip = JobRun::new(&format!("skip-{i}"), "jobs-f", "cron", "n", "schedule", run_state::SKIPPED, started);
+        skip.reason = "paused".into();
+        store.job_run_insert(&skip).unwrap();
+    }
+    let list_now = list(&state).await.unwrap();
+    let f = view(&list_now, "jobs-f");
+    assert_eq!(f.recent.len(), 14);
+    assert!(f.recent.iter().all(|r| r.run.state == "skipped"), "the failure is off the strip");
+    assert!(f.failing, "still failing behind 20 skips");
+
+    finished(&state, "jobs-f", infra::OK, 0.0, 0);
+    assert!(!view(&list(&state).await.unwrap(), "jobs-f").failing, "a success ends it");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn runs_page_newest_first() {
     let (state, _) = state();
     job(&state, "jobs-p", "uid-a");

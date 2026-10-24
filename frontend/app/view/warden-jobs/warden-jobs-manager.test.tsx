@@ -16,11 +16,20 @@ vi.mock("@/app/store/rpc-api", () => ({
         JobsActCommand: (_c: unknown, d: unknown) => rpc.act(d),
     },
 }));
-vi.mock("@/app/store/mps", () => ({ onMuxEvent: () => () => {} }));
+const events = vi.hoisted(() => ({ handlers: new Map<string, (data: unknown) => void>() }));
+vi.mock("@/app/store/mps", () => ({
+    onMuxEvent: (type: string, handler: (data: unknown) => void) => {
+        events.handlers.set(type, handler);
+        return () => events.handlers.delete(type);
+    },
+}));
+/** srv publishing `jobs:changed` for `jobId`. */
+const jobsChanged = (jobId: string) => events.handlers.get("jobs:changed")?.({ job_id: jobId });
 vi.mock("@/app/store/global", () => ({ openLink: vi.fn() }));
 vi.mock("@/app/util/reveal-block", () => ({ revealBlock: vi.fn() }));
 
 import { mkJob, mkRun, NOW } from "./jobs-fixtures";
+import { mergeReload } from "./jobs-history";
 import { WardenJobsManager } from "./warden-jobs-manager";
 
 function listOf(jobs: JobView[], pausedAll = false): JobsListResult {
@@ -93,6 +102,57 @@ describe("WardenJobsManager", () => {
         expect(rpc.act).not.toHaveBeenCalledWith({ action: "delete", job_id: "j1" });
         fireEvent.click(screen.getByRole("button", { name: /Delete it, keep its runs/ }));
         await waitFor(() => expect(rpc.act).toHaveBeenCalledWith({ action: "delete", job_id: "j1" }));
+    });
+
+    it("reloads an open history when srv says its job changed, so an older run's end shows", async () => {
+        rpc.list.mockResolvedValue(listOf([mkJob(), mkJob({ id: "j2", name: "Other job" })]));
+        const older = mkRun({ id: "r-old", state: "running", infra: "", outcome: "unknown", started_at_ms: NOW - 120_000, ended_at_ms: null });
+        const newer = mkRun({ id: "r-new", state: "running", infra: "", outcome: "unknown", started_at_ms: NOW - 60_000, ended_at_ms: null });
+        rpc.runs.mockResolvedValue({ runs: [newer, older] });
+        render(() => <WardenJobsManager visible />);
+        await waitFor(() => expect(screen.getByText("Nightly build")).toBeInTheDocument());
+        fireEvent.click(screen.getByText("Nightly build"));
+        await waitFor(() => expect(screen.getAllByText("running").length).toBeGreaterThanOrEqual(2));
+        const asked = rpc.runs.mock.calls.length;
+
+        // Another job changing doesn't reload this one.
+        jobsChanged("j2");
+        await Promise.resolve();
+        expect(rpc.runs.mock.calls.length).toBe(asked);
+
+        // The older run ends after the newer one started: its row updates.
+        rpc.runs.mockResolvedValue({ runs: [newer, { ...older, state: "finished", infra: "ok", outcome: "ok", summary: "older one done", ended_at_ms: NOW }] });
+        jobsChanged("j1");
+        await waitFor(() => expect(screen.getByText("older one done")).toBeInTheDocument());
+        expect(rpc.runs).toHaveBeenLastCalledWith({ job_id: "j1", limit: 50 });
+    });
+
+    it("drops an answer for a job that is no longer open", async () => {
+        rpc.list.mockResolvedValue(listOf([mkJob({ id: "a", name: "Job A" }), mkJob({ id: "b", name: "Job B" })]));
+        let answerA: (v: unknown) => void = () => {};
+        rpc.runs.mockImplementation((d: { job_id: string }) =>
+            d.job_id === "a"
+                ? new Promise((resolve) => (answerA = resolve))
+                : Promise.resolve({ runs: [mkRun({ id: "rb", job_id: "b", summary: "B's run" })] })
+        );
+        render(() => <WardenJobsManager visible />);
+        await waitFor(() => expect(screen.getByText("Job A")).toBeInTheDocument());
+        fireEvent.click(screen.getByText("Job A"));
+        fireEvent.click(screen.getByText("Job B"));
+        await waitFor(() => expect(screen.getByText("B's run")).toBeInTheDocument());
+        answerA({ runs: [mkRun({ id: "ra", job_id: "a", summary: "A's run" })] });
+        await new Promise((r) => setTimeout(r, 0));
+        expect(screen.queryByText("A's run")).toBeNull();
+        expect(screen.getByText("B's run")).toBeInTheDocument();
+    });
+
+    it("keeps the older pages already loaded when it reloads", () => {
+        const at = (id: string, t: number) => mkRun({ id, started_at_ms: t });
+        const shown = [at("r5", 5), at("r4", 4), at("r3", 3), at("r2", 2), at("r1", 1)];
+        const fresh = [at("r6", 6), { ...at("r5", 5), summary: "now done" }, at("r4", 4)];
+        expect(mergeReload(fresh, shown).map((r) => r.id)).toEqual(["r6", "r5", "r4", "r3", "r2", "r1"]);
+        expect(mergeReload(fresh, shown)[1].summary).toBe("now done");
+        expect(mergeReload([], shown)).toEqual([]);
     });
 
     it("with Pause all on, says so, turns Run now off, and offers Resume all", async () => {

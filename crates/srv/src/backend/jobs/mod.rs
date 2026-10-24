@@ -165,9 +165,17 @@ impl RunLedger {
         &self.store
     }
 
-    /// Tell the Jobs tab the ledger changed (`JobsChanged`).
-    pub fn changed(&self) {
-        self.broker.publish_event::<crate::backend::mps_events::JobsChanged>(&(), vec![], 0);
+    /// Tell the Jobs tab job `job_id`'s runs changed (`JobsChanged`); `""`
+    /// for a change to every job.
+    pub fn changed(&self, job_id: &str) {
+        let event = crate::backend::mps_events::JobsChangedEvent { job_id: job_id.to_string() };
+        self.broker.publish_event::<crate::backend::mps_events::JobsChanged>(&event, vec![], 0);
+    }
+
+    /// [`Self::changed`] for the job run `run_id` belongs to.
+    fn run_changed(&self, run_id: &str) {
+        let job_id = self.store.job_run_get(run_id).ok().flatten().map(|r| r.job_id).unwrap_or_default();
+        self.changed(&job_id);
     }
 
     /// Pause all, when the operator has it on: since when, and by whom.
@@ -186,7 +194,7 @@ impl RunLedger {
         } else {
             self.store.job_flag_clear(FLAG_PAUSED_ALL)?;
         }
-        self.changed();
+        self.changed("");
         Ok(())
     }
 
@@ -213,7 +221,7 @@ impl RunLedger {
             Err(e) => Err(e),
         };
         match written {
-            Ok(()) => self.changed(),
+            Ok(()) => self.changed(&job.id),
             Err(e) => tracing::warn!(job_id = %job.id, error = %e, "jobs: couldn't record a paused slot"),
         }
     }
@@ -282,7 +290,7 @@ impl RunLedger {
         if let Err(e) = result {
             tracing::warn!(run_id, error = %e, "jobs: couldn't record a fire's delivery");
         }
-        self.changed();
+        self.changed(&job.id);
         if scheduled {
             let now_pending = self.store.job_run_get(run_id).ok().flatten().is_some_and(|r| r.state == state::PENDING && r.ended_at_ms.is_none());
             let why = if now_pending { reason::SUPERSEDED } else { reason::EXPIRED };
@@ -312,7 +320,7 @@ impl RunLedger {
         if let Err(e) = result {
             tracing::warn!(run_id = %run.id, error = %e, "jobs: couldn't record a pending fire's delivery");
         }
-        self.changed();
+        self.changed(&run.job_id);
     }
 
     /// End a pending fire whose next fire time passed, or whose job is gone.
@@ -320,7 +328,7 @@ impl RunLedger {
         if let Err(e) = self.store.job_run_end_one_pending(run_id, reason::EXPIRED, now_ms()) {
             tracing::warn!(run_id, error = %e, "jobs: couldn't expire a pending fire");
         }
-        self.changed();
+        self.run_changed(run_id);
     }
 
     /// This channel's pending fires still waiting for their agent.
@@ -409,7 +417,7 @@ impl RunLedger {
         if let Err(e) = self.store.job_run_skip(&id, reason::APP_NOT_RUNNING, count, now_ms()) {
             tracing::warn!(job_id = %job.id, error = %e, "jobs: couldn't record missed slots");
         }
-        self.changed();
+        self.changed(&job.id);
     }
 
     /// The followed turn ended (or never showed up).
@@ -417,7 +425,7 @@ impl RunLedger {
         if let Err(e) = self.store.job_run_finish(run_id, infra_status, cost, summary, now_ms()) {
             tracing::warn!(run_id, error = %e, "jobs: couldn't close a run");
         }
-        self.changed();
+        self.run_changed(run_id);
     }
 
     pub(crate) fn turn_bound(&self, run_id: &str, turn_id: i64, partial: bool) {
@@ -437,7 +445,7 @@ impl RunLedger {
         });
         match self.store.job_run_insert(&run) {
             Ok(true) => {
-                self.changed();
+                self.changed(drone_id);
                 Some(run.id)
             }
             Ok(false) => None,

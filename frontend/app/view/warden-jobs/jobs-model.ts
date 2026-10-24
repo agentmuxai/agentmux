@@ -20,12 +20,28 @@ import type { JobsRunsResult } from "@/types/rpc/JobsRunsResult";
 
 const POLL_MS = 15_000;
 const DEBOUNCE_MS = 200;
+/** A history page, and the most runs one `jobs.runs` returns (srv's cap). */
+export const RUNS_PAGE = 50;
+export const RUNS_MAX = 200;
+
+/** The last `jobs:changed`: the job whose runs changed (`""`: every job), numbered so the same job
+ *  changing twice is two changes. */
+export interface JobChange {
+    jobId: string;
+    seq: number;
+}
 
 export class JobsModel {
     readonly list: Accessor<JobsListResult | null>;
     readonly error: Accessor<string | null>;
+    /** The last job srv said changed, for an open history to reload its own job's runs. */
+    readonly changed: Accessor<JobChange>;
+    /** Counts the 15 s polls: a run another AgentMux on this computer ends raises no event here. */
+    readonly polled: Accessor<number>;
     private readonly setList: (l: JobsListResult | null) => void;
     private readonly setError: (e: string | null) => void;
+    private readonly setChanged: (c: JobChange) => void;
+    private readonly setPolled: (n: number) => void;
     private unsubs: Array<() => void> = [];
     private poll: ReturnType<typeof setInterval> | null = null;
     private debounce: ReturnType<typeof setTimeout> | null = null;
@@ -39,16 +55,28 @@ export class JobsModel {
         this.error = error;
         this.setList = setList;
         this.setError = setError;
+        const [changed, setChanged] = createSignal<JobChange>({ jobId: "", seq: 0 });
+        const [polled, setPolled] = createSignal(0);
+        this.changed = changed;
+        this.polled = polled;
+        this.setChanged = setChanged;
+        this.setPolled = setPolled;
     }
 
     /** Follow the jobs while the section is shown; stop when it isn't. */
     setVisible(visible: boolean): void {
         if (visible && this.unsubs.length === 0) {
             this.unsubs = [
-                onMuxEvent(WpsEvent.JobsChanged, () => this.scheduleRefresh()),
+                onMuxEvent(WpsEvent.JobsChanged, (data) => {
+                    this.setChanged({ jobId: data.job_id, seq: this.changed().seq + 1 });
+                    this.scheduleRefresh();
+                }),
                 onMuxEvent(WpsEvent.CronChanged, () => this.scheduleRefresh()),
             ];
-            this.poll = setInterval(() => void this.refresh(), POLL_MS);
+            this.poll = setInterval(() => {
+                this.setPolled(this.polled() + 1);
+                void this.refresh();
+            }, POLL_MS);
             void this.refresh();
         } else if (!visible && this.unsubs.length > 0) {
             this.stop();
@@ -94,9 +122,9 @@ export class JobsModel {
         }
     }
 
-    /** One job's runs, newest first; `before` pages on from the last one shown. */
-    runs(jobId: string, before?: number): Promise<JobsRunsResult> {
-        return RpcApi.JobsRunsCommand(TabRpcClient, { job_id: jobId, limit: 50, ...(before != null ? { before } : {}) });
+    /** One job's runs, newest first, at most `limit`; `before` pages on from the last one shown. */
+    runs(jobId: string, before?: number, limit: number = RUNS_PAGE): Promise<JobsRunsResult> {
+        return RpcApi.JobsRunsCommand(TabRpcClient, { job_id: jobId, limit, ...(before != null ? { before } : {}) });
     }
 
     /** An action, then a refresh: the event usually comes first, but a refusal raises none. */

@@ -475,7 +475,7 @@ pub(super) async fn handle_cron_report(
     }
     match ledger.store().job_run_report(&run_id, &req.outcome, &req.summary, &links) {
         Ok(true) => {
-            ledger.changed();
+            ledger.changed(&run.job_id);
             (StatusCode::OK, Json(json!({"ok": true, "run_id": run_id, "outcome": req.outcome})))
         }
         Ok(false) => (

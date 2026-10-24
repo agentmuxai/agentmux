@@ -208,7 +208,9 @@ struct Ledgered {
 fn ledgered(ledger: &RunLedger, job_id: &str, midnight: i64, week: i64) -> Ledgered {
     let store = ledger.store();
     let runs = store.job_runs_for_job(job_id, RECENT, None).unwrap_or_default();
-    let failing = job_failing(&runs);
+    // From the newest decisive run, not the strip: a failure stays failing
+    // behind any number of skips (§3.4).
+    let failing = job_failing(store.job_run_last_decisive(job_id).ok().flatten().as_ref());
     let (today, known_today) = store.job_runs_cost_since(job_id, midnight).unwrap_or((0.0, false));
     let (week_usd, known_week) = store.job_runs_cost_since(job_id, week).unwrap_or((0.0, false));
     Ledgered {
@@ -379,7 +381,7 @@ async fn act(state: &AppState, req: JobsActRequest, ctx: &RpcContext) -> Result<
             };
             let out = answered(status, &body);
             if let Some(ledger) = state.cron_scheduler.runs() {
-                ledger.changed();
+                ledger.changed(req.job_id.as_deref().unwrap_or(""));
             }
             out
         }

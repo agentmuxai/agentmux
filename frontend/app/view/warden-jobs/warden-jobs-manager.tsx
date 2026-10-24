@@ -193,7 +193,9 @@ export const WardenJobsManager = (props: {
                         job={job()}
                         now={now()}
                         pausedAll={pausedAll() != null}
-                        loadRuns={(id, before) => model.runs(id, before)}
+                        loadRuns={(id, before, limit) => model.runs(id, before, limit)}
+                        changed={model.changed()}
+                        polled={model.polled()}
                         act={(req) => model.act(req)}
                         onClose={() => setSelected(null)}
                     />

@@ -6,7 +6,7 @@
 // cost and account, and links (docs/specs/SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §3.3). A summary is
 // another agent's words: shown as text, never as markup.
 
-import { createEffect, createMemo, createSignal, For, on, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, For, on, Show, type JSX } from "solid-js";
 
 import { Button, Pill } from "@/app/element/ui";
 import { openLink } from "@/app/store/global";
@@ -19,6 +19,16 @@ import type { JobView } from "@/types/rpc/JobView";
 import { formatDurationShort, formatTimeAgo } from "@/util/format-time";
 
 import { costText, reasonText, runBadge, stateText } from "./jobs-format";
+import { RUNS_MAX, RUNS_PAGE, type JobChange } from "./jobs-model";
+
+/** `fresh` (a reload from the newest run) with the older rows already loaded below it kept, so a
+ *  reload doesn't take the view back to the first page. Exported for its test. */
+export function mergeReload(fresh: JobRunRow[], shown: JobRunRow[]): JobRunRow[] {
+    if (fresh.length === 0) return fresh;
+    const seen = new Set(fresh.map((r) => r.id));
+    const oldest = fresh[fresh.length - 1].started_at_ms;
+    return [...fresh, ...shown.filter((r) => !seen.has(r.id) && r.started_at_ms <= oldest)];
+}
 
 /** A reported link: a URL, or `{ label, url }` (srv keeps only https ones). */
 function reportedLinks(run: JobRunRow): { label: string; url: string }[] {
@@ -99,7 +109,11 @@ export function JobHistory(props: {
     job: JobView;
     now: number;
     pausedAll: boolean;
-    loadRuns: (jobId: string, before?: number) => Promise<JobsRunsResult>;
+    loadRuns: (jobId: string, before?: number, limit?: number) => Promise<JobsRunsResult>;
+    /** The last job srv said changed (`jobs:changed`): this job's, or every job's, reloads the runs. */
+    changed: JobChange;
+    /** Counts the list's polls; each reloads the runs too. */
+    polled: number;
     act: (req: JobsActRequest) => Promise<JobsActResult>;
     onClose: () => void;
 }): JSX.Element {
@@ -109,27 +123,76 @@ export function JobHistory(props: {
     const [note, setNote] = createSignal<string | null>(null);
     const [confirmDelete, setConfirmDelete] = createSignal(false);
 
-    const load = async (before?: number) => {
+    // Every request remembers the job it was for and the generation it was made in; an answer that
+    // comes back after another job was opened, or after a newer reload, is dropped, so it can't show
+    // under the wrong job or put back older rows.
+    let generation = 0;
+    let reloads = 0;
+    const current = (gen: number, jobId: string) => gen === generation && jobId === props.job.id;
+    const ask = async (before?: number, limit?: number): Promise<JobRunRow[] | null> => {
         try {
-            const got = (await props.loadRuns(props.job.id, before)).runs;
-            setRuns(before == null ? got : [...runs(), ...got]);
-            setMore(got.length >= 50);
+            return (await props.loadRuns(props.job.id, before, limit)).runs;
         } catch (e) {
             setNote(String(e));
+            return null;
         }
     };
-    // Reload when another job is opened, or when the list says this one ran again; a refresh that
-    // changes neither leaves the runs, and a Delete being confirmed, as they are.
-    const runsKey = createMemo(() => {
-        const last = props.job.recent[0];
-        return [props.job.id, last?.id, last?.state, last?.outcome, last?.skip_count].join("|");
-    });
+
+    /** Another job was opened: its first page. */
+    const loadFirst = async () => {
+        const gen = ++generation;
+        const jobId = props.job.id;
+        setRuns([]);
+        setMore(false);
+        const got = await ask(undefined, RUNS_PAGE);
+        if (got == null || !current(gen, jobId)) return;
+        setRuns(got);
+        setMore(got.length >= RUNS_PAGE);
+    };
+
+    /** The next page below the rows shown. */
+    const loadOlder = async () => {
+        const gen = generation;
+        const jobId = props.job.id;
+        const last = runs()[runs().length - 1];
+        if (!last) return;
+        const got = await ask(last.started_at_ms, RUNS_PAGE);
+        if (got == null || !current(gen, jobId)) return;
+        const seen = new Set(runs().map((r) => r.id));
+        setRuns([...runs(), ...got.filter((r) => !seen.has(r.id))]);
+        setMore(got.length >= RUNS_PAGE);
+    };
+
+    /** The same job changed: the rows shown, as deep as they go, read again. */
+    const reload = async () => {
+        const gen = generation;
+        const jobId = props.job.id;
+        const mine = ++reloads;
+        const depth = Math.min(Math.max(RUNS_PAGE, runs().length), RUNS_MAX);
+        const got = await ask(undefined, depth);
+        if (got == null || !current(gen, jobId) || mine !== reloads) return;
+        setRuns(mergeReload(got, runs()));
+    };
+
     createEffect(
-        on(runsKey, () => {
-            setConfirmDelete(false);
-            void load();
-        })
+        on(
+            () => props.job.id,
+            () => {
+                setConfirmDelete(false);
+                void loadFirst();
+            }
+        )
     );
+    createEffect(
+        on(
+            () => props.changed,
+            (c) => {
+                if (c.jobId === "" || c.jobId === props.job.id) void reload();
+            },
+            { defer: true }
+        )
+    );
+    createEffect(on(() => props.polled, () => void reload(), { defer: true }));
 
     const doAct = async (action: JobsActRequest["action"]) => {
         setBusy(action);
@@ -235,7 +298,7 @@ export function JobHistory(props: {
                     </tbody>
                 </table>
                 <Show when={more()}>
-                    <Button density="compact" tone="quiet" onClick={() => void load(runs()[runs().length - 1]?.started_at_ms)}>
+                    <Button density="compact" tone="quiet" onClick={() => void loadOlder()}>
                         Older runs
                     </Button>
                 </Show>

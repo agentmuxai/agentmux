@@ -25,14 +25,17 @@ pub fn run_failed(run: &JobRun) -> bool {
 
 /// Whether `run` says how the job is doing: a finished run, or a failure.
 /// Skips, and runs still scheduled, pending or running, say nothing yet.
+/// The store's `job_run_last_decisive` picks the newest such run in SQL.
+#[cfg(test)]
 fn decisive(run: &JobRun) -> bool {
     run.state == state::FINISHED || run_failed(run)
 }
 
-/// Whether a job whose runs are `newest_first` is failing: its newest
-/// decisive run failed. The next success ends that (§3.4's incident).
-pub fn job_failing(newest_first: &[JobRun]) -> bool {
-    newest_first.iter().find(|r| decisive(r)).is_some_and(run_failed)
+/// Whether a job is failing, from its newest decisive run
+/// (`Store::job_run_last_decisive`): that run failed. The next success ends
+/// it (§3.4's incident), however many skips come between.
+pub fn job_failing(last_decisive: Option<&JobRun>) -> bool {
+    last_decisive.is_some_and(run_failed)
 }
 
 /// A job's state in the tab (§3.3).
@@ -106,16 +109,45 @@ mod tests {
         }
     }
 
+    /// The store's SQL pick of the newest decisive run agrees with
+    /// [`decisive`] on every shape of run.
     #[test]
-    fn a_job_is_failing_until_its_next_success_and_skips_dont_change_that() {
-        let failed = run("finished", "error", "unknown", "");
-        let ok = run("finished", "ok", "ok", "");
-        let skip = run("skipped", "", "unknown", "paused");
-        let running = run("running", "", "unknown", "");
-        assert!(job_failing(&[skip.clone(), running.clone(), failed.clone(), ok.clone()]));
-        assert!(!job_failing(&[ok.clone(), failed.clone()]), "the success after it ends it");
-        assert!(!job_failing(&[skip, running]), "nothing decisive yet");
-        assert!(!job_failing(&[]));
+    fn the_store_and_this_agree_on_which_runs_are_decisive() {
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        store.job_runs_ensure_schema().unwrap();
+        let shapes = [
+            run("finished", "ok", "ok", ""),
+            run("finished", "ok", "unknown", ""),
+            run("finished", "error", "unknown", ""),
+            run("missed", "", "unknown", "target_stopped"),
+            run("lost", "", "unknown", ""),
+            run("pending", "", "unknown", "expired"),
+            run("pending", "", "unknown", "superseded"),
+            run("pending", "", "unknown", "target_stopped"),
+            run("skipped", "", "unknown", "paused"),
+            run("scheduled", "", "unknown", ""),
+            run("running", "", "unknown", ""),
+            run("running", "interrupted", "unknown", ""),
+            run("running", "", "failed", ""),
+        ];
+        for (i, shape) in shapes.iter().enumerate() {
+            let mut r = shape.clone();
+            r.id = format!("r{i}");
+            r.job_id = format!("j{i}");
+            r.job_source = "cron".into();
+            r.trigger = "schedule".into();
+            r.links = serde_json::json!({});
+            store.job_run_insert(&r).unwrap();
+            let picked = store.job_run_last_decisive(&r.job_id).unwrap().is_some();
+            assert_eq!(picked, decisive(&r), "{r:?}");
+        }
+    }
+
+    #[test]
+    fn a_job_is_failing_when_its_newest_decisive_run_failed() {
+        assert!(job_failing(Some(&run("finished", "error", "unknown", ""))));
+        assert!(!job_failing(Some(&run("finished", "ok", "ok", ""))));
+        assert!(!job_failing(None), "nothing decisive yet");
     }
 
     #[test]

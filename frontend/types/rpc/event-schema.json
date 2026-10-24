@@ -528,8 +528,10 @@
   {
     "event": "jobs:changed",
     "payloadTs": {
-      "imports": [],
-      "name": "null"
+      "imports": [
+        "JobsChangedEvent"
+      ],
+      "name": "JobsChangedEvent"
     }
   },
   {

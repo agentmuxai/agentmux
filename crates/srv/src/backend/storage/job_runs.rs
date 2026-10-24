@@ -348,6 +348,30 @@ impl Store {
         Ok(self.job_runs_for_job(job_id, 1, None)?.pop())
     }
 
+    /// The job's newest decisive run: one that finished, or failed (a miss,
+    /// a lost run, an expired pending fire, a failing infrastructure status
+    /// or outcome). Skips, and runs still scheduled, pending or running, are
+    /// passed over however many there are. The same rule as
+    /// `jobs::verdict::decisive`, whose test checks the two agree.
+    pub fn job_run_last_decisive(&self, job_id: &str) -> Result<Option<JobRun>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        Ok(conn
+            .query_row(
+                &format!(
+                    "SELECT {COLS} FROM db_job_runs
+                      WHERE job_id = ?1 AND collapsed_into = ''
+                        AND (state IN ('finished','missed','lost')
+                             OR (state = 'pending' AND reason = 'expired')
+                             OR infra IN ('error','timeout','over_budget','interrupted')
+                             OR outcome = 'failed')
+                      ORDER BY started_at_ms DESC, rowid DESC LIMIT 1"
+                ),
+                params![job_id],
+                row_to_run,
+            )
+            .optional()?)
+    }
+
     /// Turn the just-inserted placeholder `id` into a skip for `reason`, or,
     /// when the job's previous row is a skip for the same reason, fold it
     /// into that row (`skip_count` + `count`), so consecutive skips show as
