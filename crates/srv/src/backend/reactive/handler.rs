@@ -76,12 +76,8 @@ pub struct Handler {
     /// before ambiguity is decided. `None` (tests) treats every block as
     /// live.
     block_liveness: Option<BlockLivenessProbe>,
-    /// Tries a name nothing is bound under as a former slug (`former_slug.rs`).
-    former_slug_resolver: Option<FormerSlugResolver>,
-    /// Tries a name nothing is bound under as the route form of an agent's
-    /// current display name, before former names (`former_slug.rs`, #1459).
-    /// Delivery only, never a sender.
-    display_route_resolver: Option<FormerSlugResolver>,
+    /// Tries an unbound name as a display name's route or a former name (`former_slug.rs`).
+    alias_resolvers: former_slug::AliasResolvers,
     audit_log: Vec<AuditLogEntry>,
     /// The UID of the delivery in flight
     /// (`InjectionRequest::audit_source_uid`), copied onto every audit entry
@@ -170,8 +166,7 @@ impl Handler {
             stable_agent_identity_confirmer: None,
             uid_identity_confirmer: None,
             block_liveness: None,
-            former_slug_resolver: None,
-            display_route_resolver: None,
+            alias_resolvers: Default::default(),
             audit_log: Vec::with_capacity(AUDIT_LOG_MAX),
             delivery_source_uid: String::new(),
             delivery_wan: None,

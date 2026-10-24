@@ -37,6 +37,15 @@ use crate::backend::reactive::types::InjectionRequest;
 /// handler's lock, on a miss only.
 pub type FormerSlugResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
+/// The handler's delivery-only name resolvers: a former slug or display name
+/// (also the sender rule's), and the route form of a current display name
+/// (#1459: delivery only, tried first, never asked about a sender).
+#[derive(Default)]
+pub struct AliasResolvers {
+    former: Option<FormerSlugResolver>,
+    display_route: Option<FormerSlugResolver>,
+}
+
 /// How often one name's delivery through its former slug is logged.
 const LOG_EVERY: Duration = Duration::from_secs(60 * 60);
 
@@ -117,7 +126,7 @@ impl Handler {
 
     /// [`refuse_former_slug_sender`] against this registry and the store.
     pub(super) fn refuse_former_slug_sender(&self, req: &mut InjectionRequest) -> bool {
-        let Some(resolver) = self.former_slug_resolver.as_ref() else {
+        let Some(resolver) = self.alias_resolvers.former.as_ref() else {
             return false;
         };
         refuse_former_slug_sender(req, |name| self.name_to_blocks.contains_key(name), |name| resolver(name))
@@ -128,6 +137,8 @@ impl Handler {
     /// logged ([`note_delivery`]), else not found.
     pub(super) fn former_slug_target(&self, key: &str, target: &str) -> super::TargetResolution {
         if let Some((block, uid)) = self.display_route_block(key) {
+            // Reported as `FormerSlug`: the same delivery-only path, by UID
+            // (the confirmer checks the pane's UID, not the name sent to).
             return super::TargetResolution::FormerSlug { block, uid };
         }
         match self.former_slug_block(key) {
@@ -141,7 +152,7 @@ impl Handler {
 
     /// See [`FormerSlugResolver`].
     pub fn set_former_slug_resolver(&mut self, resolver: FormerSlugResolver) {
-        self.former_slug_resolver = Some(resolver);
+        self.alias_resolvers.former = Some(resolver);
     }
 
     /// The UID of the agent whose current display name routes to a name
@@ -149,13 +160,13 @@ impl Handler {
     /// former slug, tried first, since a current name wins over a former one.
     /// Never consulted for a sender (#1459).
     pub fn set_display_route_resolver(&mut self, resolver: FormerSlugResolver) {
-        self.display_route_resolver = Some(resolver);
+        self.alias_resolvers.display_route = Some(resolver);
     }
 
     /// The block and UID `name` reaches as the route form of an agent's
     /// current display name: its agent is registered here by UID.
     pub(super) fn display_route_block(&self, name: &str) -> Option<(String, String)> {
-        let uid = self.display_route_resolver.as_ref()?(name)?;
+        let uid = self.alias_resolvers.display_route.as_ref()?(name)?;
         let block = self.uid_to_block.get(&uid)?.clone();
         Some((block, uid))
     }
@@ -169,7 +180,7 @@ impl Handler {
     /// The block and UID `name` reaches as a former slug: its agent is
     /// registered here by UID. Read-only; the caller logs a delivery.
     pub(super) fn former_slug_block(&self, name: &str) -> Option<(String, String)> {
-        let uid = self.former_slug_resolver.as_ref()?(name)?;
+        let uid = self.alias_resolvers.former.as_ref()?(name)?;
         let block = self.uid_to_block.get(&uid)?.clone();
         Some((block, uid))
     }

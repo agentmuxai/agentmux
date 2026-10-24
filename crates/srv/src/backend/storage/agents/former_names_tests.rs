@@ -258,3 +258,29 @@ fn display_route_owner_is_the_one_current_display_name() {
     store.agent_def_delete("uid-naki").unwrap();
     assert!(store.display_route_owner("Naki-2").unwrap().is_none(), "a deleted agent is never reached");
 }
+
+/// #1459: `display_route_owner` runs inside the reactive handler's lock on
+/// every unbound name, so a name no display name routes to costs no store
+/// read once the index is warm; both "Naki-2" and "Naki #2" find the agent;
+/// and an agent created through this store is seen at once.
+#[test]
+fn a_name_no_display_name_routes_to_costs_no_store_read() {
+    let store = Store::open_in_memory().unwrap();
+    let mut naki = test_agent_def("uid-naki", "Naki #2", "claude", "host", 1, "");
+    naki.slug = "naki-naki-2".into();
+    store.agent_def_insert(&mut naki).unwrap();
+    assert!(store.display_route_owner("warm-up").unwrap().is_none());
+    let warm = reads(&store);
+    for name in ["github-consumer", "naki-naki-2", "Naki-3", "agenty", ""] {
+        assert!(store.display_route_owner(name).unwrap().is_none(), "{name}");
+    }
+    for name in ["Naki-2", "Naki #2", "naki-2"] {
+        assert_eq!(store.display_route_owner(name).unwrap().map(|o| o.uid).as_deref(), Some("uid-naki"), "{name}");
+    }
+    assert_eq!(reads(&store), warm, "answered from the index");
+
+    let mut kiwi = test_agent_def("uid-kiwi", "Kiwi #1", "claude", "host", 2, "");
+    kiwi.slug = "kiwi-kiwi-1".into();
+    store.agent_def_insert(&mut kiwi).unwrap();
+    assert_eq!(store.display_route_owner("Kiwi-1").unwrap().map(|o| o.uid).as_deref(), Some("uid-kiwi"), "seen at once");
+}

@@ -793,8 +793,7 @@ pub(crate) async fn deliver(
     if is_not_found {
         // A candidate an older build registered can't take files (spec §3.4).
         let mut files_too_old = false;
-        // A former slug's agent, and one addressed by its display name's route
-        // form, is registered under its current slug (`former_slug`).
+        // A former name's agent, or a display name's, runs as its slug (`former_slug`).
         let alias = former_slug::delivery_alias(state, &req.target_agent);
         // Tier 2: same-host, different sidecar (file registry → HTTP loopback)
         let data_dir = base::get_mux_data_dir();
