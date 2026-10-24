@@ -1,7 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { FlexDirection } from "./types";
+import { isNodeLocked } from "./layoutInvariants";
+import { findNode, findParent } from "./layoutNode";
+import { DropDirection, FlexDirection, type LayoutNode } from "./types";
 
 /**
  * Where the drop placeholder goes when the pane being dragged is a minimized pane (a chip).
@@ -32,4 +34,36 @@ export function chipPlaceholderRect(
     }
     const width = Math.min(chip.width, target.width);
     return { top: target.top, height, width, left: along(target.left, target.width, width) };
+}
+
+/**
+ * Where a chip dropped on another chip goes: to the nearer of the two seams around that chip, in
+ * the direction the chips are laid out (the upper or lower half of a chip in a column, the left or
+ * right half in a row). A chip is thin, so the generic zones resolve most of its area to a swap
+ * (centre) or a split of the chip (its ends), and the placeholder then covers the chip instead of
+ * sitting between two (SPEC_CHIP_OVER_CHIP_DROP_2026_10_24.md).
+ *
+ * Undefined unless both nodes are chips of `root` with a parent to insert into, or when `offset`
+ * is outside `rect`; the caller then uses the generic zones.
+ */
+export function chipOverChipDirection(
+    root: LayoutNode | undefined,
+    targetId: string,
+    draggedId: string,
+    rect: Dimensions | undefined,
+    offset: { x: number; y: number } | null | undefined
+): DropDirection | undefined {
+    if (!root || !rect || !offset) return undefined;
+    const target = findNode(root, targetId);
+    const dragged = findNode(root, draggedId);
+    const isChip = (n: LayoutNode | undefined) => !!n && !n.children?.length && isNodeLocked(n);
+    if (!isChip(target) || !isChip(dragged)) return undefined;
+    const parent = findParent(root, targetId);
+    if (!parent) return undefined;
+    const x = offset.x - rect.left;
+    const y = offset.y - rect.top;
+    if (x < 0 || y < 0 || x > rect.width || y > rect.height) return undefined;
+    if (parent.flexDirection === FlexDirection.Column)
+        return y < rect.height / 2 ? DropDirection.Top : DropDirection.Bottom;
+    return x < rect.width / 2 ? DropDirection.Left : DropDirection.Right;
 }

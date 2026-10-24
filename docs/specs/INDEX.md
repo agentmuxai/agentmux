@@ -308,6 +308,7 @@ partial list.
 | [`SPEC_CEF_PROPRIETARY_CODECS_MACOS_BUILD_2026_07_27`](SPEC_CEF_PROPRIETARY_CODECS_MACOS_BUILD_2026_07_27.md) | Spec: Execute the macOS leg of issue #2311 (codec-enabled patched CEF) |
 | [`SPEC_CEF_RS_BINDING_FORK_UNDER_ORG_2026_09_22`](SPEC_CEF_RS_BINDING_FORK_UNDER_ORG_2026_09_22.md) | SPEC — Own the `cef-dll-sys` binding fork: `agentmuxai/cef-rs` |
 | [`SPEC_CHIP_DROP_PLACEHOLDER_ON_THE_SEAM_2026_10_21`](SPEC_CHIP_DROP_PLACEHOLDER_ON_THE_SEAM_2026_10_21.md) | Spec — A dragged minimized pane's drop placeholder sits on the seam it is inserted at |
+| [`SPEC_CHIP_OVER_CHIP_DROP_2026_10_24`](SPEC_CHIP_OVER_CHIP_DROP_2026_10_24.md) | Spec — A minimized pane dropped on another minimized pane goes to the nearer seam |
 | [`SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21`](SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21.md) | SPEC: CI check placement protocol — what runs on a PR, what runs nightly |
 | [`SPEC_CI_COMPLETION_NOTIFICATIONS_2026_08_16`](SPEC_CI_COMPLETION_NOTIFICATIONS_2026_08_16.md) | SPEC: jekt notification when a PR's CI run completes (pass or fail) |
 | [`SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19`](SPEC_CI_MERGE_QUEUE_AND_FAST_GATES_2026_10_19.md) | Spec: CI that keeps main green: a merge queue with fast gates, quicker PR builds, and a red-main alert |
