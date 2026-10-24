@@ -393,6 +393,29 @@ async fn a_pending_fire_survives_a_try_again_answer() {
     assert_eq!((r.state.as_str(), r.infra.as_str()), (state::FINISHED, infra::ERROR));
 }
 
+/// A job one fire short of max_fires whose pending fire is delivered is
+/// disabled and its loop stopped: it doesn't fire again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_delivered_pending_fire_counts_toward_max_fires() {
+    let rig = rig();
+    let mut job = test_job("j-max", "check the build", "AgentY", "uid-y", "uid-creator");
+    job.expression = "0 * * * *".to_string();
+    job.catch_up = CATCH_UP_LATEST.to_string();
+    job.max_fires = Some(2);
+    job.fire_count = 1;
+    rig.store.cron_create(&job).unwrap();
+    rig.sched.schedule_job(&job);
+    rig.answer(NOT_FOUND);
+    let now = agentmux_common::time::now_ms();
+    rig.sched.fire(&job, Slot::Scheduled(now - now % HOUR)).await;
+    *rig.present.lock().unwrap() = true;
+    rig.answer(DELIVERED);
+    assert_eq!(rig.sched.deliver_pending().await, 1);
+    let stored = rig.store.cron_get("j-max").unwrap().unwrap();
+    assert_eq!((stored.fire_count, stored.enabled), (2, false), "at max_fires: disabled");
+    assert!(!rig.sched.is_scheduled("j-max"), "its loop is stopped, so it doesn't fire again");
+}
+
 /// A pending fire expires at the job's next fire time, and a delivered
 /// scheduled fire ends an older pending one as expired.
 #[tokio::test(flavor = "multi_thread")]

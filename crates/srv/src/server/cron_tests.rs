@@ -19,6 +19,11 @@ use crate::server::AppState;
 /// A state whose cron store and run ledger are its (identity-schema) test
 /// store, with two agents and their tokens: the job's creator and another.
 fn state() -> (AppState, String, String) {
+    state_delivering_to("b-target")
+}
+
+/// [`state`], with fires delivered to the pane `block`.
+fn state_delivering_to(block: &'static str) -> (AppState, String, String) {
     let mut state = crate::server::tests::test_state();
     state.shared_store = Some(state.mstore.clone());
     for (uid, slug) in [("uid-jobs-owner", "jobs-owner"), ("uid-jobs-other", "jobs-other")] {
@@ -32,7 +37,7 @@ fn state() -> (AppState, String, String) {
     let ledger = RunLedger::new(state.identity_store.clone(), Some(state.mstore.clone()), state.broker.clone());
     state.cron_scheduler.install_runs(ledger);
     let sched = state.cron_scheduler.clone();
-    sched.install_delivery(Arc::new(|_req, _uid| Box::pin(async { json!({"success": true, "block_id": "b-target"}) })));
+    sched.install_delivery(Arc::new(move |_req, _uid| Box::pin(async move { json!({"success": true, "block_id": block}) })));
     (state, owner, other)
 }
 
@@ -144,4 +149,46 @@ async fn a_run_is_reported_by_the_agent_that_ran_it() {
 
     let (status, _) = send(&state, Method::POST, None, "/agentmux/cron/runs/no-such-run/report", Some(json!({"outcome": "ok"}))).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// A job created by name records no target UID. The run's receiver is
+/// resolved when it is delivered: from the pane's agent, or the agent
+/// registered in that pane. That agent can report; another can't.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_target_of_a_name_only_job_reports_its_run() {
+    for via_meta in [true, false] {
+        let block = if via_meta { "b-jobs-name-only-meta" } else { "b-jobs-name-only-reg" };
+        let (state, owner, other) = state_delivering_to(block);
+        let uid = format!("uid-{block}");
+        let mut def = test_agent_def(&uid, block, "claude", "agent", 1, "");
+        def.slug = block.to_string();
+        state.mstore.agent_def_insert(&mut def).unwrap();
+        let target = state.mstore.agent_token_ensure(&uid).unwrap();
+        if via_meta {
+            let mut pane = crate::backend::obj::Block { oid: block.to_string(), ..Default::default() };
+            pane.meta.insert("agentId".to_string(), json!(uid));
+            state.mstore.insert(&mut pane).unwrap();
+        } else {
+            state.reactive_handler.register_agent_full(block, block, None, 0, None, Some(&uid), "test").unwrap();
+        }
+        let body = json!({"name": "by-name", "expression": "0 0 1 1 *", "prompt": "hi", "target": block, "created_by": "jobs-owner"});
+        let (_, v) = send(&state, Method::POST, Some(&owner), "/agentmux/cron", Some(body)).await;
+        let id = v["job"]["id"].as_str().unwrap().to_string();
+        state.cron_scheduler.cancel_job(&id);
+        assert_eq!(state.mstore.cron_get(&id).unwrap().unwrap().target_uid, "", "a job by name");
+
+        let (_, v) = send(&state, Method::POST, None, &format!("/agentmux/cron/{id}/run"), Some(json!({}))).await;
+        let run_id = v["run_id"].as_str().unwrap().to_string();
+        let run = state.identity_store.job_run_get(&run_id).unwrap().unwrap();
+        assert_eq!((run.target_agent_uid.as_str(), run.block_id.as_str()), (uid.as_str(), block), "via_meta={via_meta}");
+
+        let uri = format!("/agentmux/cron/runs/{run_id}/report");
+        let (status, _) = send(&state, Method::POST, Some(&other), &uri, Some(json!({"outcome": "ok"}))).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "via_meta={via_meta}");
+        let (status, v) = send(&state, Method::POST, Some(&target), &uri, Some(json!({"outcome": "ok"}))).await;
+        assert_eq!(status, StatusCode::OK, "via_meta={via_meta}: {v}");
+        if !via_meta {
+            let _ = state.reactive_handler.unregister_block(block);
+        }
+    }
 }

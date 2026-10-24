@@ -433,14 +433,23 @@ pub(super) async fn handle_cron_report(
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
     };
     // The agent that ran it reports; so may the job's creator, or the operator.
+    // A run whose receiver's UID couldn't be resolved at delivery is
+    // reported only from the pane that took it, never by another agent.
     let allowed = match caller.as_deref().and_then(Caller::uid) {
         None => true,
-        Some(uid) if run.target_agent_uid == uid => true,
-        Some(_) => state
-            .shared_store
-            .as_ref()
-            .and_then(|s| s.cron_get(&run.job_id).ok().flatten())
-            .is_some_and(|job| may_act_on(&state, caller.as_deref(), &job)),
+        Some(uid) => {
+            let ran_it = if run.target_agent_uid.is_empty() {
+                !run.block_id.is_empty() && state.reactive_handler.block_for_uid(uid).as_deref() == Some(run.block_id.as_str())
+            } else {
+                run.target_agent_uid == uid
+            };
+            ran_it
+                || state
+                    .shared_store
+                    .as_ref()
+                    .and_then(|s| s.cron_get(&run.job_id).ok().flatten())
+                    .is_some_and(|job| may_act_on(&state, caller.as_deref(), &job))
+        }
     };
     if !allowed {
         return (StatusCode::FORBIDDEN, Json(json!({"error": "only the agent that ran this run can report it"})));

@@ -82,6 +82,27 @@ pub fn brief_line(run_id: &str, late_for_ms: Option<i64>, now_ms: i64) -> String
     )
 }
 
+/// What [`RunLedger::pane`] reads from a pane's meta.
+#[derive(Debug, Default)]
+struct Pane {
+    agent_uid: String,
+    account: String,
+    provider: String,
+}
+
+/// The UID the agent registered in `block_id` gave, if any.
+fn registered_uid(block_id: &str) -> Option<String> {
+    if block_id.is_empty() {
+        return None;
+    }
+    crate::backend::reactive::get_global_handler()
+        .list_agents()
+        .into_iter()
+        .find(|r| r.block_id == block_id)
+        .and_then(|r| r.uid)
+        .filter(|u| !u.is_empty())
+}
+
 /// What inserting a cron slot's row answered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Begin {
@@ -228,10 +249,18 @@ impl RunLedger {
     }
 
     /// A run reached its agent: running from now, with the pane's account,
-    /// and its turn followed to the end.
+    /// and its turn followed to the end. `target_agent_uid` becomes the UID
+    /// of the agent whose pane took it (a job created by name records none),
+    /// so that agent can report the run.
     fn mark_running(&self, run_id: &str, target_uid: &str, block_id: &str, now: i64) {
-        let (account, provider) = self.pane_account(block_id);
-        if let Err(e) = self.store.job_run_mark_running(run_id, target_uid, block_id, &account, &provider, now) {
+        let pane = self.pane(block_id);
+        let receiver = [pane.agent_uid.as_str(), registered_uid(block_id).as_deref().unwrap_or(""), target_uid]
+            .into_iter()
+            .find(|u| !u.is_empty())
+            .unwrap_or("")
+            .to_string();
+        let (account, provider) = (pane.account, pane.provider);
+        if let Err(e) = self.store.job_run_mark_running(run_id, &receiver, block_id, &account, &provider, now) {
             tracing::warn!(run_id, error = %e, "jobs: couldn't mark a run running");
             return;
         }
@@ -242,26 +271,27 @@ impl RunLedger {
         self.follower.arm(block_id, run_id, now);
     }
 
-    /// The account a pane runs on (`agent:run_account`) and its provider.
-    fn pane_account(&self, block_id: &str) -> (String, String) {
-        let Some(mstore) = &self.mstore else { return Default::default() };
+    /// Who a pane belongs to (its `agentId`, the agent's UID), the account
+    /// it runs on (`agent:run_account`) and its provider.
+    fn pane(&self, block_id: &str) -> Pane {
+        let Some(mstore) = &self.mstore else { return Pane::default() };
         if block_id.is_empty() {
-            return Default::default();
+            return Pane::default();
         }
         let Ok(Some(block)) = mstore.get::<crate::backend::obj::Block>(block_id) else {
-            return Default::default();
+            return Pane::default();
         };
         let account = crate::backend::obj::meta_get_string(
             &block.meta,
             crate::server::app_api::agent_spawn::RUN_ACCOUNT_META_KEY,
             "",
         );
-        let agent = crate::backend::obj::meta_get_string(&block.meta, "agentId", "");
-        let provider = match mstore.agent_def_get(&agent) {
-            Ok(Some(def)) if !agent.is_empty() => crate::backend::providers::resolve_provider_alias(&def.provider).to_string(),
+        let agent_uid = crate::backend::obj::meta_get_string(&block.meta, "agentId", "");
+        let provider = match mstore.agent_def_get(&agent_uid) {
+            Ok(Some(def)) if !agent_uid.is_empty() => crate::backend::providers::resolve_provider_alias(&def.provider).to_string(),
             _ => String::new(),
         };
-        (account, provider)
+        Pane { agent_uid, account, provider }
     }
 
     /// Write the collapsed skip for slots missed while AgentMux was off

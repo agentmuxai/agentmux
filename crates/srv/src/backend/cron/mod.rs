@@ -343,6 +343,15 @@ impl CronScheduler {
                 }
                 let delay = (next - Utc::now()).to_std().unwrap_or_default();
                 tokio::time::sleep(delay).await;
+                // A pending fire may have been delivered meanwhile: count from
+                // the DB, so max_fires holds across both.
+                if let Some(n) = sched.persisted_fire_count(&job.id) {
+                    fires = fires.max(n);
+                }
+                if job.max_fires.is_some_and(|max| fires >= max) {
+                    sched.disable_job(&job.id, "max_fires reached");
+                    break;
+                }
                 if sched.fire(&job, Slot::Scheduled(next.timestamp_millis())).await.outcome.is_some_and(|o| o.delivered()) {
                     fires += 1;
                 }
@@ -359,6 +368,12 @@ impl CronScheduler {
         });
 
         self.handles.lock().unwrap().insert(job_id, handle.abort_handle());
+    }
+
+    /// Whether a job has a live scheduled task.
+    #[cfg(test)]
+    pub(crate) fn is_scheduled(&self, id: &str) -> bool {
+        self.handles.lock().unwrap().contains_key(id)
     }
 
     /// Stop (abort) a job's scheduled task without removing it from the DB.
@@ -497,6 +512,26 @@ impl CronScheduler {
         Some(outcome)
     }
 
+    /// The job's `fire_count` in the DB.
+    fn persisted_fire_count(&self, id: &str) -> Option<i64> {
+        self.shared_store.as_ref()?.cron_get(id).ok().flatten().map(|j| j.fire_count)
+    }
+
+    /// After a fire the job's own loop didn't make (a pending fire), stop
+    /// that loop if the fire reached `max_fires`; `cron_record_fire` has
+    /// already disabled the job in the DB.
+    fn stop_at_max_fires(&self, id: &str) {
+        let at_max = self
+            .shared_store
+            .as_ref()
+            .and_then(|s| s.cron_get(id).ok().flatten())
+            .is_some_and(|j| j.max_fires.is_some_and(|max| j.fire_count >= max));
+        if at_max {
+            tracing::info!(id, "cron: a pending fire reached max_fires; stopping the job");
+            self.cancel_job(id);
+        }
+    }
+
     fn record_fire(&self, id: &str) {
         if let Some(store) = &self.shared_store {
             let now = Utc::now().timestamp();
@@ -560,6 +595,7 @@ impl CronScheduler {
             runs.record_pending_delivery(&run, &outcome);
             if outcome.delivered() {
                 self.record_fire(&job.id);
+                self.stop_at_max_fires(&job.id);
                 delivered += 1;
                 self.publish_changed();
             }

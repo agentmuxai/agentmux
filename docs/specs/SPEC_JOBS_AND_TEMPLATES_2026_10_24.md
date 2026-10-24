@@ -25,7 +25,7 @@ Measured on `main` @ `14afc1646`.
 
 | Mechanism | Trigger | What it keeps | Where it fails silently |
 |---|---|---|---|
-| **Schedule, `cron`**. MCP `crates/mcp/src/tools/schedule_tool.rs` routes to `cron.rs` (`POST/GET /agentmux/cron`, `DELETE`/`PATCH /agentmux/cron/:id`). srv: `server/cron.rs`, `backend/cron/mod.rs`, `backend/storage/cron.rs` | 5-field cron, **UTC only** (`cron` 0.12), one-minute granularity | `CronJob`: `last_fired`, `fire_count`, `max_fires`, `max_age_secs`, `created_by(_uid)`, `target(_uid)`. Table `db_cron_jobs` in the shared store | A fire to a stopped agent isn't held: `hold_applies` excludes `source_agent == "cron"` (`server/reactive.rs:1205`). `fire()` records the fire even when delivery failed (`cron/mod.rs:304-310`). Delete and pause don't check the caller (`server/cron.rs:244`, `:266`). No per-fire history. Nothing prevents a double fire when two instances share the store |
+| **Schedule, `cron`**. MCP `crates/mcp/src/tools/schedule_tool.rs` routes to `cron.rs` (`POST/GET /agentmux/cron`, `DELETE`/`PATCH /agentmux/cron/:id`). srv: `server/cron.rs`, `backend/cron/mod.rs`, `backend/storage/cron.rs` | 5-field cron, **UTC only** (`cron` 0.12), one-minute granularity | `CronJob`: `last_fired`, `fire_count`, `max_fires`, `max_age_secs`, `created_by(_uid)`, `target(_uid)`. Table `db_cron_jobs` in the shared store | A fire to a stopped agent isn't held: `hold_applies` excludes `source_agent == "cron"` (`server/reactive.rs:1205`). `fire()` records the fire even when delivery failed (`cron/mod.rs:304-310`). No per-fire history. Nothing prevents a double fire when two instances share the store |
 | **Catch-up** | Startup | — | One fire if the slot after `last_fired` has passed (`should_catchup`, `cron/mod.rs:349-363`); a job that never fired gets none |
 | **Schedule, `every`** (loops) | Interval, from the agent's own `agentmux-mcp` process | Nothing | Ends with the session; can't be paused |
 | **Swarm's Cron bucket** | — | Read-only rows (`CronBucket`, `frontend/app/view/swarm/swarm-view.tsx:940`) from `cron.ListActive` | No create, edit, pause or delete in the UI |
@@ -393,7 +393,7 @@ Built into P1–P3 so the later phases add, not change:
 |---|---|---|
 | Create a job | Any action | `message` and `task` actions; `spawn` only with itself as the leader, and only after the operator approves the job once (the spawn consent rule, `agent_spawn.rs:632`, made at creation since the runs are unattended); `drone` never |
 | Use a template | Approve and use it | Use one the operator approved |
-| Edit, pause, resume, delete, Run now | Any job | Jobs it created or owns. Today's delete and pause check no caller; P1 adds the check (`Caller` in `handle_cron_delete` and `handle_cron_patch`) |
+| Edit, pause, resume, delete, Run now | Any job | Jobs it created or owns (`Caller` in `handle_cron_delete` and `handle_cron_patch`) |
 | Raise a cap | Yes | No: clamped to the defaults |
 | Pause all / resume all | Yes | No |
 | Approve a template, pin a reporter or catalog key | Yes | No |
