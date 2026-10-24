@@ -152,7 +152,12 @@
         @include drop.drop-target-hover($hold: true);
     }
 
-    // Flash budget spent (PaneTabStrip.tsx `claimHoverFlash`): the outline alone.
+    // Flash budget short (PaneTabStrip.tsx `beginHover`): the held negative without
+    // the blink, or the outline alone.
+    &--foreign-hover#{&}--no-blink {
+        @include drop.drop-target-steady;
+    }
+
     &--foreign-hover#{&}--no-invert {
         @include drop.drop-target-plain;
 
@@ -191,7 +196,16 @@
         @include drop.drop-target-strobe-exempt($hold: true);
     }
 
-    // Flash budget spent: the outline alone, for this hover only.
+    // Flash budget short: the held negative without the blink, for this hover only.
+    &.pane-header--no-blink {
+        @include drop.drop-target-steady;
+
+        .block-frame-default-header-tabstrip {
+            @include drop.drop-target-steady-exempt;
+        }
+    }
+
+    // ... or the outline alone.
     &.pane-header--no-invert {
         @include drop.drop-target-plain;
 

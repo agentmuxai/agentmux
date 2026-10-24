@@ -9,7 +9,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as sass from "sass";
-import { BLINK_COST, BLINK_COUNT, CHANGES_PER_SECOND } from "./element/drop-blink-clock";
+import { BLINK_COST, BLINK_COUNT, BLINK_PHASE_MS, CHANGES_PER_SECOND } from "./element/drop-blink-clock";
 import { describe, expect, it } from "vitest";
 
 const APP = dirname(fileURLToPath(import.meta.url));
@@ -38,6 +38,7 @@ describe("drop target hover that lands inverted", () => {
         const [cycleMs, count] = [Number(m![1]), Number(m![2])];
         // The stylesheet and the clock that budgets it must agree.
         expect(count).toBe(BLINK_COUNT);
+        expect(cycleMs / 2).toBe(BLINK_PHASE_MS);
         expect(cycleMs).toBeLessThanOrEqual(200);
         // Changes in the worst second: entering (1), two per blink, leaving (1); the burst is the only flashing.
         const burstMs = cycleMs * count;
@@ -50,6 +51,16 @@ describe("drop target hover that lands inverted", () => {
     it("the outline pulse runs at 0.4 s a direction, twice as fast as before", () => {
         const header = rule(strip, ".pane-header--foreign-hover");
         expect(header).toMatch(/tab-drop-pulse 0\.4s /);
+    });
+
+    it("a hover that finds room for its two changes but not a burst lands inverted without the blink, tabs cancelled", () => {
+        const header = rule(strip, ".pane-header--foreign-hover.pane-header--no-blink");
+        expect(header).toContain("filter: invert(1)");
+        expect(header).not.toContain("tab-drop-invert-hold");
+        const tabs = rule(strip, ".pane-header--foreign-hover.pane-header--no-blink .block-frame-default-header-tabstrip");
+        expect(tabs).toContain("animation: none");
+        expect(tabs).toContain("filter: invert(1)");
+        expect(rule(strip, ".pane-tab-strip--foreign-hover.pane-tab-strip--no-blink")).toContain("filter: invert(1)");
     });
 
     it("a hover that finds the flash budget spent shows the outline alone, tabs and all, in both motion tiers", () => {

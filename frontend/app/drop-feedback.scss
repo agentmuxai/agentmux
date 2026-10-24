@@ -21,9 +21,9 @@
 // in any one second, and a hover makes one change entering, two per blink and one
 // leaving, so a third blink would put four flashes in the second after entry
 // whenever the pointer leaves soon after. A faster cycle would only shorten the
-// burst. element/drop-blink-clock.ts keeps the limit across re-entries (a hover
-// that inverts is charged its changes up front, and one that does not fit gets
-// the outline alone); the numbers are written once here so the header and the
+// burst. element/drop-blink-clock.ts keeps the limit across hovers (every
+// change, a hover's exit included, is counted at its real time; a hover that
+// does not fit gets the held negative without the blink, or the outline alone). The numbers are written once here so the header and the
 // counter-invert on its tabs can never drift apart, and a test pins them to the
 // clock's.
 // docs/specs/SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §3.
@@ -39,7 +39,8 @@ $drop-pulse-reduced: tab-drop-pulse 0.4s ease-in-out infinite alternate;
 // --- Mixins ---
 
 // The `$hold` look without its blink: the target is simply negative (with the
-// pulsing outline) for as long as the hover lasts. It is the reduced treatment.
+// pulsing outline) for as long as the hover lasts. It is the reduced treatment,
+// and what a hover gets when the budget has room for its two changes but not a burst.
 // `drop-target-steady-exempt` is the matching cancel on the tabs.
 @mixin drop-target-steady {
     filter: invert(1);
@@ -51,8 +52,8 @@ $drop-pulse-reduced: tab-drop-pulse 0.4s ease-in-out infinite alternate;
     filter: invert(1);
 }
 
-// What a hover gets when the window's flash budget is spent (a burst started
-// within the last second, element/drop-blink-clock.ts): the outline pulse alone,
+// What a hover gets when the window's flash budget is nearly spent (a change was
+// made within the last second, element/drop-blink-clock.ts): the outline pulse alone,
 // no negative at all, in either motion tier. `drop-target-plain-exempt` is the
 // matching state of the tabs, which have nothing to cancel.
 @mixin drop-target-plain {
