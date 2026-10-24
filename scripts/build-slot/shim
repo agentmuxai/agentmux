@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# agentmux-build-slot-shim v2: written by AgentMux; edits here are overwritten.
+#
+# The same file is installed as `cargo`, `task`, `npm`, `npx` and `docker`; it acts for the
+# tool whose name it carries. A heavy subcommand (`cargo test`, `task package`, `npm run build`,
+# `docker build`, ...) waits for the host-wide build slot first, so only one heavy build runs at
+# a time (build-slot.sh, spec docs/specs/SPEC_BUILD_SLOT_ENFORCEMENT_2026_10_20.md). Everything
+# else runs the real tool directly. It fails open: if the slot script is not where it should be,
+# the tool still runs. Opt out for one command with AGENTMUX_BUILD_SLOT_OFF=1.
+
+self_path="${BASH_SOURCE[0]}"
+self_dir="$(cd "$(dirname "$self_path")" 2>/dev/null && pwd)"
+tool="$(basename "$self_path")"
+
+# The real tool: the first one on PATH that is not this directory's. A .cmd is the last
+# resort in a directory (Git Bash runs one through cmd.exe).
+real=""
+IFS=:
+for dir in $PATH; do
+  [ -n "$dir" ] && [ "$dir" != "$self_dir" ] || continue
+  for cand in "$dir/$tool" "$dir/$tool.exe" "$dir/$tool.cmd"; do
+    if [ -f "$cand" ] && { [ -x "$cand" ] || [ "${cand##*.}" = cmd ]; }; then real="$cand"; break 2; fi
+  done
+done
+unset IFS
+if [ -z "$real" ]; then
+  echo "$tool: not found on PATH (the AgentMux build-slot shim looked past $self_dir)" >&2
+  exit 127
+fi
+
+# Prints the first word of "$@" that is not an option, skipping the separate value of each
+# option named in $skip_opts (space-separated), and any `+toolchain`. `--opt=value` spellings
+# start with `-` and are skipped. Stops at `--`.
+first_word() {
+  local skip=0 arg
+  for arg in "$@"; do
+    if [ "$skip" = 1 ]; then skip=0; continue; fi
+    case "$arg" in
+      --) return ;;
+      -*) case " $skip_opts " in *" $arg "*) skip=1 ;; esac ;;
+      +*) ;;
+      *) printf '%s' "$arg"; return ;;
+    esac
+  done
+}
+
+# Whether $1 is one of the words after it.
+has_word() {
+  local want="$1" w
+  shift
+  for w in "$@"; do [ "$w" = "$want" ] && return 0; done
+  return 1
+}
+
+# True when this invocation is heavy for the tool; $reason is then set for the queue.
+heavy=0
+reason="$tool"
+case "$tool" in
+  cargo)
+    # `run` is left out on purpose: it builds, but then keeps running (a server, the app), and
+    # the slot must not be held for as long as that runs. `-C`, `-Z`, `--config` and `--color`
+    # take a separate value; `+toolchain` starts with `+`.
+    skip_opts='-C -Z --config --color'
+    sub="$(first_word "$@")"
+    case "$sub" in
+      build|b|check|c|test|t|clippy|doc|d|bench|rustc|rustdoc|fix|install|package|nextest|llvm-cov|tarpaulin|udeps|miri)
+        heavy=1; reason="cargo $sub" ;;
+    esac
+    ;;
+  task)
+    # Builds and packaging; `dev` and `run` are left out like `cargo run`. Several task names
+    # may be given; any heavy one slots the whole call. Values of -d/-t/-o/-C are skipped.
+    names=()
+    skip=0
+    for arg in "$@"; do
+      if [ "$arg" = "--" ]; then break; fi
+      if [ "$skip" = 1 ]; then skip=0; continue; fi
+      case "$arg" in
+        -d|--dir|-t|--taskfile|-o|--output|-C|--concurrency) skip=1 ;;
+        -*) ;;
+        *) names+=("$arg") ;;
+      esac
+    done
+    for n in "${names[@]}"; do
+      case "$n" in
+        package|package:*|build|build:*|bundle|bundle:*|storybook:build) heavy=1; reason="task $n"; break ;;
+      esac
+    done
+    ;;
+  npm|npx)
+    # `npm run <script>` for the build, packaging and full-test scripts, `npm test`, and
+    # `npx vite build` / `npx vitest run`. A bare `vitest` runs once without a terminal and
+    # watches with one, so it is slotted only with none (an agent's shell has none).
+    skip_opts='--prefix -w --workspace --userconfig --registry -C'
+    sub="$(first_word "$@")"
+    if [ "$tool" = npm ]; then
+      case "$sub" in
+        run|run-script|rum|urn)
+          script=""; seen=0
+          for arg in "$@"; do
+            if [ "$seen" = 1 ]; then case "$arg" in -*) ;; *) script="$arg"; break ;; esac; fi
+            case "$arg" in run|run-script|rum|urn) seen=1 ;; esac
+          done
+          case "$script" in
+            build|build:*|package|package:*|coverage|test:e2e) heavy=1; reason="npm run $script" ;;
+            test) [ -t 0 ] || { heavy=1; reason="npm run test"; } ;;
+          esac ;;
+        test|t|tst) [ -t 0 ] || { heavy=1; reason="npm test"; } ;;
+      esac
+    else
+      case "$sub" in
+        vite) has_word build "$@" && { heavy=1; reason="npx vite build"; } ;;
+        vitest)
+          if has_word run "$@" || has_word --run "$@" || has_word --coverage "$@" || ! [ -t 0 ]; then
+            heavy=1; reason="npx vitest"
+          fi ;;
+      esac
+    fi
+    ;;
+  docker)
+    # Image builds. `docker run` and `compose up` without --build keep running or are cheap.
+    skip_opts='-H --host -c --context --config -l --log-level'
+    sub="$(first_word "$@")"
+    case "$sub" in
+      build|buildx|builder|image|compose)
+        if has_word build "$@" || { [ "$sub" = compose ] && has_word --build "$@"; }; then
+          heavy=1; reason="docker build"
+        fi ;;
+    esac
+    ;;
+esac
+
+slot="${AGENTMUX_BUILD_SLOT_SCRIPT:-$HOME/.agentmux/shared/locks/build-slot.sh}"
+if [ "$heavy" = 1 ] && [ -z "${AGENTMUX_BUILD_SLOT_OFF:-}" ] && [ -f "$slot" ]; then
+  exec bash "$slot" --reason "$reason" -- "$real" "$@"
+fi
+exec "$real" "$@"

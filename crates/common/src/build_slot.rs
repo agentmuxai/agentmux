@@ -9,10 +9,11 @@
 //! - `~/.agentmux/shared/locks/build-slot.sh`, the lock itself. Every AgentMux channel on the
 //!   machine shares it, so it is only replaced by a newer version (`# build-slot-version: N`),
 //!   never by an older channel's copy.
-//! - `cargo` and `cargo.cmd` in `~/.agentmux/tools/bin`, the user tools directory that agents'
-//!   shells put ahead of the system PATH (`tool_store::tools_path`). They send the heavy cargo
-//!   subcommands through the lock. A file at that path that does not carry the shim's marker is
-//!   somebody's own and is left alone.
+//! - A shim per heavy tool (`cargo`, `task`, `npm`, `npx`, `docker`, each with a `.cmd` twin) in
+//!   `~/.agentmux/tools/bin`, the user tools directory that agents' shells put ahead of the system
+//!   PATH (`tool_store::tools_path`). All are the same two files under different names; they send
+//!   the tool's heavy subcommands through the lock. A file at that path that does not carry the
+//!   shim's marker is somebody's own and is left alone.
 //!
 //! Installing never fails startup: the caller logs an error and goes on. The shims fail open
 //! too, so a missing or broken lock script costs nothing but the protection.
@@ -21,8 +22,11 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 const SCRIPT: &str = include_str!("../../../scripts/build-slot/build-slot.sh");
-const SHIM_SH: &str = include_str!("../../../scripts/build-slot/cargo");
-const SHIM_CMD: &str = include_str!("../../../scripts/build-slot/cargo.cmd");
+const SHIM_SH: &str = include_str!("../../../scripts/build-slot/shim");
+const SHIM_CMD: &str = include_str!("../../../scripts/build-slot/shim.cmd");
+
+/// The tools that get a shim, by the name the shim is installed under.
+const SHIMMED_TOOLS: [&str; 5] = ["cargo", "task", "npm", "npx", "docker"];
 
 const VERSION_PREFIX: &str = "# build-slot-version:";
 /// Both shims carry this text; a file without it is not ours to overwrite.
@@ -69,21 +73,24 @@ pub fn install(home: &Path) -> io::Result<Installed> {
     }
 
     let dir = shim_dir(home);
-    for (name, text) in [("cargo", lf(SHIM_SH)), ("cargo.cmd", crlf(SHIM_CMD))] {
-        let dest = dir.join(name);
+    let (sh, cmd) = (lf(SHIM_SH), crlf(SHIM_CMD));
+    let files = SHIMMED_TOOLS.iter().flat_map(|t| [(t.to_string(), &sh), (format!("{t}.cmd"), &cmd)]);
+    for (name, text) in files {
+        let text = text.as_str();
+        let dest = dir.join(&name);
         match std::fs::read_to_string(&dest) {
             Ok(existing) if existing == text => {}
             Ok(existing) if existing.contains(SHIM_MARKER) => {
-                write_executable(&dest, &text)?;
-                done.written.push(name.to_string());
+                write_executable(&dest, text)?;
+                done.written.push(name.clone());
             }
-            Ok(_) => done.foreign.push(name.to_string()),
+            Ok(_) => done.foreign.push(name.clone()),
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                write_executable(&dest, &text)?;
-                done.written.push(name.to_string());
+                write_executable(&dest, text)?;
+                done.written.push(name.clone());
             }
             // Not valid UTF-8 (a real binary named `cargo`): somebody else's.
-            Err(e) if e.kind() == io::ErrorKind::InvalidData => done.foreign.push(name.to_string()),
+            Err(e) if e.kind() == io::ErrorKind::InvalidData => done.foreign.push(name.clone()),
             Err(e) => return Err(e),
         }
     }
@@ -150,7 +157,10 @@ mod tests {
     fn an_empty_home_gets_the_script_and_both_shims_once() {
         let h = home();
         let first = install(h.path()).unwrap();
-        assert_eq!(first.written, vec!["build-slot.sh", "cargo", "cargo.cmd"]);
+        assert_eq!(
+            first.written,
+            vec!["build-slot.sh", "cargo", "cargo.cmd", "task", "task.cmd", "npm", "npm.cmd", "npx", "npx.cmd", "docker", "docker.cmd"]
+        );
         assert!(first.foreign.is_empty());
         assert_eq!(install(h.path()).unwrap(), Installed::default(), "the second call finds nothing to do");
         assert_eq!(std::fs::read_to_string(shim_dir(h.path()).join("cargo.cmd")).unwrap(), crlf(SHIM_CMD));
@@ -165,7 +175,8 @@ mod tests {
         let done = install(h.path()).unwrap();
         assert_eq!(done.foreign, vec!["cargo"]);
         assert_eq!(std::fs::read_to_string(dir.join("cargo")).unwrap(), "#!/bin/sh\necho mine\n");
-        assert!(done.written.contains(&"cargo.cmd".to_string()), "the other shim is still installed");
+        assert!(done.written.contains(&"cargo.cmd".to_string()), "the other shims are still installed");
+        assert!(done.written.contains(&"task".to_string()), "the other tools' shims are still installed");
     }
 
     #[test]
@@ -202,17 +213,17 @@ mod tests {
         }
     }
 
-    /// What the shim ran, given `args`, for a home with or without the lock script.
-    fn run_shim(with_slot: bool, off: bool, args: &[&str]) -> Option<String> {
+    /// What the `tool` shim ran, given `args`, for a home with or without the lock script.
+    fn run_tool(tool: &str, with_slot: bool, off: bool, args: &[&str]) -> Option<String> {
         let bash = bash()?;
         let h = home();
         let real_dir = h.path().join("real");
         let shim = shim_dir(h.path());
         std::fs::create_dir_all(&real_dir).unwrap();
         std::fs::create_dir_all(&shim).unwrap();
-        let real = real_dir.join("cargo");
+        let real = real_dir.join(tool);
         std::fs::write(&real, "#!/usr/bin/env bash\necho \"REAL $*\"\n").unwrap();
-        std::fs::write(shim.join("cargo"), lf(SHIM_SH)).unwrap();
+        std::fs::write(shim.join(tool), lf(SHIM_SH)).unwrap();
         if with_slot {
             std::fs::create_dir_all(script_path(h.path()).parent().unwrap()).unwrap();
             std::fs::write(script_path(h.path()), "#!/usr/bin/env bash\necho \"SLOT $*\"\n").unwrap();
@@ -225,7 +236,7 @@ mod tests {
         let sep = if cfg!(windows) { ";" } else { ":" };
         let path = format!("{}{sep}{}{sep}{}", shim.display(), real_dir.display(), std::env::var("PATH").unwrap_or_default());
         let mut cmd = std::process::Command::new(bash);
-        cmd.arg(shim.join("cargo")).args(args).env("PATH", path).env("HOME", h.path());
+        cmd.arg(shim.join(tool)).args(args).env("PATH", path).env("HOME", h.path());
         if off {
             cmd.env("AGENTMUX_BUILD_SLOT_OFF", "1");
         }
@@ -236,6 +247,10 @@ mod tests {
         }
         let out = cmd.output().unwrap();
         Some(String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n").trim().to_string())
+    }
+
+    fn run_shim(with_slot: bool, off: bool, args: &[&str]) -> Option<String> {
+        run_tool("cargo", with_slot, off, args)
     }
 
     fn contains_all(out: &str, parts: &[&str]) -> bool {
@@ -263,6 +278,67 @@ mod tests {
         assert_eq!(run_shim(true, false, &["-C", "dir", "metadata"]).unwrap(), "REAL -C dir metadata");
         assert_eq!(run_shim(true, false, &["run", "-p", "srv"]).unwrap(), "REAL run -p srv", "run keeps running, so it is not slotted");
         assert_eq!(run_shim(true, false, &[]).unwrap(), "REAL");
+    }
+
+    /// Whether the `tool` shim sent `args` through the slot (the stand-in lock script says so).
+    fn slotted(tool: &str, args: &[&str]) -> Option<bool> {
+        run_tool(tool, true, false, args).map(|out| out.starts_with("SLOT "))
+    }
+
+    #[test]
+    fn task_npm_npx_and_docker_slot_their_heavy_commands_only() {
+        if bash().is_none() {
+            return;
+        }
+        let heavy: &[(&str, &[&str])] = &[
+            ("task", &["package"]),
+            ("task", &["package:portable"]),
+            ("task", &["--verbose", "build:backend"]),
+            ("task", &["-d", "x", "bundle:windows"]),
+            ("task", &["check:doc-status", "package"]),
+            ("npm", &["run", "build"]),
+            ("npm", &["run", "--silent", "package:portable"]),
+            ("npm", &["run", "test:e2e"]),
+            ("npm", &["test"]),
+            ("npm", &["run", "coverage"]),
+            ("npx", &["vite", "build"]),
+            ("npx", &["vitest", "run", "x.test.ts"]),
+            ("npx", &["vitest"]),
+            ("docker", &["build", "-t", "x", "."]),
+            ("docker", &["buildx", "build", "."]),
+            ("docker", &["compose", "up", "--build"]),
+            ("docker", &["--context", "c", "build", "."]),
+        ];
+        for (tool, args) in heavy {
+            assert_eq!(slotted(tool, args), Some(true), "{tool} {args:?} should be slotted");
+        }
+        let light: &[(&str, &[&str])] = &[
+            ("task", &["dev"]),
+            ("task", &["run"]),
+            ("task", &["check:doc-status"]),
+            ("task", &["changeset", "--", "patch", "package"]),
+            ("task", &[]),
+            ("npm", &["install"]),
+            ("npm", &["ci"]),
+            ("npm", &["run", "lint:scss"]),
+            ("npm", &["run", "dev"]),
+            ("npm", &[]),
+            ("npx", &["tsc", "--noEmit"]),
+            ("npx", &["vite"]),
+            ("docker", &["run", "--rm", "x"]),
+            ("docker", &["ps"]),
+            ("docker", &["compose", "up"]),
+            ("docker", &["--version"]),
+        ];
+        for (tool, args) in light {
+            assert_eq!(slotted(tool, args), Some(false), "{tool} {args:?} should run directly");
+        }
+        // The reason names the command, and the real tool gets the original arguments.
+        let out = run_tool("task", true, false, &["package", "--force"]).unwrap();
+        assert!(out.starts_with("SLOT --reason task package -- "), "got {out:?}");
+        assert!(contains_all(&out, &["real", "task package --force"]), "got {out:?}");
+        assert_eq!(run_tool("npm", true, true, &["run", "build"]).unwrap(), "REAL run build", "the opt-out works for every tool");
+        assert_eq!(run_tool("docker", false, false, &["build", "."]).unwrap(), "REAL build .", "no lock script: docker still runs");
     }
 
     #[test]
