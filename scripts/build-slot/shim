@@ -96,10 +96,17 @@ case "$tool" in
     if [ "$tool" = npm ]; then
       case "$sub" in
         run|run-script|rum|urn)
-          script=""; seen=0
+          # The script is the word after `run`; an option's separate value (`--workspace child`,
+          # `--prefix dir`) is not a word, wherever the option stands.
+          script=""; seen=0; skip=0
           for arg in "$@"; do
-            if [ "$seen" = 1 ]; then case "$arg" in -*) ;; *) script="$arg"; break ;; esac; fi
-            case "$arg" in run|run-script|rum|urn) seen=1 ;; esac
+            if [ "$skip" = 1 ]; then skip=0; continue; fi
+            case "$arg" in
+              --) break ;;
+              -*) case " $skip_opts " in *" $arg "*) skip=1 ;; esac ;;
+              *) if [ "$seen" = 1 ]; then script="$arg"; break; fi
+                 case "$arg" in run|run-script|rum|urn) seen=1 ;; esac ;;
+            esac
           done
           case "$script" in
             build|build:*|package|package:*|coverage|test:e2e) heavy=1; reason="npm run $script" ;;
