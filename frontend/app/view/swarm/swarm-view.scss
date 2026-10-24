@@ -804,6 +804,33 @@
     &--idle { color: var(--success-color); }
 }
 
+// An agent that can't start a turn: out of quota until a reset, or signed out. It takes the
+// status chip's place, in the colour of something that needs attention rather than of rest.
+.swarm-unavailable-chip {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: var(--text-xs);
+    flex-shrink: 0;
+    white-space: nowrap;
+    color: var(--warning-color, var(--accent-color));
+
+    .swarm-unavailable-icon {
+        font-size: var(--text-2xs);
+    }
+}
+
+// A tool call that has been running a while, on the row of the agent running it. Information only.
+.swarm-long-tool {
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: var(--text-2xs);
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+}
+
 // The question timer's seconds, in the panel's bands (≤10s warning, ≤5s
 // critical); the word keeps the chip's colour.
 .swarm-status-countdown {

@@ -221,3 +221,34 @@ describe("swarmLineTooltip", () => {
         expect(swarmLineTooltip({ text: "x", source: "status" })).toBe(FALLBACK_TOOLTIP);
     });
 });
+
+describe("resolveSwarmLine — an agent that can't start a turn", () => {
+    const NOW = new Date(2026, 9, 24, 10, 0).getTime();
+    const resets = new Date(2026, 9, 26, 19, 0).getTime();
+    const limited = { "agent:last_failure": { code: "usage_limit", resetsAtMs: resets, limitWindow: "seven_day" } };
+
+    it("says out of quota with the reset, ahead of a generated title", () => {
+        const meta = { ...limited, "term:ambient_summary": "Refactoring the pane registry" };
+        const result = line({ meta, now: NOW });
+        expect(result.source).toBe("status");
+        expect(result.text).toMatch(/^Out of quota until /);
+    });
+
+    it("says needs sign-in for a refused sign-in", () => {
+        expect(line({ meta: { "agent:last_failure": { code: "auth" } }, now: NOW }).text).toBe("Needs sign-in");
+    });
+
+    it("goes back to the title once the reset has passed", () => {
+        const meta = { ...limited, "term:last_prompt": "Refactor the pane tab registry" };
+        expect(line({ meta, now: resets + 1 }).text).toBe("Refactor the pane tab registry");
+    });
+
+    it("leaves a working agent's line alone, since a turn in flight is evidence it can work", () => {
+        expect(line({ meta: limited, status: "running", currentTool: "Bash", now: NOW }).text).toBe(STATUS_WORKING);
+    });
+
+    it("leaves a question ahead of it", () => {
+        const meta = { ...limited, [META_AWAITING_USER]: true };
+        expect(line({ meta, status: "running", now: NOW }).text).toBe(STATUS_WAITING);
+    });
+});
