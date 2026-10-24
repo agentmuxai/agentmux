@@ -494,6 +494,7 @@ partial list.
 | [`SPEC_SWARM_BROADCAST_AS_USER_MESSAGE_2026_10_01`](SPEC_SWARM_BROADCAST_AS_USER_MESSAGE_2026_10_01.md) | Spec: a Swarm broadcast reaches agents as the user's own message, marked as a broadcast |
 | [`SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19`](SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md) | SPEC: Robust dispatch attribution + formalized session lifecycle for Swarm |
 | [`SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19`](SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19.md) | SPEC: eager per-dispatch naming + two-bucket swarm row model |
+| [`SPEC_SWARM_ORDER_WORKING_FIRST_THEN_RECENT_2026_10_23`](SPEC_SWARM_ORDER_WORKING_FIRST_THEN_RECENT_2026_10_23.md) | Spec — Swarm order: working agents on top, idle agents by most recent activity |
 | [`SPEC_SWARM_QUESTION_STATE_AND_QUESTION_TIMEOUT_ACTIVITY_2026_10_02`](SPEC_SWARM_QUESTION_STATE_AND_QUESTION_TIMEOUT_ACTIVITY_2026_10_02.md) | SPEC: Swarm "question" state and countdown, and activity that resets a question's timeout |
 | [`SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06`](SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06.md) | SPEC — Swarm Row Auto-Linger Countdown on Completion |
 | [`SPEC_SWARM_SUPERVISOR_2026_10_16`](SPEC_SWARM_SUPERVISOR_2026_10_16.md) | Spec: the Swarm Supervisor keeps agents working until they are done or need the user |
