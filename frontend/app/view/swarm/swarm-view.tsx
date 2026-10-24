@@ -4,7 +4,7 @@
 import { UnseenTurnsDot } from "@/app/block/UnseenTurnsDot";
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-holds";
-import { createMemo, createSignal, createEffect, onCleanup, onMount, untrack, For, Show, type Accessor, type JSX } from "solid-js";
+import { createComputed, createMemo, createSignal, createEffect, onCleanup, onMount, untrack, For, Show, type Accessor, type JSX } from "solid-js";
 import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, ActiveShell, ActiveCron, WorkflowDispatch, SubagentEvent, DispatchActivityEntry, TodoItem } from "./swarm-model";
 import { collectClearableRows, subagentDisplayLabel, subagentRowKey, subagentToolDetail, workflowRetireSignal, AUTO_RETIRE_DELAY_MS } from "./swarm-model";
 import { LOCAL_PROVIDER_UNKNOWN, REMOTE_PROVIDER_UNKNOWN, SwarmProviderIcon } from "./swarm-provider-icon";
@@ -25,7 +25,9 @@ import { formatCompactNumber } from "@/util/format-count";
 import { formatElapsedClock, formatTimeLeft } from "@/util/format-time";
 import { HeldTaskChip } from "@/app/view/warden-kanban/kanban-held";
 import { revealBlock } from "@/app/util/reveal-block";
-import { sameList, selectTrace } from "@/app/util/select-trace";
+import { selectTrace } from "@/app/util/select-trace";
+import { SwarmOrderController, type SwarmOrderItem } from "./swarm-order";
+import { captureRowTops, playRowMoves } from "./swarm-order-motion";
 import { BackgroundTaskBucket, SubagentBackgroundTasks, visibleBackgroundTasks } from "./swarm-background-tasks";
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 import { swarmRowColors } from "./swarm-row-colors";
@@ -111,10 +113,64 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
             return [count === 1 ? base : `${base}#${count}`, n] as const;
         });
     });
-    const rowKeys = createMemo<string[]>(() => keyedRows().map(([key]) => key), [], { equals: sameList });
     const rowsByKey = createMemo(() => new Map(keyedRows()));
     const clearableCount = createMemo(() => collectClearableRows(tree()).length);
     const remote = createMemo(() => remoteRows(remoteSections(model.otherInstancesAtom())));
+    const remoteByKey = createMemo(() => new Map(remote().map((r) => [remoteAgentKey(r.section, r.agent), r] as const)));
+    // The order the rows are shown in: working agents first, the rest by last activity
+    // (swarm-order.ts). A change waits, and waits longer while the list is in use, so a
+    // row never moves under the cursor.
+    let treeRef: HTMLDivElement | undefined;
+    let rowTops = new Map<string, number>();
+    const orderControl = new SwarmOrderController(undefined, undefined, {
+        beforeMove: () => {
+            rowTops = captureRowTops(treeRef);
+        },
+        afterMove: () => playRowMoves(treeRef, rowTops, zoomFactor()),
+    });
+    onCleanup(() => orderControl.dispose());
+    createComputed(() =>
+        orderControl.update([
+            ...keyedRows().map(([key, n]): SwarmOrderItem => {
+                const meta = n.blockId ? MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", n.blockId))()?.meta : undefined;
+                const status = phaseToDisplayStatus(n.blockId, n.agentStatus);
+                return {
+                    key,
+                    remote: false,
+                    working: chipStatus(status, isAwaitingUser(meta, n.agentStatus)) !== "idle",
+                    lastActive: lastActiveMs(meta),
+                    name: n.agentName,
+                };
+            }),
+            ...remote().map(
+                (r): SwarmOrderItem => ({
+                    key: remoteAgentKey(r.section, r.agent),
+                    remote: true,
+                    working: remoteChip(r.agent.status, r.section.stale)?.status === "working",
+                    lastActive: 0,
+                    name: r.agent.name,
+                })
+            ),
+        ])
+    );
+    // What keeps the list where it is: the pointer over it, a button down in it, a
+    // right-click menu, focus in a row. Which pane has focus, and the ticked checkboxes, do not.
+    onMount(() => {
+        const release = () => orderControl.setHold("press", false);
+        const closeMenu = () => orderControl.setHold("menu", false);
+        window.addEventListener("pointerup", release, true);
+        window.addEventListener("pointercancel", release, true);
+        window.addEventListener("dragend", release, true);
+        window.addEventListener("pointerdown", closeMenu, true);
+        window.addEventListener("keydown", closeMenu, true);
+        onCleanup(() => {
+            window.removeEventListener("pointerup", release, true);
+            window.removeEventListener("pointercancel", release, true);
+            window.removeEventListener("dragend", release, true);
+            window.removeEventListener("pointerdown", closeMenu, true);
+            window.removeEventListener("keydown", closeMenu, true);
+        });
+    });
     const localKeys = createMemo(() => tree().flatMap((n) => (n.blockId ? [n.blockId] : [])));
     // Everything a checkbox can select: this instance's agents, then the remote
     // ones not gone stale. Select all and the selection both follow it.
@@ -180,14 +236,30 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
                         </div>
                     </Show>
                 </Show>
-                {/* One list: this instance's agents, then the other instances'
-                    (docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §5). */}
+                {/* One list: this instance's agents and the other instances', working ones
+                    first (swarm-order.ts; docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §5). */}
                 <Show when={tree().length > 0 || remote().length > 0}>
-                    <div class="swarm-tree">
-                        <For each={rowKeys()}>
-                            {(key) => <AgentRowHost rowKey={key} rows={rowsByKey} focusedBlockId={focusedBlockId} model={model} />}
+                    <div
+                        class="swarm-tree"
+                        ref={treeRef}
+                        onPointerEnter={() => orderControl.setHold("pointer", true)}
+                        onPointerLeave={() => orderControl.setHold("pointer", false)}
+                        onPointerDown={() => orderControl.setHold("press", true)}
+                        onContextMenu={() => orderControl.setHold("menu", true)}
+                        onFocusIn={() => orderControl.setHold("focus", true)}
+                        onFocusOut={(e) => {
+                            if (!treeRef?.contains(e.relatedTarget as Node | null)) orderControl.setHold("focus", false);
+                        }}
+                    >
+                        <For each={orderControl.order()}>
+                            {(key) =>
+                                remoteByKey().has(key) ? (
+                                    <RemoteAgentRowHost rowKey={key} rows={remoteByKey} model={model} />
+                                ) : (
+                                    <AgentRowHost rowKey={key} rows={rowsByKey} focusedBlockId={focusedBlockId} model={model} />
+                                )
+                            }
                         </For>
-                        <RemoteAgentRows model={model} rows={remote()} />
                     </div>
                 </Show>
             </Show>
@@ -207,49 +279,66 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
  * as a local row, and its summary line under it when it shares one.
  */
 export function RemoteAgentRows(props: { model: SwarmViewModel; rows: RemoteRow[] }): JSX.Element {
+    return <For each={props.rows}>{(row) => <RemoteAgentRow model={props.model} row={row} />}</For>;
+}
+
+/** One agent of another instance, following its row as the list is rebuilt. The last row it
+ *  saw stands in while the row is on its way out. */
+export function RemoteAgentRowHost(props: {
+    rowKey: string;
+    rows: Accessor<Map<string, RemoteRow>>;
+    model: SwarmViewModel;
+}): JSX.Element {
+    let last = untrack(() => props.rows().get(props.rowKey))!;
+    const row = createMemo(() => (last = props.rows().get(props.rowKey) ?? last));
+    return <RemoteAgentRow model={props.model} row={row()} />;
+}
+
+export function RemoteAgentRow(props: { model: SwarmViewModel; row: RemoteRow }): JSX.Element {
+    const key = () => remoteAgentKey(props.row.section, props.row.agent);
+    const section = () => props.row.section;
     return (
-        <For each={props.rows}>
-            {(row) => {
-                const key = remoteAgentKey(row.section, row.agent);
-                const section = row.section;
-                return (
-                    <div classList={{ "swarm-agent-group": true, "swarm-remote-agent-group": true, "swarm-remote-agent-group--stale": section.stale }}>
-                        <div class="swarm-remote-agent">
-                            <input
-                                type="checkbox"
-                                class="swarm-agent-select-checkbox"
-                                checked={props.model.isSelected(key)}
-                                disabled={section.stale}
-                                onChange={() => props.model.toggleSelected(key)}
-                                title={section.stale ? "Not seen recently, so it can't be selected" : "Select for a fleet action (broadcast/stop)"}
-                            />
-                            <SwarmProviderIcon provider={row.agent.provider} unknownTitle={REMOTE_PROVIDER_UNKNOWN} />
-                            <span class="swarm-remote-agent-name">{row.agent.name}</span>
-                            <span class="swarm-remote-where">
-                                <span class="swarm-remote-title">{section.title}</span>
-                                <span class="swarm-remote-badge">{section.badge}</span>
-                                <Show when={section.platform}>
-                                    <span class="swarm-remote-platform">{section.platform}</span>
-                                </Show>
-                                <Show when={section.stale}>
-                                    <span class="swarm-remote-seen">{seenAgo(section.seenAtMs, Date.now())}</span>
-                                </Show>
-                            </span>
-                            <Show when={remoteChip(row.agent.status, section.stale)}>
-                                {(chip) => (
-                                    <span class="swarm-remote-agent-status" title={chip().label}>
-                                        <AgentStatusChip status={chip().status} awaitingUser={chip().awaitingUser} />
-                                    </span>
-                                )}
-                            </Show>
-                        </div>
-                        <Show when={remoteLine(row.agent.line, section.stale)}>
-                            {(line) => <div class="swarm-remote-agent-line">{line()}</div>}
-                        </Show>
-                    </div>
-                );
+        <div
+            classList={{
+                "swarm-agent-group": true,
+                "swarm-remote-agent-group": true,
+                "swarm-remote-agent-group--stale": section().stale,
             }}
-        </For>
+            data-swarm-key={key()}
+        >
+            <div class="swarm-remote-agent">
+                <input
+                    type="checkbox"
+                    class="swarm-agent-select-checkbox"
+                    checked={props.model.isSelected(key())}
+                    disabled={section().stale}
+                    onChange={() => props.model.toggleSelected(key())}
+                    title={section().stale ? "Not seen recently, so it can't be selected" : "Select for a fleet action (broadcast/stop)"}
+                />
+                <SwarmProviderIcon provider={props.row.agent.provider} unknownTitle={REMOTE_PROVIDER_UNKNOWN} />
+                <span class="swarm-remote-agent-name">{props.row.agent.name}</span>
+                <span class="swarm-remote-where">
+                    <span class="swarm-remote-title">{section().title}</span>
+                    <span class="swarm-remote-badge">{section().badge}</span>
+                    <Show when={section().platform}>
+                        <span class="swarm-remote-platform">{section().platform}</span>
+                    </Show>
+                    <Show when={section().stale}>
+                        <span class="swarm-remote-seen">{seenAgo(section().seenAtMs, Date.now())}</span>
+                    </Show>
+                </span>
+                <Show when={remoteChip(props.row.agent.status, section().stale)}>
+                    {(chip) => (
+                        <span class="swarm-remote-agent-status" title={chip().label}>
+                            <AgentStatusChip status={chip().status} awaitingUser={chip().awaitingUser} />
+                        </span>
+                    )}
+                </Show>
+            </div>
+            <Show when={remoteLine(props.row.agent.line, section().stale)}>
+                {(line) => <div class="swarm-remote-agent-line">{line()}</div>}
+            </Show>
+        </div>
     );
 }
 
@@ -345,7 +434,7 @@ export function AgentRowHost(props: {
 }): JSX.Element {
     let last = untrack(() => props.rows().get(props.rowKey))!;
     const node = createMemo(() => (last = props.rows().get(props.rowKey) ?? last));
-    return <AgentRow node={node} focusedBlockId={props.focusedBlockId} model={props.model} />;
+    return <AgentRow node={node} focusedBlockId={props.focusedBlockId} model={props.model} rowKey={props.rowKey} />;
 }
 
 // Exported for `swarm-agent-row.render.test.tsx`, which pins the PR #2862
@@ -356,10 +445,13 @@ export function AgentRow({
     node,
     focusedBlockId,
     model,
+    rowKey,
 }: {
     node: Accessor<AgentTreeNode>;
     focusedBlockId: () => string | null;
     model: SwarmViewModel;
+    /** The key the list orders the row by (swarm-order.ts), for the slide when it moves. */
+    rowKey?: string;
 }): JSX.Element {
     const displayStatus = createMemo<AgentDisplayStatus>(() =>
         phaseToDisplayStatus(node().blockId, node().agentStatus)
@@ -457,7 +549,7 @@ export function AgentRow({
     };
 
     return (
-        <div class="swarm-agent-group">
+        <div class="swarm-agent-group" data-swarm-key={rowKey}>
             <div
                 classList={{
                     "swarm-agent-card": true,
