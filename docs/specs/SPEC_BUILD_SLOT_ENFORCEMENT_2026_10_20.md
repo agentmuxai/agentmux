@@ -45,8 +45,8 @@ Agent shells already put `~/.agentmux/tools/bin` ahead of the system PATH (`tool
 The shim acts for the tool whose name it carries. It finds the real tool (the next one on PATH that is not its own directory; a `.cmd` is the last resort), and for the heavy subcommands runs it as `build-slot.sh -- <real tool> <args>`. A tool's light subcommands run it directly. What is heavy, per tool:
 
 - **`task`**: `package`, `build` and `bundle` (and their `:`-suffixed variants such as `package:portable` and `build:backend`), and `storybook:build`. `dev` and `run` are not slotted, for the reason `cargo run` is not (the app keeps running); the cargo calls inside `task dev` are slotted by the `cargo` shim anyway. Several names may be given: one heavy name slots the call.
-- **`npm`**: `npm run` for `build`, `build:*`, `package`, `package:*`, `coverage` and `test:e2e`, and `npm run test` / `npm test`. The last two are the bare `vitest`, which watches with a terminal and runs once without one, so they are slotted when stdin is not a terminal (an agent's shell has none), or when the arguments ask for a single run (`npm test -- --run`, `--coverage`).
-- **`npx`**: `vite build`, `vitest run` (or `--run`, `--coverage`), and a bare `vitest` without a terminal. `npx tsc` and the other quick tools are not slotted.
+- **`npm`**: `npm run` for `build`, `build:*`, `package`, `package:*`, `coverage` and `test:e2e`, and `npm run test` / `npm test`. The last two are the bare `vitest`, which watches with a terminal and runs once without one, so they are slotted when stdin is not a terminal (an agent's shell has none), or when the arguments ask for a single run (`npm test -- --run`). `--coverage` alone leaves vitest watching, so it does not count.
+- **`npx`**: `vite build`, `vitest run` (or `--run`), and a bare `vitest` without a terminal. `npx tsc` and the other quick tools are not slotted.
 - **`docker`**: `build`, `buildx build`, `builder build`, `image build` and `compose build` or `compose up --build`. `run`, `ps` and plain `compose up` are not.
 
 For `cargo`, the heavy subcommands are:

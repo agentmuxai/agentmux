@@ -363,14 +363,19 @@ mod tests {
         for (tool, args) in [
             ("npm", &["test", "--", "--run"][..]),
             ("npm", &["run", "test", "--", "--run"][..]),
-            ("npm", &["test", "--", "--coverage"][..]),
             ("npx", &["vitest", "--run"][..]),
             ("npx", &["vitest", "run"][..]),
             ("npm", &["run", "build"][..]),
         ] {
             assert_eq!(with_tty(tool, args), Some(true), "{tool} {args:?} should be slotted with a terminal");
         }
-        for (tool, args) in [("npm", &["test"][..]), ("npm", &["run", "test"][..]), ("npx", &["vitest"][..])] {
+        for (tool, args) in [
+            ("npm", &["test"][..]),
+            ("npm", &["run", "test"][..]),
+            ("npx", &["vitest"][..]),
+            ("npm", &["test", "--", "--coverage"][..]),
+            ("npx", &["vitest", "--coverage"][..]),
+        ] {
             assert_eq!(with_tty(tool, args), Some(false), "{tool} {args:?} watches with a terminal, so it is not slotted");
         }
     }

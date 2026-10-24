@@ -56,9 +56,10 @@ has_word() {
 has_tty() { [ -n "${BUILD_SLOT_ASSUME_TTY:-}" ] || [ -t 0 ]; }
 
 # Whether a vitest started with "$@" runs once and exits: with no terminal it does, and with one
-# only when asked to (`--run` or `--coverage`, forwarded after `npm test --`).
+# only when asked to with `--run` (forwarded after `npm test --`). `--coverage` alone does not
+# end watch mode, so it does not count.
 once_or_headless() {
-  ! has_tty || has_word --run "$@" || has_word --coverage "$@"
+  ! has_tty || has_word --run "$@"
 }
 
 # True when this invocation is heavy for the tool; $reason is then set for the queue.
