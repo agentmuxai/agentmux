@@ -427,7 +427,9 @@ impl PersistentSubprocessController {
         }
         // After the packet is built, so the disclosure can say whether this
         // fresh session was given the record ("continued") or not.
-        if fresh_onto_history && fresh_start_needs_disclosure(attempted_resume_sid.as_deref(), my_generation) {
+        // Also for a start the agent asked for (generation > 1): the pane's
+        // marker, its meter reset and the memory fallback follow from it.
+        if fresh_onto_history && (by_choice || fresh_start_needs_disclosure(attempted_resume_sid.as_deref(), my_generation)) {
             tracing::info!(
                 block_id = %self.block_id,
                 continued = continuation.is_some(),
@@ -435,7 +437,8 @@ impl PersistentSubprocessController {
             );
             // Idle when no message flows with this spawn (the same test as the
             // turn-active check below).
-            let idle_start = !had_retry_payload && self.inner.lock().unwrap().pending_send_messages.is_empty();
+            // A start the agent asked for always has its handoff in flight.
+            let idle_start = !by_choice && !had_retry_payload && self.inner.lock().unwrap().pending_send_messages.is_empty();
             self.emit_fresh_outcome_now(String::new(), continuation.is_some(), idle_start);
         }
         let pid = child.id().unwrap_or(0);
