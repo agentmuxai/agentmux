@@ -554,27 +554,47 @@ async fn act(state: &AppState, data: Value) -> Result<Value, String> {
         }
         "cancel" => {
             let t = get(&req.id)?;
+            // A cancelled spec approves nothing: what waits on it is
+            // cancelled too, or put on hold for the operator (§6). A
+            // cancelled task counts as finished for what starts after it, so
+            // its waiting builds go on hold *before* it is cancelled: until
+            // then the unfinished spec keeps them from being claimed, and no
+            // claim can slip in between.
+            let research = crate::backend::kanban::is_research_kind(&t.item.kind);
+            let why = format!("its {} #{} was cancelled", t.item.kind.trim().to_ascii_lowercase(), t.card.num);
+            let mut held: Vec<String> = Vec::new();
+            let mut were_held: Vec<String> = Vec::new();
+            if research {
+                for f in store.work_followers_of(&t.item.id).map_err(|e| e.to_string())? {
+                    match f.state.as_str() {
+                        work_state::OPEN => {
+                            if store.work_hold(&f.id, now).map_err(|e| e.to_string())?.is_some() {
+                                held.push(f.id);
+                            }
+                        }
+                        work_state::HELD => were_held.push(f.id),
+                        _ => {}
+                    }
+                }
+            }
             if !store.work_queue_cancel(&t.item.id, &text, now).map_err(|e| e.to_string())? {
+                // Nothing to cancel: let the builds go as they were.
+                for id in &held {
+                    let _ = store.work_unhold(id, now);
+                }
                 return Err("it is already finished".into());
             }
             record(state, &t.item.id, OPERATOR, OPERATOR, "cancelled", &t.item.state, work_state::CANCELLED, &text);
-            // A cancelled spec approves nothing: what waits on it is
-            // cancelled too, or put on hold for the operator (§6).
             let mut followers = 0;
-            if crate::backend::kanban::is_research_kind(&t.item.kind) {
-                let why = format!("its {} #{} was cancelled", t.item.kind.trim().to_ascii_lowercase(), t.card.num);
-                let hold = req.followers.as_deref() == Some("hold");
-                for f in store.work_followers_of(&t.item.id).map_err(|e| e.to_string())? {
-                    if f.state != work_state::OPEN && f.state != work_state::HELD {
-                        continue;
-                    }
-                    if hold {
-                        if let Some(m) = store.work_hold(&f.id, now).map_err(|e| e.to_string())? {
-                            record(state, &f.id, OPERATOR, OPERATOR, "held", &m.from, &m.to, &why);
-                            followers += 1;
-                        }
-                    } else if store.work_queue_cancel(&f.id, &why, now).map_err(|e| e.to_string())? {
-                        record(state, &f.id, OPERATOR, OPERATOR, "cancelled", &f.state, work_state::CANCELLED, &why);
+            if req.followers.as_deref() == Some("hold") {
+                for id in &held {
+                    record(state, id, OPERATOR, OPERATOR, "held", work_state::OPEN, work_state::HELD, &why);
+                    followers += 1;
+                }
+            } else {
+                for id in held.iter().chain(were_held.iter()) {
+                    if store.work_queue_cancel(id, &why, now).map_err(|e| e.to_string())? {
+                        record(state, id, OPERATOR, OPERATOR, "cancelled", "", work_state::CANCELLED, &why);
                         followers += 1;
                     }
                 }

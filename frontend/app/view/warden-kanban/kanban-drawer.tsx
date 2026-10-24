@@ -93,11 +93,10 @@ export function KanbanDrawer(props: {
     // The document a task wrote, or, for a build, the one its spec wrote.
     const docs = () => {
         const own = t().card.doc ? [{ label: "", path: t().card.doc as string }] : [];
+        // From what it starts after, so a spec finished long ago (off the board) still shows.
         const fromSpecs = (t().card.after ?? [])
-            .filter((a) => isResearchKind(a.kind))
-            .map((a) => ({ a, task: props.model.board()?.tasks.find((x) => x.id === a.id) }))
-            .filter((x) => x.task?.card.doc)
-            .map((x) => ({ label: `${x.a.kind} #${x.a.num}: `, path: x.task?.card.doc as string }));
+            .filter((a) => isResearchKind(a.kind) && a.doc)
+            .map((a) => ({ label: `${a.kind} #${a.num}: `, path: a.doc as string }));
         return [...own, ...fromSpecs];
     };
     const column = () => columnOf(t());

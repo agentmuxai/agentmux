@@ -35,6 +35,8 @@ export interface KanbanAfter {
     state: TaskState;
     /** Its kind (`spec`, `research`, `build`, …; absent from an older srv). */
     kind?: string;
+    /** The path of the document it wrote, empty when none. */
+    doc?: string;
 }
 
 /** What srv learned about a task's PR (`WorkPr` in crates/srv/src/backend/storage/work_prs.rs). */
