@@ -35,6 +35,8 @@ export interface KanbanAfter {
     state: TaskState;
     /** Its kind (`spec`, `research`, `build`, …; absent from an older srv). */
     kind?: string;
+    /** The path of the document it wrote, empty when none. */
+    doc?: string;
 }
 
 /** What srv learned about a task's PR (`WorkPr` in crates/srv/src/backend/storage/work_prs.rs). */
@@ -69,6 +71,8 @@ export interface KanbanCardFields {
     followers?: KanbanAfter[];
     /** Its PR's merge and release, once srv has seen them. */
     pr?: KanbanPr | null;
+    /** The path of the spec or report it wrote (`links.doc`), empty when none. */
+    doc?: string;
 }
 
 export interface KanbanAgent {
@@ -163,6 +167,10 @@ export interface KanbanActRequest {
     after?: string[];
     /** release, reassign: the operator read the warning (the task has a branch or PR) and wants it anyway. */
     confirm?: boolean;
+    /** create: "spec" or "research" files that task and a build that starts after it. */
+    first?: "spec" | "research";
+    /** cancel, a spec or research task: what happens to the tasks waiting on it. */
+    followers?: "cancel" | "hold";
 }
 
 export interface KanbanActResult {

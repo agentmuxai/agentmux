@@ -316,9 +316,26 @@ pub(super) struct UpdateRequest {
     pub branch: Option<String>,
     #[serde(default)]
     pub pr_url: Option<String>,
+    /// The path of the document the task wrote (`links.doc`).
+    #[serde(default)]
+    pub doc: Option<String>,
     /// `ask`: the question; `submit`: the result.
     #[serde(default)]
     pub text: String,
+}
+
+/// Why a handed-in document path can't be kept, if it can't. The card's Open
+/// button gives the path to the Editor as it is, and srv has no way to tell
+/// which clone a relative path meant, so only an absolute (or `~/`) path will do.
+fn doc_problem(req: &UpdateRequest) -> Option<String> {
+    let path = req.doc.as_deref().map(str::trim).filter(|p| !p.is_empty())?;
+    let bytes = path.as_bytes();
+    let absolute = path.starts_with('/')
+        || path.starts_with('\\')
+        || path.starts_with("~/")
+        || path.starts_with("~\\")
+        || (bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && matches!(bytes[2], b'/' | b'\\'));
+    (!absolute).then(|| format!("links.doc \"{path}\" is a relative path: give the document's full path, e.g. C:/Users/you/work/repo/docs/specs/SPEC_X.md"))
 }
 
 fn card_update(req: &UpdateRequest) -> CardUpdate {
@@ -333,6 +350,7 @@ fn card_update(req: &UpdateRequest) -> CardUpdate {
         }),
         branch: one(&req.branch),
         pr_url: one(&req.pr_url),
+        doc: one(&req.doc),
     }
 }
 
@@ -379,6 +397,9 @@ pub(super) async fn handle_work_update(
     if !holds(&item, &req.agent_id, holder_uid(caller), req.attempt) {
         return conflict();
     }
+    if let Some(why) = doc_problem(&req) {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": why })));
+    }
     let now = now_ms();
     let _ = state.identity_store.work_card_ensure(&id, now);
     let u = card_update(&req);
@@ -392,8 +413,12 @@ pub(super) async fn handle_work_update(
         body = format!("{body}{}checklist {done}/{}", if body.is_empty() { "" } else { " · " }, c.len());
     }
     record(&state, &id, &req.agent_id, "agent", "updated", &item.state, &item.state, &body);
-    if u.pr_url.is_some() || u.branch.is_some() {
-        let link = [u.pr_url.as_deref(), u.branch.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" ");
+    if u.pr_url.is_some() || u.branch.is_some() || u.doc.is_some() {
+        let link = [u.pr_url.as_deref(), u.branch.as_deref(), u.doc.as_deref()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" ");
         record(&state, &id, &req.agent_id, "agent", "linked", &item.state, &item.state, &link);
     }
     super::work_queue::publish_changed(&state);
@@ -441,6 +466,9 @@ pub(super) async fn handle_work_submit(
     let result = clean(&req.text);
     if result.is_empty() {
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "result is required: what was done, with links" })));
+    }
+    if let Some(why) = doc_problem(&req) {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": why })));
     }
     let id = resolve_id(&state, &id);
     finish(&state, caller, &id, &req.agent_id, req.attempt, &result, Some(card_update(&req))).await
@@ -702,6 +730,10 @@ async fn finish_task(
             let _ = state.identity_store.work_card_set_question(id, "", now);
             let to = if review { work_state::REVIEW } else { work_state::DONE };
             record(state, id, agent_id, "agent", if review { "submitted" } else { "completed" }, &before, to, result);
+            if to == work_state::DONE {
+                // A spec done: its build's agent hears it can start.
+                crate::backend::kanban::notify_unlocked(&state.identity_store, &state.mstore, id);
+            }
             super::work_queue::publish_changed(state);
             let holder_uid = state.identity_store.work_queue_get(id).ok().flatten().map(|i| i.claimed_by_uid).unwrap_or_default();
             let next_uid = if uid.is_empty() { holder_uid } else { uid.to_string() };

@@ -40,6 +40,50 @@ async fn tasks_get_numbers_that_work_wherever_an_id_does() {
 }
 
 #[tokio::test]
+async fn a_document_link_must_be_a_full_path() {
+    let app = app();
+    post(&app, "/agentmux/work", json!({"title": "t", "payload": "p"})).await;
+    let (_, c) = post(&app, "/agentmux/work/claim", json!({"agent_id": "a1"})).await;
+    let (num, attempt) = (c["num"].as_i64().unwrap(), c["attempt"].as_i64().unwrap());
+    let uri = format!("/agentmux/work/{num}/update");
+    let update = |doc: &str| json!({"agent_id": "a1", "attempt": attempt, "doc": doc});
+
+    let (s, v) = post(&app, &uri, update("docs/specs/SPEC_X.md")).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert!(v["error"].as_str().unwrap().contains("relative path"), "{v}");
+    for ok in ["C:/Users/a/SPEC_X.md", r"c:\Users\a\SPEC_X.md", "/home/a/SPEC_X.md", "~/work/SPEC_X.md", r"\\host\share\SPEC_X.md"] {
+        let (s, v) = post(&app, &uri, update(ok)).await;
+        assert_eq!(s, StatusCode::OK, "{ok}: {v}");
+    }
+
+    let submit = json!({"agent_id": "a1", "attempt": attempt, "text": "done", "doc": "SPEC_X.md"});
+    let (s, v) = post(&app, &format!("/agentmux/work/{num}/submit"), submit).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "submit checks it too: {v}");
+}
+
+#[tokio::test]
+async fn a_build_claimed_by_anyone_is_shown_its_specs_document() {
+    let app = app();
+    let (_, pair) = post(&app, "/agentmux/work", json!({"title": "Feature", "payload": "p", "first": "spec"})).await;
+    let (spec_num, build_num) = (pair["num"].as_i64().unwrap(), pair["build_num"].as_i64().unwrap());
+
+    let (_, c) = post(&app, "/agentmux/work/claim", json!({"agent_id": "writer"})).await;
+    assert_eq!(c["num"].as_i64(), Some(spec_num), "the build waits for its spec");
+    assert_eq!(c["after"], json!([]), "a spec starts after nothing");
+    let doc = "C:/work/SPEC_FEATURE.md";
+    let done = json!({"agent_id": "writer", "attempt": c["attempt"], "text": "approved", "doc": doc});
+    let (s, v) = post(&app, &format!("/agentmux/work/{spec_num}/submit"), done).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+
+    // Another agent takes the build; no unlock note went to it, the claim carries the path.
+    let (_, c) = post(&app, "/agentmux/work/claim", json!({"agent_id": "builder"})).await;
+    assert_eq!(c["num"].as_i64(), Some(build_num), "{c}");
+    let after = c["after"].as_array().expect("after");
+    assert_eq!(after.len(), 1);
+    assert_eq!((after[0]["num"].as_i64(), after[0]["doc"].as_str()), (Some(spec_num), Some(doc)), "{after:?}");
+}
+
+#[tokio::test]
 async fn finishing_a_task_names_the_next_one_waiting_for_the_agent() {
     let app = app();
     post(&app, "/agentmux/work", json!({"title": "first", "payload": "p", "target_agent": "a1"})).await;

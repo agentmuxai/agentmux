@@ -17,6 +17,8 @@ export function KanbanNewTask(props: { model: KanbanModel; agents: KanbanAgent[]
     const [payload, setPayload] = createSignal("");
     const [agent, setAgent] = createSignal("");
     const [hold, setHold] = createSignal(false);
+    // A feature starts as a spec, then its build (the stages spec §5.1); untick for a small fix.
+    const [specFirst, setSpecFirst] = createSignal(true);
     const [after, setAfter] = createSignal("");
     const [busy, setBusy] = createSignal(false);
 
@@ -31,6 +33,7 @@ export function KanbanNewTask(props: { model: KanbanModel; agents: KanbanAgent[]
             agent: agent() || undefined,
             hold: hold() || undefined,
             after: parseAfter(after()).length ? parseAfter(after()) : undefined,
+            first: specFirst() ? "spec" : undefined,
         });
         setBusy(false);
         if (res) props.onDone();
@@ -72,6 +75,13 @@ export function KanbanNewTask(props: { model: KanbanModel; agents: KanbanAgent[]
                         ...props.agents.map((a) => ({ value: a.name, label: `For ${a.name}` })),
                     ]}
                 />
+                <label
+                    class="kanban-new__hold"
+                    title="Files a spec, and a build that starts after it once the spec is done. Untick for a small fix."
+                >
+                    <Switch checked={specFirst()} onChange={setSpecFirst} density="compact" ariaLabel="Spec first" />
+                    Spec first
+                </label>
                 <label class="kanban-new__hold">
                     <Switch checked={hold()} onChange={setHold} density="compact" ariaLabel="On hold" />
                     On hold

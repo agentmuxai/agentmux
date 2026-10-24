@@ -71,6 +71,12 @@ fn a_cards_followers_and_the_kinds_of_what_it_waits_on() {
     let spec = s.work_board_get("spec").unwrap().unwrap().card;
     assert_eq!(spec.followers.iter().map(|f| (f.id.as_str(), f.kind.as_str())).collect::<Vec<_>>(), [("build", "build")]);
     assert_eq!(s.work_followers_of("spec").unwrap().len(), 1);
+
+    // The spec's document travels with the dependency, so the build shows it
+    // even when the spec itself is long off the board.
+    s.work_doc_set("spec", "docs/specs/SPEC_X.md", 2).unwrap();
+    let build = s.work_board_get("build").unwrap().unwrap().card;
+    assert_eq!(build.after[0].doc, "docs/specs/SPEC_X.md");
 }
 
 #[test]

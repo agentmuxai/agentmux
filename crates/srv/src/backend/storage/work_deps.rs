@@ -60,6 +60,10 @@ pub struct AfterTask {
     /// Spec'd (SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23.md §4).
     #[serde(default)]
     pub kind: String,
+    /// The path of the document it wrote (`links.doc`), so a build's card
+    /// shows its spec's path however long ago the spec finished.
+    #[serde(default)]
+    pub doc: String,
 }
 
 impl AfterTask {
@@ -86,10 +90,11 @@ fn linked(conn: &Connection, ids: &[&str], by: &str, other: &str) -> Result<Hash
     for chunk in ids.chunks(IDS_PER_QUERY) {
         let marks = vec!["?"; chunk.len()].join(",");
         let sql = format!(
-            "SELECT {by}, p.id, COALESCE(c.num, 0), p.title, p.state, p.kind
+            "SELECT {by}, p.id, COALESCE(c.num, 0), p.title, p.state, p.kind, COALESCE(doc.path, '')
                FROM db_work_deps d
                JOIN db_work_queue p ON p.id = {other}
                LEFT JOIN db_work_cards c ON c.work_id = p.id
+               LEFT JOIN db_work_docs doc ON doc.work_id = p.id
               WHERE {by} IN ({marks})
               ORDER BY c.num"
         );
@@ -97,7 +102,14 @@ fn linked(conn: &Connection, ids: &[&str], by: &str, other: &str) -> Result<Hash
         let rows = stmt.query_map(params_from_iter(chunk.iter()), |r| {
             Ok((
                 r.get::<_, String>(0)?,
-                AfterTask { id: r.get(1)?, num: r.get(2)?, title: r.get(3)?, state: r.get(4)?, kind: r.get(5)? },
+                AfterTask {
+                    id: r.get(1)?,
+                    num: r.get(2)?,
+                    title: r.get(3)?,
+                    state: r.get(4)?,
+                    kind: r.get(5)?,
+                    doc: r.get(6)?,
+                },
             ))
         })?;
         for row in rows {

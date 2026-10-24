@@ -151,6 +151,7 @@ pub(crate) const TASKS_TOOL: &str = r#"{
       "title":        { "type": "string", "description": "enqueue: a short summary" },
       "payload":      { "type": "string", "description": "enqueue: the full instruction injected into whoever claims it, written as a standalone prompt" },
       "for":          { "type": "string", "enum": ["me"], "description": "enqueue: \"me\" files it in your own backlog, to take after your current work (not with target_agent)" },
+      "first":        { "type": "string", "enum": ["spec", "research"], "description": "enqueue: a new feature as two tasks: \"Spec: <title>\" (or Research), and \"Build: <title>\", which starts after it; the build's agent is told when the spec is done" },
       "kind":         { "type": "string", "description": "enqueue: a tag to filter claims by (e.g. review, repro); claim: only items with this tag" },
       "target_agent": { "type": "string", "description": "enqueue: only this agent, by name or uid (not with target_group)" },
       "target_group": { "type": "string", "description": "enqueue: only members of this agent group (not with target_agent)" },
@@ -168,7 +169,7 @@ pub(crate) const TASKS_TOOL: &str = r#"{
       "reason":       { "type": "string", "description": "release: why you are handing it back, which the next claimant sees; hold, unhold: why, shown on the card (e.g. \"waiting on GitHub Support\")" },
       "note":         { "type": "string", "description": "update: a short progress note the operator sees on the card" },
       "checklist":    { "type": "array", "items": { "type": "object", "properties": { "text": { "type": "string" }, "status": { "type": "string", "enum": ["pending", "in_progress", "completed"] } }, "required": ["text", "status"] }, "description": "update: the task's steps, replaced whole" },
-      "links":        { "type": "object", "properties": { "pr": { "type": "string" }, "branch": { "type": "string" } }, "description": "update, submit: the PR URL and branch" },
+      "links":        { "type": "object", "properties": { "pr": { "type": "string" }, "branch": { "type": "string" }, "doc": { "type": "string" } }, "description": "update, submit: the PR URL and branch; doc: the full path (absolute, not relative to your clone) of the spec or report the task wrote, which its build's card shows" },
       "question":     { "type": "string", "description": "ask: what you need the operator to decide or give you" },
       "state":        { "type": "string", "description": "list: open, held, claimed, blocked, review, done, failed or cancelled (default all)" },
       "limit":        { "type": "integer", "description": "list: the most items to return (1-500, default 50)" }

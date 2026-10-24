@@ -7,6 +7,7 @@
 import { createResource, createSignal, For, Show, type JSX } from "solid-js";
 
 import { Button, IconButton, Select } from "@/app/element/ui";
+import { createBlock } from "@/app/store/block-layout-actions";
 import { openLink } from "@/app/store/misc-utils";
 import { formatAge } from "@/app/view/warden-shared/warden-shared";
 
@@ -83,6 +84,21 @@ export function KanbanDrawer(props: {
     // Taking a task back that has a branch or PR asks first: what srv said, and the move to repeat once confirmed.
     const [confirming, setConfirming] = createSignal<{ words: string; req: KanbanActRequest } | null>(null);
     const [giveTo, setGiveTo] = createSignal("");
+    // Cancelling a spec: its build is cancelled too, unless unticked (then held).
+    const [cancelBuild, setCancelBuild] = createSignal(true);
+    const openFollowers = () =>
+        isResearchKind(t().kind)
+            ? (t().card.followers ?? []).filter((f) => f.state === "open" || f.state === "held")
+            : [];
+    // The document a task wrote, or, for a build, the one its spec wrote.
+    const docs = () => {
+        const own = t().card.doc ? [{ label: "", path: t().card.doc as string }] : [];
+        // From what it starts after, so a spec finished long ago (off the board) still shows.
+        const fromSpecs = (t().card.after ?? [])
+            .filter((a) => isResearchKind(a.kind) && a.doc)
+            .map((a) => ({ label: `${a.kind} #${a.num}: `, path: a.doc as string }));
+        return [...own, ...fromSpecs];
+    };
     const column = () => columnOf(t());
     // An agent holds it (claimed, or blocked on a question): the operator can take it back from them.
     const heldByAgent = () => t().state === "claimed" || t().state === "blocked";
@@ -182,6 +198,30 @@ export function KanbanDrawer(props: {
             </Show>
 
             <KanbanAfterSection model={props.model} task={t()} onOpen={props.onOpenTask} />
+
+            <Show when={docs().length > 0}>
+                <section class="kanban-drawer__section">
+                    <h4>Document</h4>
+                    <For each={docs()}>
+                        {(d) => (
+                            <div class="kanban-drawer__row">
+                                <span class="kanban-drawer__doc">
+                                    {d.label}
+                                    {d.path}
+                                </span>
+                                <Button
+                                    density="compact"
+                                    tone="quiet"
+                                    icon="file-lines"
+                                    onClick={() => void createBlock({ meta: { view: "editor", file: d.path } })}
+                                >
+                                    Open
+                                </Button>
+                            </div>
+                        )}
+                    </For>
+                </section>
+            </Show>
 
             <Show when={t().result}>
                 <section class="kanban-drawer__section">
@@ -314,8 +354,25 @@ export function KanbanDrawer(props: {
                             </Button>
                         )}
                     </Show>
+                    <Show when={!isFinishedColumn(column()) && openFollowers().length > 0}>
+                        <label class="kanban-new__hold">
+                            <input
+                                type="checkbox"
+                                checked={cancelBuild()}
+                                onChange={(e) => setCancelBuild(e.currentTarget.checked)}
+                            />
+                            Cancelling also cancels {openFollowers().map((f) => `#${f.num}`).join(", ")} (else they go on
+                            hold)
+                        </label>
+                    </Show>
                     <Show when={!isFinishedColumn(column())}>
-                        <Button density="compact" tone="danger" icon="ban" disabled={busy()} onClick={() => void act({ action: "cancel", text: text() })}>
+                        <Button density="compact" tone="danger" icon="ban" disabled={busy()} onClick={() =>
+                                void act({
+                                    action: "cancel",
+                                    text: text(),
+                                    followers: openFollowers().length ? (cancelBuild() ? "cancel" : "hold") : undefined,
+                                })
+                            }>
                             Cancel task
                         </Button>
                     </Show>

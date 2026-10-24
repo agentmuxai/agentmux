@@ -125,6 +125,9 @@ pub struct WorkCard {
     /// release (`work_prs.rs`). `None` until srv has looked.
     #[serde(default)]
     pub pr: Option<super::work_prs::WorkPr>,
+    /// The path of the document it wrote (`links.doc`), empty when none.
+    #[serde(default)]
+    pub doc: String,
 }
 
 /// A task as the board shows it: the queue row and its card.
@@ -175,6 +178,8 @@ pub struct CardUpdate {
     pub checklist: Option<Vec<ChecklistItem>>,
     pub branch: Option<String>,
     pub pr_url: Option<String>,
+    /// The path of the document the task wrote (`db_work_docs`).
+    pub doc: Option<String>,
 }
 
 const CARD_COLS: &str = "c.num, c.repo, c.branch, c.pr_url, c.rank, c.review_required, c.checklist, \
@@ -202,6 +207,7 @@ fn row_to_card(row: &Row) -> rusqlite::Result<WorkCard> {
         after: Vec::new(),
         followers: Vec::new(),
         pr: None,
+        doc: String::new(),
     })
 }
 
@@ -434,6 +440,10 @@ impl Store {
             params![work_id, u.note, checklist, u.branch, u.pr_url, now_ms],
         )?;
         tx.commit()?;
+        drop(conn);
+        if let Some(doc) = &u.doc {
+            self.work_doc_set(work_id, doc, now_ms)?;
+        }
         Ok(())
     }
 

@@ -233,6 +233,114 @@ pub async fn run_reminder_loop() {
     }
 }
 
+/// Whether a kind is one that writes a document for the operator to approve
+/// (SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23.md §4.1).
+pub fn is_research_kind(kind: &str) -> bool {
+    matches!(kind.trim().to_ascii_lowercase().as_str(), "spec" | "research")
+}
+
+/// "Spec: …" / "Research: …" / "Build: …", unless the title already says so.
+pub fn pair_title(kind: &str, title: &str) -> String {
+    let word = match kind {
+        "spec" => "Spec",
+        "research" => "Research",
+        _ => "Build",
+    };
+    if title.to_ascii_lowercase().starts_with(&format!("{}:", word.to_ascii_lowercase())) {
+        title.to_string()
+    } else {
+        format!("{word}: {title}")
+    }
+}
+
+/// The first half of a feature: write it down, hand in its path.
+pub fn spec_payload(kind: &str, payload: &str) -> String {
+    let doc = if kind == "research" { "report" } else { "spec" };
+    format!(
+        "{payload}\n\nWrite this up as a {doc} first: no code. Leave it uncommitted in your clone and give its full path \
+         (not relative to your clone) with Tasks update (links.doc). A build task starts after this one: when the {doc} is approved, \
+         complete this task, and the build's agent is told it can start."
+    )
+}
+
+/// The second half: build what the approved spec says.
+pub fn build_payload(payload: &str) -> String {
+    format!(
+        "{payload}\n\nBuild what its approved spec says: the spec task this one starts after has its path on \
+         its card. Commit the spec in this build's first PR."
+    )
+}
+
+/// What a build's agent is told when the spec it waits on is done (§6.2).
+pub fn unlocked_text(spec: &BoardTask, build: &BoardTask) -> String {
+    use crate::backend::reactive::sanitize::quote_in_system_note as q;
+    let doc = if spec.card.doc.is_empty() { String::new() } else { format!(" ({})", q(&spec.card.doc)) };
+    format!(
+        "Task #{} \"{}\" can start: the {} it waits on, #{} \"{}\"{doc}, is done. \
+         Take it with Tasks claim (id {}) when you've finished your current task.",
+        build.card.num,
+        q(&build.item.title),
+        spec.item.kind.trim().to_ascii_lowercase(),
+        spec.card.num,
+        q(&spec.item.title),
+        build.card.num
+    )
+}
+
+/// The tasks a just-finished spec or research task frees, each with the
+/// agent to tell: waiting (not held), for one agent, and with nothing else
+/// unfinished to wait on. Reads the store: run it blocking.
+pub fn unlocked_by(identity: &Store, finished_id: &str) -> Vec<(BoardTask, BoardTask)> {
+    let Ok(Some(spec)) = identity.work_board_get(finished_id) else { return Vec::new() };
+    if spec.item.state != crate::backend::storage::work_queue::work_state::DONE || !is_research_kind(&spec.item.kind) {
+        return Vec::new();
+    }
+    let followers = identity.work_followers_of(finished_id).unwrap_or_default();
+    followers
+        .into_iter()
+        .filter_map(|f| identity.work_board_get(&f.id).ok().flatten())
+        .filter(|b| b.item.state == crate::backend::storage::work_queue::work_state::OPEN && !b.item.target_agent.is_empty())
+        .filter(|b| b.card.after.iter().all(|a| a.finished()))
+        .map(|b| (spec.clone(), b))
+        .collect()
+}
+
+/// Tell the agent of each task a finished spec frees that it can start
+/// (§6.2), unless that agent's pane doesn't go on through its backlog
+/// (`kanban:continue` off). A message that can't be delivered (the agent
+/// isn't running here) leaves the card in Spec'd under its name.
+pub fn notify_unlocked(identity: &Store, mstore: &Store, finished_id: &str) -> usize {
+    let handler = crate::backend::reactive::get_global_handler();
+    let mut told = 0;
+    for (spec, build) in unlocked_by(identity, finished_id) {
+        let target = build.item.target_agent.clone();
+        let reg = if build.item.target_agent_uid.is_empty() {
+            handler.get_agent(&target)
+        } else {
+            handler.list_agents().into_iter().find(|r| r.uid.as_deref() == Some(build.item.target_agent_uid.as_str()))
+        };
+        let Some(reg) = reg else { continue };
+        if !continues(mstore, &reg.block_id) {
+            continue;
+        }
+        let to = note_address(reg.uid.as_deref(), &reg.agent_id);
+        match handler.deliver_system_note(&to, &unlocked_text(&spec, &build)) {
+            Ok(()) => {
+                record(identity, &build.item.id, "agentmux", "unlocked", &format!("#{} done", spec.card.num));
+                told += 1;
+            }
+            Err(e) => tracing::info!(target = %reg.agent_id, error = %e, "kanban: unlock note not delivered"),
+        }
+    }
+    told
+}
+
+/// How a note is addressed to a registered agent: by UID when it has one, since
+/// a name two live agents share can't be delivered to.
+fn note_address(uid: Option<&str>, agent_id: &str) -> String {
+    uid.filter(|u| !u.is_empty()).unwrap_or(agent_id).to_string()
+}
+
 /// The progress watcher saw these agents open PRs: an agent holding exactly
 /// one task gets the PR's branch on it, and the PR once GitHub lists it. With
 /// several, nothing is guessed.
@@ -321,6 +429,13 @@ mod tests {
             },
             card: WorkCard { num, requested_by_kind: kind.into(), requested_by: by.into(), ..Default::default() },
         }
+    }
+
+    #[test]
+    fn a_note_goes_to_the_uid_when_there_is_one() {
+        assert_eq!(note_address(Some("uid-2"), "Twin"), "uid-2", "two agents may share the name");
+        assert_eq!(note_address(None, "Twin"), "Twin");
+        assert_eq!(note_address(Some(""), "Twin"), "Twin");
     }
 
     #[test]
