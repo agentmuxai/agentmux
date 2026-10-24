@@ -44,11 +44,40 @@ pub fn redact_secrets(text: &str) -> String {
     redact_aws_secret_key(&out)
 }
 
-/// Blanks credential-prefixed tokens and PEM private keys, and nothing else: the two passes of
-/// [`redact_secrets`] that look for a secret by its shape alone, without its `key: value` passes.
-/// For text of bounded length (it rescans for every prefix it finds).
+/// Blanks credential-prefixed tokens that start a word, and PEM private keys, and nothing else: the
+/// two passes of [`redact_secrets`] that look for a secret by its shape alone, without its
+/// `key: value` passes. Unlike [`redact_secrets`], a prefix inside a word does not count, so page
+/// text such as `disk-usage-report-weekly` (`sk-` inside `disk-`) comes back whole. For text of
+/// bounded length (it rescans for every prefix it finds).
 pub fn redact_token_shapes(text: &str) -> String {
-    redact_private_keys(&redact_credential_prefixes(text))
+    redact_private_keys(&redact_prefixed_tokens_at_word_start(text))
+}
+
+fn redact_prefixed_tokens_at_word_start(text: &str) -> String {
+    let word_char = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
+    let mut out = String::with_capacity(text.len());
+    // Everything before `copied` is in `out`; the search resumes at `from`.
+    let (mut copied, mut from) = (0, 0);
+    loop {
+        let hit = SECRET_PREFIXES
+            .iter()
+            .filter_map(|p| text[from..].find(p).map(|i| (from + i, *p)))
+            .min_by_key(|(i, p)| (*i, std::cmp::Reverse(p.len())));
+        let Some((at, prefix)) = hit else { break };
+        let starts_a_word = text[..at].chars().next_back().is_none_or(|c| !word_char(c));
+        let after = &text[at + prefix.len()..];
+        let body = after.find(|c: char| !word_char(c)).unwrap_or(after.len());
+        if starts_a_word && body >= 16 {
+            out.push_str(&text[copied..at]);
+            out.push_str("[redacted secret]");
+            copied = at + prefix.len() + body;
+            from = copied;
+        } else {
+            from = at + 1;
+        }
+    }
+    out.push_str(&text[copied..]);
+    out
 }
 
 /// Blanks credential-prefixed tokens (`ghp_...`, `sk-...`, AWS access-key
