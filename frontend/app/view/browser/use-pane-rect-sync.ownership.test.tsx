@@ -26,7 +26,7 @@ vi.mock("@/app/platform/ipc", () => ({
         return Promise.resolve();
     },
 }));
-vi.mock("@/app/workspace/floater-resize", () => ({ FLOATER_EDGE_RESIZE_BORDER: 4 }));
+vi.mock("@/app/workspace/floater-resize", () => ({ FLOATER_BROWSER_EDGE_INSET: 4 }));
 // The one visibility signal (Pane Tab contract Phase 3), driven by the test.
 const [visibility, setVisibility] = createSignal<"active" | "dormant" | "windowHidden">("active");
 vi.mock("@/app/block/pane-tab-visibility", () => ({ usePaneTabVisibility: () => visibility }));

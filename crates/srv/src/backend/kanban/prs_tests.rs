@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::backend::storage::work_board::WorkCard;
+use crate::backend::storage::work_prs::WorkPr;
 use crate::backend::storage::work_queue::{ClaimFilter, WorkItem};
 
 fn pr(repo: &str, number: u64) -> Option<PrRef> {
@@ -53,25 +54,86 @@ fn task(id: &str, state: &str, pr_url: &str, repo: &str) -> BoardTask {
 }
 
 #[test]
-fn only_tasks_in_review_with_a_pr_are_checked_and_not_too_often() {
+fn tasks_with_a_pr_are_checked_until_merged_and_not_too_often() {
+    let merged = |mut t: BoardTask| {
+        t.card.pr = Some(WorkPr { merged_at: Some(5), ..Default::default() });
+        t
+    };
     let tasks = [
         task("a", "review", "#1", "o/r"),
         task("b", "claimed", "#2", "o/r"),
         task("c", "review", "", "o/r"),
         task("d", "review", "#4", "p/private"),
         task("e", "review", "#5", "o/r"),
+        merged(task("f", "done", "#6", "o/r")),
+        task("g", "done", "#7", "o/r"),
+        task("h", "open", "#8", "o/r"),
+        merged(task("i", "claimed", "#9", "o/r")),
     ];
     let mut checked = Checked::default();
     checked.private_repos.insert("p/private".into(), 0);
     checked.at.insert("e".into(), (1000, Some(PrState::Open)));
     let ids = |v: Vec<(String, PrRef)>| v.into_iter().map(|(id, _)| id).collect::<Vec<_>>();
-    assert_eq!(ids(due(&tasks, &checked, 60_000)), ["a"], "e was just checked; d's repository is private");
-    assert_eq!(ids(due(&tasks, &checked, 1000 + CHECK_EVERY_MS)), ["a", "e"], "never looked at first");
+    assert_eq!(
+        ids(due(&tasks, &checked, 60_000)),
+        ["a", "b", "g"],
+        "e was just checked; d's repository is private; f and i are known merged; h waits"
+    );
+    assert_eq!(ids(due(&tasks, &checked, 1000 + CHECK_EVERY_MS)), ["a", "b", "g", "e"], "never looked at first");
     checked.at.insert("e".into(), (1000, Some(PrState::Closed)));
-    assert_eq!(ids(due(&tasks, &checked, 1000 + CHECK_EVERY_MS)), ["a"], "a closed PR is looked at less often");
-    assert_eq!(ids(due(&tasks, &checked, PRIVATE_FOR_MS)), ["a", "d", "e"]);
+    assert_eq!(ids(due(&tasks, &checked, 1000 + CHECK_EVERY_MS)), ["a", "b", "g"], "a closed PR is looked at less often");
+    assert_eq!(ids(due(&tasks, &checked, PRIVATE_FOR_MS)), ["a", "b", "d", "g", "e"]);
     checked.at.insert("e".into(), (1000, Some(PrState::Missing)));
-    assert_eq!(ids(due(&tasks, &checked, 1000 + CHECK_EVERY_MS)), ["a"], "a mistyped PR is looked at hourly, its repository still checked");
+    assert_eq!(ids(due(&tasks, &checked, 1000 + CHECK_EVERY_MS)), ["a", "b", "g"], "a mistyped PR is looked at hourly");
+}
+
+#[test]
+fn a_merge_is_in_the_first_release_made_at_or_after_it() {
+    use serde_json::json;
+    let releases = json!([
+        {"tag_name": "v3", "draft": false, "created_at": "2026-10-24T10:00:00Z", "published_at": "2026-10-24T11:00:00Z"},
+        {"tag_name": "draft", "draft": true, "created_at": "2026-10-23T20:00:00Z"},
+        {"tag_name": "v2", "draft": false, "created_at": "2026-10-23T16:41:01Z", "published_at": "2026-10-23T17:35:12Z"},
+        {"tag_name": "v1", "draft": false, "created_at": "2026-10-23T00:11:01Z", "published_at": "2026-10-23T01:04:40Z"}
+    ]);
+    let ms = |s: &str| chrono::DateTime::parse_from_rfc3339(s).unwrap().timestamp_millis();
+    assert_eq!(
+        release_containing(&releases, ms("2026-10-23T12:00:00Z")),
+        Some(("v2".to_string(), ms("2026-10-23T17:35:12Z")))
+    );
+    assert_eq!(
+        release_containing(&releases, ms("2026-10-23T18:00:00Z")).map(|r| r.0),
+        Some("v3".to_string()),
+        "the draft doesn't count"
+    );
+    assert_eq!(release_containing(&releases, ms("2026-10-24T12:00:00Z")), None, "not released yet");
+    assert_eq!(merged_at(&json!({"merged_at": "2026-10-23T12:00:00Z"})), Some(ms("2026-10-23T12:00:00Z")));
+    assert_eq!(merged_at(&json!({"merged_at": null})), None);
+}
+
+#[test]
+fn releases_are_asked_about_per_repository_for_merged_unreleased_tasks() {
+    let with_pr = |id: &str, repo: &str, merged: Option<i64>, released: &str| {
+        let mut t = task(id, "done", "#1", repo);
+        t.card.pr = Some(WorkPr { merged_at: merged, released_in: released.into(), released_at: None });
+        t
+    };
+    let tasks = [
+        with_pr("a", "o/r", Some(10), ""),
+        with_pr("b", "o/r", Some(20), ""),
+        with_pr("c", "o/r", Some(5), "v1"),
+        with_pr("d", "o/s", None, ""),
+        with_pr("e", "o/s", Some(30), ""),
+    ];
+    let mut checked = Checked::default();
+    let mut by_repo: Vec<(String, Vec<String>)> = awaiting_release(&tasks, &checked, 1000)
+        .into_iter()
+        .map(|(r, v)| (r, v.into_iter().map(|(id, _)| id).collect()))
+        .collect();
+    by_repo.sort();
+    assert_eq!(by_repo, [("o/r".to_string(), vec!["a".to_string(), "b".to_string()]), ("o/s".to_string(), vec!["e".to_string()])]);
+    checked.releases_at.insert("o/r".into(), 1000);
+    assert_eq!(awaiting_release(&tasks, &checked, 2000).keys().collect::<Vec<_>>(), ["o/s"], "o/r was just asked");
 }
 
 #[test]
@@ -172,4 +234,30 @@ fn a_just_opened_pr_is_the_one_created_since_the_command_not_an_older_one() {
     ]);
     assert_eq!(pick_opened(&newest, Some("x"), seen), Some(129), "a fork's PR found by its branch among the newest");
     assert_eq!(pick_opened(&json!({"message": "x"}), None, seen), None);
+}
+
+/// The loop's own list holds a task its agent completed (done) within the
+/// board's window, so its merge and release are still followed; not one
+/// finished before it.
+#[test]
+fn the_watch_list_follows_finished_tasks_for_the_boards_window() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = Store::open_identity_store(&dir.path().join("identity-store.db")).unwrap();
+    let now = 10 * super::super::FINISHED_WINDOW_MS;
+    for (id, updated) in [("recent", now - 1000), ("old", now - super::super::FINISHED_WINDOW_MS - 1000)] {
+        let mut w = item(id);
+        w.created_at = updated;
+        w.updated_at = updated;
+        s.work_queue_enqueue(&w).unwrap();
+        s.work_card_ensure(id, updated).unwrap();
+        s.work_card_update(id, &CardUpdate { pr_url: Some("https://github.com/o/r/pull/1".into()), ..Default::default() }, updated)
+            .unwrap();
+        let conn = s.conn().lock().unwrap();
+        conn.execute("UPDATE db_work_queue SET state = 'done', updated_at = ?2 WHERE id = ?1", rusqlite::params![id, updated])
+            .unwrap();
+    }
+    let ids: Vec<String> = watch_list(&s, now).unwrap().into_iter().map(|t| t.item.id).collect();
+    assert_eq!(ids, ["recent"]);
+    let tasks = watch_list(&s, now).unwrap();
+    assert!(watched(&tasks[0]), "a finished task whose merge isn't known yet is watched");
 }

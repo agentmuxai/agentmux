@@ -22,6 +22,7 @@ mod lines;
 mod off_worker;
 mod offset_ops;
 mod parts;
+pub mod reclaim;
 mod replace;
 mod truncate_owner;
 mod types;
@@ -50,6 +51,8 @@ mod tests_readers;
 mod tests_checkpoint;
 #[cfg(test)]
 mod tests_global_version;
+#[cfg(test)]
+mod tests_reclaim;
 
 #[allow(unused_imports)]
 pub use core::{FileStore, DEFAULT_FLUSH_SECS, MAX_CACHE_BYTES};

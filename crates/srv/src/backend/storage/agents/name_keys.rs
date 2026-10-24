@@ -488,6 +488,77 @@ impl Store {
         };
         Ok(defs.into_iter().filter(|d| d.id == owner.uid).collect())
     }
+
+    /// The one agent whose current display name routes to `name` ("Naki-2"
+    /// or "Naki #2" for "Naki #2", the form agents sign with), in any
+    /// channel, for a message's delivery only (#1459): a registry entry is
+    /// filed under the slug it runs as, so a message sent to the route form is
+    /// looked for under this slug. `None` when a definition holds the name as
+    /// its slug (its holder is found by that), when two display names route
+    /// to it (logged: never a guess), and for templates and deleted agents.
+    /// Asked on every name nothing is registered under, inside the reactive
+    /// handler's lock, so it answers from an in-memory index
+    /// (`FormerSlugSet::routes`), re-read only when older than `KNOWN_FOR` or
+    /// cleared by a write through this store.
+    pub fn display_route_owner(&self, name: &str) -> Result<Option<super::FormerSlugOwner>, StoreError> {
+        let Some(key) = super::former_names::route_key(name) else {
+            return Ok(None);
+        };
+        let cached = {
+            let routes = self.former_slugs.routes.lock().unwrap_or_else(|e| e.into_inner());
+            routes
+                .as_ref()
+                .filter(|(at, _)| at.elapsed() < super::former_slugs::KNOWN_FOR)
+                .map(|(_, map)| map.get(&key).cloned())
+        };
+        let hit = match cached {
+            Some(hit) => hit,
+            None => {
+                self.former_slugs.read();
+                let map = display_routes(&self.agent_def_list()?);
+                let hit = map.get(&key).cloned();
+                *self.former_slugs.routes.lock().unwrap_or_else(|e| e.into_inner()) =
+                    Some((std::time::Instant::now(), map));
+                hit
+            }
+        };
+        if matches!(hit, Some(None)) {
+            tracing::info!(name = %name, "two agents' display names route to this name; not delivering by it");
+        }
+        Ok(hit.flatten())
+    }
+}
+
+/// The index behind `Store::display_route_owner`: each current display
+/// name's route key to the one agent holding it, `None` for a key two hold,
+/// and none for a key some agent holds as its slug. Templates, forgotten
+/// agents (`user_hidden`) and agents with no slug are left out;
+/// `agent_def_list` holds no deleted agent.
+fn display_routes(defs: &[AgentDefinition]) -> std::collections::HashMap<String, Option<super::FormerSlugOwner>> {
+    let fold = |s: &str| s.trim().to_lowercase();
+    let slugs: std::collections::HashSet<String> = defs.iter().map(|d| fold(&d.slug)).filter(|s| !s.is_empty()).collect();
+    let mut map: std::collections::HashMap<String, Option<super::FormerSlugOwner>> = std::collections::HashMap::new();
+    for d in defs.iter().filter(|d| d.is_seeded == 0 && d.user_hidden == 0 && !d.slug.trim().is_empty()) {
+        let Some(key) = super::former_names::route_key(current_title(d)) else { continue };
+        if slugs.contains(&key) {
+            continue;
+        }
+        map.entry(key)
+            .and_modify(|owner| *owner = None)
+            .or_insert_with(|| Some(super::FormerSlugOwner { uid: d.id.clone(), slug: d.slug.clone() }));
+    }
+    map
+}
+
+/// The title an agent goes by now: a fork's is its `branch_label`, which a
+/// rename updates (`renameagentdefinitiontitle`) while `name` keeps the
+/// title it was forked with; a root's is its `name`.
+fn current_title(d: &AgentDefinition) -> &str {
+    if d.parent_id.trim().is_empty() || d.branch_label.trim().is_empty() {
+        &d.name
+    } else {
+        &d.branch_label
+    }
 }
 
 #[cfg(test)]

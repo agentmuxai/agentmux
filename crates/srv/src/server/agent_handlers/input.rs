@@ -642,19 +642,7 @@ pub(crate) async fn build_persistent_spawn_env(
     // inherited PATH: bundled is None in `task dev` (tool_store excludes
     // target/debug), so the wrapper is in the user dir and a system copy must
     // not shadow it. See `UserToolsPrecedence`.
-    {
-        let existing = env_vars
-            .get("PATH")
-            .cloned()
-            .or_else(|| std::env::var("PATH").ok())
-            .unwrap_or_default();
-        if let Some(path) = crate::backend::tool_store::tools_path(
-            &existing,
-            crate::backend::tool_store::UserToolsPrecedence::BeforeExisting,
-        ) {
-            env_vars.insert("PATH".to_string(), path);
-        }
-    }
+    crate::backend::tool_store::prepend_agent_tools_path(&mut env_vars);
     super::bash_prefix::apply_for_spawn(&mut env_vars, block_id);
     // Plain `gh` must not act as a human's gh login (see `gh_guard`), and no
     // agent holds the account's cloud login (see `account_login_guard`). Last,

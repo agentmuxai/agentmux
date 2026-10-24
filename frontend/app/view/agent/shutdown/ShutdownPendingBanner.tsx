@@ -19,6 +19,7 @@ import {
     EVENT_SHUTDOWN_PENDING,
     EVENT_SHUTDOWN_PENDING_CLEARED,
     LAST_CALL_MS,
+    countdownLine,
     parsePending,
     pendingTitle,
     replayPending,
@@ -110,7 +111,7 @@ export const ShutdownPendingBanner = (props: ShutdownPendingBannerProps): JSX.El
                 <PaneRow
                     sigil="⏻"
                     accent="error"
-                    title={`${pendingTitle(p(), props.agentId, props.agentName)}. Closing in ${secondsLeft(p(), now())} s.`}
+                    title={`${pendingTitle(p(), props.agentId, props.agentName)}. ${countdownLine(p(), secondsLeft(p(), now()))}`}
                     actions={[
                         {
                             label: keeping() ? "Keeping…" : "Keep running",

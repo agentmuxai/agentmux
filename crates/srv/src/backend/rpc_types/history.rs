@@ -57,6 +57,60 @@ pub struct HistoryCompression {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub waiting: Option<String>,
+    /// Space inside the store's file that holds nothing (SQLite's free pages),
+    /// which a reclaim gives back to the disk.
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub free_bytes: u64,
+    /// The store's file size, without its WAL.
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub file_bytes: u64,
+    /// The store gives freed pages back by itself (`auto_vacuum=INCREMENTAL`,
+    /// after a reclaim).
+    #[serde(default)]
+    pub incremental: bool,
+    /// Compression has caught up (off, or its last pass framed little), so a
+    /// reclaim now won't need doing again.
+    #[serde(default)]
+    pub steady: bool,
+    #[serde(default)]
+    pub reclaim: HistoryReclaim,
+}
+
+/// Giving the shared store's free space back (`history.reclaim`;
+/// SPEC_HISTORY_STORE_RECLAIM_SPACE_2026_10_23).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct HistoryReclaim {
+    /// Asked for: it runs at the next start of AgentMux.
+    #[serde(default)]
+    pub pending: bool,
+    /// Why the last start didn't run it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub waiting_for: Option<String>,
+    /// The last attempt's error, or why the request was dropped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub last_error: Option<String>,
+    /// When the last reclaim finished, in Unix milliseconds; 0 if never.
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub last_done_ms: u64,
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub last_before_bytes: u64,
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub last_after_bytes: u64,
+}
+
+/// `history.reclaim`'s request: `request` (at the next start) or `cancel`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct HistoryReclaimReq {
+    pub action: String,
 }
 
 /// What `history.usage` answers.

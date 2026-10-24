@@ -15,11 +15,26 @@ fn facts(trigger: Option<TriggerKind>) -> TurnFacts {
         background_running: false,
         reply: "r1".to_string(),
         now_ms: 1_000_000,
+        unavailable: None,
     }
 }
 
 fn running(mode: SupervisorMode) -> SupervisorState {
     SupervisorState::new(mode, 0)
+}
+
+#[test]
+fn an_agent_out_of_quota_or_signed_out_pauses_without_the_judge() {
+    for why in ["Out of quota until Sun 7:00 PM", "Needs sign-in"] {
+        let mut state = running(SupervisorMode::Steady);
+        let f = TurnFacts { unavailable: Some(why.to_string()), ..facts(Some(TriggerKind::Supervisor)) };
+        assert_eq!(policy::on_turn_end(&mut state, SupervisorMode::Steady, &f), PreJudge::Pause(format!("{why}.")));
+    }
+    // Off stays off, and AgentMux's own turn is still ignored.
+    let f = TurnFacts { unavailable: Some("Needs sign-in".into()), ..facts(Some(TriggerKind::User)) };
+    assert_eq!(policy::on_turn_end(&mut running(SupervisorMode::Off), SupervisorMode::Off, &f), PreJudge::Ignore);
+    let own = TurnFacts { unavailable: Some("Needs sign-in".into()), ..facts(Some(TriggerKind::System)) };
+    assert_eq!(policy::on_turn_end(&mut running(SupervisorMode::Steady), SupervisorMode::Steady, &own), PreJudge::Ignore);
 }
 
 // ── Modes and meta ──────────────────────────────────────────────────────

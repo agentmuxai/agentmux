@@ -8,6 +8,7 @@ import {
     checklistProgress,
     columnOf,
     columnTasks,
+    isSpecd,
     matchesQuery,
     needsReason,
     parseAfter,
@@ -18,6 +19,7 @@ import {
     requestedBy,
     reviewLimitOf,
     reviewLoad,
+    stageWord,
     untrackedAgents,
     waitingOn,
 } from "./kanban-columns";
@@ -67,12 +69,54 @@ function task(num: number, state: TaskState, over: Partial<KanbanTask> = {}): Ka
 }
 
 describe("which column a task is in", () => {
-    it("puts waiting tasks in the Backlog, handed-in ones in Review, finished ones in Done", () => {
+    it("puts waiting tasks in the Backlog, handed-in ones in Review, finished ones in Merged", () => {
         expect(columnOf(task(1, "open"))).toBe("backlog");
         expect(columnOf(task(2, "held"))).toBe("backlog");
         expect(columnOf(task(3, "review"))).toBe("review");
-        expect(columnOf(task(4, "done"))).toBe("done");
-        expect(columnOf(task(5, "cancelled"))).toBe("done");
+        expect(columnOf(task(4, "done"))).toBe("merged");
+        expect(columnOf(task(5, "cancelled"))).toBe("merged");
+    });
+
+    it("puts a spec or research task being worked In Research, any other In progress", () => {
+        const working = { holder: agent("Naki-2", "working") };
+        expect(columnOf(task(1, "claimed", { ...working, kind: "spec" }))).toBe("research");
+        expect(columnOf(task(2, "claimed", { ...working, kind: "Research" }))).toBe("research");
+        expect(columnOf(task(3, "claimed", { ...working, kind: "build" }))).toBe("progress");
+        expect(columnOf(task(4, "claimed", working))).toBe("progress");
+        // Needs you overrides the stage.
+        expect(columnOf(task(5, "claimed", { kind: "spec", holder: agent("Naki-2", "error") }))).toBe("needs");
+    });
+
+    it("puts a waiting task whose spec was accepted in Spec'd, and only then", () => {
+        const after = (state: TaskState, kind = "spec") => ({ id: "s", num: 9, title: "Spec: x", state, kind });
+        const build = (...a: ReturnType<typeof after>[]) => task(1, "open", { kind: "build", card: { after: a } as KanbanTask["card"] });
+        for (const s of ["open", "claimed", "blocked", "review", "failed"] as TaskState[]) {
+            expect(columnOf(build(after(s)))).toBe("backlog");
+        }
+        expect(columnOf(build(after("done")))).toBe("specd");
+        expect(isSpecd(build(after("done", "Spec")))).toBe(true);
+        expect(columnOf(build(after("cancelled"))), "a cancelled spec approved nothing").toBe("backlog");
+        expect(columnOf(build(after("done", "build"))), "a plain predecessor").toBe("backlog");
+        expect(columnOf(build(after("done"), { ...after("open", ""), id: "p" })), "still waiting on another").toBe(
+            "backlog"
+        );
+        expect(columnOf(build(after("done"), { ...after("done", ""), id: "p" }))).toBe("specd");
+        const held = build(after("done"));
+        held.state = "held";
+        expect(columnOf(held), "held, and still approved").toBe("specd");
+        // An older srv sends no kind: Backlog, as before.
+        expect(columnOf(build({ id: "s", num: 9, title: "x", state: "done" } as ReturnType<typeof after>))).toBe("backlog");
+    });
+
+    it("puts a held task with a PR in Review, then Merged when it merges, then Released", () => {
+        const working = { holder: agent("Naki-2", "working") };
+        const pr = (over: Partial<KanbanTask["card"]>) => ({ card: { pr_url: "https://github.com/o/r/pull/1", ...over } as KanbanTask["card"] });
+        expect(columnOf(task(1, "claimed", { ...working, ...pr({}) }))).toBe("review");
+        expect(columnOf(task(2, "claimed", { ...working, ...pr({ pr: { merged_at: 5 } }) }))).toBe("merged");
+        expect(columnOf(task(3, "done", pr({ pr: { merged_at: 5 } })))).toBe("merged");
+        expect(columnOf(task(4, "done", pr({ pr: { merged_at: 5, released_in: "v0.59.41" } })))).toBe("released");
+        expect(stageWord(task(5, "review", { kind: "Spec" }))).toBe("spec");
+        expect(stageWord(task(6, "review"))).toBe("build");
     });
 
     it("keeps a claimed task In progress while its holder works or idles", () => {
@@ -154,10 +198,19 @@ describe("what a card says", () => {
         );
         expect(checklistProgress(task(2, "claimed"))).toBeNull();
         const r = reviewLoad(
-            [task(1, "review", { updated_at: 1000 }), task(2, "review", { updated_at: 4000 }), task(3, "open")],
+            [
+                task(1, "review", { updated_at: 1000, kind: "spec" }),
+                task(2, "review", { updated_at: 4000 }),
+                task(3, "open"),
+                task(4, "claimed", {
+                    updated_at: 6000,
+                    holder: agent("Naki-2", "working"),
+                    card: { pr_url: "#4" } as KanbanTask["card"],
+                }),
+            ],
             10_000
         );
-        expect(r).toEqual({ count: 2, oldestMs: 9000 });
+        expect(r).toEqual({ count: 3, specs: 1, oldestMs: 9000 });
     });
 
     it("matches the search box on title, number, agent and repository", () => {

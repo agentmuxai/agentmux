@@ -118,6 +118,13 @@ pub struct WorkCard {
     /// The tasks this one starts after (`work_deps.rs`), finished or not.
     #[serde(default)]
     pub after: Vec<AfterTask>,
+    /// The tasks that start after this one, finished or not.
+    #[serde(default)]
+    pub followers: Vec<AfterTask>,
+    /// What GitHub said about its PR: merged when, released in which
+    /// release (`work_prs.rs`). `None` until srv has looked.
+    #[serde(default)]
+    pub pr: Option<super::work_prs::WorkPr>,
 }
 
 /// A task as the board shows it: the queue row and its card.
@@ -193,6 +200,8 @@ fn row_to_card(row: &Row) -> rusqlite::Result<WorkCard> {
         last_reminded_at: row.get("last_reminded_at")?,
         updated_at: row.get("updated_at")?,
         after: Vec::new(),
+        followers: Vec::new(),
+        pr: None,
     })
 }
 
@@ -281,6 +290,7 @@ impl Store {
         };
         let mut one = [t];
         attach_after(&conn, &mut one)?;
+        super::work_prs::attach_prs(&conn, &mut one)?;
         let [t] = one;
         Ok(Some(t))
     }
@@ -314,6 +324,7 @@ impl Store {
             out.push(r?);
         }
         attach_after(&conn, &mut out)?;
+        super::work_prs::attach_prs(&conn, &mut out)?;
         Ok(out)
     }
 
@@ -401,8 +412,18 @@ impl Store {
     /// Set the card fields an agent's `update` or `submit` carries.
     pub fn work_card_update(&self, work_id: &str, u: &CardUpdate, now_ms: i64) -> Result<(), StoreError> {
         let checklist = u.checklist.as_ref().map(|c| serde_json::to_string(c).unwrap_or_default());
-        let conn = self.conn().lock().unwrap();
-        conn.execute(
+        let mut conn = self.conn().lock().unwrap();
+        let tx = conn.transaction()?;
+        // A different PR: what was learned about the old one (its merge, its
+        // release) isn't this one's.
+        if let Some(pr) = &u.pr_url {
+            tx.execute(
+                "DELETE FROM db_work_prs WHERE work_id = ?1
+                   AND EXISTS (SELECT 1 FROM db_work_cards WHERE work_id = ?1 AND pr_url <> ?2)",
+                params![work_id, pr],
+            )?;
+        }
+        tx.execute(
             "UPDATE db_work_cards
                 SET note = COALESCE(?2, note),
                     checklist = COALESCE(?3, checklist),
@@ -412,6 +433,7 @@ impl Store {
               WHERE work_id = ?1",
             params![work_id, u.note, checklist, u.branch, u.pr_url, now_ms],
         )?;
+        tx.commit()?;
         Ok(())
     }
 

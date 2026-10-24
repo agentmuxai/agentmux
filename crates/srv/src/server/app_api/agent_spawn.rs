@@ -431,16 +431,8 @@ pub(crate) fn account_blocks(state: &AppState, accounts: &[IdentityAccount]) -> 
             Some(FailureClass::Auth) => "had its sign-in refused",
             _ => continue,
         };
-        // The account that run was on; a pane from before `agent:run_account`
-        // falls back to its agent's current link.
-        let ran_on: Vec<String> = match block.meta.get(RUN_ACCOUNT_META_KEY).and_then(|a| a.as_str()) {
-            Some(account) => vec![account.to_string()],
-            None => {
-                let agent = obj::meta_get_string(&block.meta, "agentId", "");
-                state.identity_store.agent_identity_list_for_agent(&agent).unwrap_or_default().into_iter().map(|l| l.account_id).collect()
-            }
-        };
-        for account in ran_on {
+        // The account that run was on (the rule `unavailable_of_block` shares).
+        for account in crate::backend::agent_state::run_accounts_of_block(&state.identity_store, &block) {
             if accounts.iter().any(|a| a.id == account) {
                 blocked.entry(account).or_insert_with(|| why.to_string());
             }
@@ -452,11 +444,8 @@ pub(crate) fn account_blocks(state: &AppState, accounts: &[IdentityAccount]) -> 
 /// `agent:last_failure` (`blockcontroller::core::META_LAST_FAILURE`).
 const LAST_FAILURE_META_KEY: &str = "agent:last_failure";
 
-/// The account a pane's run launched on, written at spawn
-/// (`build_persistent_spawn_env`), so a failure that run records counts
-/// against that account even after the agent is linked to another
-/// (`account_blocks`).
-pub(crate) const RUN_ACCOUNT_META_KEY: &str = "agent:run_account";
+/// The account a pane's run launched on (`agent_state::RUN_ACCOUNT_META_KEY`).
+pub(crate) use crate::backend::agent_state::RUN_ACCOUNT_META_KEY;
 
 /// Note on `block_id` the account its spawn resolves: its agent's link for
 /// its provider, as the identity injection resolves it. Best-effort; a pane
@@ -522,10 +511,13 @@ pub(crate) struct WorkerSummary {
     pub message_to: String,
     pub agent_id: String,
     pub block_id: String,
-    /// working | waiting | idle | stopped | error, and since when (unix ms);
-    /// absent while srv has no controller for the pane.
+    /// working | waiting | idle | stopped | error | limited | signed_out, and
+    /// since when (unix ms); absent while srv has no controller for the pane.
     pub state: Option<crate::backend::agent_state::AgentState>,
     pub since_ms: Option<u64>,
+    /// Why it can't work while `limited` or `signed_out`: `{state, code,
+    /// title, resets_at_ms, since_ms}`, never the account; otherwise null.
+    pub unavailable: Option<crate::backend::agent_state::Unavailable>,
     /// When it last messaged the leader (unix ms), since srv started.
     pub last_report_ms: Option<u64>,
 }
@@ -586,6 +578,7 @@ pub(crate) fn workers_of(mstore: &Store, leader_def_id: &str) -> Vec<WorkerSumma
             }
             let def = defs.iter().find(|d| d.id == def_id)?;
             let status = crate::backend::agent_state::agent_status_of_block(mstore, &b.oid);
+            let unavailable = crate::backend::agent_state::unavailable_of_block(mstore, None, &b.oid, agentmux_common::time::now_ms_u64());
             let last_report_ms = crate::backend::worker_notes::last_report(&def.slug, &leader_panes);
             Some(WorkerSummary {
                 name: def.name.clone(),
@@ -594,6 +587,7 @@ pub(crate) fn workers_of(mstore: &Store, leader_def_id: &str) -> Vec<WorkerSumma
                 block_id: b.oid.clone(),
                 state: status.map(|s| s.state),
                 since_ms: status.map(|s| s.since_ms),
+                unavailable,
                 last_report_ms,
             })
         })

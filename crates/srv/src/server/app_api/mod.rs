@@ -504,6 +504,10 @@ mod cross_channel_tests;
 mod pane_open_reducer_tests;
 
 #[cfg(test)]
+#[path = "tests/stop_agents_tests.rs"]
+mod stop_agents_tests;
+
+#[cfg(test)]
 #[path = "tests/agent_zoom_seed_tests.rs"]
 mod agent_zoom_seed_tests;
 

@@ -793,8 +793,8 @@ pub(crate) async fn deliver(
     if is_not_found {
         // A candidate an older build registered can't take files (spec §3.4).
         let mut files_too_old = false;
-        // A former slug's agent is registered under its current one (`former_slug`).
-        let alias = former_slug::owner(state, &req.target_agent).map(|o| o.slug);
+        // A former name's agent, or a display name's, runs as its slug (`former_slug`).
+        let alias = former_slug::delivery_alias(state, &req.target_agent);
         // Tier 2: same-host, different sidecar (file registry → HTTP loopback)
         let data_dir = base::get_mux_data_dir();
         if let Some((found_as, entry)) = former_slug::registry_entry(&data_dir, &req.target_agent, alias.as_deref()) {
@@ -1168,6 +1168,9 @@ pub(in crate::server) async fn hold_for_absent_target(
                         "agent {target} is not signed in — held for delivery on this AgentMux instance for up to 24 h, delivered when it signs in"
                     )
                 }
+                HoldReason::Limited => format!(
+                    "agent {target}'s account is out of quota — held for delivery on this AgentMux instance for up to 24 h, delivered when it can work again (an account move or the reset)"
+                ),
             };
             Some(json!({
                 "success": false,
@@ -1293,24 +1296,8 @@ fn absent_route_for(answer: &crate::muxbus::wan_lease::Holder) -> AbsentRoute {
     }
 }
 
-/// Why a jekt is held (`held_reason` in the inject answer;
-/// SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md §5.1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum HoldReason {
-    /// A known agent with no process here.
-    NotRunning,
-    /// The agent is here but its spawn gate refused: not signed in.
-    NeedsLogin,
-}
-
-impl HoldReason {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            HoldReason::NotRunning => "not_running",
-            HoldReason::NeedsLogin => "needs_login",
-        }
-    }
-}
+/// Why a jekt is held (`server::hold_reason`).
+pub(crate) use super::hold_reason::HoldReason;
 
 /// Tier 4. `Some(body)` when the cloud accepted the injection (and the sender
 /// echo has been emitted); `None` when tier 4 doesn't apply or didn't take,

@@ -422,6 +422,17 @@ fn takes_pane_path(kind: Option<&crate::state::BrowserKind>, client_is_browser_p
     }
 }
 
+/// Does a browser that took the pane path still need the top-level reveal?
+/// On Linux, a cold floater (`open_floating_pane_window` when the pane pool
+/// was empty) is created hidden like any new window, and only the reveal path
+/// shows it: returning after the pane work left it unmapped forever. Pool
+/// floaters are shown by their promotion; Windows reveals floaters itself
+/// (`floating_pane::reveal`).
+fn reveals_after_pane_path(kind: Option<&crate::state::BrowserKind>) -> bool {
+    use crate::state::BrowserKind;
+    cfg!(target_os = "linux") && matches!(kind, Some(BrowserKind::Floater { is_pool: false }))
+}
+
 /// Native-layer visibility for a label's bound HWND. `None` when no HWND is
 /// bound (or off Windows) — callers must treat that as "no extra information",
 /// not as hidden.
@@ -823,7 +834,9 @@ impl AgentMuxHandler {
             if let Some(b) = browser.as_deref() {
                 crate::browser_pane::callbacks::on_load_end_browser_pane(&self.state, b);
             }
-            return;
+            if !reveals_after_pane_path(resolved_kind.as_ref()) {
+                return;
+            }
         }
 
         // Windows: the old unconditional AGENTMUX_SPLASH_EVENT SetEvent that
@@ -1319,6 +1332,18 @@ mod pane_path_tests {
     #[test]
     fn a_popup_is_unchanged_by_this_gate() {
         assert!(!takes_pane_path(Some(&BrowserKind::Popup), false));
+    }
+
+    /// A cold floater on Linux goes on to the reveal after its pane work, or
+    /// nothing ever shows it. A warm pool floater and a real pane never do.
+    #[test]
+    fn only_a_cold_floater_reveals_after_the_pane_path() {
+        use super::reveals_after_pane_path;
+        let cold = BrowserKind::Floater { is_pool: false };
+        assert_eq!(reveals_after_pane_path(Some(&cold)), cfg!(target_os = "linux"));
+        assert!(!reveals_after_pane_path(Some(&BrowserKind::Floater { is_pool: true })));
+        assert!(!reveals_after_pane_path(Some(&BrowserKind::Pane { block_id: "b".into() })));
+        assert!(!reveals_after_pane_path(None));
     }
 }
 

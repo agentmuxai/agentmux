@@ -164,8 +164,25 @@ struct Unplaced {
 
 impl Unplaced {
     fn is_agent(&self) -> bool {
-        self.view == "agent" || (self.view == "term" && self.has_agent_id)
+        is_agent_view(&self.view, self.has_agent_id)
     }
+}
+
+/// An agent's block: the `agent` view, or a `term` block with an `agentId` in
+/// its meta (a terminal-tier agent).
+fn is_agent_view(view: &str, has_agent_id: bool) -> bool {
+    view == "agent" || (view == "term" && has_agent_id)
+}
+
+/// Whether `block_id` is an agent's block, from its stored meta. Which panes
+/// `Stop pane` refuses and which blocks `Stop agents` accepts
+/// (docs/specs/SPEC_STOP_AN_AGENT_ONE_WAY_AND_SHUTDOWN_TOAST_2026_10_23.md §3.2).
+pub(crate) fn is_agent_block(state: &AppState, block_id: &str) -> bool {
+    let Some(block) = state.mstore.get::<Block>(block_id).ok().flatten() else {
+        return false;
+    };
+    let has_agent_id = !crate::backend::obj::meta_get_string(&block.meta, "agentId", "").is_empty();
+    is_agent_view(&crate::backend::obj::meta_get_string(&block.meta, "view", ""), has_agent_id)
 }
 
 /// What one sweep finds: unplaced blocks (minus everything the module doc

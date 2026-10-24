@@ -353,7 +353,12 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                     let now = await_shutdown(client, local_url, auth_key, request_id, true).await;
                     outcomes.push((p["block_id"].as_str().unwrap_or_default().to_string(), now));
                 }
+                let note = result["note"].as_str().map(str::to_string);
                 result = merge_bulk_stop_outcomes(result, outcomes);
+                add_stop_notes(&mut result, note, &pending);
+            } else if result.get("kept_by_user").is_none() {
+                // Nothing waited (all refused or already gone): the same shape.
+                result["kept_by_user"] = json!([]);
             }
 
             Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))

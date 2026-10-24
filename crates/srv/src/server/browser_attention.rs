@@ -621,4 +621,17 @@ pub(crate) mod tests {
         assert_eq!(waiting_on_user("pane-e"), Some(Kind::Approval));
         pending().lock().unwrap().remove("attn-test-4");
     }
+
+    #[tokio::test]
+    async fn a_cancelled_hand_off_leaves_the_agent_its_pane() {
+        // Naki-2's Cloud Shell run (2026-10-23): the person cancelled a hand-off. Only Take over ends ownership.
+        let pane = uuid::Uuid::new_v4().to_string();
+        crate::server::browser_owner::record(&pane, "lark");
+        let rx = park("attn-test-handoff-cancel", &pane, Kind::Handoff);
+        resolve("attn-test-handoff-cancel", &pane, Answer::Cancelled).unwrap();
+        assert_eq!(rx.await.unwrap(), Answer::Cancelled);
+        assert_eq!(crate::server::browser_owner::owner_of(&pane).as_deref(), Some("lark"));
+        pending().lock().unwrap().remove("attn-test-handoff-cancel");
+        crate::server::browser_owner::forget(&pane);
+    }
 }

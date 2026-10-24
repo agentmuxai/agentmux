@@ -24,6 +24,9 @@ pub struct TurnFacts {
     /// A fingerprint of the agent's last final message.
     pub reply: String,
     pub now_ms: u64,
+    /// Why the agent can't work (`Unavailable::reason`) when it is `limited`
+    /// or `signed_out`; `None` otherwise.
+    pub unavailable: Option<String>,
 }
 
 /// What happens before any model is asked.
@@ -47,6 +50,11 @@ pub fn on_turn_end(state: &mut SupervisorState, mode: SupervisorMode, facts: &Tu
     }
     if state.mode != mode {
         *state = SupervisorState { history: std::mem::take(&mut state.history), ..SupervisorState::new(mode, facts.now_ms) };
+    }
+    // Out of quota or signed out: every turn fails until that ends, and the
+    // judge runs on the same account, so pause without asking it.
+    if let Some(why) = &facts.unavailable {
+        return PreJudge::Pause(format!("{why}."));
     }
     match facts.trigger {
         Some(TriggerKind::User | TriggerKind::Broadcast) => state.reset_run(),

@@ -19,6 +19,23 @@ const FRESH_FOR: Duration = Duration::from_secs(300);
 static LAST: Mutex<Option<(Instant, HistoryUsage)>> = Mutex::new(None);
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    // `history.reclaim`: ask for (or withdraw) giving the shared store's free
+    // space back at the next start (filestore::reclaim).
+    engine.register_typed(COMMAND_HISTORY_RECLAIM, move |req: HistoryReclaimReq, ctx| async move {
+        not_an_agent_api(&ctx)?;
+        use crate::backend::storage::filestore::reclaim;
+        let Some(db) = crate::backend::agent_session::global_transcript_store().and_then(|s| s.path().map(|p| p.to_path_buf())) else {
+            return Err("history.reclaim: the shared pane-history store isn't open".to_string());
+        };
+        let done = match req.action.as_str() {
+            "request" => reclaim::request(&db, "operator", agentmux_common::time::now_ms_u64()),
+            "cancel" => reclaim::cancel(&db),
+            other => return Err(format!("history.reclaim: unknown action {other:?} (request or cancel)")),
+        };
+        done.map_err(|e| format!("history.reclaim: {e}"))?;
+        tracing::info!(action = %req.action, "history reclaim: {}", if req.action == "request" { "asked for at the next start" } else { "withdrawn" });
+        Ok(history_usage::reclaim_of(&db))
+    });
     let mstore = state.mstore.clone();
     engine.register_typed(COMMAND_HISTORY_USAGE, move |req: HistoryUsageReq, ctx| {
         let mstore = mstore.clone();

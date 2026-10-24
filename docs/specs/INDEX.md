@@ -494,6 +494,7 @@ partial list.
 | [`SPEC_SWARM_BROADCAST_AS_USER_MESSAGE_2026_10_01`](SPEC_SWARM_BROADCAST_AS_USER_MESSAGE_2026_10_01.md) | Spec: a Swarm broadcast reaches agents as the user's own message, marked as a broadcast |
 | [`SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19`](SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md) | SPEC: Robust dispatch attribution + formalized session lifecycle for Swarm |
 | [`SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19`](SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19.md) | SPEC: eager per-dispatch naming + two-bucket swarm row model |
+| [`SPEC_SWARM_ORDER_WORKING_FIRST_THEN_RECENT_2026_10_23`](SPEC_SWARM_ORDER_WORKING_FIRST_THEN_RECENT_2026_10_23.md) | Spec — Swarm order: working agents on top, idle agents by most recent activity |
 | [`SPEC_SWARM_QUESTION_STATE_AND_QUESTION_TIMEOUT_ACTIVITY_2026_10_02`](SPEC_SWARM_QUESTION_STATE_AND_QUESTION_TIMEOUT_ACTIVITY_2026_10_02.md) | SPEC: Swarm "question" state and countdown, and activity that resets a question's timeout |
 | [`SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06`](SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06.md) | SPEC — Swarm Row Auto-Linger Countdown on Completion |
 | [`SPEC_SWARM_SUPERVISOR_2026_10_16`](SPEC_SWARM_SUPERVISOR_2026_10_16.md) | Spec: the Swarm Supervisor keeps agents working until they are done or need the user |
@@ -614,6 +615,7 @@ partial list.
 | [`SPEC_AGENT_PICKER_INLINE_CREATE_2026_10_18`](SPEC_AGENT_PICKER_INLINE_CREATE_2026_10_18.md) | SPEC: start a new agent inline, below the harness card, and one CLI-detection truth for picker and Toolchain |
 | [`SPEC_AGENT_SAME_PROCESS_DUPLICATE_PANE_RECOVERY_2026_10_01`](SPEC_AGENT_SAME_PROCESS_DUPLICATE_PANE_RECOVERY_2026_10_01.md) | SPEC: a second pane of an agent that is live in another pane of the same AgentMux must recover, not go silent |
 | [`SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23`](SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md) | SPEC: Agent seats in the UI: role, lead and area on the agent, shown where you meet it |
+| [`SPEC_AGENT_SELF_COMPACTION_2026_10_23`](SPEC_AGENT_SELF_COMPACTION_2026_10_23.md) | Agent Self-Compaction: Context, Compact, Fresh Session, and a Lower Auto-Compact Backstop |
 | [`SPEC_AGENT_SELF_QUIT_2026_09_24`](SPEC_AGENT_SELF_QUIT_2026_09_24.md) | SPEC: Agent self-quit — `/quit` for the user, `QuitSelf` for the agent (on direct user instruction only) |
 | [`SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24`](SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md) | SPEC: one live instance per agent — an agent identity is driven by at most one process, across host, LAN and WAN |
 | [`SPEC_AGENT_TEARDOWN_SINGLE_PATH_2026_10_01`](SPEC_AGENT_TEARDOWN_SINGLE_PATH_2026_10_01.md) | SPEC: One teardown path for everything an agent owns |
@@ -686,6 +688,7 @@ partial list.
 | [`SPEC_HELP_HIDDEN_TIPS_2026_10_10`](SPEC_HELP_HIDDEN_TIPS_2026_10_10.md) | Hidden tips in the Help pane: the gestures nobody would guess |
 | [`SPEC_HELP_PANE_FILTER_2026_10_08`](SPEC_HELP_PANE_FILTER_2026_10_08.md) | A filter for the Help pane, on one shared filter box |
 | [`SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21`](SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21.md) | Spec: the shared transcript store gets smaller: compressed frames, and the streaming deltas cleaned out |
+| [`SPEC_HISTORY_STORE_RECLAIM_SPACE_2026_10_23`](SPEC_HISTORY_STORE_RECLAIM_SPACE_2026_10_23.md) | SPEC: give disk space back after history compression |
 | [`SPEC_HOST_UI_THREAD_HANG_WATCHDOG_2026_08_14`](SPEC_HOST_UI_THREAD_HANG_WATCHDOG_2026_08_14.md) | SPEC: Host UI-thread hang detection, forensic dump, and auto-recovery |
 | [`SPEC_IDENTITY_STORE_SPLIT_2026_08_17`](SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md) | SPEC: Split the multi-concern shared store — permanent global identity data vs. explicitly-disposable Armory test accounts |
 | [`SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09`](SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md) | Spec: Instruction and Memory Portability |
@@ -693,6 +696,7 @@ partial list.
 | [`SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01`](SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md) | SPEC: jekt delivery that tells the truth — receiver state, one mailbox, receipts |
 | [`SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22`](SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md) | Spec: agents put Kanban tasks on hold and take them off hold |
 | [`SPEC_KANBAN_REMINDER_OFF_BY_DEFAULT_2026_10_22`](SPEC_KANBAN_REMINDER_OFF_BY_DEFAULT_2026_10_22.md) | Spec: the Kanban's backlog reminder off by default, with a setting to turn it on |
+| [`SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23`](SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23.md) | Spec: the Kanban's stages (Backlog, In Research, Spec'd, In progress, Review, Merged, Released), its colours, and its narrow view |
 | [`SPEC_KEYED_SLOT_RETENTION_FIX_2026_10_12`](SPEC_KEYED_SLOT_RETENTION_FIX_2026_10_12.md) | Spec: `<Key>` slots must not keep old rows alive |
 | [`SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30`](SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md) | SPEC: Large-file module analysis and DRY opportunities |
 | [`SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11`](SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11.md) | SPEC: Launcher-side teardown backstop (UI-thread liveness probe + armed J0 teardown) |
@@ -739,6 +743,7 @@ partial list.
 | [`SPEC_SRV_MALLOC_ARENA_CAP_2026_10_18`](SPEC_SRV_MALLOC_ARENA_CAP_2026_10_18.md) | Spec: srv caps glibc's malloc arenas at two (Linux only) |
 | [`SPEC_SRV_PROCESS_LISTING_WITHOUT_THREADS_2026_10_18`](SPEC_SRV_PROCESS_LISTING_WITHOUT_THREADS_2026_10_18.md) | Spec: srv's process listings stop reading every thread (Linux CPU) |
 | [`SPEC_START_WITH_OS_2026_09_25`](SPEC_START_WITH_OS_2026_09_25.md) | SPEC: Start with OS — AgentMux starts quietly at login, on every platform, and keeps working after updates |
+| [`SPEC_STOP_AN_AGENT_ONE_WAY_AND_SHUTDOWN_TOAST_2026_10_23`](SPEC_STOP_AN_AGENT_ONE_WAY_AND_SHUTDOWN_TOAST_2026_10_23.md) | SPEC: One way to stop an agent (close it), and a shutdown toast with a countdown and a Keep running button |
 | [`SPEC_STREAMING_BASH_RUNNER_2026_05_11`](SPEC_STREAMING_BASH_RUNNER_2026_05_11.md) | Streaming bash runner — PreToolUse command rewrite |
 | [`SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20`](SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20.md) | SPEC — live subagent reconciliation + Retire action (best-practices plan) |
 | [`SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02`](SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md) | SPEC: The Swarm shows the agents of every other instance this one knows about |
@@ -755,6 +760,7 @@ partial list.
 | [`SPEC_TOWER_THEME_SURFACE_AND_COLOR_2026_10_17`](SPEC_TOWER_THEME_SURFACE_AND_COLOR_2026_10_17.md) | SPEC: Tower in the theme's colours, with process types you can see |
 | [`SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04`](SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md) | Spec: optional system-tray + persistent background service, cross-platform |
 | [`SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05`](SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md) | Spec: one line-style UI component set (buttons, tabs, menus, form controls) |
+| [`SPEC_UNRESPONSIVE_AGENTS_2026_10_23`](SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md) | SPEC: unresponsive agents — out-of-quota and signed-out states, the reset time, held messages, the per-account notice |
 | [`SPEC_UPDATE_UNPACK_7Z_IN_RUST_2026_10_19`](SPEC_UPDATE_UNPACK_7Z_IN_RUST_2026_10_19.md) | Spec: the Windows upgrade unpacks the release's .7z itself, not with tar.exe |
 | [`SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15`](SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md) | SPEC: upgrading AgentMux, for users and for agents |
 | [`SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09`](SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md) | User widgets and the widget API |

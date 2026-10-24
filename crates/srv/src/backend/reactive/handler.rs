@@ -76,8 +76,8 @@ pub struct Handler {
     /// before ambiguity is decided. `None` (tests) treats every block as
     /// live.
     block_liveness: Option<BlockLivenessProbe>,
-    /// Tries a name nothing is bound under as a former slug (`former_slug.rs`).
-    former_slug_resolver: Option<FormerSlugResolver>,
+    /// Tries an unbound name as a display name's route or a former name (`former_slug.rs`).
+    alias_resolvers: former_slug::AliasResolvers,
     audit_log: Vec<AuditLogEntry>,
     /// The UID of the delivery in flight
     /// (`InjectionRequest::audit_source_uid`), copied onto every audit entry
@@ -166,7 +166,7 @@ impl Handler {
             stable_agent_identity_confirmer: None,
             uid_identity_confirmer: None,
             block_liveness: None,
-            former_slug_resolver: None,
+            alias_resolvers: Default::default(),
             audit_log: Vec::with_capacity(AUDIT_LOG_MAX),
             delivery_source_uid: String::new(),
             delivery_wan: None,
@@ -539,7 +539,7 @@ impl Handler {
         let key = target.to_lowercase();
         let blocks = self.name_to_blocks.get(&key).cloned().unwrap_or_default();
         match blocks.len() {
-            0 => Ok(former.then(|| self.former_slug_block(&key)).flatten().map(|(block, _)| block)),
+            0 => Ok(former.then(|| self.delivery_alias_block(&key)).flatten().map(|(block, _)| block)),
             1 => Ok(Some(blocks[0].clone())),
             _ => {
                 let live: Vec<String> = blocks.into_iter().filter(|b| self.is_live(b)).collect();

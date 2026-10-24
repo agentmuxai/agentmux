@@ -3,7 +3,7 @@
 
 import { createEffect, createSignal, on, onCleanup, onMount, type Accessor } from "solid-js";
 import { getApi } from "@/app/store/app-api";
-import { FLOATER_EDGE_RESIZE_BORDER } from "@/app/workspace/floater-resize";
+import { FLOATER_BROWSER_EDGE_INSET } from "@/app/workspace/floater-resize";
 import { registerPaneRect, unregisterPaneRect } from "@/app/platform/pane-rect-registry";
 import { paneReflowActive, notifyPaneReflow } from "@/app/platform/pane-anim";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
@@ -113,7 +113,7 @@ export function usePaneRectSync(params: {
         // edge is over the 33px header, already frontend) to expose the band.
         // SPEC_FLOATING_PANE_EDGE_RESIZE.
         if (windowLabel.startsWith("floating-")) {
-            const b = Math.round(FLOATER_EDGE_RESIZE_BORDER * dpr);
+            const b = Math.round(FLOATER_BROWSER_EDGE_INSET * dpr);
             x += b;
             width = Math.max(1, width - 2 * b);
             height = Math.max(1, height - b);

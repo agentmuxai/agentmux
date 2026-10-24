@@ -225,6 +225,7 @@ impl Store {
         let shared = self.shared_slugs_to_allocate(agent)?;
         let host = self.host_slugs_to_allocate(agent)?;
         self.agent_def_insert_with(agent, None, &shared, host.as_ref())?;
+        self.former_slugs.invalidate();
         // Mirror into the global cross-channel definition store. Content +
         // skills are inserted after the definition (separate calls), so this
         // initial record is content-less; agent_content_set / agent_skill_*
@@ -1028,6 +1029,7 @@ impl Store {
         // SQLite row, rows == 0) is actually deletable instead of reappearing
         // on the next agent_def_list. (P0.2b + codex P1 on #1385.)
         let global_retired = self.registry_def_retire(id);
+        self.former_slugs.invalidate();
         // Unconditional, deliberately.
         //
         // Gating this on `rows > 0` was the original bug's second half: the

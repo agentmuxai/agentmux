@@ -15,12 +15,24 @@ export interface ChecklistItem {
     status: string;
 }
 
-/** A task another starts after (`AfterTask` in crates/srv/src/backend/storage/work_deps.rs). */
+/** A task another starts after, or one that starts after it (`AfterTask` in
+ *  crates/srv/src/backend/storage/work_deps.rs). */
 export interface KanbanAfter {
     id: string;
     num: number;
     title: string;
     state: TaskState;
+    /** Its kind (`spec`, `research`, `build`, …; absent from an older srv). */
+    kind?: string;
+}
+
+/** What srv learned about a task's PR (`WorkPr` in crates/srv/src/backend/storage/work_prs.rs). */
+export interface KanbanPr {
+    /** When it merged (ms), once srv has seen it. */
+    merged_at?: number | null;
+    /** The release that contains the merge (its tag), once one does. */
+    released_in?: string;
+    released_at?: number | null;
 }
 
 export interface KanbanCardFields {
@@ -42,6 +54,10 @@ export interface KanbanCardFields {
     updated_at: number;
     /** The tasks it starts after, finished or not (absent from an older srv). */
     after?: KanbanAfter[];
+    /** The tasks that start after it (absent from an older srv). */
+    followers?: KanbanAfter[];
+    /** Its PR's merge and release, once srv has seen them. */
+    pr?: KanbanPr | null;
 }
 
 export interface KanbanAgent {

@@ -197,53 +197,7 @@ fn extract_commented_setting_key(line: &str) -> Option<&str> {
     Some(&rest[..end])
 }
 
-pub(super) fn strip_trailing_commas(input: &str) -> String {
-    let mut result = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-    let mut in_string = false;
-    let mut last_comma_pos: Option<usize> = None;
-
-    while let Some(ch) = chars.next() {
-        if in_string {
-            result.push(ch);
-            if ch == '\\' {
-                if let Some(&next) = chars.peek() {
-                    result.push(next);
-                    chars.next();
-                }
-            } else if ch == '"' {
-                in_string = false;
-            }
-        } else {
-            match ch {
-                '"' => {
-                    in_string = true;
-                    last_comma_pos = None;
-                    result.push(ch);
-                }
-                ',' => {
-                    last_comma_pos = Some(result.len());
-                    result.push(ch);
-                }
-                '}' | ']' => {
-                    if let Some(pos) = last_comma_pos {
-                        result.replace_range(pos..pos + 1, " ");
-                    }
-                    last_comma_pos = None;
-                    result.push(ch);
-                }
-                c if c.is_whitespace() => {
-                    result.push(ch);
-                }
-                _ => {
-                    last_comma_pos = None;
-                    result.push(ch);
-                }
-            }
-        }
-    }
-    result
-}
+pub(super) use agentmux_common::settings_jsonc::strip_trailing_commas;
 
 /// Replace `$ENV:VAR_NAME` and `$ENV:VAR_NAME:fallback` in a string.
 #[allow(dead_code)]

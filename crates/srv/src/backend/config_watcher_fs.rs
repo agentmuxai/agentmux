@@ -41,29 +41,20 @@ use super::wconfig::{self, ConfigState, SettingsType};
 ///    `~/.agentmux/channels/` itself, not inside any specific channel),
 ///    which is what makes this the genuinely shared, cross-channel file.
 /// 4. `~/.agentmux` (legacy fallback — `AGENTMUX_CONFIG_HOME` unset)
+///
+/// Steps 1-3 are `agentmux_common::settings_dir_for`, the rule the host and
+/// the launcher use too (`DataPaths::settings_dir`), so all three read and
+/// write the same file (#1903).
 pub fn resolve_settings_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("AGENTMUX_SETTINGS_DIR") {
-        if !dir.is_empty() {
-            return PathBuf::from(dir);
-        }
-    }
-    if let Some(dir) = std::env::var_os("AGENTMUX_CONFIG_HOME") {
-        if !dir.is_empty() {
-            let path = PathBuf::from(&dir);
-            if agentmux_common::isolated_settings_enabled() {
-                // Already channel-scoped — use directly, no parent-walk.
-                return path;
-            }
-            // AGENTMUX_CONFIG_HOME = channels/<ch>/config — go up two
-            // levels to the shared channels/ root.
-            if let Some(root) = path.parent().and_then(|p| p.parent()) {
-                return root.to_path_buf();
-            }
-        }
-    }
+    let env_dir = |name: &str| std::env::var_os(name).map(PathBuf::from);
+    agentmux_common::settings_dir_for(
+        env_dir("AGENTMUX_SETTINGS_DIR").as_deref(),
+        env_dir("AGENTMUX_CONFIG_HOME").as_deref(),
+        agentmux_common::isolated_settings_enabled(),
+    )
     // One resolver for the AgentMux root (A10) -- this used to compute it
     // locally, which meant it ignored AGENTMUX_DATA_HOME entirely.
-    crate::backend::base::get_mux_data_dir()
+    .unwrap_or_else(crate::backend::base::get_mux_data_dir)
 }
 
 /// Load settings.json from disk into the ConfigState.
