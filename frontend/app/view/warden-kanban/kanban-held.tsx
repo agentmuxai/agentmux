@@ -18,7 +18,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 
 import { needsCountOf } from "./kanban-columns";
-import type { KanbanBoard } from "./kanban-types";
+import type { KanbanBoard, KanbanTask } from "./kanban-types";
 
 import "./kanban-held.scss";
 
@@ -60,7 +60,7 @@ export function heldByBlock(board: KanbanBoard): Map<string, HeldTask> {
 }
 
 const [held, setHeld] = createSignal<Map<string, HeldTask>>(new Map());
-const [needs, setNeeds] = createSignal(0);
+const [boardTasks, setBoardTasks] = createSignal<KanbanTask[]>([]);
 let users = 0;
 let unsub: (() => void) | null = null;
 let poll: ReturnType<typeof setInterval> | null = null;
@@ -70,7 +70,7 @@ async function refresh(): Promise<void> {
     try {
         const board = await RpcApi.KanbanListCommand(TabRpcClient, {});
         setHeld(heldByBlock(board));
-        setNeeds(needsCountOf(board.tasks));
+        setBoardTasks(board.tasks);
     } catch {
         // An older srv, or none yet: no chips.
     }
@@ -115,7 +115,7 @@ export function useHeldTask(blockId: () => string): Accessor<HeldTask | null> {
 export function useKanbanNeeds(): Accessor<number> {
     follow();
     const episodes = useAccountEpisodes();
-    return () => needs() + episodes().length;
+    return () => needsCountOf(boardTasks(), episodes()) + episodes().length;
 }
 
 /** Open the Kanban (this tab's Warden, or a new one) with this task's drawer open. */

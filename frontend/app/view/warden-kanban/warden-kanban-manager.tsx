@@ -25,6 +25,7 @@ import {
     isFinishedColumn,
     KANBAN_NARROW_PX,
     matchesQuery,
+    needsCountOf,
     repoLabel,
     repoLanes,
     reviewLimitOf,
@@ -76,7 +77,7 @@ export const WardenKanbanManager = (props: {
     createEffect(() => model.setVisible(props.visible));
     // An account episode counts once (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §6.2).
     const accountEpisodes = useAccountEpisodes();
-    createEffect(() => props.onNeedsCount?.(model.needsCount() + accountEpisodes().length));
+    createEffect(() => props.onNeedsCount?.(needsCountOf(model.board()?.tasks ?? [], accountEpisodes()) + accountEpisodes().length));
 
     const tick = useTick(10_000);
     // The narrow layout (SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23.md §8): Warden's container at

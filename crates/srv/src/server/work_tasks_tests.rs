@@ -232,3 +232,76 @@ async fn a_group_member_refused_by_name_is_told_the_real_reason() {
     let (_, c) = post(&app, "/agentmux/work/claim", json!({"agent_id": "a2", "id": num.to_string()})).await;
     assert!(c["why"].as_str().unwrap().contains("group g1"), "not a member: {c}");
 }
+
+/// A live holder that is out of quota or signed out lets go of a task nobody in
+/// particular owns, after 30 minutes with its reset far off; nothing else changes
+/// its lease (R5 of SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md).
+mod lease_for_an_unavailable_holder {
+    use super::super::renews_lease;
+    use crate::agents::failure::FailureClass;
+    use crate::backend::agent_state::{AgentState, Unavailable};
+    use crate::backend::storage::work_queue::WorkItem;
+
+    const MIN: i64 = 60_000;
+    const NOW: i64 = 10_000 * MIN;
+
+    fn task(target_agent: &str, target_uid: &str, target_group: &str) -> WorkItem {
+        WorkItem {
+            id: "t".into(),
+            title: "t".into(),
+            payload: String::new(),
+            kind: String::new(),
+            target_agent: target_agent.into(),
+            target_group: target_group.into(),
+            priority: 0,
+            state: "claimed".into(),
+            claimed_by: "Naki-2".into(),
+            target_agent_uid: target_uid.into(),
+            claimed_by_uid: String::new(),
+            claim_expires: None,
+            attempts: 1,
+            max_attempts: 3,
+            created_by: "x".into(),
+            created_by_uid: String::new(),
+            created_at: 0,
+            updated_at: 0,
+            not_before: None,
+            result: String::new(),
+        }
+    }
+
+    fn down(state: AgentState, since_min_ago: i64, resets_in_min: Option<i64>) -> Unavailable {
+        Unavailable {
+            state,
+            code: FailureClass::UsageLimit,
+            title: String::new(),
+            resets_at_ms: resets_in_min.map(|m| (NOW + m * MIN) as u64),
+            since_ms: (NOW - since_min_ago * MIN) as u64,
+            account_id: None,
+        }
+    }
+
+    #[test]
+    fn a_holder_that_can_work_keeps_its_lease() {
+        assert!(renews_lease(&task("", "", ""), None, NOW));
+    }
+
+    #[test]
+    fn a_task_for_anyone_or_a_group_is_let_go_after_30_minutes_with_the_reset_far_off() {
+        for item in [task("", "", ""), task("", "", "reviewers")] {
+            assert!(renews_lease(&item, Some(&down(AgentState::Limited, 29, Some(300))), NOW), "not yet 30 minutes");
+            assert!(!renews_lease(&item, Some(&down(AgentState::Limited, 30, Some(300))), NOW), "30 minutes, reset in 5 h");
+            assert!(renews_lease(&item, Some(&down(AgentState::Limited, 90, Some(59))), NOW), "the reset is within the hour: wait it out");
+            assert!(!renews_lease(&item, Some(&down(AgentState::Limited, 90, Some(61))), NOW));
+            assert!(!renews_lease(&item, Some(&down(AgentState::Limited, 90, None)), NOW), "no reset known counts as far");
+            assert!(!renews_lease(&item, Some(&down(AgentState::SignedOut, 45, None)), NOW), "signed out has no reset");
+        }
+    }
+
+    #[test]
+    fn a_task_aimed_at_an_agent_stays_with_it() {
+        let long_gone = down(AgentState::Limited, 600, Some(2_000));
+        assert!(renews_lease(&task("Naki-2", "", ""), Some(&long_gone), NOW));
+        assert!(renews_lease(&task("", "uid-n", ""), Some(&long_gone), NOW));
+    }
+}

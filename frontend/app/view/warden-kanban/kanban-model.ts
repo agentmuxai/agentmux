@@ -7,14 +7,13 @@
 // §7.3). Nothing is fetched or subscribed while the section is hidden: Warden keeps every section
 // mounted.
 
-import { createMemo, createSignal, type Accessor } from "solid-js";
+import { createSignal, type Accessor } from "solid-js";
 
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 
-import { needsCountOf } from "./kanban-columns";
 import type { KanbanActRequest, KanbanActResult, KanbanBoard, KanbanTaskDetail } from "./kanban-types";
 
 const POLL_MS = 15_000;
@@ -42,8 +41,6 @@ export function keepUnchanged(prev: KanbanBoard | null, next: KanbanBoard): Kanb
 export class KanbanModel {
     readonly board: Accessor<KanbanBoard | null>;
     readonly error: Accessor<string | null>;
-    /** How many tasks need the operator: the Warden tab's count. */
-    readonly needsCount: Accessor<number>;
     private readonly setBoard: (b: KanbanBoard | null) => void;
     private readonly setError: (e: string | null) => void;
     private unsub: (() => void) | null = null;
@@ -59,7 +56,6 @@ export class KanbanModel {
         this.error = error;
         this.setBoard = setBoard;
         this.setError = setError;
-        this.needsCount = createMemo(() => needsCountOf(board()?.tasks ?? []));
     }
 
     /** Follow the queue while the section is shown; stop when it isn't. */

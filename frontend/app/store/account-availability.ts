@@ -12,6 +12,7 @@ import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { resetLabel } from "@/util/reset-label";
 import type { AccountAvailability } from "@/types/rpc/AccountAvailability";
 import type { IdentityAccountMoveAgentsResult } from "@/types/rpc/IdentityAccountMoveAgentsResult";
 
@@ -59,10 +60,7 @@ export function useAccountEpisodes(): Accessor<AccountAvailability[]> {
     return episodes;
 }
 
-/** "Sun 7:00 PM", in this machine's time zone. */
-export function resetLabel(ms: number): string {
-    return new Date(ms).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
-}
+export { resetLabel };
 
 /** "out of quota until Sun 7:00 PM", "out of quota", or "needs you to sign in again". */
 export function episodeReason(ep: Pick<AccountAvailability, "state" | "resets_at_ms">): string {

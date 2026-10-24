@@ -238,9 +238,35 @@ pub(super) fn task_brief(t: &BoardTask) -> Value {
     })
 }
 
+/// How long a holder must have been out of quota or signed out before its lease
+/// on a task open to anyone stops being renewed.
+const UNAVAILABLE_LEASE_AFTER_MS: i64 = 30 * 60 * 1000;
+/// And how far off its reset must be (or unknown): a limit that lifts within the
+/// hour is waited out.
+const RESET_FAR_MS: i64 = 60 * 60 * 1000;
+
+/// Whether a live holder's lease on `item` is renewed (R5 of
+/// docs/specs/SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md). Always, except for a
+/// holder that is out of quota or signed out on a task open to anyone or to a
+/// group: after 30 minutes of it, and with its reset more than an hour away
+/// (or not known), the lease lapses so someone else can take the task. A task
+/// aimed at an agent stays with it and shows in Needs you.
+fn renews_lease(item: &WorkItem, unavailable: Option<&crate::backend::agent_state::Unavailable>, now_ms: i64) -> bool {
+    let Some(u) = unavailable else { return true };
+    let aimed_at_an_agent = !item.target_agent.is_empty() || !item.target_agent_uid.is_empty();
+    if aimed_at_an_agent {
+        return true;
+    }
+    let for_long = now_ms - (u.since_ms as i64) >= UNAVAILABLE_LEASE_AFTER_MS;
+    let reset_far = u.resets_at_ms.is_none_or(|r| (r as i64) > now_ms + RESET_FAR_MS);
+    !(for_long && reset_far)
+}
+
 /// Keep the leases of claims whose holder is alive, so a long tool call or a
 /// model that never calls `heartbeat` doesn't lose its task (§6.8). A holder
-/// is alive while it is registered and its process runs. Run before the reap.
+/// is alive while it is registered and its process runs; one that is out of
+/// quota or signed out is alive but may let go of a task nobody in particular
+/// owns (`renews_lease`). Run before the reap.
 pub(super) fn extend_live_leases(state: &AppState, now: i64) {
     let Ok(claimed) = state.identity_store.work_claimed_all() else { return };
     if claimed.is_empty() {
@@ -257,7 +283,12 @@ pub(super) fn extend_live_leases(state: &AppState, now: i64) {
                 .is_some_and(|s| s.shellprocstatus == crate::backend::blockcontroller::STATUS_RUNNING)
         });
         if alive {
-            let _ = state.identity_store.work_extend_lease(&item.id, item.attempts, now, LEASE_MS);
+            let unavailable = holder.and_then(|r| {
+                crate::backend::agent_state::unavailable_of_block(&state.mstore, Some(&state.identity_store), &r.block_id, now as u64)
+            });
+            if renews_lease(&item, unavailable.as_ref(), now) {
+                let _ = state.identity_store.work_extend_lease(&item.id, item.attempts, now, LEASE_MS);
+            }
         }
     }
 }

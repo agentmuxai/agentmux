@@ -8,7 +8,8 @@
 //!   live state, and this instance's agents.
 //! - `kanban.task`: one task and its history.
 //! - `kanban.act`: one of the operator's moves (`create`, `edit`, `move`,
-//!   `start`, `answer`, `accept`, `send_back`, `cancel`, `retry`, `track`).
+//!   `start`, `answer`, `accept`, `send_back`, `cancel`, `retry`, `track`,
+//!   `release`, `reassign`).
 //!
 //! These are the operator's by construction: they come from the app's own
 //! window over its websocket, never from an agent's MCP, which reaches the
@@ -95,11 +96,13 @@ fn holder_of<'a>(regs: &'a [AgentRegistration], item: &WorkItem) -> Option<&'a A
     })
 }
 
-fn task_json(t: &BoardTask, holder: Option<Value>) -> Value {
+fn task_json(t: &BoardTask, holder: Option<Value>, unavailable: Option<Value>) -> Value {
     let mut v = serde_json::to_value(&t.item).unwrap_or_else(|_| json!({}));
     if let Some(o) = v.as_object_mut() {
         o.insert("card".into(), serde_json::to_value(&t.card).unwrap_or_default());
         o.insert("holder".into(), holder.unwrap_or(Value::Null));
+        // Why its holder can't work (out of quota, signed out), when it can't.
+        o.insert("holder_unavailable".into(), unavailable.unwrap_or(Value::Null));
     }
     v
 }
@@ -113,15 +116,25 @@ async fn list(state: &AppState) -> Result<Value, String> {
         let tasks = identity.work_board_list(now - FINISHED_WINDOW_MS, LIST_LIMIT, now).map_err(|e| e.to_string())?;
         let stamp = identity.work_board_stamp().unwrap_or(0);
         let states: Vec<Option<AgentState>> = regs.iter().map(|r| agent_state::current_state(&mstore, &r.block_id)).collect();
+        // Only a holder's matters, and only when it is limited or signed out.
+        let unavailable: Vec<Option<Value>> = regs
+            .iter()
+            .zip(states.iter())
+            .map(|(r, s)| match s {
+                Some(AgentState::Limited | AgentState::SignedOut) => {
+                    agent_state::unavailable_of_block(&mstore, Some(&identity), &r.block_id, agentmux_common::time::now_ms_u64())
+                        .and_then(|u| serde_json::to_value(&u).ok())
+                }
+                _ => None,
+            })
+            .collect();
         let colors: Vec<Option<String>> = regs.iter().map(|r| r.uid.as_deref().and_then(|u| color_of(&mstore, u))).collect();
         let tasks_json: Vec<Value> = tasks
             .iter()
             .map(|t| {
-                let holder = holder_of(&regs, &t.item).map(|r| {
-                    let i = regs.iter().position(|x| x.block_id == r.block_id).unwrap_or(0);
-                    agent_json(r, states[i], colors[i].clone())
-                });
-                task_json(t, holder)
+                let held = holder_of(&regs, &t.item).and_then(|r| regs.iter().position(|x| x.block_id == r.block_id));
+                let holder = held.map(|i| agent_json(&regs[i], states[i], colors[i].clone()));
+                task_json(t, holder, held.and_then(|i| unavailable[i].clone()))
             })
             .collect();
         let agents: Vec<Value> =
@@ -149,7 +162,7 @@ async fn task(state: &AppState, data: &Value) -> Result<Value, String> {
     let id = resolve_id(state, id);
     let t = state.identity_store.work_board_get(&id).map_err(|e| e.to_string())?.ok_or("no such task")?;
     let events = state.identity_store.work_events(&t.item.id, 200).map_err(|e| e.to_string())?;
-    Ok(json!({ "task": task_json(&t, None), "events": events }))
+    Ok(json!({ "task": task_json(&t, None, None), "events": events }))
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -183,6 +196,10 @@ struct ActRequest {
     /// track: the agent pane whose work becomes a task.
     #[serde(default)]
     block_id: Option<String>,
+    /// release, reassign: the operator saw the warning that the task has a
+    /// branch or PR and wants it taken back anyway.
+    #[serde(default)]
+    confirm: Option<bool>,
     /// create, edit: the tasks it starts after (ids or numbers); edit
     /// replaces the list, `[]` clears it.
     #[serde(default)]
@@ -567,6 +584,74 @@ async fn act(state: &AppState, data: Value) -> Result<Value, String> {
             }
             json!({ "ok": true, "num": num })
         }
+        "release" | "reassign" => {
+            let t = get(&req.id)?;
+            if !matches!(t.item.state.as_str(), work_state::CLAIMED | work_state::BLOCKED) {
+                return Err("only a task an agent holds can be taken back".into());
+            }
+            let reassign = req.action == "reassign";
+            // `reassign` names who it goes to: an agent (running here or not), or
+            // anyone when empty. `release` leaves who it is for as it was.
+            let retarget = if reassign {
+                let agent = req.agent.as_deref().ok_or("reassign: to which agent? (empty for anyone)")?.trim();
+                Some(match agent_named(&regs, agent) {
+                    Some(r) => (r.agent_id.clone(), r.uid.clone().unwrap_or_default()),
+                    None => (agent.to_string(), String::new()),
+                })
+            } else {
+                None
+            };
+            // Work the holder did lives on its branch or PR; taking the task back
+            // doesn't move it. The operator confirms having read that.
+            let links: Vec<String> = [("a branch", &t.card.branch), ("a PR", &t.card.pr_url)]
+                .iter()
+                .filter(|(_, v)| !v.trim().is_empty())
+                .map(|(what, v)| format!("{what} ({})", v.trim()))
+                .collect();
+            if !links.is_empty() && req.confirm != Some(true) {
+                return Ok(json!({
+                    "ok": false,
+                    "confirm": format!(
+                        "It has {}. That work stays where it is, and whoever gets the task has to pick it up from there. Take it back anyway?",
+                        links.join(" and ")
+                    ),
+                }));
+            }
+            let holder = if t.item.claimed_by.is_empty() { "its agent".to_string() } else { t.item.claimed_by.clone() };
+            let reason = if text.is_empty() {
+                format!("taken back from {holder}")
+            } else {
+                format!("taken back from {holder}: {text}")
+            };
+            let back = store
+                .work_take_back(&t.item.id, retarget.as_ref().map(|(a, u)| (a.as_str(), u.as_str())), &reason, now)
+                .map_err(|e| e.to_string())?
+                .ok_or("it moved meanwhile")?;
+            let to = match &retarget {
+                Some((name, _)) if !name.is_empty() => format!("; now for {name}"),
+                Some(_) => "; now for anyone".to_string(),
+                None => String::new(),
+            };
+            let kind = if reassign { "reassigned" } else { "taken_back" };
+            record(state, &t.item.id, OPERATOR, OPERATOR, kind, &t.item.state, work_state::OPEN, &format!("{reason}{to}"));
+            // Cancel tells nobody, so the old holder is told here: it may still be
+            // working on the task, or be about to hand it in.
+            let note = format!(
+                "[AgentMux] The operator took task #{} \"{}\" back from you. Stop working on it and don't hand it in: \
+                 your claim (attempt {}) is closed.{}",
+                t.card.num,
+                quote_in_system_note(&t.item.title),
+                t.item.attempts,
+                if text.is_empty() { String::new() } else { format!(" They said: {}", quote_in_system_note(&text)) }
+            );
+            let target = if t.item.claimed_by_uid.is_empty() { t.item.claimed_by.clone() } else { t.item.claimed_by_uid.clone() };
+            if !target.is_empty() {
+                if let Err(e) = crate::backend::reactive::get_global_handler().deliver_system_note(&target, &note) {
+                    tracing::info!(error = %e, "kanban: take-back note not delivered");
+                }
+            }
+            json!({ "ok": true, "id": back.id })
+        }
         other => return Err(format!("kanban.act: unknown action {other:?}")),
     };
     changed(state);
@@ -626,5 +711,106 @@ mod tests {
         assert!(text.contains("Loap-3 wrote it down; here it is as they wrote it:\n> Write the spec for X."), "{text}");
         assert!(text.contains("What I asked at the time:\n> can you write a spec for X"), "{text}");
         assert!(!text.contains("[JEKT:FROM"), "{text}");
+    }
+
+    // ── an agent that can't work, and taking its task back (R1, R5 of
+    //    SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md) ──────────────────────────────
+
+    use crate::backend::agent_state::test_support::register_stub;
+    use crate::backend::blockcontroller::{BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING};
+    use crate::server::tests::test_state;
+
+    /// A pane of a registered agent that is out of quota until `resets_at_ms`.
+    fn limited_agent(state: &AppState, name: &str, resets_at_ms: u64) -> String {
+        let mut block = crate::backend::obj::Block { oid: Uuid::new_v4().to_string(), ..Default::default() };
+        block.meta.insert(
+            "agent:last_failure".into(),
+            json!({"code": "usage_limit", "title": "Usage limit reached", "detail": "", "retryable": false, "resetsAtMs": resets_at_ms}),
+        );
+        state.mstore.insert(&mut block).unwrap();
+        register_stub(&block.oid, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
+        state.reactive_handler.register_agent(name, &block.oid, None).unwrap();
+        block.oid
+    }
+
+    /// A task for anyone, held by `holder`.
+    async fn held_task(state: &AppState, holder: &str) -> String {
+        let made = act(state, json!({"action": "create", "title": "Fix the thing", "payload": "do it"})).await.unwrap();
+        let id = made["id"].as_str().unwrap().to_string();
+        state.identity_store.work_start_for(&id, holder, "", now_ms(), LEASE_MS).unwrap().expect("claimed");
+        id
+    }
+
+    async fn task_of(state: &AppState, id: &str) -> Value {
+        let board = list(state).await.unwrap();
+        board["tasks"].as_array().unwrap().iter().find(|t| t["id"] == id).cloned().expect("on the board")
+    }
+
+    #[tokio::test]
+    async fn the_board_says_why_a_holder_cant_work() {
+        let state = test_state();
+        let name = format!("lim-{}", Uuid::new_v4());
+        let resets = agentmux_common::time::now_ms_u64() + 3 * 60 * 60 * 1000;
+        limited_agent(&state, &name, resets);
+        let id = held_task(&state, &name).await;
+        let t = task_of(&state, &id).await;
+        assert_eq!(t["holder"]["state"], "limited");
+        assert_eq!(t["holder_unavailable"]["state"], "limited");
+        assert_eq!(t["holder_unavailable"]["resets_at_ms"], resets);
+        assert!(t["holder_unavailable"].get("account_id").is_none(), "the account never goes to the UI: {t}");
+        // A task nobody holds, or whose holder can work, has none.
+        let open = act(&state, json!({"action": "create", "title": "Waiting"})).await.unwrap();
+        assert!(task_of(&state, open["id"].as_str().unwrap()).await["holder_unavailable"].is_null());
+    }
+
+    #[tokio::test]
+    async fn taking_a_task_back_returns_it_and_asks_first_when_it_has_a_pr() {
+        let state = test_state();
+        let id = held_task(&state, "Naki-2").await;
+        state.identity_store.work_card_update(&id, &crate::backend::storage::work_board::CardUpdate {
+            pr_url: Some("https://github.com/agentmuxai/agentmux/pull/7".into()),
+            ..Default::default()
+        }, now_ms()).unwrap();
+
+        // Not confirmed: nothing changes, and the words say what stays behind.
+        let asked = act(&state, json!({"action": "release", "id": id})).await.unwrap();
+        assert_eq!(asked["ok"], false);
+        let words = asked["confirm"].as_str().unwrap();
+        assert!(words.contains("a PR (https://github.com/agentmuxai/agentmux/pull/7)") && words.contains("Take it back anyway?"), "{words}");
+        assert_eq!(task_of(&state, &id).await["state"], "claimed");
+
+        // Confirmed: it waits again for anyone, its claim gone and its attempt not counted.
+        let before = task_of(&state, &id).await;
+        let done = act(&state, json!({"action": "release", "id": id, "confirm": true, "text": "out of quota"})).await.unwrap();
+        assert_eq!(done["ok"], true);
+        let after = task_of(&state, &id).await;
+        assert_eq!((after["state"].as_str(), after["claimed_by"].as_str()), (Some("open"), Some("")));
+        assert_eq!(after["attempts"], before["attempts"], "attempts stays as the fence");
+        assert_eq!(after["max_attempts"].as_i64().unwrap(), before["max_attempts"].as_i64().unwrap() + 1);
+        assert!(after["result"].as_str().unwrap().contains("taken back from Naki-2: out of quota"), "{after}");
+        let events = state.identity_store.work_events(&id, 10).unwrap();
+        assert!(events.iter().any(|e| e.kind == "taken_back" && e.actor_kind == "operator"), "{events:?}");
+        // A late call from the old holder is refused.
+        assert!(state.identity_store.work_queue_heartbeat(&id, "Naki-2", "", before["attempts"].as_i64().unwrap(), now_ms(), 1000).unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn reassigning_gives_it_to_another_agent_or_anyone_in_one_step() {
+        let state = test_state();
+        let id = held_task(&state, "Naki-2").await;
+        let to = act(&state, json!({"action": "reassign", "id": id, "agent": "Loap-3"})).await.unwrap();
+        assert_eq!(to["ok"], true);
+        let t = task_of(&state, &id).await;
+        assert_eq!((t["state"].as_str(), t["target_agent"].as_str(), t["claimed_by"].as_str()), (Some("open"), Some("Loap-3"), Some("")));
+
+        let again = held_task(&state, "Naki-2").await;
+        act(&state, json!({"action": "reassign", "id": again, "agent": ""})).await.unwrap();
+        assert_eq!(task_of(&state, &again).await["target_agent"], "", "anyone");
+
+        // `reassign` has to say to whom, and only a held task can be taken back.
+        assert!(act(&state, json!({"action": "reassign", "id": again})).await.is_err() || task_of(&state, &again).await["state"] == "open");
+        let waiting = act(&state, json!({"action": "create", "title": "Waiting"})).await.unwrap();
+        let err = act(&state, json!({"action": "release", "id": waiting["id"]})).await.unwrap_err();
+        assert!(err.contains("only a task an agent holds"), "{err}");
     }
 }

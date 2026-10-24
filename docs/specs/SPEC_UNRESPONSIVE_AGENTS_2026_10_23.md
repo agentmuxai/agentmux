@@ -142,7 +142,11 @@ Each of the following has to be checked, and is listed in the step-1 PR:
   - `limited` reads "out of quota until Sun 7:00 PM", or "out of quota" with no time;
   - `signed_out` reads "needs sign-in";
   - either one puts the card in Needs you and counts it in the badge.
-- R5's Release and Reassign are Naki-2's to specify in their PR. This spec only asks that they bump the fence and tell the old holder.
+- **As built (step 2a, Agent1):**
+  - `kanban.list` carries `holder_unavailable` (`state`, `code`, `title`, `resets_at_ms`, `since_ms`; never the account) beside the holder's `limited` or `signed_out` state.
+  - The Needs-you badge counts a task held by a limited or signed-out agent only when no open account episode (§6) covers that holder (`agent_ids` or `block_ids`); the episode is counted once, by the caller. The card keeps its reason either way. Every other reason counts as before.
+  - **Release** and **Reassign** (`kanban.act` `release`, `reassign`) take a claimed or blocked task back: it waits again, its claim and question gone, and with Reassign it is for the chosen agent or anyone, in the same step. The attempt isn't spent (the task's limit grows by one), and `attempts` stays as the fence: the next claim is a new number, and the old holder's late calls find the task no longer theirs. The old holder gets a system note. A task with a branch or PR link is not taken back until the operator confirms (`confirm: true`), because that work stays where it is.
+  - **The lease** of a limited or signed-out holder stops being renewed only on a task open to anyone or a group, after 30 minutes of it, and with the reset more than an hour away or not known (`renews_lease` in `server/work_tasks.rs`). A task aimed at an agent stays with it.
 
 ### 4.4 Swarm (step 2, Camper)
 
