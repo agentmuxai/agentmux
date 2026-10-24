@@ -27,6 +27,8 @@ vi.mock("@/app/store/mps", () => ({
 const jobsChanged = (jobId: string) => events.handlers.get("jobs:changed")?.({ job_id: jobId });
 vi.mock("@/app/store/global", () => ({ openLink: vi.fn() }));
 vi.mock("@/app/util/reveal-block", () => ({ revealBlock: vi.fn() }));
+const warden = vi.hoisted(() => ({ open: vi.fn() }));
+vi.mock("@/app/view/warden/open-warden", () => ({ openWarden: (section: string) => warden.open(section) }));
 
 import { mkJob, mkRun, NOW } from "./jobs-fixtures";
 import { mergeReload } from "./jobs-history";
@@ -102,6 +104,25 @@ describe("WardenJobsManager", () => {
         expect(rpc.act).not.toHaveBeenCalledWith({ action: "delete", job_id: "j1" });
         fireEvent.click(screen.getByRole("button", { name: /Delete it, keep its runs/ }));
         await waitFor(() => expect(rpc.act).toHaveBeenCalledWith({ action: "delete", job_id: "j1" }));
+    });
+
+    it("links a failing job's incident and its failed runs to the Kanban task", async () => {
+        const incident = {
+            id: "i1", job_id: "j1", job_source: "cron", job_name: "Nightly build", work_id: "w1", task_num: 12, owner_uid: "uid-b",
+            first_run_id: "r0", last_run_id: "r0", failures: 2, opened_at_ms: NOW - 60_000, last_failed_at_ms: NOW, ended_at_ms: null,
+            end_reason: "", ended_by_run: "", recovered_at_ms: null, notified: true,
+        };
+        rpc.list.mockResolvedValue(listOf([mkJob({ failing: true, incident })]));
+        rpc.runs.mockResolvedValue({
+            runs: [mkRun({ id: "r0", state: "missed", reason: "target_stopped", failed: true, links: { kanban_task: { id: "w1", num: 12 } } }), mkRun()],
+        });
+        render(() => <WardenJobsManager visible />);
+        await waitFor(() => expect(screen.getByText("Nightly build")).toBeInTheDocument());
+        fireEvent.click(screen.getByText("Nightly build"));
+        await waitFor(() => expect(screen.getByRole("button", { name: /^Kanban #12$/ })).toBeInTheDocument());
+        expect(screen.getAllByRole("button", { name: /Kanban #12/ }).length).toBe(2);
+        fireEvent.click(screen.getByRole("button", { name: /Failing: Kanban #12 · 2 in a row/ }));
+        expect(warden.open).toHaveBeenCalledWith("kanban");
     });
 
     it("reloads an open history when srv says its job changed, so an older run's end shows", async () => {

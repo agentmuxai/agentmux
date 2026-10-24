@@ -7,11 +7,14 @@
 //! [`RunLedger`] writes `db_job_runs` rows (`storage::job_runs`) for cron
 //! fires and Drone runs, follows a delivered fire's turn to its end
 //! ([`follower`]), and on startup closes the runs a restart interrupted.
+//! After each change it nudges [`incidents`], which opens one incident per
+//! failing job (§3.4).
 //! Cron fires are never held for a stopped agent: an undelivered fire is
 //! `missed`, or, under catch-up `latest`, the job's one `pending` fire (§3.2,
 //! §5.2), which the scheduler delivers when the agent is back.
 
 pub mod follower;
+pub mod incidents;
 pub mod paused;
 pub mod remote;
 pub mod verdict;
@@ -143,6 +146,8 @@ pub struct RunLedger {
     follower: follower::Follower,
     /// Where `JobsChanged` goes after each write, so the Jobs tab refreshes.
     broker: Arc<Broker>,
+    /// Failure incidents (§3.4), once [`Self::install_incidents`] ran.
+    incidents: std::sync::OnceLock<Arc<incidents::Incidents>>,
 }
 
 impl RunLedger {
@@ -165,6 +170,7 @@ impl RunLedger {
             recorded_by: format!("{channel}@{}", env!("CARGO_PKG_VERSION")),
             follower: follower::Follower::start(weak.clone(), broker.clone()),
             broker,
+            incidents: std::sync::OnceLock::new(),
         })
     }
 
@@ -172,11 +178,26 @@ impl RunLedger {
         &self.store
     }
 
+    /// Open an incident when a job fails, from now on (§3.4). `jobs` is
+    /// where cron jobs are, for a job's owner.
+    pub fn install_incidents(&self, jobs: Option<Arc<Store>>) {
+        let keeper = incidents::Incidents::new(self.store.clone(), self.mstore.clone(), jobs, self.broker.clone());
+        if self.incidents.set(keeper.clone()).is_ok() {
+            keeper.start();
+        }
+    }
+
     /// Tell the Jobs tab job `job_id`'s runs changed (`JobsChanged`); `""`
-    /// for a change to every job.
+    /// for a change to every job. A job's change is also looked at for an
+    /// incident.
     pub fn changed(&self, job_id: &str) {
         let event = crate::backend::mps_events::JobsChangedEvent { job_id: job_id.to_string() };
         self.broker.publish_event::<crate::backend::mps_events::JobsChanged>(&event, vec![], 0);
+        if !job_id.is_empty() {
+            if let Some(keeper) = self.incidents.get() {
+                keeper.nudge(job_id);
+            }
+        }
     }
 
     /// [`Self::changed`] for the job run `run_id` belongs to.
@@ -498,9 +519,11 @@ impl RunLedger {
             self.follower.watch(&run.id, now);
         }
         let stale = ours.into_iter().chain(open(SOURCE_DRONE, &[state::RUNNING])).chain(followed_here);
+        let mut jobs = std::collections::BTreeSet::new();
         for run in stale {
             if self.store.job_run_finish(&run.id, infra::INTERRUPTED, None, "AgentMux restarted during this run", now).unwrap_or(false) {
                 closed += 1;
+                jobs.insert(run.job_id);
             }
         }
         if let Some(mstore) = &self.mstore {
@@ -513,6 +536,9 @@ impl RunLedger {
         if closed > 0 {
             tracing::info!(count = closed, "jobs: closed runs left open by the restart");
             self.changed("");
+            for job_id in jobs {
+                self.changed(&job_id);
+            }
         }
         closed
     }

@@ -214,6 +214,8 @@ async fn app_main() {
         Some(state.mstore.clone()),
         state.broker.clone(),
     );
+    // A failing job opens one incident for its owner (jobs spec §3.4).
+    run_ledger.install_incidents(state.shared_store.clone());
     {
         let ledger = run_ledger.clone();
         let _ = tokio::task::spawn_blocking(move || ledger.recover_after_restart()).await;

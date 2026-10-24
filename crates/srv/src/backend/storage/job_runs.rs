@@ -76,10 +76,12 @@ pub(crate) const SCHEMA: &str = "
 /// schema version bump.
 const JOB_RUNS_COLUMNS: [&str; 1] = ["ALTER TABLE db_job_runs ADD COLUMN collapsed_into TEXT NOT NULL DEFAULT ''"];
 
-/// Create the table, then add any column it lacks; "duplicate column" is
-/// the column already being there.
+/// Create the tables (the ledger's, and its incidents', `job_incidents`),
+/// then add any column the ledger lacks; "duplicate column" is the column
+/// already being there.
 pub(crate) fn apply_schema(conn: &rusqlite::Connection) -> Result<(), StoreError> {
     conn.execute_batch(SCHEMA)?;
+    conn.execute_batch(super::job_incidents::SCHEMA)?;
     for stmt in JOB_RUNS_COLUMNS {
         if let Err(e) = conn.execute_batch(stmt) {
             if !e.to_string().contains("duplicate column") {
@@ -278,6 +280,14 @@ pub struct RunCost {
 /// list is [`state::OPEN`] (a test holds them equal).
 const OPEN_NOT_ENDED: &str = "state IN ('scheduled','pending','running') AND ended_at_ms IS NULL";
 
+/// A decisive run: one that finished, or failed (a miss, a lost run, an
+/// expired pending fire, a failing infrastructure status or outcome). The
+/// same rule as `jobs::verdict::decisive`, whose test checks the two agree.
+const DECISIVE: &str = "(state IN ('finished','missed','lost')
+                             OR (state = 'pending' AND reason = 'expired')
+                             OR infra IN ('error','timeout','over_budget','interrupted')
+                             OR outcome = 'failed')";
+
 impl Store {
     /// Create the table if this store doesn't have it yet (a test store, or
     /// one opened before this build). Idempotent.
@@ -368,17 +378,45 @@ impl Store {
             .query_row(
                 &format!(
                     "SELECT {COLS} FROM db_job_runs
-                      WHERE job_id = ?1 AND collapsed_into = ''
-                        AND (state IN ('finished','missed','lost')
-                             OR (state = 'pending' AND reason = 'expired')
-                             OR infra IN ('error','timeout','over_budget','interrupted')
-                             OR outcome = 'failed')
+                      WHERE job_id = ?1 AND collapsed_into = '' AND {DECISIVE}
                       ORDER BY started_at_ms DESC, rowid DESC LIMIT 1"
                 ),
                 params![job_id],
                 row_to_run,
             )
             .optional()?)
+    }
+
+    /// The job's decisive runs that have ended, in the order they ended
+    /// (`ended_at_ms`, then `id`): the ones after `after` (an ended time and
+    /// a run id), at most `limit`; with no `after`, only the newest. What
+    /// the incident keeper walks (`jobs::incidents`).
+    pub fn job_runs_decisive_after(
+        &self,
+        job_id: &str,
+        after: Option<(i64, &str)>,
+        limit: i64,
+    ) -> Result<Vec<JobRun>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let base = format!(
+            "SELECT {COLS} FROM db_job_runs
+              WHERE job_id = ?1 AND collapsed_into = '' AND ended_at_ms IS NOT NULL AND {DECISIVE}"
+        );
+        let rows = match after {
+            Some((ended, id)) => {
+                let mut stmt = conn.prepare(&format!(
+                    "{base} AND (ended_at_ms > ?2 OR (ended_at_ms = ?2 AND id > ?3)) ORDER BY ended_at_ms, id LIMIT ?4"
+                ))?;
+                let rows = stmt.query_map(params![job_id, ended, id, limit.max(0)], row_to_run)?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            }
+            None => {
+                let mut stmt = conn.prepare(&format!("{base} ORDER BY ended_at_ms DESC, id DESC LIMIT 1"))?;
+                let rows = stmt.query_map(params![job_id], row_to_run)?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            }
+        };
+        Ok(rows)
     }
 
     /// Turn the just-inserted placeholder `id` into a skip for `reason`, or,
@@ -545,7 +583,10 @@ impl Store {
     }
 
     /// The run's own verdict (§3.2): its outcome, a summary, links merged
-    /// into `links.reported`. Refused for a run that never ran.
+    /// into `links.reported`. Refused for a run that never ran. A report
+    /// that changes the outcome of a run that has ended moves the incident
+    /// keeper's cursor back to just before it, in the same transaction, so
+    /// the run is judged again (`job_incidents`).
     pub fn job_run_report(
         &self,
         id: &str,
@@ -555,14 +596,14 @@ impl Store {
     ) -> Result<bool, StoreError> {
         let mut conn = self.conn().lock().unwrap();
         let tx = conn.transaction()?;
-        let current: Option<String> = tx
+        let current: Option<(String, String, String, Option<i64>)> = tx
             .query_row(
-                "SELECT links FROM db_job_runs WHERE id = ?1 AND state IN ('running','finished')",
+                "SELECT links, outcome, job_id, ended_at_ms FROM db_job_runs WHERE id = ?1 AND state IN ('running','finished')",
                 params![id],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
             .optional()?;
-        let Some(current) = current else {
+        let Some((current, was, job_id, ended)) = current else {
             return Ok(false);
         };
         let mut merged: serde_json::Value = serde_json::from_str(&current).unwrap_or_else(|_| serde_json::json!({}));
@@ -576,6 +617,13 @@ impl Store {
             "UPDATE db_job_runs SET outcome = ?2, summary = ?3, links = ?4 WHERE id = ?1",
             params![id, outcome, clip_summary(summary), merged.to_string()],
         )?;
+        if let (true, Some(ended)) = (was != outcome, ended) {
+            tx.execute(
+                "UPDATE db_job_incident_cursors SET ended_at_ms = ?2, run_id = ''
+                  WHERE job_id = ?1 AND (ended_at_ms > ?2 OR (ended_at_ms = ?2 AND run_id >= ?3))",
+                params![job_id, ended, id],
+            )?;
+        }
         tx.commit()?;
         Ok(true)
     }

@@ -114,6 +114,13 @@ export const NOTIFICATIONS_SETTINGS = {
         section: "notifications",
         keywords: ["quota", "usage limit", "account", "sign in", "notify:os:accountunavailable"],
     },
+    osJobFailed: {
+        id: "notifications.os_job_failed",
+        label: "A job failed",
+        description: "Once when a scheduled job starts failing, not for every failed run; the job's Kanban task collects the rest",
+        section: "notifications",
+        keywords: ["job", "cron", "schedule", "failed", "incident", "notify:os:jobfailed"],
+    },
     pauseAllowAttention: {
         id: "notifications.pause_allow_attention",
         label: "While paused, still alert when an agent needs me",
@@ -250,6 +257,7 @@ export function NotificationsSection(): JSX.Element {
                 {kindRow(NOTIFICATIONS_SETTINGS.osNeedsReview, "notify:os:messageneedsreview")}
                 {kindRow(NOTIFICATIONS_SETTINGS.osCloudSignedOut, "notify:os:cloudsignedout")}
                 {kindRow(NOTIFICATIONS_SETTINGS.osAccountUnavailable, "notify:os:accountunavailable")}
+                {kindRow(NOTIFICATIONS_SETTINGS.osJobFailed, "notify:os:jobfailed")}
                 {kindRow(NOTIFICATIONS_SETTINGS.osSummary, "notify:os:summary")}
                 {kindRow(NOTIFICATIONS_SETTINGS.taskbarAttention, "notify:taskbar:attention")}
                 <SettingRow

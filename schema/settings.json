@@ -454,6 +454,11 @@
           "default": true,
           "description": "Notify once per account when its agents hit a weekly usage limit or need you to sign in again. A session limit shows only in the Kanban and Swarm strip. The notification never names the account."
         },
+        "notify:os:jobfailed": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notify once when a job starts failing (one notification per incident, not per run). Further failures of the same job add to its Kanban task instead."
+        },
         "notify:pause:until": {
           "type": "integer",
           "default": 0,

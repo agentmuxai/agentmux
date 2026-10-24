@@ -701,6 +701,7 @@ pub fn settings_from_extra(extra: &std::collections::HashMap<String, serde_json:
         NotifyKind::MessageNeedsReview,
         NotifyKind::CloudSignedOut,
         NotifyKind::AccountUnavailable,
+        NotifyKind::JobFailed,
     ] {
         if let Some(sfx) = kind.setting_suffix() {
             s.kind_enabled.insert(kind, setting_bool(extra, &format!("notify:os:{sfx}"), true));
@@ -891,6 +892,21 @@ impl Router {
             kind: NotifyKind::AccountUnavailable,
             block_id: key.to_string(),
             agent_name: String::new(),
+            body: Some(body),
+            summary: None,
+            shutdown: None,
+        }));
+    }
+
+    /// A job failed and opened an incident (`jobs::incidents`). `key` is the
+    /// job's (`job:<id>`); the title names the job, the body is fixed text
+    /// with the reason, never the run's summary. Taken down with
+    /// `resolve(key, Family::Job)` when the job recovers.
+    pub fn job_failed(&self, key: &str, job_name: &str, body: String) {
+        self.step(Input::Emit(Request {
+            kind: NotifyKind::JobFailed,
+            block_id: key.to_string(),
+            agent_name: sanitize_name(job_name),
             body: Some(body),
             summary: None,
             shutdown: None,

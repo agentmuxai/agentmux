@@ -228,6 +228,7 @@ fn jobs_sort_by_next_run_then_name() {
         missed_count: 0,
         recent: vec![],
         failing: false,
+        incident: None,
         cost_today_usd: 0.0,
         cost_week_usd: 0.0,
         cost_known: false,

@@ -44,6 +44,10 @@ pub enum NotifyKind {
     /// (`server::account_episodes`). About no agent; its key is the
     /// account's (`account:<hash>`), never the account itself.
     AccountUnavailable,
+    /// A job failed: one per incident, not per run (`jobs::incidents`,
+    /// SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §3.4). Its key is the job's
+    /// (`job:<id>`); the job's name stands where an agent's would.
+    JobFailed,
 }
 
 impl NotifyKind {
@@ -57,6 +61,7 @@ impl NotifyKind {
             NotifyKind::MessageNeedsReview => Some("messageneedsreview"),
             NotifyKind::CloudSignedOut => Some("cloudsignedout"),
             NotifyKind::AccountUnavailable => Some("accountunavailable"),
+            NotifyKind::JobFailed => Some("jobfailed"),
             // Follows the master switch only: a shutdown the user can still
             // stop must not be silenceable per kind.
             NotifyKind::ShutdownPending => None,
@@ -75,7 +80,7 @@ impl NotifyKind {
             NotifyKind::MessageNeedsReview => 2_000,
             // The window is only 15 s: tell the user at once.
             // The episode's scan already waited for the failure to settle.
-            NotifyKind::ShutdownPending | NotifyKind::CloudSignedOut | NotifyKind::AccountUnavailable => 0,
+            NotifyKind::ShutdownPending | NotifyKind::CloudSignedOut | NotifyKind::AccountUnavailable | NotifyKind::JobFailed => 0,
             NotifyKind::Summary | NotifyKind::Test => 0,
         }
     }
@@ -87,7 +92,8 @@ impl NotifyKind {
             | NotifyKind::MessageNeedsReview
             | NotifyKind::ShutdownPending
             | NotifyKind::CloudSignedOut
-            | NotifyKind::AccountUnavailable => {
+            | NotifyKind::AccountUnavailable
+            | NotifyKind::JobFailed => {
                 Priority::Attention
             }
             _ => Priority::Normal,
@@ -107,15 +113,18 @@ impl NotifyKind {
             NotifyKind::Summary => "summary".to_string(),
             NotifyKind::Test => "test".to_string(),
             NotifyKind::CloudSignedOut => "cloud".to_string(),
-            // One per account: the key already names it.
-            NotifyKind::AccountUnavailable => block_id.to_string(),
+            // One per account, or per job: the key already names it.
+            NotifyKind::AccountUnavailable | NotifyKind::JobFailed => block_id.to_string(),
         }
     }
 
     /// Kinds about one agent carry its summary line; the digest and the test
     /// toast are about no agent.
     fn has_summary(self) -> bool {
-        !matches!(self, NotifyKind::Summary | NotifyKind::Test | NotifyKind::CloudSignedOut | NotifyKind::AccountUnavailable)
+        !matches!(
+            self,
+            NotifyKind::Summary | NotifyKind::Test | NotifyKind::CloudSignedOut | NotifyKind::AccountUnavailable | NotifyKind::JobFailed
+        )
     }
 
     /// Within one group, a later event must not replace a more informative
@@ -284,6 +293,8 @@ pub enum Family {
     Cloud,
     /// An account episode ended (`server::account_episodes`).
     Account,
+    /// A failing job recovered (`jobs::incidents`).
+    Job,
 }
 
 impl Family {
@@ -296,6 +307,7 @@ impl Family {
             Family::Shutdown => kind == NotifyKind::ShutdownPending,
             Family::Cloud => kind == NotifyKind::CloudSignedOut,
             Family::Account => kind == NotifyKind::AccountUnavailable,
+            Family::Job => kind == NotifyKind::JobFailed,
         }
     }
 }
@@ -430,6 +442,7 @@ pub fn title_for(kind: NotifyKind, agent_name: &str) -> String {
         NotifyKind::Test => "AgentMux notifications are working".to_string(),
         NotifyKind::CloudSignedOut => "AgentMux is signed out of MuxBus".to_string(),
         NotifyKind::AccountUnavailable => "An account can't run your agents".to_string(),
+        NotifyKind::JobFailed => format!("Job failed: {agent_name}"),
     }
 }
 

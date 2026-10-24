@@ -3,14 +3,16 @@
 //
 // One job opened in the Jobs section: its actions (Run now, Pause / Resume, Delete, Open owner) and
 // its runs, newest first, with the slot, start, duration, state and reason, outcome and summary,
-// cost and account, and links (docs/specs/SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §3.3). A summary is
-// another agent's words: shown as text, never as markup.
+// cost and account, and links (docs/specs/SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §3.3), the Kanban
+// task of a failing job's incident among them (§3.4). A summary is another agent's words: shown as
+// text, never as markup.
 
 import { createEffect, createSignal, For, on, Show, type JSX } from "solid-js";
 
 import { Button, Pill } from "@/app/element/ui";
 import { openLink } from "@/app/store/global";
 import { revealBlock } from "@/app/util/reveal-block";
+import { openWarden } from "@/app/view/warden/open-warden";
 import type { JobRunRow } from "@/types/rpc/JobRunRow";
 import type { JobsActRequest } from "@/types/rpc/JobsActRequest";
 import type { JobsActResult } from "@/types/rpc/JobsActResult";
@@ -18,7 +20,7 @@ import type { JobsRunsResult } from "@/types/rpc/JobsRunsResult";
 import type { JobView } from "@/types/rpc/JobView";
 import { formatDurationShort, formatTimeAgo } from "@/util/format-time";
 
-import { costText, reasonText, runBadge, stateText } from "./jobs-format";
+import { costText, kanbanTask, reasonText, runBadge, stateText } from "./jobs-format";
 import { RUNS_MAX, RUNS_PAGE, type JobChange } from "./jobs-model";
 
 /** `fresh` (a reload from the newest run) with the older rows already loaded below it kept, so a
@@ -89,6 +91,13 @@ function RunRow(props: { run: JobRunRow; now: number }): JSX.Element {
                     {(b) => (
                         <Button density="compact" tone="quiet" icon="message" onClick={() => void revealBlock(b(), { source: "jobs" })}>
                             Agent
+                        </Button>
+                    )}
+                </Show>
+                <Show when={kanbanTask(r())}>
+                    {(t) => (
+                        <Button density="compact" tone="quiet" icon="table-columns" title="The incident's task, in the Kanban" onClick={() => void openWarden("kanban")}>
+                            Kanban #{t().num}
                         </Button>
                     )}
                 </Show>
@@ -223,6 +232,19 @@ export function JobHistory(props: {
                     </Show>
                     <Show when={props.job.target}>
                         <span class="warden-manager-dim">→ {props.job.target}</span>
+                    </Show>
+                    <Show when={props.job.incident?.task_num}>
+                        {(num) => (
+                            <Button
+                                density="compact"
+                                tone="quiet"
+                                icon="table-columns"
+                                title="Its failures go to this task until the job succeeds again"
+                                onClick={() => void openWarden("kanban")}
+                            >
+                                Failing: Kanban #{num()} · {props.job.incident!.failures} in a row
+                            </Button>
+                        )}
                     </Show>
                 </div>
                 <div class="warden-jobs-actions">

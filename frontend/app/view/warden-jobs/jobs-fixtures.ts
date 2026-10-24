@@ -66,6 +66,7 @@ export function mkJob(over: Partial<JobView> = {}): JobView {
         missed_count: 0,
         recent: [],
         failing: false,
+        incident: null,
         cost_today_usd: 0,
         cost_week_usd: 0,
         cost_known: false,

@@ -154,7 +154,14 @@ impl RunLedger {
     pub fn check_remote(&self, run_id: &str, armed_at_ms: i64, now: i64) -> bool {
         let run = self.store.job_run_get(run_id).ok().flatten();
         match verdict(run.as_ref(), armed_at_ms, now, follower_alive) {
-            Verdict::Done => true,
+            Verdict::Done => {
+                // The receiver closed it: this instance, which has the job,
+                // looks at it too (its incident, §3.4).
+                if let Some(run) = &run {
+                    self.changed(&run.job_id);
+                }
+                true
+            }
             Verdict::Wait => false,
             Verdict::Close { infra, summary } => {
                 self.turn_finished(run_id, infra, None, summary);

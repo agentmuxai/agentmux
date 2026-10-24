@@ -168,3 +168,9 @@ export function costText(usd: number, known: boolean): string {
 export function failingCount(jobs: readonly JobView[] | null | undefined): number {
     return (jobs ?? []).filter((j) => j.failing).length;
 }
+
+/** The Kanban task a failed run went to (`links.kanban_task`, §3.4), if srv linked one. */
+export function kanbanTask(run: JobRunRow): { id: string; num: number } | null {
+    const t = (run.links as { kanban_task?: { id?: unknown; num?: unknown } }).kanban_task;
+    return typeof t?.num === "number" && typeof t.id === "string" ? { id: t.id, num: t.num } : null;
+}
