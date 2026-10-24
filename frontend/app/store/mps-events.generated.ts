@@ -5,7 +5,7 @@
 // crates/srv/src/backend/mps_events.rs). DO NOT EDIT: declare the event there, then run
 // `cargo test -p agentmux-srv export_bindings` and `node scripts/gen-mux-events.mjs`.
 
-import type { AccountAvailability } from "@/types/rpc/AccountAvailability";
+import type { AccountAvailabilityEvent } from "@/types/rpc/AccountAvailabilityEvent";
 import type { AgentContextUsageEvent } from "@/types/rpc/AgentContextUsageEvent";
 import type { AgentEvent } from "@/types/rpc/AgentEvent";
 import type { AgentFailure } from "@/types/rpc/AgentFailure";
@@ -91,7 +91,7 @@ import type { WidgetStorageEvent } from "@/types/rpc/WidgetStorageEvent";
 /** Each typed broker event's payload, by its wire name. An event sent under a name per id
  *  (`agent:memory:changed:<agent id>`) is keyed by its prefix and any id. Subscribe with `onMuxEvent`. */
 export type MuxEventPayloads = {
-  accountavailability: AccountAvailability;
+  accountavailability: AccountAvailabilityEvent;
   "agent-api-retry": ApiRetryEvent;
   "agent-message-accepted": MessageAcceptedEvent;
   "agent-resume-retry": ResumeRetryEvent;

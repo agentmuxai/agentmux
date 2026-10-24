@@ -263,3 +263,50 @@ async fn an_episode_speaks_for_a_panes_quota_or_sign_in_failure_on_an_account() 
     assert!(!covers(&state.mstore, &state.identity_store, "no-such-block", now));
     cleanup(&[&session, &auth, &reset, &transient, &no_account]);
 }
+
+/// One call on an engine with this module's RPCs; `as_agent` registers the
+/// connection as an agent, as `bus:register` does.
+async fn call(state: &AppState, as_agent: Option<&str>, command: &str, data: serde_json::Value) -> Result<serde_json::Value, String> {
+    use crate::backend::rpc_types::{RpcContext, RpcMessage};
+    let (engine, mut rx) = WshRpcEngine::new();
+    register(&engine, state);
+    if let Some(agent) = as_agent {
+        engine.set_rpc_context(RpcContext { agent_id: agent.to_string(), ..Default::default() });
+    }
+    engine.handle_message(RpcMessage { command: command.to_string(), reqid: "req-1".to_string(), data: Some(data), ..Default::default() });
+    let resp = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv()).await.unwrap().unwrap();
+    if resp.error.is_empty() {
+        Ok(resp.data.unwrap_or_default())
+    } else {
+        Err(resp.error)
+    }
+}
+
+/// Both RPCs are the operator's: an agent connection can neither read which
+/// accounts are blocked (their labels can be emails) nor move other agents.
+#[tokio::test]
+async fn only_the_operators_client_may_list_episodes_or_move_agents() {
+    let state = test_state();
+    for a in [account("old", "claude", "valid"), account("spare", "claude", "valid")] {
+        state.id_store.identity_upsert(&a).unwrap();
+    }
+    agent_def(&state, "idle");
+    state.identity_store.agent_identity_link("idle", "old", "claude").unwrap();
+    let tab = new_tab(&state).await;
+    let idle = pane(&state, &tab, "idle", "Idle", "old", Some(failure("usage_limit", None, None)), false).await;
+    let move_req = json!({ "from": "old", "to": "spare", "block_ids": [idle] });
+
+    let e = call(&state, Some("loap-3"), COMMAND_IDENTITY_ACCOUNT_AVAILABILITY, json!({})).await.unwrap_err();
+    assert!(e.starts_with("FORBIDDEN"), "{e}");
+    let e = call(&state, Some("loap-3"), COMMAND_IDENTITY_ACCOUNT_MOVE_AGENTS, move_req.clone()).await.unwrap_err();
+    assert!(e.starts_with("FORBIDDEN"), "{e}");
+    assert_eq!(state.identity_store.agent_identity_list_for_agent("idle").unwrap()[0].account_id, "old", "nothing moved");
+    assert!(stored_failure(&state, &idle).is_some());
+
+    let listed = call(&state, None, COMMAND_IDENTITY_ACCOUNT_AVAILABILITY, json!({})).await.unwrap();
+    assert!(listed["episodes"].is_array());
+    let moved = call(&state, None, COMMAND_IDENTITY_ACCOUNT_MOVE_AGENTS, move_req).await.unwrap();
+    assert_eq!(moved["moved"][0]["block_id"], json!(idle));
+    assert_eq!(state.identity_store.agent_identity_list_for_agent("idle").unwrap()[0].account_id, "spare");
+    cleanup(&[&idle]);
+}

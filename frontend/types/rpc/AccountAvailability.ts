@@ -4,9 +4,9 @@ import type { AccountEpisodeTask } from "./AccountEpisodeTask";
 import type { AccountMoveCandidate } from "./AccountMoveCandidate";
 
 /**
- * One account's episode: `accountavailability`'s payload, and an entry of
- * `identity.account.availability`. Local to this machine's windows: the
- * label never goes in a toast or to another host.
+ * One account's episode, as `identity.account.availability` lists it for the
+ * operator's windows. The label never goes in a toast, an event or to
+ * another host.
  */
 export type AccountAvailability = { account_id: string, account_label: string, provider: string, state: "limited" | "signed_out" | "ok", 
 /**

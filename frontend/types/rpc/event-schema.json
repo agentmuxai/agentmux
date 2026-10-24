@@ -3,9 +3,9 @@
     "event": "accountavailability",
     "payloadTs": {
       "imports": [
-        "AccountAvailability"
+        "AccountAvailabilityEvent"
       ],
-      "name": "AccountAvailability"
+      "name": "AccountAvailabilityEvent"
     }
   },
   {

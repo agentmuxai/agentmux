@@ -85,9 +85,9 @@ pub struct AccountMoveCandidate {
     pub status: String,
 }
 
-/// One account's episode: `accountavailability`'s payload, and an entry of
-/// `identity.account.availability`. Local to this machine's windows: the
-/// label never goes in a toast or to another host.
+/// One account's episode, as `identity.account.availability` lists it for the
+/// operator's windows. The label never goes in a toast, an event or to
+/// another host.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AccountAvailability {
@@ -108,6 +108,29 @@ pub struct AccountAvailability {
     pub tasks: Vec<AccountEpisodeTask>,
     /// Where the agents can move, the first valid one first.
     pub candidates: Vec<AccountMoveCandidate>,
+}
+
+/// `accountavailability` (spec §6.1): an episode opened, changed or closed
+/// (`ok`). A signal for the windows, which then read
+/// `identity.account.availability`: it carries no account label and no move
+/// candidates, since any connection can subscribe to an event.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AccountAvailabilityEvent {
+    pub account_id: String,
+    pub provider: String,
+    #[ts(type = r#""limited" | "signed_out" | "ok""#)]
+    pub state: String,
+    #[ts(type = "number | null")]
+    pub resets_at_ms: Option<u64>,
+    pub agents: Vec<AccountEpisodeAgent>,
+    pub tasks: Vec<AccountEpisodeTask>,
+}
+
+impl From<AccountAvailability> for AccountAvailabilityEvent {
+    fn from(a: AccountAvailability) -> Self {
+        AccountAvailabilityEvent { account_id: a.account_id, provider: a.provider, state: a.state, resets_at_ms: a.resets_at_ms, agents: a.agents, tasks: a.tasks }
+    }
 }
 
 /// `identity.account.availability`: the open episodes.
@@ -282,23 +305,19 @@ fn apply(state: &AppState, effect: Effect) {
     match effect {
         Effect::Changed(ep) => {
             tracing::info!(provider = %ep.provider, agents = ep.panes.len(), state = ep.state().as_str(), "account episode: changed");
-            publish(state, &view(state, &ep));
+            publish(state, AccountAvailabilityEvent::from(view(state, &ep)));
         }
         Effect::Closed { account_id, provider } => {
             tracing::info!(provider = %provider, "account episode: closed");
-            let ok = AccountAvailability {
-                account_label: label_of(state, &account_id),
+            let ok = AccountAvailabilityEvent {
                 account_id: account_id.clone(),
                 provider,
                 state: "ok".to_string(),
                 resets_at_ms: None,
-                limit_window: None,
-                since_ms: agentmux_common::time::now_ms_u64(),
                 agents: Vec::new(),
                 tasks: Vec::new(),
-                candidates: Vec::new(),
             };
-            publish(state, &ok);
+            publish(state, ok);
             if let Some(router) = crate::backend::notify::router::get(&state.broker) {
                 router.resolve(&toast_key(&account_id), crate::backend::notify::policy::Family::Account);
             }
@@ -311,8 +330,8 @@ fn apply(state: &AppState, effect: Effect) {
     }
 }
 
-fn publish(state: &AppState, payload: &AccountAvailability) {
-    state.broker.publish_event::<crate::backend::mps_events::AccountAvailability>(payload, vec![], 0);
+fn publish(state: &AppState, payload: AccountAvailabilityEvent) {
+    state.broker.publish_event::<crate::backend::mps_events::AccountAvailability>(&payload, vec![], 0);
 }
 
 fn label_of(state: &AppState, account_id: &str) -> String {
@@ -449,16 +468,23 @@ pub fn after_rebind(mstore: &Arc<Store>, event_bus: &Arc<EventBus>, before: Vec<
     cleared
 }
 
+/// Both RPCs are the operator's: an agent connection (`bus:register`) is
+/// refused, since the answer names accounts and the move relinks and restarts
+/// other agents.
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let s = state.clone();
-    engine.register_typed(COMMAND_IDENTITY_ACCOUNT_AVAILABILITY, move |_req: Option<NoArgsReq>, _ctx| {
-        let s = s.clone();
-        async move { tokio::task::spawn_blocking(move || availability(&s)).await.map_err(|e| e.to_string()) }
-    });
-    let s = state.clone();
-    engine.register_typed(COMMAND_IDENTITY_ACCOUNT_MOVE_AGENTS, move |req: IdentityAccountMoveAgentsReq, _ctx| {
+    engine.register_typed(COMMAND_IDENTITY_ACCOUNT_AVAILABILITY, move |_req: Option<NoArgsReq>, ctx| {
         let s = s.clone();
         async move {
+            ctx.operator_only("only the operator sees which accounts their agents can't run on")?;
+            tokio::task::spawn_blocking(move || availability(&s)).await.map_err(|e| e.to_string())
+        }
+    });
+    let s = state.clone();
+    engine.register_typed(COMMAND_IDENTITY_ACCOUNT_MOVE_AGENTS, move |req: IdentityAccountMoveAgentsReq, ctx| {
+        let s = s.clone();
+        async move {
+            ctx.operator_only("only the operator moves agents to another account")?;
             let result = tokio::task::spawn_blocking(move || moves::move_agents(&s, &req)).await.map_err(|e| e.to_string())??;
             refresh_soon();
             Ok(result)
