@@ -12,10 +12,16 @@ import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const calls: { cmd: string; args: any }[] = [];
+// What the host answers a discard with, and after how long (read when the call is made).
+const discardPlan = { ok: true, delayMs: 0 };
 vi.mock("@/app/platform/ipc", () => ({
     invokeCommand: (cmd: string, args: any) => {
         calls.push({ cmd, args });
-        if (cmd === "browser_pane_discard") return Promise.resolve({ supported: true, ok: true });
+        if (cmd === "browser_pane_discard" && args.op === "discard") {
+            return new Promise((resolve) =>
+                setTimeout(() => resolve({ supported: true, ok: discardPlan.ok }), discardPlan.delayMs)
+            );
+        }
         return Promise.resolve();
     },
 }));
@@ -70,6 +76,8 @@ afterEach(() => {
     model.clearSleepKept.mockClear();
     setAsleep(false);
     setVisibility("active");
+    discardPlan.ok = true;
+    discardPlan.delayMs = 0;
 });
 
 /** A mounted, created pane whose tab is then hidden, the way a hibernating pane is. */
@@ -102,5 +110,19 @@ describe("usePaneRectSync — sleep and wake around the discard park", { timeout
         expect(discards()).toHaveLength(0);
         expect(model.endSleep).toHaveBeenCalledTimes(1);
         expect(model.endSleep).toHaveBeenCalledWith(undefined);
+    });
+
+    it("a wake while a refused discard is out ends the sleep too", async () => {
+        discardPlan.ok = false;
+        discardPlan.delayMs = 400;
+        await hiddenPane();
+        setAsleep(true);
+        await tick(1700); // the park is over and the discard is on its way
+        expect(discards().map((c) => c.args.op)).toEqual(["discard"]);
+        setAsleep(false);
+        await tick(700); // the discard is answered, refused
+        expect(model.endSleep).toHaveBeenCalledTimes(1);
+        expect(model.endSleep).toHaveBeenCalledWith(undefined);
+        expect(discards().map((c) => c.args.op)).toEqual(["discard"]);
     });
 });

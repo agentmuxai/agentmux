@@ -372,6 +372,11 @@ export function usePaneRectSync(params: {
                 // Woken while the discard was out: load it straight back.
                 void getApi().browserPanes.discard?.(model.blockId, "load").catch(() => {});
                 return;
+            case "nothing":
+                // Woken while the discard was out, and the discard didn't happen: the page is
+                // alive and won't load again, so nothing else would end the sleep.
+                void model.endSleep(undefined).catch(() => {});
+                return;
         }
     };
     createEffect(
