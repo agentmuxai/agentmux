@@ -119,6 +119,22 @@ fn a_drone_runs_cost_is_the_sum_of_its_agent_blocks() {
     .collect();
     let cost = drone_cost(&states);
     assert_eq!((cost.cost_usd, cost.output_tokens, cost.cost_known), (0.75, 150, true));
+
+    // No block reported a cost: not known, rather than a known $0.
+    let none: std::collections::HashMap<String, BlockState> =
+        [("t1".to_string(), block(Some(json!({"value": "text"})))), ("x".to_string(), block(None))].into_iter().collect();
+    assert!(!drone_cost(&none).cost_known);
+    assert!(!drone_cost(&Default::default()).cost_known);
+}
+
+#[test]
+fn a_slash_command_gets_no_run_line() {
+    let plain = crate::backend::cron::fire_message("check the build", Some("run-1"), None);
+    assert!(plain.starts_with("check the build\n\n(Scheduled run run-1."), "{plain}");
+    for cmd in ["/compact", "/model opus", "  /review 12"] {
+        assert_eq!(crate::backend::cron::fire_message(cmd, Some("run-1"), None), cmd, "the command's arguments stay its own");
+    }
+    assert_eq!(crate::backend::cron::fire_message("check", None, None), "check", "no run, no line");
 }
 
 // ── the ledger with a scheduler ─────────────────────────────────────────
@@ -341,6 +357,40 @@ async fn latest_keeps_one_pending_fire_and_delivers_it_once() {
     let r2 = rig.store.job_run_get(&second).unwrap().unwrap();
     assert_eq!(r2.state, state::RUNNING);
     assert_eq!(rig.fire_count("j-latest"), 1, "a delivered pending fire counts");
+}
+
+/// A pending fire whose delivery answers with something the held-jekt replay
+/// retries (the agent still starting, not signed in) stays pending for the
+/// next wake; a refusal that isn't transient closes it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pending_fire_survives_a_try_again_answer() {
+    let rig = rig();
+    let job = rig.job("j-retry", CATCH_UP_LATEST);
+    rig.answer(NOT_FOUND);
+    let now = agentmux_common::time::now_ms();
+    let run = rig.sched.fire(&job, Slot::Scheduled(now - now % HOUR)).await.run_id.unwrap();
+    *rig.present.lock().unwrap() = true;
+    for answer in [
+        r#"{"success": false, "error": "persistent process is still starting up — try again shortly"}"#,
+        r#"{"success": false, "error": "identity spawn gate: no credentials for claude"}"#,
+        r#"{"success": false, "error": "rate limit exceeded"}"#,
+    ] {
+        rig.answer(answer);
+        assert_eq!(rig.sched.deliver_pending().await, 0);
+        let r = rig.store.job_run_get(&run).unwrap().unwrap();
+        assert_eq!((r.state.as_str(), r.ended_at_ms), (state::PENDING, None), "{answer}");
+    }
+    rig.answer(DELIVERED);
+    assert_eq!(rig.sched.deliver_pending().await, 1, "delivered on the next pass");
+    assert_eq!(rig.store.job_run_get(&run).unwrap().unwrap().state, state::RUNNING);
+
+    // A refusal that won't change by waiting closes the pending fire.
+    rig.answer(NOT_FOUND);
+    let refused = rig.sched.fire(&job, Slot::Scheduled(now - now % HOUR + HOUR)).await.run_id.unwrap();
+    rig.answer(r#"{"success": false, "error": "subprocess controller does not accept raw input"}"#);
+    rig.sched.deliver_pending().await;
+    let r = rig.store.job_run_get(&refused).unwrap().unwrap();
+    assert_eq!((r.state.as_str(), r.infra.as_str()), (state::FINISHED, infra::ERROR));
 }
 
 /// A pending fire expires at the job's next fire time, and a delivered

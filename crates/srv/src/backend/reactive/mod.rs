@@ -43,6 +43,25 @@ pub fn held_jekt_wake() -> &'static tokio::sync::Notify {
     &WAKE
 }
 
+/// Whether a delivery error is the target's spawn gate refusing to start it
+/// (`run_agent_turn`'s "identity spawn gate: …"): not signed in. Recoverable
+/// once the receiver signs in (SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md
+/// Phase 0 item 4, G4).
+pub fn is_spawn_gate_refusal(error: &str) -> bool {
+    error.starts_with("identity spawn gate")
+}
+
+/// Whether a delivery error is worth retrying shortly, as is: the target is
+/// still absent, rate-limited, its queue is full, or it is starting,
+/// restarting or stopping ("… try again shortly"). Shared by the held-jekt
+/// replay and the cron scheduler's pending fires, which must agree.
+pub fn is_transient_delivery_error(error: &str) -> bool {
+    error.starts_with("agent not found")
+        || error.contains("rate limit")
+        || error.contains("queue is full")
+        || error.contains("try again shortly")
+}
+
 /// An agent just registered in `block_id`: replay what was held for it, wake
 /// the relay subscription to take its names, and after an upgrade tell a
 /// resumed agent once, whatever runs it

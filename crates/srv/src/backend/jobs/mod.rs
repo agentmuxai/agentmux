@@ -188,8 +188,11 @@ impl RunLedger {
     }
 
     /// A pending fire was delivered, or failed for good, when its agent came
-    /// back (`CronScheduler::deliver_pending`). Still missing keeps it
-    /// pending.
+    /// back (`CronScheduler::deliver_pending`, which expires it first once
+    /// its next fire time has passed). Still missing, or a failure the
+    /// held-jekt replay also retries (the agent still starting, a rate
+    /// limit, a full queue, not signed in yet), keeps it pending for the
+    /// next wake or sweep.
     pub fn record_pending_delivery(&self, run: &JobRun, outcome: &FireOutcome) {
         let now = now_ms();
         let result = match outcome {
@@ -198,6 +201,7 @@ impl RunLedger {
                 Ok(())
             }
             FireOutcome::Missed { .. } => Ok(()),
+            FireOutcome::Failed { error } if retry_later(error) => Ok(()),
             FireOutcome::Failed { error } => self.store.job_run_finish(&run.id, infra::ERROR, None, error, now).map(drop),
         };
         if let Err(e) = result {
@@ -354,14 +358,23 @@ impl RunLedger {
     }
 }
 
+/// Whether a pending fire's failed delivery is retried at the next wake or
+/// sweep rather than closing the run: the same classification as the
+/// held-jekt replay (`server::jekt_held`).
+fn retry_later(error: &str) -> bool {
+    crate::backend::reactive::is_transient_delivery_error(error) || crate::backend::reactive::is_spawn_gate_refusal(error)
+}
+
 /// The summed `cost_usd` of a Drone run's blocks: only Agent blocks report
-/// one, in their output (`drone/executor/blocks/agent.rs`).
+/// one, in their output (`drone/executor/blocks/agent.rs`). Known only when
+/// at least one block reported a cost.
 pub fn drone_cost(block_states: &std::collections::HashMap<String, crate::drone::types::BlockState>) -> RunCost {
-    let mut cost = RunCost { cost_known: true, ..Default::default() };
+    let mut cost = RunCost::default();
     for b in block_states.values() {
         let Some(out) = &b.output else { continue };
         if let Some(c) = out.get("cost_usd").and_then(|v| v.as_f64()) {
             cost.cost_usd += c;
+            cost.cost_known = true;
         }
         if let Some(t) = out.pointer("/tokens/output").and_then(|v| v.as_i64()) {
             cost.output_tokens += t;

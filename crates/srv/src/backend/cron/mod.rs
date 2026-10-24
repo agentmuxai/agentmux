@@ -111,6 +111,19 @@ pub(crate) fn fire_outcome(body: Option<&serde_json::Value>) -> FireOutcome {
     FireOutcome::Failed { error }
 }
 
+/// The text a fire delivers: the prompt, then the run line. A slash command
+/// (`/compact`, `/model x`) gets no run line: it would become the command's
+/// arguments. That run is still recorded and followed by its `request_id`;
+/// only its agent can't report an outcome, so it stays `unknown`.
+pub(crate) fn fire_message(prompt: &str, run_id: Option<&str>, late_for: Option<i64>) -> String {
+    match run_id {
+        Some(run_id) if !prompt.trim_start().starts_with('/') => {
+            format!("{prompt}\n\n{}", jobs::brief_line(run_id, late_for, agentmux_common::time::now_ms()))
+        }
+        _ => prompt.to_string(),
+    }
+}
+
 /// Which slot a fire is for (§3.1 `trigger`, `scheduled_for_ms`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Slot {
@@ -449,10 +462,7 @@ impl CronScheduler {
             crate::backend::agent_resolve::record_uid_fallback("m4c.cron_fire_unattributed");
         }
         let target_agent = fire_target(&job.target, &job.target_uid).to_string();
-        let message = match run_id {
-            Some(run_id) => format!("{}\n\n{}", job.prompt, jobs::brief_line(run_id, late_for, agentmux_common::time::now_ms())),
-            None => job.prompt.clone(),
-        };
+        let message = fire_message(&job.prompt, run_id, late_for);
         let request_id = run_id.map(str::to_string);
         let body = match self.delivery.get() {
             Some(deliver) => {

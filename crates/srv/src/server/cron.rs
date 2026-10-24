@@ -379,8 +379,36 @@ pub struct CronReportRequest {
     pub links: Option<Value>,
 }
 
-/// The most links one report keeps.
+/// The most links one report keeps, and the longest url and label.
 const REPORT_LINKS_MAX: usize = 5;
+const REPORT_URL_MAX: usize = 2048;
+const REPORT_LABEL_MAX: usize = 120;
+
+/// The links a report keeps: https URLs, given as strings or as
+/// `{label, url}`, within the length bounds, at most five. Anything else is
+/// dropped: the ledger shows them to other agents and the UI.
+fn report_links(given: Option<Value>) -> Value {
+    let https = |u: &str| u.len() <= REPORT_URL_MAX && u.starts_with("https://") && u.len() > "https://".len();
+    let items = match given {
+        None | Some(Value::Null) => return Value::Null,
+        Some(Value::Array(items)) => items,
+        Some(other) => vec![other],
+    };
+    let kept: Vec<Value> = items
+        .into_iter()
+        .filter_map(|item| match item {
+            Value::String(u) if https(&u) => Some(Value::String(u)),
+            Value::Object(o) => {
+                let url = o.get("url").and_then(Value::as_str).filter(|u| https(u))?;
+                let label = o.get("label").and_then(Value::as_str).unwrap_or("");
+                (label.chars().count() <= REPORT_LABEL_MAX).then(|| json!({ "label": label, "url": url }))
+            }
+            _ => None,
+        })
+        .take(REPORT_LINKS_MAX)
+        .collect();
+    Value::Array(kept)
+}
 
 pub(super) async fn handle_cron_report(
     State(state): State<AppState>,
@@ -394,11 +422,7 @@ pub(super) async fn handle_cron_report(
             Json(json!({"error": format!("invalid outcome '{}' (use ok, findings or failed)", req.outcome)})),
         );
     }
-    let links = match req.links {
-        None | Some(Value::Null) => Value::Null,
-        Some(Value::Array(items)) => Value::Array(items.into_iter().take(REPORT_LINKS_MAX).collect()),
-        Some(other) => Value::Array(vec![other]),
-    };
+    let links = report_links(req.links);
     let ledger = match ledger_or_503(&state) {
         Ok(l) => l,
         Err(e) => return e,
@@ -509,6 +533,38 @@ mod tests {
             max_age_secs: None,
             catch_up: "skip".to_string(),
         }
+    }
+
+    /// Report links keep https URLs only, as strings or `{label, url}`,
+    /// within the length bounds, at most five.
+    #[test]
+    fn report_links_keep_only_bounded_https_urls() {
+        let long_url = format!("https://example.com/{}", "a".repeat(REPORT_URL_MAX));
+        let given = json!([
+            "https://example.com/pr/1",
+            "http://example.com/plain",
+            "javascript:alert(1)",
+            "https://",
+            {"label": "Report", "url": "https://example.com/r"},
+            {"label": "x".repeat(REPORT_LABEL_MAX + 1), "url": "https://example.com/too-long-label"},
+            {"label": "bad", "url": "ftp://example.com"},
+            {"url": "https://example.com/no-label"},
+            long_url,
+            42,
+            {"label": "nested", "url": {"href": "https://example.com"}},
+        ]);
+        assert_eq!(
+            report_links(Some(given)),
+            json!([
+                "https://example.com/pr/1",
+                {"label": "Report", "url": "https://example.com/r"},
+                {"label": "", "url": "https://example.com/no-label"},
+            ])
+        );
+        let many: Vec<Value> = (0..9).map(|i| json!(format!("https://example.com/{i}"))).collect();
+        assert_eq!(report_links(Some(Value::Array(many))).as_array().unwrap().len(), REPORT_LINKS_MAX);
+        assert_eq!(report_links(Some(json!("https://example.com/one"))), json!(["https://example.com/one"]));
+        assert_eq!(report_links(None), Value::Null);
     }
 
     #[test]
