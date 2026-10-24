@@ -380,6 +380,37 @@ mod tests {
         }
     }
 
+    /// Every run leaves one line in the history, and `history` summarises them by reason.
+    #[test]
+    fn a_run_is_recorded_in_the_history_and_summarised() {
+        let Some(bash) = bash() else { return };
+        let h = home();
+        let script = h.path().join("build-slot.sh");
+        std::fs::write(&script, lf(SCRIPT)).unwrap();
+        let root = h.path().join("slots");
+        let run = |args: &[&str]| {
+            let mut cmd = std::process::Command::new(&bash);
+            cmd.arg(&script).args(args).env("AGENTMUX_BUILD_SLOT_DIR", &root).env_remove("BUILD_SLOT_HELD").env("BUILD_SLOT_POLL", "1");
+            #[cfg(windows)]
+            {
+                use crate::win32::NoWindow;
+                cmd.no_window();
+            }
+            cmd.output().unwrap()
+        };
+        assert_eq!(run(&["--reason", "cargo test", "--", "true"]).status.code(), Some(0));
+        assert_eq!(run(&["--reason", "task package", "--", "sh", "-c", "exit 3"]).status.code(), Some(3));
+        let log = std::fs::read_to_string(root.join("history.log")).unwrap();
+        let rows: Vec<Vec<&str>> = log.lines().map(|l| l.split('\t').collect()).collect();
+        assert_eq!(rows.len(), 2, "one line per run: {log:?}");
+        assert!(rows.iter().all(|r| r.len() == 6), "epoch, agent, reason, waited, held, exit: {log:?}");
+        assert_eq!((rows[0][2], rows[0][5]), ("cargo test", "0"));
+        assert_eq!((rows[1][2], rows[1][5]), ("task package", "3"), "the wrapped command's exit code is recorded");
+        let summary = String::from_utf8_lossy(&run(&["history"]).stdout).to_string();
+        assert!(summary.starts_with("runs: 2,"), "got {summary:?}");
+        assert!(contains_all(&summary, &["cargo test", "task package"]), "got {summary:?}");
+    }
+
     #[test]
     fn the_shim_fails_open() {
         if bash().is_none() {

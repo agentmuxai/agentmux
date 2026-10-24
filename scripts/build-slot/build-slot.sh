@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build-slot-version: 5
+# build-slot-version: 6
 # build-slot: run one heavy build or test command while holding the host-wide
 # build slot, so only one such command runs on this machine at a time.
 # Spec: docs/specs/SPEC_BUILD_SLOT_ENFORCEMENT_2026_10_20.md. AgentMux installs this file to
@@ -7,6 +7,7 @@
 #
 #   build-slot [--reason "text"] -- <command> [args...]   run <command> when the slot is free
 #   build-slot status                                     show the holder and the queue
+#   build-slot history                                    waits and holds of past runs, by reason
 #
 # Works in Git Bash (Windows), Linux and macOS: it needs only bash, mkdir, date, sleep.
 # The slot is a directory created with mkdir (atomic). The holder refreshes a heartbeat
@@ -21,6 +22,7 @@ set -u
 ROOT="${AGENTMUX_BUILD_SLOT_DIR:-$HOME/.agentmux/shared/locks/build}"
 SLOT="$ROOT/slot"
 QUEUE="$ROOT/queue"
+HISTORY="$ROOT/history.log"   # one line per run: epoch, agent, reason, waited, held, exit (tab-separated)
 STALE_SECS="${BUILD_SLOT_STALE_SECS:-90}"
 MAX_WAIT="${BUILD_SLOT_MAX_WAIT:-3600}"
 POLL="${BUILD_SLOT_POLL:-3}"
@@ -75,7 +77,35 @@ status() {
   return 0
 }
 
+# One line per finished or given-up run, to tune the list of heavy commands and to see whether
+# a second slot would help. Short lines appended with >> do not interleave.
+log_history() { # waited-secs held-secs exit-code
+  local reason="${REASON:-${CMDLINE:-}}"
+  reason=$(printf '%s' "$reason" | tr '\t\n' '  ' | cut -c1-120)
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(now)" "$ME" "$reason" "$1" "$2" "$3" >> "$HISTORY" 2>/dev/null || true
+}
+# Keeps the newest half once the log passes 4000 lines. Only the holder calls it, so two
+# trims never run together.
+trim_history() {
+  [ "$(wc -l < "$HISTORY" 2>/dev/null || echo 0)" -gt 4000 ] || return 0
+  tail -n 2000 "$HISTORY" > "$HISTORY.tmp.$$" 2>/dev/null && mv -f "$HISTORY.tmp.$$" "$HISTORY" 2>/dev/null
+  rm -f "$HISTORY.tmp.$$" 2>/dev/null
+  return 0
+}
+
+history() {
+  [ -s "$HISTORY" ] || { echo "history: no runs recorded yet ($HISTORY)"; return 0; }
+  awk -F'\t' '
+    { n++; w[$3]+=$4; h[$3]+=$5; c[$3]++; if ($4>wm[$3]) wm[$3]=$4; tw+=$4; th+=$5; if ($6==75) gu++; if ($4>0) q++ }
+    END {
+      printf "runs: %d, waited at all: %d, gave up: %d, total wait %d min, total held %d min\n", n, q, gu, tw/60, th/60
+      printf "%-40s %5s %9s %9s %10s\n", "reason", "runs", "avg wait", "max wait", "held (min)"
+      for (r in c) printf "%-40s %5d %8ds %8ds %10d\n", substr(r,1,40), c[r], w[r]/c[r], wm[r], h[r]/60
+    }' "$HISTORY"
+}
+
 if [ "${1:-}" = "status" ]; then status; exit 0; fi
+if [ "${1:-}" = "history" ]; then history; exit 0; fi
 
 REASON=""
 if [ "${1:-}" = "--reason" ]; then REASON="${2:-}"; shift 2; fi
@@ -86,7 +116,8 @@ if [ "${1:-}" = "--reason" ]; then REASON="${2:-}"; shift 2; fi
 if [ "${BUILD_SLOT_HELD:-}" = "1" ]; then exec "$@"; fi
 
 mkdir -p "$QUEUE" || exit 70
-TICKET="$QUEUE/$(now)-$$"
+QUEUED_AT=$(now)
+TICKET="$QUEUE/$QUEUED_AT-$$"
 CMDLINE="$*"
 TOKEN="$$-$(now)-${RANDOM:-0}"   # tells our slot from one a later holder created
 printf '%s: %s\n' "$ME" "$CMDLINE" > "$TICKET"
@@ -123,6 +154,7 @@ while :; do
     if mkdir "$SLOT" 2>/dev/null; then HOLDING=1; break; fi
   fi
   if [ "$waited" -ge "$MAX_WAIT" ]; then
+    log_history "$(( $(now) - QUEUED_AT ))" 0 75
     echo "build-slot: gave up after ${MAX_WAIT}s waiting. $(status | head -2 | tr '\n' ' ')" >&2; exit 75
   fi
   if [ "$said" -eq 0 ] || [ $((waited % 60)) -lt "$POLL" ]; then
@@ -150,10 +182,14 @@ rm -f "$TICKET"
     touch "$SLOT/heartbeat" 2>/dev/null; sleep 20
   done ) >/dev/null 2>&1 </dev/null &
 HB_PID=$!
-echo "build-slot: acquired by $ME after ${waited}s: $CMDLINE" >&2
+ACQUIRED_AT=$(now)
+echo "build-slot: acquired by $ME after $(( ACQUIRED_AT - QUEUED_AT ))s: $CMDLINE" >&2
 
 BUILD_SLOT_HELD=1 "$@"
 rc=$?
+# Still holding the slot here, so a trim cannot overlap another holder's.
+log_history "$(( ACQUIRED_AT - QUEUED_AT ))" "$(( $(now) - ACQUIRED_AT ))" "$rc"
+trim_history
 echo "build-slot: released (exit $rc)" >&2
 exit "$rc"
 }
