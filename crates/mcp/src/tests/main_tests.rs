@@ -926,3 +926,19 @@ fn an_ambiguous_name_is_refused_with_its_candidates() {
         "{err}"
     );
 }
+
+/// #1257: "none" is told apart from "reachable by name only", so `Tasks
+/// enqueue` can refuse a task nobody could claim; `resolve_agent_name_at_boundary`'s
+/// callers still see both as "no uid".
+#[test]
+fn resolve_detail_tells_no_such_agent_from_name_only() {
+    let none = r#"{"resolution":"none"}"#;
+    assert_eq!(interpret_resolve_detail(S::OK, none, "Naki-9").unwrap(), BoundaryResolution::NoSuchAgent);
+    assert_eq!(interpret_resolve_response(S::OK, none, "Naki-9").unwrap(), None);
+    let unidentified = r#"{"resolution":"unidentified","candidate":{"name":"Scratch"}}"#;
+    assert_eq!(interpret_resolve_detail(S::OK, unidentified, "Scratch").unwrap(), BoundaryResolution::NameOnly);
+    // An srv that predates the endpoint can't say: the name goes through.
+    assert_eq!(interpret_resolve_detail(S::NOT_FOUND, "", "Naki-2").unwrap(), BoundaryResolution::NameOnly);
+    let one = r#"{"resolution":"one","uid":"u-1"}"#;
+    assert_eq!(interpret_resolve_detail(S::OK, one, "Naki-2").unwrap(), BoundaryResolution::Uid("u-1".into()));
+}
