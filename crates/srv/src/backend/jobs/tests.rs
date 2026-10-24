@@ -365,6 +365,21 @@ async fn an_undelivered_fire_is_missed_and_not_counted() {
     assert_eq!((skips[0].reason.as_str(), skips[0].skip_count), (reason::TARGET_MISSING, 2));
 }
 
+/// A delivery whose answer names no pane (the relay's) has no turn to
+/// follow: it closes as finished at once instead of waiting for a restart
+/// to call it interrupted.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_delivery_with_no_pane_closes_at_once() {
+    let rig = rig();
+    let job = rig.job("j-relay", CATCH_UP_SKIP);
+    let Begin::Run(id) = rig.ledger.begin_cron(&job, TRIGGER_SCHEDULE, Some(1_800_000_000_000), BY_SCHEDULER) else { panic!() };
+    let delivered = crate::backend::cron::FireOutcome::Delivered { block_id: None };
+    rig.ledger.record_delivery(&id, &job, &delivered, true, 0);
+    let r = rig.store.job_run_get(&id).unwrap().unwrap();
+    assert_eq!((r.state.as_str(), r.infra.as_str(), r.cost_known), (state::FINISHED, infra::OK, false));
+    assert!(r.ended_at_ms.is_some());
+}
+
 /// Two schedulers sharing one identity store fire a slot once.
 #[tokio::test(flavor = "multi_thread")]
 async fn two_schedulers_sharing_the_store_fire_a_slot_once() {

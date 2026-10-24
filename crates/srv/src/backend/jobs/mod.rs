@@ -274,6 +274,10 @@ impl RunLedger {
             return;
         }
         if block_id.is_empty() {
+            // Delivered with no pane to follow (a relay answer names none):
+            // nothing would ever close it, and a restart would call it
+            // interrupted. It ran as far as AgentMux can tell (#5390).
+            self.turn_finished(run_id, infra::OK, None, "delivered; AgentMux can't follow this run's turn");
             return;
         }
         let _ = self.store.job_run_add_links(run_id, &json!({ "transcript": { "block_id": block_id } }));
