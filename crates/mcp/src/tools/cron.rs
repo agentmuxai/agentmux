@@ -198,7 +198,13 @@ fn run_brief(r: &serde_json::Value) -> String {
         _ => String::new(),
     };
     let summary = if s("summary").is_empty() { String::new() } else { format!("  \"{}\"", s("summary")) };
-    format!("{}  {state}{skips}  outcome={}  {when}{cost}{summary}", s("id"), s("outcome"))
+    // Only when it isn't ok: an interrupted run must not read like an
+    // ordinary unreported one.
+    let infra = match s("infra") {
+        "" | "ok" => String::new(),
+        other => format!("  infra={other}"),
+    };
+    format!("{}  {state}{skips}{infra}  outcome={}  {when}{cost}{summary}", s("id"), s("outcome"))
 }
 
 /// A ms epoch relative to now: "12 min ago", "in 3 h".
@@ -212,4 +218,22 @@ fn ago(ms: i64) -> String {
         m => format!("{} d", m / (24 * 60)),
     };
     if diff >= 0 { format!("{span} ago") } else { format!("in {span}") }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::run_brief;
+
+    #[test]
+    fn a_run_line_names_its_infra_status_unless_ok() {
+        let run = |infra: &str| {
+            serde_json::json!({ "id": "r1", "state": "finished", "infra": infra, "outcome": "unknown", "skip_count": 0 })
+        };
+        assert!(run_brief(&run("interrupted")).contains("finished  infra=interrupted  outcome=unknown"), "{}", run_brief(&run("interrupted")));
+        assert!(run_brief(&run("error")).contains("infra=error"));
+        for quiet in ["ok", ""] {
+            let line = run_brief(&run(quiet));
+            assert!(line.contains("finished  outcome=unknown") && !line.contains("infra="), "{line}");
+        }
+    }
 }

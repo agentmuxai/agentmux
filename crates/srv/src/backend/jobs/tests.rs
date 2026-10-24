@@ -298,6 +298,34 @@ fn an_agent_in_another_channel_counts_as_back() {
     assert!(!registered_in_another_channel(dir.path(), "", "channel-b"));
 }
 
+/// A fire another channel's agent took names a pane this instance doesn't
+/// have: its turn can't be followed from here, so the run closes at once,
+/// with no transcript link. A pane of this channel's store is followed.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_delivered_to_another_channel_closes_at_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(Store::open_identity_store(&dir.path().join("identity-store.db")).unwrap());
+    let mstore = Arc::new(Store::open_in_memory().unwrap());
+    let ledger = RunLedger::new(store.clone(), Some(mstore.clone()), Arc::new(Broker::new()));
+    let job = test_job("j-remote", "p", "AgentY", "uid-y", "c");
+    let delivered = |block: &str| crate::backend::cron::FireOutcome::Delivered { block_id: Some(block.to_string()) };
+
+    let Begin::Run(remote) = ledger.begin_cron(&job, TRIGGER_SCHEDULE, Some(1), BY_SCHEDULER) else { panic!() };
+    ledger.record_delivery(&remote, &job, &delivered("b-other-channel"), true, 0);
+    let r = store.job_run_get(&remote).unwrap().unwrap();
+    assert_eq!((r.state.as_str(), r.infra.as_str(), r.cost_known), (state::FINISHED, infra::OK, false));
+    assert!(r.summary.contains("another channel"), "{}", r.summary);
+    assert!(r.links.get("transcript").is_none(), "no link that wouldn't resolve here");
+
+    let mut pane = crate::backend::obj::Block { oid: "b-local-pane".to_string(), ..Default::default() };
+    mstore.insert(&mut pane).unwrap();
+    let Begin::Run(local) = ledger.begin_cron(&job, TRIGGER_SCHEDULE, Some(2), BY_SCHEDULER) else { panic!() };
+    ledger.record_delivery(&local, &job, &delivered("b-local-pane"), true, 0);
+    let r = store.job_run_get(&local).unwrap().unwrap();
+    assert_eq!(r.state, state::RUNNING, "followed");
+    assert_eq!(r.links["transcript"]["block_id"], "b-local-pane");
+}
+
 /// A delivered fire: its run id is the request id and ends the prompt; the
 /// row goes scheduled → running → finished with the turn's cost, and
 /// `fire_count` rises.
@@ -505,6 +533,45 @@ async fn a_delivered_pending_fire_counts_toward_max_fires() {
     let stored = rig.store.cron_get("j-max").unwrap().unwrap();
     assert_eq!((stored.fire_count, stored.enabled), (2, false), "at max_fires: disabled");
     assert!(!rig.sched.is_scheduled("j-max"), "its loop is stopped, so it doesn't fire again");
+}
+
+/// A `latest` job its loop disabled for its age bound keeps its pending fire
+/// while still inside that bound: one minute in, with a 90 s lifetime, its
+/// fire is missed and the job disabled (its next slot would pass the
+/// bound); at 70 s its agent is back and the fire is delivered, without
+/// re-enabling the job. Past the bound, or after a pause, it expires.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_age_disabled_jobs_pending_fire_survives_inside_its_lifetime() {
+    for case in ["inside", "past", "paused"] {
+        let rig = rig();
+        let mut job = test_job(&format!("j-age-{case}"), "p", "AgentY", "uid-y", "c");
+        // Hourly, so a slot boundary can't fall inside the test.
+        job.expression = "0 * * * *".to_string();
+        job.catch_up = CATCH_UP_LATEST.to_string();
+        let now = chrono::Utc::now().timestamp();
+        job.created_at = if case == "past" { now - 95 } else { now - 70 };
+        job.max_age_secs = Some(90);
+        rig.store.cron_create(&job).unwrap();
+        rig.answer(NOT_FOUND);
+        let now_ms = agentmux_common::time::now_ms();
+        let run = rig.sched.fire(&job, Slot::Scheduled(now_ms - now_ms % HOUR)).await.run_id.unwrap();
+        if case == "paused" {
+            rig.store.cron_set_enabled(&job.id, false).unwrap();
+        } else {
+            rig.sched.disable_for_test(&job.id, "max_age_secs would be reached before the next scheduled fire");
+        }
+        *rig.present.lock().unwrap() = true;
+        rig.answer(DELIVERED);
+        let delivered = rig.sched.deliver_pending().await;
+        let r = rig.store.job_run_get(&run).unwrap().unwrap();
+        let stored = rig.store.cron_get(&job.id).unwrap().unwrap();
+        assert!(!stored.enabled, "{case}: delivering never re-enables the job");
+        if case == "inside" {
+            assert_eq!((delivered, r.state.as_str()), (1, state::RUNNING), "{case}");
+        } else {
+            assert_eq!((delivered, r.reason.as_str(), r.ended_at_ms.is_some()), (0, reason::EXPIRED, true), "{case}");
+        }
+    }
 }
 
 /// A pending fire expires at the job's next fire time, and a delivered

@@ -85,9 +85,16 @@ pub fn brief_line(run_id: &str, late_for_ms: Option<i64>, now_ms: i64) -> String
 /// What [`RunLedger::pane`] reads from a pane's meta.
 #[derive(Debug, Default)]
 struct Pane {
+    /// The block is in this channel's store.
+    found: bool,
     agent_uid: String,
     account: String,
     provider: String,
+}
+
+/// Whether an agent is registered in `block_id` on this instance.
+fn registered_here(block_id: &str) -> bool {
+    crate::backend::reactive::get_global_handler().list_agents().iter().any(|r| r.block_id == block_id)
 }
 
 /// The UID the agent registered in `block_id` gave, if any.
@@ -280,6 +287,19 @@ impl RunLedger {
             self.turn_finished(run_id, infra::OK, None, "delivered; AgentMux can't follow this run's turn");
             return;
         }
+        if !(self.mstore.is_none() || pane.found || registered_here(block_id)) {
+            // The pane is on another instance (another channel took it): its
+            // turn events never reach this broker, so close it now rather
+            // than wait out the no-turn timeout. No transcript link: it
+            // wouldn't resolve here.
+            self.turn_finished(
+                run_id,
+                infra::OK,
+                None,
+                "delivered to an agent in another channel; AgentMux can't follow its turn from here",
+            );
+            return;
+        }
         let _ = self.store.job_run_add_links(run_id, &json!({ "transcript": { "block_id": block_id } }));
         self.follower.arm(block_id, run_id, now);
     }
@@ -304,7 +324,7 @@ impl RunLedger {
             Ok(Some(def)) if !agent_uid.is_empty() => crate::backend::providers::resolve_provider_alias(&def.provider).to_string(),
             _ => String::new(),
         };
-        Pane { agent_uid, account, provider }
+        Pane { found: true, agent_uid, account, provider }
     }
 
     /// Write the collapsed skip for slots missed while AgentMux was off

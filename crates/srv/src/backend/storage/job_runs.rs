@@ -64,6 +64,26 @@ pub(crate) const SCHEMA: &str = "
         WHERE scheduled_for_ms IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_ids_job_runs_state ON db_job_runs(state);";
 
+/// Columns added to `db_job_runs` after its first shape, run on every open
+/// (`apply_schema`) as `cron::CRON_JOBS_COLUMNS` is: a table an earlier
+/// build created gains them, and a new column with a default needs no
+/// schema version bump.
+const JOB_RUNS_COLUMNS: [&str; 1] = ["ALTER TABLE db_job_runs ADD COLUMN collapsed_into TEXT NOT NULL DEFAULT ''"];
+
+/// Create the table, then add any column it lacks; "duplicate column" is
+/// the column already being there.
+pub(crate) fn apply_schema(conn: &rusqlite::Connection) -> Result<(), StoreError> {
+    conn.execute_batch(SCHEMA)?;
+    for stmt in JOB_RUNS_COLUMNS {
+        if let Err(e) = conn.execute_batch(stmt) {
+            if !e.to_string().contains("duplicate column") {
+                return Err(e.into());
+            }
+        }
+    }
+    Ok(())
+}
+
 const COLS: &str = "id, job_id, job_source, job_name, template_id, template_version, trigger_kind, \
      scheduled_for_ms, triggered_by, attempt, state, reason, infra, outcome, summary, target_agent_uid, \
      block_id, turn_id, account_id, provider, started_at_ms, ended_at_ms, cost_usd, cost_known, \
@@ -232,7 +252,7 @@ impl Store {
     /// Create the table if this store doesn't have it yet (a test store, or
     /// one opened before this build). Idempotent.
     pub fn job_runs_ensure_schema(&self) -> Result<(), StoreError> {
-        Ok(self.conn().lock().unwrap().execute_batch(SCHEMA)?)
+        apply_schema(&self.conn().lock().unwrap())
     }
 
     /// Insert `run`. `Ok(false)` when its slot (`job_id`, `scheduled_for_ms`)

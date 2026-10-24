@@ -164,6 +164,12 @@ pub struct CronScheduler {
     delivery: std::sync::OnceLock<FireDelivery>,
     presence: std::sync::OnceLock<AgentPresence>,
     runs: std::sync::OnceLock<Arc<RunLedger>>,
+    /// Jobs this scheduler disabled for their age bound (`max_age_secs`),
+    /// not paused: their pending fire may still be delivered within that
+    /// bound (`deliver_pending`). Cleared when the job is paused, deleted or
+    /// scheduled again (`cancel_job`). In memory: after a restart such a
+    /// job's pending fire expires like a paused one's.
+    aged_out: Mutex<std::collections::HashSet<String>>,
 }
 
 impl CronScheduler {
@@ -184,6 +190,7 @@ impl CronScheduler {
             delivery: std::sync::OnceLock::new(),
             presence: std::sync::OnceLock::new(),
             runs: std::sync::OnceLock::new(),
+            aged_out: Mutex::default(),
         })
     }
 
@@ -378,6 +385,7 @@ impl CronScheduler {
 
     /// Stop (abort) a job's scheduled task without removing it from the DB.
     pub fn cancel_job(&self, id: &str) {
+        self.aged_out.lock().unwrap().remove(id);
         if let Some(handle) = self.handles.lock().unwrap().remove(id) {
             handle.abort();
         }
@@ -390,6 +398,9 @@ impl CronScheduler {
     /// same three-step disable sequence.
     fn disable_job(&self, job_id: &str, reason: &str) {
         tracing::info!(id = job_id, reason, "cron: disabling job");
+        if reason.starts_with("max_age_secs") {
+            self.aged_out.lock().unwrap().insert(job_id.to_string());
+        }
         if let Some(store) = &self.shared_store {
             let _ = store.cron_set_enabled(job_id, false);
         }
@@ -513,6 +524,19 @@ impl CronScheduler {
         Some(outcome)
     }
 
+    /// Whether `job` was disabled by this scheduler for its age bound and is
+    /// still inside it (`created_at + max_age_secs`).
+    fn within_age_bound(&self, job: &CronJob, now_ms: i64) -> bool {
+        self.aged_out.lock().unwrap().contains(&job.id)
+            && job.max_age_secs.is_some_and(|age| now_ms < job.created_at.saturating_add(age).saturating_mul(1000))
+    }
+
+    /// Disable a job as its own loop does at a limit (`reason`), for tests.
+    #[cfg(test)]
+    pub(crate) fn disable_for_test(&self, job_id: &str, reason: &str) {
+        self.disable_job(job_id, reason);
+    }
+
     /// The job's `fire_count` in the DB.
     fn persisted_fire_count(&self, id: &str) -> Option<i64> {
         self.shared_store.as_ref()?.cron_get(id).ok().flatten().map(|j| j.fire_count)
@@ -575,7 +599,11 @@ impl CronScheduler {
             let job = self.shared_store.as_ref().and_then(|s| s.cron_get(&run.job_id).ok().flatten());
             let expired = match (&job, run.scheduled_for_ms) {
                 (Some(job), Some(slot)) => {
-                    !job.enabled || jobs::next_slot_after(&job.expression, slot).is_none_or(|next| next <= now)
+                    // A pause ends it at once; an age bound only once passed;
+                    // max_fires reached means it may not fire at all.
+                    let stopped = !job.enabled && !self.within_age_bound(job, now);
+                    let at_max = job.max_fires.is_some_and(|max| job.fire_count >= max);
+                    stopped || at_max || jobs::next_slot_after(&job.expression, slot).is_none_or(|next| next <= now)
                 }
                 _ => true,
             };

@@ -165,3 +165,31 @@ fn history_pages_newest_first_and_keeps_every_run() {
     drop(s);
     assert_eq!(store_at(&dir).job_runs_for_job("j1", 1000, None).unwrap().len(), 30);
 }
+
+/// A `db_job_runs` an earlier build created, without `collapsed_into`,
+/// gains it when the store opens, and a fold works on it.
+#[test]
+fn an_older_table_gains_the_collapsed_column_on_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("identity-store.db");
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        let old = SCHEMA.replace(",
+        collapsed_into   TEXT NOT NULL DEFAULT ''", "");
+        assert!(!old.contains("collapsed_into"), "the old shape has no column");
+        conn.execute_batch(&old).unwrap();
+    }
+    let s = Store::open_identity_store(&path).unwrap();
+    let skip = |id: &str, slot: i64| {
+        let mut r = slot_run(id, "j1", Some(slot));
+        r.started_at_ms = slot;
+        assert!(s.job_run_insert(&r).unwrap());
+        s.job_run_skip(id, reason::TARGET_MISSING, 1, slot).unwrap()
+    };
+    assert_eq!(skip("r1", NOW), "r1");
+    assert_eq!(skip("r2", NOW + MIN), "r1", "folded");
+    assert_eq!(s.job_runs_for_job("j1", 10, None).unwrap().len(), 1);
+    drop(s);
+    // Opening again finds the column there and changes nothing.
+    assert_eq!(store_at(&dir).job_runs_for_job("j1", 10, None).unwrap()[0].skip_count, 2);
+}
