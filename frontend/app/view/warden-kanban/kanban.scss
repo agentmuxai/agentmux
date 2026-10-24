@@ -487,6 +487,12 @@ $kanban-narrow: 760px;
     gap: var(--space-2);
 }
 
+.kanban-drawer__confirm {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
 .kanban-drawer__row {
     display: flex;
     flex-wrap: wrap;

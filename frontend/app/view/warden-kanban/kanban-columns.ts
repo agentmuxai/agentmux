@@ -5,6 +5,9 @@
 // §6.3, §6.5; the stages: SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23.md §4). Pure: the section
 // and its tests share it.
 
+import type { AccountAvailability } from "@/types/rpc/AccountAvailability";
+import { resetLabel } from "@/util/reset-label";
+
 import type { KanbanAfter, KanbanAgent, KanbanTask } from "./kanban-types";
 
 export type ColumnId = "backlog" | "research" | "specd" | "progress" | "needs" | "review" | "merged" | "released";
@@ -54,6 +57,11 @@ export function stageWord(t: KanbanTask): string {
     return isResearchKind(t.kind) ? t.kind.trim().toLowerCase() : "build";
 }
 
+/** "out of quota until Sun 7:00 PM", or "out of quota" when the provider named no time. */
+export function quotaReason(resetsAtMs: number | null | undefined): string {
+    return resetsAtMs ? `out of quota until ${resetLabel(resetsAtMs)}` : "out of quota";
+}
+
 /** Why a task needs the operator, or null when it doesn't. The first line of its card in Needs you. */
 export function needsReason(t: KanbanTask): string | null {
     switch (t.state) {
@@ -65,6 +73,8 @@ export function needsReason(t: KanbanTask): string | null {
             const h = t.holder;
             if (!h || h.state === "gone") return "agent closed";
             if (h.state === "waiting") return "question waiting in its pane";
+            if (h.state === "limited") return quotaReason(t.holder_unavailable?.resets_at_ms);
+            if (h.state === "signed_out") return "needs sign-in";
             if (h.state === "error") return "agent errored";
             if (h.state === "stopped") return "agent stopped";
             return null;
@@ -101,9 +111,28 @@ export function columnOf(t: KanbanTask): ColumnId {
     }
 }
 
-/** How many tasks need the operator: the Warden tab title's count and the widget-bar badge's. */
-export function needsCountOf(tasks: KanbanTask[]): number {
-    return tasks.filter((t) => columnOf(t) === "needs").length;
+/** An account episode as far as the count is concerned: the agents it covers, by definition id and by pane. */
+export type CoveringEpisode = Pick<AccountAvailability, "agent_ids" | "block_ids">;
+
+/** Whether a task is in Needs you only because its holder is out of quota or signed out. */
+export function isUnavailableHolder(t: KanbanTask): boolean {
+    return t.state === "claimed" && (t.holder?.state === "limited" || t.holder?.state === "signed_out");
+}
+
+/** Whether an open account episode already covers this task's holder: the episode is one item for all its
+ *  agents (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §6.2), so its tasks aren't counted again. */
+export function coveredByEpisode(t: KanbanTask, episodes: readonly CoveringEpisode[]): boolean {
+    const block = t.holder?.block_id;
+    const uids = [t.claimed_by_uid, t.holder?.uid].filter((u): u is string => !!u);
+    return episodes.some((e) => (!!block && e.block_ids.includes(block)) || uids.some((u) => e.agent_ids.includes(u)));
+}
+
+/** How many tasks need the operator: the Warden tab title's count and the widget-bar badge's. A task whose
+ *  holder is out of quota or signed out still sits in Needs you with its reason, but is counted only when no
+ *  open account episode covers that holder (e.g. no run account could be resolved); the episodes are counted
+ *  once each by the caller. */
+export function needsCountOf(tasks: KanbanTask[], episodes: readonly CoveringEpisode[] = []): number {
+    return tasks.filter((t) => columnOf(t) === "needs" && !(isUnavailableHolder(t) && coveredByEpisode(t, episodes))).length;
 }
 
 /** A waiting task's place in its backlog: the operator's rank, else when it was filed (srv's claim order). */

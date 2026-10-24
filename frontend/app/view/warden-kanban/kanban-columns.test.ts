@@ -10,7 +10,9 @@ import {
     columnTasks,
     isSpecd,
     matchesQuery,
+    needsCountOf,
     needsReason,
+    quotaReason,
     parseAfter,
     prLabel,
     rankBetween,
@@ -133,6 +135,59 @@ describe("which column a task is in", () => {
         expect(needsReason(task(4, "claimed", { holder: null }))).toBe("agent closed");
         expect(needsReason(task(5, "failed", { attempts: 3 }))).toBe("failed after 3 attempts");
         expect(columnOf(task(5, "failed"))).toBe("needs");
+    });
+});
+
+describe("a holder that can't work (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §4.3)", () => {
+    const RESETS = new Date(2026, 9, 25, 19, 0).getTime();
+    const limited = (over: Partial<KanbanTask> = {}) =>
+        task(1, "claimed", {
+            holder: agent("Naki-2", "limited"),
+            claimed_by: "Naki-2",
+            claimed_by_uid: "uid-Naki-2",
+            holder_unavailable: { state: "limited", title: "Usage limit reached", resets_at_ms: RESETS, since_ms: 1 },
+            ...over,
+        });
+
+    it("says out of quota until the reset, or just out of quota with none, and puts the card in Needs you", () => {
+        const t = limited();
+        expect(columnOf(t)).toBe("needs");
+        expect(needsReason(t)).toMatch(/^out of quota until .*7:00/);
+        expect(needsReason(t)).toBe(quotaReason(RESETS));
+        const noTime = limited({ holder_unavailable: { state: "limited", title: "", since_ms: 1 } });
+        expect(needsReason(noTime)).toBe("out of quota");
+        expect(quotaReason(null)).toBe("out of quota");
+    });
+
+    it("says needs sign-in for a signed-out holder", () => {
+        const t = task(2, "claimed", { holder: agent("Loap-3", "signed_out") });
+        expect([columnOf(t), needsReason(t)]).toEqual(["needs", "needs sign-in"]);
+    });
+
+    it("leaves a question the holder asked as the reason, and a working holder alone", () => {
+        const asked = task(3, "blocked", { holder: agent("Naki-2", "limited"), card: { question: "which branch?" } as KanbanTask["card"] });
+        expect(needsReason(asked)).toBe("asks: which branch?");
+        expect(needsReason(task(4, "claimed", { holder: agent("Naki-2", "working") }))).toBeNull();
+    });
+
+    it("counts a stuck task once: only when no open account episode covers its holder", () => {
+        const t = limited();
+        const other = task(5, "failed");
+        expect(needsCountOf([t, other])).toBe(2);
+        const byPane = { agent_ids: [], block_ids: ["b-Naki-2"] };
+        const byUid = { agent_ids: ["uid-Naki-2"], block_ids: [] };
+        const unrelated = { agent_ids: ["uid-someone"], block_ids: ["b-someone"] };
+        expect(needsCountOf([t, other], [byPane])).toBe(1);
+        expect(needsCountOf([t, other], [byUid])).toBe(1);
+        expect(needsCountOf([t, other], [unrelated])).toBe(2);
+        // Covered or not, it keeps its reason and sits in Needs you.
+        expect(columnOf(t)).toBe("needs");
+    });
+
+    it("counts every other reason even when the holder's account is in an episode", () => {
+        const asked = task(6, "blocked", { holder: agent("Naki-2", "limited"), claimed_by_uid: "uid-Naki-2" });
+        const failed = task(7, "failed");
+        expect(needsCountOf([asked, failed], [{ agent_ids: ["uid-Naki-2"], block_ids: ["b-Naki-2"] }])).toBe(2);
     });
 });
 

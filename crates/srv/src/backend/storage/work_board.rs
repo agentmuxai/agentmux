@@ -804,6 +804,50 @@ impl Store {
         )
     }
 
+    /// The operator takes a claimed or blocked task back from its holder
+    /// (R5 of docs/specs/SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md): it waits again,
+    /// its claim and question gone. With `retarget` it is given to that agent
+    /// (name, UID; both empty for anyone) in the same step, so no claim lands
+    /// between. Taking back isn't the task failing: the attempt doesn't count
+    /// against it (its limit grows by one). `attempts` stays as the fence: the
+    /// next claim gets a new number, and a late call from the old holder is
+    /// refused twice over, since the task no longer says it holds it. Returns
+    /// the row as it now is.
+    pub fn work_take_back(
+        &self,
+        work_id: &str,
+        retarget: Option<(&str, &str)>,
+        reason: &str,
+        now_ms: i64,
+    ) -> Result<Option<WorkItem>, StoreError> {
+        let (set, agent, uid) = match retarget {
+            Some((agent, uid)) => (true, agent, uid),
+            None => (false, "", ""),
+        };
+        let conn = self.conn().lock().unwrap();
+        let sql = format!(
+            "UPDATE db_work_queue
+                SET state = '{open}', claimed_by = '', claimed_by_uid = '', claim_expires = NULL,
+                    max_attempts = max_attempts + 1,
+                    target_agent = CASE WHEN ?2 THEN ?3 ELSE target_agent END,
+                    target_agent_uid = CASE WHEN ?2 THEN ?4 ELSE target_agent_uid END,
+                    target_group = CASE WHEN ?2 THEN '' ELSE target_group END,
+                    result = ?5, updated_at = ?6
+              WHERE id = ?1 AND state IN ('{claimed}', '{blocked}')
+              RETURNING {COLS}",
+            open = work_state::OPEN,
+            claimed = work_state::CLAIMED,
+            blocked = work_state::BLOCKED,
+        );
+        let item = conn
+            .query_row(&sql, params![work_id, set, agent, uid, reason, now_ms], row_to_item)
+            .optional()?;
+        if item.is_some() {
+            conn.execute("UPDATE db_work_cards SET question = '', updated_at = ?2 WHERE work_id = ?1", params![work_id, now_ms])?;
+        }
+        Ok(item)
+    }
+
     /// Extend the lease of a claim whose holder srv knows is alive (§6.8:
     /// activity is the heartbeat). Only the live claim, never a newer one.
     pub fn work_extend_lease(&self, work_id: &str, attempt: i64, now_ms: i64, lease_ms: i64) -> Result<bool, StoreError> {

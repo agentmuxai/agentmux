@@ -380,3 +380,47 @@ fn a_named_claim_keeps_the_queues_rules() {
     assert!(named(&s, "later", "Loap-3", "uid-l").is_none(), "not before its time");
     assert!(named(&s, "missing", "Loap-3", "uid-l").is_none());
 }
+
+#[test]
+fn taking_a_task_back_reopens_it_without_counting_the_attempt_and_fences_the_old_holder() {
+    let (s, _d) = store();
+    s.work_queue_enqueue(&item("t", 1000)).unwrap();
+    s.work_card_create("t", &NewCard::default(), 1000).unwrap();
+    let c = claim(&s, "Loap-3", "uid-l").unwrap();
+    s.work_card_set_question("t", "which branch?", 1500).unwrap();
+
+    // Not a held task: nothing happens.
+    s.work_queue_enqueue(&item("w", 1000)).unwrap();
+    assert!(s.work_take_back("w", None, "x", 2000).unwrap().is_none());
+
+    let back = s.work_take_back("t", Some(("Naki-2", "uid-n")), "taken back from Loap-3", 2000).unwrap().unwrap();
+    assert_eq!((back.state.as_str(), back.claimed_by.as_str(), back.claimed_by_uid.as_str()), (work_state::OPEN, "", ""));
+    assert_eq!((back.target_agent.as_str(), back.target_agent_uid.as_str(), back.target_group.as_str()), ("Naki-2", "uid-n", ""));
+    assert_eq!((back.attempts, back.max_attempts), (c.attempts, c.max_attempts + 1), "the attempt isn't spent");
+    assert_eq!(back.claim_expires, None);
+    assert_eq!(back.result, "taken back from Loap-3");
+    assert_eq!(s.work_board_get("t").unwrap().unwrap().card.question, "", "its question goes with the claim");
+    // The old holder's late calls find nothing to act on.
+    assert!(s.work_queue_heartbeat("t", "Loap-3", "uid-l", c.attempts, 3000, 1000).unwrap().is_none());
+    assert!(s.work_take_back("t", None, "again", 3000).unwrap().is_none(), "already waiting");
+    // The next claim is a new attempt.
+    assert_eq!(claim(&s, "Naki-2", "uid-n").unwrap().attempts, c.attempts + 1);
+
+    // Without a retarget, who it is for stays.
+    s.work_queue_enqueue(&for_agent("f", 1000, "Loap-3", "uid-l")).unwrap();
+    let held = claim(&s, "Loap-3", "uid-l").unwrap();
+    assert_eq!(held.id, "f");
+    let kept = s.work_take_back("f", None, "r", 4000).unwrap().unwrap();
+    assert_eq!((kept.target_agent.as_str(), kept.state.as_str()), ("Loap-3", work_state::OPEN));
+}
+
+#[test]
+fn a_blocked_task_can_be_taken_back_too() {
+    let (s, _d) = store();
+    s.work_queue_enqueue(&item("t", 1000)).unwrap();
+    s.work_card_create("t", &NewCard::default(), 1000).unwrap();
+    let c = claim(&s, "Loap-3", "").unwrap();
+    s.work_ask("t", "Loap-3", "", c.attempts, 1500).unwrap().unwrap();
+    assert_eq!(s.work_queue_get("t").unwrap().unwrap().state, work_state::BLOCKED);
+    assert!(s.work_take_back("t", None, "r", 2000).unwrap().is_some());
+}

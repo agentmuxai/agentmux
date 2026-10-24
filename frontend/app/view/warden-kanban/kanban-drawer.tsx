@@ -14,7 +14,7 @@ import { KanbanAfterSection } from "./kanban-after";
 import { agentStateWords, AgentChip } from "./kanban-card";
 import { columnOf, isFinishedColumn, isResearchKind, needsReason, requestedBy } from "./kanban-columns";
 import type { KanbanModel } from "./kanban-model";
-import type { KanbanAgent, KanbanEvent, KanbanTask } from "./kanban-types";
+import type { KanbanActRequest, KanbanAgent, KanbanEvent, KanbanTask } from "./kanban-types";
 
 const EVENT_WORDS: Record<string, string> = {
     created: "created it",
@@ -39,7 +39,12 @@ const EVENT_WORDS: Record<string, string> = {
     linked: "linked",
     reminded: "reminded its agent",
     tracked: "started following it",
+    taken_back: "took it back",
+    reassigned: "took it back and gave it to someone else",
 };
+
+/** The "Give it to…" choice for anyone: no agent in particular. */
+const ANYONE = "__anyone";
 
 function EventLine(props: { ev: KanbanEvent; now: number }): JSX.Element {
     const who = () => (props.ev.actor_kind === "operator" ? "You" : props.ev.actor || "AgentMux");
@@ -75,7 +80,13 @@ export function KanbanDrawer(props: {
     const [text, setText] = createSignal("");
     const [startOn, setStartOn] = createSignal("");
     const [busy, setBusy] = createSignal(false);
+    // Taking a task back that has a branch or PR asks first: what srv said, and the move to repeat once confirmed.
+    const [confirming, setConfirming] = createSignal<{ words: string; req: KanbanActRequest } | null>(null);
+    const [giveTo, setGiveTo] = createSignal("");
     const column = () => columnOf(t());
+    // An agent holds it (claimed, or blocked on a question): the operator can take it back from them.
+    const heldByAgent = () => t().state === "claimed" || t().state === "blocked";
+    const otherAgents = () => runningAgents().filter((a) => a.name !== t().claimed_by);
     // What accepting a spec unlocks: "Unlocks #1106 'Build: …' for Naki-2".
     const specUnlocks = () =>
         isResearchKind(t().kind)
@@ -86,12 +97,19 @@ export function KanbanDrawer(props: {
             : "";
     const runningAgents = () => props.agents.filter((a) => a.state !== "stopped" && a.state !== "gone");
 
-    const act = async (req: Parameters<KanbanModel["act"]>[0]) => {
+    const act = async (req: KanbanActRequest) => {
         setBusy(true);
         const res = await props.model.act({ id: t().id, ...req });
         setBusy(false);
         if (res) setText("");
         return res;
+    };
+
+    /** `release` or `reassign`; when srv asks, show its words and wait for the operator's yes. */
+    const takeBack = async (req: KanbanActRequest) => {
+        const res = await act(req);
+        setConfirming(res && !res.ok && res.confirm ? { words: res.confirm, req } : null);
+        if (res?.ok) setGiveTo("");
     };
 
     return (
@@ -173,6 +191,65 @@ export function KanbanDrawer(props: {
             </Show>
 
             <section class="kanban-drawer__actions">
+                <Show when={heldByAgent()}>
+                    <Show when={t().holder_unavailable}>
+                        <p class="warden-manager-dim">
+                            {t().claimed_by || "Its agent"} can't work right now. Take the task back to let someone else do it.
+                        </p>
+                    </Show>
+                    <div class="kanban-drawer__row">
+                        <Button
+                            density="compact"
+                            icon="rotate-left"
+                            disabled={busy()}
+                            title="Return it to the backlog; its agent is told to stop"
+                            onClick={() => void takeBack({ action: "release" })}
+                        >
+                            Take it back
+                        </Button>
+                        <Select
+                            value={giveTo()}
+                            onChange={setGiveTo}
+                            density="compact"
+                            ariaLabel="Agent to give it to"
+                            options={[
+                                { value: "", label: "Give it to…" },
+                                { value: ANYONE, label: "Anyone" },
+                                ...otherAgents().map((a) => ({ value: a.name, label: `${a.name} (${agentStateWords(a.state)})` })),
+                            ]}
+                        />
+                        <Button
+                            density="compact"
+                            tone="accent"
+                            icon="share"
+                            disabled={!giveTo() || busy()}
+                            onClick={() => void takeBack({ action: "reassign", agent: giveTo() === ANYONE ? "" : giveTo() })}
+                        >
+                            Give
+                        </Button>
+                    </div>
+                    <Show when={confirming()}>
+                        {(c) => (
+                            <div class="kanban-drawer__confirm" role="alert">
+                                <p class="kanban-drawer__reason">{c().words}</p>
+                                <div class="kanban-drawer__row">
+                                    <Button
+                                        density="compact"
+                                        tone="danger"
+                                        icon="rotate-left"
+                                        disabled={busy()}
+                                        onClick={() => void takeBack({ ...c().req, confirm: true })}
+                                    >
+                                        Take it back anyway
+                                    </Button>
+                                    <Button density="compact" tone="quiet" disabled={busy()} onClick={() => setConfirming(null)}>
+                                        Leave it
+                                    </Button>
+                                </div>
+                            </div>
+                        )}
+                    </Show>
+                </Show>
                 <Show when={column() === "backlog" || column() === "specd"}>
                     <div class="kanban-drawer__row">
                         <Select

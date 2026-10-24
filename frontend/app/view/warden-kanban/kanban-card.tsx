@@ -48,8 +48,10 @@ export function agentTone(state: KanbanAgentState | undefined): StatusTone {
         case "working":
             return "busy";
         case "waiting":
+        case "limited":
             return "warn";
         case "error":
+        case "signed_out":
             return "error";
         case "idle":
             return "ok";
@@ -64,6 +66,8 @@ const STATE_WORDS: Record<KanbanAgentState, string> = {
     idle: "idle",
     stopped: "stopped",
     error: "errored",
+    limited: "out of quota",
+    signed_out: "signed out",
     gone: "closed",
 };
 

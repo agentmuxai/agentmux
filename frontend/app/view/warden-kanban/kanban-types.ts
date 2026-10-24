@@ -8,7 +8,18 @@
 export type TaskState = "open" | "held" | "claimed" | "blocked" | "review" | "done" | "failed" | "cancelled";
 
 /** An agent's state as srv decides it (`AgentState`), or `gone` when it isn't registered. */
-export type KanbanAgentState = "working" | "waiting" | "idle" | "stopped" | "error" | "gone";
+export type KanbanAgentState = "working" | "waiting" | "idle" | "stopped" | "error" | "limited" | "signed_out" | "gone";
+
+/** Why a task's holder can't work (`Unavailable` in crates/srv/src/backend/agent_state.rs): out of quota, or
+ *  signed out. Absent from an older srv, and while the holder can work. */
+export interface KanbanUnavailable {
+    state: "limited" | "signed_out";
+    title: string;
+    /** When the limit lifts (ms), when the provider said. */
+    resets_at_ms?: number | null;
+    /** Since when it has been in this state (ms). */
+    since_ms: number;
+}
 
 export interface ChecklistItem {
     text: string;
@@ -90,6 +101,8 @@ export interface KanbanTask {
     card: KanbanCardFields;
     /** The agent holding it, when one does and it is registered here. */
     holder: KanbanAgent | null;
+    /** Why that agent can't work, when it can't. */
+    holder_unavailable?: KanbanUnavailable | null;
 }
 
 export interface KanbanBoard {
@@ -121,7 +134,19 @@ export interface KanbanTaskDetail {
 
 /** `kanban.act`'s request: one of the operator's moves. */
 export interface KanbanActRequest {
-    action: "create" | "edit" | "move" | "start" | "answer" | "accept" | "send_back" | "cancel" | "retry" | "track";
+    action:
+        | "create"
+        | "edit"
+        | "move"
+        | "start"
+        | "answer"
+        | "accept"
+        | "send_back"
+        | "cancel"
+        | "retry"
+        | "track"
+        | "release"
+        | "reassign";
     id?: string;
     title?: string;
     payload?: string;
@@ -136,10 +161,14 @@ export interface KanbanActRequest {
     block_id?: string;
     /** create, edit: the tasks it starts after, by id or number; edit replaces the list. */
     after?: string[];
+    /** release, reassign: the operator read the warning (the task has a branch or PR) and wants it anyway. */
+    confirm?: boolean;
 }
 
 export interface KanbanActResult {
     ok: boolean;
+    /** release, reassign: nothing changed; the words to ask the operator, who answers by acting again with `confirm`. */
+    confirm?: string;
     id?: string;
     num?: number;
     attempt?: number;
