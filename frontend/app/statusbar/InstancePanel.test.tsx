@@ -162,6 +162,16 @@ describe("InstancePanel workspace heading", () => {
 
 describe("InstancePanel closed windows", () => {
     const at = new Date(2026, 9, 23, 14, 2).getTime();
+    // The panel labels `at` against the clock: pin it to the same day, or the
+    // label reads "closed yesterday …" after midnight. Only Date is faked, so
+    // `flush`'s setTimeout still runs.
+    beforeEach(() => {
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(new Date(2026, 9, 23, 18, 0));
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+    });
 
     it("lists closed windows greyed after the open ones, with when they closed, and counts them", async () => {
         closedList.current = [closedWindow("ws-2", "Scratch", at)];
