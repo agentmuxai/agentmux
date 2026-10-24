@@ -323,7 +323,8 @@ pub fn notify_unlocked(identity: &Store, mstore: &Store, finished_id: &str) -> u
         if !continues(mstore, &reg.block_id) {
             continue;
         }
-        match handler.deliver_system_note(&reg.agent_id, &unlocked_text(&spec, &build)) {
+        let to = note_address(reg.uid.as_deref(), &reg.agent_id);
+        match handler.deliver_system_note(&to, &unlocked_text(&spec, &build)) {
             Ok(()) => {
                 record(identity, &build.item.id, "agentmux", "unlocked", &format!("#{} done", spec.card.num));
                 told += 1;
@@ -332,6 +333,12 @@ pub fn notify_unlocked(identity: &Store, mstore: &Store, finished_id: &str) -> u
         }
     }
     told
+}
+
+/// How a note is addressed to a registered agent: by UID when it has one, since
+/// a name two live agents share can't be delivered to.
+fn note_address(uid: Option<&str>, agent_id: &str) -> String {
+    uid.filter(|u| !u.is_empty()).unwrap_or(agent_id).to_string()
 }
 
 /// The progress watcher saw these agents open PRs: an agent holding exactly
@@ -422,6 +429,13 @@ mod tests {
             },
             card: WorkCard { num, requested_by_kind: kind.into(), requested_by: by.into(), ..Default::default() },
         }
+    }
+
+    #[test]
+    fn a_note_goes_to_the_uid_when_there_is_one() {
+        assert_eq!(note_address(Some("uid-2"), "Twin"), "uid-2", "two agents may share the name");
+        assert_eq!(note_address(None, "Twin"), "Twin");
+        assert_eq!(note_address(Some(""), "Twin"), "Twin");
     }
 
     #[test]
