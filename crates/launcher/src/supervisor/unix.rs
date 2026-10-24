@@ -820,10 +820,10 @@ pub(crate) async fn run_unix(
     let ((), srv_stopped) = tokio::join!(stop_host, stop_srv);
     let srv_gone = match srv_stopped {
         Ok((_, crate::upgrade::QuiesceOutcome::ExitedAfterForceKill)) => {
-            // Killed mid-teardown. Its agent CLIs lead their own process
-            // groups and are ended just below. Its own group isn't signalled
-            // here: srv is already reaped, so its pid may have been reused.
-            log("WARN: srv didn't exit in time — killed it");
+            // Killed mid-teardown, with its own process group (`quiesce_srv`
+            // does that while srv is still unreaped). Its agent CLIs lead
+            // groups of their own and are ended just below.
+            log("WARN: srv didn't exit in time — killed it and its process group");
             true
         }
         Ok((_, outcome)) => {

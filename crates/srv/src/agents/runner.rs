@@ -211,7 +211,7 @@ pub(crate) async fn run_agent_with_bin(
         cmd.no_window();
     }
     crate::backend::process_tracker::registry::own_process_group(&mut cmd);
-    let mut child = cmd
+    let mut child = agentmux_common::process::KillGroupOnDrop(cmd
         .arg(&task.prompt)
         .current_dir(&working_dir)
         .stdin(Stdio::null())
@@ -219,7 +219,7 @@ pub(crate) async fn run_agent_with_bin(
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|e| AgentError::Spawn(format!("spawn `{bin}`: {e}")))?;
+        .map_err(|e| AgentError::Spawn(format!("spawn `{bin}`: {e}")))?);
     crate::backend::process_tracker::registry::record_untracked_cli(child.id());
 
     let stdout = child

@@ -65,13 +65,13 @@ pub async fn invoke_haiku(
         cmd.current_dir(dir);
     }
     crate::backend::process_tracker::registry::own_process_group(&mut cmd);
-    let mut child = cmd
+    let mut child = agentmux_common::process::KillGroupOnDrop(cmd
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|e| format!("failed to spawn the ambient CLI: {e}"))?;
+        .map_err(|e| format!("failed to spawn the ambient CLI: {e}"))?);
     crate::backend::process_tracker::registry::record_untracked_cli(child.id());
 
     if let Some(mut stdin) = child.stdin.take() {

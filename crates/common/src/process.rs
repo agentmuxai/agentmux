@@ -218,6 +218,32 @@ pub fn start_kill_child_and_group(child: &mut tokio::process::Child) -> io::Resu
     child.start_kill()
 }
 
+/// A child that, if dropped before it was reaped, takes its process group
+/// with it ([`start_kill_child_and_group`]) rather than only itself, as
+/// `kill_on_drop` does. For a CLI a caller may abandon (a cancelled task):
+/// its helpers live in the CLI's group and would otherwise outlive it. Derefs
+/// to the child.
+pub struct KillGroupOnDrop(pub tokio::process::Child);
+
+impl std::ops::Deref for KillGroupOnDrop {
+    type Target = tokio::process::Child;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for KillGroupOnDrop {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl Drop for KillGroupOnDrop {
+    fn drop(&mut self) {
+        let _ = start_kill_child_and_group(&mut self.0);
+    }
+}
+
 fn signal_unreaped_group(child: &tokio::process::Child) {
     #[cfg(unix)]
     if let Some(pid) = child.id() {
@@ -493,6 +519,33 @@ mod tests {
         assert!(leads_own_group(other_pid), "the sibling's group still has its leader");
         assert!(other.try_wait().unwrap().is_none(), "the sibling still runs");
         kill_child_and_group(&mut other).await.unwrap();
+    }
+
+    /// An abandoned CLI (its task dropped) takes its helpers with it.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_dropped_guard_kills_the_childs_group() {
+        let mut cmd = tokio::process::Command::new("sh");
+        cmd.args(["-c", "sleep 30 & echo $!; wait"]).stdout(std::process::Stdio::piped()).process_group(0);
+        let mut guard = KillGroupOnDrop(cmd.spawn().expect("spawn sh"));
+        let mut out = guard.stdout.take().unwrap();
+        let mut line = Vec::new();
+        let mut byte = [0u8; 1];
+        while tokio::io::AsyncReadExt::read(&mut out, &mut byte).await.unwrap() == 1 && byte[0] != b'\n' {
+            line.push(byte[0]);
+        }
+        let helper: u32 = String::from_utf8(line).unwrap().trim().parse().unwrap();
+        assert!(process_start_time(helper).is_some());
+        drop(guard);
+        let mut gone = false;
+        for _ in 0..100 {
+            if process_start_time(helper).is_none() || is_zombie(helper) {
+                gone = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(gone, "the helper outlived the dropped guard");
     }
 
     /// A child that doesn't lead its own group is killed by pid alone: its
