@@ -28,7 +28,7 @@ import { selectTrace } from "@/app/util/select-trace";
 import type { SwarmOrderItem } from "./swarm-order";
 import { useSwarmOrder } from "./swarm-order-hold";
 import { phaseToDisplayStatus, type AgentDisplayStatus } from "./swarm-display-status";
-import { LongToolNote, UnavailableChip } from "./swarm-row-notes";
+import { BuildSlotNote, LongToolNote, UnavailableChip } from "./swarm-row-notes";
 import { AgentStatusChip, chipStatus } from "./swarm-status-chip";
 import { unavailableLineText, unavailableOfMeta, unavailableTitle } from "@/app/store/agent-unavailable";
 import { BackgroundTaskBucket, SubagentBackgroundTasks, visibleBackgroundTasks } from "./swarm-background-tasks";
@@ -635,6 +635,7 @@ export function AgentRow({
                         </span>
                     </Show>
                     <LongToolNote rows={longRunningRows} live={() => node().agentStatus === "running"} now={rowNow} />
+                    <BuildSlotNote blockId={node().blockId} now={rowNow} />
                     <Show
                         when={unavailable()}
                         fallback={

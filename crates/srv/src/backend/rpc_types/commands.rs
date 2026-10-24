@@ -103,6 +103,8 @@ pub const COMMAND_BACKGROUND_TASK_PID: &str = "backgroundtaskpid";
 /// generation with no transcript history of ever launching it. See
 /// docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md §3.1.
 pub const COMMAND_LIST_BACKGROUND_TASKS: &str = "listbackgroundtasks";
+/// Who holds this machine's build slot (`agentmux_common::build_slot`), or null: the Swarm row note.
+pub const COMMAND_GET_BUILD_SLOT: &str = "getbuildslot";
 
 // Subprocess agent commands
 pub const COMMAND_SUBPROCESS_SPAWN: &str = "subprocessspawn";

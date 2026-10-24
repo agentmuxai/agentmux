@@ -551,6 +551,11 @@
             "method": "GetAllAgentContentCommand"
         },
         {
+            "command": "getbuildslot",
+            "method": "GetBuildSlotCommand",
+            "send": "data ?? {}"
+        },
+        {
             "command": "getmemory",
             "method": "GetBundleCommand"
         },

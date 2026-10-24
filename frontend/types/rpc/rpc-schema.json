@@ -2990,6 +2990,25 @@
     }
   },
   {
+    "command": "getbuildslot",
+    "request": "agentmux_srv::backend::rpc_types::build_slot::CommandGetBuildSlotData",
+    "requestName": "CommandGetBuildSlotData",
+    "requestTs": {
+      "imports": [
+        "CommandGetBuildSlotData"
+      ],
+      "name": "CommandGetBuildSlotData"
+    },
+    "response": "core::option::Option<agentmux_srv::backend::rpc_types::build_slot::BuildSlotView>",
+    "responseName": "core::option::Option<agentmux_srv::backend::rpc_types::build_slot::BuildSlotView>",
+    "responseTs": {
+      "imports": [
+        "BuildSlotView"
+      ],
+      "name": "BuildSlotView | null"
+    }
+  },
+  {
     "command": "getclaudeglobalconfig",
     "request": "agentmux_srv::backend::rpc_types::bundle::CommandGetClaudeGlobalConfigData",
     "requestName": "CommandGetClaudeGlobalConfigData",

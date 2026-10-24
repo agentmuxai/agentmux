@@ -829,7 +829,8 @@
 }
 
 // A tool call that has been running a while, on the row of the agent running it. Information only.
-.swarm-long-tool {
+.swarm-long-tool,
+.swarm-build-slot {
     flex-shrink: 1;
     min-width: 0;
     overflow: hidden;
