@@ -173,7 +173,7 @@ pub(super) async fn handle_work_enqueue(
         Some(_) => return err(StatusCode::BAD_REQUEST, "first: \"spec\" or \"research\""),
         None => None,
     };
-    let filing = super::work_tasks::Filing { repo: req.repo, review: req.review };
+    let filing = super::work_tasks::Filing { repo: req.repo, review: review_for(req.review, first.is_some()) };
     let card = super::work_tasks::prepare_card(&state, caller.as_deref(), &item.created_by, filing).await;
     let Some(first) = first else {
         return match enqueue_one(&state, &item, &after, &card) {
@@ -216,6 +216,14 @@ pub(super) async fn handle_work_enqueue(
         StatusCode::OK,
         Json(json!({ "id": spec.id, "num": spec_num, "build_id": build.id, "build_num": build_num })),
     )
+}
+
+/// Whether a filing is held for the operator's Accept: what the filer said, else
+/// (a spec-and-build pair) no, as in the operator's "Spec first". Left to the
+/// provenance default, a spec an operator asked for would wait for an Accept
+/// that never comes, and its build could not start.
+fn review_for(asked: Option<bool>, pair: bool) -> Option<bool> {
+    asked.or(pair.then_some(false))
 }
 
 /// Enqueue one task with what it starts after (the row and the list in one
@@ -613,5 +621,18 @@ pub(super) async fn handle_work_cancel(
             Json(json!({ "ok": false, "error": "no open or claimed item with that id" })),
         ),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("cancel failed: {e}")),
+    }
+}
+
+#[cfg(test)]
+mod review_for_tests {
+    use super::review_for;
+
+    #[test]
+    fn a_pair_defaults_to_no_accept_unless_asked() {
+        assert_eq!(review_for(None, true), Some(false));
+        assert_eq!(review_for(Some(true), true), Some(true), "asked for stands");
+        assert_eq!(review_for(None, false), None, "a single task keeps the provenance default");
+        assert_eq!(review_for(Some(false), false), Some(false));
     }
 }

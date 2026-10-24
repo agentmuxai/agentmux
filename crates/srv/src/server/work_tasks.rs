@@ -324,6 +324,20 @@ pub(super) struct UpdateRequest {
     pub text: String,
 }
 
+/// Why a handed-in document path can't be kept, if it can't. The card's Open
+/// button gives the path to the Editor as it is, and srv has no way to tell
+/// which clone a relative path meant, so only an absolute (or `~/`) path will do.
+fn doc_problem(req: &UpdateRequest) -> Option<String> {
+    let path = req.doc.as_deref().map(str::trim).filter(|p| !p.is_empty())?;
+    let bytes = path.as_bytes();
+    let absolute = path.starts_with('/')
+        || path.starts_with('\\')
+        || path.starts_with("~/")
+        || path.starts_with("~\\")
+        || (bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && matches!(bytes[2], b'/' | b'\\'));
+    (!absolute).then(|| format!("links.doc \"{path}\" is a relative path: give the document's full path, e.g. C:/Users/you/work/repo/docs/specs/SPEC_X.md"))
+}
+
 fn card_update(req: &UpdateRequest) -> CardUpdate {
     let one = |s: &Option<String>| s.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(clean);
     CardUpdate {
@@ -382,6 +396,9 @@ pub(super) async fn handle_work_update(
     let Ok(Some(item)) = state.identity_store.work_queue_get(&id) else { return conflict() };
     if !holds(&item, &req.agent_id, holder_uid(caller), req.attempt) {
         return conflict();
+    }
+    if let Some(why) = doc_problem(&req) {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": why })));
     }
     let now = now_ms();
     let _ = state.identity_store.work_card_ensure(&id, now);
@@ -449,6 +466,9 @@ pub(super) async fn handle_work_submit(
     let result = clean(&req.text);
     if result.is_empty() {
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "result is required: what was done, with links" })));
+    }
+    if let Some(why) = doc_problem(&req) {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": why })));
     }
     let id = resolve_id(&state, &id);
     finish(&state, caller, &id, &req.agent_id, req.attempt, &result, Some(card_update(&req))).await

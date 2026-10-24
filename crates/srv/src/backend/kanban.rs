@@ -257,8 +257,8 @@ pub fn pair_title(kind: &str, title: &str) -> String {
 pub fn spec_payload(kind: &str, payload: &str) -> String {
     let doc = if kind == "research" { "report" } else { "spec" };
     format!(
-        "{payload}\n\nWrite this up as a {doc} first: no code. Leave it uncommitted in your clone and give its path \
-         with Tasks update (links.doc). A build task starts after this one: when the {doc} is approved, \
+        "{payload}\n\nWrite this up as a {doc} first: no code. Leave it uncommitted in your clone and give its full path \
+         (not relative to your clone) with Tasks update (links.doc). A build task starts after this one: when the {doc} is approved, \
          complete this task, and the build's agent is told it can start."
     )
 }

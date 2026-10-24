@@ -40,6 +40,28 @@ async fn tasks_get_numbers_that_work_wherever_an_id_does() {
 }
 
 #[tokio::test]
+async fn a_document_link_must_be_a_full_path() {
+    let app = app();
+    post(&app, "/agentmux/work", json!({"title": "t", "payload": "p"})).await;
+    let (_, c) = post(&app, "/agentmux/work/claim", json!({"agent_id": "a1"})).await;
+    let (num, attempt) = (c["num"].as_i64().unwrap(), c["attempt"].as_i64().unwrap());
+    let uri = format!("/agentmux/work/{num}/update");
+    let update = |doc: &str| json!({"agent_id": "a1", "attempt": attempt, "doc": doc});
+
+    let (s, v) = post(&app, &uri, update("docs/specs/SPEC_X.md")).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert!(v["error"].as_str().unwrap().contains("relative path"), "{v}");
+    for ok in ["C:/Users/a/SPEC_X.md", r"c:\Users\a\SPEC_X.md", "/home/a/SPEC_X.md", "~/work/SPEC_X.md", r"\\host\share\SPEC_X.md"] {
+        let (s, v) = post(&app, &uri, update(ok)).await;
+        assert_eq!(s, StatusCode::OK, "{ok}: {v}");
+    }
+
+    let submit = json!({"agent_id": "a1", "attempt": attempt, "text": "done", "doc": "SPEC_X.md"});
+    let (s, v) = post(&app, &format!("/agentmux/work/{num}/submit"), submit).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "submit checks it too: {v}");
+}
+
+#[tokio::test]
 async fn finishing_a_task_names_the_next_one_waiting_for_the_agent() {
     let app = app();
     post(&app, "/agentmux/work", json!({"title": "first", "payload": "p", "target_agent": "a1"})).await;

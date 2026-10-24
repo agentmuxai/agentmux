@@ -169,7 +169,7 @@ pub(crate) const TASKS_TOOL: &str = r#"{
       "reason":       { "type": "string", "description": "release: why you are handing it back, which the next claimant sees; hold, unhold: why, shown on the card (e.g. \"waiting on GitHub Support\")" },
       "note":         { "type": "string", "description": "update: a short progress note the operator sees on the card" },
       "checklist":    { "type": "array", "items": { "type": "object", "properties": { "text": { "type": "string" }, "status": { "type": "string", "enum": ["pending", "in_progress", "completed"] } }, "required": ["text", "status"] }, "description": "update: the task's steps, replaced whole" },
-      "links":        { "type": "object", "properties": { "pr": { "type": "string" }, "branch": { "type": "string" }, "doc": { "type": "string" } }, "description": "update, submit: the PR URL and branch; doc: the path of the spec or report the task wrote, which its build's card shows" },
+      "links":        { "type": "object", "properties": { "pr": { "type": "string" }, "branch": { "type": "string" }, "doc": { "type": "string" } }, "description": "update, submit: the PR URL and branch; doc: the full path (absolute, not relative to your clone) of the spec or report the task wrote, which its build's card shows" },
       "question":     { "type": "string", "description": "ask: what you need the operator to decide or give you" },
       "state":        { "type": "string", "description": "list: open, held, claimed, blocked, review, done, failed or cancelled (default all)" },
       "limit":        { "type": "integer", "description": "list: the most items to return (1-500, default 50)" }
