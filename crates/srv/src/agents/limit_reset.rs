@@ -64,7 +64,8 @@ pub fn observe_frame(block_id: &str, frame: &Value) {
     }
 }
 
-/// Forget `block_id`'s rate-limit info (its pane closed).
+/// Forget `block_id`'s rate-limit info: its pane closed
+/// (`blockcontroller::release_block_processes`).
 pub fn forget(block_id: &str) {
     LATEST.lock().remove(block_id);
 }
