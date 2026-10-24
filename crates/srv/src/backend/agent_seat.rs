@@ -175,6 +175,61 @@ pub fn summary_in(mstore: &Store, defs: &[AgentDefinition], def_id: &str) -> Opt
     Some(summarize(&seat, |id| defs.iter().find(|d| d.id == id).map(|d| d.name.clone())))
 }
 
+/// [`summary_in`] by uid, for a reader that has no definition list: the
+/// lead is named by looking its definition up.
+pub fn summary_by_id(mstore: &Store, id: &str) -> Option<SeatSummary> {
+    let seat = effective_seat_by_id(mstore, id)?;
+    Some(summarize(&seat, |lead| mstore.agent_def_get(lead).ok().flatten().map(|d| d.name)))
+}
+
+/// The block meta key an agent pane keeps its agent's seat summary under,
+/// for the pane header's tooltip (§4). Seeded at `agent.open`, as `ui:color`
+/// is, and refreshed by `agent.setSeat` ([`stale_seat_meta`]).
+pub const SEAT_META_KEY: &str = "agent:seat";
+
+/// `agent:seat` as a meta value: the summary, or `null` for none, which a
+/// meta patch reads as "remove the key".
+pub fn seat_meta(summary: Option<&SeatSummary>) -> serde_json::Value {
+    summary.and_then(|s| serde_json::to_value(s).ok()).unwrap_or(serde_json::Value::Null)
+}
+
+/// Put agent `id`'s seat into the meta of a pane being opened for it, when
+/// it has one.
+pub fn seed_meta(mstore: &Store, id: &str, meta: &mut crate::backend::obj::MetaMapType) {
+    if let Some(seat) = summary_by_id(mstore, id) {
+        meta.insert(SEAT_META_KEY.to_string(), seat_meta(Some(&seat)));
+    }
+}
+
+/// The agent panes among `blocks` whose `agent:seat` no longer matches the
+/// seat `summary_of` gives their agent now, each with the value to patch in.
+/// `summary_of` is asked once per agent.
+pub fn stale_seat_meta(
+    blocks: &[crate::backend::obj::Block],
+    mut summary_of: impl FnMut(&str) -> Option<SeatSummary>,
+) -> Vec<(String, serde_json::Value)> {
+    let mut by_agent: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
+    let mut stale = Vec::new();
+    for block in blocks {
+        if crate::backend::obj::meta_get_string(&block.meta, "view", "") != "agent" {
+            continue;
+        }
+        let agent_id = crate::backend::obj::meta_get_string(&block.meta, "agentId", "");
+        if agent_id.is_empty() {
+            continue;
+        }
+        let want = by_agent
+            .entry(agent_id.clone())
+            .or_insert_with(|| seat_meta(summary_of(&agent_id).as_ref()))
+            .clone();
+        let have = block.meta.get(SEAT_META_KEY).cloned().unwrap_or(serde_json::Value::Null);
+        if have != want {
+            stale.push((block.oid.clone(), want));
+        }
+    }
+    stale
+}
+
 /// A seat summary a LAN peer sent, made safe to show (§5): a known role
 /// only, each text on one line and within its limit (cut, not refused: the
 /// peer validated it, this only bounds it). `None` when it can't be read.

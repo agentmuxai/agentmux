@@ -15,20 +15,48 @@ use crate::backend::storage::store::Store;
 use super::super::AppState;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let mstore = state.mstore.clone();
-    let broker = state.broker.clone();
+    let state = state.clone();
     engine.register_typed(COMMAND_AGENT_SET_SEAT, move |cmd: CommandAgentSetSeatData, ctx| {
-        let mstore = mstore.clone();
-        let broker = broker.clone();
+        let state = state.clone();
         async move {
             operator_only(&ctx)?;
+            let mstore = state.mstore.clone();
             let result = tokio::task::spawn_blocking(move || set_seat(&mstore, cmd))
                 .await
                 .map_err(|e| format!("agent.setSeat: {e}"))??;
-            broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
+            state.broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
+            refresh_pane_seats(&state).await;
             Ok(result)
         }
     });
+}
+
+/// Bring the `agent:seat` of every open agent pane up to date, so the pane
+/// header's tooltip shows the seat just set (§4). Best-effort: a pane that
+/// can't be patched shows the old seat until it's opened again.
+async fn refresh_pane_seats(state: &AppState) {
+    use crate::backend::agent_seat::{stale_seat_meta, summary_by_id, SEAT_META_KEY};
+    let mstore = state.mstore.clone();
+    let stale = tokio::task::spawn_blocking(move || {
+        let blocks = mstore.get_all::<crate::backend::obj::Block>().unwrap_or_default();
+        stale_seat_meta(&blocks, |id| summary_by_id(&mstore, id))
+    })
+    .await
+    .unwrap_or_default();
+    for (block_id, value) in stale {
+        let patch = serde_json::json!({ SEAT_META_KEY: value });
+        let events = crate::server::service::dispatch_to_reducer(
+            state,
+            agentmux_common::ipc::Command::UpdateBlockMeta { block_id, meta_patch: patch },
+        )
+        .await;
+        for ev in &events {
+            if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore) {
+                tracing::warn!("agent.setSeat: pane seat refresh failed: {e}");
+            }
+        }
+        crate::server::service::publish_events(state, &events);
+    }
 }
 
 /// Refuse a connection registered as an agent (`bus:register`), the same
