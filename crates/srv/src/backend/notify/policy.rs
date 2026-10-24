@@ -241,6 +241,10 @@ pub struct ShutdownInfo {
     /// The agent's session is running (the button says "Keep running"), not
     /// already stopped ("Keep open").
     pub running: bool,
+    /// The request this notification is about. Kept with the live notification
+    /// so its Keep running button can only cancel this request, never a later
+    /// one for the same block (#5397).
+    pub request_id: String,
 }
 
 #[derive(Clone, Debug)]
@@ -368,6 +372,8 @@ pub enum Action {
 #[derive(Clone, Debug)]
 struct Live {
     notification: Notification,
+    /// For a pending shutdown: the request it belongs to (`ShutdownInfo`).
+    request_id: Option<String>,
     due_at_ms: i64,
     shown: bool,
     /// Replaces a toast of the same group that was already on screen — it
@@ -580,6 +586,7 @@ impl PolicyState {
                     group,
                     Live {
                         notification,
+                        request_id: req.shutdown.as_ref().map(|i| i.request_id.clone()),
                         due_at_ms: now_ms + req.kind.delay_ms(),
                         shown: false,
                         replaces_shown: replaced_shown,
@@ -719,7 +726,7 @@ impl PolicyState {
             tag: tag_for(&group),
             created_at_ms: now_ms,
         };
-        self.live.insert(group, Live { notification: n.clone(), due_at_ms: now_ms, shown: true, replaces_shown: false });
+        self.live.insert(group, Live { notification: n.clone(), request_id: None, due_at_ms: now_ms, shown: true, replaces_shown: false });
         vec![Action::Show(n)]
     }
 
@@ -753,13 +760,14 @@ impl PolicyState {
         }
     }
 
-    /// The kind and block of the live notification with this id: what a
-    /// button press on it is about. Looked up here, never read from the press.
-    pub fn live_by_id(&self, id: &str) -> Option<(NotifyKind, String)> {
+    /// The kind, block and (for a shutdown) request of the live notification
+    /// with this id: what a button press on it is about. Looked up here, never
+    /// read from the press.
+    pub fn live_by_id(&self, id: &str) -> Option<(NotifyKind, String, Option<String>)> {
         self.live
             .values()
             .find(|l| l.notification.id == id)
-            .map(|l| (l.notification.kind, l.notification.block_id.clone()))
+            .map(|l| (l.notification.kind, l.notification.block_id.clone(), l.request_id.clone()))
     }
 
     /// Number of live (pending or shown) notifications — for tests/diagnostics.
@@ -1262,7 +1270,7 @@ mod tests {
 
     fn shutdown_req(effect: &'static str, running: bool, deadline_ms: i64) -> Request {
         Request {
-            shutdown: Some(ShutdownInfo { deadline_ms, effect, running }),
+            shutdown: Some(ShutdownInfo { deadline_ms, effect, running, request_id: "r1".into() }),
             ..req(NotifyKind::ShutdownPending, "b1")
         }
     }
@@ -1321,7 +1329,7 @@ mod tests {
         p.step(Input::Emit(shutdown_req("close_tab", true, 15_000)), 0, &s);
         let a = p.step(Input::Tick, 0, &s);
         let id = shows(&a)[0].id.clone();
-        assert_eq!(p.live_by_id(&id), Some((NotifyKind::ShutdownPending, "b1".to_string())));
+        assert_eq!(p.live_by_id(&id), Some((NotifyKind::ShutdownPending, "b1".to_string(), Some("r1".to_string()))));
         assert_eq!(p.live_by_id("n0-nope"), None);
         p.step(Input::Ack { id: id.clone(), clicked: false }, 1_000, &s);
         assert_eq!(p.live_by_id(&id), None, "gone once acked, so a late press finds nothing");

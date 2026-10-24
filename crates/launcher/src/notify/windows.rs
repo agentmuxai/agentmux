@@ -318,10 +318,7 @@ fn update_toast(
 fn expire_after(toast: &ToastNotification, ms: i64) -> windows::core::Result<()> {
     // FILETIME epoch (1601) in 100 ns ticks.
     const UNIX_TO_FILETIME_TICKS: i64 = 116_444_736_000_000_000;
-    let unix_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or_default();
+    let unix_ms = agentmux_common::time::now_ms();
     let at = DateTime { UniversalTime: (unix_ms + ms) * 10_000 + UNIX_TO_FILETIME_TICKS };
     let at: IReference<DateTime> = PropertyValue::CreateDateTime(at)?.cast()?;
     toast.SetExpirationTime(&at)
@@ -503,6 +500,53 @@ mod tests {
         let secs = std::env::var("SMOKE_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(8);
         std::thread::sleep(std::time::Duration::from_secs(secs));
         p.clear_all();
+    }
+
+    /// Live check of a shutdown toast's countdown against Windows itself — shows
+    /// a REAL toast for about 15 s, redraws it once a second as the ticker does,
+    /// and prints what Windows answered to each update. Manual only:
+    /// `cargo test -p agentmux-launcher --bins live_countdown_smoke -- --ignored --nocapture`.
+    /// Windows answers `Succeeded` while the toast is still there and
+    /// `NotificationNotFound` once it is not (swiped away, or never shown).
+    #[test]
+    #[ignore]
+    fn live_countdown_smoke() {
+        use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
+        unsafe { RoInitialize(RO_INIT_MULTITHREADED).unwrap() };
+        let aumid = HSTRING::from(AUMID);
+        let notifier = ToastNotificationManager::CreateToastNotifierWithId(&aumid).expect("notifier");
+        println!("SMOKE setting={:?}", notifier.Setting().map(|s| s.0));
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let group = "am-smoke-countdown".to_string();
+        let total_ms = 15_000;
+        let toast_n = Notification {
+            id: "smoke-1".into(),
+            tag: "smoke-tag".into(),
+            kind: "shutdown_pending".into(),
+            priority: "attention".into(),
+            title: "Closing QTimer in 15 s".into(),
+            body: Some("AgentY asked to close it. It stays in My Agents, with its conversation.".into()),
+            actions: vec![super::super::NotifyAction { id: "keep".into(), label: "Keep running".into() }],
+            countdown: Some(super::super::Countdown { remaining_ms: total_ms, title_template: "Closing QTimer in {n} s".into() }),
+            ..Default::default()
+        };
+        let _toast = show(&notifier, &toast_n, &tx, &group).expect("shown");
+        let history = ToastNotificationManager::History().and_then(|h| h.GetHistoryWithId(&aumid)).and_then(|v| v.Size());
+        println!("SMOKE shown; history_count={history:?}");
+        let started = std::time::Instant::now();
+        let mut results = Vec::new();
+        for seq in 2..=16u32 {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            let remaining = total_ms - started.elapsed().as_millis() as i64;
+            let u = countdown_update("Closing QTimer in {n} s", remaining, total_ms);
+            let r = update_toast(&notifier, "smoke-tag", &group, &u, seq);
+            println!("SMOKE t+{:>2}s update #{seq}: {:?} -> {} / bar {:.2}", started.elapsed().as_secs(), r.as_ref().map(|r| r.0), u.title, u.fraction_left);
+            results.push(r.map(|r| r == NotificationUpdateResult::Succeeded).unwrap_or(false));
+        }
+        let history = ToastNotificationManager::History().and_then(|h| h.GetHistoryWithId(&aumid)).and_then(|v| v.Size());
+        println!("SMOKE end; history_count={history:?}");
+        let _ = ToastNotificationManager::History().and_then(|h| h.RemoveGroupWithId(&HSTRING::from(group.as_str()), &aumid));
+        assert!(results.iter().all(|ok| *ok), "every update should have been Succeeded: {results:?}");
     }
 
     /// Lines in order — title, body, then the summary as the attribution —

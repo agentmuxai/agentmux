@@ -826,9 +826,9 @@ impl Router {
         }));
     }
 
-    /// What a press on the live notification `id` is about: its kind and
-    /// block, from this router's own record.
-    pub fn live_by_id(&self, id: &str) -> Option<(NotifyKind, String)> {
+    /// What a press on the live notification `id` is about: its kind, block
+    /// and (for a shutdown) request, from this router's own record.
+    pub fn live_by_id(&self, id: &str) -> Option<(NotifyKind, String, Option<String>)> {
         self.policy.lock().unwrap_or_else(|e| e.into_inner()).live_by_id(id)
     }
 

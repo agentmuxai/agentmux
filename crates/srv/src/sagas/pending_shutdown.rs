@@ -374,6 +374,7 @@ fn request_within(
             deadline_ms: view.deadline_ms,
             effect: view.effect,
             running: crate::backend::blockcontroller::get_controller(block_id).is_some(),
+            request_id: view.request_id.clone(),
         };
         // `emit_shutdown` reads the block (blocking): off the async workers.
         tokio::task::spawn_blocking(move || router.emit_shutdown(&block, Some(body), info));
