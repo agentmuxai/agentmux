@@ -107,8 +107,8 @@ pub struct JobIncident {
     /// its task was closed.
     #[ts(type = "number | null")]
     pub recovered_at_ms: Option<i64>,
-    /// Its notification is up: raised when it opened, taken down when it
-    /// recovers.
+    /// Its notification is up: set once a router took it (not while srv has
+    /// none yet), cleared when it recovers.
     pub notified: bool,
 }
 
@@ -232,6 +232,13 @@ impl Store {
             .optional()?)
     }
 
+    /// Open incident `id`'s notification reached a router.
+    pub fn job_incident_mark_notified(&self, id: &str) -> Result<(), StoreError> {
+        let conn = self.conn().lock().unwrap();
+        conn.execute("UPDATE db_job_incidents SET notified = 1 WHERE id = ?1 AND ended_at_ms IS NULL", params![id])?;
+        Ok(())
+    }
+
     /// The task filed for incident `id`.
     pub fn job_incident_set_task(&self, id: &str, work_id: &str, task_num: i64) -> Result<(), StoreError> {
         let conn = self.conn().lock().unwrap();
@@ -297,7 +304,8 @@ impl Store {
     }
 
     /// Reopen incident `id`, recovered by run `run_id`, which turned out to
-    /// have failed: open again, its notification up, and `run_id` counted.
+    /// have failed: open again, its notification due again, and `run_id`
+    /// counted.
     /// `None` when it can't be (the job has another open incident, or the
     /// run was counted already); else the new count.
     pub fn job_incident_reopen(&self, id: &str, run_id: &str, now_ms: i64) -> Result<Option<i64>, StoreError> {
@@ -309,7 +317,7 @@ impl Store {
         let count: Option<i64> = tx
             .query_row(
                 "UPDATE OR IGNORE db_job_incidents
-                    SET ended_at_ms = NULL, end_reason = '', ended_by_run = '', recovered_at_ms = NULL, notified = 1,
+                    SET ended_at_ms = NULL, end_reason = '', ended_by_run = '', recovered_at_ms = NULL, notified = 0,
                         failures = failures + 1, last_run_id = ?2, last_failed_at_ms = ?3
                   WHERE id = ?1 AND ended_by_run = ?2 AND recovered_at_ms IS NOT NULL
                   RETURNING failures",
@@ -394,25 +402,34 @@ impl Store {
             .optional()?)
     }
 
-    /// Move job `job_id`'s cursor past an applied run: from `from` (`None`:
-    /// it has none yet) to `to`. `false` when it isn't at `from` any more:
-    /// another keeper moved it, or a report moved it back.
+    /// Move job `job_id`'s cursor past an applied run, `to`: from `from`
+    /// (`None`: it has none yet), if that run's outcome is still `outcome`,
+    /// the one the keeper applied. `false` when the cursor isn't at `from`
+    /// any more (another keeper moved it, or a report moved it back), or a
+    /// report changed the run meanwhile: the next look reads it again.
     pub fn job_incident_cursor_advance(
         &self,
         job_id: &str,
         from: Option<&IncidentCursor>,
         to: &IncidentCursor,
+        outcome: &str,
     ) -> Result<bool, StoreError> {
         let conn = self.conn().lock().unwrap();
+        let unchanged = "EXISTS (SELECT 1 FROM db_job_runs WHERE id = ?3 AND outcome = ?4)";
         let n = match from {
             None => conn.execute(
-                "INSERT OR IGNORE INTO db_job_incident_cursors (job_id, ended_at_ms, run_id) VALUES (?1, ?2, ?3)",
-                params![job_id, to.ended_at_ms, to.run_id],
+                &format!(
+                    "INSERT OR IGNORE INTO db_job_incident_cursors (job_id, ended_at_ms, run_id)
+                     SELECT ?1, ?2, ?3 WHERE {unchanged}"
+                ),
+                params![job_id, to.ended_at_ms, to.run_id, outcome],
             )?,
             Some(from) => conn.execute(
-                "UPDATE db_job_incident_cursors SET ended_at_ms = ?2, run_id = ?3
-                  WHERE job_id = ?1 AND ended_at_ms = ?4 AND run_id = ?5",
-                params![job_id, to.ended_at_ms, to.run_id, from.ended_at_ms, from.run_id],
+                &format!(
+                    "UPDATE db_job_incident_cursors SET ended_at_ms = ?2, run_id = ?3
+                      WHERE job_id = ?1 AND ended_at_ms = ?5 AND run_id = ?6 AND {unchanged}"
+                ),
+                params![job_id, to.ended_at_ms, to.run_id, outcome, from.ended_at_ms, from.run_id],
             )?,
         };
         Ok(n > 0)
@@ -457,14 +474,19 @@ mod tests {
     }
 
     #[test]
-    fn the_cursor_moves_only_from_where_it_was() {
+    fn the_cursor_moves_only_from_where_it_was_and_while_the_run_is_unchanged() {
         let store = Store::open_in_memory().unwrap();
         store.job_runs_ensure_schema().unwrap();
+        for id in ["a", "b", "c", "d"] {
+            let run = super::super::job_runs::JobRun::new(id, "j", "cron", "J", "schedule", "finished", 1);
+            store.job_run_insert(&run).unwrap();
+        }
         let at = |ms: i64, id: &str| IncidentCursor { ended_at_ms: ms, run_id: id.into() };
-        assert!(store.job_incident_cursor_advance("j", None, &at(1, "a")).unwrap());
-        assert!(!store.job_incident_cursor_advance("j", None, &at(1, "a")).unwrap(), "taken");
-        assert!(store.job_incident_cursor_advance("j", Some(&at(1, "a")), &at(2, "b")).unwrap());
-        assert!(!store.job_incident_cursor_advance("j", Some(&at(1, "a")), &at(3, "c")).unwrap(), "moved on");
+        assert!(store.job_incident_cursor_advance("j", None, &at(1, "a"), "unknown").unwrap());
+        assert!(!store.job_incident_cursor_advance("j", None, &at(1, "a"), "unknown").unwrap(), "taken");
+        assert!(store.job_incident_cursor_advance("j", Some(&at(1, "a")), &at(2, "b"), "unknown").unwrap());
+        assert!(!store.job_incident_cursor_advance("j", Some(&at(1, "a")), &at(3, "c"), "unknown").unwrap(), "moved on");
+        assert!(!store.job_incident_cursor_advance("j", Some(&at(2, "b")), &at(4, "d"), "ok").unwrap(), "d changed since it was read");
         assert_eq!(store.job_incident_cursor("j").unwrap(), Some(at(2, "b")));
     }
 }

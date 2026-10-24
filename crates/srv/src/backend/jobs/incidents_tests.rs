@@ -24,6 +24,8 @@ fn rig() -> Rig {
     agent(&mstore, "uid-owner", "Owner");
     let keeper = Incidents::new(store.clone(), Some(mstore.clone()), Some(store.clone()), Arc::new(Broker::new()));
     store.cron_create(&test_job("j", "check the build", "AgentY", "uid-y", "uid-owner")).unwrap();
+    // A window is connected: there is a notification router.
+    *keeper.router.lock().unwrap() = Some(Vec::new());
     Rig { _dir: dir, store, mstore, keeper, next: std::cell::Cell::new(1_000) }
 }
 
@@ -222,6 +224,59 @@ fn an_old_failure_reported_ok_keeps_the_later_counts() {
     assert_eq!(rig.keeper.assess("j"), NONE);
     let open = rig.store.job_incident_open_for("j").unwrap().unwrap();
     assert_eq!((open.failures, open.notified), (2, true));
+}
+
+/// An incident opened while srv has no notification router yet (starting,
+/// no window) is notified once a router exists, at a later look, once.
+#[test]
+fn an_incident_opened_before_the_router_is_notified_when_it_appears() {
+    let rig = rig();
+    *rig.keeper.router.lock().unwrap() = None;
+    rig.run("j", "finished", "error", "unknown", "");
+    assert!(matches!(one(rig.keeper.assess("j")), Step::Opened { .. }));
+    assert!(!rig.store.job_incident_open_for("j").unwrap().unwrap().notified, "nobody took it");
+    assert_eq!(rig.keeper.assess("j"), NONE);
+    assert!(!rig.store.job_incident_open_for("j").unwrap().unwrap().notified);
+    *rig.keeper.router.lock().unwrap() = Some(Vec::new());
+    assert_eq!(rig.keeper.assess("j"), NONE, "the sweep's look");
+    assert_eq!(rig.keeper.assess("j"), NONE);
+    let sent = rig.keeper.router.lock().unwrap().clone().unwrap();
+    assert_eq!(sent.len(), 1, "once: {sent:?}");
+    assert_eq!((sent[0].0.as_str(), sent[0].1.as_str()), ("job:j", "Nightly build"));
+    assert!(rig.store.job_incident_open_for("j").unwrap().unwrap().notified);
+}
+
+/// A report that flips a run while the walk is applying what it read of it
+/// is not lost: the cursor stays before the run, and the next look reads it
+/// again.
+#[test]
+fn a_report_during_a_walk_is_read_again() {
+    let rig = rig();
+    rig.run("j", "finished", "ok", "ok", "");
+    assert_eq!(rig.keeper.assess("j"), NONE);
+    let fine = rig.run("j", "finished", "ok", "ok", "");
+    let (store, id) = (rig.store.clone(), fine.id.clone());
+    *rig.keeper.on_apply.lock().unwrap() = Some((
+        fine.id.clone(),
+        Box::new(move || {
+            assert!(store.job_run_report(&id, "failed", "late", &serde_json::Value::Null).unwrap());
+        }),
+    ));
+    assert_eq!(rig.keeper.assess("j"), NONE, "applied as the success it read");
+    assert_ne!(rig.store.job_incident_cursor("j").unwrap().unwrap().run_id, fine.id, "but not past it");
+    assert!(matches!(one(rig.keeper.assess("j")), Step::Opened { .. }), "the late failure counts");
+}
+
+/// A success reported failed after its incident's task was finished opens
+/// a new incident with a new task, not the closed one.
+#[test]
+fn a_late_failure_after_the_task_was_closed_opens_a_new_incident() {
+    let (rig, (incident, success)) = rig_with_incident_recovered_by_a_success();
+    rig.store.work_queue_cancel(&incident.work_id, "done with it", 5).unwrap();
+    assert!(rig.store.job_run_report(&success.id, "failed", "", &serde_json::Value::Null).unwrap());
+    let Step::Opened { incident: fresh, .. } = one(rig.keeper.assess("j")) else { panic!("a new incident") };
+    assert_ne!(fresh.work_id, incident.work_id);
+    assert_eq!(rig.store.work_queue_get(&fresh.work_id).unwrap().unwrap().state, work_state::OPEN);
 }
 
 fn rig_with_incident_recovered_by_a_success() -> (Rig, (JobIncident, JobRun)) {

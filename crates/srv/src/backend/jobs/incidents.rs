@@ -89,7 +89,7 @@ pub enum Step {
     Recovered,
     /// A run judged a success, which recovered `incident`, was reported
     /// failed later: the incident is open again, its notification back up.
-    Reopened { incident: JobIncident, count: i64, notify_body: String },
+    Reopened { incident: JobIncident, count: i64 },
 }
 
 /// What one walk over a job's runs did: the steps it took, whether it
@@ -116,6 +116,12 @@ pub struct Incidents {
     /// Tests: applying this run fails, as a store error would.
     #[cfg(test)]
     fail_on: std::sync::Mutex<Option<String>>,
+    /// Tests: run once when this run is applied, after the walk read it.
+    #[cfg(test)]
+    on_apply: std::sync::Mutex<Option<(String, Box<dyn FnOnce() + Send>)>>,
+    /// Tests: the notification router, once there is one: what it was sent.
+    #[cfg(test)]
+    router: std::sync::Mutex<Option<Vec<(String, String, String)>>>,
 }
 
 impl Incidents {
@@ -129,6 +135,10 @@ impl Incidents {
             queue: std::sync::OnceLock::new(),
             #[cfg(test)]
             fail_on: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            on_apply: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            router: std::sync::Mutex::new(None),
         })
     }
 
@@ -193,16 +203,18 @@ impl Incidents {
         let walked = self.walk(&job);
         for step in &walked.steps {
             match step {
-                Step::Opened { incident, leader, note, notify_body } => self.alert(incident, leader.as_ref(), note, notify_body),
-                Step::FailedAgain { .. } => {}
+                Step::Opened { incident, leader: Some(leader), note, .. } => self.note_leader(incident, leader, note),
+                Step::Opened { .. } | Step::FailedAgain { .. } | Step::Reopened { .. } => {}
                 Step::Recovered => {
                     if let Some(router) = crate::backend::notify::router::get(&self.broker) {
                         router.resolve(&notify_key(job_id), crate::backend::notify::policy::Family::Job);
                     }
                 }
-                Step::Reopened { incident, notify_body, .. } => self.alert(incident, None, "", notify_body),
             }
         }
+        // An incident opened, or reopened, while no router existed (srv
+        // starting, no window yet) is notified at a later look.
+        self.notify_pending(job_id);
         if let Some(e) = &walked.error {
             // The run it stopped at is taken again at the next look.
             tracing::warn!(job_id, error = %e, "jobs: couldn't judge an incident");
@@ -252,10 +264,11 @@ impl Incidents {
                 }
             }
             let next = IncidentCursor { ended_at_ms: run.ended_at_ms.unwrap_or_default(), run_id: run.id.clone() };
-            match self.store.job_incident_cursor_advance(&job.id, cursor.as_ref(), &next) {
+            match self.store.job_incident_cursor_advance(&job.id, cursor.as_ref(), &next, &run.outcome) {
                 Ok(true) => cursor = Some(next),
-                // Another keeper moved it, or a report moved it back: the
-                // next look goes on from there.
+                // Another keeper moved it, a report moved it back, or a
+                // report changed this run while it was applied: the next
+                // look reads it again.
                 Ok(false) => {
                     walked.more = false;
                     return walked;
@@ -282,8 +295,17 @@ impl Incidents {
     /// What one decisive run does to the job's incident.
     fn apply(&self, job: &CronJob, run: &JobRun, now: i64) -> Result<Option<Step>, crate::backend::storage::StoreError> {
         #[cfg(test)]
-        if self.fail_on.lock().unwrap().as_deref() == Some(run.id.as_str()) {
-            return Err(crate::backend::storage::StoreError::NotFound);
+        {
+            if self.fail_on.lock().unwrap().as_deref() == Some(run.id.as_str()) {
+                return Err(crate::backend::storage::StoreError::NotFound);
+            }
+            let hook = {
+                let mut slot = self.on_apply.lock().unwrap();
+                if slot.as_ref().is_some_and(|(id, _)| *id == run.id) { slot.take() } else { None }
+            };
+            if let Some((_, f)) = hook {
+                f();
+            }
         }
         if !run_failed(run) {
             let recovered = self.store.job_incidents_recover(&job.id, &run.id, now)?;
@@ -301,13 +323,17 @@ impl Incidents {
             return Ok(None);
         }
         // Judged a success before, it recovered an incident: a report says it
-        // failed after all, so that incident goes on.
+        // failed after all, so that incident goes on, unless its task was
+        // finished or cancelled since: then this failure opens a new one,
+        // with a task someone can act on.
         if let Some(inc) = self.store.job_incident_recovered_by(&job.id, &run.id)? {
-            if let Some(count) = self.store.job_incident_reopen(&inc.id, &run.id, now)? {
-                self.link_run(&run.id, &inc);
-                let line = format!("failed after all: the run of {} reported it failed, {count} in a row", clock(failed_at(run)));
-                self.history(&inc.work_id, &line);
-                return Ok(Some(Step::Reopened { notify_body: notify_body(run, inc.task_num), incident: inc, count }));
+            if !self.task_closed(&inc.work_id) {
+                if let Some(count) = self.store.job_incident_reopen(&inc.id, &run.id, now)? {
+                    self.link_run(&run.id, &inc);
+                    let line = format!("failed after all: the run of {} reported it failed, {count} in a row", clock(failed_at(run)));
+                    self.history(&inc.work_id, &line);
+                    return Ok(Some(Step::Reopened { incident: inc, count }));
+                }
             }
         }
         self.end_if_task_closed(&job.id, now)?;
@@ -336,7 +362,7 @@ impl Incidents {
             failures: 1,
             opened_at_ms: now,
             last_failed_at_ms: now,
-            notified: true,
+            notified: false,
             ..Default::default()
         };
         if !self.store.job_incident_open(&incident)? {
@@ -459,16 +485,51 @@ impl Incidents {
         }
     }
 
-    /// The note to the owning leader and the operator's notification.
-    fn alert(&self, incident: &JobIncident, leader: Option<&Leader>, note: &str, notify_body: &str) {
-        if let Some(leader) = leader {
-            if let Err(e) = crate::backend::reactive::get_global_handler().deliver_system_note(&leader.uid, note) {
-                tracing::info!(job_id = %incident.job_id, error = %e, "jobs: the owning leader didn't get the incident note");
-            }
+    /// The `[AgentMux]` note to the owning leader.
+    fn note_leader(&self, incident: &JobIncident, leader: &Leader, note: &str) {
+        if let Err(e) = crate::backend::reactive::get_global_handler().deliver_system_note(&leader.uid, note) {
+            tracing::info!(job_id = %incident.job_id, error = %e, "jobs: the owning leader didn't get the incident note");
         }
+    }
+
+    /// Send the operator the open incident's notification, if it hasn't
+    /// reached a router yet, and mark it sent only once one took it.
+    fn notify_pending(&self, job_id: &str) {
+        let Ok(Some(inc)) = self.store.job_incident_open_for(job_id) else { return };
+        if inc.notified {
+            return;
+        }
+        let Some(run) = self.store.job_run_get(&inc.last_run_id).ok().flatten() else { return };
+        if !self.notify(&notify_key(job_id), &inc.job_name, notify_body(&run, inc.task_num)) {
+            tracing::info!(job_id, "jobs: no notification router yet; the incident is notified at a later look");
+            return;
+        }
+        if let Err(e) = self.store.job_incident_mark_notified(&inc.id) {
+            tracing::warn!(job_id, error = %e, "jobs: couldn't mark an incident notified");
+        }
+    }
+
+    /// Hand a `JobFailed` notification to this instance's router. `false`
+    /// when there is none yet.
+    fn notify(&self, key: &str, job_name: &str, body: String) -> bool {
+        #[cfg(test)]
+        {
+            let mut router = self.router.lock().unwrap();
+            return match router.as_mut() {
+                Some(sent) => {
+                    sent.push((key.to_string(), job_name.to_string(), body));
+                    true
+                }
+                None => false,
+            };
+        }
+        #[cfg(not(test))]
         match crate::backend::notify::router::get(&self.broker) {
-            Some(router) => router.job_failed(&notify_key(&incident.job_id), &incident.job_name, notify_body.to_string()),
-            None => tracing::info!(job_id = %incident.job_id, "jobs: no notification router yet; the Jobs tab shows the failure"),
+            Some(router) => {
+                router.job_failed(key, job_name, body);
+                true
+            }
+            None => false,
         }
     }
 

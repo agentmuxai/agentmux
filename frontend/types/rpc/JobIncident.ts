@@ -34,7 +34,7 @@ ended_by_run: string,
  */
 recovered_at_ms: number | null, 
 /**
- * Its notification is up: raised when it opened, taken down when it
- * recovers.
+ * Its notification is up: set once a router took it (not while srv has
+ * none yet), cleared when it recovers.
  */
 notified: boolean, };
