@@ -326,6 +326,12 @@ fn request_within(
                 for b in &covers {
                     publish_pending(state, b, &view);
                 }
+                // A request that now does more (a stop upgraded to a close) must
+                // not leave the notification saying the old thing: the same
+                // request and deadline, the new wording, replacing the toast.
+                if stronger {
+                    raise_toast(state, &view);
+                }
             }
             return joined;
         }
@@ -364,21 +370,7 @@ fn request_within(
     for b in &new_covers {
         publish_pending(state, b, &view);
     }
-    if let Some(router) = notify_router(state) {
-        // Fixed wording and the asker's cleaned name; never the reason, which
-        // is the asker's own text (spec §3.11). An OS toast also lands in the
-        // Action Center and on a lock screen.
-        let body = toast_body(&view);
-        let block = block_id.to_string();
-        let info = crate::backend::notify::policy::ShutdownInfo {
-            deadline_ms: view.deadline_ms,
-            effect: view.effect,
-            running: crate::backend::blockcontroller::get_controller(block_id).is_some(),
-            request_id: view.request_id.clone(),
-        };
-        // `emit_shutdown` reads the block (blocking): off the async workers.
-        tokio::task::spawn_blocking(move || router.emit_shutdown(&block, Some(body), info));
-    }
+    raise_toast(state, &view);
     tracing::info!(block_id, by, via, request_id = %view.request_id, "shutdown pending: user has 15 s to keep it");
 
     let kept = entries().get(&view.request_id).map(|e| e.kept.clone());
@@ -405,6 +397,27 @@ fn request_within(
         set_status(&v.request_id, status, error);
     });
     view
+}
+
+/// The OS notification for `view`'s request: what will happen, the time left
+/// to its deadline, and Keep running. Raised when the request opens, and again
+/// when a stronger request takes it over (the same toast is replaced in place,
+/// since both share the block's notification group).
+fn raise_toast(state: &AppState, view: &PendingView) {
+    let Some(router) = notify_router(state) else { return };
+    // Fixed wording and the asker's cleaned name; never the reason, which is
+    // the asker's own text (spec §3.11). An OS toast also lands in the Action
+    // Center and on a lock screen.
+    let body = toast_body(view);
+    let block = view.block_id.clone();
+    let info = crate::backend::notify::policy::ShutdownInfo {
+        deadline_ms: view.deadline_ms,
+        effect: view.effect,
+        running: crate::backend::blockcontroller::get_controller(&view.block_id).is_some(),
+        request_id: view.request_id.clone(),
+    };
+    // `emit_shutdown` reads the block (blocking): off the async workers.
+    tokio::task::spawn_blocking(move || router.emit_shutdown(&block, Some(body), info));
 }
 
 /// The OS notification's body for a pending shutdown. App-controlled text and

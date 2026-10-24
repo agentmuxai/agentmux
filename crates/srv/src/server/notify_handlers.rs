@@ -814,4 +814,77 @@ mod live_tests {
         assert_eq!(crate::sagas::pending_shutdown::status(&b.request_id).unwrap().status, "pending", "B still counts down");
         crate::sagas::pending_shutdown::keep(&st, &block.oid, &b.request_id);
     }
+
+    /// A pending stop taken over by a close (the migration's stop, then an
+    /// agent's `Stop agents`): the notification is replaced to say so, on the
+    /// same request and deadline (#5397).
+    #[tokio::test]
+    async fn the_toast_follows_a_stop_that_is_upgraded_to_a_close() {
+        use crate::backend::obj::Block;
+        let state = crate::server::tests::test_state();
+        state
+            .broker
+            .set_client(Box::new(crate::backend::eventbus::EventBusBridge::new(state.event_bus.clone())));
+        crate::backend::wcore::ensure_initial_data(&state.mstore).unwrap();
+        let block = state.mstore.get_all::<Block>().unwrap().into_iter().next().expect("seeded block");
+        let (broker, auth) = (state.broker.clone(), state.auth_key.clone());
+        let st = state.clone();
+        let app = crate::server::build_router(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
+                .await
+                .unwrap();
+        });
+        let uri: tokio_tungstenite::tungstenite::http::Uri = format!("ws://{addr}/ws").parse().unwrap();
+        let (ws, _) = tokio_tungstenite::connect_async(ClientRequestBuilder::new(uri).with_header("X-AuthKey", auth))
+            .await
+            .unwrap();
+        let (mut tx, mut rx) = ws.split();
+        let send = |cmd: &str, reqid: &str, data: serde_json::Value| {
+            serde_json::json!({"wscommand":"rpc","message":{"command":cmd,"reqid":reqid,"data":data}}).to_string()
+        };
+        tx.send(Message::Text(send("eventsub", "s0", serde_json::json!({"event":"notification","scopes":[],"allscopes":true})).into()))
+            .await
+            .unwrap();
+        tx.send(Message::Text(send("notify.focus", "f1", serde_json::json!({"window_focused": false})).into()))
+            .await
+            .unwrap();
+        loop {
+            let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.next()).await.expect("focus answered").unwrap().unwrap();
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(msg.to_text().unwrap_or("")) else { continue };
+            if v["data"]["resid"] == "f1" {
+                break;
+            }
+        }
+        assert!(crate::backend::notify::router::get(&broker).is_some(), "router created by the connection");
+
+        let stop = crate::sagas::pending_shutdown::request(
+            &st,
+            &block.oid,
+            "Settings",
+            "FleetBulkStop",
+            "",
+            crate::sagas::pending_shutdown::Action::Stop { signal: None },
+        );
+        let first = next_event(&mut rx, "notification").await;
+        assert_eq!(first["title"], "Stopping An agent in 15 s");
+
+        let close = crate::sagas::pending_shutdown::request(
+            &st,
+            &block.oid,
+            "AgentY",
+            "FleetBulkStop",
+            "",
+            crate::sagas::pending_shutdown::Action::CloseTab { detail: "test".into() },
+        );
+        assert_eq!(close.request_id, stop.request_id, "the same request and deadline");
+        let second = next_event(&mut rx, "notification").await;
+        assert!(second["title"].as_str().unwrap().starts_with("Closing An agent in "), "{second}");
+        assert!(second["body"].as_str().unwrap().contains("asked to close it"), "{second}");
+        assert_eq!(second["tag"], first["tag"], "replaces the toast in place");
+        assert!(second["countdown"]["remaining_ms"].as_i64().unwrap() <= first["countdown"]["remaining_ms"].as_i64().unwrap(), "the deadline did not restart");
+        crate::sagas::pending_shutdown::keep(&st, &block.oid, &stop.request_id);
+    }
 }
