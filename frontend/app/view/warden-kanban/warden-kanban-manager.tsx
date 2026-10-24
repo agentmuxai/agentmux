@@ -80,8 +80,10 @@ export const WardenKanbanManager = (props: {
     const [narrow, setNarrow] = createSignal(false);
     onMount(() => {
         if (!root) return;
+        // The element `kanban.scss`'s container query measures (Warden's container), not this padded body.
+        const measured = root.closest<HTMLElement>(".warden-container") ?? root;
         const observer = new ResizeObserver(([entry]) => setNarrow(entry.contentRect.width <= KANBAN_NARROW_PX));
-        observer.observe(root);
+        observer.observe(measured);
         onCleanup(() => observer.disconnect());
     });
     const now = () => (tick(), Date.now());
