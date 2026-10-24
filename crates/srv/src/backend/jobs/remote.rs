@@ -18,7 +18,6 @@
 //! program reused reads as gone. Every close is the conditional `job_run_finish`,
 //! so whichever side writes first wins and the other changes nothing.
 
-use agentmux_common::time::now_ms;
 use serde_json::json;
 
 use super::follower::NO_TURN_AFTER_MS;
@@ -102,10 +101,13 @@ impl RunLedger {
     /// with `request_id` `run_id`. When that names a cron run another
     /// channel fired and nobody follows yet, take the follow-up: mark it
     /// running with this pane's account, note this channel in its links and
-    /// follow its turn here. Called before the delivery's answer goes back,
+    /// follow its turn here, from `delivery_started_ms`, taken before the
+    /// injection: a turn the delivery started, even one already over, is
+    /// this run's whole turn, as on the local path (`record_delivery`).
+    /// Called before the delivery's answer goes back,
     /// so the firing instance sees the run is followed. Never inserts a row,
     /// so the slot lease stays the firing scheduler's.
-    pub fn follow_forwarded(&self, run_id: &str, block_id: &str) -> bool {
+    pub fn follow_forwarded(&self, run_id: &str, block_id: &str, delivery_started_ms: i64) -> bool {
         if run_id.is_empty() || block_id.is_empty() {
             return false;
         }
@@ -115,7 +117,7 @@ impl RunLedger {
         if run.job_source != SOURCE_CRON || !run.is_open() || recorded_in(&run.recorded_by, &self.channel) || followed_by(&run).is_some() {
             return false;
         }
-        let now = now_ms();
+        let now = delivery_started_ms;
         let pane = self.pane(block_id);
         let receiver = [pane.agent_uid.as_str(), registered_uid(block_id).as_deref().unwrap_or("")]
             .into_iter()

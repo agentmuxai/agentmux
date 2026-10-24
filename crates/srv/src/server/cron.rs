@@ -342,12 +342,13 @@ pub(super) async fn inject_here_following_runs(
     state: &AppState,
     req: &crate::backend::reactive::types::InjectionRequest,
 ) -> crate::backend::reactive::types::InjectionResponse {
+    let delivery_started = agentmux_common::time::now_ms();
     let resp = super::jekt_files::inject_here(state, req);
     let run_id = req.request_id.clone().unwrap_or_default();
     let block_id = resp.block_id.clone().unwrap_or_default();
     if resp.success && req.forward_hops > 0 && !run_id.is_empty() && !block_id.is_empty() {
         if let Some(ledger) = state.cron_scheduler.runs().cloned() {
-            let _ = tokio::task::spawn_blocking(move || ledger.follow_forwarded(&run_id, &block_id)).await;
+            let _ = tokio::task::spawn_blocking(move || ledger.follow_forwarded(&run_id, &block_id, delivery_started)).await;
         }
     }
     resp

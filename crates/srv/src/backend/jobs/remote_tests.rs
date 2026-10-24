@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use agentmux_common::time::now_ms;
 use serde_json::json;
 
 use super::*;
@@ -95,7 +96,7 @@ async fn the_receiver_follows_a_run_another_channel_fired_and_closes_it_with_its
     let receiver = p.receiver.clone();
     sched.install_delivery(Arc::new(move |req, _uid| {
         // The receiving instance's `inject_here_following_runs`.
-        assert!(receiver.follow_forwarded(req.request_id.as_deref().unwrap_or(""), PANE));
+        assert!(receiver.follow_forwarded(req.request_id.as_deref().unwrap_or(""), PANE, now_ms()));
         Box::pin(async move { json!({"success": true, "block_id": PANE}) })
     }));
     let job = test_job("j-x", "check the build", "AgentY", "uid-y", "uid-creator");
@@ -139,7 +140,7 @@ async fn a_pending_fire_delivered_to_another_channel_is_followed_there() {
     sched.install_delivery(Arc::new(move |req, _uid| {
         let id = req.request_id.clone().unwrap_or_default();
         assert_eq!(store.job_run_get(&id).unwrap().unwrap().state, state::PENDING, "still pending when it arrives");
-        assert!(receiver.follow_forwarded(&id, PANE));
+        assert!(receiver.follow_forwarded(&id, PANE, now_ms()));
         Box::pin(async move { json!({"success": true, "block_id": PANE}) })
     }));
     let mut job = test_job("j-x", "check the build", "AgentY", "uid-y", "uid-creator");
@@ -163,18 +164,41 @@ async fn a_pending_fire_delivered_to_another_channel_is_followed_there() {
     assert_eq!((done.infra.as_str(), done.cost_usd, done.output_tokens, done.steps), (infra::OK, 0.21, 300, 4));
 }
 
+/// The receiving instance's injection waits for the turn it starts, so a
+/// fast turn can start and end before `inject_here` returns: following from
+/// the time taken before the injection, it is still the run's whole turn,
+/// closed with its cost, not rejected as over before the arm.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_turn_over_before_the_forwarded_injection_returns_is_the_runs() {
+    let p = pair();
+    let (id, job) = p.begin(1);
+    let delivery_started = now_ms();
+    // The injection: the turn starts and ends while it runs.
+    let t = delivery_started + 1;
+    p.turn(json!({
+        "block_id": PANE, "turn_id": t, "started_at_ms": t, "active": false, "ended_at_ms": t + 1,
+        "end": "completed", "cost_usd": 0.05, "output_tokens": 10, "steps": 1,
+    }));
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    assert!(p.receiver.follow_forwarded(&id, PANE, delivery_started));
+    p.deliver(&id, &job, PANE);
+    let done = p.wait_for(&id, |r| r.state == state::FINISHED).await;
+    assert_eq!(done.turn_id, Some(t), "{done:?}");
+    assert_eq!((done.cost_partial, done.cost_usd, done.cost_known, done.infra.as_str()), (false, 0.05, true, infra::OK));
+}
+
 /// The receiver takes only another channel's open cron run, once.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_receiver_takes_only_another_channels_open_run_once() {
     let p = pair();
     let (id, _) = p.begin(1);
-    assert!(!p.receiver.follow_forwarded("no-such-run", PANE));
-    assert!(!p.sender.follow_forwarded(&id, PANE), "its own channel's run is the sender's to follow");
-    assert!(p.receiver.follow_forwarded(&id, PANE));
-    assert!(!p.receiver.follow_forwarded(&id, PANE), "once");
+    assert!(!p.receiver.follow_forwarded("no-such-run", PANE, now_ms()));
+    assert!(!p.sender.follow_forwarded(&id, PANE, now_ms()), "its own channel's run is the sender's to follow");
+    assert!(p.receiver.follow_forwarded(&id, PANE, now_ms()));
+    assert!(!p.receiver.follow_forwarded(&id, PANE, now_ms()), "once");
     let (closed, _) = p.begin(2);
     p.store.job_run_finish(&closed, infra::OK, None, "", 5).unwrap();
-    assert!(!p.receiver.follow_forwarded(&closed, PANE), "a closed run stays closed");
+    assert!(!p.receiver.follow_forwarded(&closed, PANE, now_ms()), "a closed run stays closed");
 }
 
 /// The receiving agent's process exits during the turn: interrupted, with
@@ -185,7 +209,7 @@ async fn the_receiver_takes_only_another_channels_open_run_once() {
 async fn the_receivers_process_exiting_interrupts_the_run() {
     let p = pair();
     let (exits, job) = p.begin(1);
-    assert!(p.receiver.follow_forwarded(&exits, PANE));
+    assert!(p.receiver.follow_forwarded(&exits, PANE, now_ms()));
     p.deliver(&exits, &job, PANE);
     let t = now_ms() + 1;
     p.turn(json!({"block_id": PANE, "turn_id": t, "started_at_ms": t, "active": true, "cost_usd": 0.1}));
@@ -199,7 +223,7 @@ async fn the_receivers_process_exiting_interrupts_the_run() {
     // The receiving AgentMux is gone (no process with its pid). Another
     // pane, so the turn above isn't this run's.
     let (gone, job) = p.begin(2);
-    assert!(p.receiver.follow_forwarded(&gone, "b-other"));
+    assert!(p.receiver.follow_forwarded(&gone, "b-other", now_ms()));
     p.deliver(&gone, &job, "b-other");
     crate::backend::process_identity::test_srv::treat_as_srv(&[std::process::id()]);
     assert!(!p.sender.check_remote(&gone, now_ms(), now_ms()), "its follower is alive: the receiver's");
@@ -210,7 +234,7 @@ async fn the_receivers_process_exiting_interrupts_the_run() {
 
     // Restarts: the sender's leaves it, the receiver's closes it.
     let (restart, job) = p.begin(3);
-    assert!(p.receiver.follow_forwarded(&restart, "b-other"));
+    assert!(p.receiver.follow_forwarded(&restart, "b-other", now_ms()));
     p.deliver(&restart, &job, "b-other");
     let sender_again = RunLedger::new_in(p.store.clone(), None, Arc::new(Broker::new()), "chan-a");
     sender_again.recover_after_restart();
@@ -244,7 +268,7 @@ async fn both_sides_closing_write_the_end_once() {
     let p = pair();
     for slot in 1..=20 {
         let (id, job) = p.begin(slot);
-        assert!(p.receiver.follow_forwarded(&id, PANE));
+        assert!(p.receiver.follow_forwarded(&id, PANE, now_ms()));
         p.deliver(&id, &job, PANE);
         let cost = RunCost { cost_usd: 0.3, cost_known: true, output_tokens: 9, steps: 2 };
         let (s1, s2, a, b) = (p.store.clone(), p.store.clone(), id.clone(), id.clone());
@@ -289,7 +313,7 @@ fn the_senders_verdict() {
 fn a_follower_pid_another_program_reused_reads_as_gone() {
     let p = pair();
     let (id, job) = p.begin(1);
-    assert!(p.receiver.follow_forwarded(&id, PANE));
+    assert!(p.receiver.follow_forwarded(&id, PANE, now_ms()));
     p.deliver(&id, &job, PANE);
     assert_eq!(p.get(&id).links[FOLLOWED_BY_PID], std::process::id(), "alive, but not an srv");
     assert!(p.sender.check_remote(&id, now_ms(), now_ms()));
