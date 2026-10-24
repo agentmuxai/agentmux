@@ -151,6 +151,11 @@
     &--foreign-hover {
         @include drop.drop-target-hover($hold: true);
     }
+
+    // Blink budget spent (PaneTabStrip.tsx `claimBlink`): land inverted, no blink.
+    &--foreign-hover#{&}--no-blink {
+        @include drop.drop-target-steady;
+    }
 }
 
 // Same drop-to-append hover as above, on the whole Pane header row — the
@@ -180,6 +185,15 @@
 
     .block-frame-default-header-tabstrip {
         @include drop.drop-target-strobe-exempt($hold: true);
+    }
+
+    // Blink budget spent: the same look as the reduced treatment, for this hover only.
+    &.pane-header--no-blink {
+        @include drop.drop-target-steady;
+
+        .block-frame-default-header-tabstrip {
+            @include drop.drop-target-steady-exempt;
+        }
     }
 }
 

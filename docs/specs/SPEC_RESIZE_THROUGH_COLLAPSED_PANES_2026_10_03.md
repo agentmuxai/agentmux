@@ -46,7 +46,7 @@ R4. **A run at the edge of the column has no handles on its own edges.** If the 
 
 R5. **Collapsing never moves a handle off a pane.** The edge A shared with B before the middle pane was collapsed is still draggable afterwards, at A's bottom.
 
-R6. **The chip stays clickable.** Handles straddle an edge by half the handle size each way (`resizeHandleSizePx / 2`, `layoutGeometry.ts:552`), so on a 33 px chip the top and bottom few pixels become resize zones. The rest of the chip keeps its click (restore) and context-menu behaviour. If the handle size ever makes the two zones meet on a chip, the chip's middle must stay a click target (e.g. clamp each zone to at most a third of the chip).
+R6. **The chip stays clickable.** Handles straddle an edge by half the handle size each way (`resizeHandleSizePx / 2`, `layoutGeometry.ts:552`), so on a 33 px chip the top and bottom few pixels become resize zones. The rest of the chip keeps its click and context-menu behaviour. (Until 2026-10-24 this said the click restores; it did not. A plain click on a pill of a chip now expands it, SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §6; a click elsewhere on the chip does not.) If the handle size ever makes the two zones meet on a chip, the chip's middle must stay a click target (e.g. clamp each zone to at most a third of the chip).
 
 R7. **Rows unchanged.** In a Row parent collapsed panes already dock with zero width and the run is spanned by one handle (PR #2855); nothing changes there.
 

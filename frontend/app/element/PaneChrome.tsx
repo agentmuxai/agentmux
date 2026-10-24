@@ -427,6 +427,14 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         }
     };
 
+    // A click on a pill of a collapsed pane expands it, the active pill included
+    // (handleActivate never sees that click) and an agent pane's own onActivate
+    // included (it returns before the ordinary path). Restore first, then the
+    // activation, the order showBlockInPane uses.
+    // docs/specs/SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §6.
+    const handleSelect = () => {
+        if (nodeModel.isMinimized?.()) layoutModel.minimizeNodeToggle(nodeModel.nodeId);
+    };
     const handleActivate = (blockId: string) => {
         // A view type whose tabs can live in OTHER panes (agent's cross-pane
         // forks) handles activation itself and returns true; anything else
@@ -496,6 +504,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             getColor={(id) => tabColors().get(id)}
             headerBgOverride={headerTailBg()}
             onActivate={handleActivate}
+            onSelect={handleSelect}
             onClose={handleClose}
             onReorder={handleReorder}
             onReceiveForeignTab={handleReceiveForeignTab}

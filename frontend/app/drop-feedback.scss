@@ -13,13 +13,41 @@
 // `tab-drop-invert-strobe`) live in drag/drop-indicators.scss, which is
 // loaded once, so they're emitted once however many files `@use` this.
 
+// The Pane Tab strip's hover blink: one blink is one cycle (negative, then
+// normal), and the burst ends in the held negative. A cycle of 200 ms (100 ms a
+// phase, six frames at 60 Hz) and three blinks make a 600 ms burst. It is the
+// fastest burst that keeps WCAG 2.3.1's limit of three flashes in any one second:
+// a fourth blink would be four flashes in 800 ms, and a faster cycle would
+// shorten the burst below the 400 ms it was. PaneTabStrip.tsx's blink clock
+// keeps the limit across re-entries (a burst starts at most once a second per
+// window); the numbers are written once here so the header and the counter-invert
+// on its tabs can never drift apart.
+// docs/specs/SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §3.
+$drop-blink-cycle: 200ms;
+$drop-blink-count: 3;
+
 // The animations the mixins below combine, each written once.
 $drop-strobe: tab-drop-invert-strobe 400ms steps(1, end) 2;
-$drop-hold: tab-drop-invert-hold 400ms steps(1, end) forwards;
-$drop-pulse: tab-drop-pulse 0.8s var(--ease-in-out) infinite alternate;
-$drop-pulse-reduced: tab-drop-pulse 0.8s ease-in-out infinite alternate;
+$drop-hold: tab-drop-invert-hold $drop-blink-cycle steps(1, end) $drop-blink-count forwards;
+$drop-pulse: tab-drop-pulse 0.4s var(--ease-in-out) infinite alternate;
+$drop-pulse-reduced: tab-drop-pulse 0.4s ease-in-out infinite alternate;
 
 // --- Mixins ---
+
+// The `$hold` look without its blink: the target is simply negative (with the
+// pulsing outline) for as long as the hover lasts. It is the reduced treatment,
+// and it is what a hover gets when the window's blink budget is spent (a burst
+// has started within the last second), so three flashes a second is never
+// exceeded. `drop-target-steady-exempt` is the matching cancel on the tabs.
+@mixin drop-target-steady {
+    filter: invert(1);
+    animation: $drop-pulse-reduced;
+}
+
+@mixin drop-target-steady-exempt {
+    animation: none;
+    filter: invert(1);
+}
 
 // Something is being dragged over a valid drop target: the instant the hover
 // begins, the target flashes to its NEGATIVE (filter: invert) and back —
@@ -47,8 +75,7 @@ $drop-pulse-reduced: tab-drop-pulse 0.8s ease-in-out infinite alternate;
         animation: $drop-hold, $drop-pulse;
 
         @include mixins.when-motion-reduced(feedback) {
-            filter: invert(1);
-            animation: $drop-pulse-reduced;
+            @include drop-target-steady;
         }
     } @else {
         animation: $drop-strobe, $drop-pulse;
@@ -78,8 +105,7 @@ $drop-pulse-reduced: tab-drop-pulse 0.8s ease-in-out infinite alternate;
         animation: $drop-hold;
 
         @include mixins.when-motion-reduced(feedback) {
-            animation: none;
-            filter: invert(1);
+            @include drop-target-steady-exempt;
         }
     } @else {
         animation: $drop-strobe;

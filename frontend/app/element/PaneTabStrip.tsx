@@ -22,7 +22,7 @@
  * Spec: docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §3.1.
  */
 
-import { createEffect, createSignal, For, on, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
+import { batch, createEffect, createSignal, For, on, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
 import { draggable, dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { preventUnhandled } from "@atlaskit/pragmatic-drag-and-drop/prevent-unhandled";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
@@ -50,6 +50,7 @@ import { asDocTabDragData, docTabItemType, paneTabItemType, type DocTabDragData 
 import { createScrollEdges } from "./scroll-edges";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
+import { claimBlink } from "./drop-blink-clock";
 import { createStripReveal, registerStripWithPane } from "./strip-reveal-controller";
 
 // Matches the other reveal-gate/cross-fade durations added alongside this
@@ -260,6 +261,10 @@ export interface PaneTabStripProps<T> {
     flashOnActivity?: boolean;
 
     onActivate: (id: string) => void;
+    /** A plain left-click on a pill, active or not, before `onActivate` (which a
+     *  click on the active pill never reaches). A Pane's header uses it to
+     *  expand a collapsed pane. Omitted by strips that have no such pane. */
+    onSelect?: (id: string) => void;
     /** Omit entirely (not just disable) to render tabs with no close ×. */
     onClose?: (id: string) => void;
     onTabDoubleClick?: (tab: T) => void;
@@ -372,6 +377,10 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
     // to reveal before committing; see the spec's own reasoning for
     // skipping that dwell timer.
     const [foreignHover, setForeignHover] = createSignal(false);
+    // Whether this hover entry lost the window's blink budget (drop-blink-clock.ts):
+    // it then lands inverted without the blink. Set before `foreignHover`, so both
+    // class toggles are applied in the same frame.
+    const [noBlink, setNoBlink] = createSignal(false);
     // Whether the hover highlight belongs on the strip box itself. False
     // once the drop zone resolves to the enclosing header row, so the
     // feedback outlines exactly the area that actually accepts the drop
@@ -395,14 +404,22 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
             // on cleanup: the header's lifetime isn't tied to this strip's,
             // and a stale accent outline left on a header that outlives it
             // would be permanent.
-            createEffect(() => highlightEl.classList.toggle("pane-header--foreign-hover", foreignHover()));
-            onCleanup(() => highlightEl.classList.remove("pane-header--foreign-hover"));
+            createEffect(() => {
+                highlightEl.classList.toggle("pane-header--foreign-hover", foreignHover());
+                highlightEl.classList.toggle("pane-header--no-blink", foreignHover() && noBlink());
+            });
+            onCleanup(() => highlightEl.classList.remove("pane-header--foreign-hover", "pane-header--no-blink"));
         }
         const cleanup = dropTargetForElements({
             element: el,
             canDrop: ({ source }) =>
                 source.data.type === paneTabItemType && source.data.sourceNodeId !== paneKey,
-            onDragEnter: () => setForeignHover(true),
+            onDragEnter: () => {
+                batch(() => {
+                    setNoBlink(!claimBlink());
+                    setForeignHover(true);
+                });
+            },
             onDragLeave: () => setForeignHover(false),
             onDrop: ({ source }) => {
                 setForeignHover(false);
@@ -570,6 +587,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
             class="pane-tab-strip"
             classList={{
                 "pane-tab-strip--foreign-hover": foreignHover() && highlightStrip(),
+                "pane-tab-strip--no-blink": foreignHover() && highlightStrip() && noBlink(),
                 "has-more-left": edges.moreLeft(),
                 "has-more-right": edges.moreRight(),
             }}
@@ -607,6 +625,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                             getColor={props.getColor}
                             flashOnActivity={props.flashOnActivity}
                             onActivate={props.onActivate}
+                            onSelect={props.onSelect}
                             onClose={props.onClose}
                             onDoubleClick={props.onTabDoubleClick}
                             renderLabel={props.renderLabel}
@@ -660,6 +679,7 @@ interface PaneTabStripItemProps<T> {
     getColor?: (tab: T) => PaneTabColors | undefined;
     flashOnActivity?: boolean;
     onActivate: (id: string) => void;
+    onSelect?: (id: string) => void;
     onClose?: (id: string) => void;
     onDoubleClick?: (tab: T) => void;
     renderLabel?: (tab: T) => JSX.Element;
@@ -877,6 +897,7 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
     const onClick = (e: MouseEvent) => {
         // Ignore middle-click here — onMouseDown already handled it.
         if (e.button !== 0) return;
+        props.onSelect?.(id());
         if (!props.active) props.onActivate(id());
     };
 

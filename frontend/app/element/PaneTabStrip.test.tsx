@@ -84,6 +84,31 @@ describe("PaneTabStrip", () => {
         expect(onActivate).toHaveBeenCalledTimes(1);
     });
 
+    it("fires onSelect for every plain click, the active tab's too, and not for a middle click", async () => {
+        const onSelect = vi.fn();
+        const onActivate = vi.fn();
+        render(() => (
+            <PaneTabStrip
+                tabs={TABS}
+                activeId="a"
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                onActivate={onActivate}
+                onSelect={onSelect}
+            />
+        ));
+        const user = userEvent.setup();
+        await user.click(screen.getByText("alpha"));
+        expect(onSelect).toHaveBeenCalledWith("a");
+        expect(onActivate).not.toHaveBeenCalled();
+        await user.click(screen.getByText("beta"));
+        expect(onSelect).toHaveBeenLastCalledWith("b");
+        expect(onSelect).toHaveBeenCalledTimes(2);
+        expect(onActivate).toHaveBeenCalledWith("b");
+        await user.pointer({ keys: "[MouseMiddle]", target: screen.getAllByText("alpha")[0] });
+        expect(onSelect).toHaveBeenCalledTimes(2);
+    });
+
     it("fires onClose when the close button is clicked, without also activating", async () => {
         const onActivate = vi.fn();
         const onClose = vi.fn();
