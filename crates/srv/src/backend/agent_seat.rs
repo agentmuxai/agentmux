@@ -89,20 +89,28 @@ pub fn validate(
         if !is_agent(lead) {
             return Err(format!("INVALID_ARG: lead {lead} is not an agent on this machine"));
         }
-        let mut seen = HashSet::new();
-        let mut next = Some(lead.clone());
-        while let Some(id) = next {
-            if id == agent_id {
-                return Err(format!("INVALID_ARG: {lead} already reports to this agent, so it can't be its lead (a cycle)"));
-            }
-            if !seen.insert(id.clone()) || seen.len() > MAX_CHAIN {
-                // A cycle above this agent, already stored: not this seat's.
-                break;
-            }
-            next = lead_of(&id);
-        }
+        no_cycle(agent_id, lead, lead_of)?;
     }
     Ok(AgentSeat { role: role.to_string(), qualifier, lead, area, lane, set_at_ms: now_ms })
+}
+
+/// Refuse `lead` as `agent_id`'s lead when following leads from it comes
+/// back to `agent_id`. Also checked when a spawned worker's seat is cleared:
+/// its leader becomes its lead again.
+pub fn no_cycle(agent_id: &str, lead: &str, lead_of: impl Fn(&str) -> Option<String>) -> Result<(), String> {
+    let mut seen = HashSet::new();
+    let mut next = Some(lead.to_string());
+    while let Some(id) = next {
+        if id == agent_id {
+            return Err(format!("INVALID_ARG: {lead} already reports to this agent, so it can't be its lead (a cycle)"));
+        }
+        if !seen.insert(id.clone()) || seen.len() > MAX_CHAIN {
+            // A cycle above this agent, already stored: not this seat's.
+            break;
+        }
+        next = lead_of(&id);
+    }
+    Ok(())
 }
 
 /// The seat a definition is shown with: its stored seat, or, for a spawned

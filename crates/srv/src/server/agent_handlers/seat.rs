@@ -52,19 +52,26 @@ pub(super) fn set_seat(mstore: &Store, cmd: CommandAgentSetSeatData) -> Result<A
     if def.is_seeded != 0 {
         return Err(format!("agent.setSeat: {} is a template; only an agent has a seat", def.name));
     }
+    let lead_of = |id: &str| {
+        defs.iter()
+            .find(|d| d.id == id)
+            .and_then(|d| crate::backend::agent_seat::effective_seat(mstore, d))
+            .and_then(|s| s.lead)
+    };
     let seat = match &cmd.seat {
-        None => None,
+        None => {
+            // A spawned worker's leader becomes its lead again (#5378).
+            if let Some(leader) = crate::server::app_api::agent_spawn::worker_of(mstore, &agent_id) {
+                crate::backend::agent_seat::no_cycle(&agent_id, &leader, lead_of)?;
+            }
+            None
+        }
         Some(input) => Some(crate::backend::agent_seat::validate(
             &agent_id,
             input,
             agentmux_common::time::now_ms(),
             |id| defs.iter().any(|d| d.id == id && d.is_seeded == 0),
-            |id| {
-                defs.iter()
-                    .find(|d| d.id == id)
-                    .and_then(|d| crate::backend::agent_seat::effective_seat(mstore, d))
-                    .and_then(|s| s.lead)
-            },
+            lead_of,
         )?),
     };
     mstore

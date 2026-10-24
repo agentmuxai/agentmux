@@ -183,6 +183,26 @@ async fn listagents_carries_the_effective_seat() {
     assert!(row(&list, "work-1")["seat"].get("lead").is_none());
 }
 
+/// Clearing a spawned worker's seat gives it its leader back as lead, so the
+/// clear is refused when that leader now reports to the worker.
+#[tokio::test]
+async fn clearing_a_workers_seat_cant_make_a_cycle() {
+    let mut h = harness(None);
+    h.agent("lead-1", "Leader");
+    h.agent("work-1", "Worker");
+    make_worker_of(&h, "work-1", "lead-1");
+    h.call(COMMAND_AGENT_SET_SEAT, serde_json::json!({ "agent_id": "work-1", "seat": { "role": "specialist" } })).await.unwrap();
+    h.call(COMMAND_AGENT_SET_SEAT, serde_json::json!({ "agent_id": "lead-1", "seat": { "role": "worker", "lead": "work-1" } })).await.unwrap();
+
+    let err = h.call(COMMAND_AGENT_SET_SEAT, serde_json::json!({ "agent_id": "work-1", "seat": null })).await.unwrap_err();
+    assert!(err.contains("cycle"), "{err}");
+    assert_eq!(h.state.mstore.agent_seat_get("work-1").unwrap().role, "specialist", "nothing written");
+
+    h.call(COMMAND_AGENT_SET_SEAT, serde_json::json!({ "agent_id": "lead-1", "seat": null })).await.unwrap();
+    h.call(COMMAND_AGENT_SET_SEAT, serde_json::json!({ "agent_id": "work-1", "seat": null })).await.unwrap();
+    assert!(h.state.mstore.agent_seat_get("work-1").is_none());
+}
+
 /// MuxAPI's `Agents list` (`/agentmux/discovery`) gives each host agent its
 /// seat with the lead named, and `null` for one with none.
 #[tokio::test]
