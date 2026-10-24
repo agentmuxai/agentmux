@@ -29,6 +29,7 @@ mod name_resolution;
 pub(crate) mod caller;
 pub(crate) mod agent_self_keys;
 pub(crate) mod jekt_held;
+mod jekt_hold;
 pub(crate) mod jekt_files;
 pub(crate) mod jekt_cloud;
 pub(crate) mod jekt_seal;
