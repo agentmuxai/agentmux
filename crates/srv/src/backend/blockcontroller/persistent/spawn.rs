@@ -53,7 +53,9 @@ impl PersistentSubprocessController {
         // conversation instead of starting blank.
         if !config.session_id.is_empty() {
             let mut inner = self.inner.lock().unwrap();
-            if inner.session_id.is_none() {
+            // Not a retired one (`Agents fresh`): a config prepared before the
+            // transition still names it.
+            if inner.session_id.is_none() && inner.resume_poisoned.as_deref() != Some(config.session_id.as_str()) {
                 inner.session_id = Some(config.session_id.clone());
             }
         }
