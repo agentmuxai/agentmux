@@ -23,10 +23,12 @@ pub const SETTING_HINTS: &str = "agent:compacthints";
 /// `agent:compacthintat`: the context size, in tokens, from which the hint
 /// suggests compacting.
 pub const SETTING_HINT_AT: &str = "agent:compacthintat";
-pub const DEFAULT_HINT_AT: u64 = 400_000;
+pub const DEFAULT_HINT_AT: u64 = 400000; // plain digits: settings-defaults.test.ts reads it
 /// Below this the hint never fires, and it fires again only after the context
 /// has dropped below it.
 const HINT_REARM_BELOW: u64 = 250_000;
+/// The key the turn-end hint is held under (`reactive::held_notes`).
+pub const HINT_NOTE_KEY: &str = "compact-hint";
 /// No self-compaction this soon after the last one, in calls or in time: also
 /// what stops a compact, catch-up, compact loop.
 pub const MIN_CALLS_BETWEEN: u64 = 50;
@@ -96,12 +98,16 @@ pub fn observe_claude_frame(block_id: &str, frame: &Value) {
     let kind = frame.get("type").and_then(Value::as_str);
     if kind == Some("system") {
         match frame.get("subtype").and_then(Value::as_str) {
-            Some("compact_boundary") => with(block_id, |r| {
-                r.compacting = false;
-                r.calls_since_compaction = 0;
-                r.last_compaction_ms = Some(agentmux_common::time::now_ms_u64());
-                r.tokens = None;
-            }),
+            Some("compact_boundary") => {
+                with(block_id, |r| {
+                    r.compacting = false;
+                    r.calls_since_compaction = 0;
+                    r.last_compaction_ms = Some(agentmux_common::time::now_ms_u64());
+                    r.tokens = None;
+                });
+                // A held hint about the old size is stale now.
+                crate::backend::reactive::held_notes::forget_key(block_id, HINT_NOTE_KEY);
+            }
             Some("status") => {
                 let compacting = frame.get("status").and_then(Value::as_str) == Some("compacting");
                 with(block_id, |r| r.compacting = compacting);
@@ -287,7 +293,11 @@ mod tests {
         observe_claude_frame(&b, &call("m1", 900_000));
         observe_claude_frame(&b, &json!({"type": "system", "subtype": "status", "status": "compacting"}));
         assert!(get(&b).unwrap().compacting);
+        crate::backend::reactive::held_notes::hold(&b, HINT_NOTE_KEY, "[AgentMux] Your context is 900K");
         observe_claude_frame(&b, &json!({"type": "system", "subtype": "compact_boundary"}));
+        let (sent, guard) = crate::backend::reactive::held_notes::attach(&b, "next");
+        assert_eq!(sent, "next", "the hint about the old size is dropped");
+        guard.delivered();
         let r = get(&b).unwrap();
         assert!(!r.compacting && r.calls_since_compaction == 0 && r.last_compaction_ms.is_some() && r.tokens.is_none());
         forget(&b);

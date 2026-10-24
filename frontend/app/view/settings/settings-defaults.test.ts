@@ -386,6 +386,7 @@ const BACKEND_CONSTANTS: Record<string, [string, RegExp]> = {
     ],
     "telemetry:interval": ["crates/srv/src/backend/sysinfo.rs", /const DEFAULT_INTERVAL_SECS: f64 = ([\d.]+);/],
     "voice:whisperModel": ["crates/srv/src/server/voice.rs", /const DEFAULT_WHISPER_MODEL: &str = ("[^"]*");/],
+    "agent:compacthintat": ["crates/srv/src/backend/context_reading.rs", /const DEFAULT_HINT_AT: u64 = (\d+);/],
     "app:showtray": ["crates/launcher/src/background_config.rs", /\bshow_tray: (true|false),/],
     "app:runinbackground": ["crates/launcher/src/background_config.rs", /\brun_in_background: (true|false),/],
     "app:startatlogin": ["crates/launcher/src/start_at_login.rs", /\.map\(\|v\| v\.unwrap_or\((true|false)\)\)/],

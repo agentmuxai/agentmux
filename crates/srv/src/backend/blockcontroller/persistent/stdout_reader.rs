@@ -730,7 +730,7 @@ impl PersistentSubprocessController {
                     // A large context when the work may continue: one note
                     // for the next turn (SPEC_AGENT_SELF_COMPACTION §3.5).
                     if let Some(note) = crate::backend::context_reading::take_turn_end_hint(&block_id_read) {
-                        crate::backend::reactive::held_notes::hold(&block_id_read, "compact-hint", &note);
+                        crate::backend::reactive::held_notes::hold(&block_id_read, crate::backend::context_reading::HINT_NOTE_KEY, &note);
                     }
                 }
             }

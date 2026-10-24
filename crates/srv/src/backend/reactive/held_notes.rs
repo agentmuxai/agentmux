@@ -83,6 +83,13 @@ impl HeldNotes {
         true
     }
 
+    /// Drop the note held for `block_id` under `key`, if any.
+    pub fn forget_key(&mut self, block_id: &str, key: &str) {
+        if let Some(pane) = self.panes.get_mut(block_id) {
+            pane.notes.retain(|(k, _)| k != key);
+        }
+    }
+
     /// Whether a note is held for `block_id` under `key`.
     pub fn holds(&self, block_id: &str, key: &str) -> bool {
         self.panes.get(block_id).is_some_and(|p| p.notes.iter().any(|(k, _)| k == key))
@@ -119,6 +126,11 @@ fn held() -> MutexGuard<'static, HeldNotes> {
 /// UID goes through [`ReactiveHandler::hold_system_note`].
 pub fn hold(block_id: &str, key: &str, text: &str) {
     held().hold(block_id, key, text);
+}
+
+/// Drop the note held for `block_id` under `key`, if any (it went stale).
+pub fn forget_key(block_id: &str, key: &str) {
+    held().forget_key(block_id, key);
 }
 
 /// `message`, then the notes held for its pane, one per line.
@@ -250,6 +262,20 @@ impl Drop for Attached {
     }
 }
 
+/// [`attach`] for a turn from `origin`, except that a `/compact` AgentMux
+/// sends for the agent carries no notes: they would become part of its
+/// instructions, and Codex compacts only on exactly `/compact`
+/// (SPEC_AGENT_SELF_COMPACTION_2026_10_23.md §3.3). They stay held for the
+/// next turn.
+pub fn attach_for_turn(block_id: &str, message: &str, origin: crate::backend::blockcontroller::health::TurnOrigin) -> (String, Attached) {
+    let own_compact = origin == crate::backend::blockcontroller::health::TurnOrigin::System
+        && (message.trim() == "/compact" || message.starts_with("/compact "));
+    if own_compact {
+        return (message.to_string(), Attached { block_id: block_id.to_string(), notes: Vec::new(), suffix: None });
+    }
+    attach(block_id, message)
+}
+
 /// `message` with the notes held for `block_id` after it, and the guard that
 /// holds them again if the message doesn't go.
 pub fn attach(block_id: &str, message: &str) -> (String, Attached) {
@@ -321,6 +347,37 @@ mod tests {
     use super::*;
     use crate::backend::reactive::types::SenderDelivery;
     use std::sync::Arc;
+
+    #[test]
+    fn agentmuxs_own_compact_carries_no_notes_and_they_stay_held() {
+        use crate::backend::blockcontroller::health::TurnOrigin;
+        let b = format!("hn-{}", uuid::Uuid::new_v4());
+        hold(&b, "compact-hint", "[AgentMux] Your context is 512K");
+        for message in ["/compact", "/compact keep: PR #5401"] {
+            let (sent, guard) = attach_for_turn(&b, message, TurnOrigin::System);
+            assert_eq!(sent, message, "Codex compacts only on exactly /compact");
+            guard.delivered();
+            assert!(held().holds(&b, "compact-hint"), "kept for the next turn");
+        }
+        // The user typing /compact, or any other turn of AgentMux's, takes them.
+        let (sent, guard) = attach_for_turn(&b, "/compact", TurnOrigin::User);
+        assert!(sent.contains("[AgentMux] Your context is 512K"));
+        guard.delivered();
+        hold(&b, "compact-hint", "[AgentMux] again");
+        let (sent, guard) = attach_for_turn(&b, "hello", TurnOrigin::System);
+        assert!(sent.contains("[AgentMux] again"));
+        guard.delivered();
+    }
+
+    #[test]
+    fn a_stale_note_can_be_dropped_by_its_key() {
+        let b = format!("hn-{}", uuid::Uuid::new_v4());
+        hold(&b, "compact-hint", "old size");
+        hold(&b, "other", "keep me");
+        forget_key(&b, "compact-hint");
+        assert!(!held().holds(&b, "compact-hint") && held().holds(&b, "other"));
+        let _ = held().take(&b);
+    }
 
     fn texts(notes: &[(String, String)]) -> Vec<&str> {
         notes.iter().map(|(_, t)| t.as_str()).collect()
