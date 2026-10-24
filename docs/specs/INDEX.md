@@ -613,6 +613,7 @@ partial list.
 | [`SPEC_AGENT_PANE_VIRTUALIZATION_ZOOM_OVERLAP_2026_06_01`](SPEC_AGENT_PANE_VIRTUALIZATION_ZOOM_OVERLAP_2026_06_01.md) | Agent-Pane Virtualization Overlap Under Zoom |
 | [`SPEC_AGENT_PICKER_INLINE_CREATE_2026_10_18`](SPEC_AGENT_PICKER_INLINE_CREATE_2026_10_18.md) | SPEC: start a new agent inline, below the harness card, and one CLI-detection truth for picker and Toolchain |
 | [`SPEC_AGENT_SAME_PROCESS_DUPLICATE_PANE_RECOVERY_2026_10_01`](SPEC_AGENT_SAME_PROCESS_DUPLICATE_PANE_RECOVERY_2026_10_01.md) | SPEC: a second pane of an agent that is live in another pane of the same AgentMux must recover, not go silent |
+| [`SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23`](SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md) | SPEC: Agent seats in the UI: role, lead and area on the agent, shown where you meet it |
 | [`SPEC_AGENT_SELF_QUIT_2026_09_24`](SPEC_AGENT_SELF_QUIT_2026_09_24.md) | SPEC: Agent self-quit — `/quit` for the user, `QuitSelf` for the agent (on direct user instruction only) |
 | [`SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24`](SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md) | SPEC: one live instance per agent — an agent identity is driven by at most one process, across host, LAN and WAN |
 | [`SPEC_AGENT_TEARDOWN_SINGLE_PATH_2026_10_01`](SPEC_AGENT_TEARDOWN_SINGLE_PATH_2026_10_01.md) | SPEC: One teardown path for everything an agent owns |
@@ -738,6 +739,7 @@ partial list.
 | [`SPEC_SRV_MALLOC_ARENA_CAP_2026_10_18`](SPEC_SRV_MALLOC_ARENA_CAP_2026_10_18.md) | Spec: srv caps glibc's malloc arenas at two (Linux only) |
 | [`SPEC_SRV_PROCESS_LISTING_WITHOUT_THREADS_2026_10_18`](SPEC_SRV_PROCESS_LISTING_WITHOUT_THREADS_2026_10_18.md) | Spec: srv's process listings stop reading every thread (Linux CPU) |
 | [`SPEC_START_WITH_OS_2026_09_25`](SPEC_START_WITH_OS_2026_09_25.md) | SPEC: Start with OS — AgentMux starts quietly at login, on every platform, and keeps working after updates |
+| [`SPEC_STOP_AN_AGENT_ONE_WAY_AND_SHUTDOWN_TOAST_2026_10_23`](SPEC_STOP_AN_AGENT_ONE_WAY_AND_SHUTDOWN_TOAST_2026_10_23.md) | SPEC: One way to stop an agent (close it), and a shutdown toast with a countdown and a Keep running button |
 | [`SPEC_STREAMING_BASH_RUNNER_2026_05_11`](SPEC_STREAMING_BASH_RUNNER_2026_05_11.md) | Streaming bash runner — PreToolUse command rewrite |
 | [`SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20`](SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20.md) | SPEC — live subagent reconciliation + Retire action (best-practices plan) |
 | [`SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02`](SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md) | SPEC: The Swarm shows the agents of every other instance this one knows about |

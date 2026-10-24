@@ -67,6 +67,28 @@ mod tests {
         assert_eq!(listed, want);
     }
 
+    /// `agents` closes the agent's tab, and the tool says so; the two
+    /// parameters that only made sense for a stop are gone.
+    #[test]
+    fn the_schema_says_agents_closes_the_tab_and_has_no_signal_or_staged() {
+        let schema: Value = serde_json::from_str(crate::tool_schemas::STOP_TOOL).unwrap();
+        let props = &schema["inputSchema"]["properties"];
+        assert!(props.get("signal").is_none() && props.get("staged").is_none(), "{props}");
+        let d = schema["description"].as_str().unwrap();
+        for needle in [
+            "closes each target agent's tab",
+            "Only that agent's tab closes",
+            "My Agents",
+            "your own block (use self)",
+            "a pane that holds an agent is refused with a pointer to agents",
+            "banner in the agent's pane with a countdown and a Keep running button",
+            "MAJOR WARNING",
+        ] {
+            assert!(d.contains(needle), "the description lacks {needle:?}");
+        }
+        assert!(!d.contains("stop many agent panes"), "the old stop wording is gone");
+    }
+
     /// Closing a pane never stands in for ending your own session: without a
     /// block_id it is refused before anything is sent.
     #[tokio::test]

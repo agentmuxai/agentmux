@@ -42,6 +42,7 @@ fn insert_named_agent_def(state: &AppState, slug: &str, name: &str, conversation
         use_ambient_login: 0,
         model_vendor_base_url: String::new(),
         memory_id: String::new(),
+        seat: None,
         conversation_visibility: conversation_visibility.to_string(),
     };
     state.mstore.agent_def_insert(&mut def).unwrap();
@@ -214,6 +215,7 @@ async fn matches_on_slug_not_display_name() {
             use_ambient_login: 0,
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
+            seat: None,
             conversation_visibility: "ask".to_string(),
         };
         state_clone.mstore.agent_def_insert(&mut def).unwrap();

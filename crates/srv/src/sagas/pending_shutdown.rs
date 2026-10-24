@@ -30,9 +30,15 @@ pub enum Action {
     /// The agent's own `QuitSelf` from a turn the user didn't start: the same
     /// self-quit, after its turn ends (§4.2).
     SelfQuit { detail: String },
+    /// Another agent's `Stop agents`: end that one agent and close its tab,
+    /// as the user's tab × does, keeping the pane's other tabs. No wait for
+    /// its turn to end: it is stopped from outside, mid-turn or not
+    /// (docs/specs/SPEC_STOP_AN_AGENT_ONE_WAY_AND_SHUTDOWN_TOAST_2026_10_23.md §3.1).
+    CloseTab { detail: String },
     /// Another agent's `ClosePane block_id=`: close the whole pane.
     ClosePane { block_ids: Vec<String> },
-    /// An agent's `FleetBulkStop`: stop the controller, as `agent.stop` does.
+    /// Stop the controller and keep the block, as `agent.stop` does. Internal
+    /// only (the fork slug migration): no tool an agent can call opens one.
     Stop { signal: Option<String> },
 }
 
@@ -42,8 +48,17 @@ impl Action {
     fn rank(&self) -> u8 {
         match self {
             Action::Stop { .. } => 0,
-            Action::SelfQuit { .. } => 1,
+            Action::SelfQuit { .. } | Action::CloseTab { .. } => 1,
             Action::ClosePane { .. } => 2,
+        }
+    }
+
+    /// What the user is told will happen: `PendingView::effect`.
+    fn effect(&self) -> &'static str {
+        match self {
+            Action::Stop { .. } => "stop",
+            Action::SelfQuit { .. } | Action::CloseTab { .. } => "close_tab",
+            Action::ClosePane { .. } => "close_pane",
         }
     }
 
@@ -91,7 +106,13 @@ pub struct PendingView {
     pub target: String,
     /// The tool: `QuitSelf`, `ClosePane`, `FleetBulkStop`.
     pub via: String,
+    /// Why, in the asker's words, cleaned for display (`clean_reason`): never
+    /// the raw text. Shown on the pane banner only; an OS toast leaves it out.
     pub reason: String,
+    /// What happens if the window runs out: `stop` (the agent stops, its pane
+    /// stays), `close_tab` (it stops and its tab closes) or `close_pane`.
+    #[ts(type = r#""stop" | "close_tab" | "close_pane""#)]
+    pub effect: &'static str,
     #[ts(type = "number")]
     pub deadline_ms: i64,
     /// `pending` → `kept_by_user`, or `proceeding` → `shut_down` / `failed` /
@@ -123,9 +144,11 @@ struct Entry {
     finished_at_ms: Option<i64>,
     /// Taken when the window runs out and the shutdown begins.
     action: Option<Action>,
-    /// Everyone who asked, as (by, via): later requests for the same block
-    /// join this one rather than open a second window.
-    requesters: Vec<(String, String)>,
+    /// Everyone who asked, as (by, via, reason as sent): later requests for the
+    /// same block join this one rather than open a second window. The audit
+    /// keeps each reason exactly as its caller sent it; only `view.reason`, which
+    /// the user is shown, is cleaned (`clean_reason`).
+    requesters: Vec<(String, String, String)>,
     /// Every block it shuts down (`Action::covers`). A request naming any of
     /// them joins this one, Keep running works from any of their banners,
     /// and the banner shows on each — a pane's close covers all its tabs
@@ -255,6 +278,10 @@ fn request_within(
     window: std::time::Duration,
 ) -> PendingView {
     let new_covers = action.covers(block_id);
+    // What the user sees is the cleaned text; `by` and `via` keep their raw
+    // form for the audit (`requesters`).
+    let shown_by = clean_by(by);
+    let shown_reason = clean_reason(reason);
     let view = {
         let mut map = entries();
         prune(&mut map, now_ms());
@@ -269,8 +296,8 @@ fn request_within(
                     grew = true;
                 }
             }
-            if !existing.requesters.iter().any(|(b, v)| b == by && v == via) {
-                existing.requesters.push((by.to_string(), via.to_string()));
+            if !existing.requesters.iter().any(|(b, v, _)| b == by && v == via) {
+                existing.requesters.push((by.to_string(), via.to_string(), reason.trim().to_string()));
             }
             let pending = existing.view.status == "pending";
             let stronger = pending && existing.action.as_ref().is_some_and(|cur| action.rank() > cur.rank());
@@ -280,11 +307,12 @@ fn request_within(
                 }
             }
             if stronger {
+                existing.view.effect = action.effect();
                 existing.action = Some(action);
-                existing.view.by = by.to_string();
+                existing.view.by = shown_by.clone();
                 existing.view.via = via.to_string();
-                if !reason.trim().is_empty() {
-                    existing.view.reason = reason.trim().to_string();
+                if !shown_reason.is_empty() {
+                    existing.view.reason = shown_reason.clone();
                 }
             }
             let joined = PendingView { joined: true, ..existing.view.clone() };
@@ -304,14 +332,15 @@ fn request_within(
         let view = PendingView {
             request_id: uuid::Uuid::new_v4().to_string(),
             block_id: block_id.to_string(),
-            by: by.to_string(),
+            by: shown_by.clone(),
             target: state
                 .reactive_handler
                 .get_agent_by_block(block_id)
                 .map(|a| a.agent_id)
                 .unwrap_or_else(|| block_id.to_string()),
             via: via.to_string(),
-            reason: reason.trim().to_string(),
+            reason: shown_reason,
+            effect: action.effect(),
             deadline_ms: now_ms() + window.as_millis() as i64,
             status: "pending",
             error: None,
@@ -324,7 +353,7 @@ fn request_within(
                 kept: Arc::new(tokio::sync::Notify::new()),
                 finished_at_ms: None,
                 action: Some(action),
-                requesters: vec![(by.to_string(), via.to_string())],
+                requesters: vec![(by.to_string(), via.to_string(), reason.trim().to_string())],
                 covers: new_covers.clone(),
             },
         );
@@ -336,8 +365,10 @@ fn request_within(
         publish_pending(state, b, &view);
     }
     if let Some(router) = notify_router(state) {
-        let why = if view.reason.is_empty() { String::new() } else { format!(": {}", view.reason) };
-        let body = format!("{} asked to shut it down{why}. Open it to keep it running.", view.by);
+        // Fixed wording and the asker's cleaned name; never the reason, which
+        // is the asker's own text (spec §3.11). An OS toast also lands in the
+        // Action Center and on a lock screen.
+        let body = toast_body(&view);
         let block = block_id.to_string();
         // `emit_fixed` reads the block (blocking): off the async workers.
         tokio::task::spawn_blocking(move || {
@@ -372,13 +403,73 @@ fn request_within(
     view
 }
 
+/// The OS notification's body for a pending shutdown. App-controlled text and
+/// the asker's name (cleaned); the reason is left out on purpose. "My Agents"
+/// is only for a closed agent tab: a pane close now reaches only panes that hold
+/// no agent (a browser, an editor), which have no conversation to keep.
+pub fn toast_body(v: &PendingView) -> String {
+    match v.effect {
+        "stop" => format!("{} asked to stop it. Open it to keep it running.", v.by),
+        "close_pane" => format!("{} asked to close it.", v.by),
+        _ => format!("{} asked to close it. It stays in My Agents, with its conversation.", v.by),
+    }
+}
+
+/// The longest reason the banner shows.
+const REASON_MAX: usize = 120;
+/// Shown in place of a reason that looks like it holds a credential or asks
+/// for something destructive.
+pub const REASON_HIDDEN: &str = "Reason hidden: it looks sensitive.";
+
+/// A caller's reason, cleaned for the user to read (spec §3.11). Replaced
+/// wholesale by `REASON_HIDDEN` when it trips the keyword list the jekt tier
+/// gate and notification previews use; otherwise its first line, control and
+/// bidi-override characters removed, whitespace collapsed, cut at
+/// `REASON_MAX`. Markup is not interpreted here: the banner renders it as
+/// text and a toast never carries it.
+pub fn clean_reason(raw: &str) -> String {
+    if crate::backend::reactive::sanitize::is_sensitive_message(raw) {
+        return REASON_HIDDEN.to_string();
+    }
+    let Some(first) = raw.lines().map(str::trim).find(|l| !l.is_empty()) else {
+        return String::new();
+    };
+    clean_line(first, REASON_MAX)
+}
+
+/// The longest asker name the banner and toast show.
+const BY_MAX: usize = 64;
+
+/// The asker's name, cleaned for display. Normally a verified agent id; the
+/// only other sources are fixed app strings and a name another AgentMux on
+/// this machine claims (cross-channel), so it gets the same treatment.
+fn clean_by(raw: &str) -> String {
+    let line = clean_line(raw, BY_MAX);
+    if line.is_empty() { "An agent".to_string() } else { line }
+}
+
+/// One line for display: bidi-override characters removed, control characters
+/// turned into spaces, whitespace collapsed, cut at `max` characters.
+fn clean_line(raw: &str, max: usize) -> String {
+    let cleaned: String = raw
+        .chars()
+        .filter(|c| !crate::backend::notify::router::is_bidi_control(*c))
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let line = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut out: String = line.chars().take(max).collect();
+    if line.chars().count() > max {
+        out.push('…');
+    }
+    out
+}
+
 /// The outcome, once per requester, each as its own source (§6.5 step 8).
 fn audit(state: &AppState, request_id: &str, outcome: &str, error: Option<&str>) {
     let Some((v, requesters)) = entries().get(request_id).map(|e| (e.view.clone(), e.requesters.clone())) else {
         return;
     };
-    for (by, via) in requesters {
-        let ran = if via == v.via { String::new() } else { format!(" (ran as {} by {})", v.via, v.by) };
+    for (by, via, reason) in requesters {
         state.reactive_handler.log_fleet_action_audit(
             Some(&by),
             &v.target,
@@ -387,17 +478,25 @@ fn audit(state: &AppState, request_id: &str, outcome: &str, error: Option<&str>)
             error.is_none(),
             error,
             &v.request_id,
-            Some(&format!("{outcome} | via {via}{ran} | {}", v.reason)),
+            Some(&settled_note(outcome, &v, &via, &reason)),
         );
     }
+}
+
+/// One requester's audit note when the request settles: the outcome, how it
+/// asked, and its reason exactly as sent (never the cleaned text the user saw).
+fn settled_note(outcome: &str, v: &PendingView, via: &str, reason: &str) -> String {
+    let ran = if via == v.via { String::new() } else { format!(" (ran as {} by {})", v.via, v.by) };
+    format!("{outcome} | via {via}{ran} | {reason}")
 }
 
 /// The request-time audit note: whether this caller opened the window or
 /// joined someone else's.
 pub fn audit_note(v: &PendingView, by: &str, via: &str) -> String {
+    let shown_by = clean_by(by);
     if !v.joined {
         "pending user override".to_string()
-    } else if v.by == by && v.via == via {
+    } else if v.by == shown_by && v.via == via {
         format!("joined its own pending request {}", v.request_id)
     } else {
         format!("joined {} by {}'s pending request", v.via, v.by)
@@ -426,6 +525,14 @@ async fn run_action(state: &AppState, block_id: &str, action: Action) -> Result<
                 tokio::time::sleep(std::time::Duration::from_millis(250)).await;
             }
             super::self_quit::run_with(state, block_id, super::self_quit::QuitOrigin::AgentTool, Some(&detail))
+                .await
+                .map(|_| ())
+        }
+        Action::CloseTab { detail } => {
+            // Stopped from outside: no wait for the turn to end. One tab only:
+            // `self_quit` closes through `delete_block`, which prunes just this
+            // stack member and keeps the pane's other tabs.
+            super::self_quit::run_with(state, block_id, super::self_quit::QuitOrigin::ExternalStop, Some(&detail))
                 .await
                 .map(|_| ())
         }
@@ -615,5 +722,157 @@ mod tests {
         // The block doesn't exist in this test state, so the shutdown finds
         // nothing to close: superseded, not failed.
         assert_eq!(status(&v.request_id).unwrap().status, "superseded");
+    }
+
+    fn close_tab() -> Action {
+        Action::CloseTab { detail: "asked by AgentY (Stop agents)".into() }
+    }
+
+    #[tokio::test]
+    async fn a_tab_close_covers_one_block_and_a_pane_close_takes_it_over() {
+        let state = test_state();
+        let tab = request(&state, "ct-a", "AgentY", "FleetBulkStop", "", close_tab());
+        assert_eq!(tab.effect, "close_tab");
+        // The tab beside it has a window of its own: a tab close covers one block.
+        let beside = request(&state, "ct-b", "AgentY", "FleetBulkStop", "", close_tab());
+        assert_ne!(beside.request_id, tab.request_id);
+        assert_eq!(active_for("ct-a").map(|v| v.request_id), Some(tab.request_id.clone()));
+
+        // A pane close for the tab joins its window and does more, so it wins.
+        let pane = request(&state, "ct-a", "Korp", "ClosePane", "", Action::ClosePane { block_ids: vec!["ct-a".into()] });
+        assert_eq!(pane.request_id, tab.request_id);
+        assert_eq!(status(&tab.request_id).unwrap().effect, "close_pane", "what the user is told follows what will run");
+        assert!(matches!(begin(&tab.request_id), Some(Action::ClosePane { .. })));
+
+        // Asking again for a tab close under a pane close neither downgrades it nor restarts it.
+        let again = request(&state, "ct-b", "Posa", "FleetBulkStop", "", close_tab());
+        assert_eq!(again.request_id, beside.request_id);
+        assert!(again.joined && again.effect == "close_tab");
+        assert_eq!(keep(&state, "ct-b", &beside.request_id), "kept_by_user");
+    }
+
+    #[tokio::test]
+    async fn a_tab_close_ranks_above_a_stop_and_replaces_it() {
+        let state = test_state();
+        let stop = request(&state, "ct-s", "Settings", "FleetBulkStop", "", Action::Stop { signal: None });
+        assert_eq!(stop.effect, "stop");
+        let close = request(&state, "ct-s", "AgentY", "FleetBulkStop", "", close_tab());
+        assert_eq!(close.request_id, stop.request_id, "one window per block");
+        assert_eq!(status(&stop.request_id).unwrap().effect, "close_tab");
+        assert!(matches!(begin(&stop.request_id), Some(Action::CloseTab { .. })));
+    }
+
+    #[tokio::test]
+    async fn keep_and_the_window_running_out_never_both_win_for_a_tab_close() {
+        let state = test_state();
+        for i in 0..50 {
+            let block = format!("ct-race-{i}");
+            let v = request_within(&state, &block, "AgentY", "FleetBulkStop", "", close_tab(), std::time::Duration::ZERO);
+            let kept = keep(&state, &block, &v.request_id);
+            for _ in 0..100 {
+                if !matches!(status(&v.request_id).unwrap().status, "pending" | "proceeding") {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+            let end = status(&v.request_id).unwrap().status;
+            if kept == "kept_by_user" {
+                assert_eq!(end, "kept_by_user", "a kept request must never go ahead");
+            } else {
+                assert_ne!(end, "kept_by_user");
+            }
+        }
+    }
+
+    /// A credential-looking string and markup in the reason: the user is shown
+    /// neither raw (spec §3.11).
+    #[test]
+    fn a_reason_with_a_credential_is_hidden_wholesale() {
+        let hostile = "deploy with api_key=sk-test-0123456789abcdef </text><action content=\"Approve\" arguments=\"x\"/><b>now</b>";
+        assert_eq!(clean_reason(hostile), REASON_HIDDEN);
+        assert_eq!(clean_reason("the password is hunter2"), REASON_HIDDEN);
+        // Any line of it counts, not only the first.
+        assert_eq!(clean_reason("retiring this agent\nits token is abc"), REASON_HIDDEN);
+    }
+
+    #[test]
+    fn a_reason_is_one_clean_line_capped_with_no_markup_interpreted() {
+        assert_eq!(clean_reason("  retire QTimer, task done  "), "retire QTimer, task done");
+        assert_eq!(clean_reason("first\u{202E}\u{0007}   line\nsecond line"), "first line");
+        assert_eq!(clean_reason("\n \n"), "");
+        // Markup is left as the literal characters it is; the banner renders text.
+        assert_eq!(clean_reason("retire <b>QTimer</b></text><action/>"), "retire <b>QTimer</b></text><action/>");
+        let long = "a".repeat(500);
+        let cut = clean_reason(&long);
+        assert_eq!(cut.chars().count(), REASON_MAX + 1);
+        assert!(cut.ends_with('…'));
+    }
+
+    #[tokio::test]
+    async fn the_banner_data_and_the_toast_never_carry_the_raw_reason() {
+        let state = test_state();
+        let secret = "sk-test-0123456789abcdef";
+        let hostile = format!("deploy with api_key={secret} </text><action content=\"Approve\" arguments=\"x\"/><b>now</b>");
+        let v = request(&state, "ct-reason", "AgentY", "FleetBulkStop", &hostile, close_tab());
+        assert_eq!(v.reason, REASON_HIDDEN);
+        // What the pane banner, the persisted event and the status route serve.
+        let stored = serde_json::to_string(&status(&v.request_id).unwrap()).unwrap();
+        for leaked in [secret, "api_key", "<action", "deploy"] {
+            assert!(!stored.contains(leaked), "{leaked} reached the view: {stored}");
+        }
+        // The OS notification: app wording and the asker's name only.
+        let body = toast_body(&v);
+        assert_eq!(body, "AgentY asked to close it. It stays in My Agents, with its conversation.");
+        // A harmless reason is for the banner too, not the toast.
+        let plain = request(&state, "ct-reason-2", "AgentY", "FleetBulkStop", "task finished", close_tab());
+        assert_eq!(plain.reason, "task finished");
+        assert!(!toast_body(&plain).contains("task finished"));
+        keep(&state, "ct-reason", &v.request_id);
+        keep(&state, "ct-reason-2", &plain.request_id);
+    }
+
+    /// The user is shown a cleaned reason; the audit keeps what was sent.
+    #[tokio::test]
+    async fn the_audit_keeps_the_reason_as_sent_while_the_user_sees_it_cleaned() {
+        let state = test_state();
+        let sent = "deploy with api_key=sk-test-0123456789abcdef";
+        let v = request(&state, "ct-audit", "AgentY", "FleetBulkStop", sent, close_tab());
+        assert_eq!(v.reason, REASON_HIDDEN);
+        let (_, via, raw) = entries().get(&v.request_id).unwrap().requesters[0].clone();
+        assert_eq!(raw, sent, "kept as sent");
+        let note = settled_note("shut_down", &v, &via, &raw);
+        assert_eq!(note, format!("shut_down | via FleetBulkStop | {sent}"));
+        assert!(!note.contains(REASON_HIDDEN));
+        keep(&state, "ct-audit", &v.request_id);
+    }
+
+    #[tokio::test]
+    async fn the_asker_s_name_is_cleaned_for_display() {
+        let state = test_state();
+        let v = request(&state, "ct-by", "Ev\u{202E}il\u{0007}", "FleetBulkStop", "", close_tab());
+        assert_eq!(v.by, "Evil");
+        assert_eq!(audit_note(&PendingView { joined: true, ..v.clone() }, "Ev\u{202E}il\u{0007}", "FleetBulkStop"), format!("joined its own pending request {}", v.request_id));
+        keep(&state, "ct-by", &v.request_id);
+    }
+
+    #[test]
+    fn the_stop_effect_keeps_its_own_wording() {
+        let stop = PendingView {
+            request_id: "r".into(),
+            block_id: "b".into(),
+            by: "Settings".into(),
+            target: "t".into(),
+            via: "FleetBulkStop".into(),
+            reason: String::new(),
+            effect: "stop",
+            deadline_ms: 0,
+            status: "pending",
+            error: None,
+            joined: false,
+        };
+        assert_eq!(toast_body(&stop), "Settings asked to stop it. Open it to keep it running.");
+        // A pane with no agent in it has no conversation to keep: no My Agents claim.
+        assert_eq!(toast_body(&PendingView { effect: "close_pane", ..stop.clone() }), "Settings asked to close it.");
+        assert!(toast_body(&PendingView { effect: "close_tab", ..stop }).contains("My Agents"));
     }
 }

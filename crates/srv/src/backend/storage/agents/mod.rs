@@ -204,6 +204,18 @@ pub struct AgentDefinition {
     /// limitation, not a bug — same precedent as those two fields.
     #[serde(default = "default_conversation_visibility")]
     pub conversation_visibility: String,
+    /// The agent's seat: role, lead and area
+    /// (`SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md`). It lives on the shared
+    /// definition record, not in `db_agents`, so it's filled where the record
+    /// is read: `agent_def_list`'s overlay and a cross-channel agent's
+    /// `agent_def_get`. `agent_def_get` of a local row leaves it `None`; read
+    /// it with `Store::agent_seat_get`. Written only by `agent.setSeat`
+    /// (`Store::agent_seat_set`); every other definition write leaves the
+    /// stored seat alone. `listagents` gives a spawned worker with no seat its
+    /// effective one (`backend::agent_seat::effective_seat`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub seat: Option<crate::registry::AgentSeat>,
 }
 
 /// `AgentDefinition::conversation_visibility`'s serde default — the safe,
@@ -392,6 +404,7 @@ pub(crate) fn test_agent_def(
         use_ambient_login: 0,
         model_vendor_base_url: model_vendor_base_url.to_string(),
         memory_id: String::new(),
+        seat: None,
         conversation_visibility: default_conversation_visibility(),
     }
 }

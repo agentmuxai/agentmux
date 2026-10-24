@@ -200,6 +200,7 @@ pub fn seed_agents(mstore: &Arc<Store>) -> Result<SeedReport, StoreError> {
             use_ambient_login: 0,
             model_vendor_base_url: String::new(), // manifest doesn't declare this yet
             memory_id: String::new(),
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
         };
         mstore.agent_def_insert(&mut agent)?;
@@ -466,6 +467,7 @@ fn reseed_if_needed(
             use_ambient_login: 0,
             model_vendor_base_url: String::new(), // manifest doesn't declare this yet
             memory_id: String::new(),
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
         };
 
@@ -577,6 +579,7 @@ mod tests {
             use_ambient_login: 0,
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
         };
         mstore.agent_def_insert(&mut def).unwrap();

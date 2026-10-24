@@ -638,6 +638,7 @@ fn insert_template(
     provider: &str,
 ) -> AgentDefinition {
     let mut def = AgentDefinition {
+        seat: None,
         conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
         id: id.to_string(),
         slug: String::new(),
@@ -934,6 +935,7 @@ fn template_promote_does_not_reuse_clone_with_active_zone() {
     // own zone.
     let now = now_ms() as i64;
     let mut user_clone = crate::backend::storage::store::AgentDefinition {
+        seat: None,
         conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
         id: "user-made-clone".to_string(),
         slug: String::new(),
@@ -1044,6 +1046,7 @@ fn template_promote_preserves_user_continuation_on_clone() {
     let promote_target_id = format!("template-promote-v1-{}", template.id);
     let now = now_ms() as i64;
     let mut prior_target = crate::backend::storage::store::AgentDefinition {
+        seat: None,
         conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
         id: promote_target_id.clone(),
         slug: String::new(),
@@ -1146,6 +1149,7 @@ fn template_promote_recovers_partial_copy_at_zone() {
     let promote_target_id = format!("template-promote-v1-{}", template.id);
     let now = now_ms() as i64;
     let mut prior_target = crate::backend::storage::store::AgentDefinition {
+        seat: None,
         conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
         id: promote_target_id.clone(),
         slug: String::new(),
@@ -1250,6 +1254,7 @@ fn template_promote_promotes_newer_source_over_stale_destination() {
     let promote_target_id = format!("template-promote-v1-{}", template.id);
     let now = now_ms() as i64;
     let mut prior_target = crate::backend::storage::store::AgentDefinition {
+        seat: None,
         conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
         id: promote_target_id.clone(),
         slug: String::new(),
@@ -1373,6 +1378,7 @@ fn template_promote_idempotent_under_partial_failure_at_archive_move() {
     let promote_target_id = format!("template-promote-v1-{}", template.id);
     let now = now_ms() as i64;
     let mut prior_target = crate::backend::storage::store::AgentDefinition {
+        seat: None,
         conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
         id: promote_target_id.clone(),
         slug: String::new(),
@@ -1522,6 +1528,7 @@ fn template_promote_skips_already_user_owned_definitions() {
     // A user-owned definition (is_seeded = 0) with a session — the
     // migration should leave it alone.
     let mut user_def = AgentDefinition {
+        seat: None,
         conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
         id: "user-abc".to_string(),
         slug: String::new(),

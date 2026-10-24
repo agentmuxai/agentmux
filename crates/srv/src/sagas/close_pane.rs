@@ -757,6 +757,7 @@ mod tests {
 
     fn sample_agent(id: &str) -> crate::backend::storage::agents::AgentDefinition {
         crate::backend::storage::agents::AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: id.to_string(),
             slug: id.to_string(),

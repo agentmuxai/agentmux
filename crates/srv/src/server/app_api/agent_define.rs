@@ -491,6 +491,7 @@ pub(crate) async fn agent_define_core(
         use_ambient_login: 0,
         model_vendor_base_url: cmd_model_vendor_base_url.clone(),
         memory_id: String::new(),
+        seat: None,
         conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
     };
 

@@ -8,6 +8,7 @@ use super::*;
 
 fn agent_def(id: &str, working_directory: &str) -> crate::backend::storage::AgentDefinition {
     crate::backend::storage::AgentDefinition {
+        seat: None,
         conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
         id: id.to_string(),
         slug: id.to_string(),

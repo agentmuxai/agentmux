@@ -1200,6 +1200,7 @@ mod tests {
         let store = make_store();
 
         let mut def = crate::backend::storage::store::AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "def-1".to_string(),
             slug: String::new(),
@@ -1279,6 +1280,7 @@ mod tests {
         let store = make_store();
 
         let mut def = crate::backend::storage::store::AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "def-1".to_string(),
             slug: String::new(),
@@ -1361,6 +1363,7 @@ mod tests {
         let store = make_store();
 
         let mut def = crate::backend::storage::store::AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "def-1".to_string(),
             slug: String::new(),
@@ -1460,6 +1463,7 @@ mod tests {
         let identity_store = Arc::new(Store::open_identity_store(identity_store_tmp.path()).unwrap());
 
         let mut def = crate::backend::storage::store::AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "def-1".to_string(),
             slug: String::new(),
@@ -1548,6 +1552,7 @@ mod tests {
         // `make_instance` below hardcodes `definition_id: "def-1"` — match it
         // rather than parameterizing a helper shared with other tests.
         let mut def = crate::backend::storage::store::AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "def-1".to_string(),
             slug: String::new(),
@@ -1655,6 +1660,7 @@ mod tests {
 
         let store = make_store();
         let mut def = crate::backend::storage::store::AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "def-1".to_string(),
             slug: String::new(),
@@ -1725,6 +1731,7 @@ mod tests {
         let store = make_store();
 
         let mut def = crate::backend::storage::store::AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "def-1".to_string(),
             slug: String::new(),
@@ -1802,6 +1809,7 @@ mod tests {
         let store = make_store();
 
         let mut def = crate::backend::storage::store::AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "def-1".to_string(),
             slug: String::new(),
@@ -1868,6 +1876,7 @@ mod tests {
     /// (claude). `use_ambient_login` is settable only to prove it is inert.
     fn gate_def(use_ambient_login: i64) -> crate::backend::storage::store::AgentDefinition {
         crate::backend::storage::store::AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "def-1".to_string(),
             slug: String::new(),
@@ -2311,6 +2320,7 @@ mod tests {
 
         // Agent definition.
         let mut def = crate::backend::storage::store::AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "def-1".to_string(),
             slug: String::new(),
@@ -2402,6 +2412,7 @@ mod tests {
         let store = make_store();
 
         let mut def = crate::backend::storage::store::AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "def-1".to_string(),
             slug: String::new(),
@@ -2468,6 +2479,7 @@ mod tests {
         let store = make_store();
 
         let mut def = crate::backend::storage::store::AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "def-1".to_string(),
             slug: String::new(),
@@ -2536,6 +2548,7 @@ mod tests {
         let store = make_store();
 
         let mut def = crate::backend::storage::store::AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "def-1".to_string(),
             slug: String::new(),
@@ -2612,6 +2625,7 @@ mod tests {
         let store = make_store();
 
         let mut def = crate::backend::storage::store::AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "def-1".to_string(),
             slug: String::new(),
@@ -2693,6 +2707,7 @@ mod tests {
         let store = make_store();
 
         let mut def = crate::backend::storage::store::AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "def-1".to_string(),
             slug: String::new(),
@@ -2795,6 +2810,7 @@ mod tests {
         let store = make_store();
 
         let mut def = crate::backend::storage::store::AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "def-1".to_string(),
             slug: String::new(),
@@ -2943,6 +2959,7 @@ mod tests {
         let store = make_store();
 
         let mut def = crate::backend::storage::store::AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "def-1".to_string(),
             slug: String::new(),
@@ -3021,6 +3038,7 @@ mod tests {
         let store = make_store();
 
         let mut def = crate::backend::storage::store::AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "def-1".to_string(),
             slug: String::new(),
@@ -3130,6 +3148,7 @@ mod tests {
         let identity_store = Arc::new(Store::open_identity_store(identity_store_tmp.path()).unwrap());
 
         let mut def = crate::backend::storage::store::AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "def-1".to_string(),
             slug: String::new(),
@@ -3213,6 +3232,7 @@ mod tests {
 
     fn make_agent_def_with_provider(id: &str, provider: &str) -> crate::backend::storage::store::AgentDefinition {
         crate::backend::storage::store::AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: id.to_string(),
             slug: String::new(),

@@ -10,18 +10,24 @@
  */
 
 import { WpsEvent } from "@/app/store/mps-events";
+import type { PendingView } from "@/types/rpc/PendingView";
 
 export const EVENT_SHUTDOWN_PENDING = WpsEvent.AgentShutdownPending;
 export const EVENT_SHUTDOWN_PENDING_CLEARED = WpsEvent.AgentShutdownPendingCleared;
 /** The second chime, this long before the deadline. */
 export const LAST_CALL_MS = 5_000;
 
+/** What happens when the window runs out (`PendingView.effect`). */
+export type ShutdownEffect = PendingView["effect"];
+
 export interface PendingShutdown {
     request_id: string;
     block_id: string;
     by: string;
     via: string;
+    /** The asker's reason, already cleaned by srv: never the raw text. */
     reason: string;
+    effect: ShutdownEffect;
     deadline_ms: number;
 }
 
@@ -34,6 +40,7 @@ export function parsePending(data: unknown): PendingShutdown | null {
         by: typeof d.by === "string" ? d.by : "",
         via: typeof d.via === "string" ? d.via : "",
         reason: typeof d.reason === "string" ? d.reason : "",
+        effect: d.effect === "stop" || d.effect === "close_pane" ? d.effect : "close_tab",
         deadline_ms: d.deadline_ms,
     };
 }
@@ -61,11 +68,19 @@ export function secondsLeft(p: PendingShutdown, now: number): number {
 }
 
 /**
- * "Korp asked to shut down Camper: <reason>." — or "Camper asked to shut
- * itself down" for its own `QuitSelf` from a turn the user didn't start.
+ * "Korp asked to close Camper: <reason>." — or "Camper asked to close
+ * itself" for its own `QuitSelf` from a turn the user didn't start. A close
+ * ends the agent and takes its tab; only the internal stop keeps the pane,
+ * and says "stop". The reason is shown as text and is already cleaned.
  */
 export function pendingTitle(p: PendingShutdown, agentId: string, agentName: string): string {
     const self = p.by.toLowerCase() === agentId.toLowerCase() || p.by.toLowerCase() === agentName.toLowerCase();
-    const who = self ? `${agentName} asked to shut itself down` : `${p.by || "Something"} asked to shut down ${agentName}`;
+    const verb = p.effect === "stop" ? "stop" : "close";
+    const who = self ? `${agentName} asked to ${verb} itself` : `${p.by || "Something"} asked to ${verb} ${agentName}`;
     return p.reason ? `${who}: ${p.reason}` : who;
+}
+
+/** "Closing in 12 s" / "Stopping in 12 s". */
+export function countdownLine(p: PendingShutdown, seconds: number): string {
+    return `${p.effect === "stop" ? "Stopping" : "Closing"} in ${seconds} s.`;
 }

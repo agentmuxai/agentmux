@@ -37,7 +37,15 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             } else if for_me {
                 std::env::var("AGENTMUX_AGENT_UID").ok().filter(|s| !s.is_empty())
             } else {
-                resolve_agent_name_at_boundary(&client, local_url, auth_key, target_agent).await?
+                match resolve_agent_target_at_boundary(&client, local_url, auth_key, target_agent).await? {
+                    // A name nobody answers to would file a task no agent can
+                    // claim (#1257): say so instead.
+                    crate::identity::BoundaryResolution::NoSuchAgent => anyhow::bail!(
+                        "{}",
+                        no_such_target(target_agent)
+                    ),
+                    r => r.uid(),
+                }
             };
 
             let url = format!("{}/agentmux/work", local_url.trim_end_matches('/'));
@@ -461,6 +469,16 @@ fn finished_text(id: &str, v: &Value) -> String {
     out
 }
 
+/// Why `Tasks enqueue` refuses a target no agent answers to (#1257).
+fn no_such_target(name: &str) -> String {
+    format!(
+        "No agent on this computer is called \"{name}\", so nobody could take this task. \
+         Name it by its AGENTMUX_AGENT_ID (Agents list shows each one), its display name, the \
+         display name's route form (\"Loap-3\" for \"Loap #3\"), or its uid; or leave \
+         target_agent out to file it for anyone."
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -483,5 +501,12 @@ mod tests {
         let same = serde_json::json!({"name": "#12", "changed": false, "for": ""});
         assert_eq!(hold_text("12", "hold", &same), "Task #12 was already on hold.");
         assert!(hold_text("12", "unhold", &same).ends_with("waiting for anyone."));
+    }
+
+    #[test]
+    fn a_target_nobody_answers_to_is_refused_with_how_to_name_one() {
+        let msg = no_such_target("Naki-9");
+        assert!(msg.contains("\"Naki-9\"") && msg.contains("AGENTMUX_AGENT_ID") && msg.contains("for anyone"), "{msg}");
+        assert!(!msg.contains("  "), "no source indentation in the text: {msg}");
     }
 }

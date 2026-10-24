@@ -411,6 +411,7 @@ mod tests {
 
     fn def(id: &str, is_seeded: i64, parent_id: &str) -> AgentDefinition {
         AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: id.to_string(),
             slug: id.to_string(),

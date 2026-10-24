@@ -241,6 +241,12 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                 });
                 mstore_raw.set_def_registry(Arc::new(def_store));
                 tracing::info!(dir = %def_dir.display(), "def registry: global definition store attached");
+                // New slugs are checked against every channel's and version's
+                // objects.db too, the root the fork slug migration reads.
+                match backend::slug_migration::Home::from_env() {
+                    Ok(home) => mstore_raw.set_slug_home(home),
+                    Err(e) => tracing::warn!(error = %e, "agent slugs: other channels' agents can't be checked; only the shared definitions are"),
+                }
                 // This channel's copy of every agent's former slugs, in step
                 // with the shared records (SPEC_FORK_SLUG_MIGRATION_2026_10_22.md Phase 1).
                 if let Err(e) = mstore_raw.agent_former_slugs_sync_from_shared() {

@@ -10,6 +10,10 @@
 //! - **Plan** (`plan.rs`, the default): candidates by §5.1, a collision check
 //!   across every definition, every `objects.db` on disk and every live
 //!   registration, and every place the old slug is stored. Changes nothing.
+//!   It also reports slugs two agents hold (`duplicates.rs`), with a proposed
+//!   id for the later one, and renames neither.
+//! - **Holders** (`holders.rs`): the same stores read in one pass, which a new
+//!   agent's slug is picked against too (`Store::agent_def_insert`).
 //! - **Preconditions** (`preconditions.rs`): the agents run nowhere on this
 //!   host, every running AgentMux understands former slugs (`stamp.rs`), and
 //!   the host-wide lock `shared/locks/slug-migration.lock` is taken.
@@ -25,6 +29,8 @@
 //! (`agentmux-srv migrate-fork-slugs`) and from `agents.migrateForkSlugs`.
 
 mod backup;
+mod duplicates;
+mod holders;
 mod home;
 mod journal;
 mod locations;
@@ -41,6 +47,7 @@ mod verify;
 #[cfg(test)]
 mod tests;
 
+pub use holders::HostSlugs;
 pub use home::Home;
 
 use crate::backend::rpc_types::{ForkSlugMigrationMode, ForkSlugPlan, ForkSlugReport, MigrateForkSlugsResult};

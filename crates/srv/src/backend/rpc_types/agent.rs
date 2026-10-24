@@ -451,6 +451,74 @@ pub struct AgentDefCreateFromTemplateResult {
     pub slug: String,
 }
 
+/// Request for `agent.setSeat`: set (`seat`) or clear (`seat: null`) an
+/// agent's seat (`SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md` §3). The
+/// operator's own client only; srv refuses an agent's connection.
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandAgentSetSeatData {
+    /// The agent's uid (`AgentDefinition.id`).
+    pub agent_id: String,
+    pub seat: Option<SeatInput>,
+}
+
+/// A seat as the operator enters it; srv validates it and stamps
+/// `set_at_ms` (`backend::agent_seat::validate`).
+#[derive(Debug, Clone, Default, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct SeatInput {
+    /// One of `leader`, `worker`, `specialist`, `platform_tester`, `analyst`.
+    #[ts(type = r#""leader" | "worker" | "specialist" | "platform_tester" | "analyst""#)]
+    pub role: String,
+    /// At most 40 characters; blank means none.
+    #[serde(default)]
+    #[ts(optional)]
+    pub qualifier: Option<String>,
+    /// The lead's agent uid: an agent on this machine, not the agent itself,
+    /// and not one that reports to it. Blank or absent means the operator.
+    #[serde(default)]
+    #[ts(optional)]
+    pub lead: Option<String>,
+    /// One line, at most 120 characters; blank means none.
+    #[serde(default)]
+    #[ts(optional)]
+    pub area: Option<String>,
+    /// Reserved for the organization's lanes; at most 40 characters.
+    #[serde(default)]
+    #[ts(optional)]
+    pub lane: Option<String>,
+}
+
+/// Response for `agent.setSeat`: the seat as stored, `null` once cleared.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AgentSetSeatResult {
+    pub seat: Option<crate::registry::AgentSeat>,
+}
+
+/// A seat as it is shown, with the lead's name resolved: each entry of
+/// MuxAPI's `Agents list`, a LAN peer's agent list and a My Agents row
+/// (`RecentSessionRow.seat`). `set_at_ms` and `lane` stay on the definition.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct SeatSummary {
+    #[ts(type = r#""leader" | "worker" | "specialist" | "platform_tester" | "analyst""#)]
+    pub role: String,
+    pub qualifier: Option<String>,
+    /// `null`: the agent reports to the operator.
+    pub lead: Option<SeatLead>,
+    pub area: Option<String>,
+}
+
+/// A seat's lead: its uid, and its name when this machine knows it (`null`
+/// for an agent on another machine, or one deleted since).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct SeatLead {
+    pub id: String,
+    pub name: Option<String>,
+}
+
 /// Request for `agentdefhide` / `agentdefunhide`. Phase 2 of the
 /// two-tier picker (Q2 Decision Y). The two RPCs share the same shape
 /// — the action is encoded in the command name, not the payload.

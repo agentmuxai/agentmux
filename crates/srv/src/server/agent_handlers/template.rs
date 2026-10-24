@@ -335,6 +335,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // same convention as auto_start/use_ambient_login above
                     // (opt-in settings reset on a fresh clone, not carried
                     // over).
+                    seat: None,
                     conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
                 };
                 mstore
@@ -746,6 +747,7 @@ pub(crate) fn copy_definition(
         // settings reset on a fork, not carried
         // over, even though other config like container image
         // and model vendor IS inherited).
+        seat: None,
         conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
     };
     mstore
@@ -849,6 +851,7 @@ mod tests {
     // carries "codex".
     fn seed_drifted_template(state: &AppState, def_id: &str, bundle_id: &str) {
         let mut def = AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: def_id.to_string(),
             slug: String::new(),

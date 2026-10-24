@@ -650,6 +650,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         agent_created_at: def.map(|d| d.created_at).unwrap_or(0),
                         started_at: inst.started_at,
                         agent_type: def.map(|d| d.agent_type.clone()).unwrap_or_default(),
+                        seat: crate::backend::agent_seat::summary_in(&mstore, &defs, &inst.definition_id),
                     });
                 }
 
@@ -1114,6 +1115,7 @@ mod tests {
             use_ambient_login: 0,
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
+            seat: None,
             conversation_visibility: "private".to_string(),
         }
     }

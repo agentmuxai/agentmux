@@ -39,6 +39,39 @@ pub(crate) async fn resolve_agent_name_at_boundary(
     auth_key: &str,
     name: &str,
 ) -> Result<Option<String>> {
+    Ok(resolve_agent_target_at_boundary(client, local_url, auth_key, name).await?.uid())
+}
+
+/// What a typed agent name came to at the boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BoundaryResolution {
+    /// Exactly one identified agent: store its uid.
+    Uid(String),
+    /// An agent reachable by name only (no uid), or an srv too old to say:
+    /// send the bare name.
+    NameOnly,
+    /// No agent of that name on this computer, in any channel.
+    NoSuchAgent,
+}
+
+impl BoundaryResolution {
+    pub(crate) fn uid(self) -> Option<String> {
+        match self {
+            BoundaryResolution::Uid(uid) => Some(uid),
+            _ => None,
+        }
+    }
+}
+
+/// [`resolve_agent_name_at_boundary`], telling "no such agent" apart from
+/// "reachable by name only", for a caller that must refuse the first: a task
+/// filed for a name nobody answers to can never be claimed (#1257).
+pub(crate) async fn resolve_agent_target_at_boundary(
+    client: &reqwest::Client,
+    local_url: &str,
+    auth_key: &str,
+    name: &str,
+) -> Result<BoundaryResolution> {
     let url = format!("{}/agentmux/agents/resolve", local_url.trim_end_matches('/'));
     let resp = client
         .post(&url)
@@ -49,7 +82,7 @@ pub(crate) async fn resolve_agent_name_at_boundary(
         .map_err(|e| anyhow::anyhow!("agent name resolve request failed: {e}"))?;
     let status = resp.status();
     let text = resp.text().await.unwrap_or_default();
-    interpret_resolve_response(status, &text, name)
+    interpret_resolve_detail(status, &text, name)
 }
 
 /// The response half of `resolve_agent_name_at_boundary`, separated so the
@@ -59,6 +92,15 @@ pub(crate) fn interpret_resolve_response(
     text: &str,
     name: &str,
 ) -> Result<Option<String>> {
+    Ok(interpret_resolve_detail(status, text, name)?.uid())
+}
+
+/// The response half of [`resolve_agent_target_at_boundary`].
+pub(crate) fn interpret_resolve_detail(
+    status: reqwest::StatusCode,
+    text: &str,
+    name: &str,
+) -> Result<BoundaryResolution> {
     // Only an srv that predates the endpoint (404/405) gets the
     // compatibility fallback of sending the bare name. Any other failure —
     // a store fault (503), a panicked handler (500) — fails the tool call:
@@ -66,7 +108,7 @@ pub(crate) fn interpret_resolve_response(
     // item to an exact-same-name other (Codex P2 on #3563).
     if status == reqwest::StatusCode::NOT_FOUND || status == reqwest::StatusCode::METHOD_NOT_ALLOWED
     {
-        return Ok(None);
+        return Ok(BoundaryResolution::NameOnly);
     }
     if !status.is_success() {
         anyhow::bail!("could not resolve agent \"{name}\": HTTP {status} — {text}");
@@ -80,7 +122,7 @@ pub(crate) fn interpret_resolve_response(
             .and_then(|u| u.as_str())
             .filter(|u| !u.is_empty())
         {
-            Some(uid) => Ok(Some(uid.to_string())),
+            Some(uid) => Ok(BoundaryResolution::Uid(uid.to_string())),
             None => anyhow::bail!(
                 "could not resolve agent \"{name}\": a single match came back without a uid"
             ),
@@ -108,7 +150,8 @@ pub(crate) fn interpret_resolve_response(
                 listed.join("\n")
             )
         }
-        "none" | "unidentified" => Ok(None),
+        "none" => Ok(BoundaryResolution::NoSuchAgent),
+        "unidentified" => Ok(BoundaryResolution::NameOnly),
         other => {
             anyhow::bail!("could not resolve agent \"{name}\": unexpected resolution {other:?}")
         }
