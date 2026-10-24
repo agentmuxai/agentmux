@@ -351,7 +351,7 @@ mod tests {
     }
 
     /// With a terminal, a bare vitest watches and keeps running, so it is not slotted unless the
-    /// arguments ask for a single run (`npm test -- --run`, Codex on #5379).
+    /// arguments ask for a single run (`npm test -- --run`, #5379).
     #[test]
     fn with_a_terminal_only_a_one_shot_test_run_is_slotted() {
         if bash().is_none() {
