@@ -416,7 +416,7 @@ mod spawn_site_coverage {
          "test: a stand-in agent CLI the roots-file prune test records and kills"),
         ("src/backend/process_tracker/cgroup_linux.rs", "&argv[0]", 1,
          "test: runs the wrapped argv the cgroup tests track and kill"),
-        ("src/backend/process_tracker/cgroup_linux.rs", "\"sh\"", 1,
+        ("src/backend/process_tracker/cgroup_linux.rs", "\"sh\"", 2,
          "test: disposable children the cgroup tests track and kill"),
         ("src/sagas/close_pane.rs", "\"cmd\"", 2,
          "test: stand-in background dev servers (Stop ends one; a failed Stop keeps one)"),

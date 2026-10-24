@@ -105,7 +105,8 @@ pub fn kill_orphans(data_dir: &Path, srv_pid: u32) -> Option<Cleanup> {
         done.cgroups = kill_agent_cgroups(scope);
     }
     for root in &roots.roots {
-        if crate::process::process_start_time(root.pid) == Some(root.start) && crate::process::leads_own_group(root.pid) {
+        let leader_alive = crate::process::process_start_time(root.pid) == Some(root.start);
+        if (leader_alive && crate::process::leads_own_group(root.pid)) || crate::process::orphaned_group_alive(root.pid) {
             if crate::process::signal_process_group(root.pid, libc::SIGKILL).is_ok() {
                 done.groups += 1;
             }
@@ -115,6 +116,18 @@ pub fn kill_orphans(data_dir: &Path, srv_pid: u32) -> Option<Cleanup> {
     }
     remove(data_dir);
     Some(done)
+}
+
+/// Whether a recorded CLI's group is still there to end: its leader is still
+/// the process that was recorded (same start time), or the leader is gone but
+/// its helpers still hold the group (`process::orphaned_group_alive`). A pid
+/// that now belongs to some other process is not ours.
+#[cfg(unix)]
+pub fn is_alive(root: &Root) -> bool {
+    match crate::process::process_start_time(root.pid) {
+        Some(start) => start == root.start,
+        None => crate::process::orphaned_group_alive(root.pid),
+    }
 }
 
 /// Only srv's own scope (`agentmux-srv-<pid>.scope`) under the cgroup
@@ -172,6 +185,40 @@ mod tests {
         assert!(!is_srv_scope(Path::new("/sys/fs/cgroup/user.slice"), 77));
         assert!(!is_srv_scope(Path::new("/tmp/agentmux-srv-77.scope"), 77));
         assert!(!is_srv_scope(Path::new("/sys/fs/cgroup/../tmp/agentmux-srv-77.scope"), 77));
+    }
+
+    /// A CLI that exited while its helper lives on: the group is still ended.
+    #[cfg(unix)]
+    #[test]
+    fn kill_orphans_ends_the_helpers_of_a_cli_that_already_exited() {
+        use std::io::BufRead as _;
+        use std::os::unix::process::CommandExt as _;
+        let dir = temp_dir("leaderless");
+        let mut cli = std::process::Command::new("sh")
+            .args(["-c", "sleep 30 & echo $!"])
+            .stdout(std::process::Stdio::piped())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let start = crate::process::process_start_time(cli.id()).unwrap();
+        let roots = AgentRoots { srv_pid: 4242, cgroup: None, roots: vec![Root { pid: cli.id(), start }] };
+        write(&dir, &roots).unwrap();
+        let mut line = String::new();
+        std::io::BufReader::new(cli.stdout.take().unwrap()).read_line(&mut line).unwrap();
+        let helper: u32 = line.trim().parse().unwrap();
+        cli.wait().unwrap();
+        assert!(is_alive(&roots.roots[0]), "kept while the helper holds the group");
+
+        let done = kill_orphans(&dir, 4242).unwrap();
+        assert_eq!(done.groups, 1);
+        for _ in 0..100 {
+            if crate::process::process_start_time(helper).is_none() {
+                let _ = std::fs::remove_dir_all(&dir);
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        panic!("the helper {helper} survived the launcher's cleanup");
     }
 
     /// The launcher's fallback after srv died: a recorded CLI still running

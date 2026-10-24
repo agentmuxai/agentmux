@@ -265,6 +265,20 @@ pub fn leads_own_group(pid: u32) -> bool {
     pid >= 2 && unsafe { libc::getpgid(pid) } == pid
 }
 
+/// True when process group `pgid` still has members although no process has
+/// that pid any more: its leader exited and was reaped, but what the leader
+/// started (an agent CLI's MCP servers) lives on. The kernel does not hand a
+/// pid out again while it is still a group id, so `kill(-pgid)` reaches
+/// exactly those survivors. `false` while the pid is a live process (the
+/// caller decides then whether it is the same one), and for an empty group.
+#[cfg(unix)]
+pub fn orphaned_group_alive(pgid: u32) -> bool {
+    let Ok(pid) = checked_pid(pgid) else { return false };
+    // SAFETY: signal 0 only checks that the group exists; `pid >= 2` keeps
+    // `-pid` clear of the caller's own group (0) and the broadcast (-1).
+    pid >= 2 && process_start_time(pgid).is_none() && unsafe { libc::kill(-pid, 0) } == 0
+}
+
 /// When `pid` started, in a unit fixed per platform (clock ticks since boot
 /// on Linux, microseconds since the epoch on macOS), or `None` when it isn't
 /// running or the platform can't say. A pid plus its start time names one
@@ -519,6 +533,37 @@ mod tests {
         assert!(leads_own_group(other_pid), "the sibling's group still has its leader");
         assert!(other.try_wait().unwrap().is_none(), "the sibling still runs");
         kill_child_and_group(&mut other).await.unwrap();
+    }
+
+    /// A leader that exited and was reaped leaves a group the kernel still
+    /// holds: it is reported alive until its last member is gone.
+    #[cfg(unix)]
+    #[test]
+    fn a_group_outlives_its_reaped_leader_until_its_last_member_exits() {
+        use std::io::BufRead as _;
+        use std::os::unix::process::CommandExt as _;
+        let mut leader = std::process::Command::new("sh")
+            .args(["-c", "sleep 30 & echo $!"])
+            .stdout(std::process::Stdio::piped())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pgid = leader.id();
+        let mut line = String::new();
+        std::io::BufReader::new(leader.stdout.take().unwrap()).read_line(&mut line).unwrap();
+        let helper: i32 = line.trim().parse().unwrap();
+        leader.wait().unwrap();
+        assert!(orphaned_group_alive(pgid), "the helper still holds the group");
+        assert!(!orphaned_group_alive(0) && !orphaned_group_alive(1));
+        // SAFETY: the helper is the sleep started above.
+        unsafe { libc::kill(helper, libc::SIGKILL) };
+        for _ in 0..100 {
+            if !orphaned_group_alive(pgid) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        panic!("the group is still reported alive after its last member was killed");
     }
 
     /// An abandoned CLI (its task dropped) takes its helpers with it.

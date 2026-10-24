@@ -57,12 +57,11 @@ pub fn finish() {
     }
 }
 
-/// Remove every root that is no longer the process recorded (exited, or its
-/// pid reused). True when anything was removed.
+/// Remove every root whose group is gone: the CLI exited and nothing it started
+/// still holds its group, or its pid was reused. True when anything was removed.
 fn prune_exited(file: &mut AgentRoots) -> bool {
     let before = file.roots.len();
-    file.roots
-        .retain(|r| agentmux_common::process::process_start_time(r.pid) == Some(r.start));
+    file.roots.retain(agentmux_common::agent_roots::is_alive);
     file.roots.len() != before
 }
 
