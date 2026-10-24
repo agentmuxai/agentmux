@@ -14,6 +14,11 @@ use crate::backend::agent_state::AgentState;
 /// raises no toast (spec §13, decision 1).
 pub(crate) const SESSION_WINDOW: &str = "five_hour";
 
+/// How long a closed episode is remembered: the same account failing again
+/// with the same reset within it reopens the episode as it was (already
+/// toasted, its requesters already told) rather than notifying again.
+pub(crate) const REOPEN_GRACE_MS: u64 = 5 * 60_000;
+
 /// A pane that is `limited` or `signed_out` on an account, as one scan found it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BlockedPane {
@@ -106,11 +111,13 @@ pub(crate) struct Episodes {
     /// Failures stored before srv started (block → signature). Finding one is
     /// the episode rebuilt, not news: no toast and no notes for it.
     baseline: HashMap<String, String>,
+    /// Episodes closed in the last [`REOPEN_GRACE_MS`], by account, with when.
+    closed: HashMap<String, (Episode, u64)>,
 }
 
 impl Episodes {
     pub fn new(baseline: HashMap<String, String>) -> Self {
-        Episodes { open: BTreeMap::new(), baseline }
+        Episodes { open: BTreeMap::new(), baseline, closed: HashMap::new() }
     }
 
     pub fn list(&self) -> impl Iterator<Item = &Episode> {
@@ -136,24 +143,37 @@ impl Episodes {
             by_account.entry(p.account_id.clone()).or_default().push(p);
         }
         let mut out = Vec::new();
+        self.closed.retain(|_, (_, at)| now_ms.saturating_sub(*at) <= REOPEN_GRACE_MS);
         let closed: Vec<String> = self.open.keys().filter(|a| !by_account.contains_key(*a)).cloned().collect();
         for account_id in closed {
             if let Some(ep) = self.open.remove(&account_id) {
-                out.push(Effect::Closed { account_id, provider: ep.provider });
+                out.push(Effect::Closed { account_id: account_id.clone(), provider: ep.provider.clone() });
+                self.closed.insert(account_id, (ep, now_ms));
             }
         }
         for (account_id, mut panes) in by_account {
             panes.sort_by(|a, b| a.agent_name.to_lowercase().cmp(&b.agent_name.to_lowercase()).then(a.block_id.cmp(&b.block_id)));
             panes.dedup_by(|a, b| a.block_id == b.block_id);
-            let ep = self.open.entry(account_id.clone()).or_insert_with(|| Episode {
-                account_id: account_id.clone(),
-                provider: panes[0].provider.clone(),
-                opened_at_ms: now_ms,
-                panes: Vec::new(),
-                toasted: false,
-                announced: HashSet::new(),
-                told: HashSet::new(),
-            });
+            if !self.open.contains_key(&account_id) {
+                let fresh = Episode {
+                    account_id: account_id.clone(),
+                    provider: panes[0].provider.clone(),
+                    opened_at_ms: now_ms,
+                    panes: panes.clone(),
+                    toasted: false,
+                    announced: HashSet::new(),
+                    told: HashSet::new(),
+                };
+                // The same outage back within the grace: what was told stands.
+                let reopened = match self.closed.remove(&account_id) {
+                    Some((old, _)) if old.resets_at_ms() == fresh.resets_at_ms() && old.state() == fresh.state() => {
+                        Episode { panes: Vec::new(), ..old }
+                    }
+                    _ => Episode { panes: Vec::new(), ..fresh },
+                };
+                self.open.insert(account_id.clone(), reopened);
+            }
+            let ep = self.open.get_mut(&account_id).expect("just inserted");
             // A pane that left and came back is news again.
             ep.announced.retain(|b| panes.iter().any(|p| &p.block_id == b));
             let changed = ep.panes != panes;
@@ -236,10 +256,15 @@ pub(crate) fn leader_note(items: &[(&BlockedPane, &[i64])]) -> String {
         .collect();
     // Until step 2c holds messages to an unavailable agent (#1849), one sent
     // to it fails; when that lands, say they are held instead.
-    let after = if items.len() == 1 {
-        "Until then, a message to it starts a turn that fails; move it to another account or wait for the reset."
-    } else {
-        "Until then, a message to one of them starts a turn that fails; move them to another account or wait for the reset."
+    let signed_out = items.iter().filter(|(p, _)| p.state == AgentState::SignedOut).count();
+    let after = match (items.len(), signed_out) {
+        (1, 0) => "Until then, a message to it starts a turn that fails; move it to another account or wait for the reset.",
+        (1, _) => "Until it is signed in again, a message to it starts a turn that fails; sign it in again or move it to another account.",
+        (_, 0) => "Until then, a message to one of them starts a turn that fails; move them to another account or wait for the reset.",
+        (n, s) if n == s => {
+            "Until they are signed in again, a message to one of them starts a turn that fails; sign them in again or move them to another account."
+        }
+        _ => "Until then, a message to one of them starts a turn that fails; sign them in again, move them to another account or wait for the reset.",
     };
     format!("{}. {after}", clauses.join("; "))
 }

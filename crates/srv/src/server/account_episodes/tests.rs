@@ -123,8 +123,12 @@ async fn the_scan_groups_limited_and_signed_out_panes_by_their_run_account() {
         panes.iter().map(|p| (p.agent_name.as_str(), p.state, p.limit_window.as_deref(), p.account_id.as_str(), p.provider.as_str())).collect();
     assert_eq!(
         got,
-        vec![("Loap-3", AgentState::SignedOut, None, "acct-1", "claude"), ("Naki-2", AgentState::Limited, Some("seven_day"), "acct-1", "claude")],
-        "a passed reset, a transient failure, a running turn and a clean pane are not blocked"
+        vec![
+            ("Loap-3", AgentState::SignedOut, None, "acct-1", "claude"),
+            ("Mid", AgentState::Limited, None, "acct-1", "claude"),
+            ("Naki-2", AgentState::Limited, Some("seven_day"), "acct-1", "claude"),
+        ],
+        "a pane retrying (a turn in flight) stays; a passed reset, a transient failure and a clean pane are not blocked"
     );
     let base = baseline(&state.mstore);
     assert!(base.contains_key(&weekly) && base.contains_key(&auth) && base.contains_key(&reset) && base.contains_key(&mid_turn));
@@ -412,4 +416,35 @@ async fn a_requester_of_two_blocked_agents_gets_one_note() {
         state.reactive_handler.unregister_block(block);
     }
     cleanup(&[&a, &b, &c]);
+}
+
+/// A retry turn doesn't close the episode: the pane stays in it while the
+/// turn runs, with no second toast or note, and failing again is the same
+/// episode.
+#[tokio::test]
+async fn a_retry_turn_keeps_the_pane_in_its_episode() {
+    let state = test_state();
+    state.id_store.identity_upsert(&account("acct-1", "claude", "valid")).unwrap();
+    let tab = new_tab(&state).await;
+    let now = agentmux_common::time::now_ms_u64();
+    let limit = failure("usage_limit", Some(now + 600_000), Some("seven_day"));
+    let block = pane(&state, &tab, "r1", "Retry", "acct-1", Some(limit.clone()), false).await;
+    let mut eps = Episodes::default();
+    assert_eq!(eps.update(scan(&state, now), now).iter().filter(|e| matches!(e, Effect::Toast(_))).count(), 1);
+
+    // The operator retries: a turn runs on the same stored failure.
+    blockcontroller::delete_controller(&block);
+    register_stub(&block, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, true);
+    assert!(eps.update(scan(&state, now + 1_000), now + 1_000).is_empty(), "still in its episode: nothing closes, nothing is told again");
+    assert!(covers(&state.mstore, &state.identity_store, &block, now + 1_000));
+
+    // The turn fails again on the same limit.
+    blockcontroller::delete_controller(&block);
+    register_stub(&block, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
+    let mut meta = crate::backend::obj::MetaMapType::new();
+    meta.insert(blockcontroller::core::META_LAST_FAILURE.to_string(), limit);
+    crate::server::service::update_object_meta(&state.mstore, &format!("block:{block}"), &meta).unwrap();
+    assert!(eps.update(scan(&state, now + 2_000), now + 2_000).is_empty(), "the same episode");
+    assert_eq!(eps.get("acct-1").unwrap().opened_at_ms, now);
+    cleanup(&[&block]);
 }

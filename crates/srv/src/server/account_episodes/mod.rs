@@ -248,16 +248,29 @@ fn agent_name(mstore: &Store, block: &Block) -> String {
         .unwrap_or(def_id)
 }
 
-/// Every agent pane that is `limited` or `signed_out` on a known account now.
+/// The pane's account and state while its stored failure keeps it in an
+/// episode: a usage limit whose reset (if known) hasn't passed, or a refused
+/// sign-in, on an account. Read from the stored failure, not the live state:
+/// a retry turn shows the pane `working` for a moment, and that must not
+/// close its episode and open a new one with a second toast when the turn
+/// fails again. Only a clean turn, a rebind or the reset clears it.
+fn membership(identity: &Store, block: &Block, failure: &agent_state::StoredFailure, now_ms: u64) -> Option<(String, AgentState)> {
+    let state = match failure.code {
+        FailureClass::UsageLimit if failure.resets_at_ms.is_none_or(|r| r > now_ms) => AgentState::Limited,
+        FailureClass::Auth => AgentState::SignedOut,
+        _ => return None,
+    };
+    let account = run_accounts_of_block(identity, block).into_iter().next()?;
+    Some((account, state))
+}
+
+/// Every agent pane whose stored failure puts it in an account's episode now.
 fn scan(state: &AppState, now_ms: u64) -> Vec<BlockedPane> {
     let accounts = state.id_store.identity_list(None).unwrap_or_default();
     let mut out = Vec::new();
     for block in tab_blocks(&state.mstore) {
         let Some(failure) = blocking_failure(&block) else { continue };
-        let Some(u) = agent_state::unavailable_of_block(&state.mstore, Some(&state.identity_store), &block.oid, now_ms) else {
-            continue;
-        };
-        let Some(account_id) = u.account_id.clone() else { continue };
+        let Some((account_id, pane_state)) = membership(&state.identity_store, &block, &failure, now_ms) else { continue };
         let provider = accounts
             .iter()
             .find(|a| a.id == account_id)
@@ -275,8 +288,8 @@ fn scan(state: &AppState, now_ms: u64) -> Vec<BlockedPane> {
             block_id: block.oid.clone(),
             account_id,
             provider: canonical(&provider),
-            state: u.state,
-            resets_at_ms: u.resets_at_ms,
+            state: pane_state,
+            resets_at_ms: failure.resets_at_ms,
             limit_window,
             signature: signature(&failure),
         });
@@ -296,11 +309,7 @@ pub fn covers_block(block_id: &str) -> bool {
 /// [`covers_block`] against these stores at `now_ms`.
 fn covers(mstore: &Store, identity: &Store, block_id: &str, now_ms: u64) -> bool {
     let Some(block) = mstore.get::<Block>(block_id).ok().flatten() else { return false };
-    match blocking_failure(&block) {
-        Some(f) if f.code == FailureClass::UsageLimit && f.resets_at_ms.is_some_and(|r| r <= now_ms) => false,
-        Some(_) => !run_accounts_of_block(identity, &block).is_empty(),
-        None => false,
-    }
+    blocking_failure(&block).is_some_and(|f| membership(identity, &block, &f, now_ms).is_some())
 }
 
 /// The toast's key for an account: its group, and the id it is taken down by.

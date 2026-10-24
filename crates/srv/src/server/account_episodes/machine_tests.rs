@@ -62,8 +62,8 @@ fn the_episode_closes_when_no_pane_is_blocked_and_a_new_hit_opens_another() {
     let closed = eps.update(vec![], 3);
     assert_eq!(closed, vec![Effect::Closed { account_id: "acct".into(), provider: "claude".into() }]);
     assert_eq!(eps.list().count(), 0);
-    let again = eps.update(vec![weekly("b1", "A", "acct")], 4);
-    assert_eq!(kinds(&again), ["changed", "toast", "announce"], "a new episode toasts again");
+    let again = eps.update(vec![weekly("b1", "A", "acct")], 4 + REOPEN_GRACE_MS);
+    assert_eq!(kinds(&again), ["changed", "toast", "announce"], "after the grace, a new episode toasts again");
 }
 
 #[test]
@@ -141,10 +141,22 @@ fn the_leader_note_names_the_agents_and_their_tasks() {
     );
     let q = pane("b2", "Loap-3", "acct", AgentState::SignedOut, None, None);
     assert_eq!(
+        leader_note(&[(&q, &[1, 2, 3])]),
+        "Loap-3 needs the user to sign in again and holds #1, #2 and #3. \
+         Until it is signed in again, a message to it starts a turn that fails; sign it in again or move it to another account."
+    );
+    let r = pane("b3", "QTest", "acct", AgentState::SignedOut, None, None);
+    assert!(leader_note(&[(&q, &[1]), (&r, &[2])]).ends_with(
+        "Until they are signed in again, a message to one of them starts a turn that fails; sign them in again or move them to another account."
+    ));
+    assert_eq!(
         leader_note(&[(&p, &[163]), (&q, &[1, 2, 3])]),
         "Naki-2 is out of quota and holds #163; Loap-3 needs the user to sign in again and holds #1, #2 and #3. \
-         Until then, a message to one of them starts a turn that fails; move them to another account or wait for the reset."
+         Until then, a message to one of them starts a turn that fails; sign them in again, move them to another account or wait for the reset."
     );
+    assert!(leader_note(&[(&p, &[1]), (&weekly("b", "X", "a"), &[4, 5])]).ends_with(
+        "Until then, a message to one of them starts a turn that fails; move them to another account or wait for the reset."
+    ));
     assert!(leader_note(&[(&weekly("b", "X", "a"), &[4, 5])]).contains("is out of quota until "));
 }
 
@@ -156,6 +168,26 @@ fn each_requester_is_told_once_per_episode() {
     assert_eq!(eps.first_notes("acct", ["Lead".to_string(), "Other".to_string()]), ["Lead", "Other"]);
     assert!(eps.first_notes("acct", ["lead".to_string()]).is_empty(), "an agent joining later tells no one twice");
     eps.update(vec![], 2);
-    eps.update(vec![weekly("b1", "A", "acct")], 3);
-    assert_eq!(eps.first_notes("acct", ["Lead".to_string()]), ["Lead"], "a new episode tells again");
+    eps.update(vec![weekly("b1", "A", "acct")], 3 + REOPEN_GRACE_MS);
+    assert_eq!(eps.first_notes("acct", ["Lead".to_string()]), ["Lead"], "a new episode, after the grace, tells again");
+}
+
+#[test]
+fn the_same_outage_back_within_the_grace_reopens_without_notifying_again() {
+    let mut eps = Episodes::default();
+    eps.update(vec![weekly("b1", "A", "acct")], 1_000);
+    assert_eq!(eps.first_notes("acct", ["Lead".to_string()]), ["Lead"]);
+    assert_eq!(kinds(&eps.update(vec![], 2_000)), ["closed"]);
+    let back = eps.update(vec![weekly("b1", "A", "acct")], 3_000);
+    assert_eq!(kinds(&back), ["changed"], "no second toast, no second note");
+    let ep = eps.get("acct").unwrap();
+    assert_eq!((ep.opened_at_ms, ep.toasted), (1_000, true), "the same episode");
+    assert!(eps.first_notes("acct", ["Lead".to_string()]).is_empty());
+
+    // Past the grace, or with another reset, it is a new outage.
+    eps.update(vec![], 4_000);
+    assert_eq!(kinds(&eps.update(vec![weekly("b1", "A", "acct")], 4_000 + REOPEN_GRACE_MS + 1)), ["changed", "toast", "announce"]);
+    eps.update(vec![], 10_000_000);
+    let renewed = pane("b1", "A", "acct", AgentState::Limited, Some(99_999_999), Some("seven_day"));
+    assert_eq!(kinds(&eps.update(vec![renewed], 10_000_001)), ["changed", "toast", "announce"]);
 }
