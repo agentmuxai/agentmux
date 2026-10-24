@@ -256,6 +256,7 @@ export const cefApprovals: ApprovalHostApi = {
         await invokeCommand("widget_approval_decide", { id: publisher, hash: "", decision: "forget_key" });
     },
     vault: (op, args) => invokeCommand("vault_op", { ...args, op }),
+    google: (op, args) => invokeCommand("google_op", { ...args, op }),
     vaultReveal: (args) => invokeCommand("vault_reveal", args),
     vaultCopy: (args) => invokeCommand("vault_copy", args),
     vaultExport: (args) => invokeCommand("vault_export", args),

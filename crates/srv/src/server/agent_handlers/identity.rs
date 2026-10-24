@@ -744,6 +744,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         "deleteidentityaccount: identity_store mirror row cleanup failed (non-fatal)"
                     );
                 }
+                // A Google account's grants and call log go with it (connectors spec D4, D7).
+                if let Err(e) = identity_store.google_account_forget(&cmd.id) {
+                    tracing::warn!(account_id = %cmd.id, error = %e, "deleteidentityaccount: Google grants cleanup failed (non-fatal)");
+                }
                 if links_cascaded > 0 {
                     // info!, not debug!: the production filter is
                     // "agentmuxsrv=info,info" (reagent P1, PR #2143).

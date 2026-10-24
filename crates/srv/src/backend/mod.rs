@@ -178,6 +178,8 @@ pub mod shell_node;
 pub mod work_facts;
 /// The Kanban's reminders and PR links (SPEC_WARDEN_KANBAN_2026_10_20.md).
 pub mod kanban;
+/// Google connectors: Calendar, Drive and Gmail for agents, called by srv.
+pub mod google;
 /// A leader hears when its workers end a turn without reporting, fail or stop.
 pub mod worker_notes;
 

@@ -18,6 +18,7 @@ mod desktop;
 mod family;
 mod fleet;
 mod global_memory;
+pub(crate) mod google_tool;
 mod history;
 mod identity_tool;
 mod loops;
@@ -239,7 +240,8 @@ pub(crate) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         widget_tool,
         vault_tool,
         app_tool,
-        desktop
+        desktop,
+        google_tool
     );
     if let Some((_, instead)) = REPLACED.iter().find(|(old, _)| *old == name) {
         anyhow::bail!("{name} was replaced: use {instead}");
@@ -257,6 +259,7 @@ mod tests {
         ("app_tool", include_str!("app_tool.rs")),
         ("browser_tool", include_str!("browser_tool.rs")),
         ("desktop", include_str!("desktop.rs")),
+        ("google_tool", include_str!("google_tool.rs")),
         ("identity_tool", include_str!("identity_tool.rs")),
         ("memory_tool", include_str!("memory_tool.rs")),
         ("message_tool", include_str!("message_tool.rs")),
