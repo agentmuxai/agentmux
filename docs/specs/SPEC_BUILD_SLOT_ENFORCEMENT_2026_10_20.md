@@ -60,6 +60,7 @@ For `cargo`, the heavy subcommands are:
 **Installing is safe to repeat and to share between channels:**
 - The script is replaced only by a newer `# build-slot-version: N`, so an older AgentMux on the same machine never overwrites a newer one's.
 - A shim is replaced only when it carries the shim's marker. A `cargo` somebody put there is left alone (and logged).
+- An isolated instance (`AGENTMUX_HOME_OVERRIDE` set: a test or capture run) installs nothing. The lock and the shims are shared by every AgentMux on the machine, and `install_for_current_user` writes to the OS home, not the override root, so an isolated start would otherwise change what every agent runs (found 2026-10-24 while preparing the v0.59.41 checks).
 - Files are written to a temporary name and renamed into place, so a shell starting a shim sees the old file or the new one, never half of one.
 
 **Who this reaches:** agent turns (the PATH above). Interactive terminal panes put the user's tools dir after the system PATH (`UserToolsPrecedence::AfterExisting`), so a person's own `cargo` there is never slotted. A tool that calls `cargo.exe` by full path bypasses it, as does an agent that sets `AGENTMUX_BUILD_SLOT_OFF`; the standard says not to.
