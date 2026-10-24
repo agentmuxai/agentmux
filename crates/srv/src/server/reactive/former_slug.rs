@@ -29,6 +29,22 @@ pub(super) fn owner(state: &AppState, name: &str) -> Option<FormerSlugOwner> {
     state.mstore.former_name_owner(name).ok().flatten()
 }
 
+/// The slug a message to `name` is looked for under when nothing is
+/// registered as `name`: the agent's whose current display name routes to it
+/// ("Naki-2" for "Naki #2"; registries file an agent under the slug it runs
+/// as), else the agent's it is a former name of. A live name here is its
+/// holder's. The request still goes out addressed to `name`, so its
+/// signatures cover what the sender signed (#1459).
+pub(super) fn delivery_alias(state: &AppState, name: &str) -> Option<String> {
+    if state.reactive_handler.has_live_name(name) {
+        return None;
+    }
+    match state.mstore.display_route_owner(name) {
+        Ok(Some(owner)) => Some(owner.slug),
+        _ => state.mstore.former_name_owner(name).ok().flatten().map(|o| o.slug),
+    }
+}
+
 /// The same-channel registry entry for `target`, else for the slug `alias`
 /// it was renamed to, with the name it was found under.
 pub(super) fn registry_entry(data_dir: &Path, target: &str, alias: Option<&str>) -> Option<(String, AgentEntry)> {

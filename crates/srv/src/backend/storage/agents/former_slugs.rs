@@ -23,7 +23,7 @@
 //! a name that isn't one costs nothing: [`FormerSlugSet`] holds every former
 //! slug in memory, and only a name in it is looked up in full.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -62,6 +62,10 @@ pub(in crate::backend::storage) struct FormerSlugSet {
     /// The same for former display names no agent holds now, by route key
     /// (`former_names`).
     pub(super) display: Mutex<Option<(Instant, HashSet<String>)>>,
+    /// Current display names by route key, each to the one agent holding it
+    /// (`None` when two do), less the keys some agent holds as its slug
+    /// (`Store::display_route_owner`, #1459): a name not in it costs nothing.
+    pub(super) routes: Mutex<Option<(Instant, HashMap<String, Option<FormerSlugOwner>>)>>,
     /// Store reads it caused (the set's re-reads and full lookups), for tests.
     #[cfg(test)]
     pub(super) reads: std::sync::atomic::AtomicUsize,
@@ -72,6 +76,7 @@ impl FormerSlugSet {
     pub(in crate::backend::storage) fn invalidate(&self) {
         *self.known.lock().unwrap_or_else(|e| e.into_inner()) = None;
         *self.display.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        *self.routes.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 
     pub(super) fn read(&self) {
@@ -86,6 +91,9 @@ impl FormerSlugSet {
             if let Some((at, _)) = set.lock().unwrap().as_mut() {
                 *at -= KNOWN_FOR * 2;
             }
+        }
+        if let Some((at, _)) = self.routes.lock().unwrap().as_mut() {
+            *at -= KNOWN_FOR * 2;
         }
     }
 }
