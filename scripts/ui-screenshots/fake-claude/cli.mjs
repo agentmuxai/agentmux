@@ -29,6 +29,12 @@
 //   { "text": "...", "holdMs": ms }            streamed text that pauses before
 //                                              it ends: a turn caught mid-reply
 //   { "wait": ms }                             pauses between steps
+//   { "limit": { "inMs", "window"?, "message"? } }
+//        the account runs out: this turn and every one until `inMs` from now
+//        fail the way Claude Code reports a plan limit (a rejected
+//        `rate_limit_event` with `resetsAt`, then an error result whose text
+//        names the reset in the local time zone), for testing the limited state
+//        (docs/specs/SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §11)
 // An interrupt (the pane's Stop) ends the turn being played.
 
 import { readFileSync } from "node:fs";
@@ -138,13 +144,49 @@ function toolResult(id, result, extra) {
     });
 }
 
+/** The plan limit a `limit` step started: `{ until, window, message }`. */
+let limited = null;
+
+/** `resets Oct 26, 7pm (America/Los_Angeles)`, as Claude Code words it. */
+function resetsText(ms) {
+    const d = new Date(ms);
+    const month = d.toLocaleString("en-US", { month: "short" });
+    const h = d.getHours() % 12 || 12;
+    const m = d.getMinutes();
+    const ampm = d.getHours() < 12 ? "am" : "pm";
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return `resets ${month} ${d.getDate()}, ${h}${m ? ":" + String(m).padStart(2, "0") : ""}${ampm} (${zone})`;
+}
+
+/** A turn on an account that is out of quota: the limit, then the error result. */
+function limitedTurn(started) {
+    const text = `${limited.message} · ${resetsText(limited.until)}`;
+    emit({
+        type: "rate_limit_event",
+        rate_limit_info: { status: "rejected", resetsAt: Math.floor(limited.until / 1000), rateLimitType: limited.window, overageStatus: "rejected" },
+    });
+    emit({ type: "assistant", message: { id: "msg_" + randomId(20), type: "message", role: "assistant", model: "<synthetic>", content: [{ type: "text", text }] }, session_id: sessionId, isApiErrorMessage: true });
+    emit({ type: "result", subtype: "success", is_error: true, result: text, num_turns: 1, duration_ms: Date.now() - started, duration_api_ms: 0, total_cost_usd: 0, usage: { input_tokens: 0, output_tokens: 0 }, session_id: sessionId });
+}
+
 async function playTurn(turnDef) {
     const turn = { cancelled: false, wake: null };
     current = turn;
     const started = Date.now();
     emit({ type: "system", subtype: "init", session_id: sessionId, model, cwd: process.cwd(), tools: ["Read", "Edit", "Write", "Bash", "Grep", "Glob", "TodoWrite", "Task", "AskUserQuestion"], claude_code_version: VERSION, permissionMode: "default" });
+    if (limited && Date.now() < limited.until) {
+        limitedTurn(started);
+        current = null;
+        return;
+    }
     for (const step of turnDef ? turnDef.steps : [{ text: "(This demo has no scripted reply for that.)" }]) {
         if (turn.cancelled) break;
+        if (step.limit) {
+            limited = { until: Date.now() + (step.limit.inMs ?? 300000), window: step.limit.window ?? "seven_day", message: step.limit.message ?? "You've hit your weekly limit" };
+            limitedTurn(started);
+            current = null;
+            return;
+        }
         if (step.wait) {
             await sleep(step.wait, turn);
         } else if (step.thinking) {
