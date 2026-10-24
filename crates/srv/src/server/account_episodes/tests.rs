@@ -210,6 +210,68 @@ async fn a_rebind_clears_only_the_failures_of_the_old_account() {
     cleanup(&[&old, &already, &other_agent]);
 }
 
+/// Whether `held_jekt_wake` was notified since it was last drained.
+async fn held_wake_notified() -> bool {
+    tokio::time::timeout(Duration::from_millis(200), crate::backend::reactive::held_jekt_wake().notified()).await.is_ok()
+}
+
+/// Signing in again to the account a pane was refused on ends its "signed
+/// out" (#2237): the failure is cleared, the episode closes and held
+/// messages are woken. Only the operator's window may report it.
+#[tokio::test]
+async fn a_sign_in_to_the_same_account_ends_its_signed_out_episode() {
+    let state = test_state();
+    state.id_store.identity_upsert(&account("acct-a", "claude", "valid")).unwrap();
+    let tab = new_tab(&state).await;
+    let now = agentmux_common::time::now_ms_u64();
+    let block = pane(&state, &tab, "s1", "Signed-out", "acct-a", Some(failure("auth", None, None)), false).await;
+    let mut eps = Episodes::default();
+    eps.update(scan(&state, now), now);
+    assert_eq!(eps.get("acct-a").map(|e| e.state()), Some(AgentState::SignedOut));
+
+    let e = call(&state, Some("loap-3"), COMMAND_IDENTITY_ACCOUNT_SIGNED_IN, json!({ "account_id": "acct-a" })).await.unwrap_err();
+    assert!(e.starts_with("FORBIDDEN"), "{e}");
+    assert!(stored_failure(&state, &block).is_some(), "an agent can't clear it");
+
+    held_wake_notified().await;
+    let r = call(&state, None, COMMAND_IDENTITY_ACCOUNT_SIGNED_IN, json!({ "account_id": "acct-a" })).await.unwrap();
+    assert_eq!(r["cleared"], json!(1));
+    assert_eq!(stored_failure(&state, &block), None);
+    assert!(held_wake_notified().await, "held messages replay");
+    let closed = eps.update(scan(&state, now + 1_000), now + 1_000);
+    assert!(closed.iter().any(|e| matches!(e, Effect::Closed { account_id, .. } if account_id == "acct-a")), "{closed:?}");
+    cleanup(&[&block]);
+}
+
+/// A usage limit isn't a sign-in problem: it ends at the reset or a move.
+#[tokio::test]
+async fn a_sign_in_leaves_a_usage_limit_alone() {
+    let state = test_state();
+    state.id_store.identity_upsert(&account("acct-a", "claude", "valid")).unwrap();
+    let tab = new_tab(&state).await;
+    let now = agentmux_common::time::now_ms_u64();
+    let block = pane(&state, &tab, "u1", "Limited", "acct-a", Some(failure("usage_limit", Some(now + 60_000), Some("five_hour"))), false).await;
+    let mut eps = Episodes::default();
+    eps.update(scan(&state, now), now);
+
+    assert_eq!(clear_signed_out(&state.mstore, &state.identity_store, &state.event_bus, "acct-a"), 0);
+    assert!(stored_failure(&state, &block).is_some());
+    assert!(eps.update(scan(&state, now + 1_000), now + 1_000).is_empty(), "its episode stays open");
+    assert_eq!(eps.get("acct-a").map(|e| e.state()), Some(AgentState::Limited));
+    cleanup(&[&block]);
+}
+
+/// A sign-in to one account says nothing about another.
+#[tokio::test]
+async fn a_sign_in_leaves_another_accounts_panes_alone() {
+    let state = test_state();
+    let tab = new_tab(&state).await;
+    let on_b = pane(&state, &tab, "b1", "On-b", "acct-b", Some(failure("auth", None, None)), false).await;
+    assert_eq!(clear_signed_out(&state.mstore, &state.identity_store, &state.event_bus, "acct-a"), 0);
+    assert!(stored_failure(&state, &on_b).is_some());
+    cleanup(&[&on_b]);
+}
+
 #[tokio::test]
 async fn the_move_relinks_idle_agents_and_leaves_busy_ones() {
     let state = test_state();

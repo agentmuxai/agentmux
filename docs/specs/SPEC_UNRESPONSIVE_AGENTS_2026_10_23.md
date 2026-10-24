@@ -69,6 +69,7 @@ The state is derived, so it ends when its input does:
 - a clean turn clears `agent:last_failure` (already true: `stdout_reader.rs:702`, `host_spawn.rs:726`);
 - the reset passes (rule 2 stops applying);
 - an account rebind clears it (§6.2);
+- for `signed_out`, a sign-in or validate that proves the same account works clears its `auth` failures (`account_episodes::after_sign_in`, #2237); a token refresh doesn't;
 - the wake at the reset clears it (§7).
 
 ### 3.4 `AgentFailure.resets_at_ms` (R2)

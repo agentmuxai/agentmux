@@ -82,7 +82,6 @@ export async function persistSeededAccount(
             status: "valid",
         });
         log("auth", "registered a real account (Connectors → Accounts) from your existing login");
-        return true;
     } catch (e: any) {
         log(
             "auth",
@@ -91,6 +90,16 @@ export async function persistSeededAccount(
         );
         return false;
     }
+    // Every caller persists only after its poll confirmed the login, so the
+    // account works again: its agents stop showing "signed out" and their held
+    // messages replay (#2237). Best-effort: the account is saved either way,
+    // and the agent's next clean turn clears it too.
+    try {
+        await RpcApi.IdentityAccountSignedInCommand(TabRpcClient, { account_id: accountId });
+    } catch (e: any) {
+        log("auth", `couldn't tell AgentMux the account is signed in again: ${e?.message ?? String(e)}`, "warn");
+    }
+    return true;
 }
 
 // `registerSeededAccount` (steps 1+2+3 composed) REMOVED 2026-08-31 along with

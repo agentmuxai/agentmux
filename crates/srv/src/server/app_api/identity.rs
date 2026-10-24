@@ -277,6 +277,10 @@ fn register_identity_account_upsert(engine: &Arc<WshRpcEngine>, state: &AppState
 
                 broker.publish_event::<crate::backend::mps_events::IdentityAccountsChanged>(&(), vec![], 0);
                 broker.publish_event_for::<crate::backend::mps_events::AgentIdentitiesChanged>(&req.agent_id, &(), vec![], 0);
+                // A new key the provider accepted proves the account works (#2237).
+                if valid {
+                    crate::server::account_episodes::after_sign_in(&account_id);
+                }
 
                 // The subagent watcher's config-dir resolution for this
                 // agent's pane(s) can have raced ahead of this exact
@@ -492,7 +496,7 @@ pub(crate) async fn identity_account_validate_stored_impl<'o>(
         };
         let tail = crate::identity::key_validator::masked_tail(&token);
         let outcome = crate::identity::key_validator::validate(&acct.provider, &token).await;
-        return Ok(IdentityAccountValidateResult::of(outcome, tail));
+        return Ok(proven(account_id, IdentityAccountValidateResult::of(outcome, tail)));
     }
     let aid = account_id.to_string();
     let plaintext = tokio::task::spawn_blocking(move || crate::identity::secret_store::get(&aid))
@@ -500,7 +504,16 @@ pub(crate) async fn identity_account_validate_stored_impl<'o>(
         .map_err(|e| format!("identity.account.validate: keychain: {e}"))?;
     let tail = crate::identity::key_validator::masked_tail(&plaintext);
     let outcome = crate::identity::key_validator::validate(&acct.provider, &plaintext).await;
-    Ok(IdentityAccountValidateResult::of(outcome, tail))
+    Ok(proven(account_id, IdentityAccountValidateResult::of(outcome, tail)))
+}
+
+/// A validate that passed proves the account works, so its agents stop being
+/// signed out (#2237).
+fn proven(account_id: &str, result: IdentityAccountValidateResult) -> IdentityAccountValidateResult {
+    if result.valid {
+        crate::server::account_episodes::after_sign_in(account_id);
+    }
+    result
 }
 
 #[cfg(test)]

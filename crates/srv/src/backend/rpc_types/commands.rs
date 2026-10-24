@@ -586,6 +586,9 @@ pub const COMMAND_IDENTITY_ACCOUNT_AVAILABILITY: &str = "identity.account.availa
 /// Move an episode's idle agents to another signed-in account. The operator's
 /// window only.
 pub const COMMAND_IDENTITY_ACCOUNT_MOVE_AGENTS: &str = "identity.account.move_agents";
+/// A sign-in the window ran for an account completed: its agents' "signed
+/// out" ends (#2237). The operator's window only.
+pub const COMMAND_IDENTITY_ACCOUNT_SIGNED_IN: &str = "identity.account.signed_in";
 // Bundle MuxAPI commands (Preset → Bundle, spec Phase 2). The `preset.*`
 // constants below are retained as wire aliases for one release.
 pub const COMMAND_BUNDLE_LIST: &str = "bundle.list";

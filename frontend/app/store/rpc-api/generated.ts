@@ -299,6 +299,8 @@ import type { IdentityAccount } from "@/types/rpc/IdentityAccount";
 import type { IdentityAccountAvailabilityResult } from "@/types/rpc/IdentityAccountAvailabilityResult";
 import type { IdentityAccountMoveAgentsReq } from "@/types/rpc/IdentityAccountMoveAgentsReq";
 import type { IdentityAccountMoveAgentsResult } from "@/types/rpc/IdentityAccountMoveAgentsResult";
+import type { IdentityAccountSignedInReq } from "@/types/rpc/IdentityAccountSignedInReq";
+import type { IdentityAccountSignedInResult } from "@/types/rpc/IdentityAccountSignedInResult";
 import type { ImportAgentDefinitionsResult } from "@/types/rpc/ImportAgentDefinitionsResult";
 import type { InputDraftResult } from "@/types/rpc/InputDraftResult";
 import type { InputHistoryAppendResult } from "@/types/rpc/InputHistoryAppendResult";
@@ -2513,6 +2515,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<IdentityAccountMoveAgentsResult> {
     return client.rpcCall("identity.account.move_agents", data, opts);
+  },
+  // command "identity.account.signed_in"
+  IdentityAccountSignedInCommand(
+    client: RpcClient,
+    data: IdentityAccountSignedInReq,
+    opts?: RpcOpts
+  ): Promise<IdentityAccountSignedInResult> {
+    return client.rpcCall("identity.account.signed_in", data, opts);
   },
   // command "app.desktop"
   AppDesktopCommand(client: RpcClient, opts?: RpcOpts): Promise<DesktopEvent> {

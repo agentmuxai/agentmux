@@ -145,6 +145,11 @@ pub(crate) fn persist_oauth_success(
         return (String::new(), None);
     }
     let persisted = persist_oauth_direct_account(mstore, identity_store, broker, account_id, provider_id, dir, session_id, email);
+    // A completed sign-in proves the account works, so its agents stop being
+    // signed out (#2237).
+    if let Some(id) = &persisted {
+        crate::server::account_episodes::after_sign_in(id);
+    }
     (String::new(), persisted)
 }
 
