@@ -52,6 +52,15 @@ has_word() {
   return 1
 }
 
+# Whether stdin is a terminal (BUILD_SLOT_ASSUME_TTY=1 says so for tests, which have none).
+has_tty() { [ -n "${BUILD_SLOT_ASSUME_TTY:-}" ] || [ -t 0 ]; }
+
+# Whether a vitest started with "$@" runs once and exits: with no terminal it does, and with one
+# only when asked to (`--run` or `--coverage`, forwarded after `npm test --`).
+once_or_headless() {
+  ! has_tty || has_word --run "$@" || has_word --coverage "$@"
+}
+
 # True when this invocation is heavy for the tool; $reason is then set for the queue.
 heavy=0
 reason="$tool"
@@ -110,15 +119,15 @@ case "$tool" in
           done
           case "$script" in
             build|build:*|package|package:*|coverage|test:e2e) heavy=1; reason="npm run $script" ;;
-            test) [ -t 0 ] || { heavy=1; reason="npm run test"; } ;;
+            test) once_or_headless "$@" && { heavy=1; reason="npm run test"; } ;;
           esac ;;
-        test|t|tst) [ -t 0 ] || { heavy=1; reason="npm test"; } ;;
+        test|t|tst) once_or_headless "$@" && { heavy=1; reason="npm test"; } ;;
       esac
     else
       case "$sub" in
         vite) has_word build "$@" && { heavy=1; reason="npx vite build"; } ;;
         vitest)
-          if has_word run "$@" || has_word --run "$@" || has_word --coverage "$@" || ! [ -t 0 ]; then
+          if has_word run "$@" || once_or_headless "$@"; then
             heavy=1; reason="npx vitest"
           fi ;;
       esac

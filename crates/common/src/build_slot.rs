@@ -214,7 +214,7 @@ mod tests {
     }
 
     /// What the `tool` shim ran, given `args`, for a home with or without the lock script.
-    fn run_tool(tool: &str, with_slot: bool, off: bool, args: &[&str]) -> Option<String> {
+    fn run_tool_env(tool: &str, with_slot: bool, off: bool, args: &[&str], env: &[(&str, &str)]) -> Option<String> {
         let bash = bash()?;
         let h = home();
         let real_dir = h.path().join("real");
@@ -240,6 +240,7 @@ mod tests {
         if off {
             cmd.env("AGENTMUX_BUILD_SLOT_OFF", "1");
         }
+        cmd.envs(env.iter().copied());
         #[cfg(windows)]
         {
             use crate::win32::NoWindow;
@@ -247,6 +248,10 @@ mod tests {
         }
         let out = cmd.output().unwrap();
         Some(String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n").trim().to_string())
+    }
+
+    fn run_tool(tool: &str, with_slot: bool, off: bool, args: &[&str]) -> Option<String> {
+        run_tool_env(tool, with_slot, off, args, &[])
     }
 
     fn run_shim(with_slot: bool, off: bool, args: &[&str]) -> Option<String> {
@@ -343,6 +348,31 @@ mod tests {
         assert!(contains_all(&out, &["real", "task package --force"]), "got {out:?}");
         assert_eq!(run_tool("npm", true, true, &["run", "build"]).unwrap(), "REAL run build", "the opt-out works for every tool");
         assert_eq!(run_tool("docker", false, false, &["build", "."]).unwrap(), "REAL build .", "no lock script: docker still runs");
+    }
+
+    /// With a terminal, a bare vitest watches and keeps running, so it is not slotted unless the
+    /// arguments ask for a single run (`npm test -- --run`, Codex on #5379).
+    #[test]
+    fn with_a_terminal_only_a_one_shot_test_run_is_slotted() {
+        if bash().is_none() {
+            return;
+        }
+        let with_tty = |tool: &str, args: &[&str]| {
+            run_tool_env(tool, true, false, args, &[("BUILD_SLOT_ASSUME_TTY", "1")]).map(|o| o.starts_with("SLOT "))
+        };
+        for (tool, args) in [
+            ("npm", &["test", "--", "--run"][..]),
+            ("npm", &["run", "test", "--", "--run"][..]),
+            ("npm", &["test", "--", "--coverage"][..]),
+            ("npx", &["vitest", "--run"][..]),
+            ("npx", &["vitest", "run"][..]),
+            ("npm", &["run", "build"][..]),
+        ] {
+            assert_eq!(with_tty(tool, args), Some(true), "{tool} {args:?} should be slotted with a terminal");
+        }
+        for (tool, args) in [("npm", &["test"][..]), ("npm", &["run", "test"][..]), ("npx", &["vitest"][..])] {
+            assert_eq!(with_tty(tool, args), Some(false), "{tool} {args:?} watches with a terminal, so it is not slotted");
+        }
     }
 
     #[test]
