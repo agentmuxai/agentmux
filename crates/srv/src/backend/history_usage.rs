@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::backend::rpc_types::{HistoryCompression, HistoryUsage, HistoryUsageAgent, HistoryUsageStore};
+use crate::backend::rpc_types::{HistoryCompression, HistoryReclaim, HistoryUsage, HistoryUsageAgent, HistoryUsageStore};
 use crate::backend::storage::filestore::FileStore;
 
 /// Where each store lives. Built from the machine's data roots, or from temp
@@ -148,12 +148,33 @@ fn compression(transcripts: &FileStore, store_dir: Option<&Path>) -> HistoryComp
         (0, 0, 0)
     });
     let enabled = framer::enabled();
+    let (page_size, _, free_pages, auto_vacuum) = transcripts.page_stats().unwrap_or((0, 0, 0, 0));
+    let db = transcripts.path();
     HistoryCompression {
         enabled,
         frames: frames.max(0) as u64,
         logical_bytes: logical.max(0) as u64,
         stored_bytes: stored.max(0) as u64,
         waiting: if enabled { store_dir.and_then(framer::who_blocks) } else { None },
+        free_bytes: (free_pages.max(0) * page_size.max(0)) as u64,
+        file_bytes: db.and_then(|p| std::fs::metadata(p).ok()).map(|m| m.len()).unwrap_or(0),
+        incremental: auto_vacuum == 2,
+        steady: framer::steady(),
+        reclaim: db.map(reclaim_of).unwrap_or_default(),
+    }
+}
+
+/// The reclaim's request and last result, from the files beside the store.
+pub fn reclaim_of(db: &Path) -> HistoryReclaim {
+    let (marker, last) = crate::backend::storage::filestore::reclaim::status(db);
+    let last = last.unwrap_or_default();
+    HistoryReclaim {
+        pending: marker.is_some(),
+        waiting_for: marker.as_ref().and_then(|m| m.waiting_for.clone()),
+        last_error: marker.as_ref().and_then(|m| m.last_error.clone()).or(last.error.clone()),
+        last_done_ms: if last.error.is_none() { last.at_ms } else { 0 },
+        last_before_bytes: last.before_bytes,
+        last_after_bytes: last.after_bytes,
     }
 }
 

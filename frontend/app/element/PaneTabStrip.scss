@@ -497,6 +497,12 @@
     font-weight: 600;
 }
 
+// An agent's seat (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §4).
+.pane-tab-tip-seat {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
 .pane-tab-tip-summary {
     white-space: normal;
     overflow-wrap: anywhere;

@@ -380,6 +380,68 @@ mod tests {
         }
     }
 
+    /// Runs the lock script under bash with its slot directory at `root`, as a fresh top-level call.
+    fn run_slot(bash: &Path, script: &Path, root: &Path, args: &[&str]) -> std::process::Output {
+        let mut cmd = std::process::Command::new(bash);
+        cmd.arg(script).args(args).env("AGENTMUX_BUILD_SLOT_DIR", root).env_remove("BUILD_SLOT_HELD").env("BUILD_SLOT_POLL", "1");
+        #[cfg(windows)]
+        {
+            use crate::win32::NoWindow;
+            cmd.no_window();
+        }
+        cmd.output().unwrap()
+    }
+
+    /// Every run leaves one line in the history, and `history` summarises them by reason.
+    #[test]
+    fn a_run_is_recorded_in_the_history_and_summarised() {
+        let Some(bash) = bash() else { return };
+        let h = home();
+        let script = h.path().join("build-slot.sh");
+        std::fs::write(&script, lf(SCRIPT)).unwrap();
+        let root = h.path().join("slot dir");
+        let run = |args: &[&str]| run_slot(&bash, &script, &root, args);
+        assert_eq!(run(&["--reason", "cargo test", "--", "true"]).status.code(), Some(0));
+        assert_eq!(run(&["--reason", "task package", "--", "sh", "-c", "exit 3"]).status.code(), Some(3));
+        let log = std::fs::read_to_string(root.join("history.log")).unwrap();
+        let rows: Vec<Vec<&str>> = log.lines().map(|l| l.split('\t').collect()).collect();
+        assert_eq!(rows.len(), 2, "one line per run: {log:?}");
+        assert!(rows.iter().all(|r| r.len() == 6), "epoch, agent, reason, waited, held, exit: {log:?}");
+        assert_eq!((rows[0][2], rows[0][5]), ("cargo test", "0"));
+        assert_eq!((rows[1][2], rows[1][5]), ("task package", "3"), "the wrapped command's exit code is recorded");
+        let summary = String::from_utf8_lossy(&run(&["history"]).stdout).to_string();
+        assert!(summary.starts_with("runs: 2,"), "got {summary:?}");
+        assert!(contains_all(&summary, &["cargo test", "task package"]), "got {summary:?}");
+    }
+
+    /// A run cut short by a signal is still recorded (once, exit 130), and the log rotates
+    /// to `history.log.1` instead of being rewritten once it is long.
+    #[test]
+    fn an_interrupted_run_is_recorded_and_a_long_log_rotates() {
+        let Some(bash) = bash() else { return };
+        let h = home();
+        let script = h.path().join("build-slot.sh");
+        std::fs::write(&script, lf(SCRIPT)).unwrap();
+        let root = h.path().join("slot dir");
+        let run = |args: &[&str]| run_slot(&bash, &script, &root, args);
+        // The wrapped command signals its parent, the wrapper, and then ends.
+        let out = run(&["--reason", "cargo test", "--", "bash", "-c", "kill -TERM $PPID; sleep 1"]);
+        assert_eq!(out.status.code(), Some(130));
+        let log = std::fs::read_to_string(root.join("history.log")).unwrap();
+        let rows: Vec<Vec<&str>> = log.lines().map(|l| l.split('\t').collect()).collect();
+        assert_eq!(rows.len(), 1, "recorded once, not twice: {log:?}");
+        assert_eq!((rows[0][2], rows[0][5]), ("cargo test", "130"));
+        assert!(!root.join("slot").exists(), "the slot is freed");
+
+        let filler = "1\tx\told\t0\t0\t0\n".repeat(2001);
+        std::fs::write(root.join("history.log"), filler).unwrap();
+        assert_eq!(run(&["--reason", "task package", "--", "true"]).status.code(), Some(0));
+        assert!(root.join("history.log.1").exists(), "past 2000 lines the log is renamed aside");
+        assert!(!root.join("history.log").exists(), "and the next append starts a new file");
+        let summary = String::from_utf8_lossy(&run(&["history"]).stdout).to_string();
+        assert!(summary.starts_with("runs: 2002,"), "history reads both generations: {summary:?}");
+    }
+
     #[test]
     fn the_shim_fails_open() {
         if bash().is_none() {

@@ -3370,6 +3370,25 @@
     }
   },
   {
+    "command": "history.reclaim",
+    "request": "agentmux_srv::backend::rpc_types::history::HistoryReclaimReq",
+    "requestName": "HistoryReclaimReq",
+    "requestTs": {
+      "imports": [
+        "HistoryReclaimReq"
+      ],
+      "name": "HistoryReclaimReq"
+    },
+    "response": "agentmux_srv::backend::rpc_types::history::HistoryReclaim",
+    "responseName": "HistoryReclaim",
+    "responseTs": {
+      "imports": [
+        "HistoryReclaim"
+      ],
+      "name": "HistoryReclaim"
+    }
+  },
+  {
     "command": "history.usage",
     "request": "agentmux_srv::backend::rpc_types::history::HistoryUsageReq",
     "requestName": "HistoryUsageReq",

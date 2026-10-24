@@ -749,18 +749,14 @@ pub(super) async fn open_agent_inner(
                         meta.insert("term:zoom".to_string(), json!(z));
                     }
                 }
-                // Per-agent color (SPEC_AGENT_COLOR_2026_08_08.md): seed the
-                // new block's frame border colors from the agent's stored
-                // ui:color so the existing pane-frame rendering shows it —
-                // full-strength on the focused border
-                // (frame:activebordercolor), dimmed on the unfocused one
-                // (frame:bordercolor) so the color is visible either way
-                // while focus stays distinguishable by brightness.
-                // Assign-if-missing write-through covers defs created by
-                // paths the createagent handler doesn't own (forks,
-                // imports) and any def that predates migration m0020 on
-                // this channel. Strict #rrggbb validation so a corrupt row
-                // can't inject arbitrary CSS.
+                // Per-agent color (SPEC_AGENT_COLOR_2026_08_08.md): seed the new block's frame border
+                // colors from the agent's stored ui:color so the existing pane-frame rendering shows
+                // it — full-strength on the focused border (frame:activebordercolor), dimmed on the
+                // unfocused one (frame:bordercolor) so the color is visible either way while focus
+                // stays distinguishable by brightness. Assign-if-missing write-through covers defs
+                // created by paths the createagent handler doesn't own (forks, imports) and any def
+                // that predates migration m0020 on this channel. Strict #rrggbb validation so a
+                // corrupt row can't inject arbitrary CSS.
                 {
                     use crate::backend::agent_color::{dim_agent_color, is_valid_agent_color, pick_agent_color};
                     let stored = mstore
@@ -791,6 +787,8 @@ pub(super) async fn open_agent_inner(
                 }
                 meta.insert("agentProvider".to_string(), json!(&agent.provider));
                 meta.insert("agentName".to_string(), json!(&agent.name));
+                // Its seat, for the header tooltip; agent.setSeat refreshes it (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §4).
+                crate::backend::agent_seat::seed_meta(&mstore, &agent.id, &mut meta);
                 meta.insert("agentIcon".to_string(), json!(if agent.icon.is_empty() { "wand-magic-sparkles" } else { &agent.icon }));
                 meta.insert("agentMode".to_string(), json!(if agent.agent_type.is_empty() { "host" } else { &agent.agent_type }));
                 if !agent.container_image.is_empty() {

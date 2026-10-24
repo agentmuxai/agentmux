@@ -1,7 +1,7 @@
 # SPEC: Agent seats in the UI: role, lead and area on the agent, shown where you meet it
 
 **Date:** 2026-10-23
-**Status:** active — approved by the operator 2026-10-23 (open questions as proposed: operator-only seats in v1, the seat in startup instructions in phase 2, seats inform and don't gate). PR 1 (data and API) in #5378; PRs 2–4 not started.
+**Status:** active — approved by the operator 2026-10-23 (open questions as proposed: operator-only seats in v1, the seat in startup instructions in phase 2, seats inform and don't gate). PR 1 (data and API) in #5378; PR 2 (the Seat tab, roster import, My Agents tile and header tooltip) in #5382; PRs 3–4 not started.
 **Trigger:** The operator, 2026-10-23: *"how does the user know what seat AgentX is in?"* Seats were approved that day: which agent leads, which reports to whom, and what each owns. Today a seat exists only in a Global Memory entry ("Agent seats: …") and an internal report. Nothing in the app shows it.
 **Related:** the internal organization spec's phase 4 (a lane and a role on the agent definition, Swarm grouped by lane; not public, so only its conclusions are used here); `crates/srv/src/server/app_api/agent_spawn.rs` (`agent:worker_of`, the spawned-worker relationship); `SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md` (identity is the uid, names are labels).
 
@@ -59,7 +59,7 @@ seat: {
 - **The operator only.**
   - **Writes go through a new RPC, `agent.setSeat {agent_id, seat | null}`.** It's allowed only for the operator's own client (the app's renderer), refused for any `Caller::Agent` (MuxAPI, MCP, jekt), and audited.
   - **`agent.define` and `updateagent` don't touch `seat`.** A caller that omits it keeps the stored value, using the "None = keep" pattern `model_vendor_base_url` uses, so an identity or rename save never wipes a seat.
-- **The editor:** a **Seat** tab in the agent's Stash drawer (`AgentStashModal.tsx`, data-driven tabs). It has the role, a qualifier, the lead (a picker of agents, plus "the operator"), the area and a Save button. My Agents' row menu also gets a **Seat…** item that opens it.
+- **The editor:** a **Seat** tab in the agent's Stash drawer (`AgentStashModal.tsx`, data-driven tabs). It has the role, a qualifier, the lead (a picker of agents, plus "the operator"), the area, Save and Clear. My Agents' row menu also gets a **Seat…** item that opens it. As built in PR 2, that item opens the same panel in a dialog over the picker, because the Stash drawer lives in the agent's own pane, which may not be open.
 - **The initial roster:** the approved roster arrives as a small JSON (agent name or uid → role, qualifier, lead, area). The operator imports it from the Seat tab's "Import roster…". It's resolved by uid or exact name, previewed, then applied. Unresolved names are listed, not guessed.
 - **Agents read seats** (`Agents list`, §4) and may propose a change to the operator in words. They never write a seat.
 

@@ -128,7 +128,7 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "gui-program: explorer/rundll32 are GUI-subsystem, on user action only"),
     ("crates/cef/src/commands/platform.rs", "\"explorer.exe\"", 1,
      "gui-program: explorer/rundll32 are GUI-subsystem, on user action only"),
-    ("crates/common/src/build_slot.rs", "bash", 2,
+    ("crates/common/src/build_slot.rs", "bash", 3,
      "no-window: test fixtures running the cargo shim and the wait under bash; calls no_window() in this file"),
     ("crates/common/src/cli.rs", "&program", 1,
      "no-window: calls no_window()/creation_flags in this file"),

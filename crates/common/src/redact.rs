@@ -44,6 +44,38 @@ pub fn redact_secrets(text: &str) -> String {
     redact_aws_secret_key(&out)
 }
 
+/// Blanks credential-prefixed tokens that start a word, and PEM private keys, and nothing else: the
+/// two passes of [`redact_secrets`] that look for a secret by its shape alone, without its
+/// `key: value` passes. Unlike [`redact_secrets`], a prefix inside a word does not count, so page
+/// text such as `disk-usage-report-weekly` (`sk-` inside `disk-`) comes back whole. Linear in the
+/// length of the text.
+pub fn redact_token_shapes(text: &str) -> String {
+    redact_private_keys(&redact_prefixed_tokens_at_word_start(text))
+}
+
+fn redact_prefixed_tokens_at_word_start(text: &str) -> String {
+    let word_char = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
+    let mut out = String::with_capacity(text.len());
+    let mut copied = 0;
+    let mut prev_is_word = false;
+    for (i, c) in text.char_indices() {
+        let is_word = word_char(c);
+        if is_word && !prev_is_word {
+            // A word starts here: its end is the next character that isn't one.
+            let word_end = text[i..].find(|c: char| !word_char(c)).map_or(text.len(), |n| i + n);
+            let word = &text[i..word_end];
+            if SECRET_PREFIXES.iter().any(|p| word.starts_with(p) && word.len() - p.len() >= 16) {
+                out.push_str(&text[copied..i]);
+                out.push_str("[redacted secret]");
+                copied = word_end;
+            }
+        }
+        prev_is_word = is_word;
+    }
+    out.push_str(&text[copied..]);
+    out
+}
+
 /// Blanks credential-prefixed tokens (`ghp_...`, `sk-...`, AWS access-key
 /// ids, …). Deliberately shape-based: it errs toward redacting a long token
 /// that merely looks like a secret. Was `continuity.rs::redact_secrets`.

@@ -9,7 +9,7 @@
 // errors, closes; a PR merges; a release ships it); the operator starts, answers, accepts and sends back
 // here.
 
-import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 
 import { Button, FilterInput, IconButton, Select, Switch } from "@/app/element/ui";
 import { useTick } from "@/app/hook/useTick";
@@ -23,6 +23,7 @@ import { AgentChip, agentStateWords } from "./kanban-card";
 import {
     columnOf,
     isFinishedColumn,
+    KANBAN_NARROW_PX,
     matchesQuery,
     repoLabel,
     repoLanes,
@@ -77,6 +78,18 @@ export const WardenKanbanManager = (props: {
     createEffect(() => props.onNeedsCount?.(model.needsCount() + accountEpisodes().length));
 
     const tick = useTick(10_000);
+    // The narrow layout (SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23.md §8): Warden's container at
+    // KANBAN_NARROW_PX or less, as `kanban.scss`'s container query; the board folds Merged and Released.
+    let root: HTMLDivElement | undefined;
+    const [narrow, setNarrow] = createSignal(false);
+    onMount(() => {
+        if (!root) return;
+        // The element `kanban.scss`'s container query measures (Warden's container), not this padded body.
+        const measured = root.closest<HTMLElement>(".warden-container") ?? root;
+        const observer = new ResizeObserver(([entry]) => setNarrow(entry.contentRect.width <= KANBAN_NARROW_PX));
+        observer.observe(measured);
+        onCleanup(() => observer.disconnect());
+    });
     const now = () => (tick(), Date.now());
     const [query, setQuery] = createSignal("");
     const [repo, setRepo] = createSignal("");
@@ -120,7 +133,7 @@ export const WardenKanbanManager = (props: {
     const openAgent = (blockId: string) => void revealBlock(blockId, { source: "kanban" });
 
     return (
-        <div class="warden-manager-body kanban">
+        <div ref={root} class="warden-manager-body kanban">
             <AccountAvailabilityStrip />
             <div class="kanban-toolbar">
                 <FilterInput
@@ -209,6 +222,8 @@ export const WardenKanbanManager = (props: {
                             onOpenAgent={openAgent}
                             reviewLimit={reviewLimit()}
                             reviewTotal={reviewTotal()}
+                            colors={board()?.agent_colors}
+                            narrow={narrow()}
                         />
                     }
                 >
@@ -231,6 +246,8 @@ export const WardenKanbanManager = (props: {
                                     onOpenAgent={openAgent}
                                     reviewLimit={reviewLimit()}
                                     reviewTotal={reviewTotal()}
+                                    colors={board()?.agent_colors}
+                                    narrow={narrow()}
                                 />
                             </section>
                         </Show>
@@ -250,7 +267,8 @@ export const WardenKanbanManager = (props: {
                                             >
                                                 <span class="kanban-lane__name">{lane().label}</span>
                                                 <span class="warden-manager-dim">
-                                                    {lane().tasks.filter((t) => !isFinishedColumn(columnOf(t))).length} open
+                                                    {lane().tasks.filter((t) => !isFinishedColumn(columnOf(t))).length}{" "}
+                                                    open
                                                     {" · "}
                                                     {lane().tasks.filter((t) => columnOf(t) === "needs").length} need
                                                     you
@@ -268,6 +286,8 @@ export const WardenKanbanManager = (props: {
                                                     onOpenAgent={openAgent}
                                                     reviewLimit={reviewLimit()}
                                                     reviewTotal={reviewTotal()}
+                                                    colors={board()?.agent_colors}
+                                                    narrow={narrow()}
                                                 />
                                             </Show>
                                         </section>

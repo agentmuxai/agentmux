@@ -65,6 +65,8 @@ export interface KanbanAgent {
     uid?: string | null;
     block_id: string;
     state: KanbanAgentState;
+    /** The colour its definition keeps (`#rrggbb`), absent from an older srv. */
+    color?: string | null;
 }
 
 export interface KanbanTask {
@@ -93,6 +95,8 @@ export interface KanbanTask {
 export interface KanbanBoard {
     tasks: KanbanTask[];
     agents: KanbanAgent[];
+    /** The colours of agents tasks name that aren't running here, by uid (absent from an older srv). */
+    agent_colors?: Record<string, string>;
     /** The newest change, to tell whether anything moved. */
     stamp: number;
     now: number;

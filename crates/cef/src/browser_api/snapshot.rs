@@ -204,6 +204,11 @@ fn truthy(v: Option<&Value>) -> bool {
 
 fn quote(s: &str) -> String {
     let one_line: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    // Hide a card, ID or bank number, a security or one-time code and a token the page prints in
+    // plain text (docs/specs/SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.1). The whole text is
+    // masked first and cut to 2000 characters after, so nothing the cut falls inside can show its
+    // first characters; the 160-character limit below then applies to the masked text.
+    let one_line = agentmux_common::pii_mask::mask_bounded(&one_line, 2000);
     let clipped: String = if one_line.chars().count() > 160 {
         one_line.chars().take(157).collect::<String>() + "…"
     } else {
@@ -1301,5 +1306,87 @@ mod tests {
         let d = DomFacts::from_described(&json!({ "localName": "INPUT", "attributes": ["type", "File", "Name", "upload"] }));
         assert!(d.is_file_input());
         assert_eq!(d.attrs.get("name").map(String::as_str), Some("upload"));
+    }
+
+    /// A checkout page whose fields the markup doesn't call secrets: names like `field_1`, no
+    /// `autocomplete`, only what a person reads next to each (the accessible name).
+    fn checkout() -> (Vec<Value>, HashMap<i64, DomFacts>) {
+        let field = |id: &str, name: &str, value: &str, backend: i64| {
+            let mut v = n(id, Some("2"), "textbox", name, Some(backend), &[]);
+            v["value"] = json!({ "type": "string", "value": value });
+            v
+        };
+        let nodes = vec![
+            n("1", None, "RootWebArea", "Checkout", Some(1), &["2"]),
+            n("2", Some("1"), "generic", "", Some(2), &["10", "11", "12", "13", "14", "15", "16", "17", "18"]),
+            field("10", "Card number", "4111 1111 1111 1111", 10),
+            field("11", "Expiry (MM/YY)", "12/29", 11),
+            field("12", "Security code", "123", 12),
+            field("13", "Name on card", "Alex Doe", 13),
+            field("14", "Routing number", "021000021", 14),
+            field("15", "Account number", "000123456789", 15),
+            field("16", "Email", "alex@example.test", 16),
+            field("17", "Passport expiry", "2030-01-02", 17),
+            n("18", Some("2"), "StaticText", "Order total $40. Paid with card 4111-1111-1111-1111, CVV: 123. Your verification code is 482913.", None, &[]),
+        ];
+        let input = |attrs: &[(&str, &str)], label: &str| DomFacts {
+            local_name: "input".into(),
+            attrs: attrs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            label: label.into(),
+        };
+        let facts = HashMap::from([
+            (10, input(&[("name", "field_1")], "Card number")),
+            (11, input(&[("name", "field_2"), ("placeholder", "MM/YY")], "Expiry (MM/YY)")),
+            (12, input(&[("name", "field_3")], "Security code")),
+            (13, input(&[("name", "field_4")], "Name on card")),
+            (14, input(&[("name", "field_5")], "Routing number")),
+            (15, input(&[("name", "field_6")], "Account number")),
+            (16, input(&[("name", "email"), ("type", "email")], "Email")),
+            (17, input(&[("name", "field_8")], "Passport expiry")),
+        ]);
+        (nodes, facts)
+    }
+
+    #[test]
+    fn a_checkout_page_never_shows_a_card_bank_or_id_value_even_when_the_markup_does_not_name_it() {
+        let (nodes, f) = checkout();
+        let s = render(&nodes, &f, None, "");
+        for secret in ["4111", "12/29", "123\"", "021000021", "000123456789", "482913"] {
+            assert!(!s.text.contains(secret), "{secret} shown in:
+{}", s.text);
+        }
+        for named in ["Card number", "Expiry (MM/YY)", "Security code", "Routing number", "Account number"] {
+            let line = s.text.lines().find(|l| l.contains(named)).unwrap_or_else(|| panic!("no line for {named}: {}", s.text));
+            assert!(line.contains("[secret:") && !line.contains("value="), "{line}");
+        }
+        // What is not a secret still shows: a name on a card, an email, a passport's expiry.
+        assert!(s.text.contains("value=\"Alex Doe\""), "{}", s.text);
+        assert!(s.text.contains("value=\"alex@example.test\""), "{}", s.text);
+        assert!(s.text.contains("value=\"2030-01-02\""), "{}", s.text);
+    }
+
+    #[test]
+    fn a_page_that_prints_a_card_number_in_plain_text_has_it_hidden() {
+        let (nodes, f) = checkout();
+        let s = render(&nodes, &f, None, "");
+        let echo = s.text.lines().find(|l| l.contains("Order total")).unwrap_or_else(|| panic!("{}", s.text));
+        assert!(echo.contains("[card number hidden]") && echo.contains("CVV: [code hidden]") && echo.contains("verification code is [code hidden]"), "{echo}");
+        assert!(echo.contains("Order total $40."), "the rest of the text stays: {echo}");
+    }
+
+    #[test]
+    fn find_and_a_scoped_read_hide_them_too() {
+        let (nodes, f) = checkout();
+        let found = find(&nodes, &f, &q(Some("textbox"), "", false), "n1");
+        assert!(!found.text.contains("4111") && !found.text.contains("021000021"), "{}", found.text);
+        let echo = find(&nodes, &f, &q(Some("text"), "order total", false), "n1");
+        assert!(!echo.text.contains("4111") && echo.text.contains("[card number hidden]"), "{}", echo.text);
+    }
+
+    #[test]
+    fn a_number_the_line_cut_falls_inside_does_not_show_its_first_digits() {
+        let padding = "x ".repeat(78);
+        let line = quote(&format!("{padding}4111 1111 1111 1111 and more words after it"));
+        assert!(!line.contains("4111"), "{line}");
     }
 }

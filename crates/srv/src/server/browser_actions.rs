@@ -141,7 +141,10 @@ fn table() -> std::sync::MutexGuard<'static, Table> {
 
 /// `s` trimmed and cut to `n` characters.
 fn clip(s: &str, n: usize) -> String {
-    let s = s.trim();
+    // The Log is mirrored to the pane's header, the host log and the agent's own `log` read: a
+    // label the page chose (a button named with a card number) is masked before it is kept.
+    let masked = agentmux_common::pii_mask::mask_bounded(s.trim(), n.saturating_mul(4).max(400));
+    let s = masked.trim();
     if s.chars().count() <= n {
         return s.to_string();
     }
@@ -500,6 +503,14 @@ pub(crate) fn approved_by_user(r: Result<Value, (StatusCode, String)>, waited: D
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_label_the_page_chose_is_logged_without_a_card_number() {
+        let shown = clip("Pay with 4111 1111 1111 1111 (CVV 123)", 120);
+        assert!(!shown.contains("4111") && shown.contains("[card number hidden]") && shown.contains("[code hidden]"), "{shown}");
+        assert_eq!(clip("  Submit order  ", 120), "Submit order");
+        assert_eq!(clip(&"a".repeat(300), 10).chars().count(), 10);
+    }
 
     #[test]
     fn an_approved_click_says_the_user_approved_it_and_after_how_long() {

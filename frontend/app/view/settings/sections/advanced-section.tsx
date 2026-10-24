@@ -30,6 +30,14 @@ export const ADVANCED_SETTINGS = {
         section: "advanced",
         keywords: ["auto select", "question timeout", "agent:askquestiontimeoutms"],
     },
+    compactAt: {
+        id: "advanced.compact_at",
+        label: "Compact agents at",
+        description:
+            "Thousands of tokens at which Claude agents compact their context. Lower saves tokens; higher keeps more detail. 0 keeps Claude Code's own (about 967). Takes effect when each agent next starts",
+        section: "advanced",
+        keywords: ["compaction", "context", "tokens", "autoCompactWindow", "agent:compactat"],
+    },
     overlapNotes: {
         id: "advanced.overlap_notes",
         label: "Overlap notes",
@@ -127,6 +135,19 @@ export function AdvancedSection(): JSX.Element {
                         min={1} step={1}
                         value={((s()["agent:askquestiontimeoutms"] as number) ?? 30000) / 1000}
                         onChange={(v) => set("agent:askquestiontimeoutms", Math.round(v * 1000))}
+                    />
+                }
+            />
+            <SettingRow
+                id={ADVANCED_SETTINGS.compactAt.id}
+                label={ADVANCED_SETTINGS.compactAt.label}
+                description={ADVANCED_SETTINGS.compactAt.description}
+                control={
+                    <NumberControl
+                        class="setting-number setting-number--wide"
+                        min={0} step={50}
+                        value={((s()["agent:compactat"] as number) ?? 600000) / 1000}
+                        onChange={(v) => set("agent:compactat", Math.max(0, Math.round(v)) * 1000)}
                     />
                 }
             />

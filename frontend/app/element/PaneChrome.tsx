@@ -35,6 +35,7 @@ import { atoms, MOS, pushNotification } from "@/app/store/global";
 import { shouldReduceMotion } from "@/app/motion/motion";
 import { remoteDisplay } from "@/app/store/remote-display";
 import { readSwarmSummary } from "@/app/store/activitySummary";
+import { readSeatMeta, seatTooltipLine } from "@/app/view/agent/seat-format";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { closeBlockInStack, moveBlockInStack, setActiveBlockInStack, type NodeModel } from "@/layout/index";
 import { paneStackIds } from "@/layout/lib/layoutNodeModels";
@@ -392,6 +393,14 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         if (meta?.view !== "agent") return undefined;
         return readSwarmSummary(meta) ?? undefined;
     };
+    // And its seat, from the `agent:seat` srv seeds at agent.open and refreshes
+    // when the seat changes (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §4).
+    const seatOf = (id: string): string | undefined => {
+        const meta = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", id))()?.meta;
+        if (meta?.view !== "agent") return undefined;
+        const seat = readSeatMeta(meta);
+        return seat ? seatTooltipLine(seat) : undefined;
+    };
     const confirmRename = async (id: string, title: string) => {
         setRenamingId(null);
         const rename = tabInfos().get(id)?.rename;
@@ -482,6 +491,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             getId={(id) => id}
             getLabel={labelOf}
             getTooltipDetail={summaryOf}
+            getTooltipSeat={seatOf}
             getIcon={(id) => <PaneTabIconView icon={() => tabInfos().get(id)?.icon} />}
             getColor={(id) => tabColors().get(id)}
             headerBgOverride={headerTailBg()}

@@ -35,7 +35,7 @@ const overlay = () => document.body.querySelector("[data-pane-overlay]") as HTML
 
 afterEach(() => cleanup());
 
-function renderStrip(detail: (t: T) => string | undefined) {
+function renderStrip(detail: (t: T) => string | undefined, seat?: (t: T) => string | undefined) {
     return render(() => (
         <PaneTabStrip
             tabs={TABS}
@@ -43,6 +43,7 @@ function renderStrip(detail: (t: T) => string | undefined) {
             getId={(t: T) => t.id}
             getLabel={(t: T) => t.label}
             getTooltipDetail={detail}
+            getTooltipSeat={seat}
             onActivate={vi.fn()}
         />
     ));
@@ -82,6 +83,36 @@ describe("PaneTabStrip tooltip detail", () => {
         fireEvent.mouseLeave(pill);
         await new Promise((resolve) => setTimeout(resolve, 0));
         expect(overlay()).toBeNull();
+    });
+
+    it("adds an agent's seat between the name and the summary (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §4)", async () => {
+        const seat = "Leader · product — reports to the operator — agent pane, identity";
+        const { container } = renderStrip(
+            (t) => (t.id === "agent" ? "Fixing login" : undefined),
+            (t) => (t.id === "agent" ? seat : undefined)
+        );
+        fireEvent.mouseEnter(container.querySelectorAll(".pane-tab-tip")[0] as HTMLElement);
+        await frame();
+        const body = overlay()!.querySelector(".pane-tab-tip-body")!;
+        expect([...body.children].map((c) => c.className)).toEqual([
+            "pane-tab-tip-label",
+            "pane-tab-tip-seat",
+            "pane-tab-tip-summary",
+        ]);
+        expect(body.querySelector(".pane-tab-tip-seat")!.textContent).toBe(seat);
+    });
+
+    it("shows a seat with no summary, at once", async () => {
+        const { container } = renderStrip(
+            () => undefined,
+            (t) => (t.id === "agent" ? "Specialist — reports to Camper" : undefined)
+        );
+        fireEvent.mouseEnter(container.querySelectorAll(".pane-tab-tip")[0] as HTMLElement);
+        await frame();
+        const tip = overlay()!;
+        expect(tip.querySelector(".pane-tab-tip-seat")!.textContent).toBe("Specialist — reports to Camper");
+        expect(tip.querySelector(".pane-tab-tip-summary")).toBeNull();
+        expect(tip.getAttribute("style")).toContain("opacity: 1");
     });
 
     it("follows a summary that changes while the tooltip is open", async () => {

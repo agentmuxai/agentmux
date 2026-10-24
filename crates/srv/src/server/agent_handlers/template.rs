@@ -524,9 +524,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker_rn = state.broker.clone();
     let event_bus_rn = state.event_bus.clone();
     let local_url_rn = state.local_web_url.clone();
+    let state_rn = state.clone();
     engine.register_typed(
         COMMAND_RENAME_AGENT_DEFINITION_TITLE,
         move |cmd: CommandRenameAgentDefinitionTitleData, _ctx| {
+            let state = state_rn.clone();
             let mstore = mstore_rn.clone();
             let broker = broker_rn.clone();
             let event_bus = event_bus_rn.clone();
@@ -589,6 +591,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 crate::backend::reactive::handler::renamed(&cmd.id, &old_title, title, &local_url);
 
                 broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
+                // Its reports' panes name their lead in `agent:seat` (#5382).
+                super::seat::refresh_pane_seats(&state).await;
 
                 // The agent's open pane shows the new name (an earlier pane
                 // title outranks the name, so it is cleared), whichever UI the

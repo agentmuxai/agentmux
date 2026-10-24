@@ -1155,6 +1155,7 @@ declare global {
         "attachments:claudesessioninlinemb"?: number;
         "attachments:retentiondays"?: number;
         "agent:askquestiontimeoutms"?: number;
+        "agent:compactat"?: number;
         "agent:overlapnotes"?: boolean;
         "agent:retryonreconnect"?: boolean;
         "kanban:reminders"?: boolean;
