@@ -207,6 +207,19 @@ async fn app_main() {
     // docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §7.1.
     backend::native_memory_retention::spawn(state.id_store.clone());
 
+    // The run ledger (SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §3): close the
+    // runs a restart interrupted, then record every fire from here on.
+    let run_ledger = backend::jobs::RunLedger::new(
+        state.identity_store.clone(),
+        Some(state.mstore.clone()),
+        state.broker.clone(),
+    );
+    {
+        let ledger = run_ledger.clone();
+        let _ = tokio::task::spawn_blocking(move || ledger.recover_after_restart()).await;
+    }
+    state.cron_scheduler.install_runs(run_ledger);
+
     // Start persistent cron scheduler — load enabled jobs from DB, fire any
     // that missed their window (FIRE_ONCE_NOW), schedule all for future fires.
     state.cron_scheduler.start().await;

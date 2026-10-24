@@ -45,7 +45,26 @@ pub struct CronJob {
     /// unaffected). See
     /// docs/specs/SPEC_AGENT_POLLING_AND_WAKEUP_HARDENING_2026_08_04.md Phase 0.
     pub max_age_secs: Option<i64>,
+    /// What an undelivered fire leaves (SPEC_JOBS_AND_TEMPLATES_2026_10_24.md
+    /// §5.2): `skip` (a missed run) or `latest` (one coalesced pending fire,
+    /// delivered when the agent is back). Jobs from before the column read
+    /// `latest`, today's startup catch-up; new jobs default to `skip`.
+    #[serde(default = "default_catch_up")]
+    pub catch_up: String,
 }
+
+fn default_catch_up() -> String {
+    "skip".to_string()
+}
+
+/// Columns added to `db_cron_jobs` after its table, run by both stores'
+/// ALTER loops (`migrations.rs`). A new column with a default needs no
+/// schema version bump: an older build never reads it.
+///
+/// `catch_up` defaults to `latest` so every existing job keeps today's
+/// startup catch-up; a create writes `skip` unless asked.
+pub(super) const CRON_JOBS_COLUMNS: [&str; 1] =
+    ["ALTER TABLE db_cron_jobs ADD COLUMN catch_up TEXT NOT NULL DEFAULT 'latest'"];
 
 impl Store {
     pub fn cron_create(&self, job: &CronJob) -> Result<(), StoreError> {
@@ -54,8 +73,8 @@ impl Store {
             "INSERT INTO db_cron_jobs
                 (id, name, expression, prompt, target, created_by, enabled,
                  last_fired, fire_count, max_fires, created_at, max_age_secs,
-                 target_uid, created_by_uid)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                 target_uid, created_by_uid, catch_up)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 job.id,
                 job.name,
@@ -71,6 +90,7 @@ impl Store {
                 job.max_age_secs,
                 job.target_uid,
                 job.created_by_uid,
+                job.catch_up,
             ],
         )?;
         Ok(())
@@ -81,7 +101,7 @@ impl Store {
         let mut stmt = conn.prepare(
             "SELECT id, name, expression, prompt, target, created_by, enabled,
                     last_fired, fire_count, max_fires, created_at, max_age_secs,
-                    target_uid, created_by_uid
+                    target_uid, created_by_uid, catch_up
              FROM db_cron_jobs ORDER BY created_at ASC",
         )?;
         let iter = stmt.query_map([], map_row)?;
@@ -93,7 +113,7 @@ impl Store {
         let mut stmt = conn.prepare(
             "SELECT id, name, expression, prompt, target, created_by, enabled,
                     last_fired, fire_count, max_fires, created_at, max_age_secs,
-                    target_uid, created_by_uid
+                    target_uid, created_by_uid, catch_up
              FROM db_cron_jobs WHERE enabled = 1 ORDER BY created_at ASC",
         )?;
         let iter = stmt.query_map([], map_row)?;
@@ -105,7 +125,7 @@ impl Store {
         let mut stmt = conn.prepare(
             "SELECT id, name, expression, prompt, target, created_by, enabled,
                     last_fired, fire_count, max_fires, created_at, max_age_secs,
-                    target_uid, created_by_uid
+                    target_uid, created_by_uid, catch_up
              FROM db_cron_jobs WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map(params![id], map_row)?;
@@ -163,5 +183,6 @@ fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronJob> {
         max_age_secs:  row.get(11)?,
         target_uid:    row.get(12)?,
         created_by_uid: row.get(13)?,
+        catch_up:      row.get(14)?,
     })
 }

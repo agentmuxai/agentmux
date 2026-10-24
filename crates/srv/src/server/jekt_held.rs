@@ -21,13 +21,9 @@ const SWEEP_EVERY: Duration = Duration::from_secs(30);
 /// How often a target the spawn gate refused is re-checked for sign-in.
 const GATE_RECHECK_EVERY: Duration = Duration::from_secs(60);
 
-/// Whether a delivery error is the identity/credential spawn gate refusing to
-/// start the target (`run_agent_turn`'s "identity spawn gate: …"). That is
-/// recoverable — the receiver signs in — so the message is held, not dropped
-/// (SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md Phase 0 item 4, G4).
-pub(crate) fn is_spawn_gate_refusal(error: &str) -> bool {
-    error.starts_with("identity spawn gate")
-}
+/// The spawn gate refusing a target is recoverable (it signs in), so the
+/// message is held, not dropped.
+pub(crate) use crate::backend::reactive::is_spawn_gate_refusal;
 
 /// Targets the spawn gate refused, with when the gate was last checked.
 ///
@@ -250,11 +246,7 @@ async fn replay_one(state: &AppState, row: HeldJekt) -> ReplayOutcome {
     let error = resp.error.unwrap_or_default();
     // Transient: still absent, rate-limited, its queue full, or the agent
     // starting, restarting or stopping ("… try again shortly").
-    let transient = error.starts_with("agent not found")
-        || error.contains("rate limit")
-        || error.contains("queue is full")
-        || error.contains("try again shortly");
-    if transient {
+    if crate::backend::reactive::is_transient_delivery_error(&error) {
         return ReplayOutcome::Deferred;
     }
     // Not signed in: wait for sign-in, uncounted (G6 counted it, so a

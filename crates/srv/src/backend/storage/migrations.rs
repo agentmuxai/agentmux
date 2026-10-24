@@ -1754,7 +1754,7 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
     //     since created_at), alongside the existing max_fires bound. NULL
     //     for all existing rows = no behavior change for jobs created before
     //     this column existed.
-    for stmt in &[
+    for stmt in [
         "ALTER TABLE db_cron_jobs ADD COLUMN max_age_secs INTEGER",
         // v7: provider-scoped bundle instructions (ABF v0.2 §2.2).
         "ALTER TABLE db_bundles ADD COLUMN instructions_by_provider TEXT NOT NULL DEFAULT '{}'",
@@ -1766,7 +1766,7 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
         // v12: identity M4c-1 — the actor's UID beside each actor name.
         "ALTER TABLE db_cron_jobs ADD COLUMN created_by_uid TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_bundle_versions ADD COLUMN written_by_uid TEXT NOT NULL DEFAULT ''",
-    ] {
+    ].iter().chain(super::cron::CRON_JOBS_COLUMNS.iter()) {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();
             if !msg.contains("duplicate column") {
@@ -2232,7 +2232,7 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
 
     // Additive columns added after this store's tables were first created —
     // same idempotent pattern as run_shared_store_schema's own ALTER loop.
-    for stmt in &[
+    for stmt in [
         // db_bundles.is_system: see OBJECT_SCHEMA_VERSION's v27 doc comment.
         "ALTER TABLE db_bundles ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0",
         // v10: identity M1b — UID columns beside the slug columns, dual-written.
@@ -2243,7 +2243,7 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
         "ALTER TABLE db_work_queue ADD COLUMN created_by_uid TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_cron_jobs ADD COLUMN created_by_uid TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_bundle_versions ADD COLUMN written_by_uid TEXT NOT NULL DEFAULT ''",
-    ] {
+    ].iter().chain(super::cron::CRON_JOBS_COLUMNS.iter()) {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();
             if !msg.contains("duplicate column") {
