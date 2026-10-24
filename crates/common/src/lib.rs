@@ -28,6 +28,7 @@ pub mod platform_name;
 pub mod allowed_origins;
 pub mod popup_rules;
 pub mod process;
+pub mod pii_mask;
 pub mod redact;
 pub mod runtime_mode;
 pub mod secret_eq;

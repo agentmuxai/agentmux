@@ -1124,7 +1124,25 @@ pub(super) fn redact_secret(mut after: Value, facts: &DomFacts) -> Value {
             }
         }
     }
+    // A field the markup doesn't call a secret can still hold a card or ID number (a page echoing
+    // one, a value it filled in itself): hide it by its shape too.
+    mask_strings(&mut after);
     after
+}
+
+/// Every string in `v` with card, ID and bank numbers, codes and tokens hidden.
+fn mask_strings(v: &mut Value) {
+    match v {
+        Value::String(s) => {
+            let masked = agentmux_common::pii_mask::mask_short_text(s);
+            if masked != *s {
+                *s = masked;
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(mask_strings),
+        Value::Object(map) => map.values_mut().for_each(mask_strings),
+        _ => {}
+    }
 }
 
 #[cfg(test)]
@@ -1133,6 +1151,15 @@ mod tests {
 
     fn facts(tag: &str, attrs: &[(&str, &str)]) -> DomFacts {
         DomFacts { local_name: tag.into(), attrs: attrs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(), label: String::new() }
+    }
+
+    #[test]
+    fn a_read_back_hides_a_card_number_a_plain_field_holds() {
+        let after = json!({ "value": "4111 1111 1111 1111", "name": "Notes", "note": "CVV: 123" });
+        let out = redact_secret(after, &facts("input", &[("type", "text"), ("name", "notes")]));
+        assert_eq!(out["value"], "[card number hidden]");
+        assert_eq!(out["note"], "CVV: [code hidden]");
+        assert_eq!(out["name"], "Notes");
     }
 
     #[test]

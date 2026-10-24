@@ -101,7 +101,80 @@ pub fn secret_reason(f: &DomFacts) -> Option<&'static str> {
     if names_a_tax_id(&[f.attr("name"), f.attr("id"), f.attr("aria-label"), f.attr("placeholder"), &f.label]) {
         return Some("its name or label says Social Security or taxpayer ID number");
     }
+    if let Some(why) = payment_or_id_reason(f) {
+        return Some(why);
+    }
     named_like_a_secret(f).then_some("its name says password, one-time code, card number or security code")
+}
+
+/// A card, bank or identity-number field named by what a person reads next to it or by its
+/// placeholder or aria-label, not only by its `name` and `id`: the Vault's own classifier
+/// ([`super::vault_slots::slots`]), so what the Vault would fill is also what no agent reads back.
+/// Not an EIN (public), a date of birth or the name on a card, which are not secrets of this kind.
+fn payment_or_id_reason(f: &DomFacts) -> Option<&'static str> {
+    use super::vault_slots as slot;
+    let slots = slot::slots(f);
+    let texts = [f.attr("name"), f.attr("id"), f.attr("aria-label"), f.attr("placeholder"), f.label.as_str()];
+    let words: Vec<String> = texts.iter().flat_map(|t| words_of(t)).collect();
+    let says = |ws: &[&str]| words.iter().any(|w| ws.contains(&w.as_str()));
+    let card_word = says(&["card", "credit", "debit", "cc", "visa", "mastercard", "amex"]);
+    // `Passport issuing country`, `Driver's licence expiry` and `Account type` are about a number
+    // but are not it.
+    let about_it = says(&["expiry", "expiration", "expires", "issue", "issued", "issuing", "country", "state", "date", "place", "authority", "class", "type", "holder", "nickname"]);
+    let numbery = says(&["number", "no", "num", "nr", "digits", "aba"]);
+    // `MM/YY` is how a card's expiry is written; a passport's or a coupon's is a full date.
+    let squashed_texts: String = texts.iter().map(|t| t.chars().filter(|c| !c.is_whitespace()).collect::<String>().to_ascii_lowercase()).collect::<Vec<_>>().join(" ");
+    let card_expiry_format = has_month_year_format(&squashed_texts);
+    // `Credit card no.` and `Card #` are not in the Vault's list of names, but say what they are.
+    let card_number_words = card_word && numbery && !says(&["expiry", "expiration", "expires", "cvc", "cvv", "security", "code", "name", "holder", "type", "zip", "postal"]);
+    if card_number_words {
+        return Some("its name or label says card number");
+    }
+    if card_expiry_format {
+        return Some("its name or label says card expiry");
+    }
+    for s in slots {
+        match s {
+            slot::CARD_NUMBER => return Some("its name or label says card number"),
+            slot::CARD_CVC => return Some("its name or label says card security code"),
+            // An expiry is a card's only when something says card: a passport or a coupon expires too.
+            slot::CARD_EXPIRY if card_word => return Some("its name or label says card expiry"),
+            slot::BANK_ACCOUNT if !about_it => return Some("its name or label says bank account number"),
+            slot::BANK_ROUTING if !about_it && numbery => return Some("its name or label says bank routing number"),
+            slot::PASSPORT if !about_it => return Some("its name or label says passport number"),
+            slot::DRIVERS_LICENCE if !about_it => return Some("its name or label says driver's licence number"),
+            slot::API_KEY => return Some("its name or label says secret key or token"),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Does this text (lower case, spaces removed) show a month and a year, `mm/yy` or `mm-yyyy`, on their
+/// own? Not the middle of a full date: `dd/mm/yyyy` and `mm/yy/dd` are dates of birth and passport
+/// expiries, not a card's.
+fn has_month_year_format(text: &str) -> bool {
+    let b = text.as_bytes();
+    let mut i = 0;
+    while let Some(at) = text[i..].find("mm").map(|n| n + i) {
+        i = at + 1;
+        let sep = b.get(at + 2).copied();
+        if !matches!(sep, Some(b'/') | Some(b'-')) || !text[at + 3..].starts_with("yy") {
+            continue;
+        }
+        // Not preceded by a day or a year and a separator, or by a letter of the same word.
+        let before_ok = at == 0 || !matches!(b[at - 1], b'/' | b'-' | b'd' | b'y' | b'm');
+        // A year of two or four letters, not followed by another part of a date.
+        let mut end = at + 5;
+        if text[end..].starts_with("yy") {
+            end += 2;
+        }
+        let after_ok = b.get(end).is_none_or(|c| !matches!(c, b'/' | b'-' | b'y') && !c.is_ascii_alphanumeric());
+        if before_ok && after_ok {
+            return true;
+        }
+    }
+    false
 }
 
 /// Named like one: password, passcode, otp, one-time code, cvc/cvv, card number.
@@ -219,5 +292,66 @@ mod tests {
         assert_eq!(words_of("Taxpayer's TIN"), ["taxpayer", "s", "tin"]);
         assert_eq!(words_of("card[cvc]"), ["card", "cvc"]);
         assert!(words_of("").is_empty());
+    }
+
+    #[test]
+    fn card_bank_and_id_fields_are_secret_by_their_label_even_when_the_markup_is_plain() {
+        let f = |attrs: &[(&str, &str)], label: &str| DomFacts {
+            local_name: "input".into(),
+            attrs: attrs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            label: label.into(),
+        };
+        for (attrs, label) in [
+            (&[("name", "field_1")][..], "Card number"),
+            (&[("name", "f2"), ("placeholder", "Credit card no.")][..], ""),
+            (&[("name", "f3")][..], "Security code (CVV)"),
+            (&[("name", "f4"), ("aria-label", "Card expiry")][..], ""),
+            (&[("name", "f5")][..], "Expiry date (card)"),
+            (&[("name", "f6")][..], "Routing number"),
+            (&[("name", "f7")][..], "Bank account number"),
+            (&[("name", "f8")][..], "Passport number"),
+            (&[("name", "f9")][..], "Driver's licence number"),
+            (&[("name", "f10")][..], "API key"),
+        ] {
+            assert!(is_secret(&f(attrs, label)), "{attrs:?} {label:?}");
+        }
+    }
+
+    #[test]
+    fn a_month_and_year_placeholder_is_a_card_expiry_but_a_full_date_format_is_not() {
+        let f = |placeholder: &str, label: &str| DomFacts {
+            local_name: "input".into(),
+            attrs: [("name", "field_x"), ("placeholder", placeholder)].iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            label: label.into(),
+        };
+        for placeholder in ["MM/YY", "MM / YY", "mm-yyyy", "MM/YYYY", "(MM/YY)"] {
+            assert!(is_secret(&f(placeholder, "Expiry")), "{placeholder}");
+        }
+        for (placeholder, label) in [("DD/MM/YYYY", "Date of birth"), ("DD-MM-YYYY", "Passport expiry"), ("YYYY-MM-DD", "Passport expiry"), ("MM/DD/YYYY", "Date of birth"), ("MM/YY/DD", "Date"), ("dd/mm/yy", "Expiry")] {
+            assert!(!is_secret(&f(placeholder, label)), "{placeholder} {label}");
+        }
+    }
+
+    #[test]
+    fn what_only_looks_like_a_card_or_id_field_is_not_made_secret() {
+        let f = |attrs: &[(&str, &str)], label: &str| DomFacts {
+            local_name: "input".into(),
+            attrs: attrs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            label: label.into(),
+        };
+        for (attrs, label) in [
+            (&[("name", "f1")][..], "Expiry date"),
+            (&[("name", "f2")][..], "Coupon expires"),
+            (&[("name", "f3")][..], "Passport expiry"),
+            (&[("name", "f4")][..], "Passport issuing country"),
+            (&[("name", "f5")][..], "Driver's licence state"),
+            (&[("name", "f6")][..], "Account type"),
+            (&[("name", "f7")][..], "Name on card"),
+            (&[("name", "f8")][..], "Date of birth"),
+            (&[("name", "f9")][..], "Employer identification number (EIN)"),
+            (&[("name", "f10")][..], "Search keyword"),
+        ] {
+            assert!(!is_secret(&f(attrs, label)), "{attrs:?} {label:?}");
+        }
     }
 }
