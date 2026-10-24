@@ -274,7 +274,11 @@ pub fn take_fresh_by_choice(block_id: &str) -> bool {
 pub fn fresh_sent(block_id: &str, sent: bool) {
     with(block_id, |r| {
         r.compact_scheduled = false;
-        r.fresh_by_choice = false;
+        // A start that went leaves its flag for the spawn to read: the handoff
+        // may only have been queued behind a spawn that hasn't reached it yet.
+        if !sent {
+            r.fresh_by_choice = false;
+        }
         if sent {
             let now = agentmux_common::time::now_ms_u64();
             r.last_self_compact_ms = Some(now);
@@ -454,7 +458,9 @@ mod tests {
         mark_fresh_by_choice(&b);
         assert!(take_fresh_by_choice(&b) && !take_fresh_by_choice(&b), "the spawn reads it once");
         assert!(!get(&b).unwrap().task_boundary, "the boundary is used up");
+        mark_fresh_by_choice(&b);
         fresh_sent(&b, true);
+        assert!(take_fresh_by_choice(&b), "a started fresh session keeps its flag for the spawn");
         let r = get(&b).unwrap();
         assert!(r.tokens.is_none() && r.calls_since_compaction == 0 && r.last_self_compact_ms.is_some());
         forget(&b);
