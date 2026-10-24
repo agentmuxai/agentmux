@@ -330,12 +330,12 @@ pub(crate) fn send_message_outcome(to: &str, result: &Value) -> Result<String> {
     if err.starts_with("agent not found") {
         anyhow::bail!("Message delivery failed (not_found): {err}")
     }
-    // An agent out of quota or signed out, where the message can't be held
-    // (a LAN or cross-channel hop): srv's `UNAVAILABLE_PREFIX`.
+    // An agent out of quota, where the message can't be held (a LAN or
+    // cross-channel hop): srv's `UNAVAILABLE_PREFIX`.
     if let Some(why) = err.strip_prefix("agent unavailable: ") {
         anyhow::bail!(
             "Message delivery failed (unavailable): {why}, and the message was NOT kept. Send it \
-             again when {to} can work (an account move, the reset or a sign-in)."
+             again when {to} can work (an account move or the reset)."
         )
     }
     anyhow::bail!("Message delivery failed: {err}")
