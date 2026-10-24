@@ -124,7 +124,7 @@ fn payment_or_id_reason(f: &DomFacts) -> Option<&'static str> {
     let numbery = says(&["number", "no", "num", "nr", "digits", "aba"]);
     // `MM/YY` is how a card's expiry is written; a passport's or a coupon's is a full date.
     let squashed_texts: String = texts.iter().map(|t| t.chars().filter(|c| !c.is_whitespace()).collect::<String>().to_ascii_lowercase()).collect::<Vec<_>>().join(" ");
-    let card_expiry_format = squashed_texts.contains("mm/yy") || squashed_texts.contains("mm-yy") || squashed_texts.contains("mm/yyyy");
+    let card_expiry_format = has_month_year_format(&squashed_texts);
     // `Credit card no.` and `Card #` are not in the Vault's list of names, but say what they are.
     let card_number_words = card_word && numbery && !says(&["expiry", "expiration", "expires", "cvc", "cvv", "security", "code", "name", "holder", "type", "zip", "postal"]);
     if card_number_words {
@@ -148,6 +148,33 @@ fn payment_or_id_reason(f: &DomFacts) -> Option<&'static str> {
         }
     }
     None
+}
+
+/// Does this text (lower case, spaces removed) show a month and a year, `mm/yy` or `mm-yyyy`, on their
+/// own? Not the middle of a full date: `dd/mm/yyyy` and `mm/yy/dd` are dates of birth and passport
+/// expiries, not a card's.
+fn has_month_year_format(text: &str) -> bool {
+    let b = text.as_bytes();
+    let mut i = 0;
+    while let Some(at) = text[i..].find("mm").map(|n| n + i) {
+        i = at + 1;
+        let sep = b.get(at + 2).copied();
+        if !matches!(sep, Some(b'/') | Some(b'-')) || !text[at + 3..].starts_with("yy") {
+            continue;
+        }
+        // Not preceded by a day or a year and a separator, or by a letter of the same word.
+        let before_ok = at == 0 || !matches!(b[at - 1], b'/' | b'-' | b'd' | b'y' | b'm');
+        // A year of two or four letters, not followed by another part of a date.
+        let mut end = at + 5;
+        if text[end..].starts_with("yy") {
+            end += 2;
+        }
+        let after_ok = b.get(end).is_none_or(|c| !matches!(c, b'/' | b'-' | b'y') && !c.is_ascii_alphanumeric());
+        if before_ok && after_ok {
+            return true;
+        }
+    }
+    false
 }
 
 /// Named like one: password, passcode, otp, one-time code, cvc/cvv, card number.
@@ -287,6 +314,21 @@ mod tests {
             (&[("name", "f10")][..], "API key"),
         ] {
             assert!(is_secret(&f(attrs, label)), "{attrs:?} {label:?}");
+        }
+    }
+
+    #[test]
+    fn a_month_and_year_placeholder_is_a_card_expiry_but_a_full_date_format_is_not() {
+        let f = |placeholder: &str, label: &str| DomFacts {
+            local_name: "input".into(),
+            attrs: [("name", "field_x"), ("placeholder", placeholder)].iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            label: label.into(),
+        };
+        for placeholder in ["MM/YY", "MM / YY", "mm-yyyy", "MM/YYYY", "(MM/YY)"] {
+            assert!(is_secret(&f(placeholder, "Expiry")), "{placeholder}");
+        }
+        for (placeholder, label) in [("DD/MM/YYYY", "Date of birth"), ("DD-MM-YYYY", "Passport expiry"), ("YYYY-MM-DD", "Passport expiry"), ("MM/DD/YYYY", "Date of birth"), ("MM/YY/DD", "Date"), ("dd/mm/yy", "Expiry")] {
+            assert!(!is_secret(&f(placeholder, label)), "{placeholder} {label}");
         }
     }
 
