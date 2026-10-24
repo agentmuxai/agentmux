@@ -35,10 +35,25 @@ pub(in crate::server) async fn hold_for_absent_target(
     hold_with_reason(state, auth_via, req, resp, reason, None, replay).await
 }
 
-/// Whether the agent of this instance that `target` names is `limited` or
-/// `signed_out` now. `None` for an agent that can work, and for a target
-/// that isn't registered here (an absent or remote one: the tiers below
-/// decide, and the receiving instance checks again).
+/// Why messages to the agent on `block_id` wait now: its account is out of
+/// quota (`limited`). BLOCKING.
+///
+/// Not `signed_out` yet: that state lasts until a clean turn, and a sign-in
+/// to the same account doesn't clear it, so holding every message would
+/// keep the turn that clears it from ever running (muxreview P1 on #5419).
+/// It joins once a confirmed sign-in clears the failure (Kanban #2237).
+pub(in crate::server) fn holding_unavailable(
+    mstore: &crate::backend::storage::store::Store,
+    block_id: &str,
+) -> Option<crate::backend::agent_state::Unavailable> {
+    crate::backend::agent_state::unavailable_of_block(mstore, None, block_id, agentmux_common::time::now_ms_u64())
+        .filter(|u| u.state == crate::backend::agent_state::AgentState::Limited)
+}
+
+/// [`holding_unavailable`] for the agent of this instance that `target`
+/// names. `None` for an agent that can work, and for a target that isn't
+/// registered here (an absent or remote one: the tiers below decide, and the
+/// receiving instance checks again).
 pub(super) async fn local_target_unavailable(state: &AppState, target: &str) -> Option<crate::backend::agent_state::Unavailable> {
     use crate::backend::reactive::handler::LookupOutcome;
     let target = crate::backend::reactive::sanitize::route_name(target)?;
@@ -46,12 +61,7 @@ pub(super) async fn local_target_unavailable(state: &AppState, target: &str) -> 
         return None;
     };
     let mstore = state.mstore.clone();
-    tokio::task::spawn_blocking(move || {
-        crate::backend::agent_state::unavailable_of_block(&mstore, None, &reg.block_id, agentmux_common::time::now_ms_u64())
-    })
-    .await
-    .ok()
-    .flatten()
+    tokio::task::spawn_blocking(move || holding_unavailable(&mstore, &reg.block_id)).await.ok().flatten()
 }
 
 /// Hold a message for an agent that can't work now (`unavailable`), or,

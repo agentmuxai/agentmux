@@ -6955,6 +6955,15 @@ async fn a_message_to_an_agent_out_of_quota_is_held_until_it_can_work() {
     state.mstore.update(&mut block).unwrap();
     let outcomes = crate::server::jekt_held::replay_pass(&state).await;
     assert!(outcomes.iter().any(|(r, _)| r == "req-quota"), "{outcomes:?}");
+
+    // Signed out is not held yet: its state lasts until a clean turn, which
+    // holding every message would never let run (muxreview P1 on #5419).
+    block.meta.insert(
+        META_LAST_FAILURE.to_string(),
+        serde_json::json!({"code": "auth", "title": "Sign-in refused", "detail": "", "retryable": false}),
+    );
+    state.mstore.update(&mut block).unwrap();
+    assert!(super::jekt_hold::local_target_unavailable(&state, &slug).await.is_none());
     crate::backend::blockcontroller::delete_controller(&block.oid);
 }
 

@@ -195,13 +195,13 @@ pub(crate) async fn deliver_broadcast_turn(
     text: String,
     origin: TurnOrigin,
 ) -> Result<(), String> {
-    // An agent out of quota or signed out would fail the turn at once: say so
+    // An agent out of quota would fail the turn at once: say so
     // in the broadcast's result, where the operator sees it, rather than lose
     // their words in a failed turn (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5).
     let mstore = deps.mstore.clone();
     let id = block_id.clone();
     let unavailable = tokio::task::spawn_blocking(move || {
-        crate::backend::agent_state::unavailable_of_block(&mstore, None, &id, agentmux_common::time::now_ms_u64())
+        crate::server::jekt_hold::holding_unavailable(&mstore, &id)
     })
     .await
     .ok()
