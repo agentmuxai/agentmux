@@ -63,12 +63,16 @@ export function installSideButtons(): () => void {
         if (!d.consume) return;
         e.preventDefault();
         e.stopPropagation();
-        // Press and release are consumed; the release acts, like a click.
-        if (e.type === "mouseup" && d.act != null) perform(d.act, "dom");
+        // Press and release are consumed; the release acts, like a click. It is the
+        // pointer release that acts, not the mouse one: cancelling a pointerdown makes
+        // Chromium drop the mousedown and mouseup that follow it (the "compatibility
+        // mouse events"), so a mouseup listener never ran and the button did nothing
+        // where the host has no path of its own (Linux, macOS).
+        if (e.type === "pointerup" && d.act != null) perform(d.act, "dom");
     };
     // Capture and non-passive: the page's own handlers (a terminal's mouse
     // reporting) must not see these, and a passive listener can't cancel.
-    const types = ["pointerdown", "mousedown", "mouseup", "auxclick"] as const;
+    const types = ["pointerdown", "pointerup", "mousedown", "mouseup", "auxclick"] as const;
     for (const type of types) window.addEventListener(type, handler as EventListener, { capture: true, passive: false });
     const unsub = getApi().listen<HostSideButton>("side-button", onHostSideButton);
     return () => {
