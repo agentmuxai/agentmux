@@ -190,7 +190,7 @@ pub(crate) fn add_stop_notes(result: &mut Value, srv_note: Option<String>, pendi
     let mut notes: Vec<String> = srv_note.into_iter().collect();
     if !older.is_empty() {
         notes.push(format!(
-            "{} run on an older AgentMux on this machine: stopped, but the pane was left open (close it with Stop pane)",
+            "{} run on an older AgentMux on this machine: stopped, but the pane was left open; the user has to close it",
             older.join(", ")
         ));
     }

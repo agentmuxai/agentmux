@@ -81,7 +81,7 @@ mod tests {
             "My Agents",
             "your own block (use self)",
             "a pane that holds an agent is refused with a pointer to agents",
-            "toast with a countdown and a Keep running button",
+            "banner in the agent's pane with a countdown and a Keep running button",
             "MAJOR WARNING",
         ] {
             assert!(d.contains(needle), "the description lacks {needle:?}");

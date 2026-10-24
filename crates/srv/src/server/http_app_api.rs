@@ -241,7 +241,7 @@ pub(super) async fn handle_agent_stop_pending_forward(
             let error = format!("block not found: {}", req.block_id);
             return (StatusCode::OK, Json(json!({ "success": false, "error": error }))).into_response();
         }
-        if !app_api::pane::is_agent_block(&state, &req.block_id) {
+        if !crate::sagas::orphan_reaper::is_agent_block(&state, &req.block_id) {
             let error = "not an agent pane: close it with Stop with action \"pane\"".to_string();
             return (StatusCode::OK, Json(json!({ "success": false, "error": error }))).into_response();
         }

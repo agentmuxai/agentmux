@@ -50,6 +50,8 @@ fn stop_agents_notes_say_what_no_longer_applies_and_which_target_kept_its_pane()
     add_stop_notes(&mut out, Some("signal and staged no longer apply".into()), &pending);
     let note = out["note"].as_str().unwrap();
     assert!(note.starts_with("signal and staged no longer apply; b run on an older AgentMux"), "{note}");
+    assert!(note.ends_with("the user has to close it"), "no tool can close that pane, so it doesn't send the agent to one: {note}");
+    assert!(!note.contains("Stop pane"), "{note}");
     assert!(!note.contains("a run"), "only the target that kept its pane: {note}");
     // Nothing to say, no note.
     let mut quiet = serde_json::json!({ "succeeded": ["a"] });

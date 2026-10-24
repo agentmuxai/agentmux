@@ -856,7 +856,7 @@ pub(crate) async fn fleet_close_agents_with_override(
             }
             continue;
         }
-        if !super::pane::is_agent_block(state, &block_id) {
+        if !crate::sagas::orphan_reaper::is_agent_block(state, &block_id) {
             now.failed.push(FleetActionFailure {
                 id: block_id,
                 error: "not an agent pane: close it with Stop with action \"pane\"".to_string(),
