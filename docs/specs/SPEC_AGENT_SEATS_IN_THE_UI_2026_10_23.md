@@ -1,7 +1,7 @@
 # SPEC: Agent seats in the UI: role, lead and area on the agent, shown where you meet it
 
 **Date:** 2026-10-23
-**Status:** active — approved by the operator 2026-10-23 (open questions as proposed: operator-only seats in v1, the seat in startup instructions in phase 2, seats inform and don't gate). PR 1 (data and API) in #5378; PR 2 (the Seat tab, roster import, My Agents tile and header tooltip) in #5382; PR 3 (Swarm badge and Group by lead, Kanban owner tooltip and "Reports to" filter) in progress; PR 4 not started.
+**Status:** active — approved by the operator 2026-10-23 (open questions as proposed: operator-only seats in v1, the seat in startup instructions in phase 2, seats inform and don't gate). PR 1 (data and API) in #5378; PR 2 (the Seat tab, roster import, My Agents tile and header tooltip) in #5382; PR 3 (Swarm badge and Group by lead, Kanban owner tooltip and "Reports to" filter) in #5405; PR 4 not started.
 **Trigger:** The operator, 2026-10-23: *"how does the user know what seat AgentX is in?"* Seats were approved that day: which agent leads, which reports to whom, and what each owns. Today a seat exists only in a Global Memory entry ("Agent seats: …") and an internal report. Nothing in the app shows it.
 **Related:** the internal organization spec's phase 4 (a lane and a role on the agent definition, Swarm grouped by lane; not public, so only its conclusions are used here); `crates/srv/src/server/app_api/agent_spawn.rs` (`agent:worker_of`, the spawned-worker relationship); `SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md` (identity is the uid, names are labels).
 
