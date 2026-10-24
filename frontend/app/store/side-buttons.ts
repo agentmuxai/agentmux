@@ -68,7 +68,11 @@ export function installSideButtons(): () => void {
         // Chromium drop the mousedown and mouseup that follow it (the "compatibility
         // mouse events"), so a mouseup listener never ran and the button did nothing
         // where the host has no path of its own (Linux, macOS).
-        if (e.type === "pointerup" && d.act != null) perform(d.act, "dom");
+        // The mouse release still acts too, for a press made while another button is held
+        // (a chord): that press has no pointerdown, and its release no pointerup until every
+        // button is up, but its mousedown and mouseup are not dropped. When both arrive,
+        // the debounce makes it one action.
+        if ((e.type === "pointerup" || e.type === "mouseup") && d.act != null) perform(d.act, "dom");
     };
     // Capture and non-passive: the page's own handlers (a terminal's mouse
     // reporting) must not see these, and a passive listener can't cancel.

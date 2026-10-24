@@ -89,6 +89,15 @@ describe("installSideButtons — the window listener", () => {
         expect(hooks.back).toHaveBeenCalledTimes(1);
     });
 
+    it("acts on the mouse release for a press made while the middle button is held, which has no pointerdown or pointerup", () => {
+        const target = document.body;
+        target.dispatchEvent(
+            new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 3, buttons: 4 | 8 })
+        );
+        target.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, button: 3, buttons: 4 }));
+        expect(hooks.back).toHaveBeenCalledTimes(1);
+    });
+
     it("does nothing on the press itself, only on the release", () => {
         document.body.dispatchEvent(
             new MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 3, buttons: 8 })
