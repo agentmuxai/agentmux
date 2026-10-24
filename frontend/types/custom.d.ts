@@ -170,6 +170,8 @@ declare global {
          *  host, which srv trusts and agents can't impersonate. Answers srv's
          *  `data`. SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md §5.4. */
         vault?(op: string, args?: Record<string, unknown>): Promise<unknown>;
+        /** A Google account panel's operation (`account`, `set`), relayed to srv as the host so no agent can grant itself access. */
+        google?(op: string, args?: Record<string, unknown>): Promise<unknown>;
         /** Show one Vault value: the host has the OS (Windows Hello) confirm the
          *  person, then fetches it from srv. Rejects "cancelled" if they dismiss it. */
         vaultReveal?(args: { id: string; part: string; label: string }): Promise<unknown>;

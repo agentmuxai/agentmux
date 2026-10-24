@@ -179,10 +179,12 @@ async fn main() {
                 })
             }
             "tools/list" => {
+                // A Google tool is listed only for an agent with a grant on its service.
+                let services = tools::google_tool::granted_services(&client, &local_url, &auth_key).await;
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": advertised_tools() }
+                    "result": { "tools": tool_schemas::tools_for(&services) }
                 })
             }
             "tools/call" => {

@@ -51,6 +51,7 @@ pub mod agent_input_history;
 pub mod widget_storage;
 pub mod work_board;
 pub mod work_claims;
+pub mod google_grants;
 pub mod work_deps;
 pub mod work_prs;
 pub mod work_queue;

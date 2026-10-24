@@ -79,6 +79,7 @@ pub(crate) mod widget_access_handlers;
 pub(crate) mod widget_agent_handlers;
 pub(crate) mod vault_handlers;
 pub(crate) mod browser_vault_fill;
+pub(crate) mod google_handlers;
 pub(crate) mod shell_secrets;
 pub(crate) mod widget_handlers;
 

@@ -71,6 +71,13 @@
     font-style: italic;
 }
 
+// One line saying what a setting does, under it.
+.identity-detail-hint {
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+    margin-bottom: var(--space-1);
+}
+
 .identity-agent-chips {
     display: flex;
     flex-wrap: wrap;
