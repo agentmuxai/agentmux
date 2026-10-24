@@ -78,6 +78,17 @@ pub struct AgentFailure {
     #[ts(as = "Option<String>", optional)]
     pub stderr_tail: String,
     pub retryable: bool,
+    /// When a `UsageLimit` lifts (unix ms), if the provider said
+    /// (`agents::limit_reset`). Set when the failure is stored, not by
+    /// [`classify`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub resets_at_ms: Option<u64>,
+    /// The provider's name for the limit's window, such as `five_hour` or
+    /// `seven_day`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub limit_window: Option<String>,
 }
 
 impl AgentFailure {
@@ -359,11 +370,13 @@ pub fn classify(
         );
     }
     // Claude's plan limits read "You've hit your weekly limit · resets …" (or
-    // "session limit"), with no "usage" in them.
+    // "session limit", or "monthly spend limit · raise it at …"), with no
+    // "usage" in them.
     if hay.contains("usage limit")
         || hay.contains("weekly limit")
         || hay.contains("hit your limit")
         || hay.contains("hit your session limit")
+        || hay.contains("spend limit")
         || hay.contains("out of credits")
         || hay.contains("quota")
         || hay.contains("billing")
@@ -461,6 +474,8 @@ fn build(
         signal,
         stderr_tail: tail.to_string(),
         retryable,
+        resets_at_ms: None,
+        limit_window: None,
     }
 }
 
@@ -654,6 +669,8 @@ mod tests {
             "You've hit your weekly limit · resets Oct 19, 7pm (America/Los_Angeles)",
             "You've hit your session limit · resets 3pm",
             "Claude AI usage limit reached|1792156633",
+            // Extra usage capped: it works again when the exhausted window resets.
+            "You've hit your monthly spend limit · raise it at claude.ai/settings/usage",
         ] {
             let f = classify(Some(1), None, stderr, None);
             assert_eq!(f.code, FailureClass::UsageLimit, "{stderr}");

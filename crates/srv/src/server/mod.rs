@@ -22,6 +22,7 @@ mod messagebus;
 // pub(crate): muxbus::cloud_subscriber (the WAN delivery path) calls
 // resolve_transcript_request_tier_fields directly — see that function's
 // own doc comment for why.
+mod hold_reason;
 pub(crate) mod reactive;
 mod name_resolution;
 pub(crate) mod caller;

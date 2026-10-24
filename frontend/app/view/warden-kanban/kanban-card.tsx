@@ -65,7 +65,8 @@ const STATE_WORDS: Record<KanbanAgentState, string> = {
 };
 
 export function agentStateWords(state: KanbanAgentState | undefined): string {
-    return state ? STATE_WORDS[state] : "not here";
+    // A state srv added that this build doesn't word yet reads as itself.
+    return state ? (STATE_WORDS[state] ?? state) : "not here";
 }
 
 /** An agent's name with its live state. */
