@@ -15,13 +15,13 @@ The `HTTRANSPARENT` forwarder (Phase 1) was implemented and **abandoned**: on ce
 
 **Shipped instead — JS-driven resize**, mirroring the already-working JS header MOVE:
 
-1. The floater's frontend DOM (`floating-pane-workspace.tsx`) detects a pointerdown within `FLOATER_EDGE_RESIZE_BORDER` (8 CSS px, [`frontend/app/workspace/floater-resize.ts`](../../frontend/app/workspace/floater-resize.ts)) of an edge/corner.
+1. The floater's frontend DOM (`floating-pane-workspace.tsx`) detects a pointerdown within the band of an edge/corner: 12 CSS px on the left, right and bottom (`FLOATER_EDGE_RESIZE_BORDER`), 8 px on the top, corners 20 px along the edges (12 px down at the top), a header button winning over the band ([`frontend/app/workspace/floater-resize.ts`](../../frontend/app/workspace/floater-resize.ts)).
 2. It takes **pointer capture** (so it keeps getting moves after the cursor leaves the window), reads the start rect via `get_window_rect`, and on each move computes the new rect (cursor delta + which of the 8 edges) and calls `set_window_rect` → `SetWindowPos`. Moves coalesce one-IPC-in-flight (last wins). No native loop, no NCHITTEST/capture conflict.
 3. New host IPC: `get_window_rect` / `set_window_rect` in `commands/window/motion.rs`.
 
 **Browser floaters** have a second OS child (the web-content window) layered over the frontend DOM in the content region, which would cover the grab band. `use-pane-rect-sync.ts` therefore insets that child by the band depth on the three window-edge sides (left/right/bottom — the top edge is over the 33px header, already frontend), exposing the band. The full-size placeholder div paints the strip, so there's **no native white border** (the failure mode the `WS_THICKFRAME` design hit).
 
-**Note (2026-07-27):** `FLOATER_EDGE_RESIZE_BORDER` shipped at 12px here, was shrunk to 4px in PR #1829 as a side effect of fixing a browser-pane-only visual complaint (the inset above reading as a border around web content), and was restored to 8px after the resulting every-pane-type grab-target regression was diagnosed — see [`docs/retro/retro-floating-pane-resize-hit-target-2026-07-27.md`](../retro/retro-floating-pane-resize-hit-target-2026-07-27.md).
+**Note (2026-07-27):** `FLOATER_EDGE_RESIZE_BORDER` shipped at 12px here, was shrunk to 4px in PR #1829 as a side effect of fixing a browser-pane-only visual complaint (the inset above reading as a border around web content), was restored to 8px after the resulting every-pane-type grab-target regression was diagnosed, and was widened to 12px with larger corners on 2026-10-23 (Kanban #1641: 8px was still too thin to find; a browser pane keeps its own 8px inset, `FLOATER_BROWSER_EDGE_INSET`) — see [`docs/retro/retro-floating-pane-resize-hit-target-2026-07-27.md`](../retro/retro-floating-pane-resize-hit-target-2026-07-27.md).
 
 The Phase 1 forwarder design below is kept for the record.
 

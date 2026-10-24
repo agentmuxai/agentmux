@@ -48,3 +48,19 @@
         padding: 0;
     }
 }
+
+// The resize cursor while the pointer is in a floater's invisible edge band, or
+// dragging one (`showEdgeCursor` in floating-pane-workspace.tsx). Every element, so a
+// child's own `cursor` (a header button, a text field) does not hide it.
+html[data-floater-edge="ew-resize"] * {
+    cursor: ew-resize !important;
+}
+html[data-floater-edge="ns-resize"] * {
+    cursor: ns-resize !important;
+}
+html[data-floater-edge="nwse-resize"] * {
+    cursor: nwse-resize !important;
+}
+html[data-floater-edge="nesw-resize"] * {
+    cursor: nesw-resize !important;
+}
