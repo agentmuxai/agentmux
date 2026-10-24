@@ -1,7 +1,7 @@
 # SPEC: Jobs and templates: one ledger for everything that runs by itself
 
 **Date:** 2026-10-24
-**Status:** active — approved by the operator 2026-10-23 (answers in §10). P1 PR 1 (run ledger and cron fixes) in #TBD; the rest not started.
+**Status:** active — approved by the operator 2026-10-23 (answers in §10). P1 PR 1 (run ledger and cron fixes) in #5390; the rest not started.
 **Trigger:** The operator, 2026-10-23, asked how scheduled and automated agent work (cron jobs, and jobs started by an event) should live in AgentMux, whether Drone is the place for it, and for "a good set of templates that are easy to build off of … for common needs, cron and automated". An internal research report answered (an inventory of what runs today, what Drone is, current practice elsewhere, a phased plan, ten starter templates). The operator approved it the same day ("yes proceed with all") with six decisions, listed in §0. This spec covers the report's phases P1–P3 and leaves hooks for P4 and P5.
 **Related:** `SPEC_CRON_LOOP_ROBUSTNESS_2026_06_25.md` (how cron and loops were built); `SPEC_WARDEN_KANBAN_2026_10_20.md` (the task board failed runs file into); `SPEC_WIDGET_SHARING_2026_10_10.md` (the signing and catalog scheme templates reuse); `SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md` (the notification router); `SPEC_AGENT_WORKERS_2026_10_15.md` (spawned workers); `SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md` (how agents use secrets); `SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md` (the turn ledger runs read their cost from); `SPEC_SWARM_SUPERVISOR_2026_10_16.md`; `SPEC_DRONE_CANVAS_NODE_EDITOR_2026_06_05.md`; `SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md` (draft: who an agent's lead is).
 
