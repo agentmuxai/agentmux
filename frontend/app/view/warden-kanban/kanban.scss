@@ -475,6 +475,12 @@ $kanban-narrow: 760px;
     overflow-wrap: anywhere;
 }
 
+.kanban-drawer__doc {
+    font-family: monospace;
+    font-size: var(--text-xs);
+    overflow-wrap: anywhere;
+}
+
 .kanban-drawer__payload {
     white-space: pre-wrap;
     overflow-wrap: anywhere;

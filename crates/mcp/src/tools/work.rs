@@ -64,6 +64,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "hold": arguments.get("hold").and_then(|v| v.as_bool()).unwrap_or(false),
                 "review": arguments.get("review").and_then(|v| v.as_bool()),
                 "after": arguments.get("after").filter(|a| a.is_array()).cloned().unwrap_or(Value::Array(vec![])),
+                "first": arguments.get("first").and_then(|v| v.as_str()),
             });
             let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
                 .map_err(|e| anyhow::anyhow!("work enqueue request failed: {e}"))?;
@@ -75,6 +76,14 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let v = serde_json::from_str::<Value>(&text).unwrap_or(serde_json::json!({}));
             let id = v.get("id").and_then(|x| x.as_str()).unwrap_or_default().to_string();
             let name = task_name(&v, &id);
+            if let Some(build) = v.get("build_num").and_then(|n| n.as_i64()) {
+                let whose = if for_me { "your backlog" } else { "the queue" };
+                return Ok(format!(
+                    "Filed {name} (the spec) and #{build} (the build, which starts after it) in {whose}: {title}. \
+                     Tell the operator both numbers. Hand the spec's path in with Tasks update (links.doc); \
+                     complete the spec when it is approved, and the build's agent is told it can start."
+                ));
+            }
             Ok(if for_me {
                 format!(
                     "Filed {name} in your backlog: {title}. Tell the operator its number. It waits for you: \
@@ -207,6 +216,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "checklist": arguments.get("checklist").filter(|c| c.is_array()),
                 "pr_url": links.get("pr").and_then(|v| v.as_str()),
                 "branch": links.get("branch").and_then(|v| v.as_str()),
+                "doc": links.get("doc").and_then(|v| v.as_str()),
                 "text": text,
             });
             let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await

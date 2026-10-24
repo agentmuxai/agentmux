@@ -9,6 +9,10 @@
 //!
 //! Kept in `db_work_prs`, beside the board's other tables, so older builds on
 //! the same computer never see it. Pruned with the tasks it belongs to.
+//!
+//! And a task's document (`db_work_docs`): the path of the spec or report a
+//! `spec` or `research` task wrote (`links.doc`), which the card of the build
+//! that starts after it shows (§5.2).
 
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -25,6 +29,11 @@ pub(crate) const SCHEMA: &str = "
         released_in TEXT NOT NULL DEFAULT '',
         released_at INTEGER,
         updated_at  INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS db_work_docs (
+        work_id    TEXT PRIMARY KEY,
+        path       TEXT NOT NULL,
+        updated_at INTEGER NOT NULL DEFAULT 0
     );";
 
 /// Task ids per lookup query, well under SQLite's bound-parameter limit.
@@ -47,10 +56,11 @@ fn row_to_pr(r: &rusqlite::Row) -> rusqlite::Result<WorkPr> {
     Ok(WorkPr { merged_at: r.get("merged_at")?, released_in: r.get("released_in")?, released_at: r.get("released_at")? })
 }
 
-/// Fill each task's `card.pr`.
+/// Fill each task's `card.pr` and `card.doc`.
 pub(crate) fn attach_prs(conn: &Connection, tasks: &mut [BoardTask]) -> Result<(), StoreError> {
     let ids: Vec<String> = tasks.iter().map(|t| t.item.id.clone()).collect();
     let mut found = std::collections::HashMap::new();
+    let mut docs = std::collections::HashMap::new();
     for chunk in ids.chunks(IDS_PER_QUERY) {
         let marks = vec!["?"; chunk.len()].join(",");
         let sql = format!("SELECT work_id, merged_at, released_in, released_at FROM db_work_prs WHERE work_id IN ({marks})");
@@ -60,9 +70,17 @@ pub(crate) fn attach_prs(conn: &Connection, tasks: &mut [BoardTask]) -> Result<(
             let (id, pr) = row?;
             found.insert(id, pr);
         }
+        let sql = format!("SELECT work_id, path FROM db_work_docs WHERE work_id IN ({marks})");
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(chunk.iter()), |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        for row in rows {
+            let (id, path) = row?;
+            docs.insert(id, path);
+        }
     }
     for t in tasks {
         t.card.pr = found.remove(&t.item.id);
+        t.card.doc = docs.remove(&t.item.id).unwrap_or_default();
     }
     Ok(())
 }
@@ -117,7 +135,20 @@ impl Store {
     /// Drop what is known about tasks no longer in the queue.
     pub fn work_prs_prune(&self) -> Result<usize, StoreError> {
         let conn = self.conn().lock().unwrap();
-        Ok(conn.execute("DELETE FROM db_work_prs WHERE work_id NOT IN (SELECT id FROM db_work_queue)", [])?)
+        let prs = conn.execute("DELETE FROM db_work_prs WHERE work_id NOT IN (SELECT id FROM db_work_queue)", [])?;
+        let docs = conn.execute("DELETE FROM db_work_docs WHERE work_id NOT IN (SELECT id FROM db_work_queue)", [])?;
+        Ok(prs + docs)
+    }
+
+    /// Set the path of the document `work_id` wrote (`links.doc`).
+    pub fn work_doc_set(&self, work_id: &str, path: &str, now_ms: i64) -> Result<(), StoreError> {
+        let conn = self.conn().lock().unwrap();
+        conn.execute(
+            "INSERT INTO db_work_docs (work_id, path, updated_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(work_id) DO UPDATE SET path = excluded.path, updated_at = excluded.updated_at",
+            params![work_id, path, now_ms],
+        )?;
+        Ok(())
     }
 }
 

@@ -89,6 +89,11 @@ pub(super) struct EnqueueRequest {
     /// Kanban: the tasks it starts after (ids or numbers).
     #[serde(default)]
     pub after: Vec<Value>,
+    /// Kanban: `"spec"` or `"research"` files that task and a build that
+    /// starts after it, for the same agent
+    /// (SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23.md §5.1).
+    #[serde(default)]
+    pub first: Option<String>,
 }
 
 pub(super) async fn handle_work_enqueue(
@@ -163,23 +168,73 @@ pub(super) async fn handle_work_enqueue(
         Ok(a) => a,
         Err(why) => return err(StatusCode::BAD_REQUEST, why),
     };
+    let first = match req.first.as_deref().map(str::trim).filter(|f| !f.is_empty()) {
+        Some(f) if crate::backend::kanban::is_research_kind(f) => Some(f.to_ascii_lowercase()),
+        Some(_) => return err(StatusCode::BAD_REQUEST, "first: \"spec\" or \"research\""),
+        None => None,
+    };
     let filing = super::work_tasks::Filing { repo: req.repo, review: req.review };
     let card = super::work_tasks::prepare_card(&state, caller.as_deref(), &item.created_by, filing).await;
-    // With what it starts after, the row and the list in one transaction, so no
-    // claim takes it in between.
+    let Some(first) = first else {
+        return match enqueue_one(&state, &item, &after, &card) {
+            Ok(num) => {
+                publish_changed(&state);
+                (StatusCode::OK, Json(json!({ "id": item.id, "num": num })))
+            }
+            Err(e) => e,
+        };
+    };
+    // A feature as two tasks: its spec (or research), and a build that
+    // starts after it, for the same agent, filed and numbered together.
+    use crate::backend::kanban::{build_payload, pair_title, spec_payload};
+    let spec = WorkItem {
+        title: pair_title(&first, &item.title),
+        payload: spec_payload(&first, &item.payload),
+        kind: first.clone(),
+        ..item.clone()
+    };
+    let build = WorkItem {
+        id: Uuid::new_v4().to_string(),
+        title: pair_title("build", &item.title),
+        payload: build_payload(&item.payload),
+        kind: "build".into(),
+        ..item
+    };
+    let spec_num = match enqueue_one(&state, &spec, &after, &card) {
+        Ok(n) => n,
+        Err(e) => return e,
+    };
+    let build_num = match enqueue_one(&state, &build, std::slice::from_ref(&spec.id), &card) {
+        Ok(n) => n,
+        Err(e) => {
+            publish_changed(&state);
+            return e;
+        }
+    };
+    publish_changed(&state);
+    (
+        StatusCode::OK,
+        Json(json!({ "id": spec.id, "num": spec_num, "build_id": build.id, "build_num": build_num })),
+    )
+}
+
+/// Enqueue one task with what it starts after (the row and the list in one
+/// transaction, so no claim takes it in between) and file its card.
+fn enqueue_one(
+    state: &AppState,
+    item: &WorkItem,
+    after: &[String],
+    card: &crate::backend::storage::work_board::NewCard,
+) -> Result<Option<i64>, (StatusCode, Json<Value>)> {
     let enqueued = if after.is_empty() {
-        state.identity_store.work_queue_enqueue(&item).map(|()| None)
+        state.identity_store.work_queue_enqueue(item).map(|()| None)
     } else {
-        state.identity_store.work_queue_enqueue_after(&item, &after)
+        state.identity_store.work_queue_enqueue_after(item, after)
     };
     match enqueued {
-        Ok(Some(why)) => err(StatusCode::BAD_REQUEST, format!("after: {why}")),
-        Ok(None) => {
-            let num = super::work_tasks::file_card(&state, &item, &card);
-            publish_changed(&state);
-            (StatusCode::OK, Json(json!({ "id": item.id, "num": num })))
-        }
-        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("enqueue failed: {e}")),
+        Ok(Some(why)) => Err(err(StatusCode::BAD_REQUEST, format!("after: {why}"))),
+        Ok(None) => Ok(super::work_tasks::file_card(state, item, card)),
+        Err(e) => Err(err(StatusCode::INTERNAL_SERVER_ERROR, format!("enqueue failed: {e}"))),
     }
 }
 

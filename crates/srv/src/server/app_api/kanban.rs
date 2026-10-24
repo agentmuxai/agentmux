@@ -38,7 +38,7 @@ use super::AppState;
 
 /// The lease of a task the operator starts on an agent; a live holder keeps it.
 const LEASE_MS: i64 = 120_000;
-use crate::backend::kanban::FINISHED_WINDOW_MS;
+use crate::backend::kanban::{self, FINISHED_WINDOW_MS};
 /// The most tasks one list returns.
 const LIST_LIMIT: usize = 500;
 
@@ -204,6 +204,14 @@ struct ActRequest {
     /// replaces the list, `[]` clears it.
     #[serde(default)]
     after: Option<Vec<Value>>,
+    /// create: `"spec"` or `"research"` files that task and a build that
+    /// starts after it (§5.1).
+    #[serde(default)]
+    first: Option<String>,
+    /// cancel, on a spec or research task: what happens to the tasks waiting
+    /// on it, `"cancel"` (the default) or `"hold"` (§6).
+    #[serde(default)]
+    followers: Option<String>,
 }
 
 /// "#12, #15" for the history.
@@ -281,6 +289,74 @@ fn start_text(t: &BoardTask, attempt: i64) -> String {
     }
 }
 
+/// One task the operator filed: the row, what it starts after, its card and
+/// its first history line. Returns its id and number.
+#[allow(clippy::too_many_arguments)]
+fn create_one(
+    state: &AppState,
+    regs: &[AgentRegistration],
+    req: &ActRequest,
+    title: &str,
+    payload: &str,
+    kind: &str,
+    after: &[String],
+    now: i64,
+) -> Result<(String, i64), String> {
+    let store = &state.identity_store;
+    let (target, target_uid) = match req.agent.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
+        Some(a) => match agent_named(regs, a) {
+            Some(r) => (r.agent_id.clone(), r.uid.clone().unwrap_or_default()),
+            None => (a.to_string(), String::new()),
+        },
+        None => (String::new(), String::new()),
+    };
+    let item = WorkItem {
+        id: Uuid::new_v4().to_string(),
+        title: clean(title),
+        payload: clean(payload),
+        kind: kind.to_string(),
+        target_agent: target,
+        target_group: String::new(),
+        priority: req.priority.unwrap_or(0),
+        state: if req.hold == Some(true) { work_state::HELD.into() } else { String::new() },
+        claimed_by: String::new(),
+        target_agent_uid: target_uid,
+        claimed_by_uid: String::new(),
+        claim_expires: None,
+        attempts: 0,
+        max_attempts: 3,
+        created_by: OPERATOR.into(),
+        created_by_uid: String::new(),
+        created_at: now,
+        updated_at: now,
+        not_before: None,
+        result: String::new(),
+    };
+    // The row and what it starts after in one transaction, so no claim
+    // takes it in between.
+    if after.is_empty() {
+        store.work_queue_enqueue(&item).map_err(|e| e.to_string())?;
+    } else if let Some(why) = store.work_queue_enqueue_after(&item, after).map_err(|e| e.to_string())? {
+        return Err(why);
+    }
+    let card = NewCard {
+        repo: req.repo.clone().unwrap_or_default(),
+        branch: String::new(),
+        // Review is the PR's (muxreview), not the operator's: a task waits
+        // for an Accept only when asked to (§4.5).
+        review_required: req.review.unwrap_or(false),
+        requested_by: OPERATOR.into(),
+        requested_by_kind: requested::OPERATOR.into(),
+        request_text: String::new(),
+        filed_by: String::new(),
+    };
+    let num = store.work_card_create(&item.id, &card, now).map_err(|e| e.to_string())?;
+    let first = if req.hold == Some(true) { work_state::HELD } else { work_state::OPEN };
+    let body = if after.is_empty() { String::new() } else { after_words(store, after) };
+    record(state, &item.id, OPERATOR, OPERATOR, "created", "", first, &body);
+    Ok((item.id, num))
+}
+
 async fn act(state: &AppState, data: Value) -> Result<Value, String> {
     let req: ActRequest = serde_json::from_value(data).map_err(|e| format!("kanban.act: {e}"))?;
     let now = now_ms();
@@ -296,57 +372,35 @@ async fn act(state: &AppState, data: Value) -> Result<Value, String> {
         "create" => {
             let title = req.title.as_deref().map(str::trim).filter(|t| !t.is_empty()).ok_or("a title is required")?;
             let payload = req.payload.as_deref().map(str::trim).filter(|p| !p.is_empty()).unwrap_or(title);
-            let (target, target_uid) = match req.agent.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
-                Some(a) => match agent_named(&regs, a) {
-                    Some(r) => (r.agent_id.clone(), r.uid.clone().unwrap_or_default()),
-                    None => (a.to_string(), String::new()),
-                },
-                None => (String::new(), String::new()),
-            };
-            let item = WorkItem {
-                id: Uuid::new_v4().to_string(),
-                title: clean(title),
-                payload: clean(payload),
-                kind: req.kind.clone().unwrap_or_default(),
-                target_agent: target,
-                target_group: String::new(),
-                priority: req.priority.unwrap_or(0),
-                state: if req.hold == Some(true) { work_state::HELD.into() } else { String::new() },
-                claimed_by: String::new(),
-                target_agent_uid: target_uid,
-                claimed_by_uid: String::new(),
-                claim_expires: None,
-                attempts: 0,
-                max_attempts: 3,
-                created_by: OPERATOR.into(),
-                created_by_uid: String::new(),
-                created_at: now,
-                updated_at: now,
-                not_before: None,
-                result: String::new(),
-            };
-            // The row and what it starts after in one transaction, so no claim
-            // takes it in between.
             let after = resolve_after(state, req.after.as_deref().unwrap_or_default())?;
-            if after.is_empty() {
-                store.work_queue_enqueue(&item).map_err(|e| e.to_string())?;
-            } else if let Some(why) = store.work_queue_enqueue_after(&item, &after).map_err(|e| e.to_string())? {
-                return Err(why);
+            match req.first.as_deref().map(str::trim).filter(|f| !f.is_empty()) {
+                // "Spec first" (§5.1): a spec (or research) task, and a build
+                // that starts after it, for the same agent.
+                Some(first) => {
+                    if !crate::backend::kanban::is_research_kind(first) {
+                        return Err("first: \"spec\" or \"research\"".into());
+                    }
+                    let first = first.to_ascii_lowercase();
+                    let (spec_id, spec_num) =
+                        create_one(state, &regs, &req, &kanban::pair_title(&first, title), &kanban::spec_payload(&first, payload), &first, &after, now)?;
+                    let (build_id, build_num) = create_one(
+                        state,
+                        &regs,
+                        &req,
+                        &kanban::pair_title("build", title),
+                        &kanban::build_payload(payload),
+                        "build",
+                        std::slice::from_ref(&spec_id),
+                        now,
+                    )?;
+                    json!({ "ok": true, "id": spec_id, "num": spec_num, "build_id": build_id, "build_num": build_num })
+                }
+                None => {
+                    let kind = req.kind.clone().unwrap_or_default();
+                    let (id, num) = create_one(state, &regs, &req, title, payload, &kind, &after, now)?;
+                    json!({ "ok": true, "id": id, "num": num })
+                }
             }
-            let card = NewCard {
-                repo: req.repo.clone().unwrap_or_default(),
-                branch: String::new(),
-                review_required: req.review.unwrap_or(true),
-                requested_by: OPERATOR.into(),
-                requested_by_kind: requested::OPERATOR.into(),
-                request_text: String::new(),
-                filed_by: String::new(),
-            };
-            let num = store.work_card_create(&item.id, &card, now).map_err(|e| e.to_string())?;
-            let first = if req.hold == Some(true) { work_state::HELD } else { work_state::OPEN };
-            let body = if after.is_empty() { String::new() } else { after_words(store, &after) };
-            record(state, &item.id, OPERATOR, OPERATOR, "created", "", first, &body);
-            json!({ "ok": true, "id": item.id, "num": num })
         }
         "edit" => {
             let t = get(&req.id)?;
@@ -466,7 +520,8 @@ async fn act(state: &AppState, data: Value) -> Result<Value, String> {
             let t = get(&req.id)?;
             let m = store.work_accept(&t.item.id, now).map_err(|e| e.to_string())?.ok_or("only a task in Review can be accepted")?;
             record(state, &t.item.id, OPERATOR, OPERATOR, "accepted", &m.from, &m.to, &text);
-            json!({ "ok": true })
+            let unlocked = crate::backend::kanban::notify_unlocked(store, &state.mstore, &t.item.id);
+            json!({ "ok": true, "unlocked": unlocked })
         }
         "send_back" => {
             let t = get(&req.id)?;
@@ -503,7 +558,28 @@ async fn act(state: &AppState, data: Value) -> Result<Value, String> {
                 return Err("it is already finished".into());
             }
             record(state, &t.item.id, OPERATOR, OPERATOR, "cancelled", &t.item.state, work_state::CANCELLED, &text);
-            json!({ "ok": true })
+            // A cancelled spec approves nothing: what waits on it is
+            // cancelled too, or put on hold for the operator (§6).
+            let mut followers = 0;
+            if crate::backend::kanban::is_research_kind(&t.item.kind) {
+                let why = format!("its {} #{} was cancelled", t.item.kind.trim().to_ascii_lowercase(), t.card.num);
+                let hold = req.followers.as_deref() == Some("hold");
+                for f in store.work_followers_of(&t.item.id).map_err(|e| e.to_string())? {
+                    if f.state != work_state::OPEN && f.state != work_state::HELD {
+                        continue;
+                    }
+                    if hold {
+                        if let Some(m) = store.work_hold(&f.id, now).map_err(|e| e.to_string())? {
+                            record(state, &f.id, OPERATOR, OPERATOR, "held", &m.from, &m.to, &why);
+                            followers += 1;
+                        }
+                    } else if store.work_queue_cancel(&f.id, &why, now).map_err(|e| e.to_string())? {
+                        record(state, &f.id, OPERATOR, OPERATOR, "cancelled", &f.state, work_state::CANCELLED, &why);
+                        followers += 1;
+                    }
+                }
+            }
+            json!({ "ok": true, "followers": followers })
         }
         "retry" => {
             let t = get(&req.id)?;
@@ -812,5 +888,67 @@ mod tests {
         let waiting = act(&state, json!({"action": "create", "title": "Waiting"})).await.unwrap();
         let err = act(&state, json!({"action": "release", "id": waiting["id"]})).await.unwrap_err();
         assert!(err.contains("only a task an agent holds"), "{err}");
+    }
+
+    /// The operator's "Spec first": a spec task and a build that starts after
+    /// it, for the same agent, numbered together (§5.1).
+    #[tokio::test]
+    async fn spec_first_files_a_spec_and_its_build() {
+        let state = crate::server::tests::test_state();
+        let v = act(&state, json!({ "action": "create", "title": "Kanban stages", "first": "spec", "agent": "naki-x" }))
+            .await
+            .unwrap();
+        let (spec_id, build_id) = (v["id"].as_str().unwrap().to_string(), v["build_id"].as_str().unwrap().to_string());
+        let store = &state.identity_store;
+        let spec = store.work_board_get(&spec_id).unwrap().unwrap();
+        let build = store.work_board_get(&build_id).unwrap().unwrap();
+        assert_eq!((spec.item.title.as_str(), spec.item.kind.as_str()), ("Spec: Kanban stages", "spec"));
+        assert_eq!((build.item.title.as_str(), build.item.kind.as_str()), ("Build: Kanban stages", "build"));
+        assert_eq!(build.card.after.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), [spec_id.as_str()]);
+        assert_eq!((spec.item.target_agent.as_str(), build.item.target_agent.as_str()), ("naki-x", "naki-x"));
+        assert!(!spec.card.review_required, "Review is the PR's: no Accept unless asked");
+        assert!(spec.item.payload.contains("links.doc"));
+        assert!(act(&state, json!({ "action": "create", "title": "x", "first": "build" })).await.is_err());
+    }
+
+    /// Cancelling a spec cancels the build waiting on it, or holds it when the
+    /// operator says so (§6).
+    #[tokio::test]
+    async fn cancelling_a_spec_cancels_or_holds_its_build() {
+        let state = crate::server::tests::test_state();
+        let store = state.identity_store.clone();
+        for (mode, want) in [(None, "cancelled"), (Some("hold"), "held")] {
+            let v = act(&state, json!({ "action": "create", "title": "f", "first": "spec" })).await.unwrap();
+            let (spec_id, build_id) = (v["id"].as_str().unwrap().to_string(), v["build_id"].as_str().unwrap().to_string());
+            let mut req = json!({ "action": "cancel", "id": spec_id });
+            if let Some(m) = mode {
+                req["followers"] = json!(m);
+            }
+            let out = act(&state, req).await.unwrap();
+            assert_eq!(out["followers"], 1);
+            assert_eq!(store.work_queue_get(&build_id).unwrap().unwrap().state, want, "{mode:?}");
+        }
+    }
+
+    /// A done spec frees the build waiting on it, unless the build is held or
+    /// waits on something else too; a build task's own finish frees nothing.
+    #[tokio::test]
+    async fn a_done_spec_frees_its_waiting_build() {
+        let state = crate::server::tests::test_state();
+        let store = state.identity_store.clone();
+        let v = act(&state, json!({ "action": "create", "title": "f", "first": "spec", "agent": "naki-x" })).await.unwrap();
+        let (spec_id, build_id) = (v["id"].as_str().unwrap().to_string(), v["build_id"].as_str().unwrap().to_string());
+        assert!(crate::backend::kanban::unlocked_by(&store, &spec_id).is_empty(), "not done yet");
+        {
+            let conn = store.conn().lock().unwrap();
+            conn.execute("UPDATE db_work_queue SET state = 'done' WHERE id = ?1", rusqlite::params![spec_id]).unwrap();
+        }
+        let freed = crate::backend::kanban::unlocked_by(&store, &spec_id);
+        assert_eq!(freed.iter().map(|(_, b)| b.item.id.as_str()).collect::<Vec<_>>(), [build_id.as_str()]);
+        let text = crate::backend::kanban::unlocked_text(&freed[0].0, &freed[0].1);
+        assert!(text.contains("can start") && text.contains("Tasks claim"), "{text}");
+        store.work_hold(&build_id, 1).unwrap();
+        assert!(crate::backend::kanban::unlocked_by(&store, &spec_id).is_empty(), "a held build waits for its hold");
+        assert!(crate::backend::kanban::unlocked_by(&store, &build_id).is_empty(), "a build frees nothing");
     }
 }

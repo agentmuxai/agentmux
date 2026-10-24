@@ -316,6 +316,9 @@ pub(super) struct UpdateRequest {
     pub branch: Option<String>,
     #[serde(default)]
     pub pr_url: Option<String>,
+    /// The path of the document the task wrote (`links.doc`).
+    #[serde(default)]
+    pub doc: Option<String>,
     /// `ask`: the question; `submit`: the result.
     #[serde(default)]
     pub text: String,
@@ -333,6 +336,7 @@ fn card_update(req: &UpdateRequest) -> CardUpdate {
         }),
         branch: one(&req.branch),
         pr_url: one(&req.pr_url),
+        doc: one(&req.doc),
     }
 }
 
@@ -392,8 +396,12 @@ pub(super) async fn handle_work_update(
         body = format!("{body}{}checklist {done}/{}", if body.is_empty() { "" } else { " · " }, c.len());
     }
     record(&state, &id, &req.agent_id, "agent", "updated", &item.state, &item.state, &body);
-    if u.pr_url.is_some() || u.branch.is_some() {
-        let link = [u.pr_url.as_deref(), u.branch.as_deref()].into_iter().flatten().collect::<Vec<_>>().join(" ");
+    if u.pr_url.is_some() || u.branch.is_some() || u.doc.is_some() {
+        let link = [u.pr_url.as_deref(), u.branch.as_deref(), u.doc.as_deref()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" ");
         record(&state, &id, &req.agent_id, "agent", "linked", &item.state, &item.state, &link);
     }
     super::work_queue::publish_changed(&state);
@@ -702,6 +710,10 @@ async fn finish_task(
             let _ = state.identity_store.work_card_set_question(id, "", now);
             let to = if review { work_state::REVIEW } else { work_state::DONE };
             record(state, id, agent_id, "agent", if review { "submitted" } else { "completed" }, &before, to, result);
+            if to == work_state::DONE {
+                // A spec done: its build's agent hears it can start.
+                crate::backend::kanban::notify_unlocked(&state.identity_store, &state.mstore, id);
+            }
             super::work_queue::publish_changed(state);
             let holder_uid = state.identity_store.work_queue_get(id).ok().flatten().map(|i| i.claimed_by_uid).unwrap_or_default();
             let next_uid = if uid.is_empty() { holder_uid } else { uid.to_string() };

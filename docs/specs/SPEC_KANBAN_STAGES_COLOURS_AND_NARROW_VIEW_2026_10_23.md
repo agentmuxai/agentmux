@@ -146,11 +146,12 @@ And the working rule that followed (Global Memory "Agent seats"): agents file ta
   - starts after the spec;
   - same target, repo and priority;
   - review as `review` says.
-- **The answer:** `Filed #1103 "Spec: …" and #1106 "Build: …" (starts after #1103) for Naki-2.`
+- **The answer:** `Filed #1103 (the spec) and #1106 (the build, which starts after it) …`, with how to hand in the spec's path and when to complete it.
+- **Review:** neither task waits for the operator's Accept unless `review` says so (§4.5): agents file with `review: false`, and the operator's New task files that way too.
 
 Without `first`, `enqueue` files one task, as today.
 
-**The operator's New task** gets a "Spec first" check box, ticked by default. The operator described specs-first as how they work, so it is the default and they untick it for a small fix (D4). It files the same pair through `kanban.act` `create`.
+**The operator's New task** gets a "Spec first" switch, on by default. The operator described specs-first as how they work, so it is the default and they untick it for a small fix (D4). It files the same pair through `kanban.act` `create`.
 
 **The operator-config guidance** (`crates/srv/operator-config-seed.json`, the `Tasks` paragraph) gets one sentence: "A new feature is two tasks: file it with `first: "spec"`; a fix, a small change or a follow-up is one task." Global Memory's "Agent seats" entry already says the same in prose, and this makes it the tool's own guidance.
 
@@ -169,18 +170,15 @@ A task filed without `first` or "Spec first", and without an `after` on a resear
 
 ## 6. Approval rules srv enforces
 
-1. **A spec doesn't skip Review.**
-   - **The rule:** on `submit` or `complete`, a task of a research kind with at least one follower that isn't finished goes to Review, whatever `review_required` says. The answer says so: "Review: #1106 starts after it, so the operator accepts it first."
-   - **Why there:** it is enforced at hand-in, the one moment it matters. It still holds when the follower was added after the spec was filed, which an enqueue-time default would miss.
-   - **The operator** can still Accept, or remove the dependency in the build's drawer.
-2. **Accepting a spec tells the build's agent.**
-   - **When:** when Accept (or a merged PR, §6.9 of the Kanban spec) leaves a follower with nothing unfinished to wait on.
-   - **The message:** srv sends that follower's agent one message: `Task #1106 "Build: …" can start: the operator accepted its spec #1103 (<path>). <operator's accept comment, if any>. Take it with Tasks claim (id 1106) when you've finished your current task.`
+1. **~~A spec doesn't skip Review.~~ Dropped (the operator, 2026-10-23, §4.5).** This rule assumed the operator accepts specs on the Kanban. They don't: a spec is approved in conversation (the operator tells a leader, the leader tells the spec's agent), and the agent then completes the spec task itself. Forcing a spec with a waiting build into Review would leave it there, waiting for an Accept that never comes. The operator's Accept still works for a task handed in for review.
+2. **A done spec tells the build's agent.**
+   - **When:** when a spec or research task becomes done (its agent completes it once it is approved, or the operator accepts it) and that leaves a follower with nothing unfinished to wait on.
+   - **The message:** srv sends that follower's agent one system note: `Task #1106 "Build: …" can start: the spec it waits on, #1103 "Spec: …" (<path>), is done. Take it with Tasks claim (id 1106) when you've finished your current task.` The history says "unlocked".
    - **When it isn't sent:**
      - when the agent's block has `kanban:continue: false`;
      - when the follower is held (the hold keeps it unclaimed);
      - when the follower is for Anyone or a group.
-   - **An agent that isn't running** gets it through the message hold, like any other message, for up to 24 h. After that, the card waits in Spec'd under its name.
+   - **An agent that isn't running here** isn't told: the card waits in Spec'd under its name, and its agent's next claim, finished-task answer or reminder names it, as for any waiting task.
    - **Why:** today a newly free task waits until its agent happens to finish something else.
 3. **A send-back keeps the build waiting.** The spec returns to In Research (its agent) or Backlog (agent gone), as today. The build stays in Backlog with "spec #1103 · sent back". Nothing new is needed; this is how "starts after" already behaves.
 4. **Cancelling a spec doesn't release its build.** Cancel on a research-kind task with unfinished followers asks once: "Also cancel #1106 'Build: …'?", ticked by default.
