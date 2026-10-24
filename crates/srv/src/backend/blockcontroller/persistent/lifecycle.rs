@@ -86,7 +86,7 @@ impl PersistentSubprocessController {
     /// this provider session so the next message starts a new one. Clears the
     /// session id here and on the block, so nothing resumes it, then stops the
     /// CLI as a Stop does. The next message spawns a fresh CLI onto the pane's
-    /// history, which carries AgentMux's continuation packet (`spawn.rs`), and
+    /// history (no continuation packet: `spawn.rs` skips it for this start), and
     /// a new segment of the agent's chain (`continuity_segments`), so the old
     /// session stays in its record. Only between turns. Returns the old id.
     pub(crate) fn start_fresh_session(&self) -> Result<Option<String>, &'static str> {

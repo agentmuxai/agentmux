@@ -128,9 +128,12 @@ pub(crate) async fn handle_fresh_self(
         return no_pane();
     };
     let refused = |why: &str| Json(json!({ "status": "refused", "reason": why })).into_response();
-    let handoff: String = req.focus.as_deref().unwrap_or_default().trim().chars().take(HANDOFF_MAX_CHARS).collect();
+    let handoff = req.focus.as_deref().unwrap_or_default().trim().to_string();
     if handoff.is_empty() {
         return refused("a handoff is required: what your next session must know");
+    }
+    if handoff.chars().count() > HANDOFF_MAX_CHARS {
+        return refused("the handoff is over 4,000 characters: shorten it, with the next step in it");
     }
     let Some((provider, container)) = provider_of(&state, &block_id) else {
         return refused("the pane can't be read");
@@ -148,44 +151,71 @@ pub(crate) async fn handle_fresh_self(
     Json(json!({ "status": "scheduled", "runs": "when your current turn ends" })).into_response()
 }
 
-/// The new session's first message from AgentMux: the agent's own handoff. A
-/// fresh Claude session also gets the continuation packet ahead of it.
+/// The new session's first message from AgentMux: the agent's own handoff and
+/// a pointer to the old session. Nothing else of the conversation comes with it.
 pub(crate) fn handoff_message(handoff: &str) -> String {
-    format!("[AgentMux] This is the fresh session you asked for. Your previous session's handoff:\n\n{handoff}")
+    format!(
+        "[AgentMux] This is the fresh session you asked for. Nothing of the previous conversation is in your \
+         context; it is in your record (Agents search_history finds it). Your handoff:\n\n{handoff}"
+    )
+}
+
+/// Tries a fresh session makes when a message queued behind the turn starts
+/// the next one before the old session can be ended.
+const FRESH_ATTEMPTS: usize = 5;
+/// Held for the agent's next turn when its fresh session couldn't start.
+const FRESH_FAILED_NOTE_KEY: &str = "fresh-failed";
+/// What `start_fresh_session` says when the turn hasn't ended, or the CLI is
+/// already being stopped: the two it is worth trying again after.
+const TURN_RUNNING: &str = "a turn is running";
+const STOP_PENDING: &str = "the agent's process is already stopping or restarting";
+
+/// End `block_id`'s provider session, so the next message starts a new one.
+fn end_session(state: &AppState, block_id: &str, provider: &str) -> Result<(), &'static str> {
+    match crate::backend::blockcontroller::get_controller(block_id) {
+        Some(ctrl) if provider == "claude" => {
+            use crate::backend::blockcontroller::persistent::PersistentSubprocessController;
+            let p = ctrl.as_any().downcast_ref::<PersistentSubprocessController>().ok_or("the agent's controller can't start fresh")?;
+            context_reading::mark_fresh_by_choice(block_id);
+            p.start_fresh_session().map(|_| ()).inspect_err(|_| {
+                context_reading::take_fresh_by_choice(block_id);
+            })
+        }
+        Some(ctrl) => {
+            use crate::backend::blockcontroller::subprocess::SubprocessController;
+            let s = ctrl.as_any().downcast_ref::<SubprocessController>().ok_or("the agent's controller can't start fresh")?;
+            s.forget_session();
+            crate::backend::blockcontroller::core::persist_session_id(block_id, "", &Some(state.mstore.clone()), &None);
+            Ok(())
+        }
+        None => Err("no controller for the pane"),
+    }
 }
 
 /// Wait for the turn to end, end the session, then send the handoff as
 /// AgentMux's own turn, which starts the new session.
 async fn fresh_when_turn_ends(state: AppState, block_id: String, provider: String, handoff: String) {
-    if !wait_for_turn_end(&block_id).await {
-        tracing::warn!(block_id = %block_id, "fresh session given up: the turn didn't end within 30 minutes");
-        context_reading::fresh_sent(&block_id, false);
-        return;
+    let mut ended = Err("the turn didn't end within 30 minutes");
+    // A message queued behind the turn can start the next one between the wait
+    // and the stop: wait again, a few times, before giving up.
+    for _ in 0..FRESH_ATTEMPTS {
+        if !wait_for_turn_end(&block_id).await {
+            break;
+        }
+        ended = end_session(&state, &block_id, &provider);
+        if !matches!(ended, Err(TURN_RUNNING | STOP_PENDING)) {
+            break;
+        }
+        tokio::time::sleep(TURN_END_POLL).await;
     }
-    let ended = match crate::backend::blockcontroller::get_controller(&block_id) {
-        Some(ctrl) if provider == "claude" => {
-            use crate::backend::blockcontroller::persistent::PersistentSubprocessController;
-            match ctrl.as_any().downcast_ref::<PersistentSubprocessController>() {
-                Some(p) => p.start_fresh_session().map(|_| ()),
-                None => Err("the agent's controller can't start fresh"),
-            }
-        }
-        Some(ctrl) => {
-            use crate::backend::blockcontroller::subprocess::SubprocessController;
-            match ctrl.as_any().downcast_ref::<SubprocessController>() {
-                Some(s) => {
-                    s.forget_session();
-                    crate::backend::blockcontroller::core::persist_session_id(&block_id, "", &Some(state.mstore.clone()), &None);
-                    Ok(())
-                }
-                None => Err("the agent's controller can't start fresh"),
-            }
-        }
-        None => Err("no controller for the pane"),
-    };
     if let Err(why) = ended {
-        tracing::warn!(block_id = %block_id, reason = why, "fresh session could not end the old one");
+        tracing::warn!(block_id = %block_id, reason = why, "fresh session given up");
         context_reading::fresh_sent(&block_id, false);
+        crate::backend::reactive::held_notes::hold(
+            &block_id,
+            FRESH_FAILED_NOTE_KEY,
+            &format!("[AgentMux] Your fresh session did not start ({why}); this session continues. Call Agents fresh again when you want it."),
+        );
         return;
     }
     // The old CLI exits before the handoff spawns the new one.
@@ -270,6 +300,7 @@ mod tests {
     fn the_handoff_is_the_new_sessions_first_message_from_agentmux() {
         let m = handoff_message("Task #1791: PR 3 open as #5410; next: wait for review.");
         assert!(m.starts_with("[AgentMux] This is the fresh session you asked for."));
+        assert!(m.contains("search_history"), "it points at the old session");
         assert!(m.ends_with("Task #1791: PR 3 open as #5410; next: wait for review."));
     }
 

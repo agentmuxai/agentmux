@@ -410,7 +410,11 @@ impl PersistentSubprocessController {
         // (`DocumentRow.tsx`'s session-outcome body).
         let mut continuation: Option<String> = None;
         let fresh_onto_history = attempted_resume_sid.is_none() && self.has_prior_transcript();
-        if fresh_onto_history {
+        // An `Agents fresh` start carries the agent's handoff alone: the packet
+        // tells the model to continue as if uninterrupted, the opposite of what
+        // it asked for. The old session stays searchable.
+        let by_choice = crate::backend::context_reading::take_fresh_by_choice(&self.block_id);
+        if fresh_onto_history && !by_choice {
             // The provider can't give this process the conversation the pane
             // shows, so AgentMux's own record rides on its first message
             // (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §4.4). On any

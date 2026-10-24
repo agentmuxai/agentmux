@@ -65,6 +65,10 @@ pub struct ContextReading {
     /// This turn finished a Kanban task (`Tasks complete` or `submit`).
     #[serde(skip)]
     pub task_boundary: bool,
+    /// The next spawn is an `Agents fresh` one: it starts on the handoff alone,
+    /// without the continuation packet (which says "continue as if uninterrupted").
+    #[serde(skip)]
+    pub fresh_by_choice: bool,
     #[serde(skip)]
     last_message_id: Option<String>,
 }
@@ -248,11 +252,22 @@ pub fn note_task_boundary(block_id: &str) {
     with(block_id, |r| r.task_boundary = true);
 }
 
+/// The next spawn of `block_id` is the agent's own `Agents fresh`.
+pub fn mark_fresh_by_choice(block_id: &str) {
+    with(block_id, |r| r.fresh_by_choice = true);
+}
+
+/// Whether this spawn is an `Agents fresh` one; read once, by the spawn.
+pub fn take_fresh_by_choice(block_id: &str) -> bool {
+    with(block_id, |r| std::mem::take(&mut r.fresh_by_choice))
+}
+
 /// The scheduled fresh session was started (`sent`), or given up: one that
 /// started counts toward the rate limit and starts the reading over.
 pub fn fresh_sent(block_id: &str, sent: bool) {
     with(block_id, |r| {
         r.compact_scheduled = false;
+        r.fresh_by_choice = false;
         if sent {
             let now = agentmux_common::time::now_ms_u64();
             r.last_self_compact_ms = Some(now);
@@ -275,17 +290,21 @@ pub fn compact_sent(block_id: &str, sent: bool) {
     });
 }
 
-/// At the end of a turn: the hint's note text when it's due, marking it given
-/// so it isn't repeated before the context drops and crosses again. A task
-/// boundary counts for the turn it happened in only.
+/// At the end of a turn: the hint's note text when it's due. A compact hint
+/// is marked given, so it isn't repeated before the context drops and crosses
+/// again; a fresh hint belongs to the task that just finished, comes with each
+/// one and leaves the compact hint's mark alone. A task boundary counts for
+/// the turn it happened in only.
 pub fn take_turn_end_hint(block_id: &str) -> Option<String> {
     let verdict = hint(block_id);
     with(block_id, |r| {
         r.task_boundary = false;
-        if verdict == "none" || r.hinted {
+        if verdict == "none" || (verdict == "compact" && r.hinted) {
             return None;
         }
-        r.hinted = true;
+        if verdict == "compact" {
+            r.hinted = true;
+        }
         let k = |n: u64| format!("{}K", n / 1000);
         let of = r.window.map(|w| format!(" of {}", k(w))).unwrap_or_default();
         let size = format!("Your context is {}{of} tokens.", k(r.tokens.unwrap_or(0)));
@@ -418,6 +437,9 @@ mod tests {
         note_task_boundary(&b);
         let note = take_turn_end_hint(&b).expect("a task finished at 200K");
         assert!(note.contains("Agents fresh"), "{note}");
+        assert!(!get(&b).unwrap().hinted, "a fresh hint doesn't use up the compact hint");
+        mark_fresh_by_choice(&b);
+        assert!(take_fresh_by_choice(&b) && !take_fresh_by_choice(&b), "the spawn reads it once");
         assert!(!get(&b).unwrap().task_boundary, "the boundary is used up");
         fresh_sent(&b, true);
         let r = get(&b).unwrap();
