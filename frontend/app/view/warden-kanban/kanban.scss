@@ -99,6 +99,11 @@ $kanban-narrow: 760px;
         display: none;
     }
 
+    // Folded only in the narrow list; the manager's `narrow` follows the same width.
+    .kanban-board .kanban-column--folded .kanban-column__list {
+        display: none;
+    }
+
     .kanban-column--needs {
         order: -1;
     }
@@ -109,9 +114,6 @@ $kanban-narrow: 760px;
     }
 }
 
-.kanban-column--folded .kanban-column__list {
-    display: none;
-}
 
 .kanban-lanes {
     display: flex;
@@ -292,8 +294,11 @@ $kanban-narrow: 760px;
     font-size: var(--text-sm);
     transition: border-color var(--duration-fast);
 
+    // Not the left edge: that is the agent's colour.
     &:hover {
-        border-color: var(--secondary-text-color);
+        border-top-color: var(--secondary-text-color);
+        border-right-color: var(--secondary-text-color);
+        border-bottom-color: var(--secondary-text-color);
     }
 
     &:focus-visible {
