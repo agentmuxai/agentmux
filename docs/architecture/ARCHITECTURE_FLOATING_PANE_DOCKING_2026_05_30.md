@@ -240,4 +240,4 @@ The five themes share a root: **identity (which window?) and ownership (whose li
 | HWND cache stale | `docs/specs/SPEC_WINDOW_HWND_CACHE_STALE_FIX_2026_05_28.md` |
 | Redock load race | `docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_LOAD_RACE_2026_05_29.md` |
 | Browser-pane state | `docs/specs/browser-pane-state-catalog.md`, `…/browser-pane-reducer-roadmap.md` |
-| Per-window opacity (cache origin) | `docs/specs/SPEC_PER_WINDOW_OPACITY_2026-05-14.md` |
+| Per-window opacity (cache origin) | `SPEC_PER_WINDOW_OPACITY_2026-05-14.md` (no longer in this repo) |
