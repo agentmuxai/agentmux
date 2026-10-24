@@ -13,7 +13,9 @@ import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, 
 
 import { Button, FilterInput, IconButton, Select, Switch } from "@/app/element/ui";
 import { useTick } from "@/app/hook/useTick";
+import { useAccountEpisodes } from "@/app/store/account-availability";
 import { settingsAtom } from "@/app/store/config-signals";
+import { AccountAvailabilityStrip } from "@/app/view/account-availability/account-availability-strip";
 import { revealBlock } from "@/app/util/reveal-block";
 
 import { KanbanBoard, useCardDrop } from "./kanban-board";
@@ -72,7 +74,9 @@ export const WardenKanbanManager = (props: {
     const model = new KanbanModel();
     onCleanup(() => model.dispose());
     createEffect(() => model.setVisible(props.visible));
-    createEffect(() => props.onNeedsCount?.(model.needsCount()));
+    // An account episode counts once (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §6.2).
+    const accountEpisodes = useAccountEpisodes();
+    createEffect(() => props.onNeedsCount?.(model.needsCount() + accountEpisodes().length));
 
     const tick = useTick(10_000);
     // The narrow layout (SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23.md §8): Warden's container at
@@ -142,6 +146,7 @@ export const WardenKanbanManager = (props: {
 
     return (
         <div ref={root} class="warden-manager-body kanban">
+            <AccountAvailabilityStrip />
             <div class="kanban-toolbar">
                 <FilterInput
                     value={query()}

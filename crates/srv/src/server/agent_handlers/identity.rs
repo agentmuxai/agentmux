@@ -808,15 +808,21 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     let mstore = state.identity_store.clone();
     let broker = state.broker.clone();
+    let (panes, event_bus) = (state.mstore.clone(), state.event_bus.clone());
     engine.register_typed(
         COMMAND_LINK_AGENT_IDENTITY,
         move |cmd: CommandLinkAgentIdentityData, _ctx| {
             let mstore = mstore.clone();
             let broker = broker.clone();
+            let (panes, event_bus) = (panes.clone(), event_bus.clone());
             async move {
+                // Read before the link changes: an old pane counts against
+                // the agent's current links (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §6.3).
+                let failed = crate::server::account_episodes::failed_panes(&panes, &mstore, &cmd.agent_id, &cmd.provider);
                 mstore
                     .agent_identity_link(&cmd.agent_id, &cmd.account_id, &cmd.provider)
                     .map_err(|e| format!("linkagentidentity: {e}"))?;
+                crate::server::account_episodes::after_rebind(&panes, &event_bus, failed, &cmd.account_id);
                 broker.publish_event_for::<crate::backend::mps_events::AgentIdentitiesChanged>(&cmd.agent_id, &(), vec![], 0);
                 // See app_api/identity.rs's identical call for why this is
                 // needed: watch_agent's one-shot config-dir resolution can

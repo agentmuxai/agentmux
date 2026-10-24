@@ -4,6 +4,7 @@
 pub(crate) mod cli_handlers;
 mod files;
 pub(crate) mod app_api;
+pub(crate) mod account_episodes;
 // `pub` so `bootstrap::install_agent_turn_delivery` can reach `run_agent_turn`
 // to start a turn outside the RPC path.
 pub mod agent_resources;

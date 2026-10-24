@@ -141,6 +141,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     history_usage::register(engine, state);
     shells::register(engine, state);
     kanban::register(engine, state);
+    crate::server::account_episodes::register(engine, state);
     connectivity::register(engine);
 }
 

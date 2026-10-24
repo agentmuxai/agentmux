@@ -574,6 +574,12 @@ pub const COMMAND_IDENTITY_SELF_ACCOUNTS: &str = "identity.self.accounts";
 pub const COMMAND_IDENTITY_ACCOUNT_UPSERT: &str = "identity.account.upsert";
 pub const COMMAND_IDENTITY_ACCOUNT_VALIDATE: &str = "identity.account.validate";
 pub const COMMAND_IDENTITY_SELF_UNLINK: &str = "identity.self.unlink";
+/// The open account episodes: agents out of quota or signed out, grouped by
+/// account (`server::account_episodes`). The operator's window only.
+pub const COMMAND_IDENTITY_ACCOUNT_AVAILABILITY: &str = "identity.account.availability";
+/// Move an episode's idle agents to another signed-in account. The operator's
+/// window only.
+pub const COMMAND_IDENTITY_ACCOUNT_MOVE_AGENTS: &str = "identity.account.move_agents";
 // Bundle MuxAPI commands (Preset → Bundle, spec Phase 2). The `preset.*`
 // constants below are retained as wire aliases for one release.
 pub const COMMAND_BUNDLE_LIST: &str = "bundle.list";

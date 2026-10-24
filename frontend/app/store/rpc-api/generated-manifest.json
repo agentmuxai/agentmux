@@ -1442,6 +1442,14 @@
             "method": "AppUpgradeRequestsCommand"
         },
         {
+            "command": "identity.account.availability",
+            "method": "IdentityAccountAvailabilityCommand"
+        },
+        {
+            "command": "identity.account.move_agents",
+            "method": "IdentityAccountMoveAgentsCommand"
+        },
+        {
             "command": "app.desktop",
             "method": "AppDesktopCommand"
         },

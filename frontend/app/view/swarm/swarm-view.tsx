@@ -23,6 +23,7 @@ import { longRunningToolRows, type LongRunningToolRow } from "./swarm-longrunnin
 import { formatCompactNumber } from "@/util/format-count";
 import { formatElapsedClock, formatTimeLeft } from "@/util/format-time";
 import { HeldTaskChip } from "@/app/view/warden-kanban/kanban-held";
+import { AccountAvailabilityStrip } from "@/app/view/account-availability/account-availability-strip";
 import { revealBlock } from "@/app/util/reveal-block";
 import { selectTrace } from "@/app/util/select-trace";
 import type { SwarmOrderItem } from "./swarm-order";
@@ -188,6 +189,7 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
                 {/* Outside the tree's own Show: agents on other instances can be selected
                     when this instance has none, and the toolbar is what acts on them. It
                     shows itself only when there is something to select or act on. */}
+                <AccountAvailabilityStrip />
                 <FleetToolbar model={model} allBlockIds={selectableKeys} />
                 <FleetResultPanel model={model} />
                 <Show

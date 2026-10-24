@@ -66,11 +66,7 @@ pub(super) async fn refresh_pane_seats(state: &AppState) {
 /// rule as Tower's and the browser profiles' RPCs: only the operator's own
 /// client sets a seat, an agent's own included.
 fn operator_only(ctx: &RpcContext) -> Result<(), String> {
-    if ctx.agent_id.is_empty() {
-        Ok(())
-    } else {
-        Err("FORBIDDEN: only the operator sets an agent's seat".to_string())
-    }
+    ctx.operator_only("only the operator sets an agent's seat")
 }
 
 /// Validate and store (or clear) the seat, and log it as an identity change.

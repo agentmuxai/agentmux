@@ -1121,6 +1121,7 @@ declare global {
         "notify:os:agentcrashed"?: boolean;
         "notify:os:messageneedsreview"?: boolean;
         "notify:os:cloudsignedout"?: boolean;
+        "notify:os:accountunavailable"?: boolean;
         "notify:pause:until"?: number;
         "notify:pause:allowattention"?: boolean;
         "notify:taskbar:attention"?: boolean;

@@ -1,0 +1,50 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// The account episode strip (account-availability-strip.tsx), at the top of the Kanban and the Swarm.
+
+.account-strip {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px 8px;
+    border: 1px solid var(--warning-color);
+    border-radius: var(--radius-sm);
+    margin: 4px 0;
+}
+
+.account-strip__row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    min-width: 0;
+}
+
+.account-strip__line {
+    flex: 1 1 240px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.account-strip__icon {
+    color: var(--warning-color);
+    margin-right: 6px;
+}
+
+.account-strip__picker {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.account-strip__dim,
+.account-strip__note {
+    color: var(--secondary-text-color);
+    font-size: var(--text-xs);
+}
+
+.account-strip__note {
+    flex-basis: 100%;
+}

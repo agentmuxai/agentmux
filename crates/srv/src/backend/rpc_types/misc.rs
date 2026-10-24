@@ -228,6 +228,19 @@ pub struct RpcContext {
     pub agent_id: String,
 }
 
+impl RpcContext {
+    /// Refuse a connection registered as an agent (`bus:register`): only the
+    /// operator's own client may call an RPC that acts for the operator. `why`
+    /// completes "FORBIDDEN: …".
+    pub fn operator_only(&self, why: &str) -> Result<(), String> {
+        if self.agent_id.is_empty() {
+            Ok(())
+        } else {
+            Err(format!("FORBIDDEN: {why}"))
+        }
+    }
+}
+
 /// Matches Go's `CommandVarData`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandVarData {

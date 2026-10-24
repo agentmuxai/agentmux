@@ -296,6 +296,9 @@ import type { HistoryUsage } from "@/types/rpc/HistoryUsage";
 import type { HistoryUsageReq } from "@/types/rpc/HistoryUsageReq";
 import type { HostSession } from "@/types/rpc/HostSession";
 import type { IdentityAccount } from "@/types/rpc/IdentityAccount";
+import type { IdentityAccountAvailabilityResult } from "@/types/rpc/IdentityAccountAvailabilityResult";
+import type { IdentityAccountMoveAgentsReq } from "@/types/rpc/IdentityAccountMoveAgentsReq";
+import type { IdentityAccountMoveAgentsResult } from "@/types/rpc/IdentityAccountMoveAgentsResult";
 import type { ImportAgentDefinitionsResult } from "@/types/rpc/ImportAgentDefinitionsResult";
 import type { InputDraftResult } from "@/types/rpc/InputDraftResult";
 import type { InputHistoryAppendResult } from "@/types/rpc/InputHistoryAppendResult";
@@ -2481,6 +2484,18 @@ export const GeneratedApi = {
   // command "app.upgrade-requests"
   AppUpgradeRequestsCommand(client: RpcClient, opts?: RpcOpts): Promise<UpgradeRequestsEvent> {
     return client.rpcCall("app.upgrade-requests", {}, opts);
+  },
+  // command "identity.account.availability"
+  IdentityAccountAvailabilityCommand(client: RpcClient, opts?: RpcOpts): Promise<IdentityAccountAvailabilityResult> {
+    return client.rpcCall("identity.account.availability", {}, opts);
+  },
+  // command "identity.account.move_agents"
+  IdentityAccountMoveAgentsCommand(
+    client: RpcClient,
+    data: IdentityAccountMoveAgentsReq,
+    opts?: RpcOpts
+  ): Promise<IdentityAccountMoveAgentsResult> {
+    return client.rpcCall("identity.account.move_agents", data, opts);
   },
   // command "app.desktop"
   AppDesktopCommand(client: RpcClient, opts?: RpcOpts): Promise<DesktopEvent> {
