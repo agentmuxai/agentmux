@@ -824,6 +824,11 @@ pub fn inject_identity_env_with_broker(
                             e,
                         );
                     }
+                    // Soft-fail too: without it the agent compacts later, nothing worse.
+                    let compact_at = crate::backend::providers::compact_at_setting();
+                    if let Err(e) = crate::backend::providers::seed_auto_compact_window(provider_cfg, &dir, compact_at) {
+                        tracing::warn!(target: "identity", "account {}: could not set the auto-compact window in {} ({})", binding.account_id, dir, e);
+                    }
                 }
                 env_vars.insert(config_dir_env_var.to_string(), dir.clone());
                 // Canonicalized (codex P1 on PR #2377) — see def_provider's

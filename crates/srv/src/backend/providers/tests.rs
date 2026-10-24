@@ -706,3 +706,105 @@ fn a_terminal_tier_pane_is_a_terminal_started_at_once() {
     apply_terminal_pane_meta(get_provider("kilo").unwrap(), &mut other);
     assert!(other.is_empty());
 }
+
+mod auto_compact_window_tests {
+    use super::*;
+
+    fn seed(dir: &std::path::Path, compact_at: u64) -> bool {
+        seed_auto_compact_window(get_provider("claude").unwrap(), &dir.to_string_lossy(), compact_at).unwrap()
+    }
+
+    fn settings(dir: &std::path::Path) -> serde_json::Value {
+        serde_json::from_str(&std::fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap()
+    }
+
+    fn window(dir: &std::path::Path) -> Option<u64> {
+        settings(dir).get("autoCompactWindow").and_then(|v| v.as_u64())
+    }
+
+    #[test]
+    fn the_window_is_the_setting_plus_claude_codes_margin_within_its_range() {
+        assert_eq!(auto_compact_window(600_000), Some(633_000));
+        assert_eq!(auto_compact_window(DEFAULT_COMPACT_AT), Some(633_000));
+        assert_eq!(auto_compact_window(10_000), Some(100_000), "the least Claude Code accepts");
+        assert_eq!(auto_compact_window(2_000_000), Some(1_000_000), "the most");
+        assert_eq!(auto_compact_window(0), None, "0 leaves Claude Code's own");
+    }
+
+    #[test]
+    fn absent_is_written_with_the_other_settings_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("settings.json"), r#"{"cleanupPeriodDays":36500}"#).unwrap();
+        assert!(seed(dir.path(), 600_000));
+        assert_eq!(window(dir.path()), Some(633_000));
+        assert_eq!(settings(dir.path())["cleanupPeriodDays"], 36500);
+        assert!(!seed(dir.path(), 600_000), "nothing to do the second time");
+    }
+
+    #[test]
+    fn a_new_config_dir_gets_a_settings_file() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(seed(dir.path(), 400_000));
+        assert_eq!(window(dir.path()), Some(433_000));
+    }
+
+    #[test]
+    fn agentmuxs_own_value_follows_the_setting() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(seed(dir.path(), 600_000));
+        assert!(seed(dir.path(), 400_000), "the sidecar says it's ours");
+        assert_eq!(window(dir.path()), Some(433_000));
+    }
+
+    #[test]
+    fn the_hand_applied_value_counts_as_agentmuxs_own() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("settings.json"), r#"{"autoCompactWindow":633000}"#).unwrap();
+        assert!(seed(dir.path(), 500_000));
+        assert_eq!(window(dir.path()), Some(533_000));
+    }
+
+    #[test]
+    fn a_persons_own_value_is_left_alone() {
+        for original in [r#"{"autoCompactWindow":800000}"#, r#"{"autoCompactWindow":"500k"}"#] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(dir.path().join("settings.json"), original).unwrap();
+            assert!(!seed(dir.path(), 400_000), "{original}");
+            assert!(!seed(dir.path(), 0), "{original}");
+            assert_eq!(std::fs::read_to_string(dir.path().join("settings.json")).unwrap(), original);
+        }
+        // AgentMux wrote 633,000 once; a person then changed it: theirs now.
+        let dir = tempfile::tempdir().unwrap();
+        assert!(seed(dir.path(), 600_000));
+        std::fs::write(dir.path().join("settings.json"), r#"{"autoCompactWindow":900000}"#).unwrap();
+        assert!(!seed(dir.path(), 400_000));
+        assert_eq!(window(dir.path()), Some(900_000));
+    }
+
+    #[test]
+    fn zero_removes_only_agentmuxs_own_value() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("settings.json"), r#"{"model":"opus"}"#).unwrap();
+        assert!(seed(dir.path(), 600_000));
+        assert!(seed(dir.path(), 0));
+        assert_eq!(window(dir.path()), None);
+        assert_eq!(settings(dir.path())["model"], "opus");
+        assert!(!dir.path().join(".agentmux-seeded.json").exists());
+        let empty = tempfile::tempdir().unwrap();
+        assert!(!seed(empty.path(), 0));
+        assert!(!empty.path().join("settings.json").exists(), "0 creates no file");
+    }
+
+    #[test]
+    fn an_unparseable_file_or_another_provider_is_never_touched() {
+        for original in ["{ not json", "[1, 2]"] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(dir.path().join("settings.json"), original).unwrap();
+            assert!(!seed(dir.path(), 600_000));
+            assert_eq!(std::fs::read_to_string(dir.path().join("settings.json")).unwrap(), original);
+        }
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!seed_auto_compact_window(get_provider("codex").unwrap(), &dir.path().to_string_lossy(), 600_000).unwrap());
+        assert!(!dir.path().join("settings.json").exists());
+    }
+}

@@ -57,6 +57,11 @@ impl ConfigState {
         self.config.read().unwrap().settings.extra.get(key).and_then(serde_json::Value::as_bool)
     }
 
+    /// A whole, non-negative number setting, or `None` when unset or not one.
+    pub fn extra_u64(&self, key: &str) -> Option<u64> {
+        self.config.read().unwrap().settings.extra.get(key).and_then(serde_json::Value::as_u64)
+    }
+
     /// Update just the settings portion, and the per-connection settings that
     /// live inside it (`settings.json` → `connections`): every
     /// per-connection reader looks at `FullConfigType::connections`.
