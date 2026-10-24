@@ -112,14 +112,15 @@ fn digit_groups(bytes: &[u8], start: usize) -> (usize, Vec<(usize, usize)>) {
     (end, groups)
 }
 
-/// Hides card numbers and SSNs wherever they stand in the text. A run of digit groups is tried
-/// window by window, so a card number followed by a code (`4111 1111 1111 1111 123`) is found
-/// inside the longer run.
+/// Hides card numbers and SSNs wherever they stand in the text. Every window of digit groups is
+/// tried, so a card number is found inside a longer run (`4111 1111 1111 1111 123`, or after another
+/// number), and windows that overlap are merged before anything is replaced, so the whole span
+/// goes: `Order 40008 4111 1111 1111 1111` hides the order number with the card rather than leave
+/// the last eight digits of the card showing.
 fn mask_runs(text: &str) -> String {
     let bytes = text.as_bytes();
-    let mut out = String::with_capacity(text.len());
-    // Everything before this offset is already in `out`.
-    let mut copied = 0;
+    // (start, end, what it says) of each window to hide.
+    let mut spans: Vec<(usize, usize, &str)> = Vec::new();
     let mut i = 0;
     while i < bytes.len() {
         // A run starts at a digit that isn't the tail of a longer number.
@@ -128,34 +129,47 @@ fn mask_runs(text: &str) -> String {
             continue;
         }
         let (run_end, groups) = digit_groups(bytes, i);
-        let mut g = 0;
-        while g < groups.len() {
-            // The longest window of groups from here that is something to hide.
-            let mut best: Option<(usize, &str)> = None;
-            let mut total = 0;
+        let mut digits: Vec<u8> = Vec::with_capacity(20);
+        for g in 0..groups.len() {
+            digits.clear();
             for k in g..groups.len() {
-                total += groups[k].1 - groups[k].0;
-                if total > 19 {
+                digits.extend(bytes[groups[k].0..groups[k].1].iter().map(|b| b - b'0'));
+                if digits.len() > 19 {
                     break;
                 }
-                let digits: Vec<u8> = groups[g..=k].iter().flat_map(|(s, e)| bytes[*s..*e].iter().map(|b| b - b'0')).collect();
-                if (13..=19).contains(&digits.len()) && luhn(&digits) && card_network(&digits) && digits.iter().any(|d| *d != digits[0]) {
-                    best = Some((k, CARD));
-                } else if k == g + 2 && best.is_none() && is_ssn_shape(&groups[g..=k]) {
-                    best = Some((k, ID_NUMBER));
+                // The cheap prefix test first: Luhn only runs on what starts like a card.
+                if digits.len() >= 13 && card_network(&digits) && luhn(&digits) && digits.iter().any(|d| *d != digits[0]) {
+                    spans.push((groups[g].0, groups[k].1, CARD));
+                } else if k == g + 2 && is_ssn_shape(&groups[g..=k]) {
+                    spans.push((groups[g].0, groups[k].1, ID_NUMBER));
                 }
-            }
-            match best {
-                Some((k, label)) => {
-                    out.push_str(&text[copied..groups[g].0]);
-                    out.push_str(label);
-                    copied = groups[k].1;
-                    g = k + 1;
-                }
-                None => g += 1,
             }
         }
         i = run_end.max(i + 1);
+    }
+    if spans.is_empty() {
+        return text.to_string();
+    }
+    spans.sort_by_key(|s| (s.0, std::cmp::Reverse(s.1)));
+    // Merge the overlapping ones: a card number in the span makes it a card.
+    let mut merged: Vec<(usize, usize, &str)> = Vec::new();
+    for (start, end, label) in spans {
+        match merged.last_mut() {
+            Some(last) if start < last.1 => {
+                last.1 = last.1.max(end);
+                if label == CARD {
+                    last.2 = CARD;
+                }
+            }
+            _ => merged.push((start, end, label)),
+        }
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut copied = 0;
+    for (start, end, label) in merged {
+        out.push_str(&text[copied..start]);
+        out.push_str(label);
+        copied = end;
     }
     out.push_str(&text[copied..]);
     out
@@ -351,6 +365,16 @@ mod tests {
     fn a_card_number_followed_by_its_code_is_still_found() {
         assert_eq!(mask_text("4111 1111 1111 1111 123"), format!("{CARD} 123"));
         assert_eq!(mask_text("25 4111 1111 1111 1111"), format!("25 {CARD}"));
+    }
+
+    #[test]
+    fn a_card_after_another_number_is_hidden_whole() {
+        for text in ["Order 40008 4111 1111 1111 1111", "Ref 12345 4111-1111-1111-1111 done"] {
+            let masked = mask_text(text);
+            assert!(!masked.contains("1111"), "{masked}");
+            assert!(masked.contains(CARD), "{masked}");
+        }
+        assert_eq!(mask_text("Paid 4111 1111 1111 1111 and 5555 5555 5555 4444."), format!("Paid {CARD} and {CARD}."));
     }
 
     #[test]
