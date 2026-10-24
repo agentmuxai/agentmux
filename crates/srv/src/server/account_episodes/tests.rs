@@ -177,7 +177,8 @@ async fn the_strip_lists_the_agents_their_tasks_and_where_they_can_move() {
     eps.update(scan(&state, now), now);
     let v = view(&state, eps.get("acct-1").unwrap());
     assert_eq!((v.state.as_str(), v.resets_at_ms, v.limit_window.as_deref()), ("limited", Some(now + 60_000), Some("seven_day")));
-    assert_eq!(v.agents, vec![AccountEpisodeAgent { block_id: block.clone(), agent_name: "Naki-r4test".into() }]);
+    assert_eq!(v.agents, vec![AccountEpisodeAgent { block_id: block.clone(), agent_id: "a1".into(), agent_name: "Naki-r4test".into() }]);
+    assert_eq!((v.agent_ids.clone(), v.block_ids.clone()), (vec!["a1".to_string()], vec![block.clone()]), "who it covers");
     assert_eq!(v.tasks, vec![AccountEpisodeTask { id: "w-r4".into(), number: num, title: "Write the spec".into() }], "only what it holds");
     let to: Vec<&str> = v.candidates.iter().map(|c| c.account_id.as_str()).collect();
     assert_eq!(to, ["spare", "spare-unknown"], "same provider, not blocked, not the account itself; signed in first");
@@ -224,8 +225,8 @@ async fn the_move_relinks_idle_agents_and_leaves_busy_ones() {
 
     let req = IdentityAccountMoveAgentsReq { from: "old".into(), to: "spare".into(), block_ids: vec![idle.clone(), busy.clone(), "gone".into()] };
     let r = moves::move_agents(&state, &req).unwrap();
-    assert_eq!(r.moved, vec![AccountEpisodeAgent { block_id: idle.clone(), agent_name: "Idle".into() }]);
-    assert_eq!(r.busy, vec![AccountEpisodeAgent { block_id: busy.clone(), agent_name: "Busy".into() }]);
+    assert_eq!(r.moved, vec![AccountEpisodeAgent { block_id: idle.clone(), agent_id: "idle".into(), agent_name: "Idle".into() }]);
+    assert_eq!(r.busy, vec![AccountEpisodeAgent { block_id: busy.clone(), agent_id: "busy".into(), agent_name: "Busy".into() }]);
     assert_eq!(r.failed.iter().map(|f| f.block_id.as_str()).collect::<Vec<_>>(), ["gone"]);
 
     let mut links: Vec<(String, String)> =
@@ -309,4 +310,106 @@ async fn only_the_operators_client_may_list_episodes_or_move_agents() {
     assert_eq!(moved["moved"][0]["block_id"], json!(idle));
     assert_eq!(state.identity_store.agent_identity_list_for_agent("idle").unwrap()[0].account_id, "spare");
     cleanup(&[&idle]);
+}
+
+/// The link is the agent's: a pane of it in a turn keeps the agent where it
+/// is, even when that pane isn't the episode's; once all are idle, every pane
+/// restarts on the new link.
+#[tokio::test]
+async fn an_agent_moves_only_when_none_of_its_panes_is_in_a_turn() {
+    let state = test_state();
+    for a in [account("old", "claude", "valid"), account("spare", "claude", "valid")] {
+        state.id_store.identity_upsert(&a).unwrap();
+    }
+    agent_def(&state, "twin");
+    state.identity_store.agent_identity_link("twin", "old", "claude").unwrap();
+    let tab = new_tab(&state).await;
+    let limited = pane(&state, &tab, "twin", "Twin", "old", Some(failure("usage_limit", None, None)), false).await;
+    let working = pane(&state, &tab, "twin", "Twin", "old", None, true).await;
+    let req = IdentityAccountMoveAgentsReq { from: "old".into(), to: "spare".into(), block_ids: vec![limited.clone()] };
+
+    let r = moves::move_agents(&state, &req).unwrap();
+    assert!(r.moved.is_empty());
+    let mut busy: Vec<&str> = r.busy.iter().map(|a| a.block_id.as_str()).collect();
+    busy.sort();
+    let mut both = vec![limited.as_str(), working.as_str()];
+    both.sort();
+    assert_eq!(busy, both, "listed, with the pane in a turn");
+    assert_eq!(state.identity_store.agent_identity_list_for_agent("twin").unwrap()[0].account_id, "old", "not relinked");
+
+    blockcontroller::delete_controller(&working);
+    register_stub(&working, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
+    let r = moves::move_agents(&state, &req).unwrap();
+    let mut moved: Vec<&str> = r.moved.iter().map(|a| a.block_id.as_str()).collect();
+    moved.sort();
+    assert_eq!(moved, both, "both panes restart on the new link");
+    assert_eq!(state.identity_store.agent_identity_list_for_agent("twin").unwrap()[0].account_id, "spare");
+    cleanup(&[&limited, &working]);
+}
+
+/// One note per requester per episode, naming every agent of theirs that is
+/// blocked, and none for an agent that joins later.
+#[tokio::test]
+async fn a_requester_of_two_blocked_agents_gets_one_note() {
+    let state = test_state();
+    state.id_store.identity_upsert(&account("acct-1", "claude", "valid")).unwrap();
+    let tab = new_tab(&state).await;
+    let now = agentmux_common::time::now_ms_u64();
+    let claim = |agent: &str, id: &str, title: &str| {
+        let item = WorkItem {
+            id: id.into(),
+            title: title.into(),
+            payload: String::new(),
+            kind: String::new(),
+            target_agent: String::new(),
+            target_group: String::new(),
+            priority: 0,
+            state: String::new(),
+            claimed_by: String::new(),
+            target_agent_uid: String::new(),
+            claimed_by_uid: String::new(),
+            claim_expires: None,
+            attempts: 0,
+            max_attempts: 3,
+            created_by: "Lead-r4note".into(),
+            created_by_uid: String::new(),
+            created_at: now as i64,
+            updated_at: now as i64,
+            not_before: None,
+            result: String::new(),
+        };
+        state.identity_store.work_queue_enqueue(&item).unwrap();
+        let card = NewCard { requested_by: "Lead-r4note".into(), requested_by_kind: requested::AGENT.into(), ..Default::default() };
+        let num = state.identity_store.work_card_create(id, &card, now as i64).unwrap();
+        let f = ClaimFilter { kind: None, agent_id: agent.into(), agent_uid: String::new(), groups: vec![] };
+        assert_eq!(state.identity_store.work_queue_claim(&f, now as i64, 60_000).unwrap().unwrap().id, id);
+        num
+    };
+    let f = || Some(failure("usage_limit", Some(now + 60_000), Some("seven_day")));
+    let a = pane(&state, &tab, "n1", "Note-a-r4", "acct-1", f(), false).await;
+    let b = pane(&state, &tab, "n2", "Note-b-r4", "acct-1", f(), false).await;
+    let c = pane(&state, &tab, "n3", "Note-c-r4", "acct-1", f(), false).await;
+    for (name, block) in [("Note-a-r4", &a), ("Note-b-r4", &b), ("Note-c-r4", &c)] {
+        state.reactive_handler.register_agent(name, block, None).unwrap();
+    }
+    let na = claim("Note-a-r4", "w-na", "First");
+    let nb = claim("Note-b-r4", "w-nb", "Second");
+    claim("Note-c-r4", "w-nc", "Third");
+
+    let episodes = Mutex::new(Episodes::default());
+    let panes = scan(&state, now);
+    let (first, later): (Vec<BlockedPane>, Vec<BlockedPane>) = panes.into_iter().partition(|p| p.block_id != c);
+    episodes.lock().unwrap().update(first.clone(), now);
+    let notes = requester_notes(&state, &episodes, "acct-1", &first);
+    assert_eq!(notes.len(), 1, "two agents, one requester: one note");
+    let (to, text) = &notes[0];
+    assert_eq!(to, "Lead-r4note");
+    assert!(text.starts_with("[AgentMux] ") && text.contains("Note-a-r4") && text.contains("Note-b-r4"), "{text}");
+    assert!(text.contains(&format!("#{na}")) && text.contains(&format!("#{nb}")), "{text}");
+    episodes.lock().unwrap().update([first, later.clone()].concat(), now);
+    assert!(requester_notes(&state, &episodes, "acct-1", &later).is_empty(), "a later agent tells the same requester nothing more");
+    for block in [&a, &b, &c] {
+        state.reactive_handler.unregister_block(block);
+    }
+    cleanup(&[&a, &b, &c]);
 }

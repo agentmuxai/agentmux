@@ -878,7 +878,7 @@ mod tests {
         let s = Settings::default();
         let mut p = PolicyState::new();
         p.step(focus(true, Some("b1")), 0, &s);
-        let account = |key: &str| Request { kind: k, block_id: key.into(), agent_name: String::new(), body: Some("2 agents are out of quota".into()), summary: Some("s".into()) };
+        let account = |key: &str| Request { kind: k, block_id: key.into(), agent_name: String::new(), body: Some("2 agents are out of quota".into()), summary: Some("s".into()), shutdown: None };
         p.step(Input::Emit(account("account:aaaa")), 0, &s);
         p.step(Input::Emit(account("account:bbbb")), 0, &s);
         let a = p.step(Input::Tick, 0, &s);

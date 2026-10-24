@@ -37,8 +37,8 @@ const episode = (over: Partial<AccountAvailability> = {}): AccountAvailability =
     limit_window: "seven_day",
     since_ms: 0,
     agents: [
-        { block_id: "b1", agent_name: "Naki-2" },
-        { block_id: "b2", agent_name: "Loap-3" },
+        { block_id: "b1", agent_id: "d1", agent_name: "Naki-2" },
+        { block_id: "b2", agent_id: "d2", agent_name: "Loap-3" },
     ],
     tasks: [
         { id: "t1", number: 163, title: "x" },
@@ -48,6 +48,8 @@ const episode = (over: Partial<AccountAvailability> = {}): AccountAvailability =
         { account_id: "unchecked", label: "Spare", status: "unknown" },
         { account_id: "home", label: "Home", status: "valid" },
     ],
+    agent_ids: ["d1", "d2"],
+    block_ids: ["b1", "b2"],
     ...over,
 });
 
@@ -74,8 +76,8 @@ describe("the account episode's words", () => {
     it("says what moved, what was left in a turn, and what failed", () => {
         expect(
             moveOutcome({
-                moved: [{ block_id: "b1", agent_name: "Naki-2" }],
-                busy: [{ block_id: "b2", agent_name: "Loap-3" }],
+                moved: [{ block_id: "b1", agent_id: "d1", agent_name: "Naki-2" }],
+                busy: [{ block_id: "b2", agent_id: "d2", agent_name: "Loap-3" }],
                 failed: [{ block_id: "b3", agent_name: "", error: "not an open agent pane" }],
             })
         ).toBe("Moved Naki-2. Left Loap-3: in a turn; move it when it ends. A pane: not an open agent pane");
@@ -92,7 +94,7 @@ describe("AccountAvailabilityStrip", () => {
 
     it("asks which account, preselected, and moves the episode's agents there", async () => {
         availability.mockResolvedValue({ episodes: [episode()] });
-        move.mockResolvedValue({ moved: [{ block_id: "b1", agent_name: "Naki-2" }], busy: [{ block_id: "b2", agent_name: "Loap-3" }], failed: [] });
+        move.mockResolvedValue({ moved: [{ block_id: "b1", agent_id: "d1", agent_name: "Naki-2" }], busy: [{ block_id: "b2", agent_id: "d2", agent_name: "Loap-3" }], failed: [] });
         render(() => <AccountAvailabilityStrip />);
         expect(await screen.findByText(/Account Work: out of quota/)).toBeTruthy();
         fireEvent.click(screen.getByRole("button", { name: /Move these agents to another signed-in account/ }));

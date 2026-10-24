@@ -157,13 +157,21 @@ pub(super) fn move_agents(state: &AppState, req: &IdentityAccountMoveAgentsReq) 
 
     let request_id = uuid::Uuid::new_v4().to_string();
     let reason = format!("moved to {}", account_label(to));
-    for (agent_id, blocks) in by_agent {
+    let open = super::tab_blocks(&state.mstore);
+    for (agent_id, asked) in by_agent {
+        // The link is the agent's, for every pane of it, not only the ones
+        // asked for: one pane in a turn keeps them all where they are, and
+        // otherwise every pane restarts on the new link.
+        let mut blocks: Vec<Block> = open.iter().filter(|b| obj::meta_get_string(&b.meta, "agentId", "") == agent_id).cloned().collect();
+        for b in asked {
+            if !blocks.iter().any(|o| o.oid == b.oid) {
+                blocks.push(b);
+            }
+        }
         let agents: Vec<AccountEpisodeAgent> = blocks
             .iter()
-            .map(|b| AccountEpisodeAgent { block_id: b.oid.clone(), agent_name: super::agent_name(&state.mstore, b) })
+            .map(|b| AccountEpisodeAgent { block_id: b.oid.clone(), agent_id: agent_id.clone(), agent_name: super::agent_name(&state.mstore, b) })
             .collect();
-        // The link is the agent's, for every pane of it: one pane in a turn
-        // keeps them all where they are.
         if blocks.iter().any(|b| busy(state, &b.oid)) {
             result.busy.extend(agents);
             continue;

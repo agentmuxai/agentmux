@@ -18,6 +18,8 @@ pub(crate) const SESSION_WINDOW: &str = "five_hour";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BlockedPane {
     pub block_id: String,
+    /// Its definition id (`agentId`).
+    pub agent_id: String,
     pub agent_name: String,
     pub account_id: String,
     /// Canonical provider.
@@ -50,6 +52,8 @@ pub(crate) struct Episode {
     pub toasted: bool,
     /// Panes whose leaders were told, or that needed no telling.
     pub announced: HashSet<String>,
+    /// Requesters already sent this episode's note (lowercase).
+    pub told: HashSet<String>,
 }
 
 impl Episode {
@@ -117,6 +121,14 @@ impl Episodes {
         self.open.get(account_id)
     }
 
+    /// Of `requesters`, the ones `account_id`'s open episode hasn't sent its
+    /// note to yet; they count as told from now on (spec §6.2: one note per
+    /// requester per episode).
+    pub fn first_notes(&mut self, account_id: &str, requesters: impl IntoIterator<Item = String>) -> Vec<String> {
+        let Some(ep) = self.open.get_mut(account_id) else { return Vec::new() };
+        requesters.into_iter().filter(|r| ep.told.insert(r.to_lowercase())).collect()
+    }
+
     /// Take one scan's blocked panes (every account's) at `now_ms`.
     pub fn update(&mut self, panes: Vec<BlockedPane>, now_ms: u64) -> Vec<Effect> {
         let mut by_account: BTreeMap<String, Vec<BlockedPane>> = BTreeMap::new();
@@ -140,6 +152,7 @@ impl Episodes {
                 panes: Vec::new(),
                 toasted: false,
                 announced: HashSet::new(),
+                told: HashSet::new(),
             });
             // A pane that left and came back is news again.
             ep.announced.retain(|b| panes.iter().any(|p| &p.block_id == b));
@@ -204,24 +217,31 @@ fn task_list(numbers: &[i64]) -> String {
     }
 }
 
-/// The body of the note a task's requester gets about `pane` (spec §6.2):
-/// "Naki-2 is out of quota until Sun 7:00 PM and holds #163. …". `mod.rs`
-/// quotes it into an `[AgentMux]` note.
-pub(crate) fn leader_note(pane: &BlockedPane, numbers: &[i64]) -> String {
-    let why = match pane.state {
-        AgentState::SignedOut => "needs the user to sign in again".to_string(),
-        _ => match pane.resets_at_ms.and_then(until_label) {
-            Some(until) => format!("is out of quota {until}"),
-            None => "is out of quota".to_string(),
-        },
-    };
+/// The body of the note a task's requester gets about its blocked agents
+/// (spec §6.2): "Naki-2 is out of quota until Sun 7:00 PM and holds #163. …".
+/// `mod.rs` quotes it into an `[AgentMux]` note.
+pub(crate) fn leader_note(items: &[(&BlockedPane, &[i64])]) -> String {
+    let clauses: Vec<String> = items
+        .iter()
+        .map(|(pane, numbers)| {
+            let why = match pane.state {
+                AgentState::SignedOut => "needs the user to sign in again".to_string(),
+                _ => match pane.resets_at_ms.and_then(until_label) {
+                    Some(until) => format!("is out of quota {until}"),
+                    None => "is out of quota".to_string(),
+                },
+            };
+            format!("{} {why} and holds {}", pane.agent_name, task_list(numbers))
+        })
+        .collect();
     // Until step 2c holds messages to an unavailable agent (#1849), one sent
     // to it fails; when that lands, say they are held instead.
-    format!(
-        "{} {why} and holds {}. Until then, a message to it starts a turn that fails; move it to another account or wait for the reset.",
-        pane.agent_name,
-        task_list(numbers)
-    )
+    let after = if items.len() == 1 {
+        "Until then, a message to it starts a turn that fails; move it to another account or wait for the reset."
+    } else {
+        "Until then, a message to one of them starts a turn that fails; move them to another account or wait for the reset."
+    };
+    format!("{}. {after}", clauses.join("; "))
 }
 
 #[cfg(test)]

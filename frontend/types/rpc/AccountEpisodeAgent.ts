@@ -3,4 +3,8 @@
 /**
  * One agent of an episode.
  */
-export type AccountEpisodeAgent = { block_id: string, agent_name: string, };
+export type AccountEpisodeAgent = { block_id: string, 
+/**
+ * Its definition id: the UID a Kanban task's holder carries.
+ */
+agent_id: string, agent_name: string, };

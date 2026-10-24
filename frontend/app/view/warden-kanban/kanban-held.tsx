@@ -108,7 +108,10 @@ export function useHeldTask(blockId: () => string): Accessor<HeldTask | null> {
 }
 
 /** How many tasks need the operator (the same count as the Warden tab title), kept current while the
- *  caller is mounted. An account episode counts once (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §6.2). */
+ *  caller is mounted. An account episode counts once per account, however many agents it holds
+ *  (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §6.2); its `agent_ids` and `block_ids` say which holders it
+ *  covers, so the Needs-you reason for a stuck task (#1847) skips those holders instead of counting them
+ *  again. */
 export function useKanbanNeeds(): Accessor<number> {
     follow();
     const episodes = useAccountEpisodes();

@@ -893,6 +893,7 @@ impl Router {
             agent_name: String::new(),
             body: Some(body),
             summary: None,
+            shutdown: None,
         }));
     }
 

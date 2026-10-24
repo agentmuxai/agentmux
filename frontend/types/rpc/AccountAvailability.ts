@@ -24,4 +24,10 @@ since_ms: number, agents: Array<AccountEpisodeAgent>, tasks: Array<AccountEpisod
 /**
  * Where the agents can move, the first valid one first.
  */
-candidates: Array<AccountMoveCandidate>, };
+candidates: Array<AccountMoveCandidate>, 
+/**
+ * The agents it covers, by definition id and by pane, so a view can tell
+ * whether a task's holder is in it without another call (the Kanban's
+ * Needs-you count, which counts an episode once, not each holder).
+ */
+agent_ids: Array<string>, block_ids: Array<string>, };

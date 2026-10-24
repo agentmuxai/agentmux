@@ -6,6 +6,7 @@ use super::*;
 fn pane(block: &str, name: &str, account: &str, state: AgentState, resets: Option<u64>, window: Option<&str>) -> BlockedPane {
     BlockedPane {
         block_id: block.to_string(),
+        agent_id: format!("def-{block}"),
         agent_name: name.to_string(),
         account_id: account.to_string(),
         provider: "claude".to_string(),
@@ -132,13 +133,29 @@ fn the_toast_body_counts_agents_and_never_names_the_account() {
 }
 
 #[test]
-fn the_leader_note_names_the_agent_and_its_tasks() {
+fn the_leader_note_names_the_agents_and_their_tasks() {
     let p = pane("b1", "Naki-2", "acct", AgentState::Limited, None, None);
-    assert_eq!(leader_note(&p, &[163]), "Naki-2 is out of quota and holds #163. Until then, a message to it starts a turn that fails; move it to another account or wait for the reset.");
-    let p = pane("b1", "Naki-2", "acct", AgentState::SignedOut, None, None);
     assert_eq!(
-        leader_note(&p, &[1, 2, 3]),
-        "Naki-2 needs the user to sign in again and holds #1, #2 and #3. Until then, a message to it starts a turn that fails; move it to another account or wait for the reset."
+        leader_note(&[(&p, &[163])]),
+        "Naki-2 is out of quota and holds #163. Until then, a message to it starts a turn that fails; move it to another account or wait for the reset."
     );
-    assert!(leader_note(&weekly("b", "X", "a"), &[4, 5]).contains("is out of quota until "));
+    let q = pane("b2", "Loap-3", "acct", AgentState::SignedOut, None, None);
+    assert_eq!(
+        leader_note(&[(&p, &[163]), (&q, &[1, 2, 3])]),
+        "Naki-2 is out of quota and holds #163; Loap-3 needs the user to sign in again and holds #1, #2 and #3. \
+         Until then, a message to one of them starts a turn that fails; move them to another account or wait for the reset."
+    );
+    assert!(leader_note(&[(&weekly("b", "X", "a"), &[4, 5])]).contains("is out of quota until "));
+}
+
+#[test]
+fn each_requester_is_told_once_per_episode() {
+    let mut eps = Episodes::default();
+    assert!(eps.first_notes("acct", ["Lead".to_string()]).is_empty(), "no episode, no note");
+    eps.update(vec![weekly("b1", "A", "acct")], 1);
+    assert_eq!(eps.first_notes("acct", ["Lead".to_string(), "Other".to_string()]), ["Lead", "Other"]);
+    assert!(eps.first_notes("acct", ["lead".to_string()]).is_empty(), "an agent joining later tells no one twice");
+    eps.update(vec![], 2);
+    eps.update(vec![weekly("b1", "A", "acct")], 3);
+    assert_eq!(eps.first_notes("acct", ["Lead".to_string()]), ["Lead"], "a new episode tells again");
 }

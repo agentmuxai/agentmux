@@ -62,6 +62,8 @@ const SETTLE: Duration = Duration::from_millis(1_500);
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AccountEpisodeAgent {
     pub block_id: String,
+    /// Its definition id: the UID a Kanban task's holder carries.
+    pub agent_id: String,
     pub agent_name: String,
 }
 
@@ -108,6 +110,11 @@ pub struct AccountAvailability {
     pub tasks: Vec<AccountEpisodeTask>,
     /// Where the agents can move, the first valid one first.
     pub candidates: Vec<AccountMoveCandidate>,
+    /// The agents it covers, by definition id and by pane, so a view can tell
+    /// whether a task's holder is in it without another call (the Kanban's
+    /// Needs-you count, which counts an episode once, not each holder).
+    pub agent_ids: Vec<String>,
+    pub block_ids: Vec<String>,
 }
 
 /// `accountavailability` (spec §6.1): an episode opened, changed or closed
@@ -263,6 +270,7 @@ fn scan(state: &AppState, now_ms: u64) -> Vec<BlockedPane> {
             .and_then(|w| w.as_str())
             .map(str::to_string);
         out.push(BlockedPane {
+            agent_id: obj::meta_get_string(&block.meta, "agentId", ""),
             agent_name: agent_name(&state.mstore, &block),
             block_id: block.oid.clone(),
             account_id,
@@ -326,7 +334,7 @@ fn apply(state: &AppState, effect: Effect) {
             Some(router) => router.account_unavailable(&toast_key(&ep.account_id), machine::toast_body(&ep)),
             None => tracing::info!("account episode: no notification router yet (no window connected); the strip shows it"),
         },
-        Effect::Announce { panes, .. } => announce(state, &panes),
+        Effect::Announce { episode, panes } => announce(state, &episode.account_id, &panes),
     }
 }
 
@@ -392,16 +400,29 @@ fn view(state: &AppState, ep: &Episode) -> AccountAvailability {
         resets_at_ms: ep.resets_at_ms(),
         limit_window: ep.limit_window(),
         since_ms: ep.opened_at_ms,
-        agents: ep.panes.iter().map(|p| AccountEpisodeAgent { block_id: p.block_id.clone(), agent_name: p.agent_name.clone() }).collect(),
+        agents: ep
+            .panes
+            .iter()
+            .map(|p| AccountEpisodeAgent { block_id: p.block_id.clone(), agent_id: p.agent_id.clone(), agent_name: p.agent_name.clone() })
+            .collect(),
         tasks,
         candidates: moves::candidates(state, &ep.account_id, &ep.provider),
+        agent_ids: {
+            let mut ids: Vec<String> = ep.panes.iter().map(|p| p.agent_id.clone()).filter(|a| !a.is_empty()).collect();
+            ids.sort();
+            ids.dedup();
+            ids
+        },
+        block_ids: ep.panes.iter().map(|p| p.block_id.clone()).collect(),
     }
 }
 
-/// Tell the requester of each task the newly blocked `panes` hold, once.
-fn announce(state: &AppState, panes: &[BlockedPane]) {
+/// For each requester of a task the newly blocked `panes` hold: the panes,
+/// and the numbers of that requester's tasks each one holds.
+fn requester_items(state: &AppState, panes: &[BlockedPane]) -> std::collections::BTreeMap<String, Vec<(BlockedPane, Vec<i64>)>> {
     let ids: Vec<&str> = panes.iter().map(|p| p.block_id.as_str()).collect();
     let held = held_tasks(state, &ids);
+    let mut out: std::collections::BTreeMap<String, Vec<(BlockedPane, Vec<i64>)>> = Default::default();
     for pane in panes {
         let mut by_requester: std::collections::BTreeMap<String, Vec<i64>> = Default::default();
         for (task, requester) in held.get(&pane.block_id).into_iter().flatten() {
@@ -411,11 +432,35 @@ fn announce(state: &AppState, panes: &[BlockedPane]) {
         }
         for (requester, mut numbers) in by_requester {
             numbers.sort_unstable();
-            let body = machine::leader_note(pane, &numbers);
-            let text = format!("[AgentMux] {}", crate::backend::reactive::sanitize::quote_in_system_note(&body));
-            if let Err(e) = state.reactive_handler.deliver_system_note(&requester, &text) {
-                tracing::info!(requester = %requester, error = %e, "account episode: requester note not delivered");
-            }
+            out.entry(requester).or_default().push((pane.clone(), numbers));
+        }
+    }
+    out
+}
+
+/// The notes to send for the newly blocked `panes` of `account_id`'s episode:
+/// one per requester per episode (spec §6.2), naming each of its agents and
+/// tasks. A requester already told in this episode gets nothing more when
+/// another agent joins: the strip shows the rest.
+fn requester_notes(state: &AppState, episodes: &Mutex<Episodes>, account_id: &str, panes: &[BlockedPane]) -> Vec<(String, String)> {
+    let items = requester_items(state, panes);
+    let fresh = episodes.lock().unwrap_or_else(|e| e.into_inner()).first_notes(account_id, items.keys().cloned());
+    items
+        .into_iter()
+        .filter(|(requester, _)| fresh.contains(requester))
+        .map(|(requester, items)| {
+            let refs: Vec<(&BlockedPane, &[i64])> = items.iter().map(|(p, n)| (p, n.as_slice())).collect();
+            let text = format!("[AgentMux] {}", crate::backend::reactive::sanitize::quote_in_system_note(&machine::leader_note(&refs)));
+            (requester, text)
+        })
+        .collect()
+}
+
+fn announce(state: &AppState, account_id: &str, panes: &[BlockedPane]) {
+    let Some(rt) = RUNTIME.get() else { return };
+    for (requester, text) in requester_notes(state, &rt.episodes, account_id, panes) {
+        if let Err(e) = state.reactive_handler.deliver_system_note(&requester, &text) {
+            tracing::info!(requester = %requester, error = %e, "account episode: requester note not delivered");
         }
     }
 }
