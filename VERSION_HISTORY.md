@@ -1,5 +1,35 @@
 # AgentMux Version History
 
+## 0.60.0 — 2026-10-24
+
+- Scheduled cron jobs: a fire that reaches no agent is recorded as a miss (Swarm shows "missed N · agent not running") instead of counting as a fire, and an agent can pause or delete only its own jobs or ones aimed at it
+- Browser panes: card, bank and ID numbers and one-time codes a page shows or a field holds are hidden from agents in snapshots, finds, read-backs and the Log
+- Scheduled jobs keep a run history: every cron fire and Drone run is recorded with its outcome and cost, a fire to a stopped agent is recorded as missed instead of counted, and agents can see history, run a job now and report how a run went with the Schedule tool.
+- A new Kanban task can start as a spec: Spec first (on by default) files a spec and a build that starts after it; when the spec is done the build's agent is told it can start, the build's card links the spec's document, and cancelling a spec cancels or holds its build.
+- The notification for a shutdown you can stop now says what will happen ("Closing QTimer in 15 s"), has a Keep running button that cancels it, and counts down on Windows with a progress bar.
+- The Swarm says why a quiet agent is quiet: an agent out of quota shows 'Out of quota · until Sun 7 PM' (the reset time) and one whose sign-in was refused shows 'Signed out', in place of an idle chip, with the same words on its status line; and an agent mid-turn on a long tool call shows 'Running <command> · 12 min' on its row.
+- Agents can read how full their own context is (Agents context) and compact themselves when their turn ends (Agents compact, with what to keep). At the end of a turn with a large context, AgentMux suggests it once (Settings > Advanced > Suggest compacting).
+- When agents on one account run out of quota or need a sign-in, the Kanban and Swarm show one strip for the account, with a move to another signed-in account; a weekly limit or sign-in problem raises one notification per account instead of one per agent, and a session limit raises none.
+- feat(presence): Presence who shows which agent holds the build slot, since when, and what it runs
+- The mouse side buttons (Back and Forward) walk the pane selection history over the app's own UI on Linux and macOS: the action ran on a mouse release that Chromium drops after a cancelled pointer press, so it never fired.
+- On Linux and macOS, when AgentMux's background service is killed by a signal, the launcher log now names the signal (for example SIGKILL) instead of reporting "code 1".
+- Swarm shows each agent's seat as a badge and can group agents by lead; a Kanban card's owner shows its seat on hover, and the board can show only the tasks of agents that report to the operator or to one lead
+- On Linux and macOS, each agent CLI now runs in its own process group: closing an agent ends the MCP servers it started, a signal sent to an agent's group can no longer stop AgentMux's background service, and if that service dies the launcher still ends the agents it left running.
+- feat(swarm): the Swarm row of the agent holding the build slot says so, with how long and what it runs
+- Agents can start a fresh session at a task boundary (Agents fresh, with a handoff): they keep their pane, memory, workspace and tasks, the old session stays in their history, and the handoff is the new session's first message. When a turn finishes a task with a large context, AgentMux suggests it.
+- Agents running directly on the computer are now called Native, and agents running in Docker are called Container, in the agent picker, create form, badges and Global Memory
+- A task held by an agent that is out of quota or signed out now shows why in Needs you ("out of quota until Sun 7:00 PM", "needs sign-in"), and you can take the task back from its holder or give it to someone else from the task's drawer. A task nobody in particular owns is let go after the holder has been stuck for 30 minutes.
+- Warden has a Jobs section: every scheduled job with its next run, last outcome, recent runs and spend; a job's runs on click; Run now, Pause, Resume and Delete; and Pause all, which skips every scheduled fire until the operator resumes them
+- A scheduled run delivered to an agent in another channel is now followed by that channel's AgentMux, so its history shows how it ended, its cost, tokens and steps, instead of closing at once with the cost unknown.
+- Scheduled jobs read the day of the week as standard cron does: 0 and 7 are Sunday, 1 is Monday, and 1-5 is Monday to Friday. A job saved with a numeric day of the week now fires on the day it names, one day later than before (it ran a day early), and an expression using 0 for Sunday is no longer refused
+- A failing job now opens one Kanban task for its owner, tells its owning leader and you once, adds later failures to that task, and notes when the job recovers
+- On Linux and macOS, the mouse side buttons over a browser pane now step the window's selection history (Ctrl steps the page's own history), as on Windows, instead of sending the page back.
+- A message to an agent whose account is out of quota is now held and delivered when it can work again (answered "HELD for X (usage_limit, until …)"), instead of being lost in a turn that fails at once; where it can't be held it is refused with the reason, and a Swarm broadcast says so in its result.
+- Signing in again to the same account, or a passing validate of it, now ends its agents' "signed out" state right away instead of waiting for their next turn
+- fix(build-slot): an isolated AgentMux (AGENTMUX_HOME_OVERRIDE) no longer installs the shims into the real home
+- ci(codex-gate): the pending Codex review status says how long Codex has not answered and to comment @muxreview codex re-review
+- A tab dragged over another pane's tab bar now blinks twice as fast and twice as often (two 200 ms blinks, within the three-flashes-a-second limit, then holds), and clicking a tab on a collapsed pane expands that pane.
+
 ## 0.59.41 — 2026-10-24
 
 - Settings › Agents finds forks with an outdated id again: agents made from a template were taken for forks whose parent is missing, so the update offered nothing (Loap #2, Loap #3 and Naki #2 get loap-2, loap-3 and naki-2)
