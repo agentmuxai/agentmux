@@ -13,15 +13,14 @@
  * spawn" so the operator can give it a real one.
  */
 
-import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, Show, type JSX } from "solid-js";
 
 import { Button, Field, Select, TextInput, type SelectOption } from "@/app/element/ui";
-import { onMuxEvent } from "@/app/store/mps";
-import { WpsEvent } from "@/app/store/mps-events";
-import { RpcApi, type AgentDefinition } from "@/app/store/rpc-api";
+import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AgentSeat } from "@/types/rpc/AgentSeat";
 import { MAX_AREA_CHARS, MAX_QUALIFIER_CHARS, SEAT_ROLES, type SeatRole } from "../seat-format";
+import { useAgentList } from "../use-agent-list";
 import { SeatRosterImport } from "./SeatRosterImport";
 import "./AgentPrimitiveModal.scss";
 import "./AgentSeatPanel.scss";
@@ -37,32 +36,6 @@ interface AgentSeatPanelProps {
     agentName: string;
     /** Given when hosted in a modal (My Agents' "Seat…"): shows a Close button. */
     onClose?: () => void;
-}
-
-/** This machine's agents (`listagents`), refetched on `agents:changed`. */
-function useAgentList(): [() => AgentDefinition[] | undefined, () => string | null] {
-    const [agents, setAgents] = createSignal<AgentDefinition[] | undefined>(undefined);
-    const [error, setError] = createSignal<string | null>(null);
-    onMount(() => {
-        let cancelled = false;
-        const load = async () => {
-            try {
-                const list = await RpcApi.ListAgentDefinitionsCommand(TabRpcClient);
-                if (cancelled) return;
-                setAgents(list ?? []);
-                setError(null);
-            } catch (e) {
-                if (!cancelled) setError(errorText(e));
-            }
-        };
-        void load();
-        const unsub = onMuxEvent(WpsEvent.AgentsChanged, () => void load());
-        onCleanup(() => {
-            cancelled = true;
-            unsub();
-        });
-    });
-    return [agents, error];
 }
 
 export const AgentSeatPanel = (props: AgentSeatPanelProps): JSX.Element => {

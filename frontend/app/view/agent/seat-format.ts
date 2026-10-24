@@ -69,6 +69,29 @@ export function seatTooltipLine(seat: SeatSummary): string {
 const optionalText = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v : null);
 
 /**
+ * Each agent's seat as it is shown, by agent uid, from `listagents`: the
+ * stored seat, or a spawned worker's effective one. A lead is named from the
+ * same list; one not in it keeps a null name, which `leadName` words.
+ */
+export function seatsByAgent(
+    defs: readonly { id: string; name: string; seat?: AgentSeat }[]
+): Map<string, SeatSummary> {
+    const names = new Map(defs.map((d) => [d.id, d.name]));
+    const seats = new Map<string, SeatSummary>();
+    for (const d of defs) {
+        if (!d.seat || !isSeatRole(d.seat.role)) continue;
+        const leadId = d.seat.lead?.trim();
+        seats.set(d.id, {
+            role: d.seat.role,
+            qualifier: optionalText(d.seat.qualifier),
+            lead: leadId ? { id: leadId, name: optionalText(names.get(leadId)) } : null,
+            area: optionalText(d.seat.area),
+        });
+    }
+    return seats;
+}
+
+/**
  * The seat an agent pane's meta carries (`agent:seat`, seeded by srv at
  * agent.open), or null when it has none or the value can't be read.
  */

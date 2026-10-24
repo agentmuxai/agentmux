@@ -40,6 +40,7 @@ import { setSupervisorMode, SupervisorBucket, SupervisorChip, supervisorRows } f
 import { subagentStatus } from "@/app/store/agent-status";
 import { remoteAgentKey } from "./swarm-fleet-targets";
 import { remoteChip, remoteLine, remoteRows, remoteSections, seenAgo, type RemoteRow } from "./swarm-remote";
+import { SwarmGroupByControl, SwarmSeatBadge, SwarmSeatList, useSwarmSeats } from "./swarm-seats";
 import { FleetToolbar, FleetResultPanel } from "./swarm-fleet-toolbar";
 import "./swarm-view.scss";
 import { readZoom } from "@/app/store/zoom-factor";
@@ -148,6 +149,7 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
             ),
         ],
     });
+    const seats = useSwarmSeats(ctx, keyedRows, remoteByKey); // Group by lead (swarm-seats.tsx)
     const localKeys = createMemo(() => tree().flatMap((n) => (n.blockId ? [n.blockId] : [])));
     // Everything a checkbox can select: this instance's agents, then the remote
     // ones not gone stale. Select all and the selection both follow it.
@@ -216,6 +218,7 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
                 {/* One list: this instance's agents and the other instances', working ones
                     first (swarm-order.ts; docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §5). */}
                 <Show when={tree().length > 0 || remote().length > 0}>
+                    <SwarmGroupByControl seats={seats} />
                     <div
                         class="swarm-tree"
                         ref={(el) => {
@@ -224,7 +227,7 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
                         }}
                         {...swarmOrder.listHandlers}
                     >
-                        <For each={swarmOrder.order()}>
+                        <SwarmSeatList seats={seats} order={swarmOrder.order}>
                             {(key) =>
                                 // Which kind of row it is comes from the maps the rows are read from. A key in
                                 // neither (the agent just left) has no row to show.
@@ -234,7 +237,7 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
                                     <RemoteAgentRowHost rowKey={key} rows={remoteByKey} model={model} />
                                 ) : null
                             }
-                        </For>
+                        </SwarmSeatList>
                     </div>
                 </Show>
             </Show>
@@ -616,6 +619,7 @@ export function AgentRow({
                         <SwarmProviderIcon provider={node().agentProvider} unknownTitle={LOCAL_PROVIDER_UNKNOWN} />
                     </span>
                     <span class="swarm-agent-label">{node().agentName}</span>
+                    <SwarmSeatBadge meta={blockMeta()} />
                     {/* Turns this agent didn't get from you that finished
                         unseen: the same mark as its pane header (UnseenTurnsDot). */}
                     <Show when={node().blockId}>{(blockId) => <UnseenTurnsDot blockId={blockId()} />}</Show>

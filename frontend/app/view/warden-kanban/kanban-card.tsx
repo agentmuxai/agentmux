@@ -10,6 +10,7 @@ import { createMemo, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { kanbanCardItemType } from "@/app/drag/drag-types";
 import { Button, Pill, StatusDot, type StatusTone } from "@/app/element/ui";
 import { MOS } from "@/app/store/global";
+import { seatTooltipLine } from "@/app/view/agent/seat-format";
 import { formatAge } from "@/app/view/warden-shared/warden-shared";
 
 import { agentColor } from "./kanban-colors";
@@ -23,6 +24,7 @@ import {
     stageWord,
     waitingOn,
 } from "./kanban-columns";
+import { seatOf, useSeatIndex } from "./kanban-seats";
 import type { KanbanAfter, KanbanAgent, KanbanAgentState, KanbanTask } from "./kanban-types";
 
 /** A linked task's state, as a card's pill says it. */
@@ -76,10 +78,14 @@ export function AgentChip(props: {
     agent?: KanbanAgent | null;
     uid?: string;
     colors?: Record<string, string>;
+    /** Its seat as the tooltip: a card's owner (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §4). */
+    showSeat?: boolean;
 }): JSX.Element {
     const swatch = () => agentColor(props.agent, props.uid, props.colors, "identity");
+    const seats = useSeatIndex();
+    const seat = () => (props.showSeat ? seatOf(seats(), props.uid || props.agent?.uid, props.name) : null);
     return (
-        <span class="kanban-agent-chip">
+        <span class="kanban-agent-chip" title={seat() ? `${props.name}: ${seatTooltipLine(seat()!)}` : undefined}>
             <Show when={swatch()}>
                 {(c) => (
                     <span
@@ -174,7 +180,9 @@ export function KanbanCard(props: {
             </Show>
             <div class="kanban-card__meta">
                 <Show when={who()}>
-                    {(w) => <AgentChip name={w().name} agent={w().agent} uid={w().uid} colors={props.colors} />}
+                    {(w) => (
+                        <AgentChip name={w().name} agent={w().agent} uid={w().uid} colors={props.colors} showSeat />
+                    )}
                 </Show>
                 <Show when={t().state === "held"}>
                     <Pill icon="pause">on hold</Pill>
