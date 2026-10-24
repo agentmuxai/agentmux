@@ -423,6 +423,16 @@ pub fn shutdown_title_template(effect: &str, agent_name: &str) -> String {
     format!("{verb} {agent_name} in {{n}} s")
 }
 
+/// `template` with its last `{n}` replaced by the seconds: the one that is ours.
+/// An agent's name earlier in it may hold `{n}` too; the launcher fills the
+/// same one (`fill_countdown`), so the first frame and the ticked ones agree.
+pub fn fill_seconds(template: &str, secs: i64) -> String {
+    match template.rfind("{n}") {
+        Some(i) => format!("{}{}{}", &template[..i], secs, &template[i + 3..]),
+        None => template.to_string(),
+    }
+}
+
 /// Whole seconds left, rounded up, never negative.
 pub fn seconds_left(remaining_ms: i64) -> i64 {
     (remaining_ms.max(0) + 999) / 1000
@@ -551,7 +561,7 @@ impl PolicyState {
                         let remaining_ms = (info.deadline_ms - now_ms).max(0);
                         let template = shutdown_title_template(info.effect, &req.agent_name);
                         (
-                            template.replace("{n}", &seconds_left(remaining_ms).to_string()),
+                            fill_seconds(&template, seconds_left(remaining_ms)),
                             Some(vec![NotifyAction { id: "keep".to_string(), label: keep_label(info.running).to_string() }]),
                             Some(Countdown { remaining_ms, title_template: template }),
                         )
@@ -1303,6 +1313,18 @@ mod tests {
         let a = p.step(Input::Tick, 5_000, &s);
         let n = &shows(&a)[0];
         assert_eq!((n.title.as_str(), n.countdown.as_ref().unwrap().remaining_ms), ("Closing lark in 0 s", 0), "never negative");
+    }
+
+    #[test]
+    fn an_agent_name_holding_the_placeholder_keeps_its_name_in_the_first_title() {
+        let s = Settings::default();
+        let mut p = PolicyState::new();
+        let r = Request { agent_name: "x{n}".into(), ..shutdown_req("close_tab", true, 9_000) };
+        p.step(Input::Emit(r), 0, &s);
+        let a = p.step(Input::Tick, 0, &s);
+        let n = &shows(&a)[0];
+        assert_eq!(n.title, "Closing x{n} in 9 s");
+        assert_eq!(n.countdown.as_ref().unwrap().title_template, "Closing x{n} in {n} s");
     }
 
     #[test]
