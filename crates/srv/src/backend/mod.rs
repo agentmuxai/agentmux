@@ -89,6 +89,7 @@ pub mod lsp;
 pub mod messagebus;
 pub mod notify;
 pub mod oref;
+pub mod process_identity;
 pub mod process_tracker;
 pub mod reactive;
 pub mod remote;

@@ -417,7 +417,7 @@ impl RunLedger {
         });
         let (ours, followed_elsewhere): (Vec<JobRun>, Vec<JobRun>) = open(SOURCE_CRON, &[state::SCHEDULED, state::RUNNING])
             .into_iter()
-            .partition(|r| remote::followed_by(r).is_none_or(|(ch, _)| ch == self.channel));
+            .partition(|r| remote::followed_by(r).is_none_or(|f| f.channel == self.channel));
         for run in &followed_elsewhere {
             self.follower.watch(&run.id, now);
         }

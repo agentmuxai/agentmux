@@ -12,7 +12,7 @@ use super::*;
 use crate::backend::cron::{test_job, CronScheduler, FireOutcome, Slot};
 use crate::backend::jobs::{Begin, BY_SCHEDULER, TRIGGER_SCHEDULE};
 use crate::backend::mps::{Broker, MuxEvent, EVENT_AGENT_TURN};
-use crate::backend::storage::job_runs::RunCost;
+use crate::backend::storage::job_runs::{reason, state, RunCost};
 use crate::backend::storage::store::Store;
 
 const PANE: &str = "b-remote";
@@ -106,6 +106,7 @@ async fn the_receiver_follows_a_run_another_channel_fired_and_closes_it_with_its
     assert_eq!((r.state.as_str(), r.ended_at_ms, r.block_id.as_str()), (state::RUNNING, None, PANE), "left running");
     assert_eq!((r.account_id.as_str(), r.target_agent_uid.as_str()), ("acct-b", "uid-y"), "the receiver's pane, not overwritten");
     assert_eq!(r.links[FOLLOWED_BY_CHANNEL], "chan-b");
+    assert!(r.links[FOLLOWED_AT_MS].as_i64().is_some_and(|at| at >= r.started_at_ms - 1_000), "{:?}", r.links);
     assert_eq!(r.links["transcript"], json!({"block_id": PANE, "channel": "chan-b"}));
     assert_eq!(r.recorded_by.split('@').next(), Some("chan-a"));
 
@@ -123,6 +124,43 @@ async fn the_receiver_follows_a_run_another_channel_fired_and_closes_it_with_its
     // The sender's watch, past the timeout, finds it closed and writes nothing.
     assert!(p.sender.check_remote(&run_id, 0, now_ms() + NO_TURN_AFTER_MS + 1));
     assert_eq!(p.get(&run_id), done);
+}
+
+/// A catch-up `latest` pending fire, delivered when its agent is back
+/// (`deliver_pending`) to an agent in the other channel: the receiver sees
+/// it still `pending`, follows it, and closes it with its turn's cost.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pending_fire_delivered_to_another_channel_is_followed_there() {
+    let p = pair();
+    let sched = CronScheduler::new(Some(p.store.clone()), reqwest::Client::new(), String::new(), String::new(), Arc::new(Broker::new()));
+    sched.install_runs(p.sender.clone());
+    sched.install_presence(Arc::new(|_uid: &str| true));
+    let (receiver, store) = (p.receiver.clone(), p.store.clone());
+    sched.install_delivery(Arc::new(move |req, _uid| {
+        let id = req.request_id.clone().unwrap_or_default();
+        assert_eq!(store.job_run_get(&id).unwrap().unwrap().state, state::PENDING, "still pending when it arrives");
+        assert!(receiver.follow_forwarded(&id, PANE));
+        Box::pin(async move { json!({"success": true, "block_id": PANE}) })
+    }));
+    let mut job = test_job("j-x", "check the build", "AgentY", "uid-y", "uid-creator");
+    job.expression = "0 * * * *".to_string();
+    job.catch_up = crate::backend::jobs::CATCH_UP_LATEST.to_string();
+    p.store.cron_create(&job).unwrap();
+    let now = now_ms();
+    let (id, _) = p.begin(now - now % 3_600_000);
+    p.store.job_run_set_undelivered(&id, state::PENDING, reason::TARGET_STOPPED, now).unwrap();
+
+    assert_eq!(sched.deliver_pending().await, 1);
+    let r = p.get(&id);
+    assert_eq!((r.state.as_str(), r.account_id.as_str()), (state::RUNNING, "acct-b"));
+    assert_eq!(r.links[FOLLOWED_BY_CHANNEL], "chan-b");
+    let t = now_ms() + 1;
+    p.turn(json!({
+        "block_id": PANE, "turn_id": t, "started_at_ms": t, "active": false, "ended_at_ms": t + 2_000,
+        "end": "completed", "cost_usd": 0.21, "output_tokens": 300, "steps": 4,
+    }));
+    let done = p.wait_for(&id, |r| r.state == state::FINISHED).await;
+    assert_eq!((done.infra.as_str(), done.cost_usd, done.output_tokens, done.steps), (infra::OK, 0.21, 300, 4));
 }
 
 /// The receiver takes only another channel's open cron run, once.
@@ -163,6 +201,7 @@ async fn the_receivers_process_exiting_interrupts_the_run() {
     let (gone, job) = p.begin(2);
     assert!(p.receiver.follow_forwarded(&gone, "b-other"));
     p.deliver(&gone, &job, "b-other");
+    crate::backend::process_identity::test_srv::treat_as_srv(&[std::process::id()]);
     assert!(!p.sender.check_remote(&gone, now_ms(), now_ms()), "its follower is alive: the receiver's");
     p.store.job_run_add_links(&gone, &json!({ FOLLOWED_BY_PID: u32::MAX })).unwrap();
     assert!(p.sender.check_remote(&gone, now_ms(), now_ms()));
@@ -228,17 +267,54 @@ async fn both_sides_closing_write_the_end_once() {
 #[test]
 fn the_senders_verdict() {
     let mut run = JobRun::new("r", "j", SOURCE_CRON, "n", TRIGGER_SCHEDULE, state::RUNNING, 0);
-    let alive = |_: u32| true;
+    let alive = |_: u32, _: Option<i64>| true;
     assert_eq!(verdict(None, 0, 0, alive), Verdict::Done);
     assert_eq!(verdict(Some(&run), 0, NO_TURN_AFTER_MS, alive), Verdict::Wait);
     assert_eq!(verdict(Some(&run), 0, NO_TURN_AFTER_MS + 1, alive), Verdict::Close { infra: infra::OK, summary: NOT_FOLLOWED });
     run.links = json!({ FOLLOWED_BY_CHANNEL: "chan-b", FOLLOWED_BY_PID: 42 });
     assert_eq!(verdict(Some(&run), 0, i64::MAX / 2, alive), Verdict::Wait, "the receiver's, however long the turn");
-    assert_eq!(verdict(Some(&run), 0, 0, |_| false), Verdict::Close { infra: infra::INTERRUPTED, summary: FOLLOWER_GONE });
+    assert_eq!(verdict(Some(&run), 0, 0, |_, _| false), Verdict::Close { infra: infra::INTERRUPTED, summary: FOLLOWER_GONE });
     run.links = json!({ FOLLOWED_BY_CHANNEL: "chan-b" });
-    assert_eq!(verdict(Some(&run), 0, 0, |_| false), Verdict::Wait, "no pid written: nothing to check");
+    assert_eq!(verdict(Some(&run), 0, 0, |_, _| false), Verdict::Wait, "no pid written: nothing to check");
     run.ended_at_ms = Some(1);
     assert_eq!(verdict(Some(&run), 0, 0, alive), Verdict::Done);
     assert!(recorded_in("chan-a@0.59.41", "chan-a") && recorded_in("chan-a", "chan-a"));
     assert!(!recorded_in("chan-ab@0.59.41", "chan-a"));
+}
+
+/// The follower's pid now belongs to another program (this test binary,
+/// which isn't named agentmux-srv): it reads as gone, and the sender closes
+/// the run as interrupted. No `treat_as_srv` on this thread: the real lookup.
+#[test]
+fn a_follower_pid_another_program_reused_reads_as_gone() {
+    let p = pair();
+    let (id, job) = p.begin(1);
+    assert!(p.receiver.follow_forwarded(&id, PANE));
+    p.deliver(&id, &job, PANE);
+    assert_eq!(p.get(&id).links[FOLLOWED_BY_PID], std::process::id(), "alive, but not an srv");
+    assert!(p.sender.check_remote(&id, now_ms(), now_ms()));
+    let r = p.get(&id);
+    assert_eq!((r.state.as_str(), r.infra.as_str(), r.summary.as_str()), (state::FINISHED, infra::INTERRUPTED, FOLLOWER_GONE));
+}
+
+/// An srv that started after the run was followed is not the follower: its
+/// pid was reused. The rule is `process_identity::is_srv_that_wrote`, with
+/// its slack.
+#[test]
+fn an_srv_started_after_the_follow_is_not_the_follower() {
+    use crate::backend::process_identity::{is_srv_that_wrote, START_SLACK_SECS};
+    let followed_at_ms: i64 = 1_800_000_000_000;
+    let mut run = JobRun::new("r", "j", SOURCE_CRON, "n", TRIGGER_SCHEDULE, state::RUNNING, 0);
+    run.links = json!({ FOLLOWED_BY_CHANNEL: "chan-b", FOLLOWED_BY_PID: 42, FOLLOWED_AT_MS: followed_at_ms });
+    let srv_started = |started_secs: u64| {
+        move |_: u32, at: Option<i64>| is_srv_that_wrote("agentmux-srv.exe", started_secs, at.map(|ms| (ms / 1000) as u64))
+    };
+    let at_secs = (followed_at_ms / 1000) as u64;
+    assert_eq!(verdict(Some(&run), 0, 0, srv_started(at_secs - 3_600)), Verdict::Wait, "started before: the follower");
+    assert_eq!(verdict(Some(&run), 0, 0, srv_started(at_secs + START_SLACK_SECS)), Verdict::Wait, "within the slack");
+    assert_eq!(
+        verdict(Some(&run), 0, 0, srv_started(at_secs + START_SLACK_SECS + 1)),
+        Verdict::Close { infra: infra::INTERRUPTED, summary: FOLLOWER_GONE },
+        "started after: a reused pid"
+    );
 }
