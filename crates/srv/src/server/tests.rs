@@ -3258,7 +3258,7 @@ mod fleet_tests {
         let state = test_state();
 
         let (now, pending) =
-            crate::server::app_api::fleet::fleet_bulk_stop_with_override(&state, "Korp", vec![block_id.clone()], None, None).await;
+            crate::server::app_api::fleet::fleet_stop_keep_pane_with_override(&state, "Korp", vec![block_id.clone()], None, None).await;
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
 
         assert!(now.succeeded.is_empty() && now.failed.is_empty(), "nothing is stopped at once");
@@ -3299,7 +3299,7 @@ mod fleet_tests {
 
         let started = std::time::Instant::now();
         let (_, pending) =
-            crate::server::app_api::fleet::fleet_bulk_stop_with_override(&state, "Korp", targets, None, None).await;
+            crate::server::app_api::fleet::fleet_stop_keep_pane_with_override(&state, "Korp", targets, None, None).await;
         let took = started.elapsed();
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
 
@@ -3319,7 +3319,7 @@ mod fleet_tests {
         let state = test_state();
 
         let (now, pending) =
-            crate::server::app_api::fleet::fleet_bulk_stop_with_override(&state, "Korp", vec![block_id.clone()], None, None).await;
+            crate::server::app_api::fleet::fleet_stop_keep_pane_with_override(&state, "Korp", vec![block_id.clone()], None, None).await;
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
 
         assert!(pending.is_empty());
@@ -3364,7 +3364,7 @@ mod fleet_tests {
 
         let resp = super::super::handle_agent_stop_pending_forward(
             axum::extract::State(state.clone()),
-            axum::Json(super::super::AgentStopPendingForwardRequest { block_id: block_id.clone(), signal: None, by: "Korp".into() }),
+            axum::Json(super::super::AgentStopPendingForwardRequest { block_id: block_id.clone(), signal: None, by: "Korp".into(), mode: String::new() }),
         )
         .await
         .into_response();
@@ -3381,7 +3381,7 @@ mod fleet_tests {
         // Not running here: refused, nothing opened.
         let resp = super::super::handle_agent_stop_pending_forward(
             axum::extract::State(state.clone()),
-            axum::Json(super::super::AgentStopPendingForwardRequest { block_id: "nowhere".into(), signal: None, by: "Korp".into() }),
+            axum::Json(super::super::AgentStopPendingForwardRequest { block_id: "nowhere".into(), signal: None, by: "Korp".into(), mode: String::new() }),
         )
         .await
         .into_response();

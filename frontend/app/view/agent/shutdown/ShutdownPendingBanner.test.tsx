@@ -57,8 +57,25 @@ describe("ShutdownPendingBanner (SPEC_AGENT_SELF_QUIT §6.5)", () => {
     it("shows the live request with a countdown and chimes", () => {
         mount();
         handlers.get("agent:shutdown-pending")!(pending("r1"));
-        expect(screen.getByText(/Korp asked to shut down Camper: stuck\. Closing in 1[45] s\./)).toBeTruthy();
+        expect(screen.getByText(/Korp asked to close Camper: stuck\. Closing in 1[45] s\./)).toBeTruthy();
         expect(tone).toHaveBeenCalledTimes(1);
+    });
+
+    it("shows the reason as text: markup in it creates no element", () => {
+        const { container } = mount();
+        const hostile = pending("r1");
+        (hostile.data as Record<string, unknown>).reason = "retire <b>QTimer</b></text><img src=x onerror=alert(1)>";
+        handlers.get("agent:shutdown-pending")!(hostile);
+        expect(screen.getByText(/retire <b>QTimer<\/b><\/text><img src=x onerror=alert\(1\)>\./)).toBeTruthy();
+        expect(container.querySelector("b, img")).toBeNull();
+    });
+
+    it("shows srv's hidden-reason text as given", () => {
+        mount();
+        const hidden = pending("r1");
+        (hidden.data as Record<string, unknown>).reason = "Reason hidden: it looks sensitive.";
+        handlers.get("agent:shutdown-pending")!(hidden);
+        expect(screen.getByText(/Korp asked to close Camper: Reason hidden: it looks sensitive\./)).toBeTruthy();
     });
 
     it("a pane opened mid-countdown shows it from history, without a chime", async () => {
@@ -66,7 +83,7 @@ describe("ShutdownPendingBanner (SPEC_AGENT_SELF_QUIT §6.5)", () => {
         resolveHistory[0]([pending("r1")]);
         resolveHistory[1]([]);
         await flush();
-        expect(screen.queryByText(/Korp asked to shut down Camper/)).toBeTruthy();
+        expect(screen.queryByText(/Korp asked to close Camper/)).toBeTruthy();
         expect(tone).not.toHaveBeenCalled();
     });
 

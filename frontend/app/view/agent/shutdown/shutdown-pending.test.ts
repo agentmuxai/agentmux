@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { clearedRequestId, parsePending, pendingTitle, replayPending, secondsLeft } from "./shutdown-pending";
+import { clearedRequestId, countdownLine, parsePending, pendingTitle, replayPending, secondsLeft } from "./shutdown-pending";
 
 const pending = {
     request_id: "r1",
@@ -10,6 +10,7 @@ const pending = {
     by: "Korp",
     via: "QuitSelf",
     reason: "task finished",
+    effect: "close_tab",
     deadline_ms: 20_000,
 };
 
@@ -36,8 +37,19 @@ describe("shutdown-pending (SPEC_AGENT_SELF_QUIT §6.5)", () => {
 
     it("names who asked, and says 'itself' for the agent's own request", () => {
         const p = parsePending(pending)!;
-        expect(pendingTitle(p, "camper", "Camper")).toBe("Korp asked to shut down Camper: task finished");
-        expect(pendingTitle({ ...p, by: "camper" }, "camper", "Camper")).toBe("Camper asked to shut itself down: task finished");
-        expect(pendingTitle({ ...p, reason: "" }, "camper", "Camper")).toBe("Korp asked to shut down Camper");
+        expect(pendingTitle(p, "camper", "Camper")).toBe("Korp asked to close Camper: task finished");
+        expect(pendingTitle({ ...p, by: "camper" }, "camper", "Camper")).toBe("Camper asked to close itself: task finished");
+        expect(pendingTitle({ ...p, reason: "" }, "camper", "Camper")).toBe("Korp asked to close Camper");
+    });
+
+    it("says stop only for the internal stop that keeps the pane", () => {
+        const p = parsePending({ ...pending, effect: "stop" })!;
+        expect(pendingTitle(p, "camper", "Camper")).toBe("Korp asked to stop Camper: task finished");
+        expect(countdownLine(p, 9)).toBe("Stopping in 9 s.");
+        expect(countdownLine(parsePending({ ...pending, effect: "close_pane" })!, 9)).toBe("Closing in 9 s.");
+        // An event with no effect (an older srv) reads as a close.
+        const older: Partial<typeof pending> = { ...pending };
+        delete older.effect;
+        expect(parsePending(older)!.effect).toBe("close_tab");
     });
 });
