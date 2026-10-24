@@ -1,6 +1,6 @@
 # Spec: the Kanban's stages (Backlog, In Research, Spec'd, In progress, Review, Merged, Released), its colours, and its narrow view
 
-**Status:** approved — the operator, 2026-10-23 ("looks good, kanban colors look good lets do it", relayed by AgentY), with D1–D7 as recommended (§13), plus the changes of §4.5 the same day. Built in Kanban #1708 (which replaces #1106).
+**Status:** active — approved by the operator, 2026-10-23 ("looks good, kanban colors look good lets do it", relayed by AgentY), with D1–D7 as recommended (§13), plus the changes of §4.5 the same day. Built in Kanban #1708 (which replaces #1106).
 **Date:** 2026-10-23
 **Author:** Naki-2@narko, for Kanban tasks #1103 (this spec) and #1106 (its build), filed by AgentY at the operator's request
 **Verified against:** `agentmux` `main` @ `9dfcbfac6` (2026-10-23), by reading code. Nothing here has been run.
