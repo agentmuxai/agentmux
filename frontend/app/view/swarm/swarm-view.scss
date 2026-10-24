@@ -813,7 +813,7 @@
     font-size: var(--text-xs);
     flex-shrink: 0;
     white-space: nowrap;
-    color: var(--warning-color, var(--accent-color));
+    color: var(--warning-color);
 
     .swarm-unavailable-icon {
         font-size: var(--text-2xs);
