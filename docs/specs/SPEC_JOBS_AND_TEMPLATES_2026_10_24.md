@@ -37,7 +37,7 @@ Measured on `main` @ `14afc1646`.
 
 ### 1.2 Outside AgentMux
 
-A project's own jobs run in its cloud and CI: weekly analyst reports on its repositories, a review service triggered by pull requests, daily cost and usage reports, scheduled CI workflows (nightly builds, performance runs, link and docs checks). They must run while the operator's machine is off, and they already work. What they lack is a common place to see them: their history is spread over email, cloud logs, the CI tab and PR comments, and some of their failures reach no one.
+Some jobs run outside AgentMux, in a project's cloud and CI: scheduled reports, services triggered by pull requests, nightly builds and checks. They must run while the operator's machine is off. AgentMux doesn't show them: their history lives in each service's own console, the CI tab, email and PR comments.
 
 ### 1.3 What this adds up to
 
@@ -197,7 +197,7 @@ A `started` event makes a `running` row. `finished` closes it, and creates a clo
 
 ### 4.2 Transport, signature and trust
 
-- **Transport:** MuxBus, as review and CI notices already arrive (`muxbus/cloud_subscriber.rs`). The relay gains a message kind for job events, pulled and acked like pending injections (`POST /reactive/pending-batch`, `/reactive/ack`, `cloud_subscriber/delivery.rs`), and **never injected into an agent**: srv's subscriber hands them to the ledger. The relay side is outside this repo. Events wait on the relay while the machine is off and arrive when it is back; the watchdog's grace and "late" handle that.
+- **Transport:** MuxBus, the account's existing channel for cloud notices (`muxbus/cloud_subscriber.rs`). Job events are a kind of their own: srv's subscriber hands them to the ledger, and they are **never injected into an agent**. Events sent while the machine is off arrive when it is back; the watchdog's grace and "late" handle that.
 - **One ledger, many channels.** Each channel's subscriber may pull the same event; `event_id` is unique in the global ledger, so it is written once.
 - **Signature:** each event is signed with Ed25519 by its **reporter**, over `agentmux-job-event-v1\0<job_id>\0<run_id>\0<event_id>\0<SHA-256 of the JSON body>`, the same construction as widget signatures (`backend/widget_signature.rs:23-43`). Events older than 7 days are refused.
 - **Reporters are pinned by the operator,** not built in: Settings → Jobs → Cloud reporters lists each reporter's name and key fingerprint (the widget scheme's format: SHA-256, first 10 bytes, base32, groups of four). A reporter is added by pasting its public key, or by approving a cloud job manifest that names it (§4.3). No key for anyone's private jobs is compiled into the public app.
@@ -217,7 +217,7 @@ A cloud job appears in the Jobs tab because a **manifest** says it exists. A man
 | `expect` | The expected schedule: `{cron, tz, grace_minutes}`; or `none` for jobs started by events |
 | `max_duration_minutes` | After a `started` event, how long before the run is `lost` |
 | `run_now` | Optional: `{link}` (a page that starts the job, opened in the browser) or `{ask_owner: "<instruction>"}` (sent to the owner agent as a message). AgentMux holds no cloud or CI credentials, so it never starts a cloud job itself |
-| `aggregate` | `true` for a service that reports a daily summary instead of each run (a review service: reviews per day, failures) |
+| `aggregate` | `true` for a service that reports a daily summary instead of each run (runs per day, failures) |
 
 ### 4.4 The watchdog
 
@@ -354,7 +354,7 @@ A day is the operator's local calendar day. A job's `policy.caps` may set lower 
 | **Private catalogs** | A signed index at a URL the operator adds in Settings → Jobs → Catalogs, with its public key | The `widget_catalog.rs` scheme: `index.json` plus `index.json.sig`, Ed25519 against the key the operator pinned, each entry with its zip's SHA-256, content hash and publisher key; installed as `needs_approval` |
 | **User templates** | The global store | The operator's own; no signature needed |
 
-Generic templates live in agentmux; a project's own job templates and cloud job manifests (its analysts' briefs, its reporters' manifests) go in a private catalog, never in this repo.
+Generic templates live in agentmux; a project's own job templates and cloud job manifests go in a private catalog, never in this repo.
 
 ### 5.6 The ten starter templates
 
@@ -436,7 +436,7 @@ Each PR adds a changeset.
 | 1 | P1 | `db_job_runs` (identity store), cron fires write runs, cron fires never held (missed, with catch-up `skip` or `latest`; AgentA's cron fix owns the missed counters), `fire_count` only for delivered fires, the slot lease, caller checks on delete and pause, the turn follower, Drone runs in the ledger and interrupted-run cleanup; `Schedule` `history`, `run_now`, `report`; `list` with last and next run |
 | 2 | P1 | The Warden Jobs tab, `jobs.*` RPCs, `JobsChanged`, Pause all |
 | 3 | P1 | Failure incidents: the Kanban task, the note to the owning leader, `NotifyKind::JobFailed` |
-| 4 | P2 | The job-event schema file; Settings → Jobs → Cloud reporters; ingesting the relay's job events into the ledger; cloud job manifests; the cloud group in the tab. (The relay's new message kind and each reporter are changes outside this repo, made alongside) |
+| 4 | P2 | The job-event schema file; Settings → Jobs → Cloud reporters; ingesting job events into the ledger; cloud job manifests; the cloud group in the tab. |
 | 5 | P2 | The watchdog: `missed` and `lost`, local and cloud |
 | 6 | P3 | `db_jobs` and the cron migration, the job schema file, time zones, policy (overlap, catch-up, timeout, retries, groups, the global limit), the `task` and `spawn` actions, `/agentmux/jobs` routes with `/agentmux/cron` aliases |
 | 7 | P3 | Caps: settings, reservation, the interrupt at the per-run cap, daily-cap skips and alerts, no-cost providers |
