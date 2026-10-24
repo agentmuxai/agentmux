@@ -215,8 +215,10 @@ pub(crate) fn leader_note(pane: &BlockedPane, numbers: &[i64]) -> String {
             None => "is out of quota".to_string(),
         },
     };
+    // Until step 2c holds messages to an unavailable agent (#1849), one sent
+    // to it fails; when that lands, say they are held instead.
     format!(
-        "{} {why} and holds {}. Its messages are held until it can work again.",
+        "{} {why} and holds {}. Until then, a message to it starts a turn that fails; move it to another account or wait for the reset.",
         pane.agent_name,
         task_list(numbers)
     )

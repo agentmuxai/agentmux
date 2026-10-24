@@ -134,11 +134,11 @@ fn the_toast_body_counts_agents_and_never_names_the_account() {
 #[test]
 fn the_leader_note_names_the_agent_and_its_tasks() {
     let p = pane("b1", "Naki-2", "acct", AgentState::Limited, None, None);
-    assert_eq!(leader_note(&p, &[163]), "Naki-2 is out of quota and holds #163. Its messages are held until it can work again.");
+    assert_eq!(leader_note(&p, &[163]), "Naki-2 is out of quota and holds #163. Until then, a message to it starts a turn that fails; move it to another account or wait for the reset.");
     let p = pane("b1", "Naki-2", "acct", AgentState::SignedOut, None, None);
     assert_eq!(
         leader_note(&p, &[1, 2, 3]),
-        "Naki-2 needs the user to sign in again and holds #1, #2 and #3. Its messages are held until it can work again."
+        "Naki-2 needs the user to sign in again and holds #1, #2 and #3. Until then, a message to it starts a turn that fails; move it to another account or wait for the reset."
     );
     assert!(leader_note(&weekly("b", "X", "a"), &[4, 5]).contains("is out of quota until "));
 }
