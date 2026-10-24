@@ -41,7 +41,7 @@ import { closeBlockInStack, moveBlockInStack, moveBlocksInStack, setActiveBlockI
 import { paneStackIds } from "@/layout/lib/layoutNodeModels";
 import { allBlockIds } from "@/layout/lib/stackOrder";
 import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
-import { clearPaneTabSelection, paneTabSelectionApi, prunePaneTabSelection } from "./pane-tab-selection";
+import { clearPaneTabSelection, paneTabSelection, paneTabSelectionApi, prunePaneTabSelection } from "./pane-tab-selection";
 import "./PaneChrome.scss";
 import { openPaneTabWidgetPicker } from "./pane-tab-picker";
 import { PaneHeaderTabStrip } from "./PaneHeaderTabStrip";
@@ -476,6 +476,8 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         const target = activeBlockId();
         if (!target) return false;
         const moved = moveBlockInStack(layoutModel, blockId, target, "end", true);
+        // A lone picked tab that was dragged and dropped is done with: it is no longer picked.
+        if (moved && paneTabSelection().has(blockId)) clearPaneTabSelection();
         // The tab was selected by the drop: a collapsed pane would hide where it went.
         if (moved && nodeModel.isMinimized?.()) layoutModel.minimizeNodeToggle(nodeModel.nodeId);
         return moved;

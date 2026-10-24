@@ -121,7 +121,7 @@ A selected pill is distinguished from the other pill states without colour alone
 - **Source panes.** Each source pane whose active tab left passes it to its right neighbour (or the new last tab), per the existing rule. A pane emptied by the move is **removed as a move, not closed** (same as the single-tab rule: no prompt, no close guard, `removeLeafEmptiedByMove`). A collapsed pane emptied this way loses its chip. If removing a source would leave only collapsed panes, the existing restore-nearest rule applies. The last pane in a window never closes; a move that would empty it cannot happen, since the target is another pane.
 - **A collapsed target** expands on drop (D7): the moved tabs are selected on it by the drop, and a drop into a chip that stays a chip would hide where they went.
 - **One command.** The move is one atomic operation, not N calls (§5).
-- **After the drop** the selection is cleared and every moved pill plays the landing bounce.
+- **After the drop** the selection is cleared and every moved pill plays the landing bounce. A lone picked tab dragged by itself is cleared too; dragging an unpicked tab leaves the pick as it was (§4.1).
 - **Cancel.** Escape during the drag (or a drop on nothing) cancels the drag and keeps the selection, so the operator can try again.
 - **Tear-off.** Dropping a multi-block drag outside every window is **cancelled** in this build (nothing moves, selection kept); it does not tear off only the grabbed tab and leave the rest (D8). Tearing off several tabs into one floating pane is a follow-up.
 - **Not supported, as for a single tab:** dropping on the Window Tab bar, on another OS window, or across Window Tabs.

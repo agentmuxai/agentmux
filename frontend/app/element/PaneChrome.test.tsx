@@ -738,6 +738,18 @@ describe("renderPaneChromeShell — several tabs dropped on this pane", () => {
         expect(chip.minimizeNodeToggle).toHaveBeenCalledWith("node-1");
     });
 
+    it("a lone picked tab that is dropped is no longer picked; an unpicked one leaves the pick alone", () => {
+        moveBlockInStack.mockReturnValue(true);
+        collapsed(false);
+        togglePaneTabSelected("b2");
+        headerCalls[0].onReceiveForeignTab("b2");
+        expect(paneTabSelection().size).toBe(0);
+
+        togglePaneTabSelected("b2");
+        headerCalls[0].onReceiveForeignTab("x");
+        expect(paneTabSelection().has("b2")).toBe(true);
+    });
+
     it("a single tab refused by the move does not expand the pane", () => {
         moveBlockInStack.mockReturnValue(false);
         const chip = collapsed(true);
