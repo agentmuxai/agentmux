@@ -254,7 +254,7 @@ impl PersistentSubprocessController {
                 // A quota or sign-in failure is stored, and a successful turn's
                 // stale failure cleared, before the turn's end is published
                 // below: whoever reacts to that end (the Supervisor) reads the
-                // block's state from them (codex P2 on #5389). The steps after
+                // block's state from them (#5389). The steps after
                 // leave both alone, except to restore an older turn's flushed
                 // failure.
                 let result_is_error = is_result_frame && parsed.get("is_error").and_then(|v| v.as_bool()) == Some(true);
