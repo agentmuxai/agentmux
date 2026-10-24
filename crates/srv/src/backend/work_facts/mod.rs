@@ -79,6 +79,20 @@ pub struct WorkFacts {
     /// When git was last asked; `None` before the first probe or outside a
     /// repository.
     pub git_checked_ms: Option<u64>,
+    /// Set while this agent holds the host's build slot (`agentmux_common::build_slot`): other
+    /// agents' builds and tests wait behind it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build_slot: Option<BuildSlotHold>,
+}
+
+/// How long and why an agent has held the build slot.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BuildSlotHold {
+    /// When it took the slot, epoch milliseconds.
+    pub since_ms: u64,
+    pub reason: String,
+    /// The command line, cut to 120 characters (see `SlotHolder::command`).
+    pub command: String,
 }
 
 impl WorkFacts {
@@ -130,23 +144,33 @@ fn status_of(block_id: &str) -> &'static str {
 /// the caches only, never git: call off the async workers.
 pub fn collect_local(store: &Store, regs: &[AgentRegistration], channel: &str) -> Vec<WorkFacts> {
     let home = dirs::home_dir();
+    let slot = agentmux_common::build_slot::holder();
     regs.iter()
         .map(|reg| {
             let meta = store.get::<Block>(&reg.block_id).ok().flatten().map(|b| b.meta).unwrap_or_default();
             let folder = folder_of_meta(&meta, home.as_deref(), &reg.agent_id);
             let git = folder.as_deref().and_then(|d| git::cached(&reg.block_id, d));
             let watched = watched_work(&reg.block_id).unwrap_or_default();
-            build(
-                reg,
-                channel,
-                status_of(&reg.block_id),
-                goal_of(&meta),
-                folder,
-                git,
-                watched,
-            )
+            let mut facts = build(reg, channel, status_of(&reg.block_id), goal_of(&meta), folder, git, watched);
+            facts.build_slot = build_slot_of(slot.as_ref(), &reg.agent_id, || {
+                crate::server::agent_handlers::identity_env::block_agent_slug(store, &reg.block_id)
+            });
+            facts
         })
         .collect()
+}
+
+/// The build slot hold to show on the agent `agent_id`, when `holder` is that agent. The lock
+/// names its holder by `AGENTMUX_AGENT_ID`, the slug; the registry by name, so either may match.
+/// `slug` is only asked for while somebody holds the slot.
+fn build_slot_of(
+    holder: Option<&agentmux_common::build_slot::SlotHolder>,
+    agent_id: &str,
+    slug: impl FnOnce() -> Option<String>,
+) -> Option<BuildSlotHold> {
+    let h = holder?;
+    let is_it = h.agent.eq_ignore_ascii_case(agent_id) || slug().is_some_and(|s| h.agent.eq_ignore_ascii_case(&s));
+    is_it.then(|| BuildSlotHold { since_ms: h.since_ms, reason: h.reason.clone(), command: h.command.clone() })
 }
 
 /// Assemble one agent's facts from what each source said.
@@ -186,6 +210,7 @@ pub fn build(
         todos: watched.progress.todos,
         current_tool: watched.progress.current_tool,
         git_checked_ms: (git.checked_ms > 0).then_some(git.checked_ms),
+        build_slot: None,
     }
 }
 
@@ -293,6 +318,26 @@ mod tests {
         let f = WorkFacts { repo_root: Some("C:/w/x".into()), ..Default::default() };
         assert_eq!(f.repo_key().as_deref(), Some("local:C:/w/x"));
         assert_eq!(WorkFacts::default().repo_key(), None);
+    }
+
+    #[test]
+    fn the_build_slot_is_shown_on_the_holder_by_slug_or_name_and_only_while_held() {
+        use agentmux_common::build_slot::SlotHolder;
+        let holder = SlotHolder { agent: "naki-naki-2".into(), since_ms: 5, reason: "cargo test".into(), command: "cargo test -p x".into() };
+        let hold = BuildSlotHold { since_ms: 5, reason: "cargo test".into(), command: "cargo test -p x".into() };
+        // By slug: the registry's name is the display name.
+        assert_eq!(build_slot_of(Some(&holder), "Naki-2", || Some("Naki-Naki-2".into())), Some(hold.clone()));
+        // By name, without asking for the slug.
+        let named = SlotHolder { agent: "lazo".into(), ..holder.clone() };
+        assert!(build_slot_of(Some(&named), "Lazo", || panic!("the name matched; no slug lookup")).is_some());
+        // Somebody else, or no slug, or nobody holding it.
+        assert_eq!(build_slot_of(Some(&holder), "Manoz", || Some("manoz".into())), None);
+        assert_eq!(build_slot_of(Some(&holder), "Naki-2", || None), None);
+        assert_eq!(build_slot_of(None, "Lazo", || panic!("nobody holds it; no slug lookup")), None);
+        // It is on the wire only while held.
+        let held = WorkFacts { agent: "A".into(), build_slot: Some(hold), ..Default::default() };
+        assert_eq!(serde_json::to_value(&held).unwrap()["build_slot"]["reason"], "cargo test");
+        assert!(serde_json::to_value(WorkFacts::default()).unwrap().get("build_slot").is_none());
     }
 
     #[test]
