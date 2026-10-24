@@ -36,18 +36,22 @@ pub(in crate::server) async fn hold_for_absent_target(
 }
 
 /// Why messages to the agent on `block_id` wait now: its account is out of
-/// quota (`limited`). BLOCKING.
+/// quota (`limited`) until a known reset. BLOCKING.
+///
+/// Not a limit with no reset time: that state, like `signed_out`, lasts until
+/// a clean turn or an account move, so a held message would wait out the
+/// 24 h for an agent that may already work again; it is delivered as before.
 ///
 /// Not `signed_out` yet: that state lasts until a clean turn, and a sign-in
 /// to the same account doesn't clear it, so holding every message would
-/// keep the turn that clears it from ever running (muxreview P1 on #5419).
+/// keep the turn that clears it from ever running (#5419).
 /// It joins once a confirmed sign-in clears the failure (Kanban #2237).
 pub(in crate::server) fn holding_unavailable(
     mstore: &crate::backend::storage::store::Store,
     block_id: &str,
 ) -> Option<crate::backend::agent_state::Unavailable> {
     crate::backend::agent_state::unavailable_of_block(mstore, None, block_id, agentmux_common::time::now_ms_u64())
-        .filter(|u| u.state == crate::backend::agent_state::AgentState::Limited)
+        .filter(|u| u.state == crate::backend::agent_state::AgentState::Limited && u.resets_at_ms.is_some())
 }
 
 /// [`holding_unavailable`] for the agent of this instance that `target`
