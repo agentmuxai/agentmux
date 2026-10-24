@@ -16,6 +16,8 @@
  *   held         the agent can't go on yet: reconnecting > compacting >
  *                stopping > rate limited > launching
  *   working      a turn is in flight
+ *   unavailable  no turn in flight, and the agent can't start one: its plan's
+ *                usage limit is hit until a reset, or its sign-in was refused
  *   interrupted  the last turn was cut off (stopped, or a subagent whose
  *                parent's turn ended under it)
  *   errored      the last turn failed
@@ -33,12 +35,18 @@ export type HeldReason = "reconnecting" | "compacting" | "stopping" | "rate-limi
 /** Held reasons, best first. */
 export const HELD_ORDER: readonly HeldReason[] = ["reconnecting", "compacting", "stopping", "rate-limited", "launching"];
 
-export type AgentStatusKind = "needs-you" | "held" | "working" | "interrupted" | "errored" | "idle";
+export type AgentStatusKind = "needs-you" | "held" | "working" | "unavailable" | "interrupted" | "errored" | "idle";
+
+/** Why an agent can't start a turn: out of quota until a reset, or signed out. */
+export type UnavailableReason = "limited" | "signed_out";
 
 /** Status kinds, best first. */
-export const STATUS_ORDER: readonly AgentStatusKind[] = ["needs-you", "held", "working", "interrupted", "errored", "idle"];
+export const STATUS_ORDER: readonly AgentStatusKind[] = ["needs-you", "held", "working", "unavailable", "interrupted", "errored", "idle"];
 
-export type AgentStatus = { kind: "held"; reason: HeldReason } | { kind: Exclude<AgentStatusKind, "held"> };
+export type AgentStatus =
+    | { kind: "held"; reason: HeldReason }
+    | { kind: "unavailable"; reason: UnavailableReason }
+    | { kind: Exclude<AgentStatusKind, "held" | "unavailable"> };
 
 export interface AgentStatusFacts {
     /** A turn is in flight. */
@@ -55,6 +63,10 @@ export interface AgentStatusFacts {
     /** Each reason that applies. Reconnecting and compacting can hold an
      *  agent with no turn in flight. */
     held?: Partial<Record<HeldReason, boolean>>;
+    /** The agent can't start a turn (srv's `limited` or `signed_out`). Counts only while nothing is
+     *  `live`: a turn in flight is evidence the agent can work
+     *  (docs/specs/SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §3.2). */
+    unavailable?: UnavailableReason | null;
     /** How the last turn ended, read only when nothing is `live`. */
     ended?: "completed" | "interrupted" | "errored" | null;
 }
@@ -65,6 +77,7 @@ export function rankAgentStatus(facts: AgentStatusFacts): AgentStatus {
     const reason = HELD_ORDER.find((r) => facts.held?.[r]);
     if (reason) return { kind: "held", reason };
     if (facts.live) return { kind: "working" };
+    if (facts.unavailable) return { kind: "unavailable", reason: facts.unavailable };
     if (facts.ended === "interrupted") return { kind: "interrupted" };
     if (facts.ended === "errored") return { kind: "errored" };
     return { kind: "idle" };

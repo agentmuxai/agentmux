@@ -9,9 +9,18 @@
 //! since identity M4c-3 (see [`FireDelivery`]) — and records the fire in the
 //! DB.
 //!
-//! On startup, runs one catch-up fire for any job whose next scheduled time
-//! after `last_fired` is already in the past (FIRE_ONCE_NOW misfire policy —
-//! never replay all missed fires, never cause a cron storm).
+//! Every fire is a run in the run ledger (`backend::jobs`): its row is
+//! inserted before it fires, which for a slot is the lease two schedulers
+//! sharing a job need, and only a delivered fire counts toward `fire_count`
+//! (docs/specs/SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §3.2). Cron fires are
+//! never held for a stopped agent; what an undelivered fire leaves is the
+//! job's catch-up policy (§5.2): `skip`, a missed run, or `latest`, one
+//! pending fire this scheduler delivers when the agent is back.
+//!
+//! On startup, a `latest` job whose next scheduled time after `last_fired`
+//! is already in the past fires once as catch-up (FIRE_ONCE_NOW — never
+//! replay all missed fires, never cause a cron storm); the slots missed
+//! while AgentMux was off are one collapsed `skipped` row.
 //!
 //! See `docs/specs/SPEC_CRON_LOOP_ROBUSTNESS_2026_06_25.md §3.2`.
 
@@ -24,6 +33,7 @@ use agentmux_common::api_types::InjectRequest;
 use chrono::{DateTime, Utc};
 use cron::Schedule;
 
+use crate::backend::jobs::{self, Begin, RunLedger};
 use crate::backend::storage::store::Store;
 use crate::backend::storage::cron::CronJob;
 use crate::backend::mps::Broker;
@@ -31,6 +41,12 @@ use crate::backend::reactive::types::InjectionRequest;
 
 /// Abort handles for every currently scheduled cron task.
 type HandleMap = Mutex<HashMap<String, tokio::task::AbortHandle>>;
+
+/// Missed slots counted at startup, at most (`jobs::missed_slots`).
+const MISSED_SLOTS_CAP: usize = 100_000;
+
+/// How often pending fires are checked when no agent registers meanwhile.
+const PENDING_SWEEP_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// In-process delivery of a fire: the server's shared inject path
 /// (`server::reactive::deliver`, on the instance-key tier), given the job's
@@ -48,6 +64,96 @@ pub type FireDelivery = Arc<
         + Sync,
 >;
 
+/// Whether an agent UID is registered (running) on this instance, so a
+/// pending fire is only attempted once its agent is back.
+pub type AgentPresence = Arc<dyn Fn(&str) -> bool + Send + Sync>;
+
+/// Why a fire reached no one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MissReason {
+    /// A known agent with no process to take it.
+    TargetStopped,
+    /// No agent of that name or UID. Told apart from a stopped one by the
+    /// cron fix's classification (missed fires); the ledger already maps it.
+    #[allow(dead_code)]
+    TargetMissing,
+}
+
+/// What one fire's delivery decided, computed once in [`CronScheduler::fire`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum FireOutcome {
+    Delivered { block_id: Option<String> },
+    Missed { reason: MissReason },
+    Failed { error: String },
+}
+
+impl FireOutcome {
+    pub(crate) fn delivered(&self) -> bool {
+        matches!(self, FireOutcome::Delivered { .. })
+    }
+}
+
+/// Read a fire's inject answer (`None`: the request itself failed). Cron
+/// fires are never held (`hold_applies`), so a stopped agent answers "agent
+/// not found" like a missing one.
+pub(crate) fn fire_outcome(body: Option<&serde_json::Value>) -> FireOutcome {
+    let Some(body) = body else {
+        return FireOutcome::Failed { error: "inject request failed".to_string() };
+    };
+    if body.get("success").and_then(|v| v.as_bool()) == Some(true) {
+        let block_id = body.get("block_id").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(str::to_string);
+        return FireOutcome::Delivered { block_id };
+    }
+    let error = body.get("error").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    if error.starts_with("agent not found") {
+        return FireOutcome::Missed { reason: MissReason::TargetStopped };
+    }
+    FireOutcome::Failed { error }
+}
+
+/// The text a fire delivers: the prompt, then the run line. A slash command
+/// (`/compact`, `/model x`) gets no run line: it would become the command's
+/// arguments. That run is still recorded and followed by its `request_id`;
+/// only its agent can't report an outcome, so it stays `unknown`.
+pub(crate) fn fire_message(prompt: &str, run_id: Option<&str>, late_for: Option<i64>) -> String {
+    match run_id {
+        Some(run_id) if !prompt.trim_start().starts_with('/') => {
+            format!("{prompt}\n\n{}", jobs::brief_line(run_id, late_for, agentmux_common::time::now_ms()))
+        }
+        _ => prompt.to_string(),
+    }
+}
+
+/// Which slot a fire is for (§3.1 `trigger`, `scheduled_for_ms`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Slot {
+    /// A scheduled slot, ms epoch.
+    Scheduled(i64),
+    /// The newest slot missed while AgentMux was off, fired at startup.
+    CatchUp(i64),
+    /// Run now, by the operator or an agent uid. Doesn't count toward
+    /// `fire_count` or `last_fired`: those are the schedule's.
+    Manual { triggered_by: String },
+}
+
+/// How a fire ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Fired {
+    /// The run's id in the ledger, when it was recorded.
+    pub run_id: Option<String>,
+    /// `None` when the fire didn't happen: another scheduler had the slot,
+    /// or there was no way to deliver.
+    pub outcome: Option<FireOutcome>,
+}
+
+/// What `start` found for a job: the newest missed slot, and the earlier
+/// ones as `(first, count)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Missed {
+    newest_ms: i64,
+    earlier: Option<(i64, i64)>,
+}
+
 pub struct CronScheduler {
     handles: HandleMap,
     shared_store: Option<Arc<Store>>,
@@ -56,6 +162,14 @@ pub struct CronScheduler {
     auth_key: String,
     broker: Arc<Broker>,
     delivery: std::sync::OnceLock<FireDelivery>,
+    presence: std::sync::OnceLock<AgentPresence>,
+    runs: std::sync::OnceLock<Arc<RunLedger>>,
+    /// Jobs this scheduler disabled for their age bound (`max_age_secs`),
+    /// not paused: their pending fire may still be delivered within that
+    /// bound (`deliver_pending`). Cleared when the job is paused, deleted or
+    /// scheduled again (`cancel_job`). In memory: after a restart such a
+    /// job's pending fire expires like a paused one's.
+    aged_out: Mutex<std::collections::HashSet<String>>,
 }
 
 impl CronScheduler {
@@ -74,6 +188,9 @@ impl CronScheduler {
             auth_key,
             broker,
             delivery: std::sync::OnceLock::new(),
+            presence: std::sync::OnceLock::new(),
+            runs: std::sync::OnceLock::new(),
+            aged_out: Mutex::default(),
         })
     }
 
@@ -81,6 +198,22 @@ impl CronScheduler {
     /// a second install is ignored.
     pub fn install_delivery(&self, delivery: FireDelivery) {
         let _ = self.delivery.set(delivery);
+    }
+
+    /// How to tell an agent is back, for pending fires. Once.
+    pub fn install_presence(&self, presence: AgentPresence) {
+        let _ = self.presence.set(presence);
+    }
+
+    /// Record fires in the run ledger from now on. Once; a second install
+    /// is ignored.
+    pub fn install_runs(&self, ledger: Arc<RunLedger>) {
+        let _ = self.runs.set(ledger);
+    }
+
+    /// The run ledger, once installed.
+    pub fn runs(&self) -> Option<&Arc<RunLedger>> {
+        self.runs.get()
     }
 
     fn publish_changed(&self) {
@@ -109,40 +242,40 @@ impl CronScheduler {
         let count = jobs.len();
 
         for job in jobs {
-            // FIRE_ONCE_NOW: if the job missed its window, fire once immediately
-            // as catch-up. did_catchup is passed to schedule_job so the live
-            // task's fires counter is seeded at fire_count+1 and the catch-up
-            // fire counts toward max_fires.
-            let did_catchup = should_catchup(&job, now_dt);
-            if did_catchup {
-                let sched = self.clone();
-                let job_id = job.id.clone();
-                let job_prompt = job.prompt.clone();
-                let job_target = job.target.clone();
-                let job_target_uid = job.target_uid.clone();
-                let job_created_by_uid = job.created_by_uid.clone();
-                tokio::spawn(async move {
-                    sched
-                        .fire(&job_id, &job_prompt, &job_target, &job_target_uid, &job_created_by_uid)
-                        .await;
-                });
-            }
-
-            let initial_fires = job.fire_count + if did_catchup { 1 } else { 0 };
-            self.schedule_job_with_fires(&job, initial_fires);
+            let missed = self.missed_while_off(&job, now_dt);
+            self.schedule_job_inner(&job, missed);
         }
 
+        self.spawn_pending_delivery();
         tracing::info!(count, "cron: scheduled {} job(s) from DB", count);
     }
 
-    /// Schedule a single job (or reschedule it after a DB change). Replaces
-    /// any existing task for the same `job.id`. Call sites that don't need to
-    /// account for a simultaneous catch-up fire should pass `job.fire_count`.
-    pub fn schedule_job(self: &Arc<Self>, job: &CronJob) {
-        self.schedule_job_with_fires(job, job.fire_count);
+    /// The slots a job missed while AgentMux was off, if any. The base is the
+    /// later of `last_fired` and the job's newest ledger row, so slots the
+    /// ledger already accounts for (a miss while AgentMux ran) aren't counted
+    /// as missed while it was off. Only for a job that has fired before
+    /// (`should_catchup`).
+    fn missed_while_off(&self, job: &CronJob, now_dt: DateTime<Utc>) -> Option<Missed> {
+        if !should_catchup(job, now_dt) {
+            return None;
+        }
+        let mut base_ms = catch_up_base_secs(job).saturating_mul(1000);
+        if let Some(last) = self.runs().and_then(|r| r.store().job_run_last(&job.id).ok().flatten()) {
+            let seen = last.last_skip_at_ms.or(last.scheduled_for_ms).unwrap_or(last.started_at_ms);
+            base_ms = base_ms.max(seen);
+        }
+        let (newest_ms, earlier) =
+            jobs::missed_slots(&job.expression, base_ms, now_dt.timestamp_millis(), MISSED_SLOTS_CAP)?;
+        Some(Missed { newest_ms, earlier })
     }
 
-    fn schedule_job_with_fires(self: &Arc<Self>, job: &CronJob, initial_fires: i64) {
+    /// Schedule a single job (or reschedule it after a DB change). Replaces
+    /// any existing task for the same `job.id`.
+    pub fn schedule_job(self: &Arc<Self>, job: &CronJob) {
+        self.schedule_job_inner(job, None);
+    }
+
+    fn schedule_job_inner(self: &Arc<Self>, job: &CronJob, missed: Option<Missed>) {
         self.cancel_job(&job.id);
 
         let schedule = match Schedule::from_str(&format!("0 {}", job.expression)) {
@@ -154,20 +287,32 @@ impl CronScheduler {
         };
 
         let sched = self.clone();
+        let job = job.clone();
         let job_id = job.id.clone();
-        let job_prompt = job.prompt.clone();
-        let job_target = job.target.clone();
-        let job_target_uid = job.target_uid.clone();
-        let job_created_by_uid = job.created_by_uid.clone();
-        let job_max_fires = job.max_fires;
-        let job_created_at = job.created_at;
-        let job_max_age_secs = job.max_age_secs;
 
         let handle = tokio::spawn(async move {
-            // `initial_fires` is seeded from the persisted fire_count (plus 1
-            // if a catch-up fire was also dispatched at startup) so max_fires
-            // is enforced across restarts, not per process run.
-            let mut fires: i64 = initial_fires;
+            // Seeded from the persisted fire_count so max_fires is enforced
+            // across restarts, not per process run.
+            let mut fires: i64 = job.fire_count;
+            if let Some(m) = missed {
+                // `latest` catches up the newest missed slot; `skip` leaves
+                // every missed slot in the collapsed skip row.
+                let latest = job.catch_up == jobs::CATCH_UP_LATEST;
+                let skipped = match (latest, m.earlier) {
+                    (true, earlier) => earlier,
+                    (false, Some((first, n))) => Some((first, n + 1)),
+                    (false, None) => Some((m.newest_ms, 1)),
+                };
+                if let (Some(runs), Some((first, n))) = (sched.runs(), skipped) {
+                    let (runs, job) = (runs.clone(), job.clone());
+                    let _ = tokio::task::spawn_blocking(move || runs.record_missed_while_off(&job, first, n)).await;
+                }
+                // FIRE_ONCE_NOW, before the first sleep, so the catch-up
+                // counts toward max_fires only when it was delivered.
+                if latest && sched.fire(&job, Slot::CatchUp(m.newest_ms)).await.outcome.is_some_and(|o| o.delivered()) {
+                    fires += 1;
+                }
+            }
             loop {
                 // Guard at top of loop: if fires was seeded at or above max_fires
                 // (e.g. a catch-up fire brought the persisted count to the cap),
@@ -176,14 +321,14 @@ impl CronScheduler {
                 // checked the same way (Phase 0, SPEC_AGENT_POLLING_AND_WAKEUP_
                 // HARDENING_2026_08_04.md) — a job created before max_age_secs
                 // existed has max_age_secs = None and is never expired by this.
-                if let Some(max) = job_max_fires {
+                if let Some(max) = job.max_fires {
                     if fires >= max {
-                        sched.disable_job(&job_id, "max_fires reached");
+                        sched.disable_job(&job.id, "max_fires reached");
                         break;
                     }
                 }
-                if is_expired_by_age(job_created_at, job_max_age_secs, Utc::now().timestamp()) {
-                    sched.disable_job(&job_id, "max_age_secs reached");
+                if is_expired_by_age(job.created_at, job.max_age_secs, Utc::now().timestamp()) {
+                    sched.disable_job(&job.id, "max_age_secs reached");
                     break;
                 }
                 let next = match schedule.upcoming(Utc).next() {
@@ -199,33 +344,48 @@ impl CronScheduler {
                 // land at/after expiry, and skip it (disable now, don't sleep)
                 // if so — the "hard expiry bound, regardless of fire count"
                 // guarantee has to hold at fire time, not just at loop-top time.
-                if is_expired_by_age(job_created_at, job_max_age_secs, next.timestamp()) {
-                    sched.disable_job(&job_id, "max_age_secs would be reached before the next scheduled fire");
+                if is_expired_by_age(job.created_at, job.max_age_secs, next.timestamp()) {
+                    sched.disable_job(&job.id, "max_age_secs would be reached before the next scheduled fire");
                     break;
                 }
                 let delay = (next - Utc::now()).to_std().unwrap_or_default();
                 tokio::time::sleep(delay).await;
-                sched
-                    .fire(&job_id, &job_prompt, &job_target, &job_target_uid, &job_created_by_uid)
-                    .await;
-                fires += 1;
+                // A pending fire may have been delivered meanwhile: count from
+                // the DB, so max_fires holds across both.
+                if let Some(n) = sched.persisted_fire_count(&job.id) {
+                    fires = fires.max(n);
+                }
+                if job.max_fires.is_some_and(|max| fires >= max) {
+                    sched.disable_job(&job.id, "max_fires reached");
+                    break;
+                }
+                if sched.fire(&job, Slot::Scheduled(next.timestamp_millis())).await.outcome.is_some_and(|o| o.delivered()) {
+                    fires += 1;
+                }
                 // Post-fire check: enforce max_fires. The top-of-loop guard
                 // handles the restart/seeded-at-cap case; this handles the
                 // normal live-run case.
-                if let Some(max) = job_max_fires {
+                if let Some(max) = job.max_fires {
                     if fires >= max {
-                        sched.disable_job(&job_id, "max_fires reached");
+                        sched.disable_job(&job.id, "max_fires reached");
                         break;
                     }
                 }
             }
         });
 
-        self.handles.lock().unwrap().insert(job.id.clone(), handle.abort_handle());
+        self.handles.lock().unwrap().insert(job_id, handle.abort_handle());
+    }
+
+    /// Whether a job has a live scheduled task.
+    #[cfg(test)]
+    pub(crate) fn is_scheduled(&self, id: &str) -> bool {
+        self.handles.lock().unwrap().contains_key(id)
     }
 
     /// Stop (abort) a job's scheduled task without removing it from the DB.
     pub fn cancel_job(&self, id: &str) {
+        self.aged_out.lock().unwrap().remove(id);
         if let Some(handle) = self.handles.lock().unwrap().remove(id) {
             handle.abort();
         }
@@ -238,6 +398,9 @@ impl CronScheduler {
     /// same three-step disable sequence.
     fn disable_job(&self, job_id: &str, reason: &str) {
         tracing::info!(id = job_id, reason, "cron: disabling job");
+        if reason.starts_with("max_age_secs") {
+            self.aged_out.lock().unwrap().insert(job_id.to_string());
+        }
         if let Some(store) = &self.shared_store {
             let _ = store.cron_set_enabled(job_id, false);
         }
@@ -245,7 +408,14 @@ impl CronScheduler {
         self.publish_changed();
     }
 
-    /// Fire a cron job: deliver the prompt and record the fire in DB.
+    /// Run a job now: a `manual` run through the same path as a scheduled
+    /// fire (§3.2), triggered by the operator or an agent uid.
+    pub(crate) async fn run_now(&self, job: &CronJob, triggered_by: &str) -> Fired {
+        self.fire(job, Slot::Manual { triggered_by: triggered_by.to_string() }).await
+    }
+
+    /// Fire a cron job: record the run, deliver the prompt, and record the
+    /// fire in DB when it was delivered.
     ///
     /// Identity M3 (spec §5.4): a job that captured its target's UID at
     /// creation fires BY UID — a job firing at 03:00 must never resolve a
@@ -259,66 +429,220 @@ impl CronScheduler {
     /// look forged (its key is on file under that name) and echo each fire
     /// into the creator's pane. A job with no captured creator UID fires as
     /// before, counted.
-    pub(crate) async fn fire(&self, id: &str, prompt: &str, target: &str, target_uid: &str, created_by_uid: &str) {
-        if created_by_uid.is_empty() {
+    ///
+    /// The run's id is the delivery's `request_id`, and the prompt ends with
+    /// a line naming it, so the agent can report the run's outcome.
+    pub(crate) async fn fire(&self, job: &CronJob, slot: Slot) -> Fired {
+        let id = job.id.as_str();
+        let (trigger, scheduled_for, by) = match &slot {
+            Slot::Scheduled(ms) => (jobs::TRIGGER_SCHEDULE, Some(*ms), jobs::BY_SCHEDULER.to_string()),
+            Slot::CatchUp(ms) => (jobs::TRIGGER_CATCH_UP, Some(*ms), jobs::BY_SCHEDULER.to_string()),
+            Slot::Manual { triggered_by } => (jobs::TRIGGER_MANUAL, None, triggered_by.clone()),
+        };
+        let run_id = match self.runs() {
+            Some(runs) => {
+                let (runs, owned) = (runs.clone(), job.clone());
+                let begun = tokio::task::spawn_blocking(move || runs.begin_cron(&owned, trigger, scheduled_for, &by))
+                    .await
+                    .unwrap_or(Begin::Unrecorded);
+                match begun {
+                    Begin::Run(run_id) => Some(run_id),
+                    Begin::SlotTaken => {
+                        tracing::debug!(id, ?slot, "cron: another scheduler has this slot");
+                        return Fired { run_id: None, outcome: None };
+                    }
+                    Begin::Unrecorded => None,
+                }
+            }
+            None => None,
+        };
+        let late_for = match slot {
+            Slot::CatchUp(ms) => Some(ms),
+            _ => None,
+        };
+        let delivery_started = agentmux_common::time::now_ms();
+        let Some(outcome) = self.deliver(job, run_id.as_deref(), late_for).await else {
+            if let (Some(runs), Some(run_id)) = (self.runs(), &run_id) {
+                let failed = FireOutcome::Failed { error: "no way to deliver".to_string() };
+                runs.record_delivery(run_id, job, &failed, false, delivery_started);
+            }
+            return Fired { run_id, outcome: None };
+        };
+        let scheduled = !matches!(slot, Slot::Manual { .. });
+        if let (Some(runs), Some(run_id)) = (self.runs(), &run_id) {
+            let (runs, run_id, job, o) = (runs.clone(), run_id.clone(), job.clone(), outcome.clone());
+            let _ = tokio::task::spawn_blocking(move || runs.record_delivery(&run_id, &job, &o, scheduled, delivery_started)).await;
+        }
+        if scheduled && outcome.delivered() {
+            self.record_fire(id);
+        }
+        self.publish_changed();
+        Fired { run_id, outcome: Some(outcome) }
+    }
+
+    /// Deliver `job`'s prompt as run `run_id` (its `request_id`, and the
+    /// brief line), and read the answer. `None` when there is no way to
+    /// deliver at all.
+    async fn deliver(&self, job: &CronJob, run_id: Option<&str>, late_for: Option<i64>) -> Option<FireOutcome> {
+        let id = job.id.as_str();
+        if job.created_by_uid.is_empty() {
             crate::backend::agent_resolve::record_uid_fallback("m4c.cron_fire_unattributed");
         }
-        let target_agent = fire_target(target, target_uid).to_string();
+        let target_agent = fire_target(&job.target, &job.target_uid).to_string();
+        let message = fire_message(&job.prompt, run_id, late_for);
+        let request_id = run_id.map(str::to_string);
         let body = match self.delivery.get() {
             Some(deliver) => {
                 let req = InjectionRequest {
                     target_agent,
-                    message: prompt.to_string(),
+                    message,
                     source_agent: Some("cron".to_string()),
+                    request_id,
                     ..Default::default()
                 };
-                Some(deliver(req, created_by_uid.to_string()).await)
+                Some(deliver(req, job.created_by_uid.clone()).await)
             }
             None => {
                 if self.local_url.is_empty() || self.auth_key.is_empty() {
                     tracing::warn!(id, "cron: no local_url/auth_key — skipping fire");
-                    return;
+                    return None;
                 }
                 crate::backend::agent_resolve::record_uid_fallback("m4c.cron_fire_http");
-                self.post_fire(id, target_agent, prompt).await
+                self.post_fire(id, target_agent, &message, request_id).await
             }
         };
-        if let Some(body) = body {
-            // Inject answers `success: false` when the target is not
-            // reachable — since M3 that includes a UID nobody is registered
-            // under. A fire that reached no one is a failure, and a firing
-            // job has nobody to tell but the log (§5.4).
-            if body.get("success").and_then(|v| v.as_bool()) == Some(false) {
-                tracing::warn!(
-                    id,
-                    target,
-                    target_uid,
-                    error = body.get("error").and_then(|v| v.as_str()).unwrap_or(""),
-                    "cron: fire was not delivered"
-                );
-            } else {
-                tracing::debug!(id, target, "cron: fired");
-            }
+        let outcome = fire_outcome(body.as_ref());
+        // Inject answers `success: false` when the target is not reachable —
+        // since M3 that includes a UID nobody is registered under. A fire
+        // that reached no one is a failure, and a firing job has nobody to
+        // tell but the log (§5.4) and the run ledger.
+        if outcome.delivered() {
+            tracing::debug!(id, target = %job.target, "cron: fired");
+        } else {
+            tracing::warn!(id, target = %job.target, target_uid = %job.target_uid, ?outcome, "cron: fire was not delivered");
         }
+        Some(outcome)
+    }
 
+    /// Whether `job` was disabled by this scheduler for its age bound and is
+    /// still inside it (`created_at + max_age_secs`).
+    fn within_age_bound(&self, job: &CronJob, now_ms: i64) -> bool {
+        self.aged_out.lock().unwrap().contains(&job.id)
+            && job.max_age_secs.is_some_and(|age| now_ms < job.created_at.saturating_add(age).saturating_mul(1000))
+    }
+
+    /// Disable a job as its own loop does at a limit (`reason`), for tests.
+    #[cfg(test)]
+    pub(crate) fn disable_for_test(&self, job_id: &str, reason: &str) {
+        self.disable_job(job_id, reason);
+    }
+
+    /// The job's `fire_count` in the DB.
+    fn persisted_fire_count(&self, id: &str) -> Option<i64> {
+        self.shared_store.as_ref()?.cron_get(id).ok().flatten().map(|j| j.fire_count)
+    }
+
+    /// After a fire the job's own loop didn't make (a pending fire), stop
+    /// that loop if the fire reached `max_fires`; `cron_record_fire` has
+    /// already disabled the job in the DB.
+    fn stop_at_max_fires(&self, id: &str) {
+        let at_max = self
+            .shared_store
+            .as_ref()
+            .and_then(|s| s.cron_get(id).ok().flatten())
+            .is_some_and(|j| j.max_fires.is_some_and(|max| j.fire_count >= max));
+        if at_max {
+            tracing::info!(id, "cron: a pending fire reached max_fires; stopping the job");
+            self.cancel_job(id);
+        }
+    }
+
+    fn record_fire(&self, id: &str) {
         if let Some(store) = &self.shared_store {
             let now = Utc::now().timestamp();
             if let Err(e) = store.cron_record_fire(id, now) {
                 tracing::warn!(id, error = %e, "cron: failed to record fire in DB");
             }
         }
-        self.publish_changed();
+    }
+
+    /// Deliver pending fires (catch-up `latest`) whose agent is back, now and
+    /// whenever an agent registers or every 30 s; expire the ones whose next
+    /// fire time passed or whose job is gone (§5.2).
+    fn spawn_pending_delivery(self: &Arc<Self>) {
+        if self.runs().is_none() {
+            return;
+        }
+        let sched = self.clone();
+        tokio::spawn(async move {
+            loop {
+                sched.deliver_pending().await;
+                tokio::select! {
+                    _ = jobs::pending_wake().notified() => {}
+                    _ = tokio::time::sleep(PENDING_SWEEP_EVERY) => {}
+                }
+            }
+        });
+    }
+
+    /// One pass over this channel's pending fires. Returns how many were
+    /// delivered.
+    pub(crate) async fn deliver_pending(&self) -> usize {
+        let Some(runs) = self.runs().cloned() else { return 0 };
+        let waiting = {
+            let runs = runs.clone();
+            tokio::task::spawn_blocking(move || runs.waiting_here()).await.unwrap_or_default()
+        };
+        let now = agentmux_common::time::now_ms();
+        let mut delivered = 0;
+        for run in waiting {
+            let job = self.shared_store.as_ref().and_then(|s| s.cron_get(&run.job_id).ok().flatten());
+            let expired = match (&job, run.scheduled_for_ms) {
+                (Some(job), Some(slot)) => {
+                    // A pause ends it at once; an age bound only once passed;
+                    // max_fires reached means it may not fire at all.
+                    let stopped = !job.enabled && !self.within_age_bound(job, now);
+                    let at_max = job.max_fires.is_some_and(|max| job.fire_count >= max);
+                    stopped || at_max || jobs::next_slot_after(&job.expression, slot).is_none_or(|next| next <= now)
+                }
+                _ => true,
+            };
+            if expired {
+                runs.expire_pending(&run.id);
+                continue;
+            }
+            let Some(job) = job else { continue };
+            let back = match (self.presence.get(), job.target_uid.is_empty()) {
+                (Some(present), false) => present(&job.target_uid),
+                // A job by name, or no way to tell: try it.
+                _ => true,
+            };
+            if !back {
+                continue;
+            }
+            let delivery_started = agentmux_common::time::now_ms();
+            let Some(outcome) = self.deliver(&job, Some(&run.id), run.scheduled_for_ms).await else { continue };
+            runs.record_pending_delivery(&run, &outcome, delivery_started);
+            if outcome.delivered() {
+                self.record_fire(&job.id);
+                self.stop_at_max_fires(&job.id);
+                delivered += 1;
+                self.publish_changed();
+            }
+        }
+        delivered
     }
 
     /// The pre-M4c-3 fire: POST to the local inject route with the instance
     /// key. Only until [`Self::install_delivery`] runs. `None` when the POST
     /// itself failed (logged here).
-    async fn post_fire(&self, id: &str, target_agent: String, prompt: &str) -> Option<serde_json::Value> {
+    async fn post_fire(&self, id: &str, target_agent: String, prompt: &str, request_id: Option<String>) -> Option<serde_json::Value> {
         let url = format!("{}/agentmux/reactive/inject", self.local_url.trim_end_matches('/'));
         let req = InjectRequest {
             target_agent,
             message: prompt.to_string(),
             source_agent: Some("cron".to_string()),
+            request_id,
             ..Default::default()
         };
         match self.http_client.post(&url).header(AUTH_KEY_HEADER, &self.auth_key).json(&req).send().await {
@@ -344,10 +668,10 @@ impl CronScheduler {
 /// 09:05 yields a next-after-last of TOMORROW 09:00, which is NOT < now, so
 /// no spurious catch-up fires.
 ///
-/// Jobs that have never fired are skipped (they'll fire at the next naturally
-/// scheduled time without any missed-window concept).
+/// A job that has never fired counts from its creation: a slot after it was
+/// created and already past was missed too (jobs spec §5.2).
 fn should_catchup(job: &CronJob, now_dt: DateTime<Utc>) -> bool {
-    let Some(last) = job.last_fired else { return false; };
+    let last = catch_up_base_secs(job);
     let last_dt = match DateTime::from_timestamp(last, 0) {
         Some(dt) => dt,
         None => return false,
@@ -360,6 +684,12 @@ fn should_catchup(job: &CronJob, now_dt: DateTime<Utc>) -> bool {
         Some(next_after_last) => next_after_last < now_dt,
         None => false,
     }
+}
+
+/// Where missed slots are counted from: the last fire, or, for a job that
+/// never fired, its creation.
+fn catch_up_base_secs(job: &CronJob) -> i64 {
+    job.last_fired.unwrap_or(job.created_at)
 }
 
 /// True when a job's hard age-expiry bound (`max_age_secs`, seconds since
@@ -417,6 +747,28 @@ mod tests {
     }
 }
 
+/// A job for tests: every minute, enabled, never fired, catch-up `skip`.
+#[cfg(test)]
+pub(crate) fn test_job(id: &str, prompt: &str, target: &str, target_uid: &str, created_by_uid: &str) -> CronJob {
+    CronJob {
+        id: id.to_string(),
+        name: format!("{id} name"),
+        expression: "* * * * *".to_string(),
+        prompt: prompt.to_string(),
+        target: target.to_string(),
+        target_uid: target_uid.to_string(),
+        created_by: "creator".to_string(),
+        created_by_uid: created_by_uid.to_string(),
+        enabled: true,
+        last_fired: None,
+        fire_count: 0,
+        max_fires: None,
+        created_at: 0,
+        max_age_secs: None,
+        catch_up: jobs::CATCH_UP_SKIP.to_string(),
+    }
+}
+
 /// What a cron fire addresses: the UID when one was captured at creation,
 /// else the name (counted, spec §9.2 — `cron.fire_by_name` reaching zero is
 /// part of M5's exit criterion).
@@ -466,13 +818,13 @@ mod identity_m4c3_tests {
             Box::pin(async { serde_json::json!({"success": true}) })
         }));
 
-        sched.fire("job-1", "check in", "AgentY", "uid-target", "uid-creator").await;
+        sched.fire(&test_job("job-1", "check in", "AgentY", "uid-target", "uid-creator"), Slot::Scheduled(0)).await;
 
         let seen = seen.lock().unwrap();
         assert_eq!(seen.len(), 1);
         let (req, creator_uid) = &seen[0];
         assert_eq!(req.target_agent, "uid-target");
-        assert_eq!(req.message, "check in");
+        assert_eq!(req.message, "check in", "no ledger installed: no run line");
         assert_eq!(req.source_agent.as_deref(), Some("cron"), "the sender name stays cron");
         assert_eq!(creator_uid, "uid-creator");
         assert_eq!(req.audit_source_uid, "", "the delivery path sets it, on this instance only");

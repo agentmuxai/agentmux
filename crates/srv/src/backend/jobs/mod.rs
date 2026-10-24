@@ -1,0 +1,503 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+//! Jobs: things that run by themselves, and the one run ledger under them
+//! (docs/specs/SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §3).
+//!
+//! [`RunLedger`] writes `db_job_runs` rows (`storage::job_runs`) for cron
+//! fires and Drone runs, follows a delivered fire's turn to its end
+//! ([`follower`]), and on startup closes the runs a restart interrupted.
+//! Cron fires are never held for a stopped agent: an undelivered fire is
+//! `missed`, or, under catch-up `latest`, the job's one `pending` fire (§3.2,
+//! §5.2), which the scheduler delivers when the agent is back.
+
+pub mod follower;
+
+use std::sync::Arc;
+
+use agentmux_common::time::now_ms;
+use serde_json::json;
+
+use crate::backend::cron::{FireOutcome, MissReason};
+use crate::backend::mps::Broker;
+use crate::backend::storage::job_runs::{infra, reason, state, JobRun, RunCost};
+use crate::backend::storage::store::Store;
+use crate::drone::storage::DroneStore;
+
+/// Job kinds in `job_source` (§3.1).
+pub const SOURCE_CRON: &str = "cron";
+pub const SOURCE_DRONE: &str = "drone";
+
+/// Run triggers in `trigger` (§3.1).
+pub const TRIGGER_SCHEDULE: &str = "schedule";
+pub const TRIGGER_CATCH_UP: &str = "catch_up";
+pub const TRIGGER_MANUAL: &str = "manual";
+
+/// `triggered_by` for runs the scheduler starts, and for the operator.
+pub const BY_SCHEDULER: &str = "scheduler";
+pub const BY_OPERATOR: &str = "operator";
+
+/// A cron job's catch-up policy (§5.2): what an undelivered fire leaves.
+pub const CATCH_UP_SKIP: &str = "skip";
+pub const CATCH_UP_LATEST: &str = "latest";
+
+/// The status a Drone run left `running` by a restart gets in
+/// `db_drone_runs` (§3.2). An open string there, like every other status.
+pub const DRONE_STATUS_INTERRUPTED: &str = "interrupted";
+
+/// The channel and version that write rows here, `<channel>@<version>`.
+/// Startup cleanup and the pending-fire delivery only touch rows their own
+/// channel wrote: the ledger is shared by every instance on the computer.
+pub fn recorded_by() -> String {
+    format!("{}@{}", crate::backend::reactive::registry::local_channel_id(), env!("CARGO_PKG_VERSION"))
+}
+
+/// Woken whenever an agent registers (`reactive::registered`), so a pending
+/// fire reaches its agent as soon as it is back.
+pub fn pending_wake() -> &'static tokio::sync::Notify {
+    static WAKE: std::sync::LazyLock<tokio::sync::Notify> = std::sync::LazyLock::new(tokio::sync::Notify::new);
+    &WAKE
+}
+
+/// The line a fire's prompt ends with: the run id, and how to report (§3.2).
+/// A late fire (a catch-up, a pending fire delivered when its agent came
+/// back) also says which slot it was for and when it started, so the agent
+/// can tell its work is late. Plain text: srv rewrites `[AgentMux]` markers
+/// in anything forwarded.
+pub fn brief_line(run_id: &str, late_for_ms: Option<i64>, now_ms: i64) -> String {
+    let late = late_for_ms
+        .and_then(|slot| {
+            let slot = chrono::DateTime::from_timestamp_millis(slot)?;
+            let now = chrono::DateTime::from_timestamp_millis(now_ms)?;
+            Some(format!(
+                " It was due {} and started {} (late).",
+                slot.format("%Y-%m-%d %H:%M UTC"),
+                now.format("%Y-%m-%d %H:%M UTC")
+            ))
+        })
+        .unwrap_or_default();
+    format!(
+        "(Scheduled run {run_id}.{late} When it is done, say how it went: Schedule action report with run_id \
+         \"{run_id}\", outcome ok, findings or failed, and a one-line summary.)"
+    )
+}
+
+/// What [`RunLedger::pane`] reads from a pane's meta.
+#[derive(Debug, Default)]
+struct Pane {
+    /// The block is in this channel's store.
+    found: bool,
+    agent_uid: String,
+    account: String,
+    provider: String,
+}
+
+/// Whether an agent is registered in `block_id` on this instance.
+fn registered_here(block_id: &str) -> bool {
+    crate::backend::reactive::get_global_handler().list_agents().iter().any(|r| r.block_id == block_id)
+}
+
+/// The UID the agent registered in `block_id` gave, if any.
+fn registered_uid(block_id: &str) -> Option<String> {
+    if block_id.is_empty() {
+        return None;
+    }
+    crate::backend::reactive::get_global_handler()
+        .list_agents()
+        .into_iter()
+        .find(|r| r.block_id == block_id)
+        .and_then(|r| r.uid)
+        .filter(|u| !u.is_empty())
+}
+
+/// What inserting a cron slot's row answered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Begin {
+    /// The slot is ours; this is its run id.
+    Run(String),
+    /// Another scheduler sharing the job has this slot: don't fire.
+    SlotTaken,
+    /// The row couldn't be written (logged): fire anyway, unrecorded.
+    Unrecorded,
+}
+
+/// The run ledger, shared by the cron scheduler, the Drone handlers and the
+/// Schedule routes.
+pub struct RunLedger {
+    store: Arc<Store>,
+    /// The channel's object store: a pane's meta (its account) and agent
+    /// definitions. `None` in tests that don't need them.
+    mstore: Option<Arc<Store>>,
+    recorded_by: String,
+    follower: follower::Follower,
+}
+
+impl RunLedger {
+    /// A ledger over `store` (the identity store), following turns on
+    /// `broker`. Needs a tokio runtime (the follower's task).
+    pub fn new(store: Arc<Store>, mstore: Option<Arc<Store>>, broker: Arc<Broker>) -> Arc<Self> {
+        if let Err(e) = store.job_runs_ensure_schema() {
+            tracing::warn!(error = %e, "jobs: couldn't create the run ledger table");
+        }
+        Arc::new_cyclic(|weak: &std::sync::Weak<RunLedger>| RunLedger {
+            store: store.clone(),
+            mstore,
+            recorded_by: recorded_by(),
+            follower: follower::Follower::start(weak.clone(), broker),
+        })
+    }
+
+    pub fn store(&self) -> &Arc<Store> {
+        &self.store
+    }
+
+    fn row(&self, job_id: &str, job_source: &str, job_name: &str, trigger: &str, now: i64) -> JobRun {
+        let mut run =
+            JobRun::new(&uuid::Uuid::new_v4().to_string(), job_id, job_source, job_name, trigger, state::SCHEDULED, now);
+        run.recorded_by = self.recorded_by.clone();
+        run
+    }
+
+    /// Insert the `scheduled` row of a cron fire before firing it. For a
+    /// slot, that insert is the lease (§3.1): a second scheduler sharing
+    /// the job finds the slot taken.
+    pub fn begin_cron(
+        &self,
+        job: &crate::backend::storage::cron::CronJob,
+        trigger: &str,
+        scheduled_for_ms: Option<i64>,
+        triggered_by: &str,
+    ) -> Begin {
+        let mut run = self.row(&job.id, SOURCE_CRON, &job.name, trigger, now_ms());
+        run.scheduled_for_ms = scheduled_for_ms;
+        run.triggered_by = triggered_by.to_string();
+        run.target_agent_uid = job.target_uid.clone();
+        match self.store.job_run_insert(&run) {
+            Ok(true) => Begin::Run(run.id),
+            Ok(false) => Begin::SlotTaken,
+            Err(e) => {
+                tracing::warn!(job_id = %job.id, error = %e, "jobs: couldn't record a cron run");
+                Begin::Unrecorded
+            }
+        }
+    }
+
+    /// Record what a cron fire's delivery decided for run `run_id` of
+    /// `job`. `delivery_started_ms` is when the delivery began: delivery can
+    /// wait for the turn it starts, so that turn may begin, or even end,
+    /// before the answer. A scheduled fire also ends the job's older pending
+    /// fire: it is superseded when this one is pending in its place, else
+    /// expired (its next fire time came).
+    pub fn record_delivery(
+        &self,
+        run_id: &str,
+        job: &crate::backend::storage::cron::CronJob,
+        outcome: &FireOutcome,
+        scheduled: bool,
+        delivery_started_ms: i64,
+    ) {
+        let now = now_ms();
+        let latest = job.catch_up == CATCH_UP_LATEST;
+        let result = match outcome {
+            FireOutcome::Delivered { block_id } => {
+                self.mark_running(run_id, &job.target_uid, block_id.as_deref().unwrap_or(""), delivery_started_ms);
+                Ok(())
+            }
+            FireOutcome::Missed { reason: MissReason::TargetStopped } => {
+                let st = if latest && scheduled { state::PENDING } else { state::MISSED };
+                self.store.job_run_set_undelivered(run_id, st, reason::TARGET_STOPPED, now).map(drop)
+            }
+            FireOutcome::Missed { reason: MissReason::TargetMissing } => {
+                self.store.job_run_skip(run_id, reason::TARGET_MISSING, 1, now).map(drop)
+            }
+            FireOutcome::Failed { error } => self.store.job_run_finish(run_id, infra::ERROR, None, error, now).map(drop),
+        };
+        if let Err(e) = result {
+            tracing::warn!(run_id, error = %e, "jobs: couldn't record a fire's delivery");
+        }
+        if scheduled {
+            let now_pending = self.store.job_run_get(run_id).ok().flatten().is_some_and(|r| r.state == state::PENDING && r.ended_at_ms.is_none());
+            let why = if now_pending { reason::SUPERSEDED } else { reason::EXPIRED };
+            if let Err(e) = self.store.job_runs_end_pending(&job.id, run_id, why, now) {
+                tracing::warn!(job_id = %job.id, error = %e, "jobs: couldn't end an older pending fire");
+            }
+        }
+    }
+
+    /// A pending fire was delivered, or failed for good, when its agent came
+    /// back (`CronScheduler::deliver_pending`, which expires it first once
+    /// its next fire time has passed). Still missing, or a failure the
+    /// held-jekt replay also retries (the agent still starting, a rate
+    /// limit, a full queue, not signed in yet), keeps it pending for the
+    /// next wake or sweep. `delivery_started_ms` as for [`Self::record_delivery`].
+    pub fn record_pending_delivery(&self, run: &JobRun, outcome: &FireOutcome, delivery_started_ms: i64) {
+        let now = now_ms();
+        let result = match outcome {
+            FireOutcome::Delivered { block_id } => {
+                self.mark_running(&run.id, &run.target_agent_uid, block_id.as_deref().unwrap_or(""), delivery_started_ms);
+                Ok(())
+            }
+            FireOutcome::Missed { .. } => Ok(()),
+            FireOutcome::Failed { error } if retry_later(error) => Ok(()),
+            FireOutcome::Failed { error } => self.store.job_run_finish(&run.id, infra::ERROR, None, error, now).map(drop),
+        };
+        if let Err(e) = result {
+            tracing::warn!(run_id = %run.id, error = %e, "jobs: couldn't record a pending fire's delivery");
+        }
+    }
+
+    /// End a pending fire whose next fire time passed, or whose job is gone.
+    pub fn expire_pending(&self, run_id: &str) {
+        if let Err(e) = self.store.job_run_end_one_pending(run_id, reason::EXPIRED, now_ms()) {
+            tracing::warn!(run_id, error = %e, "jobs: couldn't expire a pending fire");
+        }
+    }
+
+    /// This channel's pending fires still waiting for their agent.
+    pub fn waiting_here(&self) -> Vec<JobRun> {
+        let channel = crate::backend::reactive::registry::local_channel_id();
+        self.store
+            .job_runs_open_recorded_by(&channel, SOURCE_CRON, &[state::PENDING])
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|r| r.ended_at_ms.is_none())
+            .collect()
+    }
+
+    /// A run reached its agent: running from now, with the pane's account,
+    /// and its turn followed to the end. `target_agent_uid` becomes the UID
+    /// of the agent whose pane took it (a job created by name records none),
+    /// so that agent can report the run.
+    fn mark_running(&self, run_id: &str, target_uid: &str, block_id: &str, now: i64) {
+        let pane = self.pane(block_id);
+        let receiver = [pane.agent_uid.as_str(), registered_uid(block_id).as_deref().unwrap_or(""), target_uid]
+            .into_iter()
+            .find(|u| !u.is_empty())
+            .unwrap_or("")
+            .to_string();
+        let (account, provider) = (pane.account, pane.provider);
+        if let Err(e) = self.store.job_run_mark_running(run_id, &receiver, block_id, &account, &provider, now) {
+            tracing::warn!(run_id, error = %e, "jobs: couldn't mark a run running");
+            return;
+        }
+        if block_id.is_empty() {
+            // Delivered with no pane to follow (a relay answer names none):
+            // nothing would ever close it, and a restart would call it
+            // interrupted. It ran as far as AgentMux can tell (#5390).
+            self.turn_finished(run_id, infra::OK, None, "delivered; AgentMux can't follow this run's turn");
+            return;
+        }
+        if !(self.mstore.is_none() || pane.found || registered_here(block_id)) {
+            // The pane is on another instance (another channel took it): its
+            // turn events never reach this broker, so close it now rather
+            // than wait out the no-turn timeout. No transcript link: it
+            // wouldn't resolve here.
+            self.turn_finished(
+                run_id,
+                infra::OK,
+                None,
+                "delivered to an agent in another channel; AgentMux can't follow its turn from here",
+            );
+            return;
+        }
+        let _ = self.store.job_run_add_links(run_id, &json!({ "transcript": { "block_id": block_id } }));
+        self.follower.arm(block_id, run_id, now);
+    }
+
+    /// Who a pane belongs to (its `agentId`, the agent's UID), the account
+    /// it runs on (`agent:run_account`) and its provider.
+    fn pane(&self, block_id: &str) -> Pane {
+        let Some(mstore) = &self.mstore else { return Pane::default() };
+        if block_id.is_empty() {
+            return Pane::default();
+        }
+        let Ok(Some(block)) = mstore.get::<crate::backend::obj::Block>(block_id) else {
+            return Pane::default();
+        };
+        let account = crate::backend::obj::meta_get_string(
+            &block.meta,
+            crate::server::app_api::agent_spawn::RUN_ACCOUNT_META_KEY,
+            "",
+        );
+        let agent_uid = crate::backend::obj::meta_get_string(&block.meta, "agentId", "");
+        let provider = match mstore.agent_def_get(&agent_uid) {
+            Ok(Some(def)) if !agent_uid.is_empty() => crate::backend::providers::resolve_provider_alias(&def.provider).to_string(),
+            _ => String::new(),
+        };
+        Pane { found: true, agent_uid, account, provider }
+    }
+
+    /// Write the collapsed skip for slots missed while AgentMux was off
+    /// (`app_not_running`, §3.2): `count` slots from `first_slot_ms`.
+    pub fn record_missed_while_off(&self, job: &crate::backend::storage::cron::CronJob, first_slot_ms: i64, count: i64) {
+        if count <= 0 {
+            return;
+        }
+        let Begin::Run(id) = self.begin_cron(job, TRIGGER_SCHEDULE, Some(first_slot_ms), BY_SCHEDULER) else {
+            return;
+        };
+        if let Err(e) = self.store.job_run_skip(&id, reason::APP_NOT_RUNNING, count, now_ms()) {
+            tracing::warn!(job_id = %job.id, error = %e, "jobs: couldn't record missed slots");
+        }
+    }
+
+    /// The followed turn ended (or never showed up).
+    pub(crate) fn turn_finished(&self, run_id: &str, infra_status: &str, cost: Option<RunCost>, summary: &str) {
+        if let Err(e) = self.store.job_run_finish(run_id, infra_status, cost, summary, now_ms()) {
+            tracing::warn!(run_id, error = %e, "jobs: couldn't close a run");
+        }
+    }
+
+    pub(crate) fn turn_bound(&self, run_id: &str, turn_id: i64, partial: bool) {
+        if let Err(e) = self.store.job_run_bind_turn(run_id, turn_id, partial) {
+            tracing::warn!(run_id, error = %e, "jobs: couldn't record a run's turn");
+        }
+    }
+
+    /// A Drone run started: its `manual` row, running, linked to the run.
+    pub fn drone_started(&self, drone_run_id: &str, drone_id: &str, drone_name: &str, started_at_ms: i64) -> Option<String> {
+        let mut run = self.row(drone_id, SOURCE_DRONE, drone_name, TRIGGER_MANUAL, started_at_ms);
+        run.state = state::RUNNING.to_string();
+        run.triggered_by = BY_OPERATOR.to_string();
+        run.links = json!({
+            "drone_run_id": drone_run_id,
+            "channel": crate::backend::reactive::registry::local_channel_id(),
+        });
+        match self.store.job_run_insert(&run) {
+            Ok(true) => Some(run.id),
+            Ok(false) => None,
+            Err(e) => {
+                tracing::warn!(drone_id, error = %e, "jobs: couldn't record a Drone run");
+                None
+            }
+        }
+    }
+
+    /// A Drone run ended: `ok` and the summed cost of its Agent blocks, or
+    /// `error` with its message.
+    pub fn drone_finished(
+        &self,
+        run_id: &str,
+        ok: bool,
+        block_states: &std::collections::HashMap<String, crate::drone::types::BlockState>,
+        error: &str,
+    ) {
+        let infra_status = if ok { infra::OK } else { infra::ERROR };
+        self.turn_finished(run_id, infra_status, Some(drone_cost(block_states)), error);
+    }
+
+    /// After a restart: close what this channel left open (§3.2). Cron runs
+    /// still `scheduled` or `running`, and Drone runs still `running`, were
+    /// interrupted, in the ledger and in `db_drone_runs`. Pending fires stay:
+    /// they wait for their agent across a restart. Call before the scheduler
+    /// starts.
+    pub fn recover_after_restart(&self) -> usize {
+        let channel = crate::backend::reactive::registry::local_channel_id();
+        let now = now_ms();
+        let open = |source: &str, states: &[&str]| {
+            self.store.job_runs_open_recorded_by(&channel, source, states).unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "jobs: couldn't read open runs");
+                Vec::new()
+            })
+        };
+        let mut closed = 0;
+        let stale = open(SOURCE_CRON, &[state::SCHEDULED, state::RUNNING]).into_iter().chain(open(SOURCE_DRONE, &[state::RUNNING]));
+        for run in stale {
+            if self.store.job_run_finish(&run.id, infra::INTERRUPTED, None, "AgentMux restarted during this run", now).unwrap_or(false) {
+                closed += 1;
+            }
+        }
+        if let Some(mstore) = &self.mstore {
+            match mstore.drone_runs_mark_interrupted(DRONE_STATUS_INTERRUPTED, now) {
+                Ok(n) if n > 0 => tracing::info!(count = n, "jobs: Drone runs interrupted by the restart marked"),
+                Ok(_) => {}
+                Err(e) => tracing::warn!(error = %e, "jobs: couldn't mark interrupted Drone runs"),
+            }
+        }
+        if closed > 0 {
+            tracing::info!(count = closed, "jobs: closed runs left open by the restart");
+        }
+        closed
+    }
+}
+
+/// Whether a pending fire's failed delivery is retried at the next wake or
+/// sweep rather than closing the run: the same classification as the
+/// held-jekt replay (`server::jekt_held`), plus an account out of quota
+/// (`HoldReason::Limited`), which clears at its reset.
+fn retry_later(error: &str) -> bool {
+    crate::backend::reactive::is_transient_delivery_error(error)
+        || crate::backend::reactive::is_spawn_gate_refusal(error)
+        || error.contains("out of quota")
+        || error.contains("usage limit")
+}
+
+/// The summed `cost_usd` of a Drone run's blocks: only Agent blocks report
+/// one, in their output (`drone/executor/blocks/agent.rs`). Known only when
+/// at least one block reported a cost.
+pub fn drone_cost(block_states: &std::collections::HashMap<String, crate::drone::types::BlockState>) -> RunCost {
+    let mut cost = RunCost::default();
+    for b in block_states.values() {
+        let Some(out) = &b.output else { continue };
+        if let Some(c) = out.get("cost_usd").and_then(|v| v.as_f64()) {
+            cost.cost_usd += c;
+            cost.cost_known = true;
+        }
+        if let Some(t) = out.pointer("/tokens/output").and_then(|v| v.as_i64()) {
+            cost.output_tokens += t;
+        }
+    }
+    cost
+}
+
+/// Missed cron slots after `base_ms` and before `now_ms`: the newest, and
+/// the earlier ones as `(first, count)`. The newest is the schedule's last
+/// occurrence before now, found directly, so it is right after any
+/// downtime; only the count of earlier ones stops at `cap`, so a one-minute
+/// job off for a year costs bounded work.
+pub fn missed_slots(expression: &str, base_ms: i64, now_ms: i64, cap: usize) -> Option<(i64, Option<(i64, i64)>)> {
+    use std::str::FromStr;
+    let schedule = cron::Schedule::from_str(&format!("0 {expression}")).ok()?;
+    let now = chrono::DateTime::from_timestamp_millis(now_ms)?;
+    let newest = schedule.after(&now).next_back()?.timestamp_millis();
+    if newest <= base_ms || newest >= now_ms {
+        return None;
+    }
+    let base = chrono::DateTime::from_timestamp_millis(base_ms)?;
+    let mut first = None;
+    let mut count: i64 = 0;
+    for t in schedule.after(&base).take(cap) {
+        let ms = t.timestamp_millis();
+        if ms >= newest {
+            break;
+        }
+        first.get_or_insert(ms);
+        count += 1;
+    }
+    Some((newest, first.map(|f| (f, count))))
+}
+
+/// Whether the agent with `uid` is registered by another channel's
+/// AgentMux on this computer and that process is alive: the cross-channel
+/// tier the inject path forwards to (Tier 2b, the host-global shared
+/// registry). A pending fire whose agent lives there is delivered through
+/// it, rather than expiring here unseen.
+pub fn registered_in_another_channel(shared_dir: &std::path::Path, uid: &str, channel: &str) -> bool {
+    !uid.is_empty()
+        && crate::backend::reactive::registry::list_all_shared(shared_dir)
+            .iter()
+            .any(|e| e.uid == uid && e.channel != channel && crate::backend::reactive::registry::pid_alive(e.pid))
+}
+
+/// The job's next fire time after `slot_ms`: when a pending fire for that
+/// slot expires (§5.2).
+pub fn next_slot_after(expression: &str, slot_ms: i64) -> Option<i64> {
+    use std::str::FromStr;
+    let schedule = cron::Schedule::from_str(&format!("0 {expression}")).ok()?;
+    let base = chrono::DateTime::from_timestamp_millis(slot_ms)?;
+    schedule.after(&base).next().map(|t| t.timestamp_millis())
+}
+
+#[cfg(test)]
+#[path = "tests.rs"]
+mod tests;

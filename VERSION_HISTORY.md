@@ -1,5 +1,31 @@
 # AgentMux Version History
 
+## 0.59.41 — 2026-10-24
+
+- Settings › Agents finds forks with an outdated id again: agents made from a template were taken for forks whose parent is missing, so the update offered nothing (Loap #2, Loap #3 and Naki #2 get loap-2, loap-3 and naki-2)
+- Settings › Agents no longer refuses to update agent ids because of a stale srv.lock: a lock whose process id now belongs to another program isn't taken for an older AgentMux running
+- A Kanban task addressed to an agent by the form of its name agents sign with ("Loap-3" for "Loap #3"), or to an agent running in another AgentMux on the same computer, now reaches that agent; filing a task for a name no agent has is refused instead of creating a task nobody can take.
+- A floating pane's resize edges are easier to grab: the band is 12 px on the sides and bottom (8 px before), the corners are larger squares, and the resize cursor shows even over a button in the band.
+- A message sent to an agent by the form of its name agents sign with ("Loap-3" for "Loap #3") from another AgentMux on the same computer is now delivered there directly, instead of going through the cloud relay.
+- The host log no longer fills with window drag regions: they were logged in full twice a second, 97% of the log (about 95 MB in four hours); now a count at debug level
+- An agent that stops another agent now closes its tab, the same as closing it yourself: Stop agents ends the agent and removes only its tab, after the same 15-second window. Stop pane no longer closes a pane that holds an agent. The reason an agent gives for stopping another is cleaned before you see it, and left out of the notification.
+- A new agent never gets a slug another agent already holds in any channel or version on this computer, and Settings lists agents that already share one with a proposed new id
+- The Swarm lists working agents first, newest to start working on top, and the rest by most recent activity. It never moves under your pointer or while focus is in a row: a change waits until you let go, then rows slide into place.
+- Agents can have a seat (role, lead and area), set by the operator; MuxAPI's Agents list and the LAN agent list show each agent's seat
+- chore(build-slot): task, npm, npx and docker builds wait for the host build slot like cargo does
+- When the person takes over a browser pane an agent opened, the agent's next refusal now says so and how long ago, instead of a generic message that also fits a restart, and AgentMux logs why the agent lost the pane.
+- Warden ▸ History ▸ Storage can give back the disk space pane-history compression freed: one click, and the shared store is rewritten at the next start (about 12 GB on a store compressed to a quarter of its size); after that it gives freed space back by itself
+- An agent whose account is out of quota or whose sign-in was refused now reports the state limited or signed_out (with when the limit resets, when the provider says) in Agents conversations and workers, and the Supervisor pauses it instead of asking its judge. The monthly spend limit is now recognized as a usage limit.
+- Set an agent's seat (role, qualifier, lead, area) from its Stash drawer's new Seat tab or My Agents' "Seat…", import a roster of seats, and see each agent's seat on its My Agents tile and in its pane tab's tooltip.
+- fix(agents): ACP and MSP agents get the tool dirs first on PATH, so the build-slot shims reach them
+- The Kanban's columns follow a feature from request to shipped: Backlog, In Research, Spec'd, In progress, Needs you, Review (the PR in review), Merged and Released. A build shows its spec's state, a spec shows the build it unlocks, and AgentMux notices when a task's PR merges and when a release ships it.
+- Window settings and the startup settings.json now use the same file srv reads: an AGENTMUX_HOME_OVERRIDE instance no longer reads the real home's settings, and on stable the file the app creates is the one that takes effect.
+- A floating pane keeps its resize edge where its content has buttons at the window's edge, such as a floating Hangar's Places list; only the pane header's buttons win over the edge.
+- Each Kanban column has its own colour, each card its agent's colour on its left edge, and in a narrow Warden the board is one list with one scrollbar, Needs you first, Merged and Released folded.
+- feat(build-slot): the lock records each run's wait and hold, and 'build-slot.sh history' summarises them
+- Claude agents now compact their context at 600K tokens instead of near a full 1M window, set by the new Settings > Advanced > Compact agents at (agent:compactat; 0 keeps Claude Code's own). AgentMux writes it into each Claude config it prepares and leaves a value a person set alone.
+- On Linux, a floating pane opened while no pre-warmed window was ready now appears; before, it loaded but was never shown.
+
 ## 0.59.40 — 2026-10-23
 
 - The Vault imports a password-protected Bitwarden export, asking for the password it was protected with

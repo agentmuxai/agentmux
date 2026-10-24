@@ -235,6 +235,26 @@ pub struct Request {
     pub body: Option<String>,
     /// The agent's session summary (`term:ambient_summary`), sanitized.
     pub summary: Option<String>,
+    /// For `ShutdownPending`: when the window ends and what happens then.
+    pub shutdown: Option<ShutdownInfo>,
+}
+
+/// What a pending shutdown's notification needs beyond the agent's name: it
+/// says what will happen, counts down, and offers Keep running
+/// (docs/specs/SPEC_STOP_AN_AGENT_ONE_WAY_AND_SHUTDOWN_TOAST_2026_10_23.md §3.8).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShutdownInfo {
+    /// Epoch ms the user's window ends.
+    pub deadline_ms: i64,
+    /// `PendingView::effect`: `stop`, `close_tab` or `close_pane`.
+    pub effect: &'static str,
+    /// The agent's session is running (the button says "Keep running"), not
+    /// already stopped ("Keep open").
+    pub running: bool,
+    /// The request this notification is about. Kept with the live notification
+    /// so its Keep running button can only cancel this request, never a later
+    /// one for the same block (#5397).
+    pub request_id: String,
 }
 
 #[derive(Clone, Debug)]
@@ -302,6 +322,26 @@ pub struct TrayState {
     pub paused_until_ms: i64,
 }
 
+/// A button on a toast. `id` is one of a closed set (`keep`); `label` is one of
+/// two app strings.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/", rename = "NotifyAction")]
+pub struct NotifyAction {
+    pub id: String,
+    pub label: String,
+}
+
+/// What a presenter needs to tick a toast's countdown without asking srv again:
+/// time left now (relative, so clock skew never matters) and the title with
+/// `{n}` where the whole seconds go.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/", rename = "NotifyCountdown")]
+pub struct Countdown {
+    #[ts(type = "number")]
+    pub remaining_ms: i64,
+    pub title_template: String,
+}
+
 /// The payload Presenters render. Every string here is app-controlled or
 /// router-sanitized. Exported to TS as `OsNotification` so it can't shadow the
 /// DOM's global `Notification`.
@@ -320,6 +360,15 @@ pub struct Notification {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub summary: Option<String>,
+    /// Buttons the toast offers. App-controlled ids and labels, never text
+    /// from an agent. Absent for every kind but a pending shutdown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub actions: Option<Vec<NotifyAction>>,
+    /// A live countdown the presenter ticks, where the OS can show one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub countdown: Option<Countdown>,
     /// Stable per group: OS toast replace/remove key (≤16 chars, Win10-safe).
     pub tag: String,
     #[ts(type = "number")]
@@ -336,6 +385,11 @@ pub enum Action {
 #[derive(Clone, Debug)]
 struct Live {
     notification: Notification,
+    /// For a pending shutdown: the request it belongs to (`ShutdownInfo`), and
+    /// how much its effect does (`effect_rank`), so a stale emission can't
+    /// replace a stronger one.
+    request_id: Option<String>,
+    effect_rank: u8,
     due_at_ms: i64,
     shown: bool,
     /// Replaces a toast of the same group that was already on screen — it
@@ -377,6 +431,43 @@ pub fn title_for(kind: NotifyKind, agent_name: &str) -> String {
         NotifyKind::CloudSignedOut => "AgentMux is signed out of MuxBus".to_string(),
         NotifyKind::AccountUnavailable => "An account can't run your agents".to_string(),
     }
+}
+
+/// A pending shutdown's title with `{n}` for the seconds left
+/// (spec §3.8): "Closing QTimer in {n} s". The name arrives pre-sanitized.
+pub fn shutdown_title_template(effect: &str, agent_name: &str) -> String {
+    let verb = if effect == "stop" { "Stopping" } else { "Closing" };
+    format!("{verb} {agent_name} in {{n}} s")
+}
+
+/// How much a shutdown's effect does, to order emissions for one request.
+fn effect_rank(effect: &str) -> u8 {
+    match effect {
+        "close_pane" => 2,
+        "close_tab" => 1,
+        _ => 0,
+    }
+}
+
+/// `template` with its last `{n}` replaced by the seconds: the one that is ours.
+/// An agent's name earlier in it may hold `{n}` too; the launcher fills the
+/// same one (`fill_countdown`), so the first frame and the ticked ones agree.
+pub fn fill_seconds(template: &str, secs: i64) -> String {
+    match template.rfind("{n}") {
+        Some(i) => format!("{}{}{}", &template[..i], secs, &template[i + 3..]),
+        None => template.to_string(),
+    }
+}
+
+/// Whole seconds left, rounded up, never negative.
+pub fn seconds_left(remaining_ms: i64) -> i64 {
+    (remaining_ms.max(0) + 999) / 1000
+}
+
+/// The two button labels (spec §3.1): "Keep running" for an agent whose
+/// session is running, "Keep open" for one that is already stopped.
+pub fn keep_label(running: bool) -> &'static str {
+    if running { "Keep running" } else { "Keep open" }
 }
 
 pub fn summary_title(count: u32) -> String {
@@ -465,9 +556,19 @@ impl PolicyState {
                     return out;
                 }
                 let group = req.kind.group_key(&req.block_id);
+                let effect_rank = req.shutdown.as_ref().map_or(0, |i| effect_rank(i.effect));
                 if let Some(existing) = self.live.get_mut(&group) {
                     if existing.notification.kind.rank() > req.kind.rank() {
                         return out;
+                    }
+                    // Emissions for one request are made on separate threads and
+                    // can arrive out of order: an older, weaker one (still saying
+                    // "Stopping" after the request became a close) must not
+                    // replace the newer (#5397).
+                    if let (Some(have), Some(info)) = (&existing.request_id, &req.shutdown) {
+                        if *have == info.request_id && existing.effect_rank > effect_rank {
+                            return out;
+                        }
                     }
                     // The same question reported again — srv detected it, then
                     // the renderer mounts the pane and reports it too (the one
@@ -491,12 +592,26 @@ impl PolicyState {
                 let replaced_shown = self.live.get(&group).map(|l| l.shown).unwrap_or(false);
                 self.next_seq += 1;
                 let id = format!("n{}-{}", now_ms, self.next_seq);
+                let (title, actions, countdown) = match (req.kind, &req.shutdown) {
+                    (NotifyKind::ShutdownPending, Some(info)) => {
+                        let remaining_ms = (info.deadline_ms - now_ms).max(0);
+                        let template = shutdown_title_template(info.effect, &req.agent_name);
+                        (
+                            fill_seconds(&template, seconds_left(remaining_ms)),
+                            Some(vec![NotifyAction { id: "keep".to_string(), label: keep_label(info.running).to_string() }]),
+                            Some(Countdown { remaining_ms, title_template: template }),
+                        )
+                    }
+                    _ => (title_for(req.kind, &req.agent_name), None, None),
+                };
                 let notification = Notification {
                     id,
                     kind: req.kind,
                     priority: req.kind.priority(),
                     block_id: req.block_id,
-                    title: title_for(req.kind, &req.agent_name),
+                    title,
+                    actions,
+                    countdown,
                     agent_name: req.agent_name,
                     body: match s.preview {
                         Preview::None => None,
@@ -517,6 +632,8 @@ impl PolicyState {
                     group,
                     Live {
                         notification,
+                        request_id: req.shutdown.as_ref().map(|i| i.request_id.clone()),
+                        effect_rank,
                         due_at_ms: now_ms + req.kind.delay_ms(),
                         shown: false,
                         replaces_shown: replaced_shown,
@@ -651,10 +768,12 @@ impl PolicyState {
             title: summary_title(self.summarized),
             body: Some("Open AgentMux to catch up.".to_string()),
             summary: None,
+            actions: None,
+            countdown: None,
             tag: tag_for(&group),
             created_at_ms: now_ms,
         };
-        self.live.insert(group, Live { notification: n.clone(), due_at_ms: now_ms, shown: true, replaces_shown: false });
+        self.live.insert(group, Live { notification: n.clone(), request_id: None, effect_rank: 0, due_at_ms: now_ms, shown: true, replaces_shown: false });
         vec![Action::Show(n)]
     }
 
@@ -688,6 +807,16 @@ impl PolicyState {
         }
     }
 
+    /// The kind, block and (for a shutdown) request of the live notification
+    /// with this id: what a button press on it is about. Looked up here, never
+    /// read from the press.
+    pub fn live_by_id(&self, id: &str) -> Option<(NotifyKind, String, Option<String>)> {
+        self.live
+            .values()
+            .find(|l| l.notification.id == id)
+            .map(|l| (l.notification.kind, l.notification.block_id.clone(), l.request_id.clone()))
+    }
+
     /// Number of live (pending or shown) notifications — for tests/diagnostics.
     #[cfg(test)]
     pub fn live_len(&self) -> usize {
@@ -710,7 +839,7 @@ mod tests {
     }
 
     fn req(kind: NotifyKind, block: &str) -> Request {
-        Request { kind, block_id: block.into(), agent_name: "lark".into(), body: Some("Which branch?".into()), summary: None }
+        Request { kind, block_id: block.into(), agent_name: "lark".into(), body: Some("Which branch?".into()), summary: None, shutdown: None }
     }
     fn focus(window: bool, block: Option<&str>) -> Input {
         Input::Focus { conn_id: "c1".into(), report: FocusReport { window_focused: window, block_id: block.map(Into::into), window_id: None } }
@@ -730,7 +859,7 @@ mod tests {
         let s = Settings::default();
         let mut p = PolicyState::new();
         p.step(focus(true, Some("b1")), 0, &s);
-        let blockless = Request { kind: k, block_id: String::new(), agent_name: String::new(), body: Some("x".into()), summary: Some("s".into()) };
+        let blockless = Request { kind: k, block_id: String::new(), agent_name: String::new(), body: Some("x".into()), summary: Some("s".into()), shutdown: None };
         p.step(Input::Emit(blockless), 0, &s);
         let a = p.step(Input::Tick, 0, &s);
         let n = shows(&a);
@@ -877,7 +1006,7 @@ mod tests {
         let s = Settings { enabled: false, when: When::Never, ..Settings::default() };
         let mut p = PolicyState::new();
         p.step(focus(true, Some("")), 0, &s);
-        let a = p.step(Input::Emit(Request { kind: NotifyKind::Test, block_id: String::new(), agent_name: String::new(), body: None, summary: None }), 0, &s);
+        let a = p.step(Input::Emit(Request { kind: NotifyKind::Test, block_id: String::new(), agent_name: String::new(), body: None, summary: None, shutdown: None }), 0, &s);
         assert_eq!(shows(&a).len(), 1);
         assert_eq!(shows(&a)[0].title, "AgentMux notifications are working");
     }
@@ -921,14 +1050,14 @@ mod tests {
         assert_eq!(tag_for("x").len(), 16);
     }
     fn req_b(kind: NotifyKind, block: &str) -> Request {
-        Request { kind, block_id: block.into(), agent_name: "lark".into(), body: None, summary: None }
+        Request { kind, block_id: block.into(), agent_name: "lark".into(), body: None, summary: None, shutdown: None }
     }
 
     #[test]
     fn crash_outranks_later_generic_error_in_same_group() {
         let s = Settings::default();
         let mut p = PolicyState::new();
-        p.step(Input::Emit(Request { kind: NotifyKind::AgentCrashed, block_id: "b1".into(), agent_name: "lark".into(), body: Some("Needs you to sign in again".into()), summary: None }), 0, &s);
+        p.step(Input::Emit(Request { kind: NotifyKind::AgentCrashed, block_id: "b1".into(), agent_name: "lark".into(), body: Some("Needs you to sign in again".into()), summary: None, shutdown: None }), 0, &s);
         p.step(Input::Emit(req_b(NotifyKind::TurnErrored, "b1")), 500, &s);
         let a = p.step(Input::Tick, 10_000, &s);
         let n = shows(&a);
@@ -1213,5 +1342,110 @@ mod tests {
         let a = p.step(Input::Tick, 6_000, &s);
         assert_eq!(shows(&a).len(), 2);
         assert!(shows(&a).iter().any(|n| n.title == "A message for lark needs your review"));
+    }
+
+    fn shutdown_req(effect: &'static str, running: bool, deadline_ms: i64) -> Request {
+        Request {
+            shutdown: Some(ShutdownInfo { deadline_ms, effect, running, request_id: "r1".into() }),
+            ..req(NotifyKind::ShutdownPending, "b1")
+        }
+    }
+
+    #[test]
+    fn a_pending_shutdown_says_what_will_happen_counts_down_and_offers_keep() {
+        let s = Settings::default();
+        let mut p = PolicyState::new();
+        p.step(Input::Emit(shutdown_req("close_tab", true, 16_000)), 1_000, &s);
+        let a = p.step(Input::Tick, 1_000, &s);
+        let n = &shows(&a)[0];
+        assert_eq!(n.title, "Closing lark in 15 s");
+        assert_eq!(n.actions, Some(vec![NotifyAction { id: "keep".into(), label: "Keep running".into() }]));
+        assert_eq!(n.countdown, Some(Countdown { remaining_ms: 15_000, title_template: "Closing lark in {n} s".into() }));
+    }
+
+    #[test]
+    fn the_button_and_the_verb_follow_the_agent_and_the_effect() {
+        let s = Settings::default();
+        let mut p = PolicyState::new();
+        p.step(Input::Emit(shutdown_req("close_tab", false, 10_000)), 0, &s);
+        let a = p.step(Input::Tick, 0, &s);
+        assert_eq!(shows(&a)[0].actions.as_ref().unwrap()[0].label, "Keep open", "nothing is running to keep");
+        let mut p = PolicyState::new();
+        p.step(Input::Emit(shutdown_req("stop", true, 8_500)), 0, &s);
+        let a = p.step(Input::Tick, 0, &s);
+        assert_eq!(shows(&a)[0].title, "Stopping lark in 9 s", "whole seconds, rounded up");
+        let mut p = PolicyState::new();
+        p.step(Input::Emit(shutdown_req("close_pane", true, 100)), 5_000, &s);
+        let a = p.step(Input::Tick, 5_000, &s);
+        let n = &shows(&a)[0];
+        assert_eq!((n.title.as_str(), n.countdown.as_ref().unwrap().remaining_ms), ("Closing lark in 0 s", 0), "never negative");
+    }
+
+    /// The two emissions for an upgraded request run on separate threads: the
+    /// weaker one arriving last must not put "Stopping" back (#5397).
+    #[test]
+    fn a_late_weaker_emission_for_the_same_request_does_not_replace_a_stronger_one() {
+        let s = Settings::default();
+        let mut p = PolicyState::new();
+        p.step(Input::Emit(shutdown_req("close_tab", true, 15_000)), 0, &s);
+        p.step(Input::Emit(shutdown_req("stop", true, 15_000)), 1, &s);
+        let a = p.step(Input::Tick, 1, &s);
+        assert_eq!(shows(&a)[0].title, "Closing lark in 15 s", "the stale 'Stopping' was dropped");
+        // In order, the stronger replaces the weaker as before.
+        let mut p = PolicyState::new();
+        p.step(Input::Emit(shutdown_req("stop", true, 15_000)), 0, &s);
+        p.step(Input::Emit(shutdown_req("close_tab", true, 15_000)), 1, &s);
+        let a = p.step(Input::Tick, 1, &s);
+        assert_eq!(shows(&a)[0].title, "Closing lark in 15 s");
+        // A different request for the block is a new shutdown, whatever its effect.
+        let newer = Request {
+            shutdown: Some(ShutdownInfo { deadline_ms: 30_000, effect: "stop", running: true, request_id: "r2".into() }),
+            ..req(NotifyKind::ShutdownPending, "b1")
+        };
+        p.step(Input::Emit(newer), 2, &s);
+        let a = p.step(Input::Tick, 2, &s);
+        assert!(shows(&a)[0].title.starts_with("Stopping lark"), "{:?}", shows(&a)[0].title);
+    }
+
+    #[test]
+    fn an_agent_name_holding_the_placeholder_keeps_its_name_in_the_first_title() {
+        let s = Settings::default();
+        let mut p = PolicyState::new();
+        let r = Request { agent_name: "x{n}".into(), ..shutdown_req("close_tab", true, 9_000) };
+        p.step(Input::Emit(r), 0, &s);
+        let a = p.step(Input::Tick, 0, &s);
+        let n = &shows(&a)[0];
+        assert_eq!(n.title, "Closing x{n} in 9 s");
+        assert_eq!(n.countdown.as_ref().unwrap().title_template, "Closing x{n} in {n} s");
+    }
+
+    #[test]
+    fn only_a_pending_shutdown_carries_buttons_or_a_countdown() {
+        let s = Settings::default();
+        let mut p = PolicyState::new();
+        p.step(Input::Emit(req(NotifyKind::InputWaiting, "b3")), 0, &s);
+        let due = p.step(Input::Tick, 10_000, &s);
+        let n = &shows(&due)[0];
+        assert!(n.actions.is_none() && n.countdown.is_none());
+        // A shutdown with no info (an older caller) keeps the old fixed title.
+        let mut p = PolicyState::new();
+        p.step(Input::Emit(req(NotifyKind::ShutdownPending, "b4")), 0, &s);
+        let a = p.step(Input::Tick, 0, &s);
+        let n = &shows(&a)[0];
+        assert_eq!(n.title, "lark will shut down in 15 s");
+        assert!(n.actions.is_none() && n.countdown.is_none());
+    }
+
+    #[test]
+    fn a_press_is_looked_up_by_the_notification_not_taken_from_the_press() {
+        let s = Settings::default();
+        let mut p = PolicyState::new();
+        p.step(Input::Emit(shutdown_req("close_tab", true, 15_000)), 0, &s);
+        let a = p.step(Input::Tick, 0, &s);
+        let id = shows(&a)[0].id.clone();
+        assert_eq!(p.live_by_id(&id), Some((NotifyKind::ShutdownPending, "b1".to_string(), Some("r1".to_string()))));
+        assert_eq!(p.live_by_id("n0-nope"), None);
+        p.step(Input::Ack { id: id.clone(), clicked: false }, 1_000, &s);
+        assert_eq!(p.live_by_id(&id), None, "gone once acked, so a late press finds nothing");
     }
 }

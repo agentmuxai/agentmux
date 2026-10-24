@@ -96,6 +96,30 @@ pub fn delivery(n: &Notification) -> (u8, i32, bool) {
     }
 }
 
+/// The `actions` array of a `Notify` call: `default` (the body click) and, when
+/// the toast offers Keep running and the server supports actions, that button.
+/// Pairs of (key, label), flattened as the spec wants.
+pub fn action_args(n: &Notification, server_has_actions: bool) -> Vec<String> {
+    let mut out = vec!["default".to_string(), "Open".to_string()];
+    if server_has_actions {
+        if let Some(label) = n.keep_label() {
+            out.push("keep".to_string());
+            out.push(label.to_string());
+        }
+    }
+    out
+}
+
+/// Which of our actions a press on a notification we showed names, if it is one
+/// we offered. Anything else on the bus is ignored.
+pub fn pressed(offered: &[String], action: &str, id: &str) -> Option<UserAction> {
+    match action {
+        "default" => Some(UserAction::Clicked(id.to_string())),
+        "keep" if offered.iter().any(|a| a == "keep") => Some(UserAction::Keep(id.to_string())),
+        _ => None,
+    }
+}
+
 /// Map a `NotificationClosed` reason to user feedback: only 2 ("dismissed by
 /// the user") counts.
 pub fn closed_is_user_dismissal(reason: u32) -> bool {
@@ -117,11 +141,14 @@ async fn run(mut rx: mpsc::UnboundedReceiver<Cmd>, actions: mpsc::UnboundedSende
         }
     };
 
-    let body_markup = match conn.call_method(Some(DEST), PATH, Some(IFACE), "GetCapabilities", &()).await {
-        Ok(reply) => reply.body().deserialize::<Vec<String>>().map(|c| c.iter().any(|x| x == "body-markup")).unwrap_or(false),
+    let (body_markup, has_actions) = match conn.call_method(Some(DEST), PATH, Some(IFACE), "GetCapabilities", &()).await {
+        Ok(reply) => {
+            let caps = reply.body().deserialize::<Vec<String>>().unwrap_or_default();
+            (caps.iter().any(|x| x == "body-markup"), caps.iter().any(|x| x == "actions"))
+        }
         Err(e) => {
             crate::logging::log(&format!("notify: no notification server ({e})"));
-            false
+            (false, false)
         }
     };
 
@@ -143,6 +170,8 @@ async fn run(mut rx: mpsc::UnboundedReceiver<Cmd>, actions: mpsc::UnboundedSende
     // tag → (server id, our notification id); server id → our id.
     let mut by_tag: HashMap<String, (u32, String)> = HashMap::new();
     let mut by_server: HashMap<u32, String> = HashMap::new();
+    // server id → the action keys we offered on it.
+    let mut offered: HashMap<u32, Vec<String>> = HashMap::new();
 
     loop {
         tokio::select! {
@@ -159,13 +188,14 @@ async fn run(mut rx: mpsc::UnboundedReceiver<Cmd>, actions: mpsc::UnboundedSende
                         if resident {
                             hints.insert("resident", Value::from(true));
                         }
+                        let action_list = action_args(&n, has_actions);
                         let args = (
                             "AgentMux",
                             replaces,
                             "agentmux",
                             summary.as_str(),
                             body.as_str(),
-                            vec!["default", "Open"],
+                            action_list.clone(),
                             hints,
                             timeout,
                         );
@@ -174,8 +204,10 @@ async fn run(mut rx: mpsc::UnboundedReceiver<Cmd>, actions: mpsc::UnboundedSende
                                 if let Ok(sid) = reply.body().deserialize::<u32>() {
                                     if let Some((old, _)) = by_tag.insert(n.tag.clone(), (sid, n.id.clone())) {
                                         by_server.remove(&old);
+                                        offered.remove(&old);
                                     }
                                     by_server.insert(sid, n.id.clone());
+                                    offered.insert(sid, action_list);
                                 }
                             }
                             Err(e) => crate::logging::log(&format!("notify: Notify failed: {e}")),
@@ -184,6 +216,7 @@ async fn run(mut rx: mpsc::UnboundedReceiver<Cmd>, actions: mpsc::UnboundedSende
                     Cmd::Retract(tag) => {
                         if let Some((sid, _)) = by_tag.remove(&tag) {
                             by_server.remove(&sid);
+                            offered.remove(&sid);
                             let _ = conn.call_method(Some(DEST), PATH, Some(IFACE), "CloseNotification", &(sid,)).await;
                         }
                     }
@@ -192,6 +225,7 @@ async fn run(mut rx: mpsc::UnboundedReceiver<Cmd>, actions: mpsc::UnboundedSende
                             let _ = conn.call_method(Some(DEST), PATH, Some(IFACE), "CloseNotification", &(sid,)).await;
                         }
                         by_server.clear();
+                        offered.clear();
                         let _ = done.send(());
                     }
                 }
@@ -208,9 +242,10 @@ async fn run(mut rx: mpsc::UnboundedReceiver<Cmd>, actions: mpsc::UnboundedSende
                 match member.as_str() {
                     "ActionInvoked" => {
                         if let Ok((sid, action)) = msg.body().deserialize::<(u32, String)>() {
-                            if action == "default" {
-                                if let Some(id) = by_server.get(&sid) {
-                                    let _ = actions.send(UserAction::Clicked(id.clone()));
+                            if let Some(id) = by_server.get(&sid) {
+                                let list = offered.get(&sid).map(Vec::as_slice).unwrap_or_default();
+                                if let Some(press) = pressed(list, &action, id) {
+                                    let _ = actions.send(press);
                                 }
                             }
                         }
@@ -218,6 +253,7 @@ async fn run(mut rx: mpsc::UnboundedReceiver<Cmd>, actions: mpsc::UnboundedSende
                     "NotificationClosed" => {
                         if let Ok((sid, reason)) = msg.body().deserialize::<(u32, u32)>() {
                             if let Some(id) = by_server.remove(&sid) {
+                                offered.remove(&sid);
                                 by_tag.retain(|_, (s, _)| *s != sid);
                                 if closed_is_user_dismissal(reason) {
                                     let _ = actions.send(UserAction::Dismissed(id));
@@ -244,6 +280,8 @@ mod tests {
             title: "lark has a question".into(),
             body: body.map(Into::into),
             summary: None,
+            actions: vec![],
+            countdown: None,
             tag: "t1".into(),
         }
     }
@@ -280,5 +318,33 @@ mod tests {
         assert!(!closed_is_user_dismissal(1)); // expired
         assert!(!closed_is_user_dismissal(3)); // closed by us
         assert!(!closed_is_user_dismissal(4));
+    }
+
+    fn closing() -> Notification {
+        Notification {
+            actions: vec![super::super::NotifyAction { id: "keep".into(), label: "Keep running".into() }],
+            ..n(Some("AgentY asked to close it."))
+        }
+    }
+
+    /// The Keep running button is offered only when the server supports
+    /// actions; the body click is always there.
+    #[test]
+    fn keep_running_is_an_action_only_where_the_server_supports_actions() {
+        assert_eq!(action_args(&closing(), true), vec!["default", "Open", "keep", "Keep running"]);
+        assert_eq!(action_args(&closing(), false), vec!["default", "Open"]);
+        assert_eq!(action_args(&n(None), true), vec!["default", "Open"], "no button for any other notification");
+    }
+
+    /// Only an action we offered counts: a forged `keep` for a notification
+    /// that never had the button does nothing.
+    #[test]
+    fn a_press_is_only_what_we_offered() {
+        let offered = action_args(&closing(), true);
+        assert_eq!(pressed(&offered, "keep", "n1"), Some(UserAction::Keep("n1".into())));
+        assert_eq!(pressed(&offered, "default", "n1"), Some(UserAction::Clicked("n1".into())));
+        assert_eq!(pressed(&offered, "something-else", "n1"), None);
+        let plain = action_args(&n(None), true);
+        assert_eq!(pressed(&plain, "keep", "n2"), None);
     }
 }

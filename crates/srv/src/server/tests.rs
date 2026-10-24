@@ -6663,7 +6663,8 @@ async fn m4c3_a_cron_fire_is_delivered_in_process_and_audited_with_its_creator()
     // are shared by every test: fire until this target's entry appears.
     let mut entry = None;
     for _ in 0..25 {
-        state.cron_scheduler.fire("m4c3-job", "tick", &target, "", "uid-m4c3-creator").await;
+        let job = crate::backend::cron::test_job("m4c3-job", "tick", &target, "", "uid-m4c3-creator");
+        state.cron_scheduler.fire(&job, crate::backend::cron::Slot::Manual { triggered_by: "test".into() }).await;
         entry = state
             .reactive_handler
             .get_audit_log(100)
