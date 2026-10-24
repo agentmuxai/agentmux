@@ -12,7 +12,7 @@ import { formatAge } from "@/app/view/warden-shared/warden-shared";
 
 import { KanbanAfterSection } from "./kanban-after";
 import { agentStateWords, AgentChip } from "./kanban-card";
-import { columnOf, needsReason, requestedBy } from "./kanban-columns";
+import { columnOf, isFinishedColumn, isResearchKind, needsReason, requestedBy } from "./kanban-columns";
 import type { KanbanModel } from "./kanban-model";
 import type { KanbanAgent, KanbanEvent, KanbanTask } from "./kanban-types";
 
@@ -76,6 +76,14 @@ export function KanbanDrawer(props: {
     const [startOn, setStartOn] = createSignal("");
     const [busy, setBusy] = createSignal(false);
     const column = () => columnOf(t());
+    // What accepting a spec unlocks: "Unlocks #1106 'Build: …' for Naki-2".
+    const specUnlocks = () =>
+        isResearchKind(t().kind)
+            ? (t().card.followers ?? [])
+                  .filter((f) => f.state === "open" || f.state === "held")
+                  .map((f) => `Unlocks #${f.num} "${f.title}"`)
+                  .join("; ")
+            : "";
     const runningAgents = () => props.agents.filter((a) => a.state !== "stopped" && a.state !== "gone");
 
     const act = async (req: Parameters<KanbanModel["act"]>[0]) => {
@@ -111,6 +119,14 @@ export function KanbanDrawer(props: {
                     <Button density="compact" tone="quiet" icon="code-pull-request" onClick={() => void openLink(t().card.pr_url)}>
                         Open the PR
                     </Button>
+                </Show>
+                <Show when={t().card.pr?.merged_at}>
+                    {(at) => (
+                        <span class="warden-manager-dim">
+                            merged {formatAge(Math.max(0, props.now - at()))} ago
+                            {t().card.pr?.released_in ? ` · released in ${t().card.pr?.released_in}` : ""}
+                        </span>
+                    )}
                 </Show>
             </div>
 
@@ -157,7 +173,7 @@ export function KanbanDrawer(props: {
             </Show>
 
             <section class="kanban-drawer__actions">
-                <Show when={column() === "backlog"}>
+                <Show when={column() === "backlog" || column() === "specd"}>
                     <div class="kanban-drawer__row">
                         <Select
                             value={startOn()}
@@ -195,8 +211,15 @@ export function KanbanDrawer(props: {
                         </Button>
                     </Show>
                     <Show when={t().state === "review"}>
-                        <Button density="compact" tone="accent" icon="check" disabled={busy()} onClick={() => void act({ action: "accept" })}>
-                            Accept
+                        <Button
+                            density="compact"
+                            tone="accent"
+                            icon="check"
+                            disabled={busy()}
+                            title={specUnlocks() || undefined}
+                            onClick={() => void act({ action: "accept" })}
+                        >
+                            {isResearchKind(t().kind) ? `Accept ${t().kind.trim().toLowerCase()}` : "Accept"}
                         </Button>
                         <Button density="compact" icon="rotate-left" disabled={busy()} onClick={() => void act({ action: "send_back", text: text() })}>
                             Send back
@@ -214,7 +237,7 @@ export function KanbanDrawer(props: {
                             </Button>
                         )}
                     </Show>
-                    <Show when={column() !== "done"}>
+                    <Show when={!isFinishedColumn(column())}>
                         <Button density="compact" tone="danger" icon="ban" disabled={busy()} onClick={() => void act({ action: "cancel", text: text() })}>
                             Cancel task
                         </Button>

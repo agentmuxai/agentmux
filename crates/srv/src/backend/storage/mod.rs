@@ -52,6 +52,7 @@ pub mod widget_storage;
 pub mod work_board;
 pub mod work_claims;
 pub mod work_deps;
+pub mod work_prs;
 pub mod work_queue;
 
 pub use agent_bundles::{agent_picked_bundles, format_agent_bundle_block, join_startup_blocks};

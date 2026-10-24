@@ -817,9 +817,7 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
         // getppid match can't be satisfied by a value merely inherited
         // down the env from a parent pane, so `task dev:standalone`
         // (direct host invoke) still spawns its own srv.
-        let launcher_provided = if agentmux_common::is_dev_build_exe(&host_exe_dir)
-            && !launcher_is_genuine_parent()
-        {
+        let launcher_provided = if !sidecar::may_adopt_launcher_backend(&host_exe_dir) {
             None
         } else {
             sidecar::use_launcher_endpoints(&app_state)

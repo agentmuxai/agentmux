@@ -37,8 +37,7 @@ use super::AppState;
 
 /// The lease of a task the operator starts on an agent; a live holder keeps it.
 const LEASE_MS: i64 = 120_000;
-/// Finished tasks stay on the board this long.
-const FINISHED_WINDOW_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+use crate::backend::kanban::FINISHED_WINDOW_MS;
 /// The most tasks one list returns.
 const LIST_LIMIT: usize = 500;
 

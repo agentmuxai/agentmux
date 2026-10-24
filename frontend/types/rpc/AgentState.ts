@@ -3,4 +3,4 @@
 /**
  * An agent's state as the wire reports it.
  */
-export type AgentState = "working" | "waiting" | "idle" | "stopped" | "error";
+export type AgentState = "working" | "waiting" | "idle" | "stopped" | "error" | "limited" | "signed_out";

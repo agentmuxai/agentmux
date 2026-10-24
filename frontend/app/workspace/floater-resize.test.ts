@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // @vitest-environment jsdom
 
-
 import { describe, expect, it } from "vitest";
 import {
     FLOATER_BROWSER_EDGE_INSET,
@@ -90,14 +89,24 @@ describe("the floater resize band", () => {
         expect(FLOATER_BROWSER_EDGE_INSET).toBeLessThanOrEqual(FLOATER_EDGE_RESIZE_BORDER);
     });
 
-    it("lets a header button win over the band: a press or hover on a control, or on what is inside one, is not a resize", () => {
-        document.body.innerHTML = '<div id="bar"><button id="close"><svg id="glyph"></svg></button><span id="gap"></span><div role="button" id="role"></div></div>';
+    it("lets a pane header's button win over the band: a press or hover on it, or on what is inside it, is not a resize", () => {
+        document.body.innerHTML =
+            '<div data-role="block-header" id="header"><button id="close"><svg id="glyph"></svg></button><span id="gap"></span><div role="button" id="role"></div></div>';
         const el = (id: string) => document.getElementById(id);
         expect(isFloaterBandControl(el("close"))).toBe(true);
         expect(isFloaterBandControl(el("glyph"))).toBe(true);
         expect(isFloaterBandControl(el("role"))).toBe(true);
         expect(isFloaterBandControl(el("gap"))).toBe(false);
-        expect(isFloaterBandControl(el("bar"))).toBe(false);
+        expect(isFloaterBandControl(el("header"))).toBe(false);
         expect(isFloaterBandControl(null)).toBe(false);
+    });
+
+    it("does not let a button in the pane's content win: a sidebar button at the window's edge keeps the band", () => {
+        // A floating Hangar's Places list starts at x 0; a toolbar can end at the right or bottom edge.
+        document.body.innerHTML =
+            '<div data-role="block-header"><button id="close"></button></div><div class="content"><nav><button id="places"><span id="label"></span></button></nav><div role="button" id="tool"></div><footer><button id="foot"></button></footer></div>';
+        const el = (id: string) => document.getElementById(id);
+        for (const id of ["places", "label", "tool", "foot"]) expect(isFloaterBandControl(el(id))).toBe(false);
+        expect(isFloaterBandControl(el("close"))).toBe(true);
     });
 });

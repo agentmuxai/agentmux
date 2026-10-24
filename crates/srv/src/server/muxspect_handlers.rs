@@ -1044,14 +1044,14 @@ pub async fn handle_muxspect_conversations(State(state): State<AppState>) -> imp
     for reg in state.reactive_handler.list_agents() {
         let (preview, activity_ms) =
             last_line_preview_and_activity(&state.mstore, &state.filestore, &reg.block_id);
-        let turn_active = crate::backend::blockcontroller::get_block_controller_status(&reg.block_id)
-            .map(|s| s.turn_active)
-            .unwrap_or(false);
+        let turn_active = crate::backend::blockcontroller::get_block_controller_status(&reg.block_id).map(|s| s.turn_active).unwrap_or(false);
+        let (agent_state, unavailable) = crate::backend::agent_state::state_and_unavailable(&state.mstore, &reg.block_id);
         agents.push(json!({
             "name": reg.agent_id,
             "tier": "host",
             "block_id": reg.block_id,
             "turn_active": turn_active,
+            "state": agent_state, "unavailable": unavailable, // never its account: other hosts receive this
             // Transcript-write time (see last_line_preview_and_activity);
             // registration time only while there is no output at all.
             "last_activity_ms": activity_ms.unwrap_or(reg.last_seen),

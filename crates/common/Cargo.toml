@@ -20,6 +20,8 @@ thiserror = "1"
 # skew release. JSON over newline-delimited frames.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# settings_jsonc.rs: settings.json is JSONC (comments), as srv reads it.
+json_comments = "0.2"
 # popup_rules.rs: a browser pane's popups (same-site on the public suffix list;
 # `github.io` or `co.uk` is not a site). `url` is already in the tree via reqwest.
 url = "2"

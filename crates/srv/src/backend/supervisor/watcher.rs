@@ -247,6 +247,7 @@ impl Supervisor {
             background_running: self.background_running(block_id),
             reply: fingerprint(&activity.text),
             now_ms,
+            unavailable: crate::backend::agent_state::unavailable_of_block(&self.mstore, None, block_id, now_ms).map(|u| u.reason()),
         };
         let mut state = self.state_for(block_id, &block, mode, now_ms);
         match policy::on_turn_end(&mut state, mode, &facts) {

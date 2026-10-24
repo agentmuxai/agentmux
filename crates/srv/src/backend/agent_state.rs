@@ -12,17 +12,30 @@
 //! each block's state began. Every caller goes through
 //! [`agent_status_of_block`] or a [`SinceTracker`] of its own, so the feed
 //! and the names route agree on `since_ms`.
+//!
+//! `limited` and `signed_out` are an agent that is alive but can't work: its
+//! last run ended on the plan's usage limit or a refused sign-in
+//! (`docs/specs/SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md` §3). Read them through
+//! [`unavailable_of_block`], so no caller re-derives the rule.
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
 
+use crate::agents::failure::FailureClass;
 use crate::backend::blockcontroller;
+use crate::backend::obj::Block;
 use crate::backend::storage::store::Store;
 
 /// Block meta the agent pane sets while a question waits for the user.
 pub const META_AWAITING_USER: &str = "term:awaiting_user";
+
+/// The account a pane's run launched on, written at spawn
+/// (`build_persistent_spawn_env`), so a failure that run records counts
+/// against that account even after the agent is linked to another
+/// ([`run_accounts_of_block`]).
+pub const RUN_ACCOUNT_META_KEY: &str = "agent:run_account";
 
 /// An agent's state as the wire reports it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
@@ -37,6 +50,11 @@ pub enum AgentState {
     Stopped,
     /// The process exited with an error.
     Error,
+    /// Its last run ended on the plan's usage limit, which hasn't reset.
+    Limited,
+    /// Its last run ended on refused credentials, or no account to run on.
+    #[serde(rename = "signed_out")]
+    SignedOut,
 }
 
 impl AgentState {
@@ -47,6 +65,8 @@ impl AgentState {
             Self::Idle => "idle",
             Self::Stopped => "stopped",
             Self::Error => "error",
+            Self::Limited => "limited",
+            Self::SignedOut => "signed_out",
         }
     }
 }
@@ -68,15 +88,23 @@ pub struct StateInputs<'a> {
     pub process_status: &'a str,
     pub exit_code: i32,
     pub awaiting_user: bool,
+    /// The class and reset (unix ms) of the block's `agent:last_failure`.
+    pub failure: Option<(FailureClass, Option<u64>)>,
+    /// This machine's clock, unix ms, for the reset.
+    pub now_ms: u64,
 }
 
 /// The state, or `None` when nothing tracks this agent's turns (a terminal
 /// pane: `shell` / `cmd`, or any controller that isn't an agent's) or its
 /// process state is unknown. Saying nothing beats a wrong `idle`.
 ///
-/// A turn wins over the process state, as in the process broker's
-/// `lifecycle_from`. The `subprocess` controller runs one process per turn,
-/// so its process exiting cleanly between turns is `idle`, not `stopped`.
+/// A turn wins over everything, as in the process broker's `lifecycle_from`:
+/// a turn that runs is evidence the agent can work. Then a usage limit that
+/// hasn't reset (or whose reset isn't known) is `limited`, and a refused
+/// sign-in `signed_out`, whatever the process state: anything started on that
+/// account fails the same way. Other failure classes are transient and don't
+/// change the state. The `subprocess` controller runs one process per turn, so
+/// its process exiting cleanly between turns is `idle`, not `stopped`.
 pub fn decide(inputs: &StateInputs) -> Option<AgentState> {
     let per_turn_process = match inputs.controller_type {
         blockcontroller::BLOCK_CONTROLLER_SUBPROCESS => true,
@@ -89,6 +117,13 @@ pub fn decide(inputs: &StateInputs) -> Option<AgentState> {
     if inputs.turn_active {
         return Some(if inputs.awaiting_user { AgentState::Waiting } else { AgentState::Working });
     }
+    match inputs.failure {
+        Some((FailureClass::UsageLimit, resets)) if resets.is_none_or(|r| r > inputs.now_ms) => {
+            return Some(AgentState::Limited);
+        }
+        Some((FailureClass::Auth, _)) => return Some(AgentState::SignedOut),
+        _ => {}
+    }
     match inputs.process_status {
         blockcontroller::STATUS_RUNNING | blockcontroller::STATUS_INIT => Some(AgentState::Idle),
         blockcontroller::STATUS_DONE if inputs.exit_code != 0 => Some(AgentState::Error),
@@ -99,19 +134,114 @@ pub fn decide(inputs: &StateInputs) -> Option<AgentState> {
 }
 
 /// The block's state now: its controller's runtime status and the block's
-/// `term:awaiting_user`. `None` without a controller, or when the block
-/// can't be read.
+/// `term:awaiting_user` and `agent:last_failure`. `None` without a controller,
+/// or when the block can't be read.
 pub fn current_state(mstore: &Store, block_id: &str) -> Option<AgentState> {
+    current_state_at(mstore, block_id, agentmux_common::time::now_ms_u64())
+}
+
+/// [`current_state`] at `now_ms`.
+pub fn current_state_at(mstore: &Store, block_id: &str, now_ms: u64) -> Option<AgentState> {
     let controller = blockcontroller::get_controller(block_id)?;
     let status = controller.get_runtime_status();
-    let block = mstore.get::<crate::backend::obj::Block>(block_id).ok()??;
+    let block = mstore.get::<Block>(block_id).ok()??;
     decide(&StateInputs {
         controller_type: controller.controller_type(),
         turn_active: status.turn_active,
         process_status: &status.shellprocstatus,
         exit_code: status.shellprocexitcode,
         awaiting_user: crate::backend::obj::meta_get_bool(&block.meta, META_AWAITING_USER, false),
+        failure: failure_of_block(&block).map(|f| (f.code, f.resets_at_ms)),
+        now_ms,
     })
+}
+
+/// The parts of a block's `agent:last_failure` the states read. Only these
+/// fields: the stored failure leaves out empty ones that reading the whole
+/// `AgentFailure` back would require.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredFailure {
+    pub code: FailureClass,
+    pub title: String,
+    pub resets_at_ms: Option<u64>,
+}
+
+/// The block's stored failure, or `None` when it has none (or one this build
+/// can't read).
+pub fn failure_of_block(block: &Block) -> Option<StoredFailure> {
+    let f = block.meta.get(blockcontroller::core::META_LAST_FAILURE)?;
+    Some(StoredFailure {
+        code: serde_json::from_value(f.get("code")?.clone()).ok()?,
+        title: f.get("title").and_then(|t| t.as_str()).unwrap_or_default().to_string(),
+        resets_at_ms: f.get("resetsAtMs").and_then(|r| r.as_u64()),
+    })
+}
+
+/// An agent that is alive but can't work, and why.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Unavailable {
+    /// `limited` or `signed_out`.
+    pub state: AgentState,
+    pub code: FailureClass,
+    pub title: String,
+    /// When its usage limit lifts (unix ms), when the provider said.
+    pub resets_at_ms: Option<u64>,
+    /// Since when it has been in this state (unix ms).
+    pub since_ms: u64,
+    /// The account its run launched on. Never put in an answer another host
+    /// may receive (MuxAPI, the fleet feed).
+    #[serde(skip)]
+    pub account_id: Option<String>,
+}
+
+impl Unavailable {
+    /// "Out of quota until Sun 7:00 PM", "Out of quota" or "Needs sign-in",
+    /// in this machine's time zone.
+    pub fn reason(&self) -> String {
+        match (self.state, self.resets_at_ms.and_then(|ms| chrono::DateTime::from_timestamp_millis(ms as i64))) {
+            (AgentState::SignedOut, _) => "Needs sign-in".to_string(),
+            (_, Some(t)) => format!("Out of quota until {}", t.with_timezone(&chrono::Local).format("%a %-I:%M %p")),
+            (_, None) => "Out of quota".to_string(),
+        }
+    }
+}
+
+/// `Some` when the agent on `block_id` is `limited` or `signed_out` at
+/// `now_ms`. With `identity`, a pane from before `agent:run_account` gets its
+/// agent's current account link.
+pub fn unavailable_of_block(mstore: &Store, identity: Option<&Store>, block_id: &str, now_ms: u64) -> Option<Unavailable> {
+    let state = current_state_at(mstore, block_id, now_ms)?;
+    if !matches!(state, AgentState::Limited | AgentState::SignedOut) {
+        return None;
+    }
+    let block = mstore.get::<Block>(block_id).ok()??;
+    let failure = failure_of_block(&block)?;
+    let since_ms = TRACKER.record(block_id, Some(state), now_ms).map_or(now_ms, |s| s.since_ms);
+    let account_id = match identity {
+        Some(identity) => run_accounts_of_block(identity, &block).into_iter().next(),
+        None => block.meta.get(RUN_ACCOUNT_META_KEY).and_then(|a| a.as_str()).map(str::to_string),
+    };
+    Some(Unavailable { state, code: failure.code, title: failure.title, resets_at_ms: failure.resets_at_ms, since_ms, account_id })
+}
+
+/// The block's state now and, while it is `limited` or `signed_out`, why.
+pub fn state_and_unavailable(mstore: &Store, block_id: &str) -> (Option<AgentState>, Option<Unavailable>) {
+    let state = agent_status_of_block(mstore, block_id).map(|s| s.state);
+    (state, unavailable_of_block(mstore, None, block_id, agentmux_common::time::now_ms_u64()))
+}
+
+/// The accounts a pane's run counts against: `agent:run_account`, the account
+/// it launched on; a pane from before that key falls back to its agent's
+/// current links. One rule for the spawn gate's `account_blocks`,
+/// [`unavailable_of_block`] and the account episodes.
+pub fn run_accounts_of_block(identity: &Store, block: &Block) -> Vec<String> {
+    match block.meta.get(RUN_ACCOUNT_META_KEY).and_then(|a| a.as_str()) {
+        Some(account) => vec![account.to_string()],
+        None => {
+            let agent = crate::backend::obj::meta_get_string(&block.meta, "agentId", "");
+            identity.agent_identity_list_for_agent(&agent).unwrap_or_default().into_iter().map(|l| l.account_id).collect()
+        }
+    }
 }
 
 /// When each block's current state began. A state seen for the first time
@@ -233,7 +363,7 @@ mod tests {
     };
 
     fn inputs<'a>(controller_type: &'a str, turn_active: bool, process_status: &'a str) -> StateInputs<'a> {
-        StateInputs { controller_type, turn_active, process_status, exit_code: 0, awaiting_user: false }
+        StateInputs { controller_type, turn_active, process_status, exit_code: 0, awaiting_user: false, failure: None, now_ms: 1_000 }
     }
 
     #[test]
@@ -301,7 +431,15 @@ mod tests {
 
     #[test]
     fn states_serialize_lowercase() {
-        for s in [AgentState::Working, AgentState::Waiting, AgentState::Idle, AgentState::Stopped, AgentState::Error] {
+        for s in [
+            AgentState::Working,
+            AgentState::Waiting,
+            AgentState::Idle,
+            AgentState::Stopped,
+            AgentState::Error,
+            AgentState::Limited,
+            AgentState::SignedOut,
+        ] {
             assert_eq!(serde_json::to_value(s).unwrap(), serde_json::json!(s.as_str()));
         }
         assert_eq!(
@@ -342,8 +480,119 @@ mod tests {
         assert_eq!(t.record("a", Some(AgentState::Idle), 5).unwrap().since_ms, 1);
     }
 
+    /// The full table: turn active × process state × failure class × reset
+    /// (spec §3.2, §10).
+    #[test]
+    fn a_limit_or_a_refused_sign_in_wins_over_the_process_but_not_over_a_turn() {
+        let now = 1_000;
+        let resets = [None, Some(now - 1), Some(now), Some(now + 1)];
+        let classes = [FailureClass::UsageLimit, FailureClass::Auth, FailureClass::RateLimited, FailureClass::Network];
+        for controller in [BLOCK_CONTROLLER_PERSISTENT, BLOCK_CONTROLLER_SUBPROCESS] {
+            for process in [STATUS_RUNNING, STATUS_INIT, STATUS_DONE] {
+                for exit_code in [0, 1] {
+                    let base = StateInputs { exit_code, now_ms: now, ..inputs(controller, false, process) };
+                    let plain = decide(&base);
+                    for class in classes {
+                        for reset in resets {
+                            let failed = StateInputs { failure: Some((class, reset)), ..base };
+                            let mid_turn = StateInputs { turn_active: true, ..failed };
+                            assert_eq!(decide(&mid_turn), Some(AgentState::Working), "a running turn wins: {class:?} {reset:?}");
+                            let expected = match (class, reset) {
+                                (FailureClass::UsageLimit, None) => Some(AgentState::Limited),
+                                (FailureClass::UsageLimit, Some(r)) if r > now => Some(AgentState::Limited),
+                                (FailureClass::Auth, _) => Some(AgentState::SignedOut),
+                                _ => plain,
+                            };
+                            assert_eq!(decide(&failed), expected, "{controller} {process} exit {exit_code} {class:?} {reset:?}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_terminal_pane_with_a_failure_still_reports_nothing() {
+        let failed = StateInputs { failure: Some((FailureClass::UsageLimit, None)), ..inputs(BLOCK_CONTROLLER_SHELL, false, STATUS_RUNNING) };
+        assert_eq!(decide(&failed), None);
+    }
+
+    #[test]
+    fn signed_out_round_trips_with_its_underscore() {
+        assert_eq!(serde_json::to_value(AgentState::SignedOut).unwrap(), serde_json::json!("signed_out"));
+        assert_eq!(serde_json::from_value::<AgentState>(serde_json::json!("signed_out")).unwrap(), AgentState::SignedOut);
+        assert_eq!(serde_json::from_value::<AgentState>(serde_json::json!("limited")).unwrap(), AgentState::Limited);
+    }
+
+    #[test]
+    fn the_reason_reads_for_people() {
+        let u = |state, resets_at_ms| Unavailable {
+            state,
+            code: FailureClass::UsageLimit,
+            title: String::new(),
+            resets_at_ms,
+            since_ms: 0,
+            account_id: None,
+        };
+        assert_eq!(u(AgentState::Limited, None).reason(), "Out of quota");
+        assert!(u(AgentState::Limited, Some(1_792_886_400_000)).reason().starts_with("Out of quota until "));
+        assert_eq!(u(AgentState::SignedOut, None).reason(), "Needs sign-in");
+    }
+
     fn store() -> Store {
         Store::open_in_memory().expect("in-memory store")
+    }
+
+    fn failure_meta(code: &str, resets_at_ms: Option<u64>) -> serde_json::Value {
+        let mut f = serde_json::json!({"code": code, "title": "Usage limit reached", "detail": "", "retryable": false});
+        if let Some(r) = resets_at_ms {
+            f["resetsAtMs"] = serde_json::json!(r);
+        }
+        f
+    }
+
+    #[test]
+    fn unavailable_of_block_reads_the_stored_failure_and_the_run_account() {
+        let store = store();
+        let now = agentmux_common::time::now_ms_u64();
+        let limited = insert_block(
+            &store,
+            &[
+                (blockcontroller::core::META_LAST_FAILURE, failure_meta("usage_limit", Some(now + 60_000))),
+                (RUN_ACCOUNT_META_KEY, serde_json::json!("acct-1")),
+            ],
+        );
+        test_support::register_stub(&limited, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
+        let u = unavailable_of_block(&store, None, &limited, now).expect("limited");
+        assert_eq!((u.state, u.code, u.resets_at_ms), (AgentState::Limited, FailureClass::UsageLimit, Some(now + 60_000)));
+        assert_eq!(u.title, "Usage limit reached");
+        assert_eq!(u.account_id.as_deref(), Some("acct-1"));
+        let wire = serde_json::to_value(&u).unwrap();
+        assert!(wire.get("account_id").is_none(), "the account never goes on the wire");
+        assert_eq!(wire["state"], serde_json::json!("limited"));
+        assert_eq!(unavailable_of_block(&store, None, &limited, now + 60_001), None, "the reset passed");
+
+        // A pane from before `agent:run_account` gets its agent's link from the
+        // identity store, when one is given; without it, no account.
+        let identity = Store::open_in_memory().expect("in-memory identity store");
+        let signed_out = insert_block(
+            &store,
+            &[(blockcontroller::core::META_LAST_FAILURE, failure_meta("auth", None)), ("agentId", serde_json::json!("agent-x"))],
+        );
+        test_support::register_stub(&signed_out, BLOCK_CONTROLLER_PERSISTENT, STATUS_DONE, false);
+        let u = unavailable_of_block(&store, Some(&identity), &signed_out, now).expect("signed out");
+        assert_eq!(u.state, AgentState::SignedOut);
+        assert_eq!(u.account_id, None, "no link for agent-x");
+        assert_eq!(unavailable_of_block(&store, None, &signed_out, now).unwrap().account_id, None);
+
+        let transient = insert_block(&store, &[(blockcontroller::core::META_LAST_FAILURE, failure_meta("rate_limited", None))]);
+        test_support::register_stub(&transient, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
+        assert_eq!(unavailable_of_block(&store, None, &transient, now), None, "a transient failure leaves it idle");
+        assert_eq!(current_state_at(&store, &transient, now), Some(AgentState::Idle));
+
+        for b in [&limited, &signed_out, &transient] {
+            blockcontroller::delete_controller(b);
+        }
     }
 
     fn insert_block(store: &Store, meta: &[(&str, serde_json::Value)]) -> String {

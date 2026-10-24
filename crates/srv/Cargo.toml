@@ -35,6 +35,10 @@ log = "0.4"
 socket2 = { version = "0.5.5", features = ["all"] }
 uuid = { version = "1", features = ["v4", "v5"] }
 chrono = "0.4"
+# This machine's IANA zone name, so a limit's "resets 7pm (America/Los_Angeles)"
+# is read only when it names the local zone (agents/limit_reset.rs). Already in
+# the tree through chrono, so this adds nothing new.
+iana-time-zone = "0.1"
 tokio-util = { version = "0.7", features = ["io", "rt"] }
 rusqlite = { version = "0.39", features = ["bundled", "backup"] }
 # TypeScript type generation for the RPC bindings (backend/rpc/schema.rs, and

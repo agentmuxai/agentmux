@@ -192,7 +192,8 @@ impl Store {
         conn.execute_batch(super::coord_posts::SCHEMA)?;
         conn.execute_batch(super::work_board::SCHEMA)?;
         conn.execute_batch(super::job_runs::SCHEMA)?;
-        Ok(conn.execute_batch(super::work_deps::SCHEMA)?)
+        conn.execute_batch(super::work_deps::SCHEMA)?;
+        Ok(conn.execute_batch(super::work_prs::SCHEMA)?)
     }
 
     /// Open the GLOBAL shared store at `path` (`~/.agentmux/shared/store.db`).
@@ -260,6 +261,7 @@ impl Store {
         conn.execute_batch(super::coord_posts::SCHEMA)?;
         conn.execute_batch(super::work_board::SCHEMA)?;
         conn.execute_batch(super::work_deps::SCHEMA)?;
+        conn.execute_batch(super::work_prs::SCHEMA)?;
         conn.execute_batch(super::job_runs::SCHEMA)?;
         stamp_version(&conn, IDENTITY_STORE_SCHEMA_VERSION)?;
         Ok(Self {
