@@ -25,6 +25,8 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "spawn", tool: "SpawnAgent", rename: &[] },
     Act { action: "workers", tool: "AgentWorkers", rename: &[] },
     Act { action: "search_history", tool: "SearchHistory", rename: &[] },
+    Act { action: "context", tool: "AgentContext", rename: &[] },
+    Act { action: "compact", tool: "AgentCompact", rename: &[] },
 ];
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
@@ -44,6 +46,8 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "OpenAgent" => panes::call(act.tool, &args, cx).await,
                 "SpawnAgent" => spawn(&args, cx).await,
                 "AgentWorkers" => workers(cx).await,
+                "AgentContext" => own_context(cx, "context", None).await,
+                "AgentCompact" => own_context(cx, "compact", str_arg(&args, "keep")).await,
                 _ => history::call(act.tool, &args, cx).await,
             };
             let result = result.map_err(|e| anyhow::anyhow!(public_params(&format!("{e:#}"), act.rename)));
@@ -136,6 +140,28 @@ async fn workers(cx: &ToolCtx<'_>) -> Result<String> {
     let body: Value = resp.json().await.unwrap_or(Value::Null);
     if !status.is_success() {
         anyhow::bail!("AgentWorkers: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
+    }
+    Ok(serde_json::to_string_pretty(&body)?)
+}
+
+/// `context` and `compact`: the caller's own pane only, which srv resolves
+/// from this process's agent token (`X-Agent-Token`, sent on every request),
+/// never from a name (SPEC_AGENT_SELF_COMPACTION_2026_10_23.md §3.3).
+async fn own_context(cx: &ToolCtx<'_>, route: &str, focus: Option<String>) -> Result<String> {
+    require_agent_env(cx.local_url, cx.auth_key, cx.block_id)?;
+    let url = format!("{}/api/v1/agent/self/{route}", cx.local_url.trim_end_matches('/'));
+    let resp = cx
+        .client
+        .post(&url)
+        .header(AUTH_KEY_HEADER, cx.auth_key)
+        .json(&json!({ "agent": crate::identity::agent_slug()?, "focus": focus }))
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+    let status = resp.status();
+    let body: Value = resp.json().await.unwrap_or(Value::Null);
+    if !status.is_success() {
+        anyhow::bail!("Agents {route}: {}", body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("srv answered {status}: {body}")));
     }
     Ok(serde_json::to_string_pretty(&body)?)
 }

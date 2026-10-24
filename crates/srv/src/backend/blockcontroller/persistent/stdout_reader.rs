@@ -236,6 +236,7 @@ impl PersistentSubprocessController {
                 // The latest `rate_limit_event`: a usage limit stored later
                 // reads its reset from it (`agents::limit_reset`).
                 crate::agents::limit_reset::observe_frame(&block_id_read, &parsed);
+                crate::backend::context_reading::observe_claude_frame(&block_id_read, &parsed);
                 // This block's CLI compacted: only its pane may send the
                 // hidden memory reinjection for that boundary.
                 if parsed.get("subtype").and_then(|v| v.as_str()) == Some("compact_boundary") {
@@ -726,6 +727,11 @@ impl PersistentSubprocessController {
                         mstore_read.clone(),
                         block_id_read.clone(),
                     );
+                    // A large context when the work may continue: one note
+                    // for the next turn (SPEC_AGENT_SELF_COMPACTION §3.5).
+                    if let Some(note) = crate::backend::context_reading::take_turn_end_hint(&block_id_read) {
+                        crate::backend::reactive::held_notes::hold(&block_id_read, crate::backend::context_reading::HINT_NOTE_KEY, &note);
+                    }
                 }
             }
 
