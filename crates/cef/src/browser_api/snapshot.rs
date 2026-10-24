@@ -205,9 +205,9 @@ fn truthy(v: Option<&Value>) -> bool {
 fn quote(s: &str) -> String {
     let one_line: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
     // Hide a card, ID or bank number, a security or one-time code and a token the page prints in
-    // plain text (docs/specs/SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.1). Numbers are
-    // hidden over the whole text before it is cut (so a number the cut falls inside can't show its
-    // first digits); only the first 2000 characters then go through the token pass.
+    // plain text (docs/specs/SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.1). The whole text is
+    // masked first and cut to 2000 characters after, so nothing the cut falls inside can show its
+    // first characters; the 160-character limit below then applies to the masked text.
     let one_line = agentmux_common::pii_mask::mask_bounded(&one_line, 2000);
     let clipped: String = if one_line.chars().count() > 160 {
         one_line.chars().take(157).collect::<String>() + "…"
