@@ -112,6 +112,10 @@
             "method": "AgentSessionWriteStateCommand"
         },
         {
+            "command": "agent.setSeat",
+            "method": "AgentSetSeatCommand"
+        },
+        {
             "command": "agentshutdownkeep",
             "method": "AgentShutdownKeepCommand"
         },

@@ -360,6 +360,7 @@ fn read_user_definitions(db: &Path) -> Result<Vec<(DefinitionRecord, i64)>, rusq
                 container_name: row.get(24)?,
                 use_ambient_login: row.get(25)?,
                 former_slugs: Vec::new(),
+                seat: None,
                 content: Vec::new(),
                 skills: Vec::new(),
             })

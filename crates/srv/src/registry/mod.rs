@@ -51,7 +51,7 @@ pub(crate) use paths::resolve_global_shared_root;
 pub use def_migrate::{migrate_definitions_global_once, DefMigrateStats};
 pub use def_schema::{
     DefContentBlob, DefSkillBlob, DefValidationError, DefinitionRecord, DefinitionRecordV1,
-    FormerSlug, DEF_MAX_SUPPORTED_SCHEMA, DEF_MIN_SUPPORTED_SCHEMA,
+    FormerSlug, AgentSeat, DEF_MAX_SUPPORTED_SCHEMA, DEF_MIN_SUPPORTED_SCHEMA,
 };
 pub use def_slug_index::SlugEntry;
 pub use def_store::{record_bytes, DefStoreError, DefinitionStore, LockedRecord, SlugAllocationLock};

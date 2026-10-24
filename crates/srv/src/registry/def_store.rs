@@ -24,7 +24,7 @@ use thiserror::Error;
 
 use super::atomic::{rename_atomic, write_atomic};
 use super::def_slug_index::{SlugEntry, SlugIndex};
-use super::def_schema::{validate, DefValidationError, DefinitionRecord, DEF_MAX_SUPPORTED_SCHEMA};
+use super::def_schema::{validate, AgentSeat, DefValidationError, DefinitionRecord, DEF_MAX_SUPPORTED_SCHEMA};
 
 #[derive(Debug, Error)]
 pub enum DefStoreError {
@@ -96,6 +96,15 @@ impl DefinitionStore {
     /// lock; [`DefStoreError::Locked`] names it.
     pub fn lock_slug_allocation(&self) -> Result<SlugAllocationLock, DefStoreError> {
         let file = super::def_record_lock::lock_record(&self.root, super::def_record_lock::SLUG_ALLOCATION, self.lock_timeout)?;
+        Ok(SlugAllocationLock { _file: file })
+    }
+
+    /// The host-wide seat lock, held until the guard drops. A seat's lead is
+    /// checked against every other agent's (no cycles) and then written: two
+    /// clients setting reciprocal leads at once could each pass the check
+    /// before the other wrote, so a writer holds this across both.
+    pub fn lock_seat_graph(&self) -> Result<SlugAllocationLock, DefStoreError> {
+        let file = super::def_record_lock::lock_record(&self.root, super::def_record_lock::SEAT_GRAPH, self.lock_timeout)?;
         Ok(SlugAllocationLock { _file: file })
     }
 
@@ -275,9 +284,37 @@ impl DefinitionStore {
     pub fn slug_of(&self, id: &str) -> Result<Option<SlugEntry>, DefStoreError> {
         Ok(self.slugs.one(&self.root, id)?)
     }
+
+    /// Set (`Some`) or remove (`None`) record `id`'s seat, leaving every other
+    /// field, known to this build or not, as it is on disk. The one writer of
+    /// `seat`: [`Self::upsert`] keeps the file's copy, so a mirror write can't
+    /// clear it. `Ok(false)` when there is no active record. A record this
+    /// build can't write (unparseable, a newer schema) is an error, not
+    /// overwritten.
+    pub fn set_seat(&self, id: &str, seat: Option<&AgentSeat>) -> Result<bool, DefStoreError> {
+        self.with_record_locked(id, |locked| {
+            let Some(raw) = locked.raw()? else { return Ok(false) };
+            let mut value: Value = serde_json::from_slice(&raw)?;
+            let data = value
+                .get_mut("data")
+                .and_then(Value::as_object_mut)
+                .ok_or(DefValidationError::MissingField("data"))?;
+            match seat {
+                Some(seat) => {
+                    data.insert("seat".to_string(), serde_json::to_value(seat)?);
+                }
+                None => {
+                    data.remove("seat");
+                }
+            }
+            locked.replace_raw(&record_bytes(&value)?)?;
+            Ok(true)
+        })
+    }
 }
 
-/// Held slug allocation ([`DefinitionStore::lock_slug_allocation`]).
+/// A held host-wide lock: slug allocation ([`DefinitionStore::lock_slug_allocation`])
+/// or seat changes ([`DefinitionStore::lock_seat_graph`]).
 pub struct SlugAllocationLock {
     _file: std::fs::File,
 }
@@ -524,6 +561,7 @@ mod tests {
                 container_name: String::new(),
                 use_ambient_login: 0,
                 former_slugs: Vec::new(),
+                seat: None,
                 content: Vec::new(),
                 skills: Vec::new(),
             },
@@ -602,6 +640,71 @@ mod tests {
         let got = s.get("aaa").unwrap().unwrap();
         assert_eq!(got.data.former_slugs, vec![former("a", 1), former("b", 2), former("z", 9)]);
         assert_eq!(got.data.slug, "c");
+    }
+
+    fn seat(role: &str) -> AgentSeat {
+        AgentSeat { role: role.to_string(), area: Some("docs".into()), set_at_ms: 3, ..Default::default() }
+    }
+
+    /// `set_seat` sets and removes the seat and leaves every other field,
+    /// one this build doesn't know included, as it was.
+    #[test]
+    fn set_seat_sets_and_clears_only_the_seat() {
+        let (_t, s) = store();
+        let path = s.root().join("aaa.json");
+        let raw = serde_json::json!({
+            "schema_version": 1,
+            "future": 1,
+            "data": { "id": "aaa", "name": "Demo", "provider": "claude", "slug": "demo", "future_field": "kept" }
+        });
+        std::fs::write(&path, serde_json::to_vec_pretty(&raw).unwrap()).unwrap();
+
+        assert!(s.set_seat("aaa", Some(&seat("leader"))).unwrap());
+        assert_eq!(s.get("aaa").unwrap().unwrap().data.seat, Some(seat("leader")));
+        let on_disk: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(on_disk.pointer("/data/future_field"), Some(&serde_json::json!("kept")));
+        assert_eq!(on_disk.get("future"), Some(&serde_json::json!(1)));
+
+        assert!(s.set_seat("aaa", None).unwrap());
+        let on_disk: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert!(on_disk.pointer("/data/seat").is_none(), "clearing removes the key");
+        assert_eq!(on_disk.pointer("/data/future_field"), Some(&serde_json::json!("kept")));
+        assert_eq!(on_disk.pointer("/data/slug"), Some(&serde_json::json!("demo")));
+
+        assert!(!s.set_seat("missing", Some(&seat("leader"))).unwrap(), "no record, nothing written");
+        assert!(!s.root().join("missing.json").exists());
+    }
+
+    /// A write that carries no seat, from this build's mirror or from an
+    /// older build that doesn't know the field, keeps the one on disk.
+    #[test]
+    fn an_upsert_without_a_seat_keeps_the_stored_one() {
+        let (_t, s) = store();
+        s.upsert(&rec("aaa", "Demo")).unwrap();
+        s.set_seat("aaa", Some(&seat("specialist"))).unwrap();
+
+        s.upsert(&rec("aaa", "Renamed")).unwrap();
+        let got = s.get("aaa").unwrap().unwrap();
+        assert_eq!(got.data.name, "Renamed");
+        assert_eq!(got.data.seat, Some(seat("specialist")));
+
+        // An older build's record: its JSON has no `seat` key at all.
+        let mut older = serde_json::to_value(rec("aaa", "Older")).unwrap();
+        older["data"].as_object_mut().unwrap().remove("seat");
+        let older: DefinitionRecord = serde_json::from_value(older).unwrap();
+        s.upsert(&older).unwrap();
+        assert_eq!(s.get("aaa").unwrap().unwrap().data.seat, Some(seat("specialist")));
+    }
+
+    /// A newer schema's file isn't rewritten by `set_seat`.
+    #[test]
+    fn set_seat_refuses_a_newer_schema() {
+        let (_t, s) = store();
+        let path = s.root().join("bbb.json");
+        let future = r#"{"schema_version":99,"data":{"id":"bbb","name":"B","provider":"claude"}}"#;
+        std::fs::write(&path, future).unwrap();
+        assert!(s.set_seat("bbb", Some(&seat("leader"))).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), future);
     }
 
     /// Backdate a record's file, as an index built a while after the last
@@ -817,6 +920,21 @@ mod tests {
         assert!(matches!(b.lock_slug_allocation(), Err(DefStoreError::Locked { .. })));
         drop(held);
         assert!(b.lock_slug_allocation().is_ok());
+    }
+
+    /// Seat changes are one host-wide lock too, apart from slug allocation.
+    #[test]
+    fn the_seat_lock_is_exclusive_and_separate() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("definitions");
+        let a = DefinitionStore::open(root.clone()).unwrap();
+        let mut b = DefinitionStore::open(root).unwrap();
+        b.set_lock_timeout(std::time::Duration::from_millis(100));
+        let held = a.lock_seat_graph().unwrap();
+        assert!(matches!(b.lock_seat_graph(), Err(DefStoreError::Locked { .. })));
+        assert!(b.lock_slug_allocation().is_ok(), "slug allocation isn't blocked by it");
+        drop(held);
+        assert!(b.lock_seat_graph().is_ok());
     }
 
     #[test]

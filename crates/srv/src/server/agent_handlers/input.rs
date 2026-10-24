@@ -1880,6 +1880,7 @@ mod tests {
 
     fn agent_def(id: &str, name: &str) -> AgentDefinition {
         AgentDefinition {
+            seat: None,
             conversation_visibility:
                 crate::backend::storage::agents::default_conversation_visibility(),
             id: id.to_string(),

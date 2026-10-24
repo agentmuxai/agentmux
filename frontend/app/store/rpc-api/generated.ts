@@ -33,6 +33,7 @@ import type { AgentSessionAppendOutputResult } from "@/types/rpc/AgentSessionApp
 import type { AgentSessionArchiveResult } from "@/types/rpc/AgentSessionArchiveResult";
 import type { AgentSessionReadResult } from "@/types/rpc/AgentSessionReadResult";
 import type { AgentSessionWriteStateResult } from "@/types/rpc/AgentSessionWriteStateResult";
+import type { AgentSetSeatResult } from "@/types/rpc/AgentSetSeatResult";
 import type { AgentShutdownKeepResult } from "@/types/rpc/AgentShutdownKeepResult";
 import type { AgentSkill } from "@/types/rpc/AgentSkill";
 import type { AgentTrackedBlocksResult } from "@/types/rpc/AgentTrackedBlocksResult";
@@ -74,6 +75,7 @@ import type { CommandAgentSessionArchiveData } from "@/types/rpc/CommandAgentSes
 import type { CommandAgentSessionListArchivesData } from "@/types/rpc/CommandAgentSessionListArchivesData";
 import type { CommandAgentSessionReadData } from "@/types/rpc/CommandAgentSessionReadData";
 import type { CommandAgentSessionWriteStateData } from "@/types/rpc/CommandAgentSessionWriteStateData";
+import type { CommandAgentSetSeatData } from "@/types/rpc/CommandAgentSetSeatData";
 import type { CommandAgentShutdownKeepData } from "@/types/rpc/CommandAgentShutdownKeepData";
 import type { CommandAgentStopData } from "@/types/rpc/CommandAgentStopData";
 import type { CommandAmbientNarrateData } from "@/types/rpc/CommandAmbientNarrateData";
@@ -648,6 +650,10 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<AgentSessionWriteStateResult> {
     return client.rpcCall("agent:session:write_state", data, opts);
+  },
+  // command "agent.setSeat"
+  AgentSetSeatCommand(client: RpcClient, data: CommandAgentSetSeatData, opts?: RpcOpts): Promise<AgentSetSeatResult> {
+    return client.rpcCall("agent.setSeat", data, opts);
   },
   // command "agentshutdownkeep"
   AgentShutdownKeepCommand(

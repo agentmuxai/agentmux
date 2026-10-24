@@ -477,6 +477,10 @@ pub const COMMAND_AGENT_KILL_TREE: &str = "agent.kill-tree";
 /// Create or upsert an agent definition. Broadcasts `agents:changed` on
 /// success so all open frontends refresh My Agents without a restart.
 pub const COMMAND_AGENT_DEFINE: &str = "agent.define";
+/// Set or clear an agent's seat (`CommandAgentSetSeatData` ->
+/// `AgentSetSeatResult`). The operator's client only. Broadcasts
+/// `agents:changed`. SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §3.
+pub const COMMAND_AGENT_SET_SEAT: &str = "agent.setSeat";
 
 // Fleet control — select/broadcast/bulk-act on many agents at once. See
 // docs/specs/SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md. Both action

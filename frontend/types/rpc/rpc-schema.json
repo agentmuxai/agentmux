@@ -418,6 +418,25 @@
     }
   },
   {
+    "command": "agent.setSeat",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandAgentSetSeatData",
+    "requestName": "CommandAgentSetSeatData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentSetSeatData"
+      ],
+      "name": "CommandAgentSetSeatData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::AgentSetSeatResult",
+    "responseName": "AgentSetSeatResult",
+    "responseTs": {
+      "imports": [
+        "AgentSetSeatResult"
+      ],
+      "name": "AgentSetSeatResult"
+    }
+  },
+  {
     "command": "agent.status",
     "request": "agentmux_srv::backend::rpc_types::agent::CommandAgentStatusData",
     "requestName": "CommandAgentStatusData",
