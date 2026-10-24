@@ -57,9 +57,9 @@ const model = {
 
 const [asleep, setAsleep] = createSignal(false);
 
-function Mount() {
+function Mount(props: { asleep?: () => boolean }) {
     let ph: HTMLDivElement | undefined;
-    usePaneRectSync({ model, placeholderRef: () => ph, windowLabel: "main", diag: () => {}, asleep });
+    usePaneRectSync({ model, placeholderRef: () => ph, windowLabel: "main", diag: () => {}, asleep: props.asleep ?? asleep });
     return <div ref={ph} />;
 }
 
@@ -110,6 +110,16 @@ describe("usePaneRectSync — sleep and wake around the discard park", { timeout
         expect(discards()).toHaveLength(0);
         expect(model.endSleep).toHaveBeenCalledTimes(1);
         expect(model.endSleep).toHaveBeenCalledWith(undefined);
+    });
+
+    it("a view that unmounted during the park does not discard the page its replacement mounted", async () => {
+        await hiddenPane();
+        setAsleep(true);
+        await tick(100); // parked
+        cleanup(); // the view goes away mid-park...
+        render(() => <Mount asleep={() => false} />); // ...and the same block mounts again, awake
+        await tick(1900);
+        expect(discards()).toHaveLength(0);
     });
 
     it("a wake while a refused discard is out ends the sleep too", async () => {

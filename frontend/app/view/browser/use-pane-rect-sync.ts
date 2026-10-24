@@ -333,6 +333,11 @@ export function usePaneRectSync(params: {
         }
     };
     const sleepNativeOnce = async () => {
+        // This view's claim on the native page. The host finds a page by block id, so if this
+        // view unmounts and the same block mounts again while we wait, a discard sent from here
+        // would hit the new mount's page. Check the claim is still ours before each step.
+        const token = ownerToken;
+        const stillOurs = () => !disposed && ownerToken === token && paneCreated();
         // A hidden pane is laid out at 0x0, where its page reflows into a
         // 14 px column and scrolls far down to keep its place; a discard then
         // keeps that offset, and the page comes back far down. Park it
@@ -346,6 +351,7 @@ export function usePaneRectSync(params: {
             await new Promise((done) => setTimeout(done, DISCARD_SETTLE_MS));
             parkedForDiscard = false;
             lastSentRect = null;
+            if (!stillOurs()) return;
             if (!asleep()) {
                 // Woken during the park: the page is alive and was never discarded, so it
                 // will not load again, and the sleep record would never end (the card
@@ -356,6 +362,7 @@ export function usePaneRectSync(params: {
             }
         }
         const r = await getApi().browserPanes.discard?.(model.blockId, "discard").catch(() => null);
+        if (!stillOurs()) return;
         syncPosition();
         switch (afterDiscard(r, asleep())) {
             case "kept":
