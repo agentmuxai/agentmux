@@ -199,14 +199,32 @@ fn resolve_spawn_paths() -> Result<agentmux_common::DataPaths, String> {
     }
 }
 
+/// Whether this host may take the launcher's srv, and with it the
+/// launcher's paths, instead of spawning its own: always for a release
+/// build, and for a dev build only when the launcher is its genuine parent.
+/// Startup and every settings.json read and write decide by this one rule,
+/// so they agree on whose srv, and whose settings file, this host has (#1903).
+pub(crate) fn may_adopt_launcher_backend(host_exe_dir: &std::path::Path) -> bool {
+    !agentmux_common::is_dev_build_exe(host_exe_dir) || crate::launcher_is_genuine_parent()
+}
+
 /// The `settings.json` this host's srv reads: the launcher's paths when the
-/// launcher started srv, else the ones `spawn_backend` starts it with. Every
+/// host adopts the launcher's srv (the startup rule,
+/// [`may_adopt_launcher_backend`]), else the ones `spawn_backend`
+/// starts it with. A dev host started from an AgentMux pane inherits that
+/// instance's `AGENTMUX_BACKEND_WS` but spawns its own srv, so it must not
+/// take the inherited paths. Every
 /// host read and write of settings.json goes through this, so it is the same
 /// file srv loads, under `AGENTMUX_HOME_OVERRIDE` too (#1903). `None` when the
 /// paths can't be resolved; callers then use their defaults rather than guess
 /// a location.
 pub(crate) fn settings_file() -> Option<std::path::PathBuf> {
-    let paths = if std::env::var_os("AGENTMUX_BACKEND_WS").is_some() {
+    let adopts_launcher = std::env::var_os("AGENTMUX_BACKEND_WS").is_some()
+        && std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(may_adopt_launcher_backend))
+            .unwrap_or(false);
+    let paths = if adopts_launcher {
         agentmux_common::DataPaths::from_env()
     } else {
         resolve_spawn_paths().ok()
