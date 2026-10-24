@@ -13,13 +13,58 @@
 // `tab-drop-invert-strobe`) live in drag/drop-indicators.scss, which is
 // loaded once, so they're emitted once however many files `@use` this.
 
+// The Pane Tab strip's hover blink: one blink is one cycle (negative, then
+// normal), and the burst ends in the held negative. A cycle of 200 ms (100 ms a
+// phase, six frames at 60 Hz) and two blinks make a 400 ms burst: twice the
+// speed and twice the blinks of the single 400 ms blink it replaces. Two is the
+// most the rule allows: WCAG 2.3.1 permits three flashes (six luminance changes)
+// in any one second, and a hover makes one change entering, two per blink and one
+// leaving, so a third blink would put four flashes in the second after entry
+// whenever the pointer leaves soon after. A faster cycle would only shorten the
+// burst. element/drop-blink-clock.ts keeps the limit across hovers (every
+// change, a hover's exit included, is counted at its real time; a hover that
+// does not fit gets the held negative without the blink, or the outline alone). The numbers are written once here so the header and the
+// counter-invert on its tabs can never drift apart, and a test pins them to the
+// clock's.
+// docs/specs/SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §3.
+$drop-blink-cycle: 200ms;
+$drop-blink-count: 2;
+
 // The animations the mixins below combine, each written once.
 $drop-strobe: tab-drop-invert-strobe 400ms steps(1, end) 2;
-$drop-hold: tab-drop-invert-hold 400ms steps(1, end) forwards;
-$drop-pulse: tab-drop-pulse 0.8s var(--ease-in-out) infinite alternate;
-$drop-pulse-reduced: tab-drop-pulse 0.8s ease-in-out infinite alternate;
+$drop-hold: tab-drop-invert-hold $drop-blink-cycle steps(1, end) $drop-blink-count forwards;
+$drop-pulse: tab-drop-pulse 0.4s var(--ease-in-out) infinite alternate;
+$drop-pulse-reduced: tab-drop-pulse 0.4s ease-in-out infinite alternate;
 
 // --- Mixins ---
+
+// The `$hold` look without its blink: the target is simply negative (with the
+// pulsing outline) for as long as the hover lasts. It is the reduced treatment,
+// and what a hover gets when the budget has room for its two changes but not a burst.
+// `drop-target-steady-exempt` is the matching cancel on the tabs.
+@mixin drop-target-steady {
+    filter: invert(1);
+    animation: $drop-pulse-reduced;
+}
+
+@mixin drop-target-steady-exempt {
+    animation: none;
+    filter: invert(1);
+}
+
+// What a hover gets when the window's flash budget is nearly spent (a change was
+// made within the last second, element/drop-blink-clock.ts): the outline pulse alone,
+// no negative at all, in either motion tier. `drop-target-plain-exempt` is the
+// matching state of the tabs, which have nothing to cancel.
+@mixin drop-target-plain {
+    filter: none;
+    animation: $drop-pulse;
+}
+
+@mixin drop-target-plain-exempt {
+    filter: none;
+    animation: none;
+}
 
 // Something is being dragged over a valid drop target: the instant the hover
 // begins, the target flashes to its NEGATIVE (filter: invert) and back —
@@ -29,12 +74,15 @@ $drop-pulse-reduced: tab-drop-pulse 0.8s ease-in-out infinite alternate;
 //
 // Flash rule (WCAG 2.3.1, both motion tiers): no more than three flashes in
 // any one second. The original design (10 flashes / 500ms = 20 Hz) broke it;
-// this is 2 flashes over 800ms (2.5 Hz), under the limit, so the strobe runs
-// in both tiers. Its pulse-only treatment, which drops straight to the steady
-// pulse, is declared below and dormant under `feedback`.
+// the settle-back strobe is 2 flashes over 800ms (2.5 Hz), under the limit, so
+// it runs in both tiers. The `$hold` blink is two blinks in 400ms and then
+// steady (see `$drop-blink-cycle`); a hover that would break the limit in the
+// same second as another gets the outline alone (`drop-target-plain`).
+// The pulse-only treatment, which drops straight to the steady pulse, is declared
+// below and dormant under `feedback`.
 //
-// `$hold: true` is the variant that lands inverted: the flash is one blink
-// (negative, normal) and then the target STAYS negative until the hover ends,
+// `$hold: true` is the variant that lands inverted: the flash is a short burst of
+// blinks (negative, normal; `$drop-blink-count` of them) and then the target STAYS negative until the hover ends,
 // instead of settling back to its normal colours. The Pane Tab strip uses it,
 // so the pane that will take the tab stays unmistakable for the whole drag
 // (docs/specs/SPEC_DROP_TARGET_LANDS_INVERTED_2026_10_21.md). Reduced
@@ -47,8 +95,7 @@ $drop-pulse-reduced: tab-drop-pulse 0.8s ease-in-out infinite alternate;
         animation: $drop-hold, $drop-pulse;
 
         @include mixins.when-motion-reduced(feedback) {
-            filter: invert(1);
-            animation: $drop-pulse-reduced;
+            @include drop-target-steady;
         }
     } @else {
         animation: $drop-strobe, $drop-pulse;
@@ -78,8 +125,7 @@ $drop-pulse-reduced: tab-drop-pulse 0.8s ease-in-out infinite alternate;
         animation: $drop-hold;
 
         @include mixins.when-motion-reduced(feedback) {
-            animation: none;
-            filter: invert(1);
+            @include drop-target-steady-exempt;
         }
     } @else {
         animation: $drop-strobe;

@@ -601,6 +601,57 @@ describe("renderPaneChromeShell — header tail color", () => {
     });
 });
 
+describe("renderPaneChromeShell — selecting a pill on a collapsed pane", () => {
+    function collapsedLayoutModel() {
+        const model = fakeLayoutModel(["b1", "b2"]);
+        model.minimizeNodeToggle = vi.fn();
+        return model;
+    }
+
+    it("expands a collapsed pane on a click, whether the pill is active or not", () => {
+        mockLayoutModel = collapsedLayoutModel();
+        render(() =>
+            renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b1", isMinimized: () => true }), (<div />) as any)
+        );
+        headerCalls[0].onSelect("b1"); // the active pill: handleActivate never sees this click
+        expect(mockLayoutModel.minimizeNodeToggle).toHaveBeenCalledTimes(1);
+        expect(mockLayoutModel.minimizeNodeToggle).toHaveBeenCalledWith("node-1");
+        headerCalls[0].onSelect("b2");
+        expect(mockLayoutModel.minimizeNodeToggle).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not expand this pane for a fork pill, which belongs to another pane", () => {
+        mockLayoutModel = collapsedLayoutModel();
+        render(() => renderPaneChromeShell(fakeNodeModel({ isMinimized: () => true }), (<div />) as any));
+        headerCalls[0].onSelect("block-in-another-pane");
+        expect(mockLayoutModel.minimizeNodeToggle).not.toHaveBeenCalled();
+    });
+
+    it("leaves an expanded pane alone", () => {
+        mockLayoutModel = collapsedLayoutModel();
+        render(() =>
+            renderPaneChromeShell(fakeNodeModel({ isMinimized: () => false }), (<div />) as any)
+        );
+        headerCalls[0].onSelect("b1");
+        expect(mockLayoutModel.minimizeNodeToggle).not.toHaveBeenCalled();
+    });
+
+    it("expands an agent pane too, whose own onActivate returns before the ordinary path", () => {
+        mockLayoutModel = collapsedLayoutModel();
+        render(() =>
+            renderPaneChromeShell(
+                fakeNodeModel({
+                    isMinimized: () => true,
+                    activeViewModel: () => ({ paneChromeModel: { onActivate: () => true } }),
+                }),
+                (<div />) as any
+            )
+        );
+        headerCalls[0].onSelect("b2");
+        expect(mockLayoutModel.minimizeNodeToggle).toHaveBeenCalledTimes(1);
+    });
+});
+
 describe("renderPaneChromeShell — activate/close/add wiring", () => {
     it("onActivate delegates to setActiveBlockInStack with this pane's nodeId, and no-ops when already active", () => {
         mockLayoutModel = fakeLayoutModel(["b1", "b2"]);

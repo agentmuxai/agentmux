@@ -74,6 +74,7 @@ export function PaneHeaderTabStrip<T>(props: PaneHeaderTabStripProps<T>): JSX.El
             // target of an activity flash (SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md).
             flashOnActivity
             onActivate={props.onActivate}
+            onSelect={props.onSelect}
             onClose={props.onClose}
             onTabDoubleClick={props.onTabDoubleClick}
             renderLabel={props.renderLabel}

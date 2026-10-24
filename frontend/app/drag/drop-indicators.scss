@@ -92,10 +92,12 @@
 }
 
 // The same flash, but it lands inverted and stays there (animation-fill-mode:
-// forwards) for as long as the hover lasts: negative for the first half
-// (200ms), normal for the second (200ms), then negative again, held. One
-// iteration, so two inversions in the first 400ms and never more than three
-// flashes in any one second (WCAG 2.3.1).
+// forwards) for as long as the hover lasts. One iteration is one blink:
+// negative for the first half, normal for the second, then negative again.
+// drop-feedback.scss runs it for two 200ms iterations (a 400ms burst) and
+// then the final keyframe holds: with the change on entering and the one on
+// leaving, three flashes at most in any one second (WCAG 2.3.1; the strip keeps
+// that across re-entries with element/drop-blink-clock.ts).
 // docs/specs/SPEC_DROP_TARGET_LANDS_INVERTED_2026_10_21.md
 @keyframes tab-drop-invert-hold {
     0%   { filter: invert(1); }
