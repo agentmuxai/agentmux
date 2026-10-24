@@ -32,9 +32,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 /// Bring the `agent:seat` of every open agent pane up to date, so the pane
-/// header's tooltip shows the seat just set (§4). Best-effort: a pane that
+/// header's tooltip shows the seat just set, or a lead's new name after a
+/// rename (§4). Best-effort: a pane that
 /// can't be patched shows the old seat until it's opened again.
-async fn refresh_pane_seats(state: &AppState) {
+pub(super) async fn refresh_pane_seats(state: &AppState) {
     use crate::backend::agent_seat::{stale_seat_meta, summary_by_id, SEAT_META_KEY};
     let mstore = state.mstore.clone();
     let stale = tokio::task::spawn_blocking(move || {

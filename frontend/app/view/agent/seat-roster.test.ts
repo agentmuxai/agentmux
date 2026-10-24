@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { orderForApply, parseRoster, resolveRoster, type RosterAgent } from "./seat-roster";
+import { applyInPasses, orderForApply, parseRoster, resolveRoster, type ResolvedSeat, type RosterAgent } from "./seat-roster";
 
 const AGENTS: RosterAgent[] = [
     { id: "uid-x", name: "AgentX" },
@@ -117,5 +117,47 @@ describe("orderForApply", () => {
             AGENTS
         );
         expect(orderForApply(plan.seats)).toHaveLength(2);
+    });
+});
+
+describe("applyInPasses", () => {
+    const line = (id: string, lead: string): ResolvedSeat => ({
+        ref: id,
+        agent: { id, name: id },
+        seat: { role: "worker", lead },
+        leadName: lead,
+    });
+
+    /** A store of leads that refuses a lead whose chain comes back, as srv does. */
+    const leads = (initial: Record<string, string>) => {
+        const lead = { ...initial };
+        const set = async (s: ResolvedSeat) => {
+            for (let at: string | undefined = s.seat.lead ?? undefined; at; at = lead[at]) {
+                if (at === s.agent.id) throw new Error(`INVALID_ARG: ${s.seat.lead} already reports to this agent (a cycle)`);
+            }
+            lead[s.agent.id] = s.seat.lead as string;
+        };
+        return { lead, set };
+    };
+
+    it("retries a line refused as a cycle once a later one lands", async () => {
+        // X → A → B today; the roster moves B under X and A under C.
+        const store = leads({ X: "A", A: "B" });
+        const out = await applyInPasses(orderForApply([line("B", "X"), line("A", "C")]), store.set);
+        expect(out.map((o) => [o.seat.agent.id, o.error])).toEqual([
+            ["B", null],
+            ["A", null],
+        ]);
+        expect(store.lead).toEqual({ X: "A", A: "C", B: "X" });
+    });
+
+    it("stops when a pass lands nothing, keeping each refusal", async () => {
+        const store = leads({ A: "B" });
+        const out = await applyInPasses([line("B", "A"), line("C", "nobody")], async (s) => {
+            if (s.agent.id === "C") throw new Error("lead nobody is not an agent");
+            await store.set(s);
+        });
+        expect(out[0].error).toMatch(/cycle/);
+        expect(out[1].error).toMatch(/not an agent/);
     });
 });

@@ -174,3 +174,47 @@ export function orderForApply(seats: ResolvedSeat[]): ResolvedSeat[] {
         .sort((a, b) => a.d - b.d || a.i - b.i)
         .map((x) => x.s);
 }
+
+/** One line's result from {@link applyInPasses}. */
+export interface ApplyOutcome {
+    seat: ResolvedSeat;
+    error: string | null;
+}
+
+/**
+ * Set `seats` (already in {@link orderForApply}'s order) with `set`, then
+ * retry the ones srv refused as a cycle while a pass still lands something.
+ * The order only sees the roster's own leads, so a chain through an agent
+ * the roster leaves out (X → A → B, importing B → X then A → C) can refuse
+ * a line that becomes valid once a later one lands (#5382). Each line's
+ * outcome is its last attempt's; `onProgress` gets them as they change.
+ */
+export async function applyInPasses(
+    seats: ResolvedSeat[],
+    set: (seat: ResolvedSeat) => Promise<void>,
+    onProgress?: (outcomes: ApplyOutcome[]) => void
+): Promise<ApplyOutcome[]> {
+    const outcomes: ApplyOutcome[] = seats.map((seat) => ({ seat, error: null }));
+    let pending = outcomes.map((_, i) => i);
+    while (pending.length > 0) {
+        const retry: number[] = [];
+        let landed = false;
+        for (const i of pending) {
+            const seat = outcomes[i].seat;
+            try {
+                await set(seat);
+                outcomes[i] = { seat, error: null };
+                landed = true;
+            } catch (e) {
+                const error = e instanceof Error ? e.message : String(e);
+                outcomes[i] = { seat, error };
+                if (error.includes("cycle")) retry.push(i);
+            }
+            onProgress?.([...outcomes]);
+        }
+        // Nothing landed: another pass would be refused the same way.
+        if (!landed) break;
+        pending = retry;
+    }
+    return outcomes;
+}

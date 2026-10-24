@@ -5,7 +5,8 @@
  * "Import roster…" in the Seat tab (docs/specs/SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §3):
  * paste the approved roster's JSON, preview what each line resolves to and
  * which lines don't (with why; nothing is guessed), then apply. The seats are
- * set one by one through `agent.setSeat`, leads first (`orderForApply`), and
+ * set one by one through `agent.setSeat`, leads first (`orderForApply`), a
+ * line refused as a cycle is retried once others land (`applyInPasses`), and
  * each line's outcome is shown.
  */
 
@@ -15,7 +16,15 @@ import { Button } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { seatBadgeText } from "../seat-format";
-import { orderForApply, parseRoster, resolveRoster, type RosterAgent, type RosterPlan } from "../seat-roster";
+import {
+    applyInPasses,
+    orderForApply,
+    parseRoster,
+    resolveRoster,
+    type ApplyOutcome,
+    type RosterAgent,
+    type RosterPlan,
+} from "../seat-roster";
 
 interface SeatRosterImportProps {
     /** This machine's agents (no templates). */
@@ -55,16 +64,16 @@ export const SeatRosterImport = (props: SeatRosterImportProps): JSX.Element => {
         const p = plan();
         if (!p) return;
         setApplying(true);
-        const done: Outcome[] = [];
-        for (const line of orderForApply(p.seats)) {
-            try {
-                await RpcApi.AgentSetSeatCommand(TabRpcClient, { agent_id: line.agent.id, seat: line.seat });
-                done.push({ name: line.agent.name, error: null });
-            } catch (e) {
-                done.push({ name: line.agent.name, error: e instanceof Error ? e.message : String(e) });
-            }
-            setOutcomes([...done]);
-        }
+        const show = (results: ApplyOutcome[]) => setOutcomes(results.map((r) => ({ name: r.seat.agent.name, error: r.error })));
+        show(
+            await applyInPasses(
+                orderForApply(p.seats),
+                async (line) => {
+                    await RpcApi.AgentSetSeatCommand(TabRpcClient, { agent_id: line.agent.id, seat: line.seat });
+                },
+                show
+            )
+        );
         setApplying(false);
     };
 
