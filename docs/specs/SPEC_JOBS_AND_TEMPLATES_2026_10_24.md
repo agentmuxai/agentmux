@@ -150,7 +150,7 @@ A new Warden section, `jobs`, after Kanban (`frontend/app/view/warden/warden-sec
 
 | To | How | In the code |
 |---|---|---|
-| **A Kanban task** for the owning leader | One task, titled "Job failed: <name>", with the run's state, reason, summary and a link to its history. `kind: "job-failure"`, `target_agent_uid` the owning leader, `requested_by_kind: other`, `filed_by: "jobs"`, review required | The same store calls as `kanban.act` `create` (`app_api/kanban.rs:254-308`): `work_queue_enqueue` and `work_card_create` |
+| **A Kanban task** for the owning leader | One task, titled "Job failed: <name>", with the run's state, reason, summary and a link to its history. `kind: "job-failure"`, `target_agent_uid` the owning leader, `requested_by_kind: other`, `filed_by: "jobs"`, `review: false` (the operator reviews by using the app, not in the Kanban's Review column; operator decision, 2026-10-23) | The same store calls as `kanban.act` `create` (`app_api/kanban.rs:254-308`): `work_queue_enqueue` and `work_card_create` |
 | **The owning leader** | An `[AgentMux]` note: "Job "<name>" failed at 06:02 (timeout). Kanban #123." It starts a turn | `deliver_system_note` (`backend/reactive/handler.rs:1453`); the summary goes through `quote_in_system_note` (`reactive/sanitize.rs:736`) |
 | **The operator** | A notification: "Job failed: <name>", fixed text plus the reason. Clicking it opens Warden → Jobs at the job. Also the tab's "N failing" count | A new `NotifyKind::JobFailed` (`backend/notify/policy.rs:23`), Attention priority, group key `job:<job_id>`, setting `notify:os:jobfailed`, fixed text, sent from srv the way `CloudSignedOut` is (`router.rs:850`), which is about no agent either |
 
