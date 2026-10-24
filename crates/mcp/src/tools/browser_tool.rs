@@ -44,8 +44,20 @@ const CHANGES_THE_PAGE: &[&str] = &["click", "fill", "select", "check", "key", "
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     match name {
-        "Browser" => relabeled("Browser", ACTS, run(arguments, cx).await),
+        "Browser" => masked(relabeled("Browser", ACTS, run(arguments, cx).await)),
         _ => Err(not_in_family()),
+    }
+}
+
+/// Everything the agent reads from a Browser call, with card, ID and bank numbers and one-time
+/// codes hidden by their shape: the last line of the secret-field rule (the host hides a secret
+/// *field*'s value; this hides the number a page prints in plain text, or a dialog, a popup title
+/// or the Log repeats). Not grantable: no site grant reaches it.
+fn masked(result: Result<String>) -> Result<String> {
+    use agentmux_common::pii_mask::mask_text;
+    match result {
+        Ok(text) => Ok(mask_text(&text)),
+        Err(e) => Err(anyhow::anyhow!(mask_text(&format!("{e:#}")))),
     }
 }
 
@@ -182,5 +194,20 @@ mod tests {
         let cx = ToolCtx { local_url: "", auth_key: "", block_id: "", client: &client, loops: &loops, loop_counter: &counter };
         let e = call("Browser", &json!({ "action": "eval", "script": "1", "snapshot": true }), &cx).await.unwrap_err().to_string();
         assert!(e.contains("follow an action that changes the page"), "{e}");
+    }
+}
+
+#[cfg(test)]
+mod mask_tests {
+    use super::*;
+
+    #[test]
+    fn every_answer_and_error_has_card_numbers_and_codes_hidden() {
+        let ok = masked(Ok("- text \"Paid with 4111 1111 1111 1111, CVV 123\"
+".into())).unwrap();
+        assert!(!ok.contains("4111") && ok.contains("[card number hidden]") && ok.contains("[code hidden]"), "{ok}");
+        let err = masked(Err(anyhow::anyhow!("the page said: your verification code is 482913"))).unwrap_err().to_string();
+        assert!(!err.contains("482913") && err.contains("[code hidden]"), "{err}");
+        assert_eq!(masked(Ok("pane 7f3a2c: done".into())).unwrap(), "pane 7f3a2c: done");
     }
 }

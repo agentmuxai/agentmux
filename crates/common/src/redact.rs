@@ -44,6 +44,13 @@ pub fn redact_secrets(text: &str) -> String {
     redact_aws_secret_key(&out)
 }
 
+/// Blanks credential-prefixed tokens and PEM private keys, and nothing else: the two passes of
+/// [`redact_secrets`] that look for a secret by its shape alone, without its `key: value` passes.
+/// For text of bounded length (it rescans for every prefix it finds).
+pub fn redact_token_shapes(text: &str) -> String {
+    redact_private_keys(&redact_credential_prefixes(text))
+}
+
 /// Blanks credential-prefixed tokens (`ghp_...`, `sk-...`, AWS access-key
 /// ids, …). Deliberately shape-based: it errs toward redacting a long token
 /// that merely looks like a secret. Was `continuity.rs::redact_secrets`.

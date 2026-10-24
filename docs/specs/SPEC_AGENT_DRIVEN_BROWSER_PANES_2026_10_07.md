@@ -94,6 +94,8 @@ Returns a compact, text-first view of the page's **accessibility tree**, the way
 
 `BrowserFill`, `BrowserDispatchKey` and `BrowserEval` refuse to write into a field that is `type=password`, has `autocomplete` `current-password`, `new-password`, `one-time-code` or `cc-*`, or is named like one (snapshot marks it `[secret]`). The refusal tells the agent to hand off (§5.2). The agent also never reads such a field's value. This is a guard against mistakes and page tricks, not a sandbox: §8.
 
+**What an agent reads is masked too (2026-10-23, Kanban #1871).** A field is secret by what a person reads next to it (its label, placeholder and aria-label) as well as by its markup: a card number, security code, expiry written MM/YY, bank account or routing number, passport or licence number, and an API key or token field show `[secret: …]` and never a value, in `snapshot`, `find` and every read-back. Text a page prints in plain copy is masked by its shape, for every answer the Browser tool gives, and for the pane's Log: a Luhn-valid card number, a dashed Social Security number, an IBAN, the digits after a label such as `CVV`, `verification code`, `routing number` or `SSN`, and credential-prefixed tokens show as `[card number hidden]`, `[ID number hidden]`, `[code hidden]` or `[account number hidden]`. `crates/common/src/pii_mask.rs` has the rules. It is a mistake guard, not a sandbox, and **no grant lifts it**: it is not an approval or a site power (bypass spec §4.3). Transcripts written before this change are not rewritten.
+
 ### 5.2 Hand-off: `BrowserHandoff({pane, reason})`
 
 For sign-in, two-factor codes, CAPTCHAs, payment, or anything the agent shouldn't do.
