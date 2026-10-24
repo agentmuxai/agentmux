@@ -372,8 +372,11 @@ pub enum Action {
 #[derive(Clone, Debug)]
 struct Live {
     notification: Notification,
-    /// For a pending shutdown: the request it belongs to (`ShutdownInfo`).
+    /// For a pending shutdown: the request it belongs to (`ShutdownInfo`), and
+    /// how much its effect does (`effect_rank`), so a stale emission can't
+    /// replace a stronger one.
     request_id: Option<String>,
+    effect_rank: u8,
     due_at_ms: i64,
     shown: bool,
     /// Replaces a toast of the same group that was already on screen — it
@@ -421,6 +424,15 @@ pub fn title_for(kind: NotifyKind, agent_name: &str) -> String {
 pub fn shutdown_title_template(effect: &str, agent_name: &str) -> String {
     let verb = if effect == "stop" { "Stopping" } else { "Closing" };
     format!("{verb} {agent_name} in {{n}} s")
+}
+
+/// How much a shutdown's effect does, to order emissions for one request.
+fn effect_rank(effect: &str) -> u8 {
+    match effect {
+        "close_pane" => 2,
+        "close_tab" => 1,
+        _ => 0,
+    }
 }
 
 /// `template` with its last `{n}` replaced by the seconds: the one that is ours.
@@ -530,9 +542,19 @@ impl PolicyState {
                     return out;
                 }
                 let group = req.kind.group_key(&req.block_id);
+                let effect_rank = req.shutdown.as_ref().map_or(0, |i| effect_rank(i.effect));
                 if let Some(existing) = self.live.get_mut(&group) {
                     if existing.notification.kind.rank() > req.kind.rank() {
                         return out;
+                    }
+                    // Emissions for one request are made on separate threads and
+                    // can arrive out of order: an older, weaker one (still saying
+                    // "Stopping" after the request became a close) must not
+                    // replace the newer (#5397).
+                    if let (Some(have), Some(info)) = (&existing.request_id, &req.shutdown) {
+                        if *have == info.request_id && existing.effect_rank > effect_rank {
+                            return out;
+                        }
                     }
                     // The same question reported again — srv detected it, then
                     // the renderer mounts the pane and reports it too (the one
@@ -597,6 +619,7 @@ impl PolicyState {
                     Live {
                         notification,
                         request_id: req.shutdown.as_ref().map(|i| i.request_id.clone()),
+                        effect_rank,
                         due_at_ms: now_ms + req.kind.delay_ms(),
                         shown: false,
                         replaces_shown: replaced_shown,
@@ -736,7 +759,7 @@ impl PolicyState {
             tag: tag_for(&group),
             created_at_ms: now_ms,
         };
-        self.live.insert(group, Live { notification: n.clone(), request_id: None, due_at_ms: now_ms, shown: true, replaces_shown: false });
+        self.live.insert(group, Live { notification: n.clone(), request_id: None, effect_rank: 0, due_at_ms: now_ms, shown: true, replaces_shown: false });
         vec![Action::Show(n)]
     }
 
@@ -1313,6 +1336,32 @@ mod tests {
         let a = p.step(Input::Tick, 5_000, &s);
         let n = &shows(&a)[0];
         assert_eq!((n.title.as_str(), n.countdown.as_ref().unwrap().remaining_ms), ("Closing lark in 0 s", 0), "never negative");
+    }
+
+    /// The two emissions for an upgraded request run on separate threads: the
+    /// weaker one arriving last must not put "Stopping" back (#5397).
+    #[test]
+    fn a_late_weaker_emission_for_the_same_request_does_not_replace_a_stronger_one() {
+        let s = Settings::default();
+        let mut p = PolicyState::new();
+        p.step(Input::Emit(shutdown_req("close_tab", true, 15_000)), 0, &s);
+        p.step(Input::Emit(shutdown_req("stop", true, 15_000)), 1, &s);
+        let a = p.step(Input::Tick, 1, &s);
+        assert_eq!(shows(&a)[0].title, "Closing lark in 15 s", "the stale 'Stopping' was dropped");
+        // In order, the stronger replaces the weaker as before.
+        let mut p = PolicyState::new();
+        p.step(Input::Emit(shutdown_req("stop", true, 15_000)), 0, &s);
+        p.step(Input::Emit(shutdown_req("close_tab", true, 15_000)), 1, &s);
+        let a = p.step(Input::Tick, 1, &s);
+        assert_eq!(shows(&a)[0].title, "Closing lark in 15 s");
+        // A different request for the block is a new shutdown, whatever its effect.
+        let newer = Request {
+            shutdown: Some(ShutdownInfo { deadline_ms: 30_000, effect: "stop", running: true, request_id: "r2".into() }),
+            ..req(NotifyKind::ShutdownPending, "b1")
+        };
+        p.step(Input::Emit(newer), 2, &s);
+        let a = p.step(Input::Tick, 2, &s);
+        assert!(shows(&a)[0].title.starts_with("Stopping lark"), "{:?}", shows(&a)[0].title);
     }
 
     #[test]
