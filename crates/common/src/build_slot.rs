@@ -104,11 +104,20 @@ pub struct Installed {
     pub foreign: Vec<String>,
 }
 
-/// Installs for the current user's home directory. `Ok` with nothing written when there is none.
+/// Installs for the current user's home directory. `Ok` with nothing written when there is none,
+/// and when this AgentMux is isolated (`AGENTMUX_HOME_OVERRIDE`): the lock and the shims are shared
+/// by every AgentMux on the machine, so a test or capture instance must not change them.
 pub fn install_for_current_user() -> io::Result<Installed> {
-    match dirs::home_dir() {
-        Some(home) => install(&home),
-        None => Ok(Installed::default()),
+    let isolated = std::env::var_os("AGENTMUX_HOME_OVERRIDE").is_some_and(|v| !v.is_empty());
+    install_unless_isolated(isolated, dirs::home_dir().as_deref())
+}
+
+/// [`install`] into `home`, unless `isolated`: then nothing is written, so the start of a test or
+/// capture instance leaves the real home as it was.
+fn install_unless_isolated(isolated: bool, home: Option<&Path>) -> io::Result<Installed> {
+    match home {
+        Some(home) if !isolated => install(home),
+        _ => Ok(Installed::default()),
     }
 }
 
@@ -236,6 +245,19 @@ mod tests {
         assert_eq!(lines.last().copied(), Some("main \"$@\"; exit $?"), "the script must end by calling main");
         assert!(lines.contains(&"main() {"), "the script body must be one function");
         assert!(crlf(SHIM_CMD).contains("\r\n") && !crlf(SHIM_CMD).replace("\r\n", "").contains('\n'));
+    }
+
+    /// An isolated instance (a test or capture run with `AGENTMUX_HOME_OVERRIDE`) leaves the real
+    /// home alone: the lock and the shims are shared by every AgentMux on the machine.
+    #[test]
+    fn an_isolated_instance_installs_nothing_in_the_real_home() {
+        let real = home();
+        assert_eq!(install_unless_isolated(true, Some(real.path())).unwrap(), Installed::default());
+        assert!(!real.path().join(".agentmux").exists(), "nothing at all was created under the home");
+        assert_eq!(install_unless_isolated(false, None).unwrap(), Installed::default(), "no home: nothing to install into");
+        let done = install_unless_isolated(false, Some(real.path())).unwrap();
+        assert!(done.written.contains(&"build-slot.sh".to_string()) && done.written.contains(&"npm".to_string()));
+        assert!(script_path(real.path()).exists(), "a normal instance still installs");
     }
 
     #[test]
