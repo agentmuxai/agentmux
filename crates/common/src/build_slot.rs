@@ -399,7 +399,7 @@ mod tests {
         let h = home();
         let script = h.path().join("build-slot.sh");
         std::fs::write(&script, lf(SCRIPT)).unwrap();
-        let root = h.path().join("slots");
+        let root = h.path().join("slot dir");
         let run = |args: &[&str]| run_slot(&bash, &script, &root, args);
         assert_eq!(run(&["--reason", "cargo test", "--", "true"]).status.code(), Some(0));
         assert_eq!(run(&["--reason", "task package", "--", "sh", "-c", "exit 3"]).status.code(), Some(3));
@@ -422,7 +422,7 @@ mod tests {
         let h = home();
         let script = h.path().join("build-slot.sh");
         std::fs::write(&script, lf(SCRIPT)).unwrap();
-        let root = h.path().join("slots");
+        let root = h.path().join("slot dir");
         let run = |args: &[&str]| run_slot(&bash, &script, &root, args);
         // The wrapped command signals its parent, the wrapper, and then ends.
         let out = run(&["--reason", "cargo test", "--", "bash", "-c", "kill -TERM $PPID; sleep 1"]);

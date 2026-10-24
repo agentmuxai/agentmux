@@ -96,15 +96,15 @@ rotate_history() {
 
 history() {
   [ -s "$HISTORY" ] || [ -s "$HISTORY.1" ] || { echo "history: no runs recorded yet ($HISTORY)"; return 0; }
-  local files="" f
-  for f in "$HISTORY.1" "$HISTORY"; do [ -s "$f" ] && files="$files $f"; done
+  local files=() f
+  for f in "$HISTORY.1" "$HISTORY"; do [ -s "$f" ] && files+=("$f"); done
   awk -F'\t' '
     { n++; w[$3]+=$4; h[$3]+=$5; c[$3]++; if ($4>wm[$3]) wm[$3]=$4; tw+=$4; th+=$5; if ($6==75) gu++; if ($4>0) q++ }
     END {
       printf "runs: %d, waited at all: %d, gave up: %d, total wait %d min, total held %d min\n", n, q, gu, tw/60, th/60
       printf "%-40s %5s %9s %9s %10s\n", "reason", "runs", "avg wait", "max wait", "held (min)"
       for (r in c) printf "%-40s %5d %8ds %8ds %10d\n", substr(r,1,40), c[r], w[r]/c[r], wm[r], h[r]/60
-    }' $files
+    }' "${files[@]}"
 }
 
 if [ "${1:-}" = "status" ]; then status; exit 0; fi
