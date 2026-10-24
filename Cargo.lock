@@ -121,7 +121,6 @@ dependencies = [
  "core-foundation",
  "core-graphics",
  "dirs 5.0.1",
- "json_comments",
  "libc",
  "objc2",
  "objc2-app-kit",
