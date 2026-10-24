@@ -159,13 +159,24 @@ pub(super) async fn handle_fleet_bulk_stop(
     };
     // `signal` and `staged` no longer mean anything: a close ends the agent
     // gracefully and force-kills at its own deadline.
-    let note = (req.signal.is_some() || req.staged.is_some())
-        .then_some("signal and staged no longer apply: Stop agents closes the agent's tab");
-    let (result, pending) =
+    let mut notes: Vec<String> = Vec::new();
+    if req.signal.is_some() || req.staged.is_some() {
+        notes.push("signal and staged no longer apply: Stop agents closes the agent's tab".to_string());
+    }
+    let (result, pending, left_open) =
         app_api::fleet::fleet_close_agents_with_override(&state, &by, caller_block.as_deref(), req.targets).await;
+    // An older AgentMux on this machine that predates the override only stopped
+    // these at once. Said here for those; the MCP layer says it for a target
+    // whose window an older instance opened (`effect: stop`).
+    if !left_open.is_empty() {
+        notes.push(format!(
+            "{} run on an older AgentMux on this machine: stopped, but the pane was left open; the user has to close it",
+            left_open.join(", ")
+        ));
+    }
     let mut out = json!({ "succeeded": result.succeeded, "failed": result.failed });
-    if let Some(note) = note {
-        out["note"] = json!(note);
+    if !notes.is_empty() {
+        out["note"] = json!(notes.join("; "));
     }
     if pending.is_empty() {
         return (StatusCode::OK, Json(out)).into_response();

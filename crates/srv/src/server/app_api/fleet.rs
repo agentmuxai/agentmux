@@ -756,7 +756,7 @@ pub(crate) async fn fleet_stop_keep_pane_with_override(
             None => nowhere.push(block_id),
         }
     }
-    let (mut now, remote_pending) = ask_other_instances(state, by, signal, false, forwards).await;
+    let (mut now, remote_pending, _) = ask_other_instances(state, by, signal, false, forwards).await;
     pending.extend(remote_pending);
     if !nowhere.is_empty() {
         let rest = fleet_bulk_stop_impl(state, nowhere, signal, staged).await;
@@ -770,15 +770,18 @@ pub(crate) async fn fleet_stop_keep_pane_with_override(
 /// Ask each target's own instance (a target running on another AgentMux on
 /// this machine) to open its override window, all at once. `close`: ask for
 /// the tab to close (`Stop agents`) rather than only stop (the migration).
+/// The third answer lists the targets of a `close` that an instance predating
+/// the override only stopped at once, leaving the pane open.
 async fn ask_other_instances(
     state: &AppState,
     by: &str,
     signal: Option<&str>,
     close: bool,
     forwards: Vec<(String, crate::backend::reactive::registry::AgentEntry)>,
-) -> (FleetActionResult, Vec<crate::sagas::pending_shutdown::PendingView>) {
+) -> (FleetActionResult, Vec<crate::sagas::pending_shutdown::PendingView>, Vec<String>) {
     let mut now = FleetActionResult::default();
     let mut remote_pending = Vec::new();
+    let mut left_open = Vec::new();
     let answers = futures_util::future::join_all(
         forwards.iter().map(|(block_id, entry)| forward_stop_pending(state, entry, block_id, by, signal, close)),
     )
@@ -802,7 +805,12 @@ async fn ask_other_instances(
                     outcome.is_ok(), outcome.as_ref().err().map(String::as_str), &request_id, Some(&note),
                 );
                 match outcome {
-                    Ok(()) => now.succeeded.push(block_id),
+                    Ok(()) => {
+                        if close {
+                            left_open.push(block_id.clone());
+                        }
+                        now.succeeded.push(block_id)
+                    }
                     Err(error) => now.failed.push(FleetActionFailure { id: block_id, error }),
                 }
             }
@@ -815,7 +823,7 @@ async fn ask_other_instances(
             }
         }
     }
-    (now, remote_pending)
+    (now, remote_pending, left_open)
 }
 
 /// `Stop agents`, from an agent: close each target agent's tab, as the user's
@@ -826,13 +834,15 @@ async fn ask_other_instances(
 ///
 /// Refused up front, as `failed` with a pointer: the caller's own block (that
 /// is `Stop self`), and a block that is not an agent's (that is `Stop pane`).
-/// A target on another AgentMux instance on this machine is asked there.
+/// A target on another AgentMux instance on this machine is asked there. The
+/// third answer lists targets that an older instance only stopped at once, so
+/// the caller can say their panes were left open.
 pub(crate) async fn fleet_close_agents_with_override(
     state: &AppState,
     by: &str,
     caller_block: Option<&str>,
     targets: Vec<String>,
-) -> (FleetActionResult, Vec<crate::sagas::pending_shutdown::PendingView>) {
+) -> (FleetActionResult, Vec<crate::sagas::pending_shutdown::PendingView>, Vec<String>) {
     let mut now = FleetActionResult::default();
     let mut pending: Vec<crate::sagas::pending_shutdown::PendingView> = Vec::new();
     let mut forwards = Vec::new();
@@ -886,11 +896,11 @@ pub(crate) async fn fleet_close_agents_with_override(
         v.target = target;
         pending.push(v);
     }
-    let (asked, remote_pending) = ask_other_instances(state, by, None, true, forwards).await;
+    let (asked, remote_pending, left_open) = ask_other_instances(state, by, None, true, forwards).await;
     now.succeeded.extend(asked.succeeded);
     now.failed.extend(asked.failed);
     pending.extend(remote_pending);
-    (now, pending)
+    (now, pending, left_open)
 }
 
 /// `batch_failures / batch_len` (as a percentage) exceeds `max_pct`.

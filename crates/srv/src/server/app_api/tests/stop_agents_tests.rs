@@ -117,7 +117,7 @@ async fn stop_agents_closes_one_agent_s_tab_and_leaves_the_agent_beside_it() {
     let state = test_state();
     let (tab_id, visible, background) = seed_two_agent_pane(&state).await;
 
-    let (result, pending) = super::fleet::fleet_close_agents_with_override(
+    let (result, pending, _) = super::fleet::fleet_close_agents_with_override(
         &state,
         "AgentY",
         None,
@@ -146,7 +146,7 @@ async fn stop_agents_closes_one_agent_s_tab_and_leaves_the_agent_beside_it() {
 async fn stop_agents_gives_each_tab_its_own_window() {
     let state = test_state();
     let (_, visible, background) = seed_two_agent_pane(&state).await;
-    let (_, pending) = super::fleet::fleet_close_agents_with_override(
+    let (_, pending, _) = super::fleet::fleet_close_agents_with_override(
         &state,
         "AgentY",
         None,
@@ -173,7 +173,7 @@ async fn stop_agents_closes_a_stopped_agent_s_pane_after_the_window() {
     let (tab_id, _) = seed(&state).await;
     let agent = create_agent_block(&state, &tab_id, &format!("stopped-{}", uuid::Uuid::new_v4())).await;
     assert!(crate::backend::blockcontroller::get_controller(&agent).is_none(), "no running session");
-    let (_, pending) =
+    let (_, pending, _) =
         super::fleet::fleet_close_agents_with_override(&state, "AgentY", None, vec![agent.clone()]).await;
     assert_eq!(pending.len(), 1, "a window, not an immediate close");
     crate::sagas::pending_shutdown::expire_now(&pending[0].request_id);
@@ -188,7 +188,7 @@ async fn stop_agents_refuses_its_own_block_a_non_agent_pane_and_a_missing_block(
     let (tab_id, plain) = seed(&state).await;
     let own = create_agent_block(&state, &tab_id, &format!("own-{}", uuid::Uuid::new_v4())).await;
     let missing = format!("no-such-block-{}", uuid::Uuid::new_v4());
-    let (result, pending) = super::fleet::fleet_close_agents_with_override(
+    let (result, pending, _) = super::fleet::fleet_close_agents_with_override(
         &state,
         "AgentY",
         Some(&own),

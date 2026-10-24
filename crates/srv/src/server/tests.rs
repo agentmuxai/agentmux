@@ -3329,6 +3329,95 @@ mod fleet_tests {
         assert!(entry.reason.unwrap_or_default().contains("predates the user override"), "audited as such");
     }
 
+    /// A fake other instance that records the body of each request it gets, to
+    /// check what `Stop agents` asks of it. `with_pending: false` predates the
+    /// override route.
+    async fn spawn_recording_peer(with_pending: bool) -> (String, std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>) {
+        use axum::routing::post;
+        let hits: std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>> = Default::default();
+        let (h1, h2) = (hits.clone(), hits.clone());
+        let mut app = axum::Router::new().route(
+            "/agentmux/agent/stop",
+            post(move |axum::Json(body): axum::Json<serde_json::Value>| async move {
+                h1.lock().unwrap().push(serde_json::json!({ "route": "stop", "body": body }));
+                axum::Json(serde_json::json!({ "success": true }))
+            }),
+        );
+        if with_pending {
+            app = app.route(
+                "/agentmux/agent/stop-pending",
+                post(move |axum::Json(body): axum::Json<serde_json::Value>| async move {
+                    h2.lock().unwrap().push(serde_json::json!({ "route": "stop-pending", "body": body }));
+                    axum::Json(serde_json::json!({
+                        "success": true,
+                        "pending": { "request_id": "remote-req-2", "by": "Korp", "via": "FleetBulkStop", "effect": "close_tab", "deadline_ms": 42, "joined": false },
+                    }))
+                }),
+            );
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        (url, hits)
+    }
+
+    #[tokio::test]
+    async fn stop_agents_asks_another_instance_to_close_the_tab_not_only_stop() {
+        let _guard = home_override_guard();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", tmp.path());
+        let shared_dir = tmp.path().join("shared").join("agents").join("reactive");
+        let block_id = format!("blk-xchan-close-{}", uuid::Uuid::new_v4());
+        let (peer_url, hits) = spawn_recording_peer(true).await;
+        write_raw_shared_entry(&shared_dir, "peer-agent-close", &peer_url, &block_id, "k");
+        let state = test_state();
+
+        let (now, pending, left_open) =
+            crate::server::app_api::fleet::fleet_close_agents_with_override(&state, "Korp", None, vec![block_id.clone()]).await;
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+
+        assert!(now.succeeded.is_empty() && now.failed.is_empty() && left_open.is_empty());
+        assert_eq!((pending.len(), pending[0].effect), (1, "close_tab"));
+        let hits = hits.lock().unwrap().clone();
+        assert_eq!(hits.len(), 1, "asked there once, never the plain stop: {hits:?}");
+        assert_eq!(hits[0]["route"], "stop-pending");
+        assert_eq!(hits[0]["body"]["mode"], "close");
+        assert_eq!(hits[0]["body"]["by"], "Korp");
+    }
+
+    /// An instance that predates the override only stops, leaving the pane: the
+    /// tool result says so rather than reporting a close (Codex P2 on #5375).
+    #[tokio::test]
+    async fn stop_agents_tells_the_caller_when_an_older_instance_only_stopped_its_agent() {
+        let _guard = home_override_guard();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", tmp.path());
+        let shared_dir = tmp.path().join("shared").join("agents").join("reactive");
+        let block_id = format!("blk-xchan-closeold-{}", uuid::Uuid::new_v4());
+        let (peer_url, hits) = spawn_recording_peer(false).await;
+        write_raw_shared_entry(&shared_dir, "peer-agent-closeold", &peer_url, &block_id, "k");
+        let state = test_state();
+
+        let resp = super::super::http_app_api::handle_fleet_bulk_stop(
+            axum::extract::State(state),
+            None,
+            axum::Json(serde_json::json!({ "targets": [block_id.clone()] })),
+        )
+        .await
+        .into_response();
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+
+        assert_eq!(resp.status(), StatusCode::OK, "nothing waits: the old instance stopped it at once");
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["succeeded"], serde_json::json!([block_id.clone()]));
+        let note = body["note"].as_str().unwrap_or_default();
+        assert!(note.contains(&block_id) && note.contains("older AgentMux") && note.contains("the user has to close it"), "{note}");
+        assert_eq!(hits.lock().unwrap()[0]["route"], "stop");
+    }
+
     /// The target instance's side: its own window, not an immediate stop.
     #[tokio::test]
     async fn stop_pending_opens_this_instance_s_window_for_a_block_running_here() {
