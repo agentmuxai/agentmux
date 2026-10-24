@@ -443,6 +443,26 @@ system_usec 234567
         let _ = child.wait().await;
     }
 
+    /// An agent CLI leads its own process group (`place_spawn`) and joins its
+    /// agent cgroup before it runs: the two don't get in each other's way.
+    #[tokio::test]
+    async fn a_group_leader_still_joins_its_cgroup_before_exec() {
+        use std::os::unix::process::CommandExt as _;
+        let Some(root) = test_root().await else { return };
+        let tracker = CgroupTracker::new(root, "group-leader").unwrap();
+        let mut cmd = tokio::process::Command::new("sh");
+        cmd.args(["-c", "sleep 3051 & wait"]).kill_on_drop(true).process_group(0);
+        join_before_exec(&mut cmd, tracker.spawn_target().unwrap());
+        let child = cmd.spawn().expect("spawn sh");
+        let pid = child.id().unwrap();
+        assert!(wait_for(|| tracker.pids().len() >= 2).await, "the CLI and its child are in the agent cgroup");
+        assert_eq!(unsafe { libc::getpgid(pid as i32) }, pid as i32, "and the CLI leads its own group");
+        let own = std::fs::read_to_string(format!("/proc/{pid}/cgroup")).unwrap();
+        assert!(own.trim().ends_with("/agent-group-leader"), "{own}");
+        drop(child);
+        drop(tracker);
+    }
+
     /// `terminate` asks politely: a process that exits on SIGTERM is gone
     /// without a kill.
     #[tokio::test]
