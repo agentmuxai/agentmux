@@ -98,6 +98,24 @@ describe("fake Claude Code", () => {
         expect(firstTurn.some((l) => l.type === "assistant")).toBe(false);
         expect(lines.some((l) => l.event?.delta?.text === "hello")).toBe(true);
     });
+
+    it("runs out of quota on a limit step: a rejected rate_limit_event with resetsAt, then an error result, on every turn until the reset", async () => {
+        const before = Date.now();
+        const lines = await run(
+            { turns: [{ steps: [{ text: "working" }] }, { steps: [{ limit: { inMs: 120000, window: "seven_day" } }] }, { steps: [{ text: "never" }] }] },
+            ["one", "two", "three"]
+        );
+        const results = lines.filter((l) => l.type === "result");
+        expect(results.map((r) => r.is_error)).toEqual([false, true, true]);
+        expect(results[1].result).toMatch(/^You've hit your weekly limit · resets [A-Z][a-z]{2} \d{1,2}, \d{1,2}(:\d{2})?(am|pm) \(.+\)$/);
+        const events = lines.filter((l) => l.type === "rate_limit_event");
+        expect(events).toHaveLength(2);
+        const info = events[0].rate_limit_info;
+        expect(info).toMatchObject({ status: "rejected", rateLimitType: "seven_day" });
+        expect(info.resetsAt * 1000).toBeGreaterThanOrEqual(Math.floor(before / 1000) * 1000 + 119000);
+        expect(info.resetsAt * 1000).toBeLessThanOrEqual(Date.now() + 121000);
+        expect(lines.some((l) => l.event?.delta?.text === "never")).toBe(false);
+    });
 });
 
 describe("install-fake-claude", () => {
