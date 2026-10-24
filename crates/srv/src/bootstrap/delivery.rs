@@ -27,6 +27,9 @@ pub fn install_cron_delivery(state: &AppState) {
             .await
         })
     }));
+    // A pending fire (catch-up `latest`) waits until its agent is back.
+    let handler = state.reactive_handler;
+    state.cron_scheduler.install_presence(Arc::new(move |uid: &str| handler.has_uid_registration(uid)));
 }
 
 /// Where a message for an agent block goes.

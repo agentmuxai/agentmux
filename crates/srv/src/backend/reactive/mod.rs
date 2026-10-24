@@ -50,6 +50,7 @@ pub fn held_jekt_wake() -> &'static tokio::sync::Notify {
 /// safe under the handler lock (the note is sent from a task of its own).
 pub fn registered(block_id: &str) {
     held_jekt_wake().notify_one();
+    crate::backend::jobs::pending_wake().notify_one();
     crate::backend::upgrade_notice::on_registered(block_id);
     crate::backend::background_work::on_registered(block_id);
     crate::muxbus::cloud_subscriber::live_names::registration_changed();

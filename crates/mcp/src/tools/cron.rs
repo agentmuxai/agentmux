@@ -20,6 +20,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 .ok_or_else(|| anyhow::anyhow!("missing required parameter: to (target agent id)"))?;
             let max_fires = arguments.get("max_fires").and_then(|v| v.as_i64()).filter(|&n| n > 0);
             let max_age_secs = arguments.get("max_age_secs").and_then(|v| v.as_i64()).filter(|&n| n > 0);
+            let catch_up = arguments.get("catch_up").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
             let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty()).unwrap_or_default();
             // Identity M3 (spec §5.4): resolve the target while the author is
             // present; the job then fires by uid, never by resolving a name.
@@ -30,7 +31,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "name": name, "expression": expression, "prompt": prompt,
                 "target": target, "target_uid": target_uid.unwrap_or_default(),
                 "created_by": self_id, "max_fires": max_fires,
-                "max_age_secs": max_age_secs,
+                "max_age_secs": max_age_secs, "catch_up": catch_up,
             });
             let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
                 .map_err(|e| anyhow::anyhow!("cron create request failed: {e}"))?;
@@ -89,8 +90,9 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 let fires = j["fire_count"].as_i64().unwrap_or(0);
                 let max = j["max_fires"].as_i64().map(|n| format!("/{n}")).unwrap_or_default();
                 let age_bound = j["expires_in_secs"].as_i64().map(|n| format!("  expires_in={n}s")).unwrap_or_default();
+                let last = j.get("last_run").filter(|r| r.is_object()).map(run_brief).unwrap_or_else(|| "none".to_string());
                 lines.push(format!(
-                    "  {}  {}  [{}]  fires={fires}{max}  next={}  expr='{}'{age_bound}",
+                    "  {}  {}  [{}]  fires={fires}{max}  next={}  expr='{}'{age_bound}\n      last run: {last}",
                     j["id"].as_str().unwrap_or("?"),
                     j["name"].as_str().unwrap_or("?"),
                     status_str,
@@ -112,6 +114,102 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
             cron_set_enabled(client, local_url, auth_key, id, "resume").await
         }
+        "CronHistory" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let id = arguments.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
+            let limit = arguments.get("limit").and_then(|v| v.as_i64()).filter(|&n| n > 0).unwrap_or(20);
+            let url = format!("{}/agentmux/cron/{}/runs?limit={limit}", local_url.trim_end_matches('/'), id);
+            let resp = client.get(&url).header(AUTH_KEY_HEADER, auth_key).send().await
+                .map_err(|e| anyhow::anyhow!("cron history request failed: {e}"))?;
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            if !status.is_success() {
+                anyhow::bail!("Schedule history failed: HTTP {status} — {text}");
+            }
+            let v: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+            let runs = v["runs"].as_array().cloned().unwrap_or_default();
+            if runs.is_empty() {
+                return Ok(format!("No runs recorded for job {id}."));
+            }
+            let mut lines = vec![format!("{} run(s) of job {id}, newest first:", runs.len())];
+            lines.extend(runs.iter().map(|r| format!("  {}", run_brief(r))));
+            Ok(lines.join("\n"))
+        }
+        "CronRunNow" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let id = arguments.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
+            let url = format!("{}/agentmux/cron/{}/run", local_url.trim_end_matches('/'), id);
+            let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&serde_json::json!({})).send().await
+                .map_err(|e| anyhow::anyhow!("cron run_now request failed: {e}"))?;
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            if status.as_u16() == 404 {
+                return Ok(format!("Job '{id}' not found"));
+            }
+            if !status.is_success() {
+                anyhow::bail!("Schedule run_now failed: HTTP {status} — {text}");
+            }
+            let v: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+            let run_id = v["run_id"].as_str().unwrap_or("(not recorded)");
+            match v["outcome"].as_str().unwrap_or("failed") {
+                "delivered" => Ok(format!("Ran job {id} now: delivered (run {run_id})")),
+                other => Ok(format!(
+                    "Ran job {id} now: {other} (run {run_id}){}",
+                    v["error"].as_str().map(|e| format!(" — {e}")).unwrap_or_default()
+                )),
+            }
+        }
+        "CronReport" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let run_id = arguments.get("run_id").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: run_id (from the line that ends the scheduled prompt)"))?;
+            let outcome = arguments.get("outcome").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: outcome (ok, findings or failed)"))?;
+            let summary = arguments.get("summary").and_then(|v| v.as_str()).unwrap_or("");
+            let links = arguments.get("links").cloned().unwrap_or(serde_json::Value::Null);
+            let url = format!("{}/agentmux/cron/runs/{}/report", local_url.trim_end_matches('/'), run_id);
+            let body = serde_json::json!({ "outcome": outcome, "summary": summary, "links": links });
+            let resp = client.post(&url).header(AUTH_KEY_HEADER, auth_key).json(&body).send().await
+                .map_err(|e| anyhow::anyhow!("cron report request failed: {e}"))?;
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            if !status.is_success() {
+                anyhow::bail!("Schedule report failed: HTTP {status} — {text}");
+            }
+            Ok(format!("Reported run {run_id}: {outcome}"))
+        }
         _ => Err(not_in_family()),
     }
+}
+
+/// One run on one line: state (and reason), outcome, when, cost, summary.
+fn run_brief(r: &serde_json::Value) -> String {
+    let s = |k: &str| r[k].as_str().unwrap_or("");
+    let mut state = s("state").to_string();
+    if !s("reason").is_empty() {
+        state = format!("{state} ({})", s("reason"));
+    }
+    let skips = r["skip_count"].as_i64().filter(|&n| n > 1).map(|n| format!(" x{n}")).unwrap_or_default();
+    let when = r["scheduled_for_ms"].as_i64().or_else(|| r["started_at_ms"].as_i64()).map(ago).unwrap_or_default();
+    let cost = match (r["cost_known"].as_bool(), r["cost_usd"].as_f64()) {
+        (Some(true), Some(c)) => format!("  ${c:.2}{}", if r["cost_partial"].as_bool() == Some(true) { " (partial)" } else { "" }),
+        _ => String::new(),
+    };
+    let summary = if s("summary").is_empty() { String::new() } else { format!("  \"{}\"", s("summary")) };
+    format!("{}  {state}{skips}  outcome={}  {when}{cost}{summary}", s("id"), s("outcome"))
+}
+
+/// A ms epoch relative to now: "12 min ago", "in 3 h".
+fn ago(ms: i64) -> String {
+    let diff = agentmux_common::time::now_ms() - ms;
+    let mins = diff.abs() / 60_000;
+    let span = match mins {
+        0 => return "just now".to_string(),
+        m if m < 120 => format!("{m} min"),
+        m if m < 48 * 60 => format!("{} h", m / 60),
+        m => format!("{} d", m / (24 * 60)),
+    };
+    if diff >= 0 { format!("{span} ago") } else { format!("in {span}") }
 }

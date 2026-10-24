@@ -6,12 +6,18 @@
 //! Routes (all auth-gated via `X-AuthKey`):
 //!   POST   /agentmux/cron          — create a job
 //!   DELETE /agentmux/cron/:id      — delete a job
-//!   GET    /agentmux/cron          — list all jobs
+//!   GET    /agentmux/cron          — list all jobs, each with its last run
 //!   PATCH  /agentmux/cron/:id      — pause / resume
+//!   GET    /agentmux/cron/:id/runs — a job's runs, newest first
+//!   POST   /agentmux/cron/:id/run  — run it now (a `manual` run)
+//!   POST   /agentmux/cron/runs/:run_id/report — a run's own verdict
+//!
+//! The run routes are the run ledger's (SPEC_JOBS_AND_TEMPLATES_2026_10_24.md
+//! §3.2, §3.3 MuxAPI).
 
 use std::str::FromStr;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Json;
 use chrono::Utc;
@@ -20,7 +26,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
+use crate::backend::cron::FireOutcome;
+use crate::backend::jobs;
 use crate::backend::storage::cron::CronJob;
+use crate::backend::storage::job_runs::{JobRun, OUTCOMES};
+use super::caller::Caller;
 use super::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -45,6 +55,10 @@ pub struct CronCreateRequest {
     /// meant to run indefinitely, e.g. a recurring standup check).
     #[serde(default)]
     pub max_age_secs: Option<i64>,
+    /// What an undelivered fire leaves (jobs spec §5.2): `skip` (default) or
+    /// `latest`.
+    #[serde(default)]
+    pub catch_up: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -75,6 +89,9 @@ pub struct CronJobView {
     pub expires_in_secs: Option<i64>,
     /// ISO-8601 string of the next scheduled fire (UTC), or null if disabled.
     pub next_fire: Option<String>,
+    pub catch_up: String,
+    /// The job's newest run in the ledger, if it has one.
+    pub last_run: Option<JobRun>,
 }
 
 fn to_view(job: &CronJob) -> CronJobView {
@@ -101,6 +118,8 @@ fn to_view(job: &CronJob) -> CronJobView {
         expires_in_secs,
         max_age_secs: job.max_age_secs,
         next_fire,
+        catch_up: job.catch_up.clone(),
+        last_run: None,
     }
 }
 
@@ -178,6 +197,14 @@ pub(super) async fn handle_cron_create(
         );
     }
 
+    let catch_up = req.catch_up.clone().unwrap_or_else(|| jobs::CATCH_UP_SKIP.to_string());
+    if catch_up != jobs::CATCH_UP_SKIP && catch_up != jobs::CATCH_UP_LATEST {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": format!("invalid catch_up '{catch_up}' (use 'skip' or 'latest')")})),
+        );
+    }
+
     let store = match &state.shared_store {
         Some(s) => s.clone(),
         None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "shared store unavailable"}))),
@@ -211,6 +238,7 @@ pub(super) async fn handle_cron_create(
         max_fires: req.max_fires,
         created_at: Utc::now().timestamp(),
         max_age_secs: req.max_age_secs,
+        catch_up,
     };
 
     if let Err(e) = store.cron_create(&job) {
@@ -234,9 +262,171 @@ pub(super) async fn handle_cron_list(
 
     match store.cron_list() {
         Ok(jobs) => {
-            let views: Vec<_> = jobs.iter().map(to_view).collect();
+            let ledger = state.cron_scheduler.runs().cloned();
+            let views = tokio::task::spawn_blocking(move || {
+                jobs.iter()
+                    .map(|job| {
+                        let mut view = to_view(job);
+                        view.last_run = ledger.as_ref().and_then(|l| l.store().job_run_last(&job.id).ok().flatten());
+                        view
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .await
+            .unwrap_or_default();
             (StatusCode::OK, Json(json!({"jobs": views})))
         }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+
+/// Whether `caller` may act on `job` (Run now): the operator (the app's own
+/// client, which carries no agent token) or the agent that created it
+/// (jobs spec §7). By UID when the job recorded one, else by the creator's
+/// name against the caller's agent slug.
+fn may_act_on(state: &AppState, caller: Option<&Caller>, job: &CronJob) -> bool {
+    let Some(uid) = caller.and_then(Caller::uid) else {
+        return true;
+    };
+    if !job.created_by_uid.is_empty() {
+        return job.created_by_uid == uid;
+    }
+    match state.mstore.agent_def_get(uid) {
+        Ok(Some(def)) => !job.created_by.is_empty() && def.slug.eq_ignore_ascii_case(&job.created_by),
+        _ => false,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CronRunsQuery {
+    #[serde(default)]
+    pub limit: Option<i64>,
+    /// Page: runs started before this (ms epoch).
+    #[serde(default)]
+    pub before: Option<i64>,
+}
+
+/// The most runs one history call returns.
+const RUNS_MAX: i64 = 200;
+
+type Answer = (StatusCode, Json<Value>);
+
+fn ledger_or_503(state: &AppState) -> Result<std::sync::Arc<jobs::RunLedger>, Answer> {
+    state
+        .cron_scheduler
+        .runs()
+        .cloned()
+        .ok_or_else(|| (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "run ledger unavailable"}))))
+}
+
+pub(super) async fn handle_cron_runs(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(q): Query<CronRunsQuery>,
+) -> Answer {
+    let ledger = match ledger_or_503(&state) {
+        Ok(l) => l,
+        Err(e) => return e,
+    };
+    let limit = q.limit.unwrap_or(20).clamp(1, RUNS_MAX);
+    match tokio::task::spawn_blocking(move || ledger.store().job_runs_for_job(&id, limit, q.before)).await {
+        Ok(Ok(runs)) => (StatusCode::OK, Json(json!({"runs": runs}))),
+        Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+
+pub(super) async fn handle_cron_run_now(
+    State(state): State<AppState>,
+    caller: Option<axum::Extension<Caller>>,
+    Path(id): Path<String>,
+) -> Answer {
+    let store = match &state.shared_store {
+        Some(s) => s.clone(),
+        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "shared store unavailable"}))),
+    };
+    let job = match store.cron_get(&id) {
+        Ok(Some(job)) => job,
+        Ok(None) => return (StatusCode::NOT_FOUND, Json(json!({"error": "job not found"}))),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    };
+    if !may_act_on(&state, caller.as_deref(), &job) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "only the agent that created this job, or the operator, can run it now"})),
+        );
+    }
+    let triggered_by =
+        caller.as_deref().and_then(Caller::uid).map(str::to_string).unwrap_or_else(|| jobs::BY_OPERATOR.to_string());
+    let fired = state.cron_scheduler.run_now(&job, &triggered_by).await;
+    let (outcome, error) = match &fired.outcome {
+        Some(FireOutcome::Delivered { .. }) => ("delivered", None),
+        Some(FireOutcome::Missed { .. }) => ("missed", Some(format!("agent {} is not running", job.target))),
+        Some(FireOutcome::Failed { error }) => ("failed", Some(error.clone())),
+        None => ("failed", Some("no way to deliver".to_string())),
+    };
+    (StatusCode::OK, Json(json!({"run_id": fired.run_id, "outcome": outcome, "error": error})))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CronReportRequest {
+    /// `ok`, `findings` or `failed`.
+    pub outcome: String,
+    #[serde(default)]
+    pub summary: String,
+    /// Up to five links (strings or `{label, url}`), kept as given.
+    #[serde(default)]
+    pub links: Option<Value>,
+}
+
+/// The most links one report keeps.
+const REPORT_LINKS_MAX: usize = 5;
+
+pub(super) async fn handle_cron_report(
+    State(state): State<AppState>,
+    caller: Option<axum::Extension<Caller>>,
+    Path(run_id): Path<String>,
+    Json(req): Json<CronReportRequest>,
+) -> Answer {
+    if req.outcome == "unknown" || !OUTCOMES.contains(&req.outcome.as_str()) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": format!("invalid outcome '{}' (use ok, findings or failed)", req.outcome)})),
+        );
+    }
+    let links = match req.links {
+        None | Some(Value::Null) => Value::Null,
+        Some(Value::Array(items)) => Value::Array(items.into_iter().take(REPORT_LINKS_MAX).collect()),
+        Some(other) => Value::Array(vec![other]),
+    };
+    let ledger = match ledger_or_503(&state) {
+        Ok(l) => l,
+        Err(e) => return e,
+    };
+    let run = match ledger.store().job_run_get(&run_id) {
+        Ok(Some(run)) => run,
+        Ok(None) => return (StatusCode::NOT_FOUND, Json(json!({"error": "run not found"}))),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    };
+    // The agent that ran it reports; so may the job's creator, or the operator.
+    let allowed = match caller.as_deref().and_then(Caller::uid) {
+        None => true,
+        Some(uid) if run.target_agent_uid == uid => true,
+        Some(_) => state
+            .shared_store
+            .as_ref()
+            .and_then(|s| s.cron_get(&run.job_id).ok().flatten())
+            .is_some_and(|job| may_act_on(&state, caller.as_deref(), &job)),
+    };
+    if !allowed {
+        return (StatusCode::FORBIDDEN, Json(json!({"error": "only the agent that ran this run can report it"})));
+    }
+    match ledger.store().job_run_report(&run_id, &req.outcome, &req.summary, &links) {
+        Ok(true) => (StatusCode::OK, Json(json!({"ok": true, "run_id": run_id, "outcome": req.outcome}))),
+        Ok(false) => (
+            StatusCode::CONFLICT,
+            Json(json!({"error": format!("run {run_id} never ran ({}): there is nothing to report", run.state)})),
+        ),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
     }
 }
@@ -317,6 +507,7 @@ mod tests {
             max_fires,
             created_at: 1_699_000_000,
             max_age_secs: None,
+            catch_up: "skip".to_string(),
         }
     }
 
@@ -347,3 +538,7 @@ mod tests {
         assert!(summary.next_fire.is_some());
     }
 }
+
+#[cfg(test)]
+#[path = "cron_tests.rs"]
+mod route_tests;

@@ -200,11 +200,11 @@ pub(crate) const PRESENCE_TOOL: &str = r#"{
 
 pub(crate) const SCHEDULE_TOOL: &str = r#"{
   "name": "Schedule",
-  "description": "Inject a prompt or slash command into an agent's conversation on a schedule, usually ANOTHER agent's. Every call takes an action. create: with cron, a persistent job on a 5-field UTC cron schedule (\"0 9 * * 1-5\" is 9am on weekdays) that survives pane restarts as long as AgentMux runs, needing name, prompt and to; with every (\"30s\", \"5m\", \"1h\"; a bare number is minutes), a loop that lives as long as this agent's session, to defaulting to you. list: the cron jobs, then this session's loops. pause and resume: a cron job. delete: a cron job or a loop, by the id create returned. To schedule your OWN next turn with no other agent involved, prefer your harness's own scheduling tools (they add no cross-agent message overhead); use this when the target is another agent, or you need delivery AgentMux keeps across a restart.",
+  "description": "Inject a prompt or slash command into an agent's conversation on a schedule, usually ANOTHER agent's. Every call takes an action. create: with cron, a persistent job on a 5-field UTC cron schedule (\"0 9 * * 1-5\" is 9am on weekdays) that survives pane restarts as long as AgentMux runs, needing name, prompt and to; with every (\"30s\", \"5m\", \"1h\"; a bare number is minutes), a loop that lives as long as this agent's session, to defaulting to you. list: the cron jobs, each with its last run and next fire, then this session's loops. pause and resume: a cron job. delete: a cron job or a loop, by the id create returned. history: a cron job's runs, newest first, including the ones that didn't happen (missed, skipped) and why. run_now: run a cron job once now (yours, or as the operator). report: when a scheduled prompt you received ends with a run id, say how that run went: run_id, outcome ok, findings (it found something worth a look) or failed, and a one-line summary; without a report the run's outcome stays unknown. To schedule your OWN next turn with no other agent involved, prefer your harness's own scheduling tools (they add no cross-agent message overhead); use this when the target is another agent, or you need delivery AgentMux keeps across a restart.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "action":         { "type": "string", "enum": ["create", "list", "pause", "resume", "delete"], "description": "What to do" },
+      "action":         { "type": "string", "enum": ["create", "list", "pause", "resume", "delete", "history", "run_now", "report"], "description": "What to do" },
       "cron":           { "type": "string", "description": "create: a 5-field UTC cron expression for a persistent job (min hour dom month dow)" },
       "every":          { "type": "string", "description": "create: an interval for a loop for this session (\"30s\", \"5m\", \"1h\")" },
       "prompt":         { "type": "string", "description": "create: the prompt or slash command to inject" },
@@ -214,7 +214,13 @@ pub(crate) const SCHEDULE_TOOL: &str = r#"{
       "max_age_secs":   { "type": "integer", "description": "create with cron: disable this long after creation, a hard stop for a stuck job" },
       "max_iterations": { "type": "integer", "description": "create with every: stop after this many fires (0 or omitted: no limit)" },
       "immediate":      { "type": "boolean", "description": "create with every: also run once now" },
-      "id":             { "type": "string", "description": "pause, resume, delete: a job or loop id from create or list" }
+      "catch_up":       { "type": "string", "enum": ["skip", "latest"], "description": "create with cron: when a fire finds its agent not running, skip it (default) or keep the latest one and deliver it when the agent is back" },
+      "id":             { "type": "string", "description": "pause, resume, delete, history, run_now: a job (or, for delete, loop) id from create or list" },
+      "limit":          { "type": "integer", "description": "history: the most runs to show (default 20)" },
+      "run_id":         { "type": "string", "description": "report: the run id from the line that ends the scheduled prompt" },
+      "outcome":        { "type": "string", "enum": ["ok", "findings", "failed"], "description": "report: how the run went" },
+      "summary":        { "type": "string", "description": "report: one line, at most 300 characters" },
+      "links":          { "type": "array", "items": { "type": "string" }, "description": "report: up to 5 links (a PR, a report file)" }
     },
     "required": ["action"]
   }

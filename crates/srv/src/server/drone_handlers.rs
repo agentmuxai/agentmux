@@ -189,12 +189,14 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let id_store = state.id_store.clone();
     let mstore = state.mstore.clone();
     let broker = state.broker.clone();
+    let cron_scheduler = state.cron_scheduler.clone();
     engine.register_typed(
         COMMAND_RUN_DRONE,
         move |cmd: RunDroneReq, _ctx| {
             let id_store = id_store.clone();
             let mstore = mstore.clone();
             let broker = broker.clone();
+            let ledger = cron_scheduler.runs().cloned();
             async move {
                 let wf = id_store
                     .drone_get(&cmd.drone_id)
@@ -253,6 +255,12 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     Err(e) => tracing::warn!(drone_id = %drone_id, "rundrone: re-checking the drone failed: {e}"),
                 }
 
+                // The run ledger's row (SPEC_JOBS_AND_TEMPLATES_2026_10_24.md
+                // §3.2): a manual run, linked to this one, closed by the drain.
+                let ledger_run = ledger
+                    .as_ref()
+                    .and_then(|l| l.drone_started(&run_id, &drone_id, &wf.name, started_at).map(|id| (l.clone(), id)));
+
                 // Drain on a background task; on completion, UPDATE
                 // the placeholder row in place.
                 let mstore_for_drain = mstore.clone();
@@ -304,6 +312,9 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 output: output.clone(),
                                 error: error.clone(),
                             };
+                            if let Some((ledger, ledger_id)) = &ledger_run {
+                                ledger.drone_finished(ledger_id, last_status == RunStatus::Done, &row.block_states, &row.error);
+                            }
                             match mstore_for_drain.drone_run_update(&row) {
                                 Ok(0) => tracing::warn!(
                                     run_id = %run_id_for_drain,

@@ -692,6 +692,7 @@ partial list.
 | [`SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09`](SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md) | Spec: Instruction and Memory Portability |
 | [`SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02`](SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md) | SPEC: Cross-channel jekt trust — closing the last unverifiable same-machine tier |
 | [`SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01`](SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md) | SPEC: jekt delivery that tells the truth — receiver state, one mailbox, receipts |
+| [`SPEC_JOBS_AND_TEMPLATES_2026_10_24`](SPEC_JOBS_AND_TEMPLATES_2026_10_24.md) | SPEC: Jobs and templates: one ledger for everything that runs by itself |
 | [`SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22`](SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md) | Spec: agents put Kanban tasks on hold and take them off hold |
 | [`SPEC_KANBAN_REMINDER_OFF_BY_DEFAULT_2026_10_22`](SPEC_KANBAN_REMINDER_OFF_BY_DEFAULT_2026_10_22.md) | Spec: the Kanban's backlog reminder off by default, with a setting to turn it on |
 | [`SPEC_KEYED_SLOT_RETENTION_FIX_2026_10_12`](SPEC_KEYED_SLOT_RETENTION_FIX_2026_10_12.md) | Spec: `<Key>` slots must not keep old rows alive |

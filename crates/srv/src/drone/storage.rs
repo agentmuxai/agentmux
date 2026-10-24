@@ -37,6 +37,10 @@ pub trait DroneStore {
     fn drone_runs_delete_for(&self, drone_id: &str) -> Result<usize, StoreError>;
     /// Delete one run by its id. Returns rows deleted.
     fn drone_run_delete(&self, run_id: &str) -> Result<usize, StoreError>;
+    /// After a restart, give every run still `running` the status `status`
+    /// and end it at `now_ms`: its drain task died with the old process.
+    /// Returns rows changed.
+    fn drone_runs_mark_interrupted(&self, status: &str, now_ms: i64) -> Result<usize, StoreError>;
 }
 
 impl DroneStore for Store {
@@ -226,5 +230,15 @@ impl DroneStore for Store {
     fn drone_run_delete(&self, run_id: &str) -> Result<usize, StoreError> {
         let conn = self.conn().lock().unwrap();
         Ok(conn.execute("DELETE FROM db_drone_runs WHERE id = ?1", params![run_id])?)
+    }
+
+    fn drone_runs_mark_interrupted(&self, status: &str, now_ms: i64) -> Result<usize, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        Ok(conn.execute(
+            "UPDATE db_drone_runs SET status = ?1, ended_at = ?2,
+                    error = CASE WHEN error = '' THEN 'interrupted: AgentMux restarted during this run' ELSE error END
+              WHERE status = 'running'",
+            params![status, now_ms],
+        )?)
     }
 }

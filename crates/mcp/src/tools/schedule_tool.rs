@@ -9,7 +9,7 @@
 
 use super::*;
 
-pub(super) const ACTIONS: &[&str] = &["create", "list", "pause", "resume", "delete"];
+pub(super) const ACTIONS: &[&str] = &["create", "list", "pause", "resume", "delete", "history", "run_now", "report"];
 
 /// Loops are named `loop-<n>` (loops.rs); everything else is a cron job id.
 fn is_loop_id(id: &str) -> bool {
@@ -17,7 +17,7 @@ fn is_loop_id(id: &str) -> bool {
 }
 
 /// `create` parameters only a cron job takes, and only a loop takes.
-const CRON_ONLY: &[&str] = &["name", "max_fires", "max_age_secs"];
+const CRON_ONLY: &[&str] = &["name", "max_fires", "max_age_secs", "catch_up"];
 const LOOP_ONLY: &[&str] = &["max_iterations", "immediate"];
 
 /// A parameter of the other kind is an error, not dropped: `max_fires` on a
@@ -77,6 +77,13 @@ pub(super) fn route(arguments: &Value) -> Result<(&'static str, Value)> {
             "LoopStop"
         }
         "delete" => "CronDelete",
+        // A loop writes no runs (jobs spec §3.2): it belongs to one session.
+        "history" | "run_now" if is_loop_id(&id) => {
+            anyhow::bail!("Schedule: a loop keeps no run history and can't be run now; only a cron job can")
+        }
+        "history" => "CronHistory",
+        "run_now" => "CronRunNow",
+        "report" => "CronReport",
         "" => anyhow::bail!("Schedule: missing required parameter: action (one of {})", ACTIONS.join(", ")),
         other => anyhow::bail!("Schedule: unknown action {other:?}: use one of {}", ACTIONS.join(", ")),
     };
@@ -140,6 +147,20 @@ mod tests {
         assert_eq!(route(&json!({ "action": "pause", "id": "c0ffee" })).unwrap().0, "CronPause");
         assert!(route(&json!({ "action": "pause", "id": "loop-1" })).unwrap_err().to_string().contains("can't be paused"));
         assert!(route(&json!({ "action": "stop" })).unwrap_err().to_string().contains("unknown action"));
+    }
+
+    #[test]
+    fn the_run_actions_go_to_the_cron_handlers_and_refuse_a_loop() {
+        assert_eq!(route(&json!({ "action": "history", "id": "c0ffee" })).unwrap().0, "CronHistory");
+        assert_eq!(route(&json!({ "action": "run_now", "id": "c0ffee" })).unwrap().0, "CronRunNow");
+        let (tool, args) = route(&json!({ "action": "report", "run_id": "r1", "outcome": "ok" })).unwrap();
+        assert_eq!((tool, args["run_id"].as_str()), ("CronReport", Some("r1")));
+        for action in ["history", "run_now"] {
+            let e = route(&json!({ "action": action, "id": "loop-2" })).unwrap_err().to_string();
+            assert!(e.contains("only a cron job"), "{action}: {e}");
+        }
+        let e = route(&json!({ "action": "create", "every": "5m", "prompt": "p", "catch_up": "latest" })).unwrap_err().to_string();
+        assert!(e.contains("catch_up"), "{e}");
     }
 
     #[test]

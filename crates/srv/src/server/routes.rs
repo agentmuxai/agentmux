@@ -551,6 +551,9 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/agentmux/cron", get(cron::handle_cron_list))
         .route("/agentmux/cron/:id", delete(cron::handle_cron_delete))
         .route("/agentmux/cron/:id", patch(cron::handle_cron_patch))
+        .route("/agentmux/cron/:id/runs", get(cron::handle_cron_runs))
+        .route("/agentmux/cron/:id/run", post(cron::handle_cron_run_now))
+        .route("/agentmux/cron/runs/:run_id/report", post(cron::handle_cron_report))
         // Muxqueue — the universal agent work queue, cron's readiness-triggered
         // sibling (docs/reports/REPORT_UNIVERSAL_AGENT_WORK_QUEUE_2026_09_01.md).
         // Same auth gate as the cron routes above.

@@ -191,6 +191,7 @@ impl Store {
         conn.execute_batch(super::work_claims::SCHEMA)?;
         conn.execute_batch(super::coord_posts::SCHEMA)?;
         conn.execute_batch(super::work_board::SCHEMA)?;
+        conn.execute_batch(super::job_runs::SCHEMA)?;
         Ok(conn.execute_batch(super::work_deps::SCHEMA)?)
     }
 
@@ -259,6 +260,7 @@ impl Store {
         conn.execute_batch(super::coord_posts::SCHEMA)?;
         conn.execute_batch(super::work_board::SCHEMA)?;
         conn.execute_batch(super::work_deps::SCHEMA)?;
+        conn.execute_batch(super::job_runs::SCHEMA)?;
         stamp_version(&conn, IDENTITY_STORE_SCHEMA_VERSION)?;
         Ok(Self {
             conn: Mutex::new(conn),
