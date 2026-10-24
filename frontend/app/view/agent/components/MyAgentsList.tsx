@@ -597,15 +597,6 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
         document.removeEventListener("keydown", onDocumentKeyDown);
     });
 
-    // Duplicate — reuses the EXISTING fork-and-launch flow unchanged
-    // (handleOpenNewSession/handleForkStart above, already wired to
-    // props.onFork = AgentPicker.handleFork). The naming UI that flow
-    // drives (the `agent-fork-prompt` block below) is already rendered
-    // per-row regardless of what triggered it; only its "already open in
-    // another pane" message needed to become conditional (see JSX below),
-    // since Duplicate reaches "naming" state directly without going
-    // through "prompt" first. Repo-owner-confirmed 2026-09-16: keep
-    // conversation history forking as-is (forkSession: true, unchanged).
     // "Seat…" opens the Seat editor over the picker; the Stash drawer's
     // Seat tab needs the agent's own pane (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §3).
     // No modal layer (a bare test render): no item.
@@ -619,6 +610,15 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
         });
     };
 
+    // Duplicate — reuses the EXISTING fork-and-launch flow unchanged
+    // (handleOpenNewSession/handleForkStart above, already wired to
+    // props.onFork = AgentPicker.handleFork). The naming UI that flow
+    // drives (the `agent-fork-prompt` block below) is already rendered
+    // per-row regardless of what triggered it; only its "already open in
+    // another pane" message needed to become conditional (see JSX below),
+    // since Duplicate reaches "naming" state directly without going
+    // through "prompt" first. Repo-owner-confirmed 2026-09-16: keep
+    // conversation history forking as-is (forkSession: true, unchanged).
     const handleDuplicate = (row: RecentSessionRow): void => {
         closeMenu(row.definition_id);
         // Rename and Duplicate render two DIFFERENT panels, both anchored to

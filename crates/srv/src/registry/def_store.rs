@@ -99,6 +99,15 @@ impl DefinitionStore {
         Ok(SlugAllocationLock { _file: file })
     }
 
+    /// The host-wide seat lock, held until the guard drops. A seat's lead is
+    /// checked against every other agent's (no cycles) and then written: two
+    /// clients setting reciprocal leads at once could each pass the check
+    /// before the other wrote, so a writer holds this across both.
+    pub fn lock_seat_graph(&self) -> Result<SlugAllocationLock, DefStoreError> {
+        let file = super::def_record_lock::lock_record(&self.root, super::def_record_lock::SEAT_GRAPH, self.lock_timeout)?;
+        Ok(SlugAllocationLock { _file: file })
+    }
+
     #[cfg(test)]
     pub(crate) fn set_lock_timeout(&mut self, timeout: Duration) {
         self.lock_timeout = timeout;
@@ -304,7 +313,8 @@ impl DefinitionStore {
     }
 }
 
-/// Held slug allocation ([`DefinitionStore::lock_slug_allocation`]).
+/// A held host-wide lock: slug allocation ([`DefinitionStore::lock_slug_allocation`])
+/// or seat changes ([`DefinitionStore::lock_seat_graph`]).
 pub struct SlugAllocationLock {
     _file: std::fs::File,
 }
@@ -910,6 +920,21 @@ mod tests {
         assert!(matches!(b.lock_slug_allocation(), Err(DefStoreError::Locked { .. })));
         drop(held);
         assert!(b.lock_slug_allocation().is_ok());
+    }
+
+    /// Seat changes are one host-wide lock too, apart from slug allocation.
+    #[test]
+    fn the_seat_lock_is_exclusive_and_separate() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("definitions");
+        let a = DefinitionStore::open(root.clone()).unwrap();
+        let mut b = DefinitionStore::open(root).unwrap();
+        b.set_lock_timeout(std::time::Duration::from_millis(100));
+        let held = a.lock_seat_graph().unwrap();
+        assert!(matches!(b.lock_seat_graph(), Err(DefStoreError::Locked { .. })));
+        assert!(b.lock_slug_allocation().is_ok(), "slug allocation isn't blocked by it");
+        drop(held);
+        assert!(b.lock_seat_graph().is_ok());
     }
 
     #[test]

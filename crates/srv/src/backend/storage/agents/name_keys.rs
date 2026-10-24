@@ -44,11 +44,18 @@ pub struct AgentNameMatch {
 /// agent was renamed from, by its route (`former_names`): it still addresses
 /// that agent. `own_id` is the row being inserted, whose own shared record (a
 /// cross-channel backfill) doesn't count.
+///
+/// `host`, when given, is every other `objects.db` on this host and every
+/// live registration (`slug_migration::HostSlugs`): a row only another
+/// channel or version holds (an agent from before the shared definitions, a
+/// template launch, a copy never published) is taken too. Two agents got one
+/// slug in two channels when only this channel's rows were checked.
 pub(super) fn resolve_slug_collision(
     conn: &rusqlite::Connection,
     base: &str,
     own_id: &str,
     shared: &SharedSlugs,
+    host: Option<&crate::backend::slug_migration::HostSlugs>,
 ) -> rusqlite::Result<String> {
     let mut candidate = base.to_string();
     let mut n: u32 = 2;
@@ -67,6 +74,7 @@ pub(super) fn resolve_slug_collision(
         if count == 0
             && !shared.others(own_id).any(|names| held(&names.slug) || names.former.iter().any(held))
             && !former_display_name_of_another(conn, &candidate.to_lowercase(), own_id)?
+            && host.is_none_or(|h| h.holder(&candidate, own_id).is_none())
         {
             return Ok(candidate);
         }
@@ -481,3 +489,7 @@ impl Store {
         Ok(defs.into_iter().filter(|d| d.id == owner.uid).collect())
     }
 }
+
+#[cfg(test)]
+#[path = "unique_slugs_tests.rs"]
+mod unique_slugs_tests;

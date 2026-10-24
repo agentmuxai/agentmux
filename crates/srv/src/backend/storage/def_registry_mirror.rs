@@ -151,6 +151,28 @@ pub(super) fn record_to_agent_definition(rec: &DefinitionRecord) -> AgentDefinit
     }
 }
 
+/// Whether a mirror write may publish the agent's slug as it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Publish {
+    /// A new agent's insert, which picked the slug against every holder and
+    /// still holds the slug allocation lock.
+    Allocated,
+    /// Any other write: a slug the shared record doesn't hold yet is checked
+    /// first ([`Store::registry_def_write`]).
+    CheckFirst,
+}
+
+/// Whether `def_id`'s active record holds a slug, which no update changes
+/// (`DefinitionStore::upsert`). A record that can't be read counts: `upsert`
+/// won't overwrite it either.
+fn reg_slug_is_set(reg: &crate::registry::DefinitionStore, def_id: &str) -> bool {
+    match reg.slug_of_strict(def_id) {
+        Ok(Some(names)) => !names.slug.trim().is_empty(),
+        Ok(None) => false,
+        Err(_) => true,
+    }
+}
+
 impl Store {
     /// Mirror a definition (by id) into the global store, reading its full
     /// row + content + skills from SQLite. Best-effort: a missing global
@@ -167,8 +189,9 @@ impl Store {
         // Best-effort for an edit: the record already exists and holds the
         // agent's slug, so a missed refresh loses nothing another channel could
         // claim, and the next write repairs it. A new agent's insert goes
-        // through `registry_def_publish` instead.
-        if let Err(e) = self.registry_def_write(def_id) {
+        // through `registry_def_publish` instead. An agent with no record yet
+        // (one only this channel's row knew) has its slug checked first.
+        if let Err(e) = self.registry_def_write(def_id, Publish::CheckFirst) {
             tracing::warn!(def_id, error = %e, "def registry: mirror upsert failed");
         }
     }
@@ -179,11 +202,11 @@ impl Store {
     /// holds the slug allocation lock, rather than leave a slug another channel
     /// can't see and could take too.
     pub(super) fn registry_def_publish(&self, def_id: &str) -> Result<(), StoreError> {
-        self.registry_def_write(def_id)
+        self.registry_def_write(def_id, Publish::Allocated)
             .map_err(|e| StoreError::Other(format!("could not publish agent {def_id} to the shared definitions: {e}")))
     }
 
-    fn registry_def_write(&self, def_id: &str) -> Result<(), String> {
+    fn registry_def_write(&self, def_id: &str, publish: Publish) -> Result<(), String> {
         let Some(reg) = self.shared_def_registry() else {
             return Ok(());
         };
@@ -205,7 +228,67 @@ impl Store {
         let skills = self.agent_skill_list_local(def_id).unwrap_or_default();
         let mut rec = agent_definition_to_record(&def, &content, &skills);
         rec.data.former_slugs = self.agent_former_slugs_local(def_id).unwrap_or_default();
-        reg.upsert(&rec).map_err(|e| e.to_string())
+        if publish == Publish::Allocated || reg_slug_is_set(&reg, def_id) {
+            return reg.upsert(&rec).map_err(|e| e.to_string());
+        }
+        // This write would publish the slug: there is no record yet (an
+        // agent only this channel's row knew, from before the shared
+        // definitions), or its record has no slug. Under the allocation lock,
+        // so nobody picks the slug between the check and the write.
+        let _allocating = reg.lock_slug_allocation().map_err(|e| format!("could not check its slug: {e}"))?;
+        if reg_slug_is_set(&reg, def_id) {
+            return reg.upsert(&rec).map_err(|e| e.to_string());
+        }
+        let slug = rec.data.slug.clone();
+        match self.slug_publication_holder(def_id, &slug) {
+            Ok(None) => reg.upsert(&rec).map_err(|e| e.to_string()),
+            Ok(Some(holder)) => self.refuse_publication(&reg, def_id, &mut rec, &format!("its slug {slug:?} is taken: {holder}")),
+            Err(e) => self.refuse_publication(&reg, def_id, &mut rec, &format!("its slug {slug:?} can't be checked: {e}")),
+        }
+    }
+
+    /// Don't publish a slug another agent holds, or one that couldn't be
+    /// checked. With no record, none is written: the agent stays this
+    /// channel's alone, under its slug here, rather than give the host two
+    /// agents of one slug, and the fork slug migration's plan reports it. An
+    /// existing record without a slug is updated and keeps none. Renaming the
+    /// agent instead would move its keys, folders and registrations, which
+    /// only the journaled migration does.
+    fn refuse_publication(
+        &self,
+        reg: &crate::registry::DefinitionStore,
+        def_id: &str,
+        rec: &mut DefinitionRecord,
+        why: &str,
+    ) -> Result<(), String> {
+        tracing::warn!(def_id, reason = why, "def registry: not publishing this agent's slug to the shared definitions");
+        if !reg.exists(def_id) {
+            return Ok(());
+        }
+        rec.data.slug.clear();
+        reg.upsert(rec).map_err(|e| e.to_string())
+    }
+
+    /// Who other than `def_id` holds `slug`: as its slug or a former slug in
+    /// the shared definitions (every record, read strictly) or in any
+    /// `objects.db` on this host. A display name isn't counted here: the
+    /// agent already answers to this slug in its channel; only another
+    /// agent's slug would make two.
+    fn slug_publication_holder(&self, def_id: &str, slug: &str) -> Result<Option<String>, String> {
+        let folded = slug.trim().to_lowercase();
+        if folded.is_empty() {
+            return Ok(None);
+        }
+        let shared = self.shared_slugs_for_allocation().map_err(|e| e.to_string())?;
+        let names_it = |s: &String| s.trim().to_lowercase() == folded;
+        if let Some((uid, _)) = shared.entries().find(|(uid, n)| *uid != def_id && (names_it(&n.slug) || n.former.iter().any(names_it))) {
+            return Ok(Some(format!("agent {uid} holds it in the shared definitions")));
+        }
+        let Some(home) = self.slug_home() else {
+            return Ok(None);
+        };
+        let host = crate::backend::slug_migration::HostSlugs::read(&home)?;
+        Ok(host.slug_holder(&folded, def_id))
     }
 
     /// Same mirror as `registry_def_upsert`, but never CREATES a global
@@ -240,22 +323,9 @@ impl Store {
         if !reg.exists(def_id) {
             return;
         }
-        let def = match self.agent_def_get(def_id) {
-            Ok(Some(d)) => d,
-            Ok(None) => return,
-            Err(e) => {
-                tracing::warn!(def_id, error = %e, "def registry: read definition failed, skipping refresh");
-                return;
-            }
-        };
-        if def.is_seeded != 0 {
-            return;
-        }
-        let content = self.agent_content_get_all_local(def_id).unwrap_or_default();
-        let skills = self.agent_skill_list_local(def_id).unwrap_or_default();
-        let mut rec = agent_definition_to_record(&def, &content, &skills);
-        rec.data.former_slugs = self.agent_former_slugs_local(def_id).unwrap_or_default();
-        if let Err(e) = reg.upsert(&rec) {
+        // The same write as an edit's, so a record without a slug isn't
+        // given a taken one here either.
+        if let Err(e) = self.registry_def_write(def_id, Publish::CheckFirst) {
             tracing::warn!(def_id, error = %e, "def registry: mirror refresh failed");
         }
     }
@@ -356,6 +426,16 @@ impl Store {
                 None
             }
         }
+    }
+
+    /// The host-wide seat lock ([`crate::registry::DefinitionStore::lock_seat_graph`]):
+    /// `agent.setSeat` holds it from reading the seats it validates against
+    /// to writing its own.
+    pub fn agent_seat_lock(&self) -> Result<crate::registry::SlugAllocationLock, StoreError> {
+        let Some(reg) = self.shared_def_registry() else {
+            return Err(StoreError::Other("no shared definition store, so no agent can have a seat".into()));
+        };
+        reg.lock_seat_graph().map_err(|e| StoreError::Other(format!("seat lock: {e}")))
     }
 
     /// Set (`Some`) or clear (`None`) agent `id`'s seat on its shared

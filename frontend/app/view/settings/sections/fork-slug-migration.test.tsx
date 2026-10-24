@@ -34,7 +34,7 @@ function cand(name: string, old_slug: string, new_slug: string, extra: Partial<F
 const THREE = [cand("Loap #2", "loap-loap-2", "loap-2"), cand("Naki #2", "naki-naki-2", "naki-2"), cand("Loap #3", "loap-loap-2-loap-3", "loap-3")];
 
 function plan(candidates: ForkSlugCandidate[], blockers: ForkSlugBlocker[] = []): ForkSlugPlan {
-    return { candidates, skipped: [], blockers, summary: "" };
+    return { candidates, skipped: [], blockers, summary: "", duplicates: [] };
 }
 
 const RUNNING: ForkSlugBlocker = {
@@ -106,6 +106,30 @@ describe("ForkSlugMigration", () => {
         expect(await screen.findByText("Every agent has an up-to-date id.")).toBeInTheDocument();
         expect(modes()).toEqual(["plan", "apply", "plan"]);
         expect(screen.getByLabelText("Update report")).toHaveTextContent("Updated Naki #2");
+    });
+
+    it("lists agents that share an id, with the id proposed for the later one, and offers nothing to run", async () => {
+        const holder = { name: "Claude", place: "the shared definitions" };
+        const shared: ForkSlugPlan = {
+            ...plan([]),
+            duplicates: [
+                {
+                    slug: "claude-2",
+                    holders: [
+                        { ...holder, uid: "uid-a", created_at: 1 },
+                        { ...holder, uid: "uid-b", created_at: 2, proposed: "claude-3" },
+                    ],
+                },
+            ],
+        };
+        srv([shared]);
+        render(() => <ForkSlugMigration />);
+        await screen.findByText("Every agent has an up-to-date id.");
+        const list = screen.getByRole("list", { name: "Agents that share an id" });
+        expect(list).toHaveTextContent("claude-2");
+        expect(list).toHaveTextContent("keeps it");
+        expect(within(list).getByText("claude-3")).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Update them" })).not.toBeInTheDocument();
     });
 
     it("stops the running panes first, through the override, then updates", async () => {

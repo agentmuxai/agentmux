@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use super::home::{fold, has_agent_slugs, has_column, open_ro, place, table_exists, Home, Install};
-use crate::backend::rpc_types::{ForkSlugBlocker, ForkSlugBlockerKind, ForkSlugCandidate, ForkSlugPlan, ForkSlugSkipped};
+use crate::backend::rpc_types::{ForkSlugBlocker, ForkSlugBlockerKind, ForkSlugCandidate, ForkSlugDuplicate, ForkSlugPlan, ForkSlugSkipped};
 use agentmux_common::slug::{agent_route_name, definition_slug, fork_slug, is_agent_id};
 use rusqlite::OptionalExtension;
 
@@ -24,6 +24,7 @@ pub(super) struct Def {
     pub former: Vec<String>,
     pub parent_id: String,
     pub branch_label: String,
+    pub created_at: i64,
     pub path: PathBuf,
 }
 
@@ -77,6 +78,7 @@ fn parse_def(stem: &str, bytes: &[u8], path: &Path) -> Result<Def, String> {
         former,
         parent_id: text("parent_id"),
         branch_label: text("branch_label"),
+        created_at: data.get("created_at").and_then(Value::as_i64).unwrap_or(0),
         path: path.to_path_buf(),
     })
 }
@@ -307,8 +309,8 @@ pub(super) fn plan_with(home: &Home, quick: bool, check_lock: bool) -> Result<Fo
     let (found, skipped) = find_candidates(&defs);
     if quick {
         let candidates = found.into_iter().map(|f| bare(&f)).collect::<Vec<_>>();
-        let summary = summary(&candidates, &skipped, &[]);
-        return Ok(ForkSlugPlan { candidates, skipped, blockers: Vec::new(), summary, last_run: last_run(home) });
+        let summary = summary(&candidates, &skipped, &[], &[]);
+        return Ok(ForkSlugPlan { candidates, skipped, blockers: Vec::new(), summary, last_run: last_run(home), duplicates: Vec::new() });
     }
     let installs = home.installs()?;
     let mut blockers: Vec<ForkSlugBlocker> = unreadable
@@ -325,8 +327,11 @@ pub(super) fn plan_with(home: &Home, quick: bool, check_lock: bool) -> Result<Fo
             .iter()
             .map(|f| ForkSlugCandidate { refused: Some("not every store can be read, so its new id can't be checked".into()), ..bare(f) })
             .collect();
-        let summary = summary(&candidates, &skipped, &blockers);
-        return Ok(ForkSlugPlan { candidates, skipped, blockers, summary, last_run: last_run(home) });
+        // The shared definitions alone: a store that can't be read may hold
+        // more, and no proposal can be checked.
+        let duplicates = super::duplicates::duplicates(home, &installs, &defs, &BTreeMap::new(), false);
+        let summary = summary(&candidates, &skipped, &blockers, &duplicates);
+        return Ok(ForkSlugPlan { candidates, skipped, blockers, summary, last_run: last_run(home), duplicates });
     }
     let mut taken: BTreeMap<String, String> = BTreeMap::new();
     let mut candidates = Vec::new();
@@ -354,8 +359,9 @@ pub(super) fn plan_with(home: &Home, quick: bool, check_lock: bool) -> Result<Fo
     if candidates.iter().any(|c| c.refused.is_none()) {
         blockers.extend(super::preconditions::blockers(home, &installs, &candidates, check_lock));
     }
-    let summary = summary(&candidates, &skipped, &blockers);
-    Ok(ForkSlugPlan { candidates, skipped, blockers, summary, last_run: last_run(home) })
+    let duplicates = super::duplicates::duplicates(home, &installs, &defs, &taken, true);
+    let summary = summary(&candidates, &skipped, &blockers, &duplicates);
+    Ok(ForkSlugPlan { candidates, skipped, blockers, summary, last_run: last_run(home), duplicates })
 }
 
 /// The latest run, unless it was rolled back. A journal that can't be read
@@ -436,7 +442,7 @@ fn suggest(
     Ok(None)
 }
 
-fn summary(candidates: &[ForkSlugCandidate], skipped: &[ForkSlugSkipped], blockers: &[ForkSlugBlocker]) -> String {
+fn summary(candidates: &[ForkSlugCandidate], skipped: &[ForkSlugSkipped], blockers: &[ForkSlugBlocker], duplicates: &[ForkSlugDuplicate]) -> String {
     let ready = candidates.iter().filter(|c| c.refused.is_none()).count();
     let mut lines = Vec::new();
     if candidates.is_empty() {
@@ -460,6 +466,17 @@ fn summary(candidates: &[ForkSlugCandidate], skipped: &[ForkSlugSkipped], blocke
     }
     for b in blockers {
         lines.push(format!("Blocked: {}", b.message));
+    }
+    for d in duplicates {
+        lines.push(format!("{} agents share the id {} (an update doesn't change it):", d.holders.len(), d.slug));
+        for (i, h) in d.holders.iter().enumerate() {
+            let what = match (i, &h.proposed) {
+                (0, _) => "keeps it, as the oldest".to_string(),
+                (_, Some(p)) => format!("could be renamed to {p}"),
+                (_, None) => "needs a new id".to_string(),
+            };
+            lines.push(format!("  {} ({}, {}): {what}", h.name, h.uid, h.place));
+        }
     }
     lines.join("\n")
 }

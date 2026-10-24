@@ -73,6 +73,9 @@ fn operator_only(ctx: &RpcContext) -> Result<(), String> {
 /// Validate and store (or clear) the seat, and log it as an identity change.
 pub(super) fn set_seat(mstore: &Store, cmd: CommandAgentSetSeatData) -> Result<AgentSetSeatResult, String> {
     let agent_id = cmd.agent_id.trim().to_string();
+    // Held from reading every seat to writing this one, across channels and
+    // instances, so two writes can't each pass the cycle check (#5378).
+    let _seats = mstore.agent_seat_lock().map_err(|e| format!("agent.setSeat: {e}"))?;
     let defs = mstore.agent_def_list().map_err(|e| format!("agent.setSeat: {e}"))?;
     let Some(def) = defs.iter().find(|d| d.id == agent_id) else {
         return Err(format!("agent.setSeat: agent {agent_id} not found"));

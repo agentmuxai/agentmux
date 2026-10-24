@@ -201,11 +201,23 @@ impl Store {
         } else {
             inst.id.clone()
         };
+        // A fresh template launch picks a new slug, as `agent_def_insert`
+        // does: under the host-wide allocation lock and against every other
+        // holder on this host, since its row is never published and only the
+        // scan of every `objects.db` lets another channel see it.
+        let fresh_launch = key == inst.id;
+        let allocating = match self.shared_def_registry().filter(|_| fresh_launch) {
+            Some(reg) => Some(reg.lock_slug_allocation().map_err(|e| {
+                StoreError::Other(format!("could not pick a slug for the launch of {}: {e}", def.name))
+            })?),
+            None => None,
+        };
         let shared = self.shared_slugs();
+        let host = if fresh_launch { self.host_slugs_for_allocation()? } else { None };
         {
             let conn = self.conn.lock().unwrap();
             let now_ms = Self::monotonic_updated_at(&conn, inst.created_at);
-            if key == inst.id {
+            if fresh_launch {
                 // Fresh template launch — its own user-agent row, config
                 // copied from the template, bindings + launch state from the
                 // launch. ON CONFLICT covers an id the caller reuses on a
@@ -220,7 +232,7 @@ impl Store {
                 // only by handing `instance_create` a seeded template id
                 // directly — this closes the function's contract rather than an
                 // observed fault (§2.5.2).
-                let launch_slug = resolve_slug_collision(&conn, &def.slug, &inst.id, &shared)?;
+                let launch_slug = resolve_slug_collision(&conn, &def.slug, &inst.id, &shared, host.as_ref())?;
                 conn.execute(
                     "INSERT INTO db_agents (
                         id, name, icon, description,
@@ -352,6 +364,7 @@ impl Store {
                 )?;
             }
         }
+        drop(allocating);
         let canonical = self.instance_get(&key)?.ok_or(StoreError::NotFound)?;
         self.registry_upsert_if_named(&canonical, !inst.session_id.is_empty());
         // A freshly created launch's session_id is never a genuine capture

@@ -244,3 +244,43 @@ fn an_objects_db_older_than_agent_slugs_holds_nothing() {
     assert_eq!(report.failed, None);
     assert_eq!(report.migrated.len(), 3);
 }
+
+/// Two agents holding one slug, as builds that checked only their own
+/// channel left them, are reported oldest first, with the next free id
+/// proposed for each later one: two published records of one slug, and an
+/// agent only another channel's objects.db knows beside a published one.
+/// The plan changes nothing, and an update leaves them alone.
+#[test]
+fn duplicate_slugs_are_reported_with_a_proposal() {
+    let fx = Fx::empty();
+    let a = fx.version("stable", "0.59.1");
+    let b = fx.version("local-x", "0.60.0");
+    fx.agent(&a, "uid-claude-old", "Claude", "claude-2", "claude", "", true);
+    fx.agent(&b, "uid-claude-new", "Claude", "claude-2", "claude", "", false);
+    let mut rec = read_json(&fx.home.definitions().join("uid-claude-old.json"));
+    rec["data"]["id"] = serde_json::json!("uid-claude-new");
+    rec["data"]["created_at"] = serde_json::json!(2_000);
+    std::fs::write(fx.home.definitions().join("uid-claude-new.json"), serde_json::to_vec_pretty(&rec).unwrap()).unwrap();
+    fx.agent(&a, "uid-fork-a", "ForkLead", "forklead", "", "", true);
+    fx.agent(&b, "uid-fork-b", "ForkLead", "forklead", "", "", false);
+    fx.agent(&a, "uid-taken", "Taken", "claude-3", "", "", true);
+
+    let before = fx.snapshot();
+    let plan = super::super::plan(&fx.home, false).unwrap();
+    assert_eq!(fx.snapshot(), before, "a plan writes nothing");
+    let got: Vec<(&str, Vec<(&str, Option<&str>)>)> = plan
+        .duplicates
+        .iter()
+        .map(|d| (d.slug.as_str(), d.holders.iter().map(|h| (h.uid.as_str(), h.proposed.as_deref())).collect()))
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            ("claude-2", vec![("uid-claude-old", None), ("uid-claude-new", Some("claude-4"))]),
+            ("forklead", vec![("uid-fork-a", None), ("uid-fork-b", Some("forklead-2"))]),
+        ]
+    );
+    assert_eq!(plan.duplicates[1].holders[1].place, "channels/local-x@0.60.0");
+    assert!(plan.summary.contains("2 agents share the id claude-2"), "{}", plan.summary);
+    assert!(plan.candidates.is_empty() && plan.blockers.is_empty(), "{plan:?}");
+}
