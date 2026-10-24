@@ -43,6 +43,7 @@
 //!   set up again (the listener already in the page stays, and only claims
 //!   the buttons until the binding is back).
 
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
 
@@ -88,10 +89,22 @@ pub fn install(state: &Arc<AppState>, browser: &Browser) {
         return;
     };
     let pane = Arc::new(Pane { state: state.clone(), label, block_id, inner: Default::default() });
-    if PANES.lock().insert(browser.identifier(), pane.clone()).is_some() {
-        return;
+    if register_new(&mut PANES.lock(), browser.identifier(), pane.clone()) {
+        spawn_ensure(pane);
     }
-    spawn_ensure(pane);
+}
+
+/// Put `value` under `id` unless something is already there, and say whether it
+/// was put. A repeat `install` must keep the pane already registered, with what
+/// it knows is done, not replace it.
+fn register_new<T>(map: &mut HashMap<i32, Arc<T>>, id: i32, value: Arc<T>) -> bool {
+    match map.entry(id) {
+        Entry::Occupied(_) => false,
+        Entry::Vacant(slot) => {
+            slot.insert(value);
+            true
+        }
+    }
 }
 
 /// A document of the pane committed (the main frame or a frame in it): add the
@@ -292,6 +305,15 @@ mod tests {
             987_654,
             br#"{"method":"Runtime.bindingCalled","params":{"name":"agentmuxSideButton","payload":"{\"button\":\"back\"}"}}"#,
         );
+    }
+
+    #[test]
+    fn a_repeat_registration_keeps_the_first() {
+        let mut map: HashMap<i32, Arc<&str>> = HashMap::new();
+        assert!(register_new(&mut map, 7, Arc::new("first")));
+        assert!(!register_new(&mut map, 7, Arc::new("second")));
+        assert_eq!(*map[&7], "first");
+        assert!(register_new(&mut map, 8, Arc::new("other browser")));
     }
 
     #[test]
