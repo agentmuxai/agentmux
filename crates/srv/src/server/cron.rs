@@ -92,6 +92,11 @@ pub struct CronJobView {
     pub catch_up: String,
     /// The job's newest run in the ledger, if it has one.
     pub last_run: Option<JobRun>,
+    /// Scheduled fires that reached no one, and the last one's time and
+    /// reason (`CronJob::missed_count`).
+    pub missed_count: i64,
+    pub last_missed_at: Option<i64>,
+    pub last_miss_reason: String,
 }
 
 fn to_view(job: &CronJob) -> CronJobView {
@@ -120,6 +125,9 @@ fn to_view(job: &CronJob) -> CronJobView {
         next_fire,
         catch_up: job.catch_up.clone(),
         last_run: None,
+        missed_count: job.missed_count,
+        last_missed_at: job.last_missed_at,
+        last_miss_reason: job.last_miss_reason.clone(),
     }
 }
 
@@ -150,6 +158,9 @@ pub struct CronSummary {
     pub max_fires: Option<i64>,
     /// ISO-8601 string of the next scheduled fire (UTC), or null if disabled.
     pub next_fire: Option<String>,
+    /// Scheduled fires that reached no one; Swarm's Cron bucket shows them.
+    pub missed_count: i64,
+    pub last_miss_reason: String,
 }
 
 pub(crate) fn to_summary(job: &CronJob, block_id: String) -> CronSummary {
@@ -170,6 +181,8 @@ pub(crate) fn to_summary(job: &CronJob, block_id: String) -> CronSummary {
         fire_count: job.fire_count,
         max_fires: job.max_fires,
         next_fire,
+        missed_count: job.missed_count,
+        last_miss_reason: job.last_miss_reason.clone(),
     }
 }
 
@@ -239,6 +252,9 @@ pub(super) async fn handle_cron_create(
         created_at: Utc::now().timestamp(),
         max_age_secs: req.max_age_secs,
         catch_up,
+        missed_count: 0,
+        last_missed_at: None,
+        last_miss_reason: String::new(),
     };
 
     if let Err(e) = store.cron_create(&job) {
@@ -464,13 +480,50 @@ pub(super) async fn handle_cron_report(
     }
 }
 
-pub(super) async fn handle_cron_delete(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> (StatusCode, Json<Value>) {
+/// Whether `caller` may pause, resume or delete `job`. An agent (a request
+/// carrying its token) may change only a job it created or one aimed at it;
+/// everyone else, the UI included, may change any job. Unattributed requests
+/// can't be refused: at the same-user boundary one that omits its token looks
+/// like the UI (caller.rs). This stops an agent changing another agent's job
+/// by mistake, not a determined one. A job with no recorded creator UID
+/// (created before identity M4c-1, or unattributed) is open to any caller.
+fn may_change_job(caller: Option<&super::caller::Caller>, job: &CronJob) -> bool {
+    let Some(uid) = caller.and_then(super::caller::Caller::uid) else {
+        return true;
+    };
+    job.created_by_uid.is_empty() || job.created_by_uid == uid || job.target_uid == uid
+}
+
+/// The store, or the response refusing the change: the store unavailable,
+/// no such job, or a caller [`may_change_job`] refuses.
+fn store_for_change(
+    state: &AppState,
+    caller: Option<&super::caller::Caller>,
+    id: &str,
+) -> Result<std::sync::Arc<crate::backend::storage::store::Store>, (StatusCode, Json<Value>)> {
     let store = match &state.shared_store {
         Some(s) => s.clone(),
-        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "shared store unavailable"}))),
+        None => return Err((StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "shared store unavailable"})))),
+    };
+    match store.cron_get(id) {
+        Ok(Some(job)) if may_change_job(caller, &job) => Ok(store),
+        Ok(Some(_)) => Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "an agent can change only a scheduled job it created or one aimed at it"})),
+        )),
+        Ok(None) => Err((StatusCode::NOT_FOUND, Json(json!({"error": "job not found"})))),
+        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()})))),
+    }
+}
+
+pub(super) async fn handle_cron_delete(
+    State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
+    Path(id): Path<String>,
+) -> (StatusCode, Json<Value>) {
+    let store = match store_for_change(&state, caller.as_deref(), &id) {
+        Ok(store) => store,
+        Err(refused) => return refused,
     };
 
     // Cancel live task first.
@@ -488,12 +541,13 @@ pub(super) async fn handle_cron_delete(
 
 pub(super) async fn handle_cron_patch(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Path(id): Path<String>,
     Json(req): Json<CronPatchRequest>,
 ) -> (StatusCode, Json<Value>) {
-    let store = match &state.shared_store {
-        Some(s) => s.clone(),
-        None => return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "shared store unavailable"}))),
+    let store = match store_for_change(&state, caller.as_deref(), &id) {
+        Ok(store) => store,
+        Err(refused) => return refused,
     };
 
     let enabled = match req.action.as_str() {
@@ -541,6 +595,9 @@ mod tests {
             created_at: 1_699_000_000,
             max_age_secs: None,
             catch_up: "skip".to_string(),
+            missed_count: 0,
+            last_missed_at: None,
+            last_miss_reason: String::new(),
         }
     }
 
@@ -574,6 +631,37 @@ mod tests {
         assert_eq!(report_links(Some(Value::Array(many))).as_array().unwrap().len(), REPORT_LINKS_MAX);
         assert_eq!(report_links(Some(json!("https://example.com/one"))), json!(["https://example.com/one"]));
         assert_eq!(report_links(None), Value::Null);
+    }
+
+    #[test]
+    fn an_agent_changes_only_its_own_jobs_or_ones_aimed_at_it() {
+        use super::super::caller::Caller;
+        let mut job = mk_job(true, None, 0);
+        job.created_by_uid = "uid-creator".to_string();
+        job.target_uid = "uid-target".to_string();
+        let agent = |uid: &str| Caller::Agent { uid: uid.to_string() };
+        assert!(may_change_job(Some(&agent("uid-creator")), &job));
+        assert!(may_change_job(Some(&agent("uid-target")), &job), "the agent it pings may pause it");
+        assert!(!may_change_job(Some(&agent("uid-other")), &job));
+        // The UI and every other unattributed request can't be told apart: never refused.
+        assert!(may_change_job(Some(&Caller::Unattributed), &job));
+        assert!(may_change_job(None, &job));
+        // A job with no recorded creator is open to any caller.
+        job.created_by_uid.clear();
+        assert!(may_change_job(Some(&agent("uid-other")), &job));
+    }
+
+    #[test]
+    fn views_carry_the_miss_record() {
+        let mut job = mk_job(true, None, 2);
+        job.missed_count = 3;
+        job.last_missed_at = Some(1_700_000_100);
+        job.last_miss_reason = "target_stopped".to_string();
+        let view = to_view(&job);
+        assert_eq!((view.missed_count, view.last_missed_at), (3, Some(1_700_000_100)));
+        assert_eq!(view.last_miss_reason, "target_stopped");
+        let summary = to_summary(&job, "block-1".to_string());
+        assert_eq!((summary.missed_count, summary.last_miss_reason.as_str()), (3, "target_stopped"));
     }
 
     #[test]
