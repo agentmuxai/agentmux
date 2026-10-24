@@ -47,6 +47,8 @@ fn a_merge_then_a_release_show_on_the_card_once_each() {
     assert!(s.work_pr_merged("a", 10, 2).unwrap());
     assert!(!s.work_pr_merged("a", 11, 3).unwrap(), "the first merge time stays");
     assert!(s.work_pr_released("a", "v0.59.41", 20, 4).unwrap());
+    let t = s.work_board_get("a").unwrap().unwrap();
+    assert_eq!((t.item.updated_at, t.card.updated_at), (4, 4), "a release counts as a change");
     assert!(!s.work_pr_released("a", "v0.59.42", 30, 5).unwrap(), "the first release that holds it stays");
 
     let card = s.work_board_get("a").unwrap().unwrap().card;

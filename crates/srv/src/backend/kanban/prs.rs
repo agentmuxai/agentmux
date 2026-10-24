@@ -372,9 +372,9 @@ pub async fn run_merge_loop() {
     loop {
         tokio::time::sleep(std::time::Duration::from_millis(TICK_MS)).await;
         let Some(ctx) = CONTEXT.get() else { continue };
-        if !close_on_merge_enabled(&ctx.config.get_settings().extra) {
-            continue;
-        }
+        // The setting stops a merge accepting a task in Review; merges and
+        // releases are still recorded, for the Merged and Released columns.
+        let close_on_merge = close_on_merge_enabled(&ctx.config.get_settings().extra);
         let now = agentmux_common::time::now_ms();
         let identity = ctx.identity.clone();
         let tasks = tokio::task::spawn_blocking(move || identity.work_board_list(now, 500, now)).await;
@@ -393,7 +393,7 @@ pub async fn run_merge_loop() {
                         let when = merged_at(&v).unwrap_or(now);
                         changed |= tokio::task::spawn_blocking(move || {
                             let noted = identity.work_pr_merged(&id, when, now).unwrap_or(false);
-                            close_merged(&identity, &id, &pr, now) || noted
+                            (close_on_merge && close_merged(&identity, &id, &pr, now)) || noted
                         })
                         .await
                         .unwrap_or(false);

@@ -95,14 +95,22 @@ impl Store {
 
     /// Record that the release `tag`, made at `released_at`, contains
     /// `work_id`'s merged PR. Only once, and only after its merge is known.
-    /// Returns whether that was news.
+    /// The task counts as changed, so a finished one stays on the board its
+    /// week after it ships, and boards elsewhere see it move. Returns whether
+    /// that was news.
     pub fn work_pr_released(&self, work_id: &str, tag: &str, released_at: i64, now_ms: i64) -> Result<bool, StoreError> {
-        let conn = self.conn().lock().unwrap();
-        let n = conn.execute(
+        let mut conn = self.conn().lock().unwrap();
+        let tx = conn.transaction()?;
+        let n = tx.execute(
             "UPDATE db_work_prs SET released_in = ?2, released_at = ?3, updated_at = ?4
               WHERE work_id = ?1 AND merged_at IS NOT NULL AND released_in = ''",
             params![work_id, tag, released_at, now_ms],
         )?;
+        if n > 0 {
+            tx.execute("UPDATE db_work_queue SET updated_at = MAX(updated_at, ?2) WHERE id = ?1", params![work_id, now_ms])?;
+            tx.execute("UPDATE db_work_cards SET updated_at = MAX(updated_at, ?2) WHERE work_id = ?1", params![work_id, now_ms])?;
+        }
+        tx.commit()?;
         Ok(n > 0)
     }
 
