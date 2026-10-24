@@ -24,6 +24,10 @@ pub const SETTING_HINTS: &str = "agent:compacthints";
 /// suggests compacting.
 pub const SETTING_HINT_AT: &str = "agent:compacthintat";
 pub const DEFAULT_HINT_AT: u64 = 400000; // plain digits: settings-defaults.test.ts reads it
+/// `agent:freshhintat`: from this many tokens, a turn that finished a task
+/// suggests a fresh session instead.
+pub const SETTING_FRESH_HINT_AT: &str = "agent:freshhintat";
+pub const DEFAULT_FRESH_HINT_AT: u64 = 150000; // plain digits, as above
 /// Below this the hint never fires, and it fires again only after the context
 /// has dropped below it.
 const HINT_REARM_BELOW: u64 = 250_000;
@@ -58,6 +62,9 @@ pub struct ContextReading {
     /// The hint fired and the context hasn't dropped below the re-arm point.
     #[serde(skip)]
     pub hinted: bool,
+    /// This turn finished a Kanban task (`Tasks complete` or `submit`).
+    #[serde(skip)]
+    pub task_boundary: bool,
     #[serde(skip)]
     last_message_id: Option<String>,
 }
@@ -76,6 +83,10 @@ fn hints_on() -> bool {
 
 fn hint_at() -> u64 {
     CONFIG.get().and_then(|c| c.extra_u64(SETTING_HINT_AT)).unwrap_or(DEFAULT_HINT_AT)
+}
+
+fn fresh_hint_at() -> u64 {
+    CONFIG.get().and_then(|c| c.extra_u64(SETTING_FRESH_HINT_AT)).unwrap_or(DEFAULT_FRESH_HINT_AT)
 }
 
 fn with<R>(block_id: &str, f: impl FnOnce(&mut ContextReading) -> R) -> R {
@@ -177,14 +188,18 @@ pub fn observe_codex(block_id: &str, tokens: u64, window: Option<u64>, model: Op
     });
 }
 
-/// What the §3.5 rule says for a reading: `compact` from `hint_at` tokens,
-/// once per crossing; otherwise `none`.
-pub fn hint_of(r: &ContextReading, hint_at: u64, now_ms: u64) -> &'static str {
+/// What the §3.5 rule says for a reading: `fresh` from `fresh_at` tokens
+/// when this turn finished a task, else `compact` from `hint_at` tokens;
+/// otherwise `none`.
+pub fn hint_of(r: &ContextReading, hint_at: u64, fresh_at: u64, now_ms: u64) -> &'static str {
     let Some(tokens) = r.tokens else { return "none" };
-    if tokens < HINT_REARM_BELOW || tokens < hint_at || r.compacting || r.compact_scheduled {
+    if r.compacting || r.compact_scheduled || refusal_reason(r, now_ms).is_some() {
         return "none";
     }
-    if refusal_reason(r, now_ms).is_some() {
+    if r.task_boundary && tokens >= fresh_at {
+        return "fresh";
+    }
+    if tokens < HINT_REARM_BELOW || tokens < hint_at {
         return "none";
     }
     "compact"
@@ -195,7 +210,7 @@ pub fn hint(block_id: &str) -> &'static str {
     if !hints_on() {
         return "none";
     }
-    get(block_id).map_or("none", |r| hint_of(&r, hint_at(), agentmux_common::time::now_ms_u64()))
+    get(block_id).map_or("none", |r| hint_of(&r, hint_at(), fresh_hint_at(), agentmux_common::time::now_ms_u64()))
 }
 
 /// Why a self-compaction can't be scheduled now, or `None`.
@@ -228,6 +243,27 @@ pub fn schedule_compact(block_id: &str, now_ms: u64) -> Result<(), &'static str>
     })
 }
 
+/// `block_id`'s agent finished a task in this turn.
+pub fn note_task_boundary(block_id: &str) {
+    with(block_id, |r| r.task_boundary = true);
+}
+
+/// The scheduled fresh session was started (`sent`), or given up: one that
+/// started counts toward the rate limit and starts the reading over.
+pub fn fresh_sent(block_id: &str, sent: bool) {
+    with(block_id, |r| {
+        r.compact_scheduled = false;
+        if sent {
+            let now = agentmux_common::time::now_ms_u64();
+            r.last_self_compact_ms = Some(now);
+            r.last_compaction_ms = Some(now);
+            r.calls_since_compaction = 0;
+            r.tokens = None;
+            r.hinted = false;
+        }
+    });
+}
+
 /// The scheduled self-compaction was sent (`sent`), or given up or refused by
 /// the controller: only one that went counts toward the rate limit.
 pub fn compact_sent(block_id: &str, sent: bool) {
@@ -240,24 +276,32 @@ pub fn compact_sent(block_id: &str, sent: bool) {
 }
 
 /// At the end of a turn: the hint's note text when it's due, marking it given
-/// so it isn't repeated before the context drops and crosses again.
+/// so it isn't repeated before the context drops and crosses again. A task
+/// boundary counts for the turn it happened in only.
 pub fn take_turn_end_hint(block_id: &str) -> Option<String> {
-    if hint(block_id) != "compact" {
-        return None;
-    }
+    let verdict = hint(block_id);
     with(block_id, |r| {
-        if r.hinted {
+        r.task_boundary = false;
+        if verdict == "none" || r.hinted {
             return None;
         }
         r.hinted = true;
         let k = |n: u64| format!("{}K", n / 1000);
         let of = r.window.map(|w| format!(" of {}", k(w))).unwrap_or_default();
-        Some(format!(
-            "[AgentMux] Your context is {}{of} tokens. If your next work continues this task, compact now: \
-             Agents compact, with a focus saying what to keep (PR and task numbers, files you're editing, \
-             decisions, the next step); it runs when this turn ends.",
-            k(r.tokens.unwrap_or(0))
-        ))
+        let size = format!("Your context is {}{of} tokens.", k(r.tokens.unwrap_or(0)));
+        Some(if verdict == "fresh" {
+            format!(
+                "[AgentMux] {size} You finished a task: if your next work is unrelated, start fresh with \
+                 Agents fresh and a handoff (task number, spec or file paths, open PRs, decisions, the next step); \
+                 if it continues this work, compact instead (Agents compact). Either runs when this turn ends."
+            )
+        } else {
+            format!(
+                "[AgentMux] {size} If your next work continues this task, compact now: \
+                 Agents compact, with a focus saying what to keep (PR and task numbers, files you're editing, \
+                 decisions, the next step); it runs when this turn ends."
+            )
+        })
     })
 }
 
@@ -314,11 +358,16 @@ mod tests {
 
     #[test]
     fn the_hint_fires_from_its_threshold_and_not_below_the_rearm_point() {
-        assert_eq!(hint_of(&reading(399_999), 400_000, 0), "none");
-        assert_eq!(hint_of(&reading(400_000), 400_000, 0), "compact");
-        assert_eq!(hint_of(&reading(240_000), 100_000, 0), "none", "never below 250K");
-        assert_eq!(hint_of(&ContextReading { compact_scheduled: true, ..reading(500_000) }, 400_000, 0), "none");
-        assert_eq!(hint_of(&ContextReading { tokens: None, ..reading(0) }, 400_000, 0), "none");
+        assert_eq!(hint_of(&reading(399_999), 400_000, 150_000, 0), "none");
+        assert_eq!(hint_of(&reading(400_000), 400_000, 150_000, 0), "compact");
+        assert_eq!(hint_of(&reading(240_000), 100_000, 150_000, 0), "none", "never below 250K");
+        assert_eq!(hint_of(&ContextReading { compact_scheduled: true, ..reading(500_000) }, 400_000, 150_000, 0), "none");
+        assert_eq!(hint_of(&ContextReading { tokens: None, ..reading(0) }, 400_000, 150_000, 0), "none");
+        // A finished task: fresh from its own, lower threshold.
+        let done = |t| ContextReading { task_boundary: true, ..reading(t) };
+        assert_eq!(hint_of(&done(149_999), 400_000, 150_000, 0), "none");
+        assert_eq!(hint_of(&done(150_000), 400_000, 150_000, 0), "fresh");
+        assert_eq!(hint_of(&done(500_000), 400_000, 150_000, 0), "fresh", "fresh wins over compact at a boundary");
     }
 
     #[test]
@@ -359,6 +408,20 @@ mod tests {
         observe_claude_frame(&b, &call("m2", 60_000));
         observe_claude_frame(&b, &call("m3", 450_000));
         assert!(take_turn_end_hint(&b).is_some(), "again after dropping below 250K and crossing");
+        forget(&b);
+    }
+
+    #[test]
+    fn a_finished_task_hints_fresh_for_that_turn_only() {
+        let b = block();
+        observe_claude_frame(&b, &call("m1", 200_000));
+        note_task_boundary(&b);
+        let note = take_turn_end_hint(&b).expect("a task finished at 200K");
+        assert!(note.contains("Agents fresh"), "{note}");
+        assert!(!get(&b).unwrap().task_boundary, "the boundary is used up");
+        fresh_sent(&b, true);
+        let r = get(&b).unwrap();
+        assert!(r.tokens.is_none() && r.calls_since_compaction == 0 && r.last_self_compact_ms.is_some());
         forget(&b);
     }
 

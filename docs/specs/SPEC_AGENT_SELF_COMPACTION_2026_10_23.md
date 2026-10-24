@@ -1,7 +1,7 @@
 # Agent Self-Compaction: Context, Compact, Fresh Session, and a Lower Auto-Compact Backstop
 
 **Date:** 2026-10-23
-**Status:** active — approved by the operator on 2026-10-23. PR 1 (§3.1, the backstop setting) shipped in #5393; PR 2 (§3.2–§3.6: context, compact, the compact hint) in #5399; PR 3 (fresh, and the fresh hint) remains.
+**Status:** implemented — approved by the operator on 2026-10-23. PR 1 (§3.1, the backstop setting) in #5393; PR 2 (§3.2–§3.6: context, compact, the compact hint) in #5399; PR 3 (fresh, and the fresh hint) in #5411.
 **Owner:** agent-pane lifecycle
 **Research:** [`REPORT_AGENT_SELF_COMPACTION_AND_TOKEN_USE_2026_10_23.md`](../reports/REPORT_AGENT_SELF_COMPACTION_AND_TOKEN_USE_2026_10_23.md) (measurements, economics, options, probe)
 **Related:** [`SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md`](SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md) (detection and display), [`SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md`](SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md) (running summary and continuation packet), [`SPEC_RESUME_PHASE_CATCH_UP_TURN_2026_10_13.md`](SPEC_RESUME_PHASE_CATCH_UP_TURN_2026_10_13.md) (catch-up turn), [`REPORT_AGENT_PANE_CONTEXT_METER_2026_10_05.md`](../reports/REPORT_AGENT_PANE_CONTEXT_METER_2026_10_05.md) (context readings, `get_context_usage`)
@@ -111,7 +111,7 @@ All three act on the **caller's own pane** only, resolved from its token the way
 
 - Returns `scheduled` or `refused`.
 - **Claude:** at the turn boundary, srv stops the CLI gracefully (the `stop_for_config_restart` path), clears the session id (`inner.session_id` and the `agent:sessionid` meta), and respawns **without** `--resume`. The existing continuation path (`persistent/spawn.rs`, `resume_retry.rs` `carry_continuation`) builds the packet and prefixes it to the first message. The agent's handoff goes into the packet as its own section, "Handoff from your previous session", ahead of the running summary (`continuity.rs` `build_continuation_packet`). The packet's size cap still applies; the handoff is kept whole and the recent exchange is cut first.
-- **Codex:** at the boundary, srv drops the thread id, so the next `codex exec` starts a new thread, and sends the packet, with the handoff, as that turn's first message.
+- **Codex:** at the boundary, srv drops the thread id (`SubprocessController::forget_session` and the block's `agent:sessionid`), so the next `codex exec` starts a new thread, and sends the handoff as that turn's first message. The continuation packet is built in the persistent (Claude) controller, so a Codex fresh session carries the handoff alone.
 - The pane's existing `fresh_session` catch-up turn follows (`useAgentStream.ts`).
 - This is **not** the pane's "New session" button, which archives the transcript and the running summary. The transcript continues in the same pane, so the user sees one conversation with a "fresh session" marker.
 

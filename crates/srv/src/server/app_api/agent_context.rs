@@ -111,6 +111,121 @@ pub(crate) async fn handle_compact_self(
     Json(json!({ "status": "scheduled", "runs": "when your current turn ends", "note": focus_note })).into_response()
 }
 
+/// The most handoff text a fresh session carries.
+pub(crate) const HANDOFF_MAX_CHARS: usize = 4_000;
+/// The longest a fresh session waits for the old CLI to exit.
+const EXIT_WAIT: Duration = Duration::from_secs(30);
+
+/// `POST /api/v1/agent/self/fresh`: `scheduled` (when the caller's turn ends,
+/// its session ends and a new one starts with the handoff) or `refused`.
+/// `focus` carries the handoff here.
+pub(crate) async fn handle_fresh_self(
+    State(state): State<AppState>,
+    caller: Option<Extension<Caller>>,
+    Json(req): Json<SelfContextRequest>,
+) -> Response {
+    let Some(block_id) = crate::server::actor::own_pane_by_token(&state.mstore, caller.as_deref(), req.agent.trim()) else {
+        return no_pane();
+    };
+    let refused = |why: &str| Json(json!({ "status": "refused", "reason": why })).into_response();
+    let handoff: String = req.focus.as_deref().unwrap_or_default().trim().chars().take(HANDOFF_MAX_CHARS).collect();
+    if handoff.is_empty() {
+        return refused("a handoff is required: what your next session must know");
+    }
+    let Some((provider, container)) = provider_of(&state, &block_id) else {
+        return refused("the pane can't be read");
+    };
+    match (provider.as_str(), container) {
+        (_, true) => return refused("unsupported in containers"),
+        ("claude" | "codex", false) => {}
+        _ => return refused("unsupported: only Claude and Codex agents can start fresh"),
+    }
+    if let Err(why) = context_reading::schedule_compact(&block_id, agentmux_common::time::now_ms_u64()) {
+        return refused(why);
+    }
+    tracing::info!(block_id = %block_id, provider = %provider, handoff_chars = handoff.len(), "fresh session scheduled");
+    tokio::spawn(fresh_when_turn_ends(state, block_id, provider, handoff));
+    Json(json!({ "status": "scheduled", "runs": "when your current turn ends" })).into_response()
+}
+
+/// The new session's first message from AgentMux: the agent's own handoff. A
+/// fresh Claude session also gets the continuation packet ahead of it.
+pub(crate) fn handoff_message(handoff: &str) -> String {
+    format!("[AgentMux] This is the fresh session you asked for. Your previous session's handoff:\n\n{handoff}")
+}
+
+/// Wait for the turn to end, end the session, then send the handoff as
+/// AgentMux's own turn, which starts the new session.
+async fn fresh_when_turn_ends(state: AppState, block_id: String, provider: String, handoff: String) {
+    if !wait_for_turn_end(&block_id).await {
+        tracing::warn!(block_id = %block_id, "fresh session given up: the turn didn't end within 30 minutes");
+        context_reading::fresh_sent(&block_id, false);
+        return;
+    }
+    let ended = match crate::backend::blockcontroller::get_controller(&block_id) {
+        Some(ctrl) if provider == "claude" => {
+            use crate::backend::blockcontroller::persistent::PersistentSubprocessController;
+            match ctrl.as_any().downcast_ref::<PersistentSubprocessController>() {
+                Some(p) => p.start_fresh_session().map(|_| ()),
+                None => Err("the agent's controller can't start fresh"),
+            }
+        }
+        Some(ctrl) => {
+            use crate::backend::blockcontroller::subprocess::SubprocessController;
+            match ctrl.as_any().downcast_ref::<SubprocessController>() {
+                Some(s) => {
+                    s.forget_session();
+                    crate::backend::blockcontroller::core::persist_session_id(&block_id, "", &Some(state.mstore.clone()), &None);
+                    Ok(())
+                }
+                None => Err("the agent's controller can't start fresh"),
+            }
+        }
+        None => Err("no controller for the pane"),
+    };
+    if let Err(why) = ended {
+        tracing::warn!(block_id = %block_id, reason = why, "fresh session could not end the old one");
+        context_reading::fresh_sent(&block_id, false);
+        return;
+    }
+    // The old CLI exits before the handoff spawns the new one.
+    let deadline = tokio::time::Instant::now() + EXIT_WAIT;
+    while crate::backend::blockcontroller::get_block_controller_status(&block_id)
+        .is_some_and(|s| s.shellprocstatus == crate::backend::blockcontroller::STATUS_RUNNING)
+        && tokio::time::Instant::now() < deadline
+    {
+        tokio::time::sleep(TURN_END_POLL).await;
+    }
+    let deps = crate::server::agent_handlers::AgentTurnDeps::from_state(&state);
+    let outcome = crate::server::agent_handlers::run_agent_turn(
+        &deps,
+        block_id.clone(),
+        handoff_message(&handoff),
+        None,
+        crate::server::agent_handlers::TurnRegistration::Register,
+        crate::backend::blockcontroller::health::TurnOrigin::System,
+        Vec::new(),
+    )
+    .await;
+    context_reading::fresh_sent(&block_id, outcome.is_ok());
+    match outcome {
+        Ok(()) => tracing::info!(block_id = %block_id, "fresh session started"),
+        Err(e) => tracing::warn!(block_id = %block_id, error = %e, "fresh session's handoff could not be sent"),
+    }
+}
+
+/// Wait until `block_id` has no turn running; `false` after [`TURN_END_WAIT`].
+async fn wait_for_turn_end(block_id: &str) -> bool {
+    let deadline = tokio::time::Instant::now() + TURN_END_WAIT;
+    while crate::backend::blockcontroller::get_block_controller_status(block_id).is_some_and(|s| s.turn_active) {
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(TURN_END_POLL).await;
+    }
+    true
+}
+
 /// `/compact` with the focus, trimmed to [`FOCUS_MAX_CHARS`] and to one
 /// paragraph's worth of whitespace.
 pub(crate) fn compact_message(focus: Option<&str>) -> String {
@@ -150,6 +265,13 @@ async fn compact_when_turn_ends(state: AppState, block_id: String, message: Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_handoff_is_the_new_sessions_first_message_from_agentmux() {
+        let m = handoff_message("Task #1791: PR 3 open as #5410; next: wait for review.");
+        assert!(m.starts_with("[AgentMux] This is the fresh session you asked for."));
+        assert!(m.ends_with("Task #1791: PR 3 open as #5410; next: wait for review."));
+    }
 
     #[test]
     fn the_focus_rides_after_compact_on_one_line_within_its_limit() {

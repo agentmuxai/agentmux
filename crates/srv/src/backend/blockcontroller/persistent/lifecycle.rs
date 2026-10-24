@@ -82,6 +82,29 @@ impl PersistentSubprocessController {
         Self::request_stop_inner(&self.inner, request, false, true);
     }
 
+    /// `Agents fresh` (SPEC_AGENT_SELF_COMPACTION_2026_10_23.md §3.3): end
+    /// this provider session so the next message starts a new one. Clears the
+    /// session id here and on the block, so nothing resumes it, then stops the
+    /// CLI as a Stop does. The next message spawns a fresh CLI onto the pane's
+    /// history, which carries AgentMux's continuation packet (`spawn.rs`), and
+    /// a new segment of the agent's chain (`continuity_segments`), so the old
+    /// session stays in its record. Only between turns. Returns the old id.
+    pub(crate) fn start_fresh_session(&self) -> Result<Option<String>, &'static str> {
+        if self.health_monitor.is_active_turn() {
+            return Err("a turn is running");
+        }
+        let old = {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.stop_pending || inner.restart_pending {
+                return Err("the agent's process is already stopping or restarting");
+            }
+            inner.session_id.take()
+        };
+        super::super::core::persist_session_id(&self.block_id, "", &self.mstore, &self.event_bus);
+        let request = KillRequest::Graceful(std::time::Instant::now() + super::super::SHUTDOWN_GRACE);
+        self.request_stop(request).map(|()| old).map_err(|_| "could not stop the agent's process")
+    }
+
     /// A kill for teardown: drains the deferred queue in the SAME `inner`
     /// acquisition that issues the kill, and returns what it drained for the
     /// caller to report. Draining in a second acquisition left a window

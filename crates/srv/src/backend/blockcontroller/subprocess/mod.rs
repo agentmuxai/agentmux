@@ -343,6 +343,12 @@ impl SubprocessController {
         self.inner.lock().unwrap().session_id.clone()
     }
 
+    /// `Agents fresh`: forget the thread, so the next turn's `codex exec`
+    /// starts a new one. Returns the old id.
+    pub fn forget_session(&self) -> Option<String> {
+        self.inner.lock().unwrap().session_id.take()
+    }
+
     /// Stop the currently running subprocess.
     pub fn stop_subprocess(&self, force: bool) -> Result<(), String> {
         let kill_tx = {

@@ -27,6 +27,7 @@ pub(super) const ACTS: &[Act] = &[
     Act { action: "search_history", tool: "SearchHistory", rename: &[] },
     Act { action: "context", tool: "AgentContext", rename: &[] },
     Act { action: "compact", tool: "AgentCompact", rename: &[] },
+    Act { action: "fresh", tool: "AgentFresh", rename: &[] },
 ];
 
 pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
@@ -48,6 +49,10 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 "AgentWorkers" => workers(cx).await,
                 "AgentContext" => own_context(cx, "context", None).await,
                 "AgentCompact" => own_context(cx, "compact", str_arg(&args, "keep")).await,
+                "AgentFresh" => match str_arg(&args, "handoff") {
+                    Some(handoff) => own_context(cx, "fresh", Some(handoff)).await,
+                    None => Err(anyhow::anyhow!("Agents fresh needs a handoff: what your next session must know")),
+                },
                 _ => history::call(act.tool, &args, cx).await,
             };
             let result = result.map_err(|e| anyhow::anyhow!(public_params(&format!("{e:#}"), act.rename)));
