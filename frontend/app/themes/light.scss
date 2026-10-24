@@ -119,3 +119,9 @@
     --color-border: var(--border-color);
     --color-modalbg: var(--modal-bg-color);
 }
+
+// The Kanban's stage colours this palette needs moved apart, or made readable
+// (view/warden-kanban/kanban-stage-colours.test.ts).
+[data-theme="light"] {
+    --kanban-stage-progress: var(--term-bright-blue);
+}

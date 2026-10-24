@@ -195,25 +195,27 @@ The board moves stay operator-only, as `SPEC_WARDEN_KANBAN_2026_10_20.md` §6.13
 
 ### 7.1 Each column's colour
 
-There are eight new `:root` tokens in `frontend/app/theme.scss`, aliases of existing ones, the same way the `--process-kind-*` tokens alias the terminal palette:
+There are eight new `:root` tokens in `frontend/app/theme.scss`, aliases of tokens each theme already tunes. Most are the `--process-kind-*` colours, which the Tower's test keeps apart and readable in every theme. The accent colour isn't used: it differs in every theme and met another stage in most of them.
 
 | Column | Token | Alias | Why |
 |---|---|---|---|
-| Backlog | `--kanban-stage-backlog` | `--tertiary-text-color` | Neutral: nothing is happening yet |
-| In Research | `--kanban-stage-research` | `--term-cyan` | |
+| Backlog | `--kanban-stage-backlog` | `--secondary-text-color` | Neutral: nothing is happening yet |
+| In Research | `--kanban-stage-research` | `--process-kind-agentmux` (cyan) | |
 | Spec'd | `--kanban-stage-specd` | `--info-color` (violet) | |
-| In progress | `--kanban-stage-progress` | `--accent-color` | The app's "working" colour |
+| In progress | `--kanban-stage-progress` | `--process-kind-agents` (magenta) | |
 | Needs you | `--kanban-stage-needs` | `--attention-color` | The app's own "an agent needs you" colour. Today the Kanban uses `--warning-color` here; this aligns it with the agent pane's attention signal |
-| Review | `--kanban-stage-review` | `--term-yellow` | |
-| Merged | `--kanban-stage-merged` | `--success-color` | Finished |
-| Released | `--kanban-stage-released` | `--term-blue` | Shipped: the last column, set apart from Merged |
+| Review | `--kanban-stage-review` | `--process-kind-builds` (yellow) | |
+| Merged | `--kanban-stage-merged` | `--process-kind-shells` (green) | Finished |
+| Released | `--kanban-stage-released` | `--process-kind-runtimes` (blue) | Shipped: the last column, set apart from Merged |
+
+Seven themes override one or two of these where two still met, or one didn't read on its surface (catppuccin, high-contrast, light, midnight, monokai, solarized-light, tokyo-night), each in a small block at the end of its theme file.
 
 - **Where the colour shows:**
   - a 3 px top bar on the column's header;
   - a dot before the column's label;
   - in the narrow view, the section header's left bar.
 - **What stays uncoloured:** column bodies and cards. The Kanban's rule is borders, not fills (`kanban.scss`'s header note), and fills would fight the agent colours on the cards.
-- **Themes:** a theme where two of these collide or don't read on its surface overrides the alias in its own `themes/*.scss`. A test, modelled on `view/tower/process-kind-colours.test.ts`, checks two things in every theme, light and dark:
+- **Themes:** a theme where two of these collide or don't read on its surface overrides the alias in its own `themes/*.scss`. A test (`view/warden-kanban/kanban-stage-colours.test.ts`), modelled on `view/tower/process-kind-colours.test.ts`, checks two things in every theme, light and dark (a light theme with theme.scss's light-polarity block applied):
   - the eight stay apart (a minimum OKLCH distance);
   - each has at least 3:1 contrast against `--main-bg-color` (WCAG 1.4.11 for indicators).
 
@@ -255,7 +257,7 @@ The rule, already the Kanban's and the UI kit's (`Pill.tsx`, `SPEC_TOWER_AGENT_C
 
 ## 8. The narrow view
 
-- **Breakpoint:** unchanged: the Warden container at 760 px or less (`@container warden (max-width: 760px)`). It becomes a named SCSS variable, `$kanban-narrow`, so the TSX that mirrors it (drag auto-scroll, below) reads the same number from one place.
+- **Breakpoint:** unchanged: the Warden container at 760 px or less (`@container warden (max-width: 760px)`). It becomes a named SCSS variable, `$kanban-narrow`, and `KANBAN_NARROW_PX` in `kanban-columns.ts`, which the manager's resize observer compares the section's width with to fold Merged and Released.
 - **Wider than that:**
   - Eight columns at `minmax(160px, 1fr)` need about 1,340 px.
   - Between 760 px and that width, the board scrolls sideways, as five columns do today below about 940 px.
@@ -267,7 +269,7 @@ The rule, already the Kanban's and the UI kit's (`Pill.tsx`, `SPEC_TOWER_AGENT_C
   - **Sticky:** the header is `position: sticky; top: 0`, so the section being read is always named.
   - **Empty sections:** collapse to their header line ("Spec'd · 0").
 - **Order:** the column order, with Needs you first, as today: Needs you, Backlog, In Research, Spec'd, In progress, Review, Merged, Released. Needs you is the one section the operator must not have to scroll to (D3).
-- **Merged and Released** are folded by default in the narrow view (one header line each, with its count). Tapping a header opens it. The choice is kept per pane (`kanban:narrowdone` meta).
+- **Merged and Released** are folded by default in the narrow view (one header line each, with its count). Tapping a header opens it, for as long as the pane is open.
 - **Lanes mode, narrow:**
   - One scroller for the whole list.
   - Each repository lane is a heading (sticky at top), and its stage sections follow it in the same order.

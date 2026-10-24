@@ -300,6 +300,20 @@
     --process-kind-builds: var(--term-yellow);
     --process-kind-runtimes: var(--term-blue);
 
+    // The Kanban's columns, one colour per stage, the words carrying the meaning
+    // (SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23.md §7.1). Aliases of
+    // tokens each theme already tunes (the process kinds stay apart and readable),
+    // so a theme overrides one only where two still meet, as
+    // view/warden-kanban/kanban-stage-colours.test.ts measures.
+    --kanban-stage-backlog: var(--secondary-text-color);
+    --kanban-stage-research: var(--process-kind-agentmux);
+    --kanban-stage-specd: var(--info-color);
+    --kanban-stage-progress: var(--process-kind-agents);
+    --kanban-stage-needs: var(--attention-color);
+    --kanban-stage-review: var(--process-kind-builds);
+    --kanban-stage-merged: var(--process-kind-shells);
+    --kanban-stage-released: var(--process-kind-runtimes);
+
 
     // term colors (16 + 6) form the base terminal theme
     // for consistency these colors should be used by plugins/applications

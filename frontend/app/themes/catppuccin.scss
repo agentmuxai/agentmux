@@ -81,3 +81,9 @@
     --process-kind-agentmux: #89dceb;
     --process-kind-runtimes: #b4befe;
 }
+
+// The Kanban's stage colours this palette needs moved apart, or made readable
+// (view/warden-kanban/kanban-stage-colours.test.ts).
+[data-theme="catppuccin"] {
+    --kanban-stage-backlog: var(--conn-icon-color-1);
+}
