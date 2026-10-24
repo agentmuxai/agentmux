@@ -66,6 +66,12 @@ export interface SwarmOrderHooks {
     beforeMove?: () => void;
     /** Called just after, once the rows are in their new places. */
     afterMove?: () => void;
+    /**
+     * Whether the page still shows the pointer over the list, or focus in it. The leave and
+     * blur events that end those holds are not delivered when the element under the pointer or
+     * focus is removed or disabled, so the controller asks before it trusts them.
+     */
+    stillHeld?: (hold: "pointer" | "focus") => boolean;
 }
 
 /**
@@ -100,6 +106,7 @@ export class SwarmOrderController {
 
     /** The rows and what the order reads from them, as they are now. */
     update(items: readonly SwarmOrderItem[]): void {
+        this.dropStaleHolds();
         this.trackWorkingSince(items);
         const keys = new Set(items.map((item) => item.key));
         const target = orderSwarmItems(items, this.workingSince);
@@ -118,7 +125,8 @@ export class SwarmOrderController {
         this.target = target;
         if (sameList(target, next)) {
             this.cancel();
-        } else if (targetChanged) {
+        } else if (targetChanged || this.timer === undefined) {
+            // Also when nothing is waiting: a hold the page no longer shows was just dropped.
             this.arm();
         }
     }
@@ -136,7 +144,21 @@ export class SwarmOrderController {
     }
 
     get held(): boolean {
+        this.dropStaleHolds();
         return this.holds.size > 0;
+    }
+
+    /** Let go of a pointer or focus hold the page no longer shows (see `SwarmOrderHooks.stillHeld`). */
+    private dropStaleHolds(): void {
+        for (const hold of ["pointer", "focus"] as const) {
+            if (this.holds.has(hold) && this.hooks.stillHeld?.(hold) === false) this.holds.delete(hold);
+        }
+    }
+
+    /** Let go of every hold that comes from the list element itself, e.g. because it was removed. */
+    releaseListHolds(): void {
+        for (const hold of ["pointer", "press", "focus"] as const) this.holds.delete(hold);
+        if (this.holds.size === 0 && !sameList(this.target, this.order())) this.arm();
     }
 
     dispose(): void {

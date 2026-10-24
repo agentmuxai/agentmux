@@ -79,11 +79,12 @@ describe("SwarmOrderController", () => {
     beforeEach(() => vi.useFakeTimers());
     afterEach(() => vi.useRealTimers());
 
-    function make(now = () => Date.now()) {
+    function make(now = () => Date.now(), stillHeld?: (hold: "pointer" | "focus") => boolean) {
         const moves: string[] = [];
         const ctl = new SwarmOrderController(SWARM_SETTLE_MS, now, {
             beforeMove: () => moves.push("before"),
             afterMove: () => moves.push("after"),
+            stillHeld,
         });
         return { ctl, moves };
     }
@@ -234,6 +235,35 @@ describe("SwarmOrderController", () => {
         vi.advanceTimersByTime(SWARM_SETTLE_MS * 3);
         expect(ctl.order()).toEqual(["a", "b"]);
         expect(moves).toEqual([]);
+    });
+
+    it("lets go of a pointer or focus hold the page no longer shows, so a lost leave or blur cannot freeze the list", () => {
+        let shown = true;
+        const { ctl } = make(undefined, () => shown);
+        ctl.update([local("a", { lastActive: 2 }), local("b", { lastActive: 1 })]);
+        ctl.setHold("pointer", true);
+        ctl.setHold("focus", true);
+        ctl.update([local("a", { lastActive: 2 }), local("b", { working: true, lastActive: 3 })]);
+        vi.advanceTimersByTime(10_000);
+        expect(ctl.order()).toEqual(["a", "b"]);
+        // The pointer's list was removed under it: no leave ever came.
+        shown = false;
+        ctl.update([local("a", { lastActive: 2 }), local("b", { working: true, lastActive: 4 })]);
+        expect(ctl.held).toBe(false);
+        vi.advanceTimersByTime(SWARM_SETTLE_MS);
+        expect(ctl.order()).toEqual(["b", "a"]);
+    });
+
+    it("lets go of the holds the list gave when the list is removed, but not a right-click menu's", () => {
+        const { ctl } = make();
+        ctl.update([local("a", { lastActive: 2 }), local("b", { lastActive: 1 })]);
+        for (const hold of ["pointer", "press", "focus", "menu"] as const) ctl.setHold(hold, true);
+        ctl.update([local("a", { lastActive: 2 }), local("b", { working: true, lastActive: 3 })]);
+        ctl.releaseListHolds();
+        expect(ctl.held).toBe(true);
+        ctl.setHold("menu", false);
+        vi.advanceTimersByTime(SWARM_SETTLE_MS);
+        expect(ctl.order()).toEqual(["b", "a"]);
     });
 
     it("stops its timers when disposed", () => {

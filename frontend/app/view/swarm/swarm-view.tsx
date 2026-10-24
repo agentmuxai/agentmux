@@ -217,7 +217,11 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
                 <Show when={tree().length > 0 || remote().length > 0}>
                     <div
                         class="swarm-tree"
-                        ref={treeRef}
+                        ref={(el) => {
+                            treeRef = el;
+                            // The pointer and focus holds end with the list, if its events never come.
+                            onCleanup(() => swarmOrder.releaseListHolds());
+                        }}
                         {...swarmOrder.listHandlers}
                     >
                         <For each={swarmOrder.order()}>

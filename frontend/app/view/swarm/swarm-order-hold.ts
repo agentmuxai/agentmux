@@ -15,6 +15,8 @@ import { captureRowTops, playRowMoves } from "./swarm-order-motion";
 export interface SwarmOrder {
     /** The keys of the rows, in the order to show them. */
     order: Accessor<string[]>;
+    /** Lets go of the holds the list element gave, for when it is removed. */
+    releaseListHolds: () => void;
     /** Event handlers for the list element, which hold the order still. */
     listHandlers: {
         onPointerEnter: () => void;
@@ -41,6 +43,11 @@ export function useSwarmOrder(opts: {
             tops = captureRowTops(opts.list());
         },
         afterMove: () => playRowMoves(opts.list(), tops, opts.zoom()),
+        stillHeld: (hold) => {
+            const list = opts.list();
+            if (!list) return false;
+            return hold === "pointer" ? list.matches(":hover") : list.contains(document.activeElement);
+        },
     });
     onCleanup(() => control.dispose());
     createComputed(() => control.update(opts.items()));
@@ -65,6 +72,7 @@ export function useSwarmOrder(opts: {
 
     return {
         order: control.order,
+        releaseListHolds: () => control.releaseListHolds(),
         listHandlers: {
             onPointerEnter: () => control.setHold("pointer", true),
             onPointerLeave: () => control.setHold("pointer", false),

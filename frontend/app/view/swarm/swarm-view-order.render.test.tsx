@@ -24,9 +24,20 @@ import { SWARM_SETTLE_MS } from "./swarm-order";
 import type { RemoteAgentState, SwarmOtherInstances } from "./swarm-remote";
 import { SwarmView } from "./swarm-view";
 
-beforeEach(() => vi.useFakeTimers());
+// jsdom has no :hover; the page says whether the pointer is over the list, as a browser would.
+let hovered = false;
+const realMatches = Element.prototype.matches;
+
+beforeEach(() => {
+    vi.useFakeTimers();
+    hovered = false;
+    vi.spyOn(Element.prototype, "matches").mockImplementation(function (this: Element, selector: string) {
+        return selector === ":hover" ? hovered : realMatches.call(this, selector);
+    });
+});
 afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
     vi.useRealTimers();
 });
 
@@ -96,10 +107,12 @@ describe("Swarm order", () => {
     it("does not move the rows while the pointer is over the list, and moves them after it leaves", () => {
         const { names, change, container } = setup({ A: "idle", B: "idle", C: "idle" });
         const tree = container.querySelector(".swarm-tree")!;
+        hovered = true;
         fireEvent.pointerEnter(tree);
         change({ A: "idle", B: "idle", C: "working" });
         vi.advanceTimersByTime(60_000);
         expect(names()).toEqual(["A", "B", "C"]);
+        hovered = false;
         fireEvent.pointerLeave(tree);
         vi.advanceTimersByTime(SWARM_SETTLE_MS - 1);
         expect(names()).toEqual(["A", "B", "C"]);
@@ -111,11 +124,11 @@ describe("Swarm order", () => {
         const { names, change, container } = setup({ A: "idle", B: "idle" });
         const tree = container.querySelector(".swarm-tree")!;
         const box = container.querySelector<HTMLInputElement>(".swarm-remote-agent input")!;
-        fireEvent.focusIn(box);
+        box.focus();
         change({ A: "idle", B: "working" });
         vi.advanceTimersByTime(10_000);
         expect(names()).toEqual(["A", "B"]);
-        fireEvent.focusOut(box, { relatedTarget: document.body });
+        box.blur();
         fireEvent.pointerDown(tree);
         vi.advanceTimersByTime(10_000);
         expect(names()).toEqual(["A", "B"]);
