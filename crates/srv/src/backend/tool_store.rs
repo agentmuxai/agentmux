@@ -159,6 +159,23 @@ pub fn tools_path(existing: &str, user_precedence: UserToolsPrecedence) -> Optio
     compose_tools_path(existing, bundled.as_deref(), user.as_deref(), user_precedence)
 }
 
+/// Puts the tool dirs ahead of the PATH in `env_vars` (else the process's own) for an agent's
+/// process: the bundled dir, then the user dir, so the build-slot shims in the user dir
+/// (`agentmux_common::build_slot`) and the app's own tools beat anything on the system PATH.
+/// Every agent spawn calls this: a spawn that skips it never reaches the shims.
+pub fn prepend_agent_tools_path(env_vars: &mut HashMap<String, String>) {
+    let bundled = bundled_tools_dir().filter(|d| d.exists());
+    let user = user_tools_dir().filter(|d| d.exists());
+    prepend_tools_path_with(env_vars, bundled.as_deref(), user.as_deref());
+}
+
+fn prepend_tools_path_with(env_vars: &mut HashMap<String, String>, bundled: Option<&std::path::Path>, user: Option<&std::path::Path>) {
+    let existing = env_vars.get("PATH").cloned().or_else(|| std::env::var("PATH").ok()).unwrap_or_default();
+    if let Some(path) = compose_tools_path(&existing, bundled, user, UserToolsPrecedence::BeforeExisting) {
+        env_vars.insert("PATH".to_string(), path);
+    }
+}
+
 /// The `agentmux-bashwrap` agents' Bash commands run through: the bundled
 /// copy, else the user tools dir's (where `task dev` puts it), in the order
 /// [`tools_path`] puts them on PATH. An absolute path, so a stale copy
@@ -594,7 +611,7 @@ mod tool_status_wire_tests {
 
 #[cfg(test)]
 mod tools_path_tests {
-    use super::{compose_tools_path, UserToolsPrecedence};
+    use super::{compose_tools_path, prepend_tools_path_with, UserToolsPrecedence};
     use std::path::Path;
 
     const SEP: &str = if cfg!(windows) { ";" } else { ":" };
@@ -619,6 +636,20 @@ mod tools_path_tests {
     #[test]
     fn no_tool_dirs_leaves_path_untouched() {
         assert_eq!(compose_tools_path("SYS", None, None, UserToolsPrecedence::BeforeExisting), None);
+    }
+
+    #[test]
+    fn an_agents_own_path_gets_the_tool_dirs_in_front_and_none_means_no_change() {
+        let sep = if cfg!(windows) { ";" } else { ":" };
+        let mut env = std::collections::HashMap::from([("PATH".to_string(), "SYS".to_string())]);
+        prepend_tools_path_with(&mut env, Some(Path::new("B")), Some(Path::new("U")));
+        assert_eq!(env["PATH"], format!("B{sep}U{sep}SYS"), "the user dir (build-slot shims) is ahead of the system PATH");
+        let mut untouched = std::collections::HashMap::from([("PATH".to_string(), "SYS".to_string())]);
+        prepend_tools_path_with(&mut untouched, None, None);
+        assert_eq!(untouched["PATH"], "SYS");
+        let mut none = std::collections::HashMap::new();
+        prepend_tools_path_with(&mut none, None, Some(Path::new("U")));
+        assert!(none["PATH"].starts_with(&format!("U{sep}")) || none["PATH"] == "U", "no PATH in the env: the process's own follows the user dir");
     }
 
     #[test]
