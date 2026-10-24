@@ -264,7 +264,7 @@ describe("MyAgentsList — populated", () => {
         expect(screen.queryByText("Container")).toBeNull();
     });
 
-    it("renders the host runtime badge with the same 'tag' variant + HOST wording as the composer strip", async () => {
+    it("renders the host runtime badge with the same 'tag' variant + NATIVE wording as the composer strip", async () => {
         vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([makeRow({ agent_type: "host" })]));
         render(() => <MyAgentsList onReattach={() => {}} />);
         await screen.findByTestId("agent-my-agents-entry");

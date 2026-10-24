@@ -938,7 +938,7 @@ describe("AgentComposerStrip — interactive elements flush against the row edge
         expect(precedes(compact, shell)).toBe(true);
     });
 
-    it("mirrors the hostShell slot's internal order when it lands on the LEFT (degenerate one-slot case): Shell outermost-left, HOST badge inward", () => {
+    it("mirrors the hostShell slot's internal order when it lands on the LEFT (degenerate one-slot case): Shell outermost-left, NATIVE badge inward", () => {
         // Minimal pool: no controls (no blockAtom), no auth, no badge, no
         // ctx — hostShell alone falls back to the left side (the "left
         // must never be completely empty" fallback), putting it on the
