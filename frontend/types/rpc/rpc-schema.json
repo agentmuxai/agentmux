@@ -4956,6 +4956,25 @@
     }
   },
   {
+    "command": "pane.moveTabs",
+    "request": "agentmux_srv::backend::rpc_types::block::CommandPaneMoveTabsData",
+    "requestName": "CommandPaneMoveTabsData",
+    "requestTs": {
+      "imports": [
+        "CommandPaneMoveTabsData"
+      ],
+      "name": "CommandPaneMoveTabsData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::block::PaneTabEditResult",
+    "responseName": "PaneTabEditResult",
+    "responseTs": {
+      "imports": [
+        "PaneTabEditResult"
+      ],
+      "name": "PaneTabEditResult"
+    }
+  },
+  {
     "command": "pane.open",
     "request": "agentmux_srv::backend::rpc_types::block::CommandPaneOpenData",
     "requestName": "CommandPaneOpenData",

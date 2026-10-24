@@ -129,7 +129,7 @@ async fn activate_tab_switches_the_stored_pane_and_queues_under_the_callers_id()
     let state = test_state();
     let (tab_id, layout_oid, a, b) = seed(&state).await;
     stack_b_onto_a(&state, &tab_id, &a, &b).await;
-    let res = crate::server::app_api::pane::activate_tab(
+    let res = crate::server::app_api::activate_tab(
         &state,
         CommandPaneTabData { block_id: a.clone(), action_id: Some("fe-1".into()) },
     )
@@ -147,7 +147,7 @@ async fn remove_tab_takes_one_tab_out_and_queues_a_delete_under_the_callers_id()
     let state = test_state();
     let (tab_id, layout_oid, a, b) = seed(&state).await;
     stack_b_onto_a(&state, &tab_id, &a, &b).await;
-    let res = crate::server::app_api::pane::remove_tab(
+    let res = crate::server::app_api::remove_tab(
         &state,
         CommandPaneTabData { block_id: b.clone(), action_id: Some("fe-2".into()) },
     )
@@ -160,7 +160,7 @@ async fn remove_tab_takes_one_tab_out_and_queues_a_delete_under_the_callers_id()
     assert_eq!((last.actiontype.as_str(), last.actionid.as_str()), ("delete", "fe-2"));
 
     // Already out of every pane: nothing changes and nothing is queued.
-    let again = crate::server::app_api::pane::remove_tab(&state, CommandPaneTabData { block_id: b, action_id: None })
+    let again = crate::server::app_api::remove_tab(&state, CommandPaneTabData { block_id: b, action_id: None })
         .await
         .unwrap();
     assert_eq!(again.version, row(&state, &layout_oid).version as u64);

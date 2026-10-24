@@ -28,6 +28,8 @@ export interface DragSource {
     nodeId?: string;
     tabId?: string;
     blockId?: string;
+    /** pane-tab: every block a multi-tab drag carries (the grabbed one included); absent for a single tab. */
+    blockIds?: readonly string[];
     wsId?: string;
     /** list-item: the dragged entry. doc-tab: the dragged document tab. */
     itemId?: string;

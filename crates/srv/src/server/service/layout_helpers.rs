@@ -169,6 +169,50 @@ pub(crate) async fn queue_target_stack_move(
     super::reducer_helpers::queue_layout_actions_via_reducer(state, tab_id, vec![action]).await
 }
 
+/// Tell the frontend that several blocks were moved — already, in the
+/// reducer — to the end of `target_block_id`'s pane (`Command::LayoutStackMoveMany`):
+/// one `stackmove` per block, in order, the visible tab's (when it is one of
+/// them) carrying `focused`; and a `stackactivate` when the visible tab is a
+/// member of that pane that was not moved. The ids are `<action_id>:<index>`,
+/// which the calling frontend registered as its own.
+/// SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §5.
+pub(crate) async fn queue_target_stack_moves(
+    state: &super::super::AppState,
+    tab_id: &str,
+    block_ids: &[String],
+    target_block_id: &str,
+    activate_block_id: Option<&str>,
+    action_id: &str,
+) -> Result<(), String> {
+    let nth = |i: usize| if action_id.is_empty() { String::new() } else { format!("{action_id}:{i}") };
+    let mut actions: Vec<LayoutActionData> = block_ids
+        .iter()
+        .enumerate()
+        .map(|(i, block_id)| LayoutActionData {
+            actiontype: "stackmove".to_string(),
+            actionid: action_id_or_new(&nth(i)),
+            blockid: block_id.clone(),
+            nodesize: None,
+            nodesizefraction: None,
+            indexarr: None,
+            focused: activate_block_id == Some(block_id.as_str()),
+            magnified: false,
+            ephemeral: false,
+            targetblockid: target_block_id.to_string(),
+            position: "end".to_string(),
+            nodeid: None,
+        })
+        .collect();
+    if let Some(active) = activate_block_id.filter(|a| !block_ids.iter().any(|b| b == a)) {
+        actions.push(LayoutActionData {
+            actiontype: "stackactivate".to_string(),
+            actionid: action_id_or_new(&nth(block_ids.len())),
+            ..source_delete_action(active)
+        });
+    }
+    super::reducer_helpers::queue_layout_actions_via_reducer(state, tab_id, actions).await
+}
+
 /// Tell the frontend that `block_id` became the visible tab of its pane
 /// (`Command::LayoutStackActivate`). Matches
 /// `LayoutTreeActionType.StackActivate = "stackactivate"`.

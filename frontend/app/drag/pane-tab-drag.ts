@@ -10,9 +10,15 @@
 
 import { beginDrag, isUnderway, markReleased, session } from "./drag-session";
 
-/** `paneKey` is the pane the pill belongs to; `tabId` its window tab. */
-export function startPaneTabDrag(blockId: string, paneKey?: string, tabId?: string): void {
-    beginDrag("pane-tab", { blockId, nodeId: paneKey, tabId });
+/** `paneKey` is the pane the pill belongs to; `tabId` its window tab. `blockIds` is the
+ *  whole selection when several tabs are dragged together (the grabbed one included). */
+export function startPaneTabDrag(blockId: string, paneKey?: string, tabId?: string, blockIds?: readonly string[]): void {
+    beginDrag("pane-tab", {
+        blockId,
+        nodeId: paneKey,
+        tabId,
+        ...(blockIds && blockIds.length > 1 ? { blockIds } : {}),
+    });
 }
 
 export function releasePaneTabDrag(): void {
@@ -42,5 +48,8 @@ export function isDraggedDocTab(blockId: string, tabId: string): boolean {
  */
 export function isDraggedPaneTab(blockId: string, paneKey?: string): boolean {
     const source = session()?.source;
-    return isUnderway("pane-tab") && source?.blockId === blockId && source?.nodeId === paneKey;
+    if (!isUnderway("pane-tab")) return false;
+    // A multi-tab drag dims every selected pill, in whichever strip it is.
+    if (source?.blockIds?.includes(blockId)) return true;
+    return source?.blockId === blockId && source?.nodeId === paneKey;
 }

@@ -25,6 +25,7 @@ import { CommandPaletteModal } from "@/app/modals/command-palette";
 import { ReplacePaneConfirm } from "@/app/modals/replace-pane-confirm";
 import { handleCmdN, handleSplitHorizontal, handleSplitVertical } from "./keymodel-blockcreate";
 import { type KeyHandler, keyCommands } from "./keymodel-dispatch";
+import { clearPaneTabSelection } from "@/app/element/pane-tab-selection";
 import {
     cyclePaneFocus,
     genericClose,
@@ -67,7 +68,10 @@ function registerGlobalKeys() {
             modalsModel.closeTopModal();
             return true;
         }
-        return deactivateSearch();
+        // One Escape does one thing: a modal, then an active search, then picked pane tabs
+        // (Ctrl/Cmd+click), then (not here) un-magnify. A handled key goes no further.
+        if (deactivateSearch()) return true;
+        return clearPaneTabSelection();
     });
 
     // ── Tabs & windows ──

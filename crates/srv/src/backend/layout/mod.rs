@@ -316,6 +316,51 @@ pub fn move_stack_member(
     push_stack_member_at(tree, target_block_id, block_id, position, activate)
 }
 
+/// Move every block in `block_ids` that is not already in `target_block_id`'s
+/// leaf into it, appended in the order given (each as [`move_stack_member`]
+/// with [`StackMovePosition::End`] would), then make `activate_block_id` the
+/// leaf's visible tab when it is one of its members.
+///
+/// All or nothing: it works on a copy and replaces `tree` only when every
+/// step succeeded, so a block missing from the tree, a missing target, or a
+/// refused step leaves the tree as it was and returns `None`. On success it
+/// returns the node ids of the panes emptied (and so removed) by the move, in
+/// the order they went. Blocks already in the target's leaf stay where they
+/// are, and a repeated id is moved once.
+/// SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §5.
+pub fn move_stack_members(
+    tree: &mut LayoutNode,
+    block_ids: &[String],
+    target_block_id: &str,
+    activate_block_id: Option<&str>,
+) -> Option<Vec<String>> {
+    let mut work = tree.clone();
+    let target_members = leaf_members(find_leaf_containing_block(&work, target_block_id)?.data.as_ref()?);
+    let mut seen: Vec<&str> = Vec::new();
+    let mut emptied = Vec::new();
+    for block_id in block_ids {
+        find_leaf_containing_block(&work, block_id)?;
+        if target_members.iter().any(|m| m == block_id) || seen.contains(&block_id.as_str()) {
+            continue;
+        }
+        seen.push(block_id);
+        if let Some(node_id) = source_leaf_emptied_by_move(&work, block_id, target_block_id) {
+            emptied.push(node_id);
+        }
+        if !move_stack_member(&mut work, block_id, target_block_id, StackMovePosition::End, false) {
+            return None;
+        }
+    }
+    if let Some(active) = activate_block_id {
+        let leaf = find_leaf_containing_block(&work, target_block_id)?;
+        if !leaf_members(leaf.data.as_ref()?).iter().any(|m| m == active) || !activate_stack_member(&mut work, active) {
+            return None;
+        }
+    }
+    *tree = work;
+    Some(emptied)
+}
+
 /// The node id of `block_id`'s leaf, when `move_stack_member(tree, block_id,
 /// target_block_id, ..)` would delete that leaf: `block_id` is its only
 /// member and `target_block_id` lives in a different leaf. `None` for every

@@ -383,6 +383,7 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Reduced {
         | Command::LayoutStackActivate { .. }
         | Command::CreateBlockInStack { .. }
         | Command::LayoutStackMove { .. }
+        | Command::LayoutStackMoveMany { .. }
         | Command::LayoutApplyIntent { .. }
         | Command::LayoutQueueBackendActions { .. }
         | Command::LayoutSetTree { .. }

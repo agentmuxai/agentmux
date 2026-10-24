@@ -17,6 +17,7 @@ import {
     addWidgetAsPaneTab,
     closeBlockInStack,
     moveBlockInStack,
+    moveBlocksInStack,
     openBlockInStack,
     setActiveBlockInStack,
 } from "./lib/layoutStack";
@@ -44,6 +45,7 @@ export {
     installWindowEdgeResizeListener,
     LayoutTreeActionType,
     moveBlockInStack,
+    moveBlocksInStack,
     NavigateDirection,
     newLayoutNode,
     openBlockInStack,

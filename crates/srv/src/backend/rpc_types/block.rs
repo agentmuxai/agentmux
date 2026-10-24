@@ -855,6 +855,26 @@ pub struct CommandPaneMoveTabData {
     pub action_id: Option<String>,
 }
 
+/// Request for pane.moveTabs — append every block in `block_ids` to the pane
+/// holding `target_block_id`, in the order given, in one edit (all or nothing).
+/// The caller sends only the blocks that are not already in that pane;
+/// `activate_block_id` becomes the pane's visible tab and may be one of its
+/// existing members. `action_id` is the caller's base id: the queued actions
+/// for other views are `<action_id>:0`, `<action_id>:1`, … and the caller
+/// skips them all.
+/// SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §5.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+#[serde(rename_all = "snake_case")]
+pub struct CommandPaneMoveTabsData {
+    pub block_ids: Vec<String>,
+    pub target_block_id: String,
+    #[ts(optional)]
+    pub activate_block_id: Option<String>,
+    #[ts(optional)]
+    pub action_id: Option<String>,
+}
+
 /// Request for pane.activateTab and pane.removeTab: one Pane Tab, by its
 /// block id. `action_id` as in [`CommandPaneMoveTabData`].
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]

@@ -18,6 +18,7 @@ import {
     closeBlockInStack,
     effectiveStack,
     moveBlockInStack,
+    moveBlocksInStack,
     openBlockInStack,
     pushBlockOntoStack,
     setActiveBlockInStack,
@@ -1380,5 +1381,159 @@ describe("paneStackIds", () => {
             expect(ids()).toEqual(["b1", "b2"]);
             dispose();
         });
+    });
+});
+
+
+// SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §4.3, §5: several tabs into ONE pane.
+describe("moveBlocksInStack", () => {
+    beforeEach(() => {
+        layoutStateSignals.clear();
+        vi.useFakeTimers();
+        rpcCall.mockReset();
+        rpcCall.mockResolvedValue(undefined);
+    });
+    afterEach(() => vi.useRealTimers());
+
+    function addPane(model: LayoutModel, blockId: string): string {
+        model.treeReducer({
+            type: LayoutTreeActionType.InsertNode,
+            node: newLayoutNode(undefined, undefined, undefined, { blockId }),
+            magnified: false,
+            focused: false,
+        } as LayoutTreeInsertNodeAction);
+        return getNodeByBlockId(model, blockId)!.id;
+    }
+
+    /** p1: [a1, a2], p2: [c1], p3: [d1, d2], p4: [e1] (tree order p1..p4). */
+    function fourPanes() {
+        const model = createLayoutModel();
+        const p1 = insertRootBlock(model, "a1");
+        pushBlockOntoStack(model, p1, "a2");
+        addPane(model, "c1");
+        const p3 = addPane(model, "d1");
+        pushBlockOntoStack(model, p3, "d2");
+        addPane(model, "e1");
+        model.updateTree();
+        return model;
+    }
+
+    const stackOf = (model: LayoutModel, blockId: string) => effectiveStack(getNodeByBlockId(model, blockId)!.data!);
+
+    it("gathers tabs from several panes, appended in layout order whatever order they are named in", () => {
+        const model = fourPanes();
+
+        const moved = moveBlocksInStack(model, ["d2", "a2", "e1"], "c1", "d2");
+
+        expect(moved).toEqual(["a2", "d2", "e1"]);
+        expect(stackOf(model, "c1")).toEqual(["c1", "a2", "d2", "e1"]);
+        expect(getNodeByBlockId(model, "c1")!.data!.activeBlockId).toBe("d2");
+        expect(stackOf(model, "a1")).toEqual(["a1"]);
+        expect(stackOf(model, "d1")).toEqual(["d1"]);
+    });
+
+    it("removes every pane it empties as a move, and never asks to close or delete anything", () => {
+        const model = fourPanes();
+        const beforeNodeDelete = vi.fn().mockResolvedValue(true);
+        const onNodeDelete = vi.fn().mockResolvedValue(undefined);
+        model.beforeNodeDelete = beforeNodeDelete;
+        model.onNodeDelete = onNodeDelete;
+
+        moveBlocksInStack(model, ["c1", "e1", "a1", "a2"], "d1", "e1");
+
+        expect(model.leafs()).toHaveLength(1);
+        expect(stackOf(model, "d1")).toEqual(["d1", "d2", "a1", "a2", "c1", "e1"]);
+        expect(beforeNodeDelete).not.toHaveBeenCalled();
+        expect(onNodeDelete).not.toHaveBeenCalled();
+        expect(deleteBlock).not.toHaveBeenCalled();
+    });
+
+    it("empties two sibling panes of one column into the pane beside them (the nested tree a real window has)", () => {
+        const model = createLayoutModel();
+        insertRootBlock(model, "agent");
+        const cpuId = addPane(model, "cpu");
+        model.treeReducer({
+            type: LayoutTreeActionType.SplitVertical,
+            targetNodeId: cpuId,
+            newNode: newLayoutNode(undefined, undefined, undefined, { blockId: "swarm" }),
+            position: "after",
+        } as any);
+        model.updateTree();
+        expect(model.leafs()).toHaveLength(3);
+        expect(model.treeState.rootNode!.children!.some((c) => (c.children?.length ?? 0) === 2)).toBe(true);
+
+        const moved = moveBlocksInStack(model, ["swarm", "cpu"], "agent", "swarm");
+
+        expect(moved).toEqual(["cpu", "swarm"].sort((x, y) => (x === "cpu" ? -1 : 1)).filter((x) => moved && moved.includes(x)));
+        expect(model.leafs()).toHaveLength(1);
+        expect(stackOf(model, "agent")).toEqual(expect.arrayContaining(["agent", "cpu", "swarm"]));
+        expect(model.treeState.rootNode!.children ?? []).toHaveLength(0);
+    });
+
+    it("leaves a tab already in the target where it is, and moves the rest", () => {
+        const model = fourPanes();
+
+        const moved = moveBlocksInStack(model, ["d1", "a2"], "d2", "d1");
+
+        expect(moved).toEqual(["a2"]);
+        expect(stackOf(model, "d1")).toEqual(["d1", "d2", "a2"]);
+        expect(getNodeByBlockId(model, "d1")!.data!.activeBlockId).toBe("d1");
+    });
+
+    it("can gather into the pane the grabbed tab came from", () => {
+        const model = fourPanes();
+
+        const moved = moveBlocksInStack(model, ["a1", "e1", "c1"], "a1", "a1");
+
+        expect(moved).toEqual(["c1", "e1"]);
+        expect(stackOf(model, "a1")).toEqual(["a1", "a2", "c1", "e1"]);
+    });
+
+    it("does nothing at all when a named block is in no pane", () => {
+        const model = fourPanes();
+        const before = JSON.stringify(model.treeState.rootNode);
+
+        expect(moveBlocksInStack(model, ["a2", "ghost"], "c1", "a2")).toBe(false);
+
+        expect(JSON.stringify(model.treeState.rootNode)).toBe(before);
+    });
+
+    it("returns false when everything is already in the target and nothing is to be activated", () => {
+        const model = fourPanes();
+        expect(moveBlocksInStack(model, ["d1", "d2"], "d1")).toBe(false);
+    });
+
+    it("focuses the pane that took the tabs", () => {
+        const model = fourPanes();
+        moveBlocksInStack(model, ["a2", "e1"], "c1", "a2");
+        expect(model.focusedNodeId).toBe(getNodeByBlockId(model, "c1")!.id);
+    });
+
+    it("sends ONE pane.moveTabs with only the blocks that moved, and no per-tab pane.moveTab", async () => {
+        const model = fourPanes();
+
+        moveBlocksInStack(model, ["d1", "e1", "a2"], "d2", "e1");
+        await settle();
+
+        const calls = rpcCall.mock.calls.filter((c) => String(c[0]).startsWith("pane."));
+        expect(calls).toHaveLength(1);
+        expect(calls[0][0]).toBe("pane.moveTabs");
+        expect(calls[0][1]).toEqual({
+            block_ids: ["a2", "e1"],
+            target_block_id: "d2",
+            activate_block_id: "e1",
+            action_id: expect.any(String),
+        });
+    });
+
+    it("registers every queued copy srv will send as this model's own, so it does not apply them twice", async () => {
+        const model = fourPanes();
+
+        moveBlocksInStack(model, ["a2", "e1"], "c1", "a2");
+        await settle();
+
+        const actionId = (rpcCall.mock.calls.find((c) => c[0] === "pane.moveTabs")![1] as { action_id: string }).action_id;
+        for (let i = 0; i <= 2; i++) expect(model.processedActionIds.has(`${actionId}:${i}`)).toBe(true);
+        expect(model.processedActionIds.has(actionId)).toBe(true);
     });
 });

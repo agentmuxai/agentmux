@@ -83,6 +83,9 @@ export function PaneHeaderTabStrip<T>(props: PaneHeaderTabStripProps<T>): JSX.El
             addLabel={props.addLabel}
             onReorder={props.onReorder}
             onReceiveForeignTab={props.onReceiveForeignTab}
+            onReceiveForeignTabs={props.onReceiveForeignTabs}
+            acceptsForeignTabs={props.acceptsForeignTabs}
+            selection={props.selection}
             // Derived from `nodeModel` (this strip's own Pane) rather than
             // requiring a redundant caller-supplied prop — `PaneTabStrip`'s
             // `canDrop` uses it to reject a pill dragged from a DIFFERENT

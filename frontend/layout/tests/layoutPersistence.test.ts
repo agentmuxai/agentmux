@@ -616,6 +616,53 @@ describe("processPendingBackendActions — StackMove of a pane's only tab", () =
     });
 });
 
+// A multi-tab move queues one `stackmove` per tab, and when the tabs were the last of two sibling panes, the
+// mirror removes both panes in one batch.
+// SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §5.
+describe("processPendingBackendActions — several StackMoves that each empty a pane", () => {
+    beforeEach(() => {
+        layoutStateSignals.clear();
+        vi.useFakeTimers();
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it("removes every emptied pane and leaves a tree that lays out", async () => {
+        const model = createLayoutModel();
+        // The shape of a real window: one pane beside a column of two.
+        insertBlock(model, "existing");
+        const cpu = insertBlock(model, "cpu");
+        model.treeReducer({
+            type: LayoutTreeActionType.SplitVertical,
+            targetNodeId: cpu.id,
+            newNode: newLayoutNode(undefined, undefined, undefined, { blockId: "swarm" }),
+            position: "after",
+        } as any);
+        model.updateTree();
+        expect(model.leafs()).toHaveLength(3);
+        expect(model.treeState.rootNode!.children!.some((c) => (c.children?.length ?? 0) === 2)).toBe(true);
+        const move = (blockid: string, actionid: string) => ({
+            actiontype: LayoutTreeActionType.StackMove,
+            actionid,
+            blockid,
+            targetblockid: "existing",
+            position: "end",
+            focused: blockid === "swarm",
+            magnified: false,
+            ephemeral: false,
+        });
+        setPendingActions(model, [move("cpu", "m-1"), move("swarm", "m-2")]);
+
+        await processPendingBackendActions(model);
+
+        expect(model.leafs()).toHaveLength(1);
+        expect(findBlock(model, "existing")!.data!.blockStack).toEqual(["existing", "cpu", "swarm"]);
+        expect(findBlock(model, "existing")!.data!.activeBlockId).toBe("swarm");
+        expect(JSON.stringify(model.treeState.rootNode)).not.toContain("null");
+    });
+});
+
 // A tab's model is disposed when the window tab leaves this window
 // (installLayoutModelEviction). Its tree is stale from then on.
 describe("a disposed model", () => {

@@ -44,7 +44,14 @@ import type { LayoutModel } from "./layoutModel";
 import { focusNode } from "./layoutFocus";
 import { closeNode, removeLeafEmptiedByMove } from "./layoutMagnify";
 import { sendStackCommand } from "./layoutPersistence";
-import { effectiveStack, moveMemberAcrossStacks, moveMemberInStack, removeMemberFromStack } from "./stackMembers";
+import {
+    activateMemberInStack,
+    effectiveStack,
+    moveMemberAcrossStacks,
+    moveMemberInStack,
+    removeMemberFromStack,
+} from "./stackMembers";
+import { blocksInLayoutOrder } from "./stackOrder";
 
 export { effectiveStack };
 
@@ -339,4 +346,88 @@ export function moveBlockInStack(
         )
     );
     return true;
+}
+
+/**
+ * Move several tabs into ONE pane in a single edit: every block in `blockIds` that is
+ * not already in the pane holding `targetBlockId` is appended to it, in layout order
+ * (panes in tree order, tabs in strip order, so the result does not depend on the order
+ * they were picked), and `activateBlockId` becomes that pane's visible tab (it may be
+ * a tab that was already there). A pane emptied by the move is removed as a move, never
+ * a close, as for one tab. One local edit and one `pane.moveTabs` command, so the
+ * layout is never half moved; if any block is in no pane nothing is touched. Returns
+ * the blocks that moved (in the order they landed), or `false` when nothing could be
+ * done, so a drop handler can bounce exactly those pills.
+ * SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §4.3, §5.
+ */
+export function moveBlocksInStack(
+    model: LayoutModel,
+    blockIds: readonly string[],
+    targetBlockId: string,
+    activateBlockId?: string
+): string[] | false {
+    const root = model.treeState.rootNode;
+    const targetNode = root && findNodeByBlockId(root, targetBlockId);
+    if (!root || !targetNode?.data) {
+        console.error("moveBlocksInStack: target block is in no pane", targetBlockId);
+        return false;
+    }
+    const inTarget = new Set(effectiveStack(targetNode.data));
+    const moving = blocksInLayoutOrder(root, blockIds).filter((id) => !inTarget.has(id));
+    // A block the caller named that is in no pane is a stale selection: do nothing at all.
+    if (new Set(blockIds).size !== blocksInLayoutOrder(root, blockIds).length) {
+        console.error("moveBlocksInStack: a block is in no pane", blockIds);
+        return false;
+    }
+    const activate = activateBlockId && (moving.includes(activateBlockId) || inTarget.has(activateBlockId));
+    if (moving.length === 0 && !activate) return false;
+
+    let emptied = false;
+    for (const id of moving) {
+        // Re-resolved every time: removing an emptied pane can collapse a parent and
+        // re-home the destination (the hazard closeBlockInStack guards against (#3422)).
+        const cur = model.treeState.rootNode;
+        const src = cur && findNodeByBlockId(cur, id);
+        const dst = cur && findNodeByBlockId(cur, targetBlockId);
+        if (!src?.data || !dst?.data) {
+            console.error("moveBlocksInStack: lost a pane mid-move", id, targetBlockId);
+            break;
+        }
+        const result = moveMemberAcrossStacks(src.data, dst.data, id, false);
+        if (result === "emptied") {
+            removeLeafEmptiedByMove(model, src.id);
+            // Normalize before the next removal, as separate single moves would: two
+            // removals in a row on one tree left a hole in a parent's children.
+            model.updateTree(true);
+            emptied = true;
+        }
+    }
+    if (activate) {
+        const dst = model.treeState.rootNode && findNodeByBlockId(model.treeState.rootNode, targetBlockId);
+        if (dst?.data) activateMemberInStack(dst.data, activateBlockId!);
+    }
+    model.updateTree(emptied);
+    model.setter(model.localTreeStateAtom, { ...model.treeState });
+
+    // The pane that took the tabs is where the user's attention is now.
+    const landedIn = model.treeState.rootNode && findNodeByBlockId(model.treeState.rootNode, targetBlockId);
+    if (landedIn) focusNode(model, landedIn.id);
+
+    void sendStackCommand(
+        model,
+        "pane.moveTabs",
+        (action_id) =>
+            RpcApi.PaneMoveTabsCommand(
+                TabRpcClient,
+                {
+                    block_ids: moving,
+                    target_block_id: targetBlockId,
+                    activate_block_id: activate ? activateBlockId : undefined,
+                    action_id,
+                },
+                {}
+            ),
+        moving.length
+    );
+    return moving;
 }

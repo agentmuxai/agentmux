@@ -165,6 +165,8 @@ vi.mock("@/app/window/action-widgets-config", () => ({
 const addWidgetAsPaneTab = vi.fn().mockResolvedValue(undefined); // real one is async — the picker chains .catch() on it
 const closeBlockInStack = vi.fn();
 const setActiveBlockInStack = vi.fn();
+const moveBlockInStack = vi.fn();
+const moveBlocksInStack = vi.fn();
 let mockLayoutModel: any;
 // SPEC_PANE_CHROME_LAYOUT_MODEL_TAB_BINDING_2026_09_18.md — the real bug this
 // spy exists to catch: `renderPaneChromeShell` used to resolve its own
@@ -184,6 +186,8 @@ vi.mock("@/layout/index", () => ({
     addWidgetAsPaneTab: (...args: any[]) => addWidgetAsPaneTab(...args),
     closeBlockInStack: (...args: any[]) => closeBlockInStack(...args),
     setActiveBlockInStack: (...args: any[]) => setActiveBlockInStack(...args),
+    moveBlockInStack: (...args: any[]) => moveBlockInStack(...args),
+    moveBlocksInStack: (...args: any[]) => moveBlocksInStack(...args),
     getLayoutModelForStaticTab: (...args: any[]) => getLayoutModelForStaticTabSpy(...args),
 }));
 
@@ -197,6 +201,7 @@ import { emitPaneLocate, onPaneLocatePlay } from "@/app/util/pane-locate";
 import { registerPaneTab } from "@/app/block/pane-tab-registry";
 import { stubPaneTab } from "@/app/block/pane-tab-test-utils";
 import type { PaneTabDescriptor } from "./pane-tab-model";
+import { paneTabSelection, resetPaneTabSelection, togglePaneTabSelected } from "./pane-tab-selection";
 
 // A test view type whose manifest carries only a pane-tab descriptor.
 const unregisterTestTabs: (() => void)[] = [];
@@ -244,6 +249,9 @@ beforeEach(() => {
     addWidgetAsPaneTab.mockClear();
     closeBlockInStack.mockClear();
     setActiveBlockInStack.mockClear();
+    moveBlockInStack.mockReset();
+    moveBlocksInStack.mockReset();
+    resetPaneTabSelection();
     getLayoutModelForStaticTabSpy.mockClear();
     capturedOnSelect = undefined;
 });
@@ -649,6 +657,104 @@ describe("renderPaneChromeShell — selecting a pill on a collapsed pane", () =>
         );
         headerCalls[0].onSelect("b2");
         expect(mockLayoutModel.minimizeNodeToggle).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe("renderPaneChromeShell — several tabs dropped on this pane", () => {
+    function collapsed(minimized: boolean) {
+        const model = fakeLayoutModel(["b1", "b2"]);
+        model.minimizeNodeToggle = vi.fn();
+        mockLayoutModel = model;
+        render(() =>
+            renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b1", isMinimized: () => minimized }), (<div />) as any)
+        );
+        return model;
+    }
+
+    it("drops a picked tab that the layout on screen no longer holds", () => {
+        collapsed(false);
+        togglePaneTabSelected("gone");
+        togglePaneTabSelected("b2");
+        // The prune runs on layout changes: a fresh mount sees the stale pick go.
+        cleanup();
+        collapsed(false);
+        expect([...paneTabSelection()]).toEqual(["b2"]);
+    });
+
+    it("hands the strip the selection, so pills can be picked", () => {
+        collapsed(false);
+        expect(headerCalls[0].selection).toBeDefined();
+        togglePaneTabSelected("b2");
+        expect(headerCalls[0].selection.isSelected("b2")).toBe(true);
+    });
+
+    it("accepts a multi-tab drag only when this pane lacks at least one of the tabs", () => {
+        collapsed(false);
+        expect(headerCalls[0].acceptsForeignTabs(["b1", "b2"])).toBe(false);
+        expect(headerCalls[0].acceptsForeignTabs(["b1", "elsewhere"])).toBe(true);
+    });
+
+    it("moves them in one call to this pane's visible tab, the grabbed one active, and clears the selection", () => {
+        collapsed(false);
+        togglePaneTabSelected("b2");
+        moveBlocksInStack.mockReturnValue(["x", "y"]);
+
+        const moved = headerCalls[0].onReceiveForeignTabs(["x", "y"], "y");
+
+        expect(moveBlocksInStack).toHaveBeenCalledTimes(1);
+        expect(moveBlocksInStack).toHaveBeenCalledWith(mockLayoutModel, ["x", "y"], "b1", "y");
+        expect(moveBlockInStack).not.toHaveBeenCalled();
+        expect(moved).toEqual(["x", "y"]);
+        expect(paneTabSelection().size).toBe(0);
+    });
+
+    it("keeps the selection when the move was refused", () => {
+        collapsed(false);
+        togglePaneTabSelected("b2"); // a tab the layout holds, or pruning would drop it
+        moveBlocksInStack.mockReturnValue(false);
+
+        expect(headerCalls[0].onReceiveForeignTabs(["x", "y"], "x")).toBe(false);
+
+        expect(paneTabSelection().has("b2")).toBe(true);
+    });
+
+    it("expands a collapsed pane that took the tabs, and leaves an expanded one alone", () => {
+        moveBlocksInStack.mockReturnValue(["x", "y"]);
+        const chip = collapsed(true);
+        headerCalls[0].onReceiveForeignTabs(["x", "y"], "x");
+        expect(chip.minimizeNodeToggle).toHaveBeenCalledWith("node-1");
+
+        cleanup();
+        headerCalls.length = 0;
+        const open = collapsed(false);
+        headerCalls[0].onReceiveForeignTabs(["x", "y"], "x");
+        expect(open.minimizeNodeToggle).not.toHaveBeenCalled();
+    });
+
+    it("a single tab dropped on a collapsed pane expands it too", () => {
+        moveBlockInStack.mockReturnValue(true);
+        const chip = collapsed(true);
+        headerCalls[0].onReceiveForeignTab("x");
+        expect(chip.minimizeNodeToggle).toHaveBeenCalledWith("node-1");
+    });
+
+    it("a lone picked tab that is dropped is no longer picked; an unpicked one leaves the pick alone", () => {
+        moveBlockInStack.mockReturnValue(true);
+        collapsed(false);
+        togglePaneTabSelected("b2");
+        headerCalls[0].onReceiveForeignTab("b2");
+        expect(paneTabSelection().size).toBe(0);
+
+        togglePaneTabSelected("b2");
+        headerCalls[0].onReceiveForeignTab("x");
+        expect(paneTabSelection().has("b2")).toBe(true);
+    });
+
+    it("a single tab refused by the move does not expand the pane", () => {
+        moveBlockInStack.mockReturnValue(false);
+        const chip = collapsed(true);
+        headerCalls[0].onReceiveForeignTab("x");
+        expect(chip.minimizeNodeToggle).not.toHaveBeenCalled();
     });
 });
 

@@ -244,7 +244,12 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
                 // closeNode/onNodeDelete here, same reason as the DeleteNode
                 // case above (R1 / #1681).
                 // SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §4.2.
-                if (result === "emptied") removeLeafEmptiedByMove(model, leaf.id);
+                if (result === "emptied") {
+                    removeLeafEmptiedByMove(model, leaf.id);
+                    // Normalize before the next queued move: a multi-tab move queues one per tab, and two
+                    // removals in a row on one tree leave a hole in a parent's children.
+                    model.updateTree(true);
+                }
             }
             break;
         }
@@ -369,10 +374,14 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
 export function sendStackCommand(
     model: LayoutModel,
     op: string,
-    send: (actionId: string) => Promise<PaneTabEditResult>
+    send: (actionId: string) => Promise<PaneTabEditResult>,
+    /** A command that srv answers with several queued actions (`pane.moveTabs`): they
+     *  are named `<id>:0` … `<id>:<fanout>`, and this model skips them all. */
+    fanout = 0
 ): Promise<void> {
     const actionId = crypto.randomUUID();
     model.processedActionIds.add(actionId);
+    for (let i = 0; i <= fanout; i++) model.processedActionIds.add(`${actionId}:${i}`);
     return new Promise((done) =>
         queueLayoutCommand(model, async () => {
             try {

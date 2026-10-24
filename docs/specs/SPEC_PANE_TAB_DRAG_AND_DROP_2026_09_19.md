@@ -22,6 +22,8 @@ out-of-scope items at the end of §3.5. Not yet verified in a running app.
   It resolves §7 Q1 in favor of `TearOffBlock` (relocate the same block,
   never close-and-reopen).
 
+> **Update 2026-10-24:** several tabs can now be picked with Ctrl+click (Cmd on macOS) and dragged into one pane together, in one `pane.moveTabs` command; see SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md. Single-tab behaviour here is unchanged.
+
 **Scope:** Dragging an individual **Pane Tab** pill (the pills rendered by
 `PaneHeaderTabStrip`/`PaneTabStrip`, one per `block_stack` member — see
 terminology below) to: reorder it within its own Pane, move it into a

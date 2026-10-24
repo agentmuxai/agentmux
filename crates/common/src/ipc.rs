@@ -597,6 +597,22 @@ pub enum Command {
         activate: bool,
         correlation_id: String,
     },
+    /// Move several Pane Tabs into ONE pane in a single edit: every block in
+    /// `block_ids` not already in the pane holding `target_block_id` is
+    /// appended to it, in the order given, as `LayoutStackMove` with
+    /// `position: End` would for each. `activate_block_id`, when present,
+    /// becomes that pane's visible tab. All or nothing: a block or target
+    /// that is not in the tree leaves the tree untouched. A pane emptied by
+    /// the move is removed, as for `LayoutStackMove`.
+    /// SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §5.
+    LayoutStackMoveMany {
+        tab_id: String,
+        block_ids: Vec<String>,
+        target_block_id: String,
+        #[serde(default)]
+        activate_block_id: Option<String>,
+        correlation_id: String,
+    },
     /// Apply a layout intent to the tab's tree: the frontend's own tree
     /// action, computed and normalized by the reducer.
     /// SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md §4.
