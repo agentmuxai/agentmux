@@ -140,14 +140,14 @@ pub(crate) async fn handle_fresh_self(
     };
     match (provider.as_str(), container) {
         (_, true) => return refused("unsupported in containers"),
-        ("claude" | "codex", false) => {}
-        _ => return refused("unsupported: only Claude and Codex agents can start fresh"),
+        ("claude", false) => {}
+        _ => return refused("unsupported: only Claude agents can start fresh for now; Codex agents can compact"),
     }
     if let Err(why) = context_reading::schedule_compact(&block_id, agentmux_common::time::now_ms_u64()) {
         return refused(why);
     }
     tracing::info!(block_id = %block_id, provider = %provider, handoff_chars = handoff.len(), "fresh session scheduled");
-    tokio::spawn(fresh_when_turn_ends(state, block_id, provider, handoff));
+    tokio::spawn(fresh_when_turn_ends(state, block_id, handoff));
     Json(json!({ "status": "scheduled", "runs": "when your current turn ends" })).into_response()
 }
 
@@ -171,30 +171,19 @@ const TURN_RUNNING: &str = "a turn is running";
 const STOP_PENDING: &str = "the agent's process is already stopping or restarting";
 
 /// End `block_id`'s provider session, so the next message starts a new one.
-fn end_session(state: &AppState, block_id: &str, provider: &str) -> Result<(), &'static str> {
-    match crate::backend::blockcontroller::get_controller(block_id) {
-        Some(ctrl) if provider == "claude" => {
-            use crate::backend::blockcontroller::persistent::PersistentSubprocessController;
-            let p = ctrl.as_any().downcast_ref::<PersistentSubprocessController>().ok_or("the agent's controller can't start fresh")?;
-            context_reading::mark_fresh_by_choice(block_id);
-            p.start_fresh_session().map(|_| ()).inspect_err(|_| {
-                context_reading::take_fresh_by_choice(block_id);
-            })
-        }
-        Some(ctrl) => {
-            use crate::backend::blockcontroller::subprocess::SubprocessController;
-            let s = ctrl.as_any().downcast_ref::<SubprocessController>().ok_or("the agent's controller can't start fresh")?;
-            s.forget_session();
-            crate::backend::blockcontroller::core::persist_session_id(block_id, "", &Some(state.mstore.clone()), &None);
-            Ok(())
-        }
-        None => Err("no controller for the pane"),
-    }
+fn end_session(block_id: &str) -> Result<(), &'static str> {
+    use crate::backend::blockcontroller::persistent::PersistentSubprocessController;
+    let ctrl = crate::backend::blockcontroller::get_controller(block_id).ok_or("no controller for the pane")?;
+    let p = ctrl.as_any().downcast_ref::<PersistentSubprocessController>().ok_or("the agent's controller can't start fresh")?;
+    context_reading::mark_fresh_by_choice(block_id);
+    p.start_fresh_session().map(|_| ()).inspect_err(|_| {
+        context_reading::take_fresh_by_choice(block_id);
+    })
 }
 
 /// Wait for the turn to end, end the session, then send the handoff as
 /// AgentMux's own turn, which starts the new session.
-async fn fresh_when_turn_ends(state: AppState, block_id: String, provider: String, handoff: String) {
+async fn fresh_when_turn_ends(state: AppState, block_id: String, handoff: String) {
     let mut ended = Err("the turn didn't end within 30 minutes");
     // A message queued behind the turn can start the next one between the wait
     // and the stop: wait again, a few times, before giving up.
@@ -202,7 +191,7 @@ async fn fresh_when_turn_ends(state: AppState, block_id: String, provider: Strin
         if !wait_for_turn_end(&block_id).await {
             break;
         }
-        ended = end_session(&state, &block_id, &provider);
+        ended = end_session(&block_id);
         if !matches!(ended, Err(TURN_RUNNING | STOP_PENDING)) {
             break;
         }

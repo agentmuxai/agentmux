@@ -111,7 +111,7 @@ All three act on the **caller's own pane** only, resolved from its token the way
 
 - Returns `scheduled` or `refused`.
 - **Claude:** at the turn boundary, srv stops the CLI gracefully (the `stop_for_config_restart` path), clears the session id (`inner.session_id` and the `agent:sessionid` meta), and respawns **without** `--resume`. The agent's handoff is sent as AgentMux's own turn (`TurnOrigin::System`), which starts the new session, with a line pointing at `search_history` for the old one. The continuation packet is **not** attached (`spawn.rs` skips it for a start the agent asked for): it tells the model to continue as if uninterrupted and that its last request is unanswered, which is the opposite of a fresh start, and it would spend tokens on the conversation the agent chose to leave. The handoff is the only carry-over, so the tool description says it must stand on its own.
-- **Codex:** at the boundary, srv drops the thread id (`SubprocessController::forget_session` and the block's `agent:sessionid`), so the next `codex exec` starts a new thread, and sends the handoff as that turn's first message. The continuation packet is built in the persistent (Claude) controller, so a Codex fresh session carries the handoff alone.
+- **Codex:** `refused: unsupported` for now. A Codex fresh session needs the same pane outcome frame a Claude one emits (the transcript divider, the meter reset, the memory fallback), and the Codex controller has no equivalent; a follow-up adds both. Codex agents keep `compact`.
 - The pane's existing `fresh_session` catch-up turn follows (`useAgentStream.ts`).
 - This is **not** the pane's "New session" button, which archives the transcript and the running summary. The transcript continues in the same pane, so the user sees one conversation with a "fresh session" marker.
 
@@ -173,7 +173,7 @@ The agent decides with one judgment it already holds at the end of its turn: is 
 | Seeding | `crates/srv/src/backend/providers.rs` (`seed_auto_compact_window`, called from `prepare_provider_auth_dir`), `crates/srv/src/identity/resolver/inject.rs`, `providers/tests.rs` |
 | Context in srv | `blockcontroller/persistent/mod.rs` (`PersistentInner`), `persistent/stdout_reader.rs`, `subprocess/codex_context.rs` and the Codex host spawn |
 | Compact | `persistent/input.rs` (direct stdin write at the boundary), `persistent/stdout_reader.rs` (boundary hook), `subprocess/codex_compact.rs` |
-| Fresh | `persistent/lifecycle.rs`, `persistent/spawn.rs`, `persistent/resume_retry.rs`, `backend/continuity.rs` (handoff section), Codex host spawn (thread id) |
+| Fresh | `persistent/lifecycle.rs`, `persistent/spawn.rs`, `persistent/resume_retry.rs`, `context_reading.rs` (the flag that skips the packet) |
 | MuxAPI | `crates/mcp/src/tool_schemas.rs`, the `Agents` family handler in `crates/mcp/src/tools/`, `crates/srv/src/server/routes.rs` (`/api/v1/agent/self/context`, `/compact`, `/fresh`), a handler next to `server/app_api/mcp_health.rs` |
 | Hint | `reactive/held_notes.rs` (or the turn-end path in `stdout_reader.rs`), the model price table |
 | Frontend | the catch-up turn for a self-requested compaction (`useAgentStream.ts`), the "fresh session" marker in the transcript |
@@ -183,7 +183,7 @@ The agent decides with one judgment it already holds at the end of its turn: is 
 
 1. **PR 1, backstop:** the `agent:compactat` setting, `seed_auto_compact_window`, Settings UI, tests; with this spec and the public report. (The hand-applied 633,000 on 2026-10-23 becomes AgentMux's own value under §3.1.)
 2. **PR 2, context and compact:** srv's context reading, `Agents context` and `compact`, the hint, its settings, the catch-up turn with the focus.
-3. **PR 3, fresh:** `Agents fresh`, the handoff section, the Codex path, the transcript marker.
+3. **PR 3, fresh:** `Agents fresh` for Claude, the handoff, the transcript marker. The Codex path follows.
 
 Each PR is independently useful; PR 2 doesn't need PR 3.
 

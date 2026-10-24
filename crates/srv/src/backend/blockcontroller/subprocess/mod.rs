@@ -343,18 +343,6 @@ impl SubprocessController {
         self.inner.lock().unwrap().session_id.clone()
     }
 
-    /// `Agents fresh`: forget the thread, so the next turn's `codex exec`
-    /// starts a new one. Returns the old id. A message already queued behind
-    /// the finishing turn carries the old id in its config, which would bring
-    /// the thread back (`hydrate_session_id_from_config`): drop it there too.
-    pub fn forget_session(&self) -> Option<String> {
-        let mut inner = self.inner.lock().unwrap();
-        for queued in inner.pending_messages.iter_mut() {
-            queued.session_id = None;
-        }
-        inner.session_id.take()
-    }
-
     /// Stop the currently running subprocess.
     pub fn stop_subprocess(&self, force: bool) -> Result<(), String> {
         let kill_tx = {
