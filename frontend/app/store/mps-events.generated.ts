@@ -40,6 +40,7 @@ import type { IncidentEvent } from "@/types/rpc/IncidentEvent";
 import type { InputHistoryChangedEvent } from "@/types/rpc/InputHistoryChangedEvent";
 import type { InstallChunkEvent } from "@/types/rpc/InstallChunkEvent";
 import type { InstallProgressEvent } from "@/types/rpc/InstallProgressEvent";
+import type { JobsChangedEvent } from "@/types/rpc/JobsChangedEvent";
 import type { LanDiscoverability } from "@/types/rpc/LanDiscoverability";
 import type { LanDiscoveryError } from "@/types/rpc/LanDiscoveryError";
 import type { LanFirewall } from "@/types/rpc/LanFirewall";
@@ -145,6 +146,7 @@ export type MuxEventPayloads = {
   "incident:recorded": IncidentEvent;
   install_chunk: InstallChunkEvent;
   install_progress: InstallProgressEvent;
+  "jobs:changed": JobsChangedEvent;
   laninstances: LanInstanceList;
   "laninstances:error": LanDiscoveryError;
   "laninstances:firewall": LanFirewall;
@@ -253,6 +255,7 @@ export const TYPED_MUX_EVENTS = [
   "incident:recorded",
   "install_chunk",
   "install_progress",
+  "jobs:changed",
   "laninstances",
   "laninstances:error",
   "laninstances:firewall",

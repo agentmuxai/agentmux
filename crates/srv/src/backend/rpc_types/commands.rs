@@ -429,6 +429,12 @@ pub const COMMAND_SWARM_OTHER_INSTANCES: &str = "swarm.other-instances";
 pub const COMMAND_KANBAN_LIST: &str = "kanban.list";
 pub const COMMAND_KANBAN_TASK: &str = "kanban.task";
 pub const COMMAND_KANBAN_ACT: &str = "kanban.act";
+/// The Warden Jobs tab (docs/specs/SPEC_JOBS_AND_TEMPLATES_2026_10_24.md
+/// §3.3): every job, one job's runs, and Run now / Pause / Resume / Delete /
+/// Pause all.
+pub const COMMAND_JOBS_LIST: &str = "jobs.list";
+pub const COMMAND_JOBS_RUNS: &str = "jobs.runs";
+pub const COMMAND_JOBS_ACT: &str = "jobs.act";
 // Connections (SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md). The
 // names are the ones the frontend's connection UI has always called
 // (rpc-api/workspace.ts); they had no handler until P0.

@@ -1,0 +1,146 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// The Warden Jobs section (warden-jobs-manager.tsx, jobs-history.tsx). Status colours are the
+// theme's semantic ones; the words in each pill carry the status too.
+
+@use "../../mixins.scss" as mixins;
+
+.warden-jobs-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+
+    .warden-manager-summary {
+        margin: 0;
+    }
+}
+
+.warden-jobs-banner {
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--warning-line);
+    background: var(--warning-bg);
+    font-size: var(--text-sm);
+}
+
+.warden-jobs-table {
+    .warden-jobs-row {
+        cursor: pointer;
+
+        &:hover td {
+            background: var(--tint-3);
+        }
+
+        &[data-selected="true"] td {
+            background: var(--accent-bg);
+        }
+
+        &:focus-visible {
+            @include mixins.focus-ring;
+        }
+    }
+
+    td {
+        vertical-align: top;
+    }
+}
+
+.warden-jobs-name {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-weight: 500;
+}
+
+.warden-jobs-num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.warden-jobs-strip {
+    display: inline-flex;
+    gap: 2px;
+    align-items: center;
+}
+
+.warden-jobs-mark {
+    display: inline-block;
+    width: 6px;
+    height: 12px;
+    background: var(--secondary-text-color);
+    border: 1px solid var(--secondary-text-color);
+    opacity: 0.6;
+
+    &[data-tone="ok"] {
+        background: var(--success-color);
+        border-color: var(--success-color);
+        opacity: 1;
+    }
+
+    &[data-tone="warn"] {
+        background: var(--warning-color);
+        border-color: var(--warning-color);
+        opacity: 1;
+    }
+
+    &[data-tone="error"] {
+        background: var(--error-color);
+        border-color: var(--error-color);
+        opacity: 1;
+    }
+
+    &[data-tone="accent"] {
+        background: var(--accent-color);
+        border-color: var(--accent-color);
+        opacity: 1;
+    }
+
+    &[data-hollow="true"] {
+        background: transparent;
+    }
+}
+
+.warden-jobs-history {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding-top: var(--space-2);
+    border-top: 1px solid var(--border-color);
+}
+
+.warden-jobs-history-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+}
+
+.warden-jobs-history-title,
+.warden-jobs-actions,
+.warden-jobs-links {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.warden-jobs-runs {
+    tr[data-failed="true"] td:first-child {
+        box-shadow: inset 2px 0 0 var(--error-color);
+    }
+}
+
+.warden-jobs-reason {
+    margin-left: var(--space-2);
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
+.warden-jobs-summary {
+    max-width: 40ch;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}

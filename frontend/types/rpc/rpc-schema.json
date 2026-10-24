@@ -3655,6 +3655,63 @@
     }
   },
   {
+    "command": "jobs.act",
+    "request": "agentmux_srv::server::app_api::jobs::JobsActRequest",
+    "requestName": "JobsActRequest",
+    "requestTs": {
+      "imports": [
+        "JobsActRequest"
+      ],
+      "name": "JobsActRequest"
+    },
+    "response": "agentmux_srv::server::app_api::jobs::JobsActResult",
+    "responseName": "JobsActResult",
+    "responseTs": {
+      "imports": [
+        "JobsActResult"
+      ],
+      "name": "JobsActResult"
+    }
+  },
+  {
+    "command": "jobs.list",
+    "request": "serde_json::value::Value",
+    "requestName": "Value",
+    "requestTs": {
+      "imports": [
+        "JsonValue"
+      ],
+      "name": "JsonValue"
+    },
+    "response": "agentmux_srv::server::app_api::jobs::JobsListResult",
+    "responseName": "JobsListResult",
+    "responseTs": {
+      "imports": [
+        "JobsListResult"
+      ],
+      "name": "JobsListResult"
+    }
+  },
+  {
+    "command": "jobs.runs",
+    "request": "agentmux_srv::server::app_api::jobs::JobsRunsRequest",
+    "requestName": "JobsRunsRequest",
+    "requestTs": {
+      "imports": [
+        "JobsRunsRequest"
+      ],
+      "name": "JobsRunsRequest"
+    },
+    "response": "agentmux_srv::server::app_api::jobs::JobsRunsResult",
+    "responseName": "JobsRunsResult",
+    "responseTs": {
+      "imports": [
+        "JobsRunsResult"
+      ],
+      "name": "JobsRunsResult"
+    }
+  },
+  {
     "command": "kanban.act",
     "request": "serde_json::value::Value",
     "requestName": "Value",

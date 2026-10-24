@@ -24,14 +24,14 @@
 //!
 //! See `docs/specs/SPEC_CRON_LOOP_ROBUSTNESS_2026_06_25.md §3.2`.
 
+pub mod expr;
+
 use agentmux_common::AUTH_KEY_HEADER;
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use agentmux_common::api_types::InjectRequest;
 use chrono::{DateTime, Utc};
-use cron::Schedule;
 
 use crate::backend::jobs::{self, Begin, RunLedger};
 use crate::backend::storage::store::Store;
@@ -289,7 +289,7 @@ impl CronScheduler {
     fn schedule_job_inner(self: &Arc<Self>, job: &CronJob, missed: Option<Missed>) {
         self.cancel_job(&job.id);
 
-        let schedule = match Schedule::from_str(&format!("0 {}", job.expression)) {
+        let schedule = match expr::parse(&job.expression) {
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!(id = %job.id, expr = %job.expression, error = %e, "cron: invalid expression — skipping job");
@@ -450,6 +450,9 @@ impl CronScheduler {
             Slot::CatchUp(ms) => (jobs::TRIGGER_CATCH_UP, Some(*ms), jobs::BY_SCHEDULER.to_string()),
             Slot::Manual { triggered_by } => (jobs::TRIGGER_MANUAL, None, triggered_by.clone()),
         };
+        if let Some(fired) = self.paused_all_answer(job, scheduled_for).await {
+            return fired;
+        }
         let run_id = match self.runs() {
             Some(runs) => {
                 let (runs, owned) = (runs.clone(), job.clone());
@@ -491,6 +494,28 @@ impl CronScheduler {
         }
         self.publish_changed();
         Fired { run_id, outcome: Some(outcome) }
+    }
+
+    /// While the operator has Pause all on (jobs spec §3.3): a slot becomes
+    /// a collapsed `skipped (paused_all)` row and isn't fired, and Run now
+    /// (no slot) is refused. `None` when Pause all is off.
+    async fn paused_all_answer(&self, job: &CronJob, scheduled_for: Option<i64>) -> Option<Fired> {
+        let runs = self.runs()?.clone();
+        let job = job.clone();
+        let answer = tokio::task::spawn_blocking(move || {
+            runs.paused_all()?;
+            Some(match scheduled_for {
+                Some(slot) => {
+                    runs.record_skip_slot(&job, slot, crate::backend::storage::job_runs::reason::PAUSED_ALL);
+                    Fired { run_id: None, outcome: None }
+                }
+                None => Fired {
+                    run_id: None,
+                    outcome: Some(FireOutcome::Failed { error: jobs::PAUSED_ALL_REFUSAL.to_string() }),
+                },
+            })
+        });
+        answer.await.ok().flatten()
     }
 
     /// Deliver `job`'s prompt as run `run_id` (its `request_id`, and the
@@ -619,6 +644,10 @@ impl CronScheduler {
             tokio::task::spawn_blocking(move || runs.waiting_here()).await.unwrap_or_default()
         };
         let now = agentmux_common::time::now_ms();
+        let paused_all = {
+            let runs = runs.clone();
+            tokio::task::spawn_blocking(move || runs.paused_all().is_some()).await.unwrap_or(false)
+        };
         let mut delivered = 0;
         for run in waiting {
             let job = self.shared_store.as_ref().and_then(|s| s.cron_get(&run.job_id).ok().flatten());
@@ -634,6 +663,10 @@ impl CronScheduler {
             };
             if expired {
                 runs.expire_pending(&run.id);
+                continue;
+            }
+            // Pause all holds it, until it expires as above.
+            if paused_all {
                 continue;
             }
             let Some(job) = job else { continue };
@@ -704,7 +737,7 @@ fn should_catchup(job: &CronJob, now_dt: DateTime<Utc>) -> bool {
         Some(dt) => dt,
         None => return false,
     };
-    let Ok(schedule) = Schedule::from_str(&format!("0 {}", job.expression)) else {
+    let Ok(schedule) = expr::parse(&job.expression) else {
         return false;
     };
     // First scheduled time after last_fired — if it's already past, a fire was missed.

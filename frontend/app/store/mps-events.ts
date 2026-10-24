@@ -138,6 +138,8 @@ export const WpsEvent = {
     DispatchActivity: "dispatch:activity",
     DispatchUpdated: "dispatch:updated",
     IdentityAccountsChanged: "identityaccounts:changed",
+    /** The run ledger, or Pause all, changed (the Warden Jobs tab). */
+    JobsChanged: "jobs:changed",
     InstallChunk: "install_chunk",
     /** Widget packages changed (SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §8). */
     WidgetPackages: "widgetpackages",

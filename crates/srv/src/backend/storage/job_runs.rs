@@ -62,7 +62,13 @@ pub(crate) const SCHEMA: &str = "
     CREATE INDEX IF NOT EXISTS idx_ids_job_runs_job_started ON db_job_runs(job_id, started_at_ms);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_ids_job_runs_slot ON db_job_runs(job_id, scheduled_for_ms)
         WHERE scheduled_for_ms IS NOT NULL;
-    CREATE INDEX IF NOT EXISTS idx_ids_job_runs_state ON db_job_runs(state);";
+    CREATE INDEX IF NOT EXISTS idx_ids_job_runs_state ON db_job_runs(state);
+    CREATE TABLE IF NOT EXISTS db_job_flags (
+        key        TEXT PRIMARY KEY,
+        value      TEXT NOT NULL DEFAULT '',
+        set_at_ms  INTEGER NOT NULL,
+        set_by     TEXT NOT NULL DEFAULT ''
+    );";
 
 /// Columns added to `db_job_runs` after its first shape, run on every open
 /// (`apply_schema`) as `cron::CRON_JOBS_COLUMNS` is: a table an earlier
@@ -113,6 +119,10 @@ pub mod reason {
     pub const SUPERSEDED: &str = "superseded";
     /// The job's next fire time passed before its agent came back.
     pub const EXPIRED: &str = "expired";
+    /// The job was paused when its slot came.
+    pub const PAUSED: &str = "paused";
+    /// Every job was paused by the operator (Pause all) when its slot came.
+    pub const PAUSED_ALL: &str = "paused_all";
 }
 
 /// Infrastructure status (§3.1; the ones P1 writes).
@@ -140,7 +150,8 @@ pub fn clip_summary(text: &str) -> String {
 }
 
 /// One row of `db_job_runs`. Field meanings are the spec's table (§3.1).
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct JobRun {
     pub id: String,
     pub job_id: String,
@@ -151,8 +162,10 @@ pub struct JobRun {
     #[serde(default)]
     pub template_version: String,
     pub trigger: String,
+    #[ts(type = "number | null")]
     pub scheduled_for_ms: Option<i64>,
     pub triggered_by: String,
+    #[ts(type = "number")]
     pub attempt: i64,
     pub state: String,
     pub reason: String,
@@ -161,19 +174,27 @@ pub struct JobRun {
     pub summary: String,
     pub target_agent_uid: String,
     pub block_id: String,
+    #[ts(type = "number | null")]
     pub turn_id: Option<i64>,
     pub account_id: String,
     pub provider: String,
+    #[ts(type = "number")]
     pub started_at_ms: i64,
+    #[ts(type = "number | null")]
     pub ended_at_ms: Option<i64>,
     pub cost_usd: f64,
     pub cost_known: bool,
     pub cost_partial: bool,
+    #[ts(type = "number")]
     pub output_tokens: i64,
+    #[ts(type = "number")]
     pub steps: i64,
     /// JSON object: the transcript, a Drone run, reported links.
+    #[ts(type = "Record<string, unknown>")]
     pub links: serde_json::Value,
+    #[ts(type = "number")]
     pub skip_count: i64,
+    #[ts(type = "number | null")]
     pub last_skip_at_ms: Option<i64>,
     #[serde(default)]
     pub reporter: String,
@@ -334,6 +355,30 @@ impl Store {
     /// The job's newest run, if any.
     pub fn job_run_last(&self, job_id: &str) -> Result<Option<JobRun>, StoreError> {
         Ok(self.job_runs_for_job(job_id, 1, None)?.pop())
+    }
+
+    /// The job's newest decisive run: one that finished, or failed (a miss,
+    /// a lost run, an expired pending fire, a failing infrastructure status
+    /// or outcome). Skips, and runs still scheduled, pending or running, are
+    /// passed over however many there are. The same rule as
+    /// `jobs::verdict::decisive`, whose test checks the two agree.
+    pub fn job_run_last_decisive(&self, job_id: &str) -> Result<Option<JobRun>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        Ok(conn
+            .query_row(
+                &format!(
+                    "SELECT {COLS} FROM db_job_runs
+                      WHERE job_id = ?1 AND collapsed_into = ''
+                        AND (state IN ('finished','missed','lost')
+                             OR (state = 'pending' AND reason = 'expired')
+                             OR infra IN ('error','timeout','over_budget','interrupted')
+                             OR outcome = 'failed')
+                      ORDER BY started_at_ms DESC, rowid DESC LIMIT 1"
+                ),
+                params![job_id],
+                row_to_run,
+            )
+            .optional()?)
     }
 
     /// Turn the just-inserted placeholder `id` into a skip for `reason`, or,
@@ -588,6 +633,135 @@ impl Store {
         let rows = stmt.query_map(params![channel], row_to_run)?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
+
+    /// Record `skip`, a `skipped` row for one slot (`scheduled_for_ms` set,
+    /// `skip_count` 1). When the job's newest row is a skip for the same
+    /// reason, the slot is counted into that row (`skip_count` + 1,
+    /// `last_skip_at_ms`) and `skip` is kept hidden under it
+    /// (`collapsed_into`), so consecutive skips show as one row while every
+    /// slot keeps its own row in the unique `(job_id, scheduled_for_ms)`
+    /// index: the slot stays leased, and another scheduler sharing the job
+    /// can't fire it later (after Resume all, say). A slot already taken (by
+    /// another instance's count, or a fire) counts nothing.
+    pub fn job_run_record_skip_slot(&self, skip: &JobRun) -> Result<(), StoreError> {
+        let mut conn = self.conn().lock().unwrap();
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let newest: Option<(String, String, String)> = tx
+            .query_row(
+                "SELECT id, state, reason FROM db_job_runs
+                  WHERE job_id = ?1 AND collapsed_into = ''
+                  ORDER BY started_at_ms DESC, rowid DESC LIMIT 1",
+                params![skip.job_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        let fold_into = newest.filter(|(_, st, why)| st == state::SKIPPED && *why == skip.reason).map(|(id, _, _)| id);
+        let inserted = tx.execute(
+            &format!(
+                "INSERT OR IGNORE INTO db_job_runs ({COLS}, collapsed_into) VALUES \
+                 (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33)"
+            ),
+            params![
+                skip.id,
+                skip.job_id,
+                skip.job_source,
+                skip.job_name,
+                skip.template_id,
+                skip.template_version,
+                skip.trigger,
+                skip.scheduled_for_ms,
+                skip.triggered_by,
+                skip.attempt,
+                skip.state,
+                skip.reason,
+                skip.infra,
+                skip.outcome,
+                skip.summary,
+                skip.target_agent_uid,
+                skip.block_id,
+                skip.turn_id,
+                skip.account_id,
+                skip.provider,
+                skip.started_at_ms,
+                skip.ended_at_ms,
+                skip.cost_usd,
+                skip.cost_known as i64,
+                skip.cost_partial as i64,
+                skip.output_tokens,
+                skip.steps,
+                skip.links.to_string(),
+                if fold_into.is_some() { 0 } else { skip.skip_count },
+                skip.last_skip_at_ms,
+                skip.reporter,
+                skip.recorded_by,
+                fold_into.as_deref().unwrap_or(""),
+            ],
+        )?;
+        if inserted > 0 {
+            if let Some(into) = &fold_into {
+                tx.execute(
+                    "UPDATE db_job_runs SET skip_count = skip_count + 1,
+                            last_skip_at_ms = MAX(COALESCE(last_skip_at_ms, 0), ?2)
+                      WHERE id = ?1",
+                    params![into, skip.scheduled_for_ms],
+                )?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// The job's spend since `since_ms`: the summed `cost_usd` of its runs
+    /// started then or later, and whether any of them reported a cost.
+    pub fn job_runs_cost_since(&self, job_id: &str, since_ms: i64) -> Result<(f64, bool), StoreError> {
+        let conn = self.conn().lock().unwrap();
+        Ok(conn.query_row(
+            "SELECT COALESCE(SUM(cost_usd), 0), COALESCE(MAX(cost_known), 0) FROM db_job_runs
+              WHERE job_id = ?1 AND collapsed_into = '' AND started_at_ms >= ?2",
+            params![job_id, since_ms],
+            |r| Ok((r.get::<_, f64>(0)?, r.get::<_, i64>(1)? != 0)),
+        )?)
+    }
+
+    /// A switch every job honours (`db_job_flags`), if it is set.
+    pub fn job_flag_get(&self, key: &str) -> Result<Option<JobFlag>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        Ok(conn
+            .query_row(
+                "SELECT value, set_at_ms, set_by FROM db_job_flags WHERE key = ?1",
+                params![key],
+                |r| Ok(JobFlag { value: r.get(0)?, set_at_ms: r.get(1)?, set_by: r.get(2)? }),
+            )
+            .optional()?)
+    }
+
+    /// Set the switch `key`, by `set_by`, now. Setting it again keeps the
+    /// first time it was set.
+    pub fn job_flag_set(&self, key: &str, value: &str, set_by: &str, now_ms: i64) -> Result<(), StoreError> {
+        let conn = self.conn().lock().unwrap();
+        conn.execute(
+            "INSERT INTO db_job_flags (key, value, set_at_ms, set_by) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value, now_ms, set_by],
+        )?;
+        Ok(())
+    }
+
+    /// Clear the switch `key`. `false` when it wasn't set.
+    pub fn job_flag_clear(&self, key: &str) -> Result<bool, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        Ok(conn.execute("DELETE FROM db_job_flags WHERE key = ?1", params![key])? > 0)
+    }
+}
+
+/// A switch in `db_job_flags`: its value, when it was set and by whom.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct JobFlag {
+    pub value: String,
+    #[ts(type = "number")]
+    pub set_at_ms: i64,
+    pub set_by: String,
 }
 
 #[cfg(test)]

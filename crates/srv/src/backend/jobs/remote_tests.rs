@@ -342,3 +342,32 @@ fn an_srv_started_after_the_follow_is_not_the_follower() {
         "started after: a reused pid"
     );
 }
+
+/// The receiving instance's Jobs tab hears about the run it follows: when
+/// it takes the run, and when the run's turn closes it (`jobs:changed`, with
+/// the job's id).
+#[tokio::test(flavor = "multi_thread")]
+async fn following_a_forwarded_run_publishes_jobs_changed_for_its_job() {
+    let p = pair();
+    let seen: Arc<std::sync::Mutex<Vec<serde_json::Value>>> = Arc::default();
+    let sink = seen.clone();
+    p.receiver_broker.add_observer(Arc::new(move |e: &MuxEvent| {
+        if e.event == "jobs:changed" {
+            sink.lock().unwrap().push(e.data.clone().unwrap_or_default());
+        }
+    }));
+    let (id, job) = p.begin(1);
+    let delivery_started = now_ms();
+    assert!(p.receiver.follow_forwarded(&id, PANE, delivery_started));
+    assert_eq!(seen.lock().unwrap().as_slice(), [json!({ "job_id": "j-x" })], "taking the run publishes");
+
+    p.deliver(&id, &job, PANE);
+    let t = delivery_started + 1;
+    p.turn(json!({
+        "block_id": PANE, "turn_id": t, "started_at_ms": t, "active": false, "ended_at_ms": t + 1,
+        "end": "completed", "cost_usd": 0.01, "output_tokens": 1, "steps": 1,
+    }));
+    p.wait_for(&id, |r| r.state == state::FINISHED).await;
+    let after = seen.lock().unwrap().clone();
+    assert!(after.len() >= 2 && after.iter().all(|d| d["job_id"] == "j-x"), "the close publishes too: {after:?}");
+}

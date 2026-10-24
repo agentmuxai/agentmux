@@ -11,6 +11,7 @@ import { WardenAuditManager } from "@/app/view/warden-audit/warden-audit-manager
 import { WardenHistoryManager } from "@/app/view/warden-history/warden-history-manager";
 import { WardenKanbanManager } from "@/app/view/warden-kanban/warden-kanban-manager";
 import { WardenAmbientManager } from "@/app/view/warden-ambient/warden-ambient-manager";
+import { WardenJobsManager } from "@/app/view/warden-jobs/warden-jobs-manager";
 import { VaultView } from "@/app/view/vault/vault-view";
 import { WARDEN_SECTIONS, type WardenSection, type WardenViewModel } from "./warden-model";
 // The section panes use section-pane.scss's `.bundle-manager-section` / `-pane` rules (a pane that is not the
@@ -74,6 +75,9 @@ export function WardenView(props: { model: WardenViewModel }): JSX.Element {
                             lanes={model.kanbanLanesAtom()}
                             onLanes={(on) => model.setMeta({ "kanban:lanes": on })}
                         />
+                    </Lazy>
+                    <Lazy id="jobs">
+                        <WardenJobsManager visible={shown("jobs")} onFailingCount={model.setJobsFailing} />
                     </Lazy>
                     <Lazy id="vault">
                         <VaultView model={model.vault} />

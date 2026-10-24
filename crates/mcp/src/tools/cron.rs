@@ -80,10 +80,19 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             }
             let v: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
             let jobs = v["jobs"].as_array().cloned().unwrap_or_default();
+            // Pause all: the operator's switch over every job.
+            let paused_all = v.get("paused_all").filter(|p| p.is_object()).map(|p| {
+                format!(
+                    "The operator paused every job (Pause all, {}): scheduled fires are skipped and run_now is refused until they resume them.",
+                    ago(p["set_at_ms"].as_i64().unwrap_or(0))
+                )
+            });
             if jobs.is_empty() {
-                return Ok("No cron jobs configured.".to_string());
+                return Ok(paused_all.map(|p| format!("{p}
+No cron jobs configured.")).unwrap_or_else(|| "No cron jobs configured.".to_string()));
             }
-            let mut lines = vec![format!("{} cron job(s):", jobs.len())];
+            let mut lines: Vec<String> = paused_all.into_iter().collect();
+            lines.push(format!("{} cron job(s):", jobs.len()));
             for j in &jobs {
                 let status_str = if j["enabled"].as_bool().unwrap_or(false) { "enabled" } else { "paused" };
                 let next = j["next_fire"].as_str().unwrap_or("—");

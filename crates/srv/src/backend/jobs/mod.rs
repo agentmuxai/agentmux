@@ -12,7 +12,9 @@
 //! §5.2), which the scheduler delivers when the agent is back.
 
 pub mod follower;
+pub mod paused;
 pub mod remote;
+pub mod verdict;
 
 use std::sync::Arc;
 
@@ -21,7 +23,7 @@ use serde_json::json;
 
 use crate::backend::cron::{FireOutcome, MissReason};
 use crate::backend::mps::Broker;
-use crate::backend::storage::job_runs::{infra, reason, state, JobRun, RunCost};
+use crate::backend::storage::job_runs::{infra, reason, state, JobFlag, JobRun, RunCost};
 use crate::backend::storage::store::Store;
 use crate::drone::storage::DroneStore;
 
@@ -41,6 +43,15 @@ pub const BY_OPERATOR: &str = "operator";
 /// A cron job's catch-up policy (§5.2): what an undelivered fire leaves.
 pub const CATCH_UP_SKIP: &str = "skip";
 pub const CATCH_UP_LATEST: &str = "latest";
+
+/// The identity-store switch Pause all sets (§3.3): while it is on, every
+/// scheduled fire is a collapsed `skipped (paused_all)` row and Run now is
+/// refused. Only the operator turns it on or off.
+pub const FLAG_PAUSED_ALL: &str = "jobs:paused_all";
+
+/// What a Run now gets while Pause all is on.
+pub const PAUSED_ALL_REFUSAL: &str =
+    "the operator has paused every job (Pause all); Run now is off until they resume them";
 
 /// The status a Drone run left `running` by a restart gets in
 /// `db_drone_runs` (§3.2). An open string there, like every other status.
@@ -130,6 +141,8 @@ pub struct RunLedger {
     /// computer.
     recorded_by: String,
     follower: follower::Follower,
+    /// Where `JobsChanged` goes after each write, so the Jobs tab refreshes.
+    broker: Arc<Broker>,
 }
 
 impl RunLedger {
@@ -150,12 +163,67 @@ impl RunLedger {
             mstore,
             channel: channel.to_string(),
             recorded_by: format!("{channel}@{}", env!("CARGO_PKG_VERSION")),
-            follower: follower::Follower::start(weak.clone(), broker),
+            follower: follower::Follower::start(weak.clone(), broker.clone()),
+            broker,
         })
     }
 
     pub fn store(&self) -> &Arc<Store> {
         &self.store
+    }
+
+    /// Tell the Jobs tab job `job_id`'s runs changed (`JobsChanged`); `""`
+    /// for a change to every job.
+    pub fn changed(&self, job_id: &str) {
+        let event = crate::backend::mps_events::JobsChangedEvent { job_id: job_id.to_string() };
+        self.broker.publish_event::<crate::backend::mps_events::JobsChanged>(&event, vec![], 0);
+    }
+
+    /// [`Self::changed`] for the job run `run_id` belongs to.
+    fn run_changed(&self, run_id: &str) {
+        let job_id = self.store.job_run_get(run_id).ok().flatten().map(|r| r.job_id).unwrap_or_default();
+        self.changed(&job_id);
+    }
+
+    /// Pause all, when the operator has it on: since when, and by whom.
+    pub fn paused_all(&self) -> Option<JobFlag> {
+        self.store.job_flag_get(FLAG_PAUSED_ALL).unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "jobs: couldn't read Pause all");
+            None
+        })
+    }
+
+    /// Turn Pause all on or off. The caller has checked that the operator
+    /// asked: agents can't (§7).
+    pub fn set_paused_all(&self, on: bool, by: &str) -> Result<(), crate::backend::storage::StoreError> {
+        if on {
+            self.store.job_flag_set(FLAG_PAUSED_ALL, "1", by, now_ms())?;
+        } else {
+            self.store.job_flag_clear(FLAG_PAUSED_ALL)?;
+        }
+        self.changed("");
+        Ok(())
+    }
+
+    /// A slot of `job` that didn't fire because the job, or every job, was
+    /// paused (`reason`): counted into the job's newest row when that is the
+    /// same skip, else a new `skipped` row; either way the slot keeps its own
+    /// leased row, so no scheduler fires it later (§3.1, §3.3).
+    pub fn record_skip_slot(&self, job: &crate::backend::storage::cron::CronJob, slot_ms: i64, why: &str) {
+        let now = now_ms();
+        let mut run = self.row(&job.id, SOURCE_CRON, &job.name, TRIGGER_SCHEDULE, now);
+        run.state = state::SKIPPED.to_string();
+        run.reason = why.to_string();
+        run.scheduled_for_ms = Some(slot_ms);
+        run.triggered_by = BY_SCHEDULER.to_string();
+        run.target_agent_uid = job.target_uid.clone();
+        run.skip_count = 1;
+        run.last_skip_at_ms = Some(slot_ms);
+        run.ended_at_ms = Some(now);
+        match self.store.job_run_record_skip_slot(&run) {
+            Ok(()) => self.changed(&job.id),
+            Err(e) => tracing::warn!(job_id = %job.id, error = %e, "jobs: couldn't record a paused slot"),
+        }
     }
 
     fn row(&self, job_id: &str, job_source: &str, job_name: &str, trigger: &str, now: i64) -> JobRun {
@@ -222,6 +290,7 @@ impl RunLedger {
         if let Err(e) = result {
             tracing::warn!(run_id, error = %e, "jobs: couldn't record a fire's delivery");
         }
+        self.changed(&job.id);
         if scheduled {
             let now_pending = self.store.job_run_get(run_id).ok().flatten().is_some_and(|r| r.state == state::PENDING && r.ended_at_ms.is_none());
             let why = if now_pending { reason::SUPERSEDED } else { reason::EXPIRED };
@@ -251,6 +320,7 @@ impl RunLedger {
         if let Err(e) = result {
             tracing::warn!(run_id = %run.id, error = %e, "jobs: couldn't record a pending fire's delivery");
         }
+        self.changed(&run.job_id);
     }
 
     /// End a pending fire whose next fire time passed, or whose job is gone.
@@ -258,6 +328,7 @@ impl RunLedger {
         if let Err(e) = self.store.job_run_end_one_pending(run_id, reason::EXPIRED, now_ms()) {
             tracing::warn!(run_id, error = %e, "jobs: couldn't expire a pending fire");
         }
+        self.run_changed(run_id);
     }
 
     /// This channel's pending fires still waiting for their agent.
@@ -348,6 +419,7 @@ impl RunLedger {
         if let Err(e) = self.store.job_run_skip(&id, reason::APP_NOT_RUNNING, count, now_ms()) {
             tracing::warn!(job_id = %job.id, error = %e, "jobs: couldn't record missed slots");
         }
+        self.changed(&job.id);
     }
 
     /// The followed turn ended (or never showed up).
@@ -355,6 +427,7 @@ impl RunLedger {
         if let Err(e) = self.store.job_run_finish(run_id, infra_status, cost, summary, now_ms()) {
             tracing::warn!(run_id, error = %e, "jobs: couldn't close a run");
         }
+        self.run_changed(run_id);
     }
 
     pub(crate) fn turn_bound(&self, run_id: &str, turn_id: i64, partial: bool) {
@@ -373,7 +446,10 @@ impl RunLedger {
             "channel": crate::backend::reactive::registry::local_channel_id(),
         });
         match self.store.job_run_insert(&run) {
-            Ok(true) => Some(run.id),
+            Ok(true) => {
+                self.changed(drone_id);
+                Some(run.id)
+            }
             Ok(false) => None,
             Err(e) => {
                 tracing::warn!(drone_id, error = %e, "jobs: couldn't record a Drone run");
@@ -436,6 +512,7 @@ impl RunLedger {
         }
         if closed > 0 {
             tracing::info!(count = closed, "jobs: closed runs left open by the restart");
+            self.changed("");
         }
         closed
     }
@@ -476,8 +553,7 @@ pub fn drone_cost(block_states: &std::collections::HashMap<String, crate::drone:
 /// downtime; only the count of earlier ones stops at `cap`, so a one-minute
 /// job off for a year costs bounded work.
 pub fn missed_slots(expression: &str, base_ms: i64, now_ms: i64, cap: usize) -> Option<(i64, Option<(i64, i64)>)> {
-    use std::str::FromStr;
-    let schedule = cron::Schedule::from_str(&format!("0 {expression}")).ok()?;
+    let schedule = crate::backend::cron::expr::parse(expression).ok()?;
     let now = chrono::DateTime::from_timestamp_millis(now_ms)?;
     let newest = schedule.after(&now).next_back()?.timestamp_millis();
     if newest <= base_ms || newest >= now_ms {
@@ -512,8 +588,7 @@ pub fn registered_in_another_channel(shared_dir: &std::path::Path, uid: &str, ch
 /// The job's next fire time after `slot_ms`: when a pending fire for that
 /// slot expires (§5.2).
 pub fn next_slot_after(expression: &str, slot_ms: i64) -> Option<i64> {
-    use std::str::FromStr;
-    let schedule = cron::Schedule::from_str(&format!("0 {expression}")).ok()?;
+    let schedule = crate::backend::cron::expr::parse(expression).ok()?;
     let base = chrono::DateTime::from_timestamp_millis(slot_ms)?;
     schedule.after(&base).next().map(|t| t.timestamp_millis())
 }

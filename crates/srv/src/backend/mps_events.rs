@@ -255,6 +255,8 @@ events! {
     IdentityAccountsChanged: "identityaccounts:changed" => (),
     /// Scheduled jobs changed.
     CronChanged: super::mps::EVENT_CRON_CHANGED => (),
+    /// The run ledger, or Pause all, changed (the Warden Jobs tab).
+    JobsChanged: "jobs:changed" => JobsChangedEvent,
     /// The drones changed.
     DronesChanged: "drones:changed" => (),
     /// The configured remotes changed.
@@ -357,6 +359,14 @@ pub struct PathChangedEvent {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct BlockRefEvent {
     pub block_id: String,
+}
+
+/// `jobs:changed`: the job whose runs changed, or `""` when every job may
+/// have (Pause all), so an open history reloads only for its own job.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct JobsChangedEvent {
+    pub job_id: String,
 }
 
 /// `ambient-narration`: a line to show in an agent pane.

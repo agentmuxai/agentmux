@@ -651,6 +651,19 @@
             "method": "InstallToolCommand"
         },
         {
+            "command": "jobs.act",
+            "method": "JobsActCommand"
+        },
+        {
+            "command": "jobs.list",
+            "method": "JobsListCommand",
+            "dataType": "Record<string, never>"
+        },
+        {
+            "command": "jobs.runs",
+            "method": "JobsRunsCommand"
+        },
+        {
             "command": "kanban.act",
             "method": "KanbanActCommand",
             "dataType": "import(\"@/app/view/warden-kanban/kanban-types\").KanbanActRequest",

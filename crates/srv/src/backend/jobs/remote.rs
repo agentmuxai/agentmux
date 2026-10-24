@@ -142,6 +142,9 @@ impl RunLedger {
             tracing::warn!(run_id, error = %e, "jobs: couldn't note who follows a forwarded run");
         }
         self.follower.arm(block_id, run_id, now);
+        // This instance's Jobs tab sees the run start; its close publishes
+        // again (`turn_finished`, also behind `check_remote`).
+        self.changed(&run.job_id);
         tracing::info!(run_id, block_id, recorded_by = %run.recorded_by, "jobs: following a run another channel fired");
         true
     }
