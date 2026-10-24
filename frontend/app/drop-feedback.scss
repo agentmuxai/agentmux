@@ -57,12 +57,14 @@ $drop-pulse-reduced: tab-drop-pulse 0.4s ease-in-out infinite alternate;
 //
 // Flash rule (WCAG 2.3.1, both motion tiers): no more than three flashes in
 // any one second. The original design (10 flashes / 500ms = 20 Hz) broke it;
-// this is 2 flashes over 800ms (2.5 Hz), under the limit, so the strobe runs
-// in both tiers. Its pulse-only treatment, which drops straight to the steady
-// pulse, is declared below and dormant under `feedback`.
+// the settle-back strobe is 2 flashes over 800ms (2.5 Hz), under the limit, so
+// it runs in both tiers. The `$hold` blink is three flashes in 600ms and then
+// steady, and is limited to one burst a second per window (see `$drop-blink-cycle`).
+// The pulse-only treatment, which drops straight to the steady pulse, is declared
+// below and dormant under `feedback`.
 //
-// `$hold: true` is the variant that lands inverted: the flash is one blink
-// (negative, normal) and then the target STAYS negative until the hover ends,
+// `$hold: true` is the variant that lands inverted: the flash is a short burst of
+// blinks (negative, normal; `$drop-blink-count` of them) and then the target STAYS negative until the hover ends,
 // instead of settling back to its normal colours. The Pane Tab strip uses it,
 // so the pane that will take the tab stays unmistakable for the whole drag
 // (docs/specs/SPEC_DROP_TARGET_LANDS_INVERTED_2026_10_21.md). Reduced

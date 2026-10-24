@@ -620,6 +620,13 @@ describe("renderPaneChromeShell — selecting a pill on a collapsed pane", () =>
         expect(mockLayoutModel.minimizeNodeToggle).toHaveBeenCalledTimes(2);
     });
 
+    it("does not expand this pane for a fork pill, which belongs to another pane", () => {
+        mockLayoutModel = collapsedLayoutModel();
+        render(() => renderPaneChromeShell(fakeNodeModel({ isMinimized: () => true }), (<div />) as any));
+        headerCalls[0].onSelect("block-in-another-pane");
+        expect(mockLayoutModel.minimizeNodeToggle).not.toHaveBeenCalled();
+    });
+
     it("leaves an expanded pane alone", () => {
         mockLayoutModel = collapsedLayoutModel();
         render(() =>

@@ -432,8 +432,10 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     // included (it returns before the ordinary path). Restore first, then the
     // activation, the order showBlockInPane uses.
     // docs/specs/SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §6.
-    const handleSelect = () => {
-        if (nodeModel.isMinimized?.()) layoutModel.minimizeNodeToggle(nodeModel.nodeId);
+    // A fork pill (extraTabs) belongs to another pane, and its click reveals that
+    // pane (agent onActivate): the pane whose strip it sits in is not expanded for it.
+    const handleSelect = (blockId: string) => {
+        if (nodeModel.isMinimized?.() && stackIds().includes(blockId)) layoutModel.minimizeNodeToggle(nodeModel.nodeId);
     };
     const handleActivate = (blockId: string) => {
         // A view type whose tabs can live in OTHER panes (agent's cross-pane
