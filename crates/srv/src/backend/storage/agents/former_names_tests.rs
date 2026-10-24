@@ -285,7 +285,7 @@ fn a_name_no_display_name_routes_to_costs_no_store_read() {
     assert_eq!(store.display_route_owner("Kiwi-1").unwrap().map(|o| o.uid).as_deref(), Some("uid-kiwi"), "seen at once");
 }
 
-/// #1459, Codex on #5370: a renamed fork is found by the title it goes by now
+/// A renamed fork is found by the title it goes by now
 /// (its `branch_label`), not the one it was forked with; a forgotten agent
 /// (`user_hidden`) is never found.
 #[test]
