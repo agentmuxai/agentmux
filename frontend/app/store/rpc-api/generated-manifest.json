@@ -1272,6 +1272,10 @@
             "method": "HistoryLocateCommand"
         },
         {
+            "command": "history.reclaim",
+            "method": "HistoryReclaimCommand"
+        },
+        {
             "command": "history.usage",
             "method": "HistoryUsageCommand"
         },

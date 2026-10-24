@@ -331,7 +331,27 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                     tracing::warn!(dir = %dir.display(), error = %e, "global transcripts: failed to create dir — disabled, falling back to per-channel store");
                     None
                 } else {
-                    match crate::boot_timing::time("open_transcripts_db", || FileStore::open_global_transcripts(&dir.join("filestore.db"))) {
+                    let path = dir.join("filestore.db");
+                    // Give freed space back, if the Storage view asked and no other srv
+                    // runs (SPEC_HISTORY_STORE_RECLAIM_SPACE_2026_10_23 §4), then hold the
+                    // gate shared while opening, so an srv starting meanwhile waits. The
+                    // rewrite takes longer than a supervisor's ESTART wait (about 40 s for
+                    // 3.6 GB), so it says so first, as a migration does, and the splash
+                    // shows it as a step.
+                    {
+                        use crate::backend::storage::filestore::reclaim;
+                        reclaim::recover(&reclaim::Paths::for_db(&path));
+                        if reclaim::requested(&path) {
+                            eprintln!("{}", agentmux_common::srv_stderr::migrating_line("reclaiming-history", 1));
+                            crate::boot_timing::step("reclaim-history", "Giving back history disk space", || {
+                                reclaim::run_at_start(&path, crate::backend::transcript::framer::other_srv, agentmux_common::time::now_ms_u64())
+                            });
+                        }
+                    }
+                    let gate = crate::backend::storage::filestore::reclaim::gate_shared(&path);
+                    let opened = crate::boot_timing::time("open_transcripts_db", || FileStore::open_global_transcripts(&path));
+                    drop(gate);
+                    match opened {
                         Ok(fs) => {
                             tracing::info!(dir = %dir.display(), "global transcripts: store attached");
                             // This srv reads compressed frames (transcript::framer).

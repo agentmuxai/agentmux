@@ -103,6 +103,37 @@ fn is_srv(name: &str) -> bool {
     name.to_ascii_lowercase().starts_with("agentmux-srv")
 }
 
+/// The last pass's frames, or -1 before the first; and whether it was done.
+static LAST_PASS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(-1);
+
+/// Record a pass, for [`steady`].
+pub fn note_pass(frames: usize, done: bool) {
+    let frames = if done { 0 } else { frames as i64 };
+    LAST_PASS.store(frames, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether compression has caught up here: off, or its last pass was done or
+/// framed at most 4 frames. Before then, giving space back would only have
+/// to be done again (SPEC_HISTORY_STORE_RECLAIM_SPACE_2026_10_23 §6).
+pub fn steady() -> bool {
+    let last = LAST_PASS.load(std::sync::atomic::Ordering::Relaxed);
+    !enabled() || (0..=4).contains(&last)
+}
+
+/// Another running srv, any build, as a sentence for the log and the Storage
+/// view; `None` when this srv is the only one. A reclaim swaps the store's
+/// file, so any open connection holds it off, not only an old build's
+/// (`filestore::reclaim`).
+pub fn other_srv() -> Option<String> {
+    let sys = scan_processes();
+    let me = std::process::id();
+    sys.processes().iter().find_map(|(pid, process)| {
+        let name = process.name().to_string_lossy().to_string();
+        let monitor = process.cmd().iter().any(|a| a.to_string_lossy() == "--crash-monitor");
+        (pid.as_u32() != me && is_srv(&name) && !monitor).then(|| format!("{name} (pid {}) is running", pid.as_u32()))
+    })
+}
+
 /// The first running srv that hasn't said it reads every frame codec, as a
 /// sentence for the log and the Storage view; `None` when all have. Prunes the
 /// readers files of processes that have exited.

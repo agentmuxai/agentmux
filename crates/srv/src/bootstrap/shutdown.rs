@@ -167,6 +167,18 @@ pub fn spawn_global_transcripts_truncate_loop(token: tokio_util::sync::Cancellat
                     Err(e) => tracing::warn!(error = %e, "global transcript store truncate task failed"),
                 }
             }
+            // Give freed pages back in short steps, once the store is
+            // `auto_vacuum=INCREMENTAL` (a reclaim made it so): the frames the
+            // last pass wrote freed their parts' pages. One srv does it, the
+            // owner; the file shrinks at its next TRUNCATE above.
+            if owner.is_owner() {
+                let store = Arc::clone(&store);
+                match tokio::task::spawn_blocking(move || store.reclaim_free_pages()).await {
+                    Ok(Ok(pages)) if pages > 0 => tracing::info!(pages, "history store: gave freed pages back"),
+                    Ok(Err(e)) => tracing::warn!(error = %e, "history store: giving freed pages back failed"),
+                    _ => {}
+                }
+            }
             if !framer::enabled() {
                 continue;
             }
@@ -178,6 +190,7 @@ pub fn spawn_global_transcripts_truncate_loop(token: tokio_util::sync::Cancellat
             .await;
             match pass {
                 Ok(Ok(report)) => {
+                    framer::note_pass(report.frames, report.done);
                     if report.waiting != last_waiting {
                         if let Some(who) = &report.waiting {
                             tracing::info!(who = %who, "framer: waiting");
