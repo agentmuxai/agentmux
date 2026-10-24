@@ -41,6 +41,11 @@ pub struct Store {
     /// in one channel is visible in every channel (cross-channel agent
     /// persistence, `docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md`).
     def_registry: Mutex<Option<Arc<DefinitionStore>>>,
+    /// The AgentMux root whose every `objects.db` and live registration a
+    /// new agent's slug is also checked against
+    /// (`slug_migration::HostSlugs`). `None` except on the channel's object
+    /// store at runtime, and in tests that ask for it.
+    slug_home: Mutex<Option<Arc<crate::backend::slug_migration::Home>>>,
     /// Every former slug this channel can see, cached so a sender or target
     /// that isn't one costs no store read (`agents/former_slugs.rs`).
     pub(super) former_slugs: super::agents::FormerSlugSet,
@@ -135,6 +140,7 @@ impl Store {
             conn: Mutex::new(conn),
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
+            slug_home: Mutex::new(None),
             former_slugs: Default::default(),
             token_index: Mutex::new(None),
             wan_identity: Mutex::new(None),
@@ -213,6 +219,7 @@ impl Store {
             conn: Mutex::new(conn),
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
+            slug_home: Mutex::new(None),
             former_slugs: Default::default(),
             token_index: Mutex::new(None),
             wan_identity: Mutex::new(None),
@@ -257,6 +264,7 @@ impl Store {
             conn: Mutex::new(conn),
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
+            slug_home: Mutex::new(None),
             former_slugs: Default::default(),
             token_index: Mutex::new(None),
             wan_identity: Mutex::new(None),
@@ -286,6 +294,7 @@ impl Store {
             conn: Mutex::new(conn),
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
+            slug_home: Mutex::new(None),
             former_slugs: Default::default(),
             token_index: Mutex::new(None),
             wan_identity: Mutex::new(None),
@@ -368,6 +377,7 @@ impl Store {
             conn: Mutex::new(conn),
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
+            slug_home: Mutex::new(None),
             former_slugs: Default::default(),
             token_index: Mutex::new(None),
             wan_identity: Mutex::new(None),
@@ -463,6 +473,17 @@ impl Store {
     pub fn set_def_registry(&self, def_registry: Arc<DefinitionStore>) {
         *self.def_registry.lock().unwrap_or_else(|e| e.into_inner()) = Some(def_registry);
         self.former_slugs.invalidate();
+    }
+
+    /// Check new slugs against every `objects.db` and live registration
+    /// under `home` too, not only this channel's rows and the shared
+    /// definitions.
+    pub fn set_slug_home(&self, home: crate::backend::slug_migration::Home) {
+        *self.slug_home.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(home));
+    }
+
+    pub(super) fn slug_home(&self) -> Option<Arc<crate::backend::slug_migration::Home>> {
+        self.slug_home.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Public accessor for the global agent-definition store. `None` when

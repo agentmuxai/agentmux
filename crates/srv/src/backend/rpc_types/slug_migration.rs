@@ -146,6 +146,39 @@ pub struct ForkSlugPlan {
     #[serde(default)]
     #[ts(optional)]
     pub last_run: Option<ForkSlugLastRun>,
+    /// Slugs two or more agents hold: reported, never changed by a run.
+    #[serde(default)]
+    pub duplicates: Vec<ForkSlugDuplicate>,
+}
+
+/// One slug held by more than one agent (two uids, one slug), as an older
+/// build could leave it: agents made in two channels each picked it, unique
+/// in their own `objects.db`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ForkSlugDuplicate {
+    pub slug: String,
+    /// Oldest first: the first keeps the slug.
+    pub holders: Vec<ForkSlugDuplicateHolder>,
+}
+
+/// An agent holding a duplicated slug.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ForkSlugDuplicateHolder {
+    pub uid: String,
+    pub name: String,
+    /// When it was made, in ms; 0 when unknown.
+    #[ts(type = "number")]
+    pub created_at: i64,
+    /// Where it holds the slug: the shared definitions, or the `objects.db`
+    /// of an install (an agent never published).
+    pub place: String,
+    /// For each holder after the first, the first free id a rename could
+    /// give it. A proposal only: nothing renames it.
+    #[serde(default)]
+    #[ts(optional)]
+    pub proposed: Option<String>,
 }
 
 /// A run that wasn't rolled back.
