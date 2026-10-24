@@ -61,6 +61,7 @@ fn a_live_registration_refuses() {
 #[test]
 fn an_old_version_instance_refuses() {
     let (fx, data) = fixture();
+    super::super::preconditions::test_srv::treat_as_srv(&[std::process::id()]);
     std::fs::write(data.join("srv.lock"), std::process::id().to_string()).unwrap();
     let err = refuses_and_writes_nothing(&fx, "no stamp");
     assert!(err.contains("older AgentMux is running"), "{err}");
@@ -82,6 +83,7 @@ fn an_old_version_instance_refuses() {
 #[test]
 fn an_instance_known_only_to_the_registry_refuses() {
     let (fx, _) = fixture();
+    super::super::preconditions::test_srv::treat_as_srv(&[std::process::id()]);
     let entry = serde_json::json!({ "agent_id": "someone", "local_url": "", "block_id": "b", "pid": std::process::id(), "updated_at": 1, "channel": "ancient" });
     let dir = fx.home.reactive().join("someone");
     std::fs::create_dir_all(&dir).unwrap();
@@ -113,6 +115,7 @@ fn a_held_lock_refuses() {
 #[test]
 fn blockers_say_their_kind_and_only_a_running_agent_is_cleared_by_stopping() {
     let (fx, data) = fixture();
+    super::super::preconditions::test_srv::treat_as_srv(&[std::process::id()]);
     let entry = serde_json::json!({ "agent_id": "naki-naki-2", "local_url": "", "block_id": "b", "pid": std::process::id(), "updated_at": 1, "channel": "stable", "uid": NAKI2 });
     let dir = fx.home.reactive().join("naki-naki-2");
     std::fs::create_dir_all(&dir).unwrap();
@@ -188,4 +191,39 @@ fn a_corrupt_objects_db_blocks_the_plan() {
     let err = super::apply(&fx.home).unwrap_err();
     assert!(err.contains("can't be read"), "{err}");
     assert!(!fx.home.backups().exists(), "nothing written");
+}
+
+/// A stale srv.lock whose pid another program now has (chrome.exe, on the
+/// operator's home) isn't an older AgentMux running (#1270).
+#[test]
+fn a_stale_lock_whose_pid_was_reused_doesnt_block() {
+    let (fx, data) = fixture();
+    // This process is alive but isn't an srv: the pid a stale lock names.
+    super::super::preconditions::test_srv::treat_as_srv(&[]);
+    std::fs::write(data.join("srv.lock"), std::process::id().to_string()).unwrap();
+    let plan = super::super::plan(&fx.home, false).unwrap();
+    assert!(plan.blockers.iter().all(|b| b.kind != ForkSlugBlockerKind::OldInstance), "{:?}", plan.blockers);
+    assert!(super::apply(&fx.home).is_ok());
+}
+
+#[test]
+fn only_an_srv_started_before_its_lock_was_written_holds_it() {
+    use super::super::preconditions::is_srv_that_wrote;
+    assert!(is_srv_that_wrote("agentmux-srv.exe", 100, Some(100)));
+    assert!(is_srv_that_wrote("agentmux-srv-0.59.40-linux.x64", 100, Some(103)), "Linux names its binary by version");
+    assert!(is_srv_that_wrote("AgentMux-Srv.exe", 100, None), "no lock time: the name decides");
+    assert!(!is_srv_that_wrote("chrome.exe", 100, Some(200)));
+    assert!(!is_srv_that_wrote("agentmux_srv-1a2b3c.exe", 100, Some(200)), "a test binary isn't one");
+    assert!(!is_srv_that_wrote("agentmux-srv.exe", 500, Some(100)), "started after the lock was written: a reused pid");
+}
+
+/// The real lookup reads this process's name: a test binary, so not an srv.
+#[test]
+fn this_test_process_is_not_taken_for_an_srv() {
+    let target = sysinfo::Pid::from(std::process::id() as usize);
+    let mut sys = sysinfo::System::new();
+    sys.refresh_processes_specifics(sysinfo::ProcessesToUpdate::Some(&[target]), true, sysinfo::ProcessRefreshKind::nothing());
+    let name = sys.process(target).map(|p| p.name().to_string_lossy().into_owned()).unwrap_or_default();
+    assert!(!name.is_empty(), "the name is read without a full refresh");
+    assert!(!super::super::preconditions::is_srv_that_wrote(&name, 0, None), "{name}");
 }
