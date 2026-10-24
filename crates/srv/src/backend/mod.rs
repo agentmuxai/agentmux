@@ -103,6 +103,7 @@ pub mod history_registry;
 pub mod history_usage;
 pub mod session_backfill;
 pub mod claude_layout;
+pub mod context_reading;
 pub mod continuity;
 pub mod continuity_relocate;
 pub mod continuity_segments;

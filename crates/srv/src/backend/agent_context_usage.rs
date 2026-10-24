@@ -124,6 +124,7 @@ pub fn publish_agent_context_usage(
     block_id: &str,
     usage: &AgentContextUsage,
 ) {
+    crate::backend::context_reading::set_auto_compact(block_id, usage.auto_compact_threshold, usage.auto_compact_window);
     broker.publish_event::<crate::backend::mps_events::AgentContextUsageChanged>(
         &agent_context_usage_event(block_id, usage),
         vec![format!("block:{block_id}")],

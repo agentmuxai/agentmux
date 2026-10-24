@@ -690,6 +690,7 @@ impl SubprocessController {
                 if let (Some(home), Some(thread_id), Some(broker)) = (codex_home_wait, thread_id, broker_wait.as_ref()) {
                     let read = tokio::task::spawn_blocking(move || super::codex_context::read(&home, &thread_id)).await;
                     if let Ok(Some(ctx)) = read {
+                        crate::backend::context_reading::observe_codex(&block_id_wait, ctx.tokens, ctx.window, ctx.model.clone());
                         let zone = crate::backend::transcript::append::resolve_global_output_zone(&mstore_wait, &block_id_wait);
                         crate::backend::blockcontroller::shell::handle_append_block_file(
                             broker,

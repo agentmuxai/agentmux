@@ -38,6 +38,14 @@ export const ADVANCED_SETTINGS = {
         section: "advanced",
         keywords: ["compaction", "context", "tokens", "autoCompactWindow", "agent:compactat"],
     },
+    compactHints: {
+        id: "advanced.compact_hints",
+        label: "Suggest compacting",
+        description:
+            "When an agent's turn ends with a large context, tell it once that it can compact itself before its next task, so it doesn't compact by itself mid-task",
+        section: "advanced",
+        keywords: ["compaction", "context", "tokens", "hint", "agent:compacthints"],
+    },
     overlapNotes: {
         id: "advanced.overlap_notes",
         label: "Overlap notes",
@@ -148,6 +156,17 @@ export function AdvancedSection(): JSX.Element {
                         min={0} step={50}
                         value={((s()["agent:compactat"] as number) ?? 600000) / 1000}
                         onChange={(v) => set("agent:compactat", Math.max(0, Math.round(v)) * 1000)}
+                    />
+                }
+            />
+            <SettingRow
+                id={ADVANCED_SETTINGS.compactHints.id}
+                label={ADVANCED_SETTINGS.compactHints.label}
+                description={ADVANCED_SETTINGS.compactHints.description}
+                control={
+                    <ToggleControl
+                        checked={(s()["agent:compacthints"] as boolean) ?? true}
+                        onChange={(v) => set("agent:compacthints", v)}
                     />
                 }
             />

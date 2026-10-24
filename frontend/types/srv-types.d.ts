@@ -1155,6 +1155,8 @@ declare global {
         "attachments:retentiondays"?: number;
         "agent:askquestiontimeoutms"?: number;
         "agent:compactat"?: number;
+        "agent:compacthints"?: boolean;
+        "agent:compacthintat"?: number;
         "agent:overlapnotes"?: boolean;
         "agent:retryonreconnect"?: boolean;
         "kanban:reminders"?: boolean;
