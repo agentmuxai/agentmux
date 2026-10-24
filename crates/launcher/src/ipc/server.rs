@@ -1077,6 +1077,7 @@ async fn enforce_register_first(
         | Command::LayoutStackActivate { .. }
         | Command::CreateBlockInStack { .. }
         | Command::LayoutStackMove { .. }
+        | Command::LayoutStackMoveMany { .. }
         | Command::LayoutApplyIntent { .. }
         | Command::LayoutQueueBackendActions { .. }
         | Command::LayoutSetTree { .. } => (

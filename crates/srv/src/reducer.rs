@@ -172,6 +172,15 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             activate,
             correlation_id,
         } => layout::handle_layout_stack_move(state, tab_id, block_id, target_block_id, position, activate, correlation_id),
+        // SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §5
+        // — several tabs into one pane, atomically.
+        Command::LayoutStackMoveMany {
+            tab_id,
+            block_ids,
+            target_block_id,
+            activate_block_id,
+            correlation_id,
+        } => layout::handle_layout_stack_move_many(state, tab_id, block_ids, target_block_id, activate_block_id, correlation_id),
         // SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md §4 — every
         // layout edit the frontend makes, computed here.
         Command::LayoutApplyIntent {

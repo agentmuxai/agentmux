@@ -492,6 +492,55 @@ pub(super) fn handle_layout_stack_move(
     }]
 }
 
+/// `Command::LayoutStackMoveMany`: several Pane Tabs into one pane in one edit
+/// (`move_stack_members`). Reported like `LayoutStackMove`: a plain
+/// `LayoutTreeReplaced` normally, and, when panes were emptied and removed,
+/// a `LayoutNodeDeleted` with focus and magnify reconciled (it carries the
+/// full resulting tree, and the first removed pane's id).
+/// SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §5.
+pub(super) fn handle_layout_stack_move_many(
+    state: &mut State,
+    tab_id: String,
+    block_ids: Vec<String>,
+    target_block_id: String,
+    activate_block_id: Option<String>,
+    correlation_id: String,
+) -> Vec<Event> {
+    const OP: &str = "LayoutStackMoveMany";
+    let not_found = format!("a block of {block_ids:?} or {target_block_id} not found, or the move was refused");
+    let Some(tab) = state.tabs.get_mut(&tab_id) else {
+        return unknown_tab(state, OP, &tab_id);
+    };
+    let outcome = tab.rootnode.as_mut().and_then(|root| {
+        crate::backend::layout::move_stack_members(root, &block_ids, &target_block_id, activate_block_id.as_deref())
+    });
+    let Some(emptied) = outcome else {
+        return op_error(state, format!("{OP}: {not_found} (tab {tab_id})"));
+    };
+    let Some(first_removed) = emptied.into_iter().next() else {
+        let new_tree = state.tabs.get(&tab_id).and_then(|tab| tab.rootnode.clone());
+        report_layout_violations(&tab_id, OP, &new_tree);
+        let v = state.bump_version();
+        return vec![Event::LayoutTreeReplaced { tab_id, new_tree, correlation_id, slices: None, version: v }];
+    };
+    let tab = state.tabs.get_mut(&tab_id).expect("resolved above");
+    let (was_focused, was_magnified) = clear_dangling_focus_magnify(tab);
+    let new_tree = tab.rootnode.clone();
+    report_layout_violations(&tab_id, OP, &new_tree);
+    let v = state.bump_version();
+    vec![Event::LayoutNodeDeleted {
+        tab_id,
+        node_id: first_removed,
+        new_tree,
+        // The destination leaf is still there, so the tree is never empty.
+        tree_cleared: false,
+        was_focused,
+        was_magnified,
+        correlation_id,
+        version: v,
+    }]
+}
+
 /// `Event::Error` for an unknown tab.
 fn unknown_tab(state: &mut State, op: &str, tab_id: &str) -> Vec<Event> {
     let v = state.bump_version();

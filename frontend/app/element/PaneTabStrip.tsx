@@ -40,7 +40,7 @@ import { cancelFlashPattern, flashElement, onActivityFlash } from "@/app/notific
 import { LOCATE_PILL_FLASH, onPaneLocate, onPaneLocatePlay } from "@/app/util/pane-locate";
 import { shouldReduceMotion } from "@/app/motion/motion";
 import { DURATION_BASE_MS, EASE_OUT } from "@/app/motion/tokens";
-import { isWindows } from "@/util/platformutil";
+import { isModKey, isWindows } from "@/util/platformutil";
 import { Tooltip } from "./tooltip";
 import "./PaneTabStrip.scss";
 // The Pane Tab pill's drag tag (drag-types.ts): distinct from the tile and
@@ -51,6 +51,7 @@ import { createScrollEdges } from "./scroll-edges";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
 import { beginHover, type Hover, type HoverFlash } from "./drop-blink-clock";
+import type { PaneTabSelectionApi } from "./pane-tab-selection";
 import { createStripReveal, registerStripWithPane } from "./strip-reveal-controller";
 
 // Matches the other reveal-gate/cross-fade durations added alongside this
@@ -72,12 +73,19 @@ export const LANDING_BOUNCE_MS = 400;
  *  and only the pill in the pane it actually landed in should bounce (Codex
  *  P2 on #3694). Only header strips set it.
  *  SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §3.4. */
-const [landedTab, setLandedTab] = createSignal<{ id: string; paneKey: string | undefined } | null>(null);
+const [landedTab, setLandedTab] = createSignal<{ ids: ReadonlySet<string>; paneKey: string | undefined } | null>(null);
 let landingTimer: ReturnType<typeof setTimeout> | undefined;
-function markLanded(id: string, paneKey: string | undefined): void {
+/** `id` is one tab, or every tab a multi-tab move brought into the pane. */
+function markLanded(id: string | readonly string[], paneKey: string | undefined): void {
     clearTimeout(landingTimer);
-    setLandedTab({ id, paneKey });
+    setLandedTab({ ids: new Set(typeof id === "string" ? [id] : id), paneKey });
     landingTimer = setTimeout(() => setLandedTab(null), LANDING_BOUNCE_MS);
+}
+
+/** The block ids a pane-tab drag carries when it carries several (a Ctrl/Cmd+click selection), else undefined. */
+function multiIdsOf(data: Record<string | symbol, unknown>): readonly string[] | undefined {
+    const ids = data.blockIds;
+    return Array.isArray(ids) && ids.length > 1 && ids.every((x) => typeof x === "string") ? (ids as string[]) : undefined;
 }
 
 /** A tab's own pane color, split into the two treatments PaneChrome's
@@ -331,6 +339,19 @@ export interface PaneTabStripProps<T> {
      *  Return `false` when the move was refused (same contract as
      *  `onReorder`). */
     onReceiveForeignTab?: (blockId: string) => boolean | void;
+    /** Several tabs dragged together (Ctrl/Cmd+click selection) dropped on this pane:
+     *  `blockIds` is the whole drag, `grabbed` the pill the pointer held. Returns the
+     *  blocks that moved (they bounce), or `false` when nothing could be moved. Called
+     *  one task after the drop, like `onReceiveForeignTab`.
+     *  SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §4.3. */
+    onReceiveForeignTabs?: (blockIds: readonly string[], grabbed: string) => readonly string[] | false;
+    /** Whether this pane would take a multi-tab drag: true when at least one of
+     *  `blockIds` is not already in it. Without it a multi-tab drag is accepted only
+     *  from another pane, as a single tab is. */
+    acceptsForeignTabs?: (blockIds: readonly string[]) => boolean;
+    /** Ctrl/Cmd+click multi-select for a Pane's own header strip. Omitted by document
+     *  tabs and the agent History strip, which have no selection. */
+    selection?: PaneTabSelectionApi;
 
     /** The window tab this pane lives in. When set (with `onReorder` and
      *  `paneKey`), a pill dragged OUT of the window tears off into a floating
@@ -428,8 +449,18 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
         }
         const cleanup = dropTargetForElements({
             element: el,
-            canDrop: ({ source }) =>
-                source.data.type === paneTabItemType && source.data.sourceNodeId !== paneKey,
+            canDrop: ({ source }) => {
+                if (source.data.type !== paneTabItemType) return false;
+                // Several tabs: accepted when this pane lacks at least one of them, even
+                // the pane the grabbed tab came from (gathering into where you started).
+                const many = multiIdsOf(source.data);
+                if (many && props.acceptsForeignTabs) return props.acceptsForeignTabs(many);
+                return source.data.sourceNodeId !== paneKey;
+            },
+            // A drag that starts inside this pane (gathering tabs into the pane the grabbed one came
+            // from) is over this drop zone from the first moment: pragmatic-dnd calls onDragStart for
+            // that, not onDragEnter.
+            onDragStart: beginForeignHover,
             onDragEnter: beginForeignHover,
             onDragLeave: endForeignHover,
             onDrop: ({ source }) => {
@@ -439,6 +470,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                 setCurrentDragPayload(null);
                 const blockId = source.data.blockId as string | undefined;
                 if (!blockId) return;
+                const many = multiIdsOf(source.data);
                 // Commit on the next task, after pragmatic-dnd has finished
                 // dispatching this drop. The move unmounts the dragged pill —
                 // the live drag SOURCE — from its old strip (and, once moving
@@ -449,6 +481,14 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                 // catalogs; one task of delay costs nothing visible.
                 // The hover styling above clears synchronously.
                 // SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §4.2.
+                if (many && props.onReceiveForeignTabs) {
+                    const receiveMany = props.onReceiveForeignTabs;
+                    setTimeout(() => {
+                        const moved = receiveMany(many, blockId);
+                        if (moved !== false) markLanded(moved, paneKey);
+                    }, 0);
+                    return;
+                }
                 const receive = props.onReceiveForeignTab!;
                 setTimeout(() => {
                     if (receive(blockId) !== false) markLanded(blockId, paneKey);
@@ -638,6 +678,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                             flashOnActivity={props.flashOnActivity}
                             onActivate={props.onActivate}
                             onSelect={props.onSelect}
+                            selection={props.selection}
                             onClose={props.onClose}
                             onDoubleClick={props.onTabDoubleClick}
                             renderLabel={props.renderLabel}
@@ -692,6 +733,7 @@ interface PaneTabStripItemProps<T> {
     flashOnActivity?: boolean;
     onActivate: (id: string) => void;
     onSelect?: (id: string) => void;
+    selection?: PaneTabSelectionApi;
     onClose?: (id: string) => void;
     onDoubleClick?: (tab: T) => void;
     renderLabel?: (tab: T) => JSX.Element;
@@ -797,18 +839,35 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
         const onReorder = props.onReorder;
         if (!onReorder) return null;
         return {
-            data: () => ({ kind: "pane-tab", blockId: id(), type: paneTabItemType, sourceNodeId: props.paneKey }),
+            data: () => {
+                const many = props.selection?.dragIds(id());
+                return {
+                    kind: "pane-tab",
+                    blockId: id(),
+                    type: paneTabItemType,
+                    sourceNodeId: props.paneKey,
+                    ...(many && many.length > 1 ? { blockIds: many } : {}),
+                };
+            },
             canDrag: () => true,
             start: () => {
-                startPaneTabDrag(id(), props.paneKey, props.sourceTabId);
-                startTearOffTracking();
+                const many = props.selection?.dragIds(id());
+                const several = !!many && many.length > 1;
+                startPaneTabDrag(id(), props.paneKey, props.sourceTabId, several ? many : undefined);
+                // Dropping several tabs outside every window does nothing (no partial tear-off):
+                // without the tear-off payload the monitors treat the release as a cancel.
+                if (!several) startTearOffTracking();
             },
             release: () => {
                 releasePaneTabDrag();
                 stopTearOffTracking();
             },
+            // A multi-tab drag is not a reorder: the pane's own drop zone takes it.
             accepts: (data) =>
-                data.type === paneTabItemType && data.blockId !== id() && data.sourceNodeId === props.paneKey,
+                data.type === paneTabItemType &&
+                data.blockId !== id() &&
+                data.sourceNodeId === props.paneKey &&
+                !multiIdsOf(data),
             drop: (data, position) => {
                 // Handled in-window: never also a tear-off.
                 setCurrentDragPayload(null);
@@ -909,12 +968,23 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
     const onClick = (e: MouseEvent) => {
         // Ignore middle-click here — onMouseDown already handled it.
         if (e.button !== 0) return;
+        // Ctrl (Cmd on macOS) + click picks or unpicks this tab for a multi-tab drag. It
+        // does not activate, focus or expand anything, and the click goes no further, so
+        // the pane's own click handler (focus) does not run either.
+        if (props.selection && isModKey(e)) {
+            e.stopPropagation();
+            props.selection.toggle(id());
+            return;
+        }
+        props.selection?.clear();
         props.onSelect?.(id());
         if (!props.active) props.onActivate(id());
     };
 
     const onDblClick = (e: MouseEvent) => {
         e.stopPropagation();
+        // Two quick Ctrl/Cmd+clicks toggle the pick twice; they are not a rename.
+        if (props.selection && isModKey(e)) return;
         props.onDoubleClick?.(props.tab);
     };
 
@@ -976,7 +1046,8 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
                     "pane-tab--dragging": isDragging(),
                     "pane-tab--drop-before": dropSide() === "before",
                     "pane-tab--drop-after": dropSide() === "after",
-                    "pane-tab--landing": landedTab()?.id === id() && landedTab()?.paneKey === landingKey(),
+                    "pane-tab--landing": !!landedTab()?.ids.has(id()) && landedTab()?.paneKey === landingKey(),
+                    "pane-tab--selected": !!props.selection?.isSelected(id()),
                     // Gates PaneTabStrip.scss's lighter-on-hover treatment —
                     // only a tab with its own color gets it; every other
                     // consumer's plain hover tint is untouched.
@@ -990,6 +1061,12 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
                 onClick={onClick}
                 onDblClick={onDblClick}
             >
+                <Show when={props.selection?.isSelected(id())}>
+                    {/* The non-colour cue for "selected"; the label is what a screen reader reads. */}
+                    <span class="pane-tab-selected-mark" role="img" aria-label="Selected">
+                        <i class="fa-solid fa-circle-check" aria-hidden="true" />
+                    </span>
+                </Show>
                 {props.getIcon && <span class="pane-tab-icon">{props.getIcon(props.tab)}</span>}
                 {props.renderLabel ? (
                     props.renderLabel(props.tab)

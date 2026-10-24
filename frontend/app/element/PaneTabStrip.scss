@@ -422,6 +422,27 @@
     &--landing {
         @include drop.landing-bounce;
     }
+
+    // Picked with Ctrl/Cmd+click, to be dragged into one pane together
+    // (docs/specs/SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §4.2).
+    // A channel no other pill state uses: the active tab's underline is an inset
+    // bottom shadow, a drag's is opacity, a drop mark is an inset left/right shadow and
+    // the activity flash is ::before. An accent outline drawn inward, a faint tint, and
+    // a check mark (.pane-tab-selected-mark), so it does not rest on colour alone.
+    &--selected {
+        outline: 2px solid var(--accent-color);
+        outline-offset: -2px;
+        background-image: linear-gradient(rgba(var(--accent-color-rgb), 0.16), rgba(var(--accent-color-rgb), 0.16));
+    }
+
+    .pane-tab-selected-mark {
+        display: inline-flex;
+        align-items: center;
+        flex-shrink: 0;
+        margin-right: 4px;
+        font-size: 0.85em;
+        color: var(--accent-color);
+    }
 }
 
 // One fixed box for every icon kind (font icon, brand logo, favicon), so a

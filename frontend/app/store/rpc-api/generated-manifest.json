@@ -963,6 +963,10 @@
             "method": "PaneMoveTabCommand"
         },
         {
+            "command": "pane.moveTabs",
+            "method": "PaneMoveTabsCommand"
+        },
+        {
             "command": "pane.activateTab",
             "method": "PaneActivateTabCommand"
         },

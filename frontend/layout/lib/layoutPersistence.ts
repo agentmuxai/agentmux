@@ -369,10 +369,14 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
 export function sendStackCommand(
     model: LayoutModel,
     op: string,
-    send: (actionId: string) => Promise<PaneTabEditResult>
+    send: (actionId: string) => Promise<PaneTabEditResult>,
+    /** A command that srv answers with several queued actions (`pane.moveTabs`): they
+     *  are named `<id>:0` … `<id>:<fanout>`, and this model skips them all. */
+    fanout = 0
 ): Promise<void> {
     const actionId = crypto.randomUUID();
     model.processedActionIds.add(actionId);
+    for (let i = 0; i <= fanout; i++) model.processedActionIds.add(`${actionId}:${i}`);
     return new Promise((done) =>
         queueLayoutCommand(model, async () => {
             try {

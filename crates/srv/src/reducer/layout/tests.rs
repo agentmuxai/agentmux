@@ -1554,3 +1554,147 @@ fn stack_push_activate_and_remove_keep_every_block_in_exactly_one_pane() {
     assert!(matches!(update(&mut state, remove, &ctx(1))[0], Event::LayoutTreeReplaced { .. }));
     check(&state, &[&b]);
 }
+
+// ── LayoutStackMoveMany (SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §5) ──
+
+fn move_many(
+    state: &mut State,
+    tab_id: &str,
+    blocks: &[&str],
+    target: &str,
+    activate: Option<&str>,
+) -> Vec<Event> {
+    update(
+        state,
+        Command::LayoutStackMoveMany {
+            tab_id: tab_id.to_string(),
+            block_ids: blocks.iter().map(|b| b.to_string()).collect(),
+            target_block_id: target.to_string(),
+            activate_block_id: activate.map(str::to_string),
+            correlation_id: String::new(),
+        },
+        &ctx(1),
+    )
+}
+
+/// Three panes: `p1` holds a b, `p2` holds c, `p3` holds d e. Plus a lone `p4` with f.
+fn four_panes(state: &mut State, tab_id: &str) {
+    for b in ["a", "b", "c", "d", "e", "f"] {
+        seed_block(state, tab_id, b);
+    }
+    state.tabs.get_mut(tab_id).unwrap().rootnode = Some(agentmux_common::LayoutNode {
+        id: "root".into(),
+        children: vec![
+            stacked_leaf("p1", &["a", "b"], "a"),
+            leaf_node("p2", "c"),
+            stacked_leaf("p3", &["d", "e"], "d"),
+            leaf_node("p4", "f"),
+        ],
+        ..Default::default()
+    });
+}
+
+fn pane<'a>(tree: &'a agentmux_common::LayoutNode, id: &str) -> Option<&'a agentmux_common::LayoutNode> {
+    tree.children.iter().find(|c| c.id == id)
+}
+
+#[test]
+fn layout_stack_move_many_gathers_tabs_from_several_panes_in_order() {
+    let (mut state, tab_id) = fresh_tab();
+    four_panes(&mut state, &tab_id);
+
+    let events = move_many(&mut state, &tab_id, &["b", "e"], "c", Some("e"));
+    assert!(matches!(events.as_slice(), [Event::LayoutTreeReplaced { slices: None, .. }]), "got {events:?}");
+    let tree = state.tabs[&tab_id].rootnode.clone().unwrap();
+    let dst = pane(&tree, "p2").unwrap().data.as_ref().unwrap();
+    assert_eq!(dst.block_stack, vec!["c", "b", "e"], "appended after the existing tab, in the order given");
+    assert_eq!((dst.block_id.as_str(), dst.active_block_id.as_str()), ("e", "e"), "the grabbed tab is visible");
+    assert_eq!(pane(&tree, "p1").unwrap().data.as_ref().unwrap().block_stack, vec!["a"]);
+    assert_eq!(pane(&tree, "p3").unwrap().data.as_ref().unwrap().block_stack, vec!["d"]);
+}
+
+#[test]
+fn layout_stack_move_many_leaves_a_block_already_in_the_target_where_it_is() {
+    let (mut state, tab_id) = fresh_tab();
+    four_panes(&mut state, &tab_id);
+
+    // "d" is already in p3: it must not be reordered to the end, only "b" arrives.
+    move_many(&mut state, &tab_id, &["b", "d"], "e", None);
+    let tree = state.tabs[&tab_id].rootnode.clone().unwrap();
+    let dst = pane(&tree, "p3").unwrap().data.as_ref().unwrap();
+    assert_eq!(dst.block_stack, vec!["d", "e", "b"]);
+    assert_eq!(dst.active_block_id, "d", "no activate id: the visible tab does not change");
+}
+
+#[test]
+fn layout_stack_move_many_can_activate_a_member_that_did_not_move() {
+    let (mut state, tab_id) = fresh_tab();
+    four_panes(&mut state, &tab_id);
+
+    move_many(&mut state, &tab_id, &["b"], "d", Some("e"));
+    let tree = state.tabs[&tab_id].rootnode.clone().unwrap();
+    let dst = pane(&tree, "p3").unwrap().data.as_ref().unwrap();
+    assert_eq!(dst.block_stack, vec!["d", "e", "b"]);
+    assert_eq!((dst.block_id.as_str(), dst.active_block_id.as_str()), ("e", "e"));
+}
+
+#[test]
+fn layout_stack_move_many_removes_every_pane_it_empties_and_reports_a_delete() {
+    let (mut state, tab_id) = fresh_tab();
+    four_panes(&mut state, &tab_id);
+
+    // p2 and p4 each lose their only tab; p1 loses both of its tabs.
+    let events = move_many(&mut state, &tab_id, &["c", "f", "a", "b"], "d", Some("f"));
+    let tree = state.tabs[&tab_id].rootnode.clone().unwrap();
+    match events.as_slice() {
+        [Event::LayoutNodeDeleted { node_id, new_tree, tree_cleared, .. }] => {
+            assert_eq!(node_id, "p2", "the first pane to go");
+            assert_eq!(new_tree.as_ref(), Some(&tree));
+            assert!(!tree_cleared);
+        }
+        other => panic!("expected one LayoutNodeDeleted, got {other:?}"),
+    }
+    // Only the destination is left, so the root collapses into it.
+    assert!(tree.children.is_empty(), "{tree:?}");
+    assert_eq!(tree.id, "p3");
+    let dst = tree.data.as_ref().unwrap();
+    assert_eq!(dst.block_stack, vec!["d", "e", "c", "f", "a", "b"]);
+    assert_eq!(dst.active_block_id, "f");
+}
+
+#[test]
+fn layout_stack_move_many_changes_nothing_when_a_block_is_missing() {
+    let (mut state, tab_id) = fresh_tab();
+    four_panes(&mut state, &tab_id);
+    let before = state.tabs[&tab_id].rootnode.clone();
+
+    let events = move_many(&mut state, &tab_id, &["b", "nope"], "c", Some("b"));
+    assert!(matches!(events.as_slice(), [Event::Error { .. }]), "got {events:?}");
+    assert_eq!(state.tabs[&tab_id].rootnode, before, "all or nothing");
+
+    let events = move_many(&mut state, &tab_id, &["b"], "nope", None);
+    assert!(matches!(events.as_slice(), [Event::Error { .. }]), "got {events:?}");
+    assert_eq!(state.tabs[&tab_id].rootnode, before);
+
+    // The visible tab must be one of the target pane's members after the move.
+    let events = move_many(&mut state, &tab_id, &["b"], "c", Some("e"));
+    assert!(matches!(events.as_slice(), [Event::Error { .. }]), "got {events:?}");
+    assert_eq!(state.tabs[&tab_id].rootnode, before);
+}
+
+#[test]
+fn layout_stack_move_many_moves_a_repeated_block_once() {
+    let (mut state, tab_id) = fresh_tab();
+    four_panes(&mut state, &tab_id);
+
+    move_many(&mut state, &tab_id, &["b", "b", "e"], "c", None);
+    let tree = state.tabs[&tab_id].rootnode.clone().unwrap();
+    assert_eq!(pane(&tree, "p2").unwrap().data.as_ref().unwrap().block_stack, vec!["c", "b", "e"]);
+}
+
+#[test]
+fn layout_stack_move_many_on_an_unknown_tab_is_an_error() {
+    let (mut state, _tab_id) = fresh_tab();
+    let events = move_many(&mut state, "no-such-tab", &["a"], "b", None);
+    assert!(matches!(events.as_slice(), [Event::Error { .. }]), "got {events:?}");
+}

@@ -4,6 +4,7 @@ use agentmux_common::AUTH_KEY_HEADER;
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_pane_open(engine, state);
     register_pane_move_tab(engine, state);
+    register_pane_move_tabs(engine, state);
     register_pane_tab_edits(engine, state);
 }
 
@@ -32,6 +33,15 @@ fn register_pane_move_tab(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(COMMAND_PANE_MOVE_TAB, move |cmd: CommandPaneMoveTabData, _ctx| {
         let state = state.clone();
         async move { super::move_tab(&state, cmd).await }
+    });
+}
+
+/// SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §5.
+fn register_pane_move_tabs(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let state = state.clone();
+    engine.register_typed(COMMAND_PANE_MOVE_TABS, move |cmd: CommandPaneMoveTabsData, _ctx| {
+        let state = state.clone();
+        async move { super::move_tabs(&state, cmd).await }
     });
 }
 
@@ -1425,6 +1435,39 @@ pub(crate) async fn move_tab(state: &AppState, cmd: CommandPaneMoveTabData) -> R
     .await;
     tracing::info!(block_id = %cmd.block_id, target = %cmd.target_block_id, position = %cmd.position, "pane.moveTab");
     Ok(edit_result(state, &tab_id, "pane.moveTab", &cmd.block_id, queued))
+}
+
+/// Core `pane.moveTabs` logic: several tabs into one pane in one reducer edit
+/// (`Command::LayoutStackMoveMany`), then one queued `stackmove` per block (and
+/// a `stackactivate` when the visible tab is a member that did not move) so any
+/// OTHER window viewing the layout follows. The calling frontend has already
+/// made the same edit and skips every queued copy by its base `action_id`.
+/// SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §5.
+pub(crate) async fn move_tabs(state: &AppState, cmd: CommandPaneMoveTabsData) -> Result<PaneTabEditResult, String> {
+    if cmd.block_ids.is_empty() {
+        return Err("pane.moveTabs: block_ids is empty".to_string());
+    }
+    let (tab_id, _) = apply_pane_tab_command(state, "pane.moveTabs", &cmd.target_block_id, |tab_id| {
+        agentmux_common::ipc::Command::LayoutStackMoveMany {
+            tab_id,
+            block_ids: cmd.block_ids.clone(),
+            target_block_id: cmd.target_block_id.clone(),
+            activate_block_id: cmd.activate_block_id.clone(),
+            correlation_id: String::new(),
+        }
+    })
+    .await?;
+    let queued = crate::server::service::layout_helpers::queue_target_stack_moves(
+        state,
+        &tab_id,
+        &cmd.block_ids,
+        &cmd.target_block_id,
+        cmd.activate_block_id.as_deref(),
+        cmd.action_id.as_deref().unwrap_or_default(),
+    )
+    .await;
+    tracing::info!(count = cmd.block_ids.len(), target = %cmd.target_block_id, "pane.moveTabs");
+    Ok(edit_result(state, &tab_id, "pane.moveTabs", &cmd.target_block_id, queued))
 }
 
 /// `pane.activateTab`: make `block_id` its pane's visible tab

@@ -1,6 +1,6 @@
-# Spec: Moving pane tabs between panes — a faster, longer drop flash; Ctrl/Cmd+click to select several tabs and drag them together; selecting a tab on a collapsed pane expands it
+# Spec: Moving pane tabs between panes — a faster, doubled drop flash; Ctrl/Cmd+click to select several tabs and drag them together; selecting a tab on a collapsed pane expands it
 
-**Status:** active — approved by the operator on 2026-10-24 (through AgentY): "ok, thats fine, follow wcag, as fast as possible following the standard, lets proceed with recommendations". D1 is settled in §3 and §9; D2 to D9 take the recommendations. Build: #2242.
+**Status:** active. Approved by the operator on 2026-10-24 (through AgentY): "ok, thats fine, follow wcag, as fast as possible following the standard, lets proceed with recommendations"; D1 is settled in §3 and §9, D2 to D9 take the recommendations. Built in two PRs: the blink and the collapsed-pane expand in #5423, the multi-select and the multi-tab move in the PR that follows (§12). Build task #2242.
 **Date:** 2026-10-24
 **Author:** Camper@narko
 **Task:** Spec #2241; the build is #2242 and starts after this is approved
@@ -116,7 +116,7 @@ A selected pill is distinguished from the other pill states without colour alone
   - The per-pill reorder targets reject a multi-block drag, so the drop is never ambiguous between "reorder" and "gather".
   - A pane that already holds every dragged block does not accept the drag (no hover flash).
 - **What moves.** Every dragged block not already in the target. Blocks already there stay where they are and are not reordered. Membership is resolved **by block id**, not by the strip's `paneKey`: a fork pill shown in one pane's strip but belonging to another (`extraTabs`) is moved from the pane it really lives in.
-- **Order of arrival.** Appended after the target's existing tabs in **layout order**: panes in tree order (the same order Cmd+1..9 uses), tabs in strip order within each pane. Click order is invisible to the operator, so it is not used (D6).
+- **Order of arrival.** Appended after the target's existing tabs in **layout order**: panes in tree order (depth first, children in order), tabs in strip order within each pane. Click order is invisible to the operator, so it is not used (D6).
 - **Active tab and focus.** The **grabbed** tab becomes active in the target, and the target pane takes focus, as a single-tab move does today. The other moved tabs arrive inactive.
 - **Source panes.** Each source pane whose active tab left passes it to its right neighbour (or the new last tab), per the existing rule. A pane emptied by the move is **removed as a move, not closed** (same as the single-tab rule: no prompt, no close guard, `removeLeafEmptiedByMove`). A collapsed pane emptied this way loses its chip. If removing a source would leave only collapsed panes, the existing restore-nearest rule applies. The last pane in a window never closes; a move that would empty it cannot happen, since the target is another pane.
 - **A collapsed target** expands on drop (D7): the moved tabs are selected on it by the drop, and a drop into a chip that stays a chip would hide where they went.
@@ -220,6 +220,14 @@ N sequential `pane.moveTab` calls would be N optimistic edits, N RPCs and N vers
 2. Expand-on-select and the Escape/selection store with Mod+click and the looks (no move yet).
 3. The drag payload, the batch command and the drop, then the tear-off cancel.
 
-These can be one PR or three, as the reviewer prefers; the batch command is the part that needs the srv review.
+It was built as two PRs: step 1 and the expand-on-select half of step 2 (#5423), then the selection, the drag and the batch command together, because a selection that cannot be dragged is half a feature.
 
 Agent: Camper@narko
+
+## 12. What was built, and what checking it in `task dev` changed
+
+- **Escape** is part of `app:escape` (keymodel.ts), not a listener of its own: a modal, then an active search, then picked tabs, and a key the selection takes does not reach un-magnify. `keymodel-escape.test.ts` pins the order.
+- **Hovering starts at drag start for a drag begun inside the pane.** pragmatic-dnd calls `onDragStart`, not `onDragEnter`, for a drop zone the pointer is already over, so gathering tabs into the pane the grabbed one came from showed no flash until the pointer left and came back. The drop zone now starts the hover on `onDragStart` too.
+- **Several emptied panes are removed one at a time, normalizing the tree between them** (`moveBlocksInStack`): two removals in a row on one tree left a hole in a parent's children and broke the layout (seen live, not by the unit test, whose tree was flat).
+- **Driven in an isolated `task dev` build over CDP** (trusted Ctrl+clicks, an intercepted HTML5 drag): picking two tabs in two panes and dragging one onto a third pane moves both in layout order with the grabbed one active, removes both emptied panes and bounces both pills; the drop zone blinks twice and holds negative; Escape and a plain click clear the pick; clicking the (active) pill of a collapsed pane expands it; gathering into the grabbed tab's own pane works.
+- **Not built, as specced:** tearing several tabs off into one floating pane (a multi-tab drag released outside every window is cancelled), keyboard multi-select, undo.

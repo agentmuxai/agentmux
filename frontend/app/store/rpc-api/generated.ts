@@ -177,6 +177,7 @@ import type { CommandNativeMemoryWriteFileData } from "@/types/rpc/CommandNative
 import type { CommandNextPromptSuggestionData } from "@/types/rpc/CommandNextPromptSuggestionData";
 import type { CommandOtherBuildLayoutsData } from "@/types/rpc/CommandOtherBuildLayoutsData";
 import type { CommandPaneMoveTabData } from "@/types/rpc/CommandPaneMoveTabData";
+import type { CommandPaneMoveTabsData } from "@/types/rpc/CommandPaneMoveTabsData";
 import type { CommandPaneOpenData } from "@/types/rpc/CommandPaneOpenData";
 import type { CommandPaneTabData } from "@/types/rpc/CommandPaneTabData";
 import type { CommandReadEditorFileData } from "@/types/rpc/CommandReadEditorFileData";
@@ -1811,6 +1812,10 @@ export const GeneratedApi = {
   // command "pane.moveTab"
   PaneMoveTabCommand(client: RpcClient, data: CommandPaneMoveTabData, opts?: RpcOpts): Promise<PaneTabEditResult> {
     return client.rpcCall("pane.moveTab", data, opts);
+  },
+  // command "pane.moveTabs"
+  PaneMoveTabsCommand(client: RpcClient, data: CommandPaneMoveTabsData, opts?: RpcOpts): Promise<PaneTabEditResult> {
+    return client.rpcCall("pane.moveTabs", data, opts);
   },
   // command "pane.activateTab"
   PaneActivateTabCommand(client: RpcClient, data: CommandPaneTabData, opts?: RpcOpts): Promise<PaneTabEditResult> {

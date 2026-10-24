@@ -37,8 +37,11 @@ import { remoteDisplay } from "@/app/store/remote-display";
 import { readSwarmSummary } from "@/app/store/activitySummary";
 import { readSeatMeta, seatTooltipLine } from "@/app/view/agent/seat-format";
 import { ErrorBoundary } from "@/element/errorboundary";
-import { closeBlockInStack, moveBlockInStack, setActiveBlockInStack, type NodeModel } from "@/layout/index";
+import { closeBlockInStack, moveBlockInStack, moveBlocksInStack, setActiveBlockInStack, type NodeModel } from "@/layout/index";
 import { paneStackIds } from "@/layout/lib/layoutNodeModels";
+import { allBlockIds } from "@/layout/lib/stackOrder";
+import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
+import { clearPaneTabSelection, paneTabSelectionApi, prunePaneTabSelection } from "./pane-tab-selection";
 import "./PaneChrome.scss";
 import { openPaneTabWidgetPicker } from "./pane-tab-picker";
 import { PaneHeaderTabStrip } from "./PaneHeaderTabStrip";
@@ -472,8 +475,36 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     const handleReceiveForeignTab = (blockId: string) => {
         const target = activeBlockId();
         if (!target) return false;
-        return moveBlockInStack(layoutModel, blockId, target, "end", true);
+        const moved = moveBlockInStack(layoutModel, blockId, target, "end", true);
+        // The tab was selected by the drop: a collapsed pane would hide where it went.
+        if (moved && nodeModel.isMinimized?.()) layoutModel.minimizeNodeToggle(nodeModel.nodeId);
+        return moved;
     };
+    // Several tabs (a Ctrl/Cmd+click selection) dropped on this pane, in one move. The anchor
+    // is this pane's visible tab, which is never one of the moved tabs (blocks already here
+    // are left alone). SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §4.3.
+    const handleReceiveForeignTabs = (blockIds: readonly string[], grabbed: string) => {
+        const target = activeBlockId();
+        if (!target) return false;
+        const moved = moveBlocksInStack(layoutModel, blockIds, target, grabbed);
+        if (moved === false) return false;
+        clearPaneTabSelection();
+        if (nodeModel.isMinimized?.()) layoutModel.minimizeNodeToggle(nodeModel.nodeId);
+        return moved;
+    };
+    const acceptsForeignTabs = (blockIds: readonly string[]) => {
+        const here = new Set(stackIds());
+        return blockIds.some((id) => !here.has(id));
+    };
+
+    // The selection belongs to the Window Tab on screen: a tab that was closed, or that
+    // lives in another Window Tab's layout, is dropped from it.
+    const windowTabDisplayed = useWindowTabDisplayed();
+    createEffect(() => {
+        layoutModel.localTreeStateAtom();
+        if (!windowTabDisplayed()) return;
+        prunePaneTabSelection(allBlockIds(layoutModel.treeState.rootNode));
+    });
 
     const activeViewModelOrUndefined = () => nodeModel.activeViewModel?.() ?? undefined;
 
@@ -510,6 +541,9 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             onClose={handleClose}
             onReorder={handleReorder}
             onReceiveForeignTab={handleReceiveForeignTab}
+            onReceiveForeignTabs={handleReceiveForeignTabs}
+            acceptsForeignTabs={acceptsForeignTabs}
+            selection={paneTabSelectionApi}
             onTabDoubleClick={(id) => tabInfos().get(id)?.rename && setRenamingId(id)}
             renderLabel={(id) =>
                 renamingId() === id ? (
