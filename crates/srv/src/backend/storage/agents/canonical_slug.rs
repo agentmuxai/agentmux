@@ -192,6 +192,26 @@ impl Store {
         })
     }
 
+    /// Every slug held on this host outside the shared definitions (every
+    /// `objects.db`, every live registration: `slug_migration::HostSlugs`),
+    /// for picking a new agent's slug. `None` when this store has no slug home
+    /// (`set_slug_home`: tests, or no shared store). A store that can't be
+    /// read is an error, as an unreadable shared definition is, so a slug is
+    /// never picked without knowing who holds it.
+    pub(in crate::backend::storage) fn host_slugs_for_allocation(
+        &self,
+    ) -> Result<Option<crate::backend::slug_migration::HostSlugs>, StoreError> {
+        let Some(home) = self.slug_home() else {
+            return Ok(None);
+        };
+        crate::backend::slug_migration::HostSlugs::read(&home).map(Some).map_err(|e| {
+            StoreError::Other(format!(
+                "not creating the agent: {e}, so its slug could be one another agent holds. Nothing was created; \
+                 fix or remove that database and try again."
+            ))
+        })
+    }
+
     /// Every active shared definition's names, for a slug-to-uid read, from
     /// the store's slug index (`DefinitionStore::slug_index`): a stat per
     /// file, and a parse only of the files that changed. Read before taking

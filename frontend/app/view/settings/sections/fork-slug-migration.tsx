@@ -93,6 +93,8 @@ export function ForkSlugMigration(): JSX.Element {
     const ready = () => readyOf(plan());
     const running = () => ready().flatMap((c) => c.running.map((r) => ({ name: c.name, ...r })));
     const blockers = () => plan()?.blockers ?? [];
+    // An srv from before the report sends none.
+    const duplicates = () => plan()?.duplicates ?? [];
     const busy = () => phase() !== "idle";
     // Running panes are the one blocker the card clears itself, by stopping
     // them; anything else (an older AgentMux running, another update under
@@ -249,6 +251,41 @@ export function ForkSlugMigration(): JSX.Element {
             <Show when={blockers().length > 0 && !busy()}>
                 <ul class="setting-fork-slugs-blockers" aria-label="What has to change first">
                     <For each={blockers()}>{(b) => <li>{b.message}</li>}</For>
+                </ul>
+            </Show>
+            <Show when={duplicates().length > 0}>
+                <div class="setting-fork-slugs-note">
+                    These agents share an id, as older builds could leave them. An update doesn't change them; the
+                    oldest keeps the id.
+                </div>
+                <ul class="setting-fork-slugs-list" aria-label="Agents that share an id">
+                    <For each={duplicates()}>
+                        {(d) => (
+                            <li>
+                                <span class="mono">{d.slug}</span>
+                                <ul class="setting-fork-slugs-where">
+                                    <For each={d.holders}>
+                                        {(h, i) => (
+                                            <li>
+                                                <span class="setting-fork-slugs-name">{h.name}</span>{" "}
+                                                <span class="setting-fork-slugs-place">{h.place}</span>
+                                                {i() === 0 ? (
+                                                    " keeps it"
+                                                ) : h.proposed ? (
+                                                    <>
+                                                        {" "}
+                                                        could be renamed to <span class="mono">{h.proposed}</span>
+                                                    </>
+                                                ) : (
+                                                    " needs a new id"
+                                                )}
+                                            </li>
+                                        )}
+                                    </For>
+                                </ul>
+                            </li>
+                        )}
+                    </For>
                 </ul>
             </Show>
             <Show when={report()}>
