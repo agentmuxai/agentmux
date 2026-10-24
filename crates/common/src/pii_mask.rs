@@ -252,7 +252,9 @@ fn mask_labelled(text: &str) -> String {
     if hits.is_empty() {
         return text.to_string();
     }
-    hits.sort_by_key(|h| h.0);
+    // The longest match first where several labels take the same start (`Security code` is a card's
+    // 3 or 4 digits and a one-time code's 4 to 8).
+    hits.sort_by_key(|h| (h.0, std::cmp::Reverse(h.1)));
     let mut out = String::with_capacity(text.len());
     let mut copied = 0;
     for (start, end, shown) in hits {
@@ -442,6 +444,13 @@ mod tests {
         assert_eq!(mask_text("Your verification code is 482913 2026-10-24"), format!("Your verification code is {CODE} 2026-10-24"));
         assert_eq!(mask_text("SSN 123-45-6789 4 dependants"), format!("SSN {ID_NUMBER} 4 dependants"));
         assert_eq!(mask_text("Routing number 021000021 account number 12345678"), format!("Routing number {ACCOUNT} account number {ACCOUNT}"));
+    }
+
+    #[test]
+    fn where_two_labels_match_the_longer_secret_wins() {
+        assert_eq!(mask_text("Security code: 123 456"), format!("Security code: {CODE}"));
+        assert_eq!(mask_text("Security code: 123"), format!("Security code: {CODE}"));
+        assert_eq!(mask_text("Security code 4321 on the back"), format!("Security code {CODE} on the back"));
     }
 
     #[test]
