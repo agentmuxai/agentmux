@@ -522,7 +522,7 @@ mod tests {
         assert_eq!(resolve_name_to_uid(&store, &registry(), "Naki-3").unwrap(), NameResolution::None);
     }
 
-    /// Codex on #5369: a local template's slug doesn't shadow an agent whose
+    /// A local template's slug doesn't shadow an agent whose
     /// title routes to the same name; a forgotten agent is never a target; a
     /// renamed fork is found by its current title.
     #[test]
