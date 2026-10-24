@@ -80,7 +80,8 @@ pub(super) async fn local_target_unavailable(state: &AppState, target: &str) -> 
 /// where the hold doesn't apply (a LAN or cross-channel hop, a cron fire),
 /// refuse it with the reason: either way it is not injected into a turn
 /// that would fail and lose it. The refusal begins with
-/// [`crate::backend::reactive::UNAVAILABLE_PREFIX`].
+/// [`crate::backend::reactive::UNAVAILABLE_PREFIX`]. Its `SignedOut` arm is
+/// for when `holding_unavailable` takes signed-out agents (Kanban #2237).
 pub(super) async fn hold_for_unavailable(
     state: &AppState,
     auth_via: super::ReactiveAuthVia,

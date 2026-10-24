@@ -721,7 +721,7 @@ pub(crate) async fn deliver(
     if let Err(error) = super::jekt_files::check(&req) {
         return super::jekt_files::refused(&req, error);
     }
-    // An agent here out of quota or signed out would lose it in a turn that
+    // An agent here out of quota (`holding_unavailable`) would lose it in a turn that
     // fails at once: hold it, or refuse it where it can't be held (spec
     // SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5). Before `prepare`, which
     // charges inline attachments to the session: the replay prepares again.
