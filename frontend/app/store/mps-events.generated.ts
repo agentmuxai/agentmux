@@ -145,6 +145,7 @@ export type MuxEventPayloads = {
   "incident:recorded": IncidentEvent;
   install_chunk: InstallChunkEvent;
   install_progress: InstallProgressEvent;
+  "jobs:changed": null;
   laninstances: LanInstanceList;
   "laninstances:error": LanDiscoveryError;
   "laninstances:firewall": LanFirewall;
@@ -253,6 +254,7 @@ export const TYPED_MUX_EVENTS = [
   "incident:recorded",
   "install_chunk",
   "install_progress",
+  "jobs:changed",
   "laninstances",
   "laninstances:error",
   "laninstances:firewall",
@@ -312,6 +314,7 @@ const NO_PAYLOAD_MUX_EVENTS: ReadonlySet<string> = new Set([
   "cron_changed",
   "drones:changed",
   "identityaccounts:changed",
+  "jobs:changed",
   "mcp:changed",
   "memories:changed",
   "namedagents:changed",

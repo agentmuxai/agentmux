@@ -312,6 +312,11 @@ import type { InstallStartReq } from "@/types/rpc/InstallStartReq";
 import type { InstallStartResult } from "@/types/rpc/InstallStartResult";
 import type { InstallSystemToolResult } from "@/types/rpc/InstallSystemToolResult";
 import type { InstallToolResult } from "@/types/rpc/InstallToolResult";
+import type { JobsActRequest } from "@/types/rpc/JobsActRequest";
+import type { JobsActResult } from "@/types/rpc/JobsActResult";
+import type { JobsListResult } from "@/types/rpc/JobsListResult";
+import type { JobsRunsRequest } from "@/types/rpc/JobsRunsRequest";
+import type { JobsRunsResult } from "@/types/rpc/JobsRunsResult";
 import type { LaunchCost } from "@/types/rpc/LaunchCost";
 import type { LayoutIntentResult } from "@/types/rpc/LayoutIntentResult";
 import type { LayoutOpenResult } from "@/types/rpc/LayoutOpenResult";
@@ -1404,6 +1409,18 @@ export const GeneratedApi = {
   // command "installtool"
   InstallToolCommand(client: RpcClient, data: CommandInstallToolData, opts?: RpcOpts): Promise<InstallToolResult> {
     return client.rpcCall("installtool", data, opts);
+  },
+  // command "jobs.act"
+  JobsActCommand(client: RpcClient, data: JobsActRequest, opts?: RpcOpts): Promise<JobsActResult> {
+    return client.rpcCall("jobs.act", data, opts);
+  },
+  // command "jobs.list"
+  JobsListCommand(client: RpcClient, data: Record<string, never>, opts?: RpcOpts): Promise<JobsListResult> {
+    return client.rpcCall("jobs.list", data, opts);
+  },
+  // command "jobs.runs"
+  JobsRunsCommand(client: RpcClient, data: JobsRunsRequest, opts?: RpcOpts): Promise<JobsRunsResult> {
+    return client.rpcCall("jobs.runs", data, opts);
   },
   // command "kanban.act"
   KanbanActCommand(

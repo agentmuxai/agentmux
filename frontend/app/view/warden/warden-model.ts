@@ -35,6 +35,9 @@ export class WardenViewModel {
      *  section. Set by the section while it is shown. */
     ambientFailing: Accessor<number>;
     setAmbientFailing: (n: number) => void;
+    /** How many jobs are failing: shown in the title on the Jobs section. Set by the section while it is shown. */
+    jobsFailing: Accessor<number>;
+    setJobsFailing: (n: number) => void;
     /** A task another view asked to show (`kanban:open` meta, kanban-held.tsx), until the section opens it. */
     kanbanOpenAtom: Accessor<string | null>;
     /** The Kanban in one lane per repository (`kanban:lanes` meta). */
@@ -67,12 +70,16 @@ export class WardenViewModel {
         const [ambientFailing, setAmbientFailing] = createSignal(0);
         this.ambientFailing = ambientFailing;
         this.setAmbientFailing = setAmbientFailing;
+        const [jobsFailing, setJobsFailing] = createSignal(0);
+        this.jobsFailing = jobsFailing;
+        this.setJobsFailing = setJobsFailing;
         this.vault = new VaultViewModel(vaultHostIn(ctx, () => this.sectionAtom() === "vault"));
         this.viewName = createMemo<string>(() => {
             const section = this.sectionAtom();
             const n = kanbanNeeds();
             if (section === "vault") return `Vault · ${this.vault.viewName()}`;
             if (section === "ambient" && ambientFailing() > 0) return `Ambient · ${ambientFailing()} failing`;
+            if (section === "jobs" && jobsFailing() > 0) return `Jobs · ${jobsFailing()} failing`;
             return section === "kanban" && n > 0 ? `Kanban · ${n} need${n === 1 ? "s" : ""} you` : WARDEN_SECTION_LABELS[section];
         });
     }

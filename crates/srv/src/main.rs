@@ -218,6 +218,10 @@ async fn app_main() {
         let ledger = run_ledger.clone();
         let _ = tokio::task::spawn_blocking(move || ledger.recover_after_restart()).await;
     }
+    // A paused job's slots are counted as skips (jobs spec §3.3).
+    if let Some(shared) = state.shared_store.clone() {
+        backend::jobs::paused::spawn(shared, run_ledger.clone());
+    }
     state.cron_scheduler.install_runs(run_ledger);
 
     // Start persistent cron scheduler — load enabled jobs from DB, fire any

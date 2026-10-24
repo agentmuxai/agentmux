@@ -255,6 +255,8 @@ events! {
     IdentityAccountsChanged: "identityaccounts:changed" => (),
     /// Scheduled jobs changed.
     CronChanged: super::mps::EVENT_CRON_CHANGED => (),
+    /// The run ledger, or Pause all, changed (the Warden Jobs tab).
+    JobsChanged: "jobs:changed" => (),
     /// The drones changed.
     DronesChanged: "drones:changed" => (),
     /// The configured remotes changed.

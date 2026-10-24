@@ -193,3 +193,38 @@ fn an_older_table_gains_the_collapsed_column_on_open() {
     // Opening again finds the column there and changes nothing.
     assert_eq!(store_at(&dir).job_runs_for_job("j1", 10, None).unwrap()[0].skip_count, 2);
 }
+
+/// Pause all's switch is seen by every handle on the store, keeps the time
+/// it was first set, and clears.
+#[test]
+fn a_job_flag_is_shared_kept_and_cleared() {
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (store_at(&dir), store_at(&dir));
+    assert!(a.job_flag_get("jobs:paused_all").unwrap().is_none());
+    a.job_flag_set("jobs:paused_all", "1", "operator", NOW).unwrap();
+    a.job_flag_set("jobs:paused_all", "1", "operator", NOW + MIN).unwrap();
+    let flag = b.job_flag_get("jobs:paused_all").unwrap().expect("set, seen from another handle");
+    assert_eq!((flag.set_at_ms, flag.set_by.as_str()), (NOW, "operator"));
+    assert!(b.job_flag_clear("jobs:paused_all").unwrap());
+    assert!(!b.job_flag_clear("jobs:paused_all").unwrap());
+    assert!(a.job_flag_get("jobs:paused_all").unwrap().is_none());
+}
+
+/// A job's spend since a time sums its runs from then on, and says whether
+/// any reported a cost; a folded skip's hidden row doesn't count.
+#[test]
+fn a_jobs_spend_since_a_time() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = store_at(&dir);
+    for (id, started, cost, known) in [("r1", NOW - 2 * MIN, 1.0, true), ("r2", NOW, 0.25, true), ("r3", NOW + MIN, 0.0, false)] {
+        let mut r = slot_run(id, "j1", None);
+        r.started_at_ms = started;
+        r.cost_usd = cost;
+        r.cost_known = known;
+        assert!(s.job_run_insert(&r).unwrap());
+    }
+    assert_eq!(s.job_runs_cost_since("j1", NOW).unwrap(), (0.25, true));
+    assert_eq!(s.job_runs_cost_since("j1", NOW - 10 * MIN).unwrap(), (1.25, true));
+    assert_eq!(s.job_runs_cost_since("j1", NOW + MIN).unwrap(), (0.0, false));
+    assert_eq!(s.job_runs_cost_since("nobody", 0).unwrap(), (0.0, false));
+}

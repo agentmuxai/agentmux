@@ -279,18 +279,21 @@ pub(super) async fn handle_cron_list(
     match store.cron_list() {
         Ok(jobs) => {
             let ledger = state.cron_scheduler.runs().cloned();
-            let views = tokio::task::spawn_blocking(move || {
-                jobs.iter()
+            let (views, paused_all) = tokio::task::spawn_blocking(move || {
+                let views = jobs
+                    .iter()
                     .map(|job| {
                         let mut view = to_view(job);
                         view.last_run = ledger.as_ref().and_then(|l| l.store().job_run_last(&job.id).ok().flatten());
                         view
                     })
-                    .collect::<Vec<_>>()
+                    .collect::<Vec<_>>();
+                // Pause all (jobs spec §3.3), so the Schedule tool can say so.
+                (views, ledger.as_ref().and_then(|l| l.paused_all()))
             })
             .await
             .unwrap_or_default();
-            (StatusCode::OK, Json(json!({"jobs": views})))
+            (StatusCode::OK, Json(json!({"jobs": views, "paused_all": paused_all})))
         }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
     }
@@ -471,7 +474,10 @@ pub(super) async fn handle_cron_report(
         return (StatusCode::FORBIDDEN, Json(json!({"error": "only the agent that ran this run can report it"})));
     }
     match ledger.store().job_run_report(&run_id, &req.outcome, &req.summary, &links) {
-        Ok(true) => (StatusCode::OK, Json(json!({"ok": true, "run_id": run_id, "outcome": req.outcome}))),
+        Ok(true) => {
+            ledger.changed();
+            (StatusCode::OK, Json(json!({"ok": true, "run_id": run_id, "outcome": req.outcome})))
+        }
         Ok(false) => (
             StatusCode::CONFLICT,
             Json(json!({"error": format!("run {run_id} never ran ({}): there is nothing to report", run.state)})),

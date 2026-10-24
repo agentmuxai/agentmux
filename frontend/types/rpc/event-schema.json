@@ -526,6 +526,13 @@
     }
   },
   {
+    "event": "jobs:changed",
+    "payloadTs": {
+      "imports": [],
+      "name": "null"
+    }
+  },
+  {
     "event": "laninstances",
     "payloadTs": {
       "imports": [

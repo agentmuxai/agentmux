@@ -12,6 +12,8 @@
 //! §5.2), which the scheduler delivers when the agent is back.
 
 pub mod follower;
+pub mod paused;
+pub mod verdict;
 
 use std::sync::Arc;
 
@@ -20,7 +22,7 @@ use serde_json::json;
 
 use crate::backend::cron::{FireOutcome, MissReason};
 use crate::backend::mps::Broker;
-use crate::backend::storage::job_runs::{infra, reason, state, JobRun, RunCost};
+use crate::backend::storage::job_runs::{infra, reason, state, JobFlag, JobRun, RunCost};
 use crate::backend::storage::store::Store;
 use crate::drone::storage::DroneStore;
 
@@ -40,6 +42,15 @@ pub const BY_OPERATOR: &str = "operator";
 /// A cron job's catch-up policy (§5.2): what an undelivered fire leaves.
 pub const CATCH_UP_SKIP: &str = "skip";
 pub const CATCH_UP_LATEST: &str = "latest";
+
+/// The identity-store switch Pause all sets (§3.3): while it is on, every
+/// scheduled fire is a collapsed `skipped (paused_all)` row and Run now is
+/// refused. Only the operator turns it on or off.
+pub const FLAG_PAUSED_ALL: &str = "jobs:paused_all";
+
+/// What a Run now gets while Pause all is on.
+pub const PAUSED_ALL_REFUSAL: &str =
+    "the operator has paused every job (Pause all); Run now is off until they resume them";
 
 /// The status a Drone run left `running` by a restart gets in
 /// `db_drone_runs` (§3.2). An open string there, like every other status.
@@ -130,6 +141,8 @@ pub struct RunLedger {
     mstore: Option<Arc<Store>>,
     recorded_by: String,
     follower: follower::Follower,
+    /// Where `JobsChanged` goes after each write, so the Jobs tab refreshes.
+    broker: Arc<Broker>,
 }
 
 impl RunLedger {
@@ -143,12 +156,66 @@ impl RunLedger {
             store: store.clone(),
             mstore,
             recorded_by: recorded_by(),
-            follower: follower::Follower::start(weak.clone(), broker),
+            follower: follower::Follower::start(weak.clone(), broker.clone()),
+            broker,
         })
     }
 
     pub fn store(&self) -> &Arc<Store> {
         &self.store
+    }
+
+    /// Tell the Jobs tab the ledger changed (`JobsChanged`).
+    pub fn changed(&self) {
+        self.broker.publish_event::<crate::backend::mps_events::JobsChanged>(&(), vec![], 0);
+    }
+
+    /// Pause all, when the operator has it on: since when, and by whom.
+    pub fn paused_all(&self) -> Option<JobFlag> {
+        self.store.job_flag_get(FLAG_PAUSED_ALL).unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "jobs: couldn't read Pause all");
+            None
+        })
+    }
+
+    /// Turn Pause all on or off. The caller has checked that the operator
+    /// asked: agents can't (§7).
+    pub fn set_paused_all(&self, on: bool, by: &str) -> Result<(), crate::backend::storage::StoreError> {
+        if on {
+            self.store.job_flag_set(FLAG_PAUSED_ALL, "1", by, now_ms())?;
+        } else {
+            self.store.job_flag_clear(FLAG_PAUSED_ALL)?;
+        }
+        self.changed();
+        Ok(())
+    }
+
+    /// A slot of `job` that didn't fire because the job, or every job, was
+    /// paused (`reason`): counted into the job's newest row when that is the
+    /// same skip, else a new `skipped` row holding the slot (§3.3).
+    pub fn record_skip_slot(&self, job: &crate::backend::storage::cron::CronJob, slot_ms: i64, why: &str) {
+        let written = match self.store.job_run_fold_skip(&job.id, why, slot_ms) {
+            Ok(true) => Ok(()),
+            Ok(false) => {
+                let now = now_ms();
+                let mut run = self.row(&job.id, SOURCE_CRON, &job.name, TRIGGER_SCHEDULE, now);
+                run.state = state::SKIPPED.to_string();
+                run.reason = why.to_string();
+                run.scheduled_for_ms = Some(slot_ms);
+                run.triggered_by = BY_SCHEDULER.to_string();
+                run.target_agent_uid = job.target_uid.clone();
+                run.skip_count = 1;
+                run.last_skip_at_ms = Some(slot_ms);
+                run.ended_at_ms = Some(now);
+                // A taken slot is another instance's count of the same skip.
+                self.store.job_run_insert(&run).map(drop)
+            }
+            Err(e) => Err(e),
+        };
+        match written {
+            Ok(()) => self.changed(),
+            Err(e) => tracing::warn!(job_id = %job.id, error = %e, "jobs: couldn't record a paused slot"),
+        }
     }
 
     fn row(&self, job_id: &str, job_source: &str, job_name: &str, trigger: &str, now: i64) -> JobRun {
@@ -215,6 +282,7 @@ impl RunLedger {
         if let Err(e) = result {
             tracing::warn!(run_id, error = %e, "jobs: couldn't record a fire's delivery");
         }
+        self.changed();
         if scheduled {
             let now_pending = self.store.job_run_get(run_id).ok().flatten().is_some_and(|r| r.state == state::PENDING && r.ended_at_ms.is_none());
             let why = if now_pending { reason::SUPERSEDED } else { reason::EXPIRED };
@@ -244,6 +312,7 @@ impl RunLedger {
         if let Err(e) = result {
             tracing::warn!(run_id = %run.id, error = %e, "jobs: couldn't record a pending fire's delivery");
         }
+        self.changed();
     }
 
     /// End a pending fire whose next fire time passed, or whose job is gone.
@@ -251,6 +320,7 @@ impl RunLedger {
         if let Err(e) = self.store.job_run_end_one_pending(run_id, reason::EXPIRED, now_ms()) {
             tracing::warn!(run_id, error = %e, "jobs: couldn't expire a pending fire");
         }
+        self.changed();
     }
 
     /// This channel's pending fires still waiting for their agent.
@@ -339,6 +409,7 @@ impl RunLedger {
         if let Err(e) = self.store.job_run_skip(&id, reason::APP_NOT_RUNNING, count, now_ms()) {
             tracing::warn!(job_id = %job.id, error = %e, "jobs: couldn't record missed slots");
         }
+        self.changed();
     }
 
     /// The followed turn ended (or never showed up).
@@ -346,6 +417,7 @@ impl RunLedger {
         if let Err(e) = self.store.job_run_finish(run_id, infra_status, cost, summary, now_ms()) {
             tracing::warn!(run_id, error = %e, "jobs: couldn't close a run");
         }
+        self.changed();
     }
 
     pub(crate) fn turn_bound(&self, run_id: &str, turn_id: i64, partial: bool) {
@@ -364,7 +436,10 @@ impl RunLedger {
             "channel": crate::backend::reactive::registry::local_channel_id(),
         });
         match self.store.job_run_insert(&run) {
-            Ok(true) => Some(run.id),
+            Ok(true) => {
+                self.changed();
+                Some(run.id)
+            }
             Ok(false) => None,
             Err(e) => {
                 tracing::warn!(drone_id, error = %e, "jobs: couldn't record a Drone run");

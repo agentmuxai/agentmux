@@ -42,6 +42,13 @@ vi.mock("@/app/view/warden-ambient/warden-ambient-manager", () => ({
         return <div data-testid="ambient-manager" data-visible={String(props.visible)} />;
     },
 }));
+const jobsFailing = vi.hoisted(() => ({ n: 2 }));
+vi.mock("@/app/view/warden-jobs/warden-jobs-manager", () => ({
+    WardenJobsManager: (props: { visible: boolean; onFailingCount?: (n: number) => void }) => {
+        props.onFailingCount?.(jobsFailing.n);
+        return <div data-testid="jobs-manager" data-visible={String(props.visible)} />;
+    },
+}));
 vi.mock("@/app/view/warden-history/warden-history-manager", () => ({
     WardenHistoryManager: (props: { wardenBlockId: string; visible: boolean }) => (
         <div data-testid="history-manager" data-block={props.wardenBlockId} data-visible={String(props.visible)} />
@@ -82,11 +89,11 @@ describe("WardenView rail", () => {
         ));
     }
 
-    it("orders the rail as Kanban, Vault, Host, LAN, Internet, Audit, History, Ambient", () => {
+    it("orders the rail as Kanban, Jobs, Vault, Host, LAN, Internet, Audit, History, Ambient", () => {
         renderWarden();
         const rail = screen.getByRole("tablist", { name: "Warden section" });
         const labels = Array.from(rail.querySelectorAll('[role="tab"]')).map((el) => el.textContent);
-        expect(labels).toEqual(["Kanban", "Vault", "Host", "LAN", "Internet", "Audit", "History", "Ambient"]);
+        expect(labels).toEqual(["Kanban", "Jobs", "Vault", "Host", "LAN", "Internet", "Audit", "History", "Ambient"]);
     });
 
     // The Vault became a section of Warden (vault-in-warden.ts): its protections follow the
@@ -239,6 +246,21 @@ describe("WardenView pane title", () => {
         fireEvent.keyDown(screen.getByRole("tab", { name: "Host" }), { key: "End" });
         expect(setMetaMock).toHaveBeenCalledWith({ "warden:section": "ambient" });
         expect(model.viewName()).toBe("Ambient · 3 failing");
+    });
+
+    it("on the Jobs section, the title counts the failing jobs, and is plain with none", () => {
+        const { model } = renderWarden();
+        expect(screen.queryByTestId("jobs-manager")).toBeNull();
+        screen.getByRole("tab", { name: "Jobs" }).click();
+        expect(screen.getByTestId("jobs-manager").dataset.visible).toBe("true");
+        expect(model.viewName()).toBe("Jobs · 2 failing");
+        cleanup();
+        setBlockMeta({});
+        jobsFailing.n = 0;
+        const second = renderWarden();
+        screen.getByRole("tab", { name: "Jobs" }).click();
+        expect(second.model.viewName()).toBe("Jobs");
+        jobsFailing.n = 2;
     });
 
     it("on the Ambient section, the title counts the failing kinds of call, and is plain with none", () => {
