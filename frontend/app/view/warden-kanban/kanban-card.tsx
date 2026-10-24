@@ -5,15 +5,40 @@
 // working with no task (§6.6).
 
 import { draggable } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
-import { createMemo, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createMemo, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 
 import { kanbanCardItemType } from "@/app/drag/drag-types";
 import { Button, Pill, StatusDot, type StatusTone } from "@/app/element/ui";
 import { MOS } from "@/app/store/global";
 import { formatAge } from "@/app/view/warden-shared/warden-shared";
 
-import { checklistProgress, columnOf, needsReason, prLabel, requestedBy, waitingOn } from "./kanban-columns";
-import type { KanbanAgent, KanbanAgentState, KanbanTask } from "./kanban-types";
+import {
+    checklistProgress,
+    columnOf,
+    isResearchKind,
+    needsReason,
+    prLabel,
+    requestedBy,
+    stageWord,
+    waitingOn,
+} from "./kanban-columns";
+import type { KanbanAfter, KanbanAgent, KanbanAgentState, KanbanTask } from "./kanban-types";
+
+/** A linked task's state, as a card's pill says it. */
+const LINK_WORDS: Record<string, string> = {
+    open: "waiting",
+    held: "on hold",
+    claimed: "in progress",
+    blocked: "needs you",
+    review: "in review",
+    done: "accepted",
+    failed: "failed",
+    cancelled: "cancelled",
+};
+
+function linkWord(a: KanbanAfter): string {
+    return LINK_WORDS[a.state] ?? a.state;
+}
 
 export function agentTone(state: KanbanAgentState | undefined): StatusTone {
     switch (state) {
@@ -75,7 +100,7 @@ export function KanbanCard(props: {
     });
     onMount(() => {
         // Only a waiting task moves by drag: to another agent, to Anyone, or onto an agent to start it.
-        if (!el || column() !== "backlog") return;
+        if (!el || (column() !== "backlog" && column() !== "specd")) return;
         const cleanup = draggable({
             element: el,
             getInitialData: () => ({ type: kanbanCardItemType, id: t().id, num: t().card.num }),
@@ -90,6 +115,7 @@ export function KanbanCard(props: {
             classList={{
                 "kanban-card--held": t().state === "held",
                 "kanban-card--needs": column() === "needs",
+                "kanban-card--cancelled": t().state === "cancelled",
             }}
             role="button"
             tabindex={0}
@@ -115,17 +141,60 @@ export function KanbanCard(props: {
                 <Show when={t().state === "held"}>
                     <Pill icon="pause">on hold</Pill>
                 </Show>
-                <Show when={column() === "backlog" && waitingOn(t()).length > 0}>
+                {/* Its spec: "spec #1103 · in review", then "· accepted" once it is Spec'd. */}
+                <For each={(t().card.after ?? []).filter((a) => isResearchKind(a.kind))}>
+                    {(a) => (
+                        <Pill icon="file-lines" title={`${a.kind} #${a.num} ${a.title}`}>
+                            {`${a.kind?.trim().toLowerCase()} #${a.num} · ${linkWord(a)}`}
+                        </Pill>
+                    )}
+                </For>
+                <Show
+                    when={
+                        (column() === "backlog" || column() === "specd") &&
+                        waitingOn(t()).filter((a) => !isResearchKind(a.kind)).length > 0
+                    }
+                >
                     <Pill
                         icon="hourglass-half"
                         title={`Starts after ${waitingOn(t())
+                            .filter((a) => !isResearchKind(a.kind))
                             .map((a) => `#${a.num} ${a.title}`)
                             .join(", ")}: nobody takes it until then`}
                     >
                         {`after #${waitingOn(t())
+                            .filter((a) => !isResearchKind(a.kind))
                             .map((a) => a.num)
                             .join(", #")}`}
                     </Pill>
+                </Show>
+                {/* A spec's build: what accepting it unlocks. */}
+                <Show when={isResearchKind(t().kind)}>
+                    <For each={t().card.followers ?? []}>
+                        {(f) => (
+                            <Pill icon="arrow-right" title={`#${f.num} ${f.title}: ${linkWord(f)}`}>
+                                {`build #${f.num}`}
+                            </Pill>
+                        )}
+                    </For>
+                </Show>
+                <Show when={column() === "needs" || column() === "review"}>
+                    <Pill title="What this task is">{stageWord(t())}</Pill>
+                </Show>
+                <Show when={t().card.pr?.released_in}>
+                    {(tag) => (
+                        <Pill icon="box" tone="ok" title="Shipped in this release">
+                            {tag()}
+                        </Pill>
+                    )}
+                </Show>
+                <Show when={column() === "merged" && t().card.pr?.merged_at}>
+                    <Pill icon="code-merge" title="Its PR merged">
+                        merged
+                    </Pill>
+                </Show>
+                <Show when={t().state === "cancelled"}>
+                    <Pill icon="ban">cancelled</Pill>
                 </Show>
                 <Show when={checklistProgress(t())}>{(p) => <Pill icon="list-check">{p()}</Pill>}</Show>
                 <Show when={t().card.pr_url}>
