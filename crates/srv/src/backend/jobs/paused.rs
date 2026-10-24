@@ -8,7 +8,6 @@
 //! skips are the scheduler's own (`CronScheduler::fire`): those jobs still
 //! have their task.
 
-use std::str::FromStr;
 use std::sync::Arc;
 
 use agentmux_common::time::now_ms;
@@ -67,7 +66,7 @@ pub(crate) fn record_paused_slots(shared: &Store, ledger: &RunLedger, since_ms: 
 /// The slots of `expression` after `since_ms` and up to `until_ms`, at most
 /// [`SLOTS_CAP`].
 fn slots_between(expression: &str, since_ms: i64, until_ms: i64) -> Vec<i64> {
-    let Ok(schedule) = cron::Schedule::from_str(&format!("0 {expression}")) else { return Vec::new() };
+    let Ok(schedule) = crate::backend::cron::expr::parse(expression) else { return Vec::new() };
     let Some(since) = chrono::DateTime::from_timestamp_millis(since_ms) else { return Vec::new() };
     schedule
         .after(&since)
@@ -133,6 +132,49 @@ mod tests {
         job.fire_count = 1;
         store.cron_create(&job).unwrap();
         assert_eq!(record_paused_slots(&store, &ledger, 0, 180_000), 0);
+    }
+
+    /// Two schedulers share one ledger. Under Pause all, A counts two slots
+    /// into one skip row; after Resume all, B wakes for the second slot and
+    /// finds it leased, so it doesn't fire it.
+    #[tokio::test]
+    async fn a_slot_folded_under_pause_all_stays_leased_after_resume_all() {
+        use crate::backend::cron::{CronScheduler, Slot};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("identity-store.db");
+        let scheduler = |delivered: Arc<AtomicUsize>| {
+            let store = Arc::new(Store::open_identity_store(&path).unwrap());
+            let s = CronScheduler::new(None, reqwest::Client::new(), "http://127.0.0.1:1".into(), "t".into(), Arc::new(Broker::new()));
+            s.install_runs(RunLedger::new(store, None, Arc::new(Broker::new())));
+            s.install_delivery(Arc::new(move |_, _| {
+                delivered.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { serde_json::json!({"success": false, "error": "agent not found: uid-t"}) })
+            }));
+            s
+        };
+        let (on_a, on_b) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let (a, b) = (scheduler(on_a.clone()), scheduler(on_b.clone()));
+        let job = crate::backend::cron::test_job("lease-j", "p", "t", "uid-t", "uid-c");
+
+        a.runs().unwrap().set_paused_all(true, "operator").unwrap();
+        for slot in [60_000, 120_000] {
+            let fired = a.fire(&job, Slot::Scheduled(slot)).await;
+            assert!(fired.outcome.is_none(), "skipped, not fired");
+        }
+        a.runs().unwrap().set_paused_all(false, "operator").unwrap();
+
+        let fired = b.fire(&job, Slot::Scheduled(120_000)).await;
+        assert_eq!((fired.run_id, fired.outcome), (None, None), "the folded slot is still leased");
+        assert_eq!((on_a.load(Ordering::SeqCst), on_b.load(Ordering::SeqCst)), (0, 0), "nothing was delivered");
+        let rows = b.runs().unwrap().store().job_runs_for_job("lease-j", 10, None).unwrap();
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!((rows[0].reason.as_str(), rows[0].skip_count, rows[0].last_skip_at_ms), ("paused_all", 2, Some(120_000)));
+
+        // The next slot is free: B tries it (its agent is away, so it misses).
+        assert!(b.fire(&job, Slot::Scheduled(180_000)).await.run_id.is_some());
+        assert_eq!(on_b.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

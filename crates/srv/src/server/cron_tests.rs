@@ -192,3 +192,25 @@ async fn the_target_of_a_name_only_job_reports_its_run() {
         }
     }
 }
+
+/// Standard cron weekdays: `0` (Sunday) is accepted, the expression is
+/// stored as written, and its next fire is on a Sunday (`backend::cron::expr`).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_standard_weekday_expression_is_kept_as_written_and_fires_on_its_day() {
+    use chrono::Datelike;
+    let (state, owner, _) = state();
+    let (status, v) = send(
+        &state,
+        Method::POST,
+        Some(&owner),
+        "/agentmux/cron",
+        Some(json!({"name": "sundays", "expression": "0 6 * * 0", "prompt": "hi", "target": "jobs-target", "created_by": "jobs-owner"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{v}");
+    let id = v["job"]["id"].as_str().unwrap().to_string();
+    state.cron_scheduler.cancel_job(&id);
+    assert_eq!(state.mstore.cron_get(&id).unwrap().unwrap().expression, "0 6 * * 0", "stored as written");
+    let next = chrono::DateTime::parse_from_rfc3339(v["job"]["next_fire"].as_str().unwrap()).unwrap();
+    assert_eq!(next.weekday(), chrono::Weekday::Sun);
+}

@@ -200,27 +200,20 @@ impl RunLedger {
 
     /// A slot of `job` that didn't fire because the job, or every job, was
     /// paused (`reason`): counted into the job's newest row when that is the
-    /// same skip, else a new `skipped` row holding the slot (§3.3).
+    /// same skip, else a new `skipped` row; either way the slot keeps its own
+    /// leased row, so no scheduler fires it later (§3.1, §3.3).
     pub fn record_skip_slot(&self, job: &crate::backend::storage::cron::CronJob, slot_ms: i64, why: &str) {
-        let written = match self.store.job_run_fold_skip(&job.id, why, slot_ms) {
-            Ok(true) => Ok(()),
-            Ok(false) => {
-                let now = now_ms();
-                let mut run = self.row(&job.id, SOURCE_CRON, &job.name, TRIGGER_SCHEDULE, now);
-                run.state = state::SKIPPED.to_string();
-                run.reason = why.to_string();
-                run.scheduled_for_ms = Some(slot_ms);
-                run.triggered_by = BY_SCHEDULER.to_string();
-                run.target_agent_uid = job.target_uid.clone();
-                run.skip_count = 1;
-                run.last_skip_at_ms = Some(slot_ms);
-                run.ended_at_ms = Some(now);
-                // A taken slot is another instance's count of the same skip.
-                self.store.job_run_insert(&run).map(drop)
-            }
-            Err(e) => Err(e),
-        };
-        match written {
+        let now = now_ms();
+        let mut run = self.row(&job.id, SOURCE_CRON, &job.name, TRIGGER_SCHEDULE, now);
+        run.state = state::SKIPPED.to_string();
+        run.reason = why.to_string();
+        run.scheduled_for_ms = Some(slot_ms);
+        run.triggered_by = BY_SCHEDULER.to_string();
+        run.target_agent_uid = job.target_uid.clone();
+        run.skip_count = 1;
+        run.last_skip_at_ms = Some(slot_ms);
+        run.ended_at_ms = Some(now);
+        match self.store.job_run_record_skip_slot(&run) {
             Ok(()) => self.changed(&job.id),
             Err(e) => tracing::warn!(job_id = %job.id, error = %e, "jobs: couldn't record a paused slot"),
         }
@@ -539,8 +532,7 @@ pub fn drone_cost(block_states: &std::collections::HashMap<String, crate::drone:
 /// downtime; only the count of earlier ones stops at `cap`, so a one-minute
 /// job off for a year costs bounded work.
 pub fn missed_slots(expression: &str, base_ms: i64, now_ms: i64, cap: usize) -> Option<(i64, Option<(i64, i64)>)> {
-    use std::str::FromStr;
-    let schedule = cron::Schedule::from_str(&format!("0 {expression}")).ok()?;
+    let schedule = crate::backend::cron::expr::parse(expression).ok()?;
     let now = chrono::DateTime::from_timestamp_millis(now_ms)?;
     let newest = schedule.after(&now).next_back()?.timestamp_millis();
     if newest <= base_ms || newest >= now_ms {
@@ -575,8 +567,7 @@ pub fn registered_in_another_channel(shared_dir: &std::path::Path, uid: &str, ch
 /// The job's next fire time after `slot_ms`: when a pending fire for that
 /// slot expires (§5.2).
 pub fn next_slot_after(expression: &str, slot_ms: i64) -> Option<i64> {
-    use std::str::FromStr;
-    let schedule = cron::Schedule::from_str(&format!("0 {expression}")).ok()?;
+    let schedule = crate::backend::cron::expr::parse(expression).ok()?;
     let base = chrono::DateTime::from_timestamp_millis(slot_ms)?;
     schedule.after(&base).next().map(|t| t.timestamp_millis())
 }

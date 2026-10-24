@@ -15,13 +15,11 @@
 //! The run routes are the run ledger's (SPEC_JOBS_AND_TEMPLATES_2026_10_24.md
 //! §3.2, §3.3 MuxAPI).
 
-use std::str::FromStr;
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Json;
 use chrono::Utc;
-use cron::Schedule;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -131,11 +129,11 @@ fn to_view(job: &CronJob) -> CronJobView {
     }
 }
 
-/// Compute the next UTC fire time for a 5-field cron expression, returned
-/// as an ISO-8601 string. Returns `None` on parse error.
+/// Compute the next UTC fire time for a standard 5-field cron expression
+/// (`backend::cron::expr`), returned as an ISO-8601 string. Returns `None`
+/// on parse error.
 fn next_fire_utc(expression: &str) -> Option<String> {
-    let full = format!("0 {}", expression);
-    let schedule = Schedule::from_str(&full).ok()?;
+    let schedule = crate::backend::cron::expr::parse(expression).ok()?;
     let next = schedule.upcoming(chrono::Utc).next()?;
     Some(next.to_rfc3339())
 }
@@ -201,12 +199,11 @@ pub(super) async fn handle_cron_create(
         super::actor::ActorSite::CronCreate,
         Some(&req.created_by),
     );
-    // Validate expression.
-    let full_expr = format!("0 {}", req.expression);
-    if Schedule::from_str(&full_expr).is_err() {
+    // Validate expression: standard 5-field cron (0 and 7 are Sunday).
+    if let Err(why) = crate::backend::cron::expr::parse(&req.expression) {
         return (
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": format!("invalid cron expression: '{}'", req.expression)})),
+            Json(json!({"error": format!("invalid cron expression: '{}': {why}", req.expression)})),
         );
     }
 

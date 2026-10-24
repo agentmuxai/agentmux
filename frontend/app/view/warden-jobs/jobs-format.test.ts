@@ -21,6 +21,16 @@ describe("describeCron", () => {
         expect(describeCron("0 0 1 * *")).toBe("monthly on day 1 00:00 UTC");
     });
 
+    it("numbers the days as standard cron does: 0 and 7 are Sunday, 1 is Monday", () => {
+        expect(describeCron("0 6 * * 0")).toBe("Sundays 06:00 UTC");
+        expect(describeCron("0 6 * * 7")).toBe("Sundays 06:00 UTC");
+        expect(describeCron("0 6 * * 1")).toBe("Mondays 06:00 UTC");
+        expect(describeCron("0 6 * * 6")).toBe("Saturdays 06:00 UTC");
+        expect(describeCron("0 6 * * MON-FRI")).toBe("weekdays 06:00 UTC");
+        expect(describeCron("0 6 * * sun")).toBe("Sundays 06:00 UTC");
+        expect(describeCron("0 6 * * 8")).toBe("0 6 * * 8");
+    });
+
     it("leaves anything else as the expression", () => {
         expect(describeCron("0 0 1 1 *")).toBe("0 0 1 1 *");
         expect(describeCron("0-30/5 9-17 * * *")).toBe("0-30/5 9-17 * * *");

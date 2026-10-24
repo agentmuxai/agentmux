@@ -24,14 +24,14 @@
 //!
 //! See `docs/specs/SPEC_CRON_LOOP_ROBUSTNESS_2026_06_25.md §3.2`.
 
+pub mod expr;
+
 use agentmux_common::AUTH_KEY_HEADER;
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use agentmux_common::api_types::InjectRequest;
 use chrono::{DateTime, Utc};
-use cron::Schedule;
 
 use crate::backend::jobs::{self, Begin, RunLedger};
 use crate::backend::storage::store::Store;
@@ -289,7 +289,7 @@ impl CronScheduler {
     fn schedule_job_inner(self: &Arc<Self>, job: &CronJob, missed: Option<Missed>) {
         self.cancel_job(&job.id);
 
-        let schedule = match Schedule::from_str(&format!("0 {}", job.expression)) {
+        let schedule = match expr::parse(&job.expression) {
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!(id = %job.id, expr = %job.expression, error = %e, "cron: invalid expression — skipping job");
@@ -737,7 +737,7 @@ fn should_catchup(job: &CronJob, now_dt: DateTime<Utc>) -> bool {
         Some(dt) => dt,
         None => return false,
     };
-    let Ok(schedule) = Schedule::from_str(&format!("0 {}", job.expression)) else {
+    let Ok(schedule) = expr::parse(&job.expression) else {
         return false;
     };
     // First scheduled time after last_fired — if it's already past, a fire was missed.

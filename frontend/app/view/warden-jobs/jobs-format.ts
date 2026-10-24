@@ -9,7 +9,17 @@ import type { PillTone } from "@/app/element/ui";
 import type { JobRunRow } from "@/types/rpc/JobRunRow";
 import type { JobView } from "@/types/rpc/JobView";
 
+// Standard cron numbering, as srv reads it (backend/cron/expr.rs): 0 and 7 are Sunday, 1 is Monday.
 const DAYS = ["Sundays", "Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays"];
+const DAY_NAMES = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+
+/** A day-of-week field with its names (`MON`, `mon-fri`) as standard numbers. */
+function dowNumbers(dow: string): string {
+    return dow.replace(/[a-z]{3}/gi, (name) => {
+        const i = DAY_NAMES.indexOf(name.toUpperCase());
+        return i < 0 ? name : String(i);
+    });
+}
 
 const two = (n: number) => String(n).padStart(2, "0");
 const isNum = (s: string) => /^\d+$/.test(s);
@@ -19,7 +29,8 @@ const isNum = (s: string) => /^\d+$/.test(s);
 export function describeCron(expression: string): string {
     const f = expression.trim().split(/\s+/);
     if (f.length !== 5) return expression;
-    const [min, hour, dom, mon, dow] = f;
+    const [min, hour, dom, mon] = f;
+    const dow = dowNumbers(f[4]);
     const anyDay = dom === "*" && mon === "*";
     if (anyDay && dow === "*" && hour === "*") {
         if (min === "*") return "every minute";
@@ -35,7 +46,7 @@ export function describeCron(expression: string): string {
     const time = `${two(Number(hour))}:${two(Number(min))} UTC`;
     if (anyDay && dow === "*") return `daily ${time}`;
     if (anyDay && dow === "1-5") return `weekdays ${time}`;
-    if (anyDay && /^\d(,\d)*$/.test(dow)) {
+    if (anyDay && /^\d(,\d)*$/.test(dow) && dow.split(",").every((d) => Number(d) <= 7)) {
         const days = dow.split(",").map((d) => DAYS[Number(d) % 7]);
         if (days.every(Boolean)) return `${days.join(", ")} ${time}`;
     }

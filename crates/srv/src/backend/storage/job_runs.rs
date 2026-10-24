@@ -611,38 +611,81 @@ impl Store {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
-    /// Count slot `slot_ms` into the job's newest row when that row is a skip
-    /// for `reason` that hasn't counted it yet (`last_skip_at_ms` before the
-    /// slot), so consecutive skips stay one row with no row per slot (§3.1).
-    /// `Ok(false)`: the newest row is something else, and the caller writes a
-    /// new skip row. The update is guarded by the slot, so two instances
-    /// sharing the ledger count a slot once.
-    pub fn job_run_fold_skip(&self, job_id: &str, reason: &str, slot_ms: i64) -> Result<bool, StoreError> {
+    /// Record `skip`, a `skipped` row for one slot (`scheduled_for_ms` set,
+    /// `skip_count` 1). When the job's newest row is a skip for the same
+    /// reason, the slot is counted into that row (`skip_count` + 1,
+    /// `last_skip_at_ms`) and `skip` is kept hidden under it
+    /// (`collapsed_into`), so consecutive skips show as one row while every
+    /// slot keeps its own row in the unique `(job_id, scheduled_for_ms)`
+    /// index: the slot stays leased, and another scheduler sharing the job
+    /// can't fire it later (after Resume all, say). A slot already taken (by
+    /// another instance's count, or a fire) counts nothing.
+    pub fn job_run_record_skip_slot(&self, skip: &JobRun) -> Result<(), StoreError> {
         let mut conn = self.conn().lock().unwrap();
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let newest: Option<(String, String, String, Option<i64>)> = tx
+        let newest: Option<(String, String, String)> = tx
             .query_row(
-                "SELECT id, state, reason, last_skip_at_ms FROM db_job_runs
+                "SELECT id, state, reason FROM db_job_runs
                   WHERE job_id = ?1 AND collapsed_into = ''
                   ORDER BY started_at_ms DESC, rowid DESC LIMIT 1",
-                params![job_id],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                params![skip.job_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .optional()?;
-        let folded = match newest {
-            Some((id, st, why, last)) if st == state::SKIPPED && why == reason => {
-                if last.is_none_or(|l| l < slot_ms) {
-                    tx.execute(
-                        "UPDATE db_job_runs SET skip_count = skip_count + 1, last_skip_at_ms = ?2 WHERE id = ?1",
-                        params![id, slot_ms],
-                    )?;
-                }
-                true
+        let fold_into = newest.filter(|(_, st, why)| st == state::SKIPPED && *why == skip.reason).map(|(id, _, _)| id);
+        let inserted = tx.execute(
+            &format!(
+                "INSERT OR IGNORE INTO db_job_runs ({COLS}, collapsed_into) VALUES \
+                 (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33)"
+            ),
+            params![
+                skip.id,
+                skip.job_id,
+                skip.job_source,
+                skip.job_name,
+                skip.template_id,
+                skip.template_version,
+                skip.trigger,
+                skip.scheduled_for_ms,
+                skip.triggered_by,
+                skip.attempt,
+                skip.state,
+                skip.reason,
+                skip.infra,
+                skip.outcome,
+                skip.summary,
+                skip.target_agent_uid,
+                skip.block_id,
+                skip.turn_id,
+                skip.account_id,
+                skip.provider,
+                skip.started_at_ms,
+                skip.ended_at_ms,
+                skip.cost_usd,
+                skip.cost_known as i64,
+                skip.cost_partial as i64,
+                skip.output_tokens,
+                skip.steps,
+                skip.links.to_string(),
+                if fold_into.is_some() { 0 } else { skip.skip_count },
+                skip.last_skip_at_ms,
+                skip.reporter,
+                skip.recorded_by,
+                fold_into.as_deref().unwrap_or(""),
+            ],
+        )?;
+        if inserted > 0 {
+            if let Some(into) = &fold_into {
+                tx.execute(
+                    "UPDATE db_job_runs SET skip_count = skip_count + 1,
+                            last_skip_at_ms = MAX(COALESCE(last_skip_at_ms, 0), ?2)
+                      WHERE id = ?1",
+                    params![into, skip.scheduled_for_ms],
+                )?;
             }
-            _ => false,
-        };
+        }
         tx.commit()?;
-        Ok(folded)
+        Ok(())
     }
 
     /// The job's spend since `since_ms`: the summed `cost_usd` of its runs
