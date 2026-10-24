@@ -19,7 +19,7 @@
  * fixed semantic `side` — left is "what agent, what mode, how much context
  * is left" (the runtime trigger + the context group); right is "status
  * indicators + the one real action" (process badge, auth tag, then
- * HOST/SANDBOX+Shell, Shell always outermost) — used ONLY as the fallback
+ * NATIVE/CONTAINER+Shell, Shell always outermost) — used ONLY as the fallback
  * ordering when real measurement isn't available yet (see Rev 6/7's own
  * paragraphs). Once real widths ARE available, `rows()` computes the
  * actual left/right split and row grouping fresh, which can and does
@@ -51,7 +51,7 @@
  *     that's just inherently lopsided by content. Fixed by moving the
  *     context group to the left (paired with the runtime trigger — both
  *     are "primary awareness" of the running agent), leaving badge/auth
- *     paired with HOST/SANDBOX+Shell on the right ("secondary status +
+ *     paired with NATIVE/CONTAINER+Shell on the right ("secondary status +
  *     the action button"). This is a FIXED regrouping chosen by counting
  *     realistic sub-element totals for the common case, not a per-render
  *     computed weight — simpler, and the earlier per-render weight
@@ -65,7 +65,7 @@
  *
  *   - Rev 6 (2026-08-26): even with both of the above fixed, the FIXED
  *     Rev 5 grouping still needed 2 lines in the single common case that
- *     matters most (Claude + context tracked + HOST + logged in) — the
+ *     matters most (Claude + context tracked + NATIVE + logged in) — the
  *     runtime trigger + full context group (3 sub-elements) together are
  *     wider than one line holds, while badge+auth+hostShell fit
  *     comfortably. No fixed pairing can be right for every combination
@@ -667,7 +667,7 @@ interface AgentComposerStripProps {
     /** Provider id — needed for applyRuntimeChange. */
     providerId?: string;
     /** `block.meta["agentMode"]` — "host" or "container". Drives the compact
-     *  HOST/SANDBOX tag next to the model selector (replaces the old,
+     *  NATIVE/CONTAINER tag next to the model selector (replaces the old,
      *  confirmed-inert "Host — full system access" / "Container — isolated
      *  Docker sandbox" pane row — see
      *  docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md §3.2). */
@@ -982,7 +982,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
             key: "hostShell",
             side: "right",
             interactive: true,
-            // Shell (the button) on the OUTER end, HOST badge (passive)
+            // Shell (the button) on the OUTER end, NATIVE badge (passive)
             // inward — mirrored by side the same way ctx's Compact is.
             // On the right this is the existing "Shell always outermost"
             // order, unchanged; the flip only shows in the degenerate
@@ -995,7 +995,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
             // passive badge inward past a NEIGHBORING slot's interactive
             // element (Compact), which a single wrapping flex item never
             // allowed. The user explicitly chose this over the older
-            // "HOST just left of Shell" pairing when the two directives
+            // "NATIVE just left of Shell" pairing when the two directives
             // collided (see _composer-strip.scss's removal note).
             render: (rowSide) => {
                 const hostBadge = () => (

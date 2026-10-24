@@ -140,6 +140,11 @@ export function groupProvidersByStartupFilename(): { filename: string; providerN
 /** The agent kinds Operator Config entries can target. */
 export type AgentKind = "host" | "container";
 
+/** What the person reads for an agent kind. The stored value stays `host` / `container`. */
+export function agentKindLabel(kind: string): string {
+    return kind === "host" ? "Native" : kind === "container" ? "Container" : kind;
+}
+
 /** The separator between Global Memory sections, as srv's
  *  `GLOBAL_SECTION_SEPARATOR` (storage/bundles.rs). */
 export const GLOBAL_SECTION_SEPARATOR = "\n\n---\n\n";

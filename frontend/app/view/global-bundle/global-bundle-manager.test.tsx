@@ -148,7 +148,7 @@ describe("GlobalBundleManager — tiles first", () => {
         render(() => <GlobalBundleManager />);
 
         await waitFor(() =>
-            expect(tileTitles()).toEqual(["Policy", "Alpha", "Beta", "CLAUDE.md", "Delivered to a host agent", "+ Add memory"])
+            expect(tileTitles()).toEqual(["Policy", "Alpha", "Beta", "CLAUDE.md", "Delivered to a Native agent", "+ Add memory"])
         );
         const system = document.querySelector('[data-kind="system"]');
         expect(system?.querySelector(".memory-file-card-badge")?.textContent).toBe("system");
@@ -161,7 +161,7 @@ describe("GlobalBundleManager — tiles first", () => {
         );
         expect(sectionsMock.mock.calls.at(-1)?.[1]).toEqual({ agent_kind: "host" });
         expect(screen.getByTestId("global-memory-token-strip")).toHaveTextContent(
-            "Every host agent starts with ~40 tok of Global Memory"
+            "Every Native agent starts with ~40 tok of Global Memory"
         );
         expect(document.querySelector('[data-kind="preview"] .memory-file-card-tokens')?.textContent).toBe("~40 tok");
         expect(document.querySelector('[data-kind="claude-config"] .memory-file-card-tokens')?.textContent).toBe("~2 tok");
@@ -183,14 +183,14 @@ describe("GlobalBundleManager — tiles first", () => {
         fireEvent.click(screen.getByRole("radio", { name: "Container" }));
         await waitFor(() =>
             expect(screen.getByTestId("global-memory-token-strip")).toHaveTextContent(
-                "Every container agent starts with ~7 tok of Global Memory"
+                "Every Container agent starts with ~7 tok of Global Memory"
             )
         );
         expect(sectionsMock.mock.calls.at(-1)?.[1]).toEqual({ agent_kind: "container" });
         expect(document.querySelector('[data-id="sys-host"] .memory-file-card-meta')?.textContent).toContain(
-            "Not sent to container agents"
+            "Not sent to Container agents"
         );
-        expect(tileTitles()).toContain("Delivered to a container agent");
+        expect(tileTitles()).toContain("Delivered to a Container agent");
     });
 
     test("Largest first orders the tiles by delivered tokens, and stops dragging", async () => {
@@ -576,7 +576,7 @@ describe("GlobalBundleManager — combined preview tile", () => {
     test("opens the exact composed block", async () => {
         listMemoriesMock.mockResolvedValue([bundle("g-a", "Alpha", "alpha body")]);
         render(() => <GlobalBundleManager />);
-        await openTile("Delivered to a host agent");
+        await openTile("Delivered to a Native agent");
         expect(await screen.findByText("[Workspace] Alpha", { selector: ".heading" })).toBeInTheDocument();
     });
 });

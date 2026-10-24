@@ -14,7 +14,7 @@
 // [Pre-Rev-7 history] In flow order: 1. Controls zone (left) — whichever
 // slots the JS split assigned left; 2. Stats zone (centered); 3. Right
 // zone — whichever slots landed right, semantically process badge, auth
-// tag, and the HOST/SANDBOX tag + Shell toggle (paired as a single unit —
+// tag, and the NATIVE/CONTAINER tag + Shell toggle (paired as a single unit —
 // see .agent-composer-strip-host-shell), Shell always outermost. Tiered
 // split points chose which zones shared a line: <280px (3 lines, each
 // zone its own line), 280-481px (2 lines: [controls|stats] then [right]
@@ -34,7 +34,7 @@
 //   what actually fixed the real clipping bug this file has a documented
 //   history with (PR #2393/#2408). Growing taller is always preferable to
 //   silently clipping Shell.
-// - The shed-content queries further down (hiding auth/HOST at
+// - The shed-content queries further down (hiding auth/NATIVE at
 //   extreme narrow widths) — orthogonal to row-pairing, untouched by
 //   Rev 7 (spec §4).
 
@@ -366,19 +366,19 @@
     }
 }
 
-// [Superseded, element-level edge priority 2026-08-26] HOST/SANDBOX +
+// [Superseded, element-level edge priority 2026-08-26] NATIVE/CONTAINER +
 // Shell were previously paired as a single inline-flex unit per a
-// 2026-08-24 user request ("the HOST/SANDBOX indicator should be just
+// 2026-08-24 user request ("the NATIVE/CONTAINER indicator should be just
 // to the left of the Shell button") — the user explicitly chose to
 // override that with strict edge priority when the two directives
 // collided (interactive elements always closest to the edge means
-// Compact can sit BETWEEN the passive HOST badge and Shell). Full
+// Compact can sit BETWEEN the passive NATIVE badge and Shell). Full
 // wrapper history: reagentx P1 PR #2393 (internal-wrap fallback),
 // reagentx/Codex P2 PR #2408 (min-width give so Shell never clips).
 // [Removed, element-level edge priority 2026-08-26] The
 // `.agent-composer-strip-host-shell` wrapper (inline-flex, internal
 // wrap fallback, --space-1 gap — reagentx P1 PR #2393 / P1 PR #2408
-// history) is gone: HOST/SANDBOX and Shell now render as direct
+// history) is gone: NATIVE/CONTAINER and Shell now render as direct
 // siblings in the slot's measure wrapper (same shape as the ctx slot's
 // own 3 elements), so each is independently orderable by the
 // edge-priority rules below — a passive badge trapped inside a wrapper
@@ -390,7 +390,7 @@
 // Element-level edge priority (2026-08-26, user-directed): within each
 // row side, interactive elements (buttons/dropdowns) order toward the
 // strip's outer edge ACROSS slot boundaries — a passive element from
-// one slot (the HOST badge) must never sit closer to the edge than a
+// one slot (the NATIVE badge) must never sit closer to the edge than a
 // neighboring slot's interactive one (Compact). CSS `order` changes
 // VISUAL placement only: DOM order — and with it slot measurement,
 // pairing math, and keyboard focus order — is untouched. The JS layers
@@ -570,7 +570,7 @@
 // auth 70px + Shell 40px + 3 gaps ≈ 220px), not measured DOM output —
 // confirm against real rendered widths in `task dev` and adjust.
 
-// HOST/SANDBOX sheds ahead of auth (below), not alongside it: it renders
+// NATIVE/CONTAINER sheds ahead of auth (below), not alongside it: it renders
 // beside Shell — the strip's one real action, which never sheds — so
 // that neighborhood needs strictly more guaranteed room than auth alone
 // did on its own. (The badge is now a direct row-zone item — the

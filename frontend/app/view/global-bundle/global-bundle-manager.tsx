@@ -35,7 +35,7 @@ import { shareLabel, tokensTitle } from "@/app/view/native-memory/memory-tokens"
 import { estimateTokenCount } from "@/util/format-count";
 import "@/app/view/native-memory/native-memory-manager.scss";
 import { GlobalMemoryFullView } from "./GlobalMemoryFullView";
-import { GlobalBundleViewModel, utf8Bytes, type GlobalMemoryView } from "./global-bundle-model";
+import { agentKindLabel, GlobalBundleViewModel, utf8Bytes, type GlobalMemoryView } from "./global-bundle-model";
 import { GlobalMemoryTokenStrip } from "./GlobalMemoryTokenStrip";
 import "./global-bundle.scss";
 
@@ -47,7 +47,7 @@ function viewTitle(model: GlobalBundleViewModel, view: GlobalMemoryView): string
         case "claude-config":
             return "CLAUDE.md";
         case "preview":
-            return `Delivered to a ${model.agentKindAtom()} agent`;
+            return `Delivered to a ${agentKindLabel(model.agentKindAtom())} agent`;
         case "entry":
             return model.openEntryAtom()?.name ?? "";
     }
@@ -77,7 +77,7 @@ export const GlobalBundleManager = (): JSX.Element => {
         const delivered = model.tokensByIdAtom().get(entry.id);
         const age = formatFileAge(entry.updated_at);
         if (!delivered && model.deliveredAtom()) {
-            const why = (entry.instructions ?? "").trim() ? `Not sent to ${model.agentKindAtom()} agents` : "Empty";
+            const why = (entry.instructions ?? "").trim() ? `Not sent to ${agentKindLabel(model.agentKindAtom())} agents` : "Empty";
             return [why, age].filter(Boolean).join(" · ");
         }
         const share = delivered ? shareLabel(delivered.tokens_est, model.deliveredTotalsAtom()?.total ?? 0) : "";
@@ -214,7 +214,7 @@ export const GlobalBundleManager = (): JSX.Element => {
 
                 <MemoryTile
                     icon="fa-layer-group"
-                    title={`Delivered to a ${model.agentKindAtom()} agent`}
+                    title={`Delivered to a ${agentKindLabel(model.agentKindAtom())} agent`}
                     monoTitle={false}
                     tokens={model.deliveredTotalsAtom()?.total}
                     tokensTitle={

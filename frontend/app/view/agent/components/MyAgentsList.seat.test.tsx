@@ -76,7 +76,7 @@ describe("MyAgentsList — seats", () => {
         expect(badge).toHaveTextContent("Worker");
         // After the runtime badge, on the name's line.
         const children = [...line1.children];
-        expect(children.indexOf(badge)).toBeGreaterThan(children.findIndex((c) => /HOST/i.test(c.textContent ?? "")));
+        expect(children.indexOf(badge)).toBeGreaterThan(children.findIndex((c) => /NATIVE/i.test(c.textContent ?? "")));
         // Under the account line.
         const account = container.querySelector(".agent-recent-sessions-account")!;
         expect(account.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
