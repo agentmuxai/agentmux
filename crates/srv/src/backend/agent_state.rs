@@ -224,6 +224,12 @@ pub fn unavailable_of_block(mstore: &Store, identity: Option<&Store>, block_id: 
     Some(Unavailable { state, code: failure.code, title: failure.title, resets_at_ms: failure.resets_at_ms, since_ms, account_id })
 }
 
+/// The block's state now and, while it is `limited` or `signed_out`, why.
+pub fn state_and_unavailable(mstore: &Store, block_id: &str) -> (Option<AgentState>, Option<Unavailable>) {
+    let state = agent_status_of_block(mstore, block_id).map(|s| s.state);
+    (state, unavailable_of_block(mstore, None, block_id, agentmux_common::time::now_ms_u64()))
+}
+
 /// The accounts a pane's run counts against: `agent:run_account`, the account
 /// it launched on; a pane from before that key falls back to its agent's
 /// current links. One rule for the spawn gate's `account_blocks`,

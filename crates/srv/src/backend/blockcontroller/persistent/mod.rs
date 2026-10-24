@@ -1616,11 +1616,7 @@ fn classify_exit_line(exit_code: Option<i32>, line: &str) -> Option<crate::agent
     let parsed_line: Option<serde_json::Value> = serde_json::from_str(line).ok();
     let stderr_text = if parsed_line.is_none() { line } else { "" };
     let failure = crate::agents::failure::classify(exit_code, None, stderr_text, parsed_line.as_ref());
-    if failure.retryable || failure.code != crate::agents::failure::FailureClass::UnknownNonZero {
-        Some(failure)
-    } else {
-        None
-    }
+    (failure.retryable || failure.code != crate::agents::failure::FailureClass::UnknownNonZero).then_some(failure)
 }
 
 /// Record `failure` as the block's `agent:last_failure`, then publish it as
@@ -1632,8 +1628,7 @@ fn surface_failure(
     mstore: &Option<Arc<Store>>,
     event_bus: &Option<Arc<EventBus>>,
 ) {
-    // With its reset, so the published event and the stored meta agree.
-    let failure = &crate::agents::limit_reset::with_reset(block_id, failure);
+    let failure = &crate::agents::limit_reset::with_reset(block_id, failure); // the event and the meta agree
     core::persist_last_failure(block_id, Some(failure), mstore, event_bus);
     if let Some(broker) = broker {
         broker.publish_event::<crate::backend::mps_events::AgentFailed>(failure, vec![format!("block:{}", block_id)], 1);
