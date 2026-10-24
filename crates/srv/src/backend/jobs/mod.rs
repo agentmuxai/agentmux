@@ -176,15 +176,24 @@ impl RunLedger {
     }
 
     /// Record what a cron fire's delivery decided for run `run_id` of
-    /// `job`. A scheduled fire also ends the job's older pending fire: it
-    /// is superseded when this one is pending in its place, else expired
-    /// (its next fire time came).
-    pub fn record_delivery(&self, run_id: &str, job: &crate::backend::storage::cron::CronJob, outcome: &FireOutcome, scheduled: bool) {
+    /// `job`. `delivery_started_ms` is when the delivery began: delivery can
+    /// wait for the turn it starts, so that turn may begin, or even end,
+    /// before the answer. A scheduled fire also ends the job's older pending
+    /// fire: it is superseded when this one is pending in its place, else
+    /// expired (its next fire time came).
+    pub fn record_delivery(
+        &self,
+        run_id: &str,
+        job: &crate::backend::storage::cron::CronJob,
+        outcome: &FireOutcome,
+        scheduled: bool,
+        delivery_started_ms: i64,
+    ) {
         let now = now_ms();
         let latest = job.catch_up == CATCH_UP_LATEST;
         let result = match outcome {
             FireOutcome::Delivered { block_id } => {
-                self.mark_running(run_id, &job.target_uid, block_id.as_deref().unwrap_or(""), now);
+                self.mark_running(run_id, &job.target_uid, block_id.as_deref().unwrap_or(""), delivery_started_ms);
                 Ok(())
             }
             FireOutcome::Missed { reason: MissReason::TargetStopped } => {
@@ -213,12 +222,12 @@ impl RunLedger {
     /// its next fire time has passed). Still missing, or a failure the
     /// held-jekt replay also retries (the agent still starting, a rate
     /// limit, a full queue, not signed in yet), keeps it pending for the
-    /// next wake or sweep.
-    pub fn record_pending_delivery(&self, run: &JobRun, outcome: &FireOutcome) {
+    /// next wake or sweep. `delivery_started_ms` as for [`Self::record_delivery`].
+    pub fn record_pending_delivery(&self, run: &JobRun, outcome: &FireOutcome, delivery_started_ms: i64) {
         let now = now_ms();
         let result = match outcome {
             FireOutcome::Delivered { block_id } => {
-                self.mark_running(&run.id, &run.target_agent_uid, block_id.as_deref().unwrap_or(""), now);
+                self.mark_running(&run.id, &run.target_agent_uid, block_id.as_deref().unwrap_or(""), delivery_started_ms);
                 Ok(())
             }
             FireOutcome::Missed { .. } => Ok(()),
@@ -390,9 +399,13 @@ impl RunLedger {
 
 /// Whether a pending fire's failed delivery is retried at the next wake or
 /// sweep rather than closing the run: the same classification as the
-/// held-jekt replay (`server::jekt_held`).
+/// held-jekt replay (`server::jekt_held`), plus an account out of quota
+/// (`HoldReason::Limited`), which clears at its reset.
 fn retry_later(error: &str) -> bool {
-    crate::backend::reactive::is_transient_delivery_error(error) || crate::backend::reactive::is_spawn_gate_refusal(error)
+    crate::backend::reactive::is_transient_delivery_error(error)
+        || crate::backend::reactive::is_spawn_gate_refusal(error)
+        || error.contains("out of quota")
+        || error.contains("usage limit")
 }
 
 /// The summed `cost_usd` of a Drone run's blocks: only Agent blocks report
@@ -414,27 +427,42 @@ pub fn drone_cost(block_states: &std::collections::HashMap<String, crate::drone:
 }
 
 /// Missed cron slots after `base_ms` and before `now_ms`: the newest, and
-/// the earlier ones as `(first, count)`. Counting stops at `cap` slots so a
-/// one-minute job off for a year costs bounded work.
+/// the earlier ones as `(first, count)`. The newest is the schedule's last
+/// occurrence before now, found directly, so it is right after any
+/// downtime; only the count of earlier ones stops at `cap`, so a one-minute
+/// job off for a year costs bounded work.
 pub fn missed_slots(expression: &str, base_ms: i64, now_ms: i64, cap: usize) -> Option<(i64, Option<(i64, i64)>)> {
     use std::str::FromStr;
     let schedule = cron::Schedule::from_str(&format!("0 {expression}")).ok()?;
+    let now = chrono::DateTime::from_timestamp_millis(now_ms)?;
+    let newest = schedule.after(&now).next_back()?.timestamp_millis();
+    if newest <= base_ms || newest >= now_ms {
+        return None;
+    }
     let base = chrono::DateTime::from_timestamp_millis(base_ms)?;
     let mut first = None;
-    let mut newest = None;
     let mut count: i64 = 0;
     for t in schedule.after(&base).take(cap) {
         let ms = t.timestamp_millis();
-        if ms >= now_ms {
+        if ms >= newest {
             break;
         }
         first.get_or_insert(ms);
-        newest = Some(ms);
         count += 1;
     }
-    let newest = newest?;
-    let earlier = (count > 1).then(|| (first.unwrap_or(newest), count - 1));
-    Some((newest, earlier))
+    Some((newest, first.map(|f| (f, count))))
+}
+
+/// Whether the agent with `uid` is registered by another channel's
+/// AgentMux on this computer and that process is alive: the cross-channel
+/// tier the inject path forwards to (Tier 2b, the host-global shared
+/// registry). A pending fire whose agent lives there is delivered through
+/// it, rather than expiring here unseen.
+pub fn registered_in_another_channel(shared_dir: &std::path::Path, uid: &str, channel: &str) -> bool {
+    !uid.is_empty()
+        && crate::backend::reactive::registry::list_all_shared(shared_dir)
+            .iter()
+            .any(|e| e.uid == uid && e.channel != channel && crate::backend::reactive::registry::pid_alive(e.pid))
 }
 
 /// The job's next fire time after `slot_ms`: when a pending fire for that

@@ -88,6 +88,20 @@ fn missed_slots_counts_the_newest_and_the_earlier_ones() {
     assert_eq!(next_slot_after("0 * * * *", base - 30_000), Some(base - 30_000 + 60 * MIN));
 }
 
+/// After long downtime the newest missed slot is still the last one before
+/// now; only the count of earlier ones is capped.
+#[test]
+fn the_newest_missed_slot_survives_long_downtime() {
+    let now = chrono::DateTime::parse_from_rfc3339("2026-10-24T08:00:30Z").unwrap().timestamp_millis();
+    let base = now - 70 * 24 * 60 * MIN;
+    let (newest, earlier) = missed_slots("* * * * *", base, now, 100_000).unwrap();
+    assert_eq!(newest, now - 30_000, "08:00, the last minute before now");
+    let (first, count) = earlier.unwrap();
+    assert_eq!(count, 100_000, "capped");
+    assert!(first > base && first < base + MIN + 1, "counting starts at the first slot after base");
+    assert_eq!(next_slot_after("* * * * *", newest), Some(newest + MIN), "a pending fire for it expires at 08:01");
+}
+
 #[test]
 fn the_brief_line_names_the_run_and_a_late_one_says_so() {
     let line = brief_line("run-1", None, 0);
@@ -150,6 +164,9 @@ struct Rig {
     /// What the fake delivery answers.
     answer: Arc<Mutex<serde_json::Value>>,
     present: Arc<Mutex<bool>>,
+    /// A turn ledger published while the fake delivery runs, as a real
+    /// delivery that waits for the turn it starts may see.
+    turn_during_delivery: Arc<Mutex<Option<serde_json::Value>>>,
 }
 
 const DELIVERED: &str = r#"{"success": true, "block_id": "b1"}"#;
@@ -169,15 +186,31 @@ fn rig_on(dir: tempfile::TempDir, store: Arc<Store>) -> Rig {
     let seen: Arc<Mutex<Vec<_>>> = Arc::default();
     let answer = Arc::new(Mutex::new(serde_json::from_str::<serde_json::Value>(DELIVERED).unwrap()));
     let (sink, reply) = (seen.clone(), answer.clone());
+    let turn_during_delivery: Arc<Mutex<Option<serde_json::Value>>> = Arc::default();
+    let (turn, publisher) = (turn_during_delivery.clone(), broker.clone());
     sched.install_delivery(Arc::new(move |req, _uid| {
         sink.lock().unwrap().push(req);
+        if let Some(mut data) = turn.lock().unwrap().take() {
+            // The turn starts and ends now, while the delivery runs.
+            let started = agentmux_common::time::now_ms();
+            data["turn_id"] = json!(started);
+            data["started_at_ms"] = json!(started);
+            data["ended_at_ms"] = json!(started + 1);
+            publisher.publish(MuxEvent {
+                event: EVENT_AGENT_TURN.to_string(),
+                scopes: vec!["block:b1".to_string()],
+                sender: String::new(),
+                persist: 1,
+                data: Some(data),
+            });
+        }
         let body = reply.lock().unwrap().clone();
         Box::pin(async move { body })
     }));
     let present = Arc::new(Mutex::new(false));
     let p = present.clone();
     sched.install_presence(Arc::new(move |_uid: &str| *p.lock().unwrap()));
-    Rig { _dir: dir, store, broker, ledger, sched, seen, answer, present }
+    Rig { _dir: dir, store, broker, ledger, sched, seen, answer, present, turn_during_delivery }
 }
 
 impl Rig {
@@ -221,6 +254,48 @@ impl Rig {
         }
         panic!("run {run_id} never got there: {:?}", self.store.job_run_get(run_id).unwrap());
     }
+}
+
+/// Delivery waits for the turn it starts, so a fast turn can start and end
+/// before the answer: it is still this run's whole turn, not a partial or
+/// an earlier one.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_turn_that_starts_and_ends_during_delivery_is_the_runs() {
+    let rig = rig();
+    let job = rig.job("j-fast", CATCH_UP_SKIP);
+    *rig.turn_during_delivery.lock().unwrap() = Some(json!({
+        "block_id": "b1", "active": false, "end": "completed", "cost_usd": 0.05, "output_tokens": 10, "steps": 1,
+    }));
+    let run_id = rig.sched.fire(&job, Slot::Scheduled(1_800_000_000_000)).await.run_id.unwrap();
+    // Answered only after the turn ended: the run still takes it, whole.
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    let done = rig.wait_for(&run_id, |r| r.state == state::FINISHED).await;
+    assert!(done.turn_id.is_some(), "{done:?}");
+    assert_eq!((done.cost_partial, done.cost_usd, done.infra.as_str()), (false, 0.05, infra::OK));
+}
+
+/// A pending fire's agent may be registered by another channel's AgentMux
+/// on this computer: presence covers the shared registry the inject path
+/// forwards through.
+#[test]
+fn an_agent_in_another_channel_counts_as_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let write = |agent: &str, channel: &str, uid: &str, pid: u32| {
+        let path = dir.path().join(agent);
+        std::fs::create_dir_all(&path).unwrap();
+        let entry = json!({
+            "agent_id": agent, "local_url": "http://127.0.0.1:1", "block_id": "b", "pid": pid,
+            "updated_at": 1, "channel": channel, "uid": uid,
+        });
+        std::fs::write(path.join(format!("{channel}.json")), entry.to_string()).unwrap();
+    };
+    write("agent-y", "channel-a", "uid-y", std::process::id());
+    write("agent-z", "channel-a", "uid-z", u32::MAX);
+    assert!(registered_in_another_channel(dir.path(), "uid-y", "channel-b"));
+    assert!(!registered_in_another_channel(dir.path(), "uid-y", "channel-a"), "its own channel is the local check's");
+    assert!(!registered_in_another_channel(dir.path(), "uid-z", "channel-b"), "a dead process isn't back");
+    assert!(!registered_in_another_channel(dir.path(), "uid-q", "channel-b"));
+    assert!(!registered_in_another_channel(dir.path(), "", "channel-b"));
 }
 
 /// A delivered fire: its run id is the request id and ends the prompt; the
@@ -283,7 +358,7 @@ async fn an_undelivered_fire_is_missed_and_not_counted() {
     let missing = crate::backend::cron::FireOutcome::Missed { reason: crate::backend::cron::MissReason::TargetMissing };
     for slot in [1_800_000_120_000, 1_800_000_180_000] {
         let Begin::Run(id) = rig.ledger.begin_cron(&job, TRIGGER_SCHEDULE, Some(slot), BY_SCHEDULER) else { panic!() };
-        rig.ledger.record_delivery(&id, &job, &missing, true);
+        rig.ledger.record_delivery(&id, &job, &missing, true, 0);
     }
     let skips: Vec<_> = rig.runs("j-miss").into_iter().filter(|r| r.state == state::SKIPPED).collect();
     assert_eq!(skips.len(), 1, "consecutive skips collapse");
@@ -374,6 +449,7 @@ async fn a_pending_fire_survives_a_try_again_answer() {
         r#"{"success": false, "error": "persistent process is still starting up — try again shortly"}"#,
         r#"{"success": false, "error": "identity spawn gate: no credentials for claude"}"#,
         r#"{"success": false, "error": "rate limit exceeded"}"#,
+        r#"{"success": false, "error": "agent y's account is out of quota"}"#,
     ] {
         rig.answer(answer);
         assert_eq!(rig.sched.deliver_pending().await, 0);

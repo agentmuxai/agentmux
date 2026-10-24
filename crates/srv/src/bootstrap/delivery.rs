@@ -27,9 +27,20 @@ pub fn install_cron_delivery(state: &AppState) {
             .await
         })
     }));
-    // A pending fire (catch-up `latest`) waits until its agent is back.
+    // A pending fire (catch-up `latest`) waits until its agent is back,
+    // here or in another channel on this computer (the inject path reaches
+    // both).
     let handler = state.reactive_handler;
-    state.cron_scheduler.install_presence(Arc::new(move |uid: &str| handler.has_uid_registration(uid)));
+    state.cron_scheduler.install_presence(Arc::new(move |uid: &str| {
+        handler.has_uid_registration(uid)
+            || crate::registry::resolve_shared_reactive_dir().is_some_and(|dir| {
+                crate::backend::jobs::registered_in_another_channel(
+                    &dir,
+                    uid,
+                    &crate::backend::reactive::registry::local_channel_id(),
+                )
+            })
+    }));
 }
 
 /// Where a message for an agent block goes.

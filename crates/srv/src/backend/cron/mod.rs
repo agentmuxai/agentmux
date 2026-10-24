@@ -449,17 +449,18 @@ impl CronScheduler {
             Slot::CatchUp(ms) => Some(ms),
             _ => None,
         };
+        let delivery_started = agentmux_common::time::now_ms();
         let Some(outcome) = self.deliver(job, run_id.as_deref(), late_for).await else {
             if let (Some(runs), Some(run_id)) = (self.runs(), &run_id) {
                 let failed = FireOutcome::Failed { error: "no way to deliver".to_string() };
-                runs.record_delivery(run_id, job, &failed, false);
+                runs.record_delivery(run_id, job, &failed, false, delivery_started);
             }
             return Fired { run_id, outcome: None };
         };
         let scheduled = !matches!(slot, Slot::Manual { .. });
         if let (Some(runs), Some(run_id)) = (self.runs(), &run_id) {
             let (runs, run_id, job, o) = (runs.clone(), run_id.clone(), job.clone(), outcome.clone());
-            let _ = tokio::task::spawn_blocking(move || runs.record_delivery(&run_id, &job, &o, scheduled)).await;
+            let _ = tokio::task::spawn_blocking(move || runs.record_delivery(&run_id, &job, &o, scheduled, delivery_started)).await;
         }
         if scheduled && outcome.delivered() {
             self.record_fire(id);
@@ -591,8 +592,9 @@ impl CronScheduler {
             if !back {
                 continue;
             }
+            let delivery_started = agentmux_common::time::now_ms();
             let Some(outcome) = self.deliver(&job, Some(&run.id), run.scheduled_for_ms).await else { continue };
-            runs.record_pending_delivery(&run, &outcome);
+            runs.record_pending_delivery(&run, &outcome, delivery_started);
             if outcome.delivered() {
                 self.record_fire(&job.id);
                 self.stop_at_max_fires(&job.id);
