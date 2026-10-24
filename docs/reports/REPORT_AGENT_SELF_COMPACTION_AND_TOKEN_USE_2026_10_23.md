@@ -1,7 +1,7 @@
 # Agent Self-Compaction and Token Use: Measurements, Economics and a Decision Rule
 
 **Date:** 2026-10-23
-**Status:** research report behind [`SPEC_AGENT_SELF_COMPACTION_2026_10_23.md`](../specs/SPEC_AGENT_SELF_COMPACTION_2026_10_23.md). This public version gives shares, token counts and ratios; spend totals and per-agent figures are kept internally.
+**Status:** analysis — the research behind [`SPEC_AGENT_SELF_COMPACTION_2026_10_23.md`](../specs/SPEC_AGENT_SELF_COMPACTION_2026_10_23.md). This public version gives shares, token counts and ratios; spend totals and per-agent figures are kept internally.
 **Question:** Can agents be compacted, or compact themselves, to save tokens? Can they judge their own context and the next piece of work, and decide when to compress?
 **Builds on:** [`REPORT_TOKEN_ACCOUNTING_AND_COMPACTION_CONTROL_2026_08_18.md`](REPORT_TOKEN_ACCOUNTING_AND_COMPACTION_CONTROL_2026_08_18.md) (proved `/compact` works over stream-json), [`REPORT_AGENT_PANE_CONTEXT_METER_2026_10_05.md`](REPORT_AGENT_PANE_CONTEXT_METER_2026_10_05.md) (context readings and the CLI's auto-compact point), [`SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md`](../specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md), [`SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md`](../specs/SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md) (the continuation packet).
 
