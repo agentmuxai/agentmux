@@ -5,7 +5,7 @@
 //! slug migration (`backend::slug_migration`). `plan`, `apply`, `rollback`
 //! and `restore` run on the disk, off the async workers; `stop` asks each
 //! running affected pane to stop, through the same 15 s user override an
-//! agent's stop request waits for (`fleet_bulk_stop_with_override`).
+//! agent's stop request waits for (`fleet_stop_keep_pane_with_override`).
 
 use std::sync::Arc;
 
@@ -58,7 +58,7 @@ async fn stop(state: &AppState, home: Home) -> Result<MigrateForkSlugsResult, St
     blocks.sort();
     blocks.dedup();
     let asked = blocks.len();
-    let (now, pending) = crate::server::app_api::fleet::fleet_bulk_stop_with_override(state, STOPPED_BY, blocks, None, None).await;
+    let (now, pending) = crate::server::app_api::fleet::fleet_stop_keep_pane_with_override(state, STOPPED_BY, blocks, None, None).await;
     let pending: Vec<ForkSlugStopPending> =
         pending.into_iter().map(|p| ForkSlugStopPending { block_id: p.block_id, request_id: p.request_id }).collect();
     let wait_ms = if pending.is_empty() { 0 } else { crate::sagas::pending_shutdown::OVERRIDE_WINDOW.as_millis() as u64 };

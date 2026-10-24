@@ -739,6 +739,7 @@ partial list.
 | [`SPEC_SRV_MALLOC_ARENA_CAP_2026_10_18`](SPEC_SRV_MALLOC_ARENA_CAP_2026_10_18.md) | Spec: srv caps glibc's malloc arenas at two (Linux only) |
 | [`SPEC_SRV_PROCESS_LISTING_WITHOUT_THREADS_2026_10_18`](SPEC_SRV_PROCESS_LISTING_WITHOUT_THREADS_2026_10_18.md) | Spec: srv's process listings stop reading every thread (Linux CPU) |
 | [`SPEC_START_WITH_OS_2026_09_25`](SPEC_START_WITH_OS_2026_09_25.md) | SPEC: Start with OS — AgentMux starts quietly at login, on every platform, and keeps working after updates |
+| [`SPEC_STOP_AN_AGENT_ONE_WAY_AND_SHUTDOWN_TOAST_2026_10_23`](SPEC_STOP_AN_AGENT_ONE_WAY_AND_SHUTDOWN_TOAST_2026_10_23.md) | SPEC: One way to stop an agent (close it), and a shutdown toast with a countdown and a Keep running button |
 | [`SPEC_STREAMING_BASH_RUNNER_2026_05_11`](SPEC_STREAMING_BASH_RUNNER_2026_05_11.md) | Streaming bash runner — PreToolUse command rewrite |
 | [`SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20`](SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20.md) | SPEC — live subagent reconciliation + Retire action (best-practices plan) |
 | [`SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02`](SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md) | SPEC: The Swarm shows the agents of every other instance this one knows about |

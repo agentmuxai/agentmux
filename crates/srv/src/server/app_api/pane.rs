@@ -749,6 +749,26 @@ pub(crate) async fn close_pane_as(
         }
     };
 
+    // A pane that holds an agent is closed by closing the agent, with `Stop
+    // agents`: one way to stop an agent, and only that agent's tab goes
+    // (docs/specs/SPEC_STOP_AN_AGENT_ONE_WAY_AND_SHUTDOWN_TOAST_2026_10_23.md
+    // §3.2). Refused here, not in the tool, so `UI run_command pane:close` has
+    // no way round it.
+    let agents: Vec<&String> =
+        pane_block_ids.iter().filter(|b| crate::sagas::orphan_reaper::is_agent_block(state, b)).collect();
+    if !agents.is_empty() {
+        let names = agents.iter().map(|b| b.as_str()).collect::<Vec<_>>().join(", ");
+        let err = format!(
+            "not a pane to close this way: it holds an agent (block {names}). Use Stop with action \"agents\" and targets [{names}], which closes the agent's tab and leaves the others in the pane running"
+        );
+        let request_id = uuid::Uuid::new_v4().to_string();
+        state.reactive_handler.log_fleet_action_audit(
+            Some(&caller_agent_id), &target_agent, &target_block_id,
+            "pane.close", false, Some(&err), &request_id, reason,
+        );
+        return (StatusCode::CONFLICT, json!({ "error": err }));
+    }
+
     // Its user has 15 s to keep it (§6.5), whoever's pane it is. A pane the
     // caller is in is no exception: closing it would end the caller without
     // QuitSelf's check, and any other agent stacked in it with no window.

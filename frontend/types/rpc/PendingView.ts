@@ -15,7 +15,17 @@ target: string,
 /**
  * The tool: `QuitSelf`, `ClosePane`, `FleetBulkStop`.
  */
-via: string, reason: string, deadline_ms: number, 
+via: string, 
+/**
+ * Why, in the asker's words, cleaned for display (`clean_reason`): never
+ * the raw text. Shown on the pane banner only; an OS toast leaves it out.
+ */
+reason: string, 
+/**
+ * What happens if the window runs out: `stop` (the agent stops, its pane
+ * stays), `close_tab` (it stops and its tab closes) or `close_pane`.
+ */
+effect: "stop" | "close_tab" | "close_pane", deadline_ms: number, 
 /**
  * `pending` → `kept_by_user`, or `proceeding` → `shut_down` / `failed` /
  * `superseded` (the user closed it themselves meanwhile).

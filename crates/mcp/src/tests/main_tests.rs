@@ -41,6 +41,25 @@ fn close_pane_outcome_says_what_the_user_decided() {
 }
 
 #[test]
+fn stop_agents_notes_say_what_no_longer_applies_and_which_target_kept_its_pane() {
+    let pending = vec![
+        serde_json::json!({ "block_id": "a", "request_id": "r1", "effect": "close_tab" }),
+        serde_json::json!({ "block_id": "b", "request_id": "r2", "effect": "stop" }),
+    ];
+    let mut out = serde_json::json!({ "succeeded": ["a", "b"] });
+    add_stop_notes(&mut out, Some("signal and staged no longer apply".into()), &pending);
+    let note = out["note"].as_str().unwrap();
+    assert!(note.starts_with("signal and staged no longer apply; b run on an older AgentMux"), "{note}");
+    assert!(note.ends_with("the user has to close it"), "no tool can close that pane, so it doesn't send the agent to one: {note}");
+    assert!(!note.contains("Stop pane"), "{note}");
+    assert!(!note.contains("a run"), "only the target that kept its pane: {note}");
+    // Nothing to say, no note.
+    let mut quiet = serde_json::json!({ "succeeded": ["a"] });
+    add_stop_notes(&mut quiet, None, &pending[..1]);
+    assert!(quiet.get("note").is_none());
+}
+
+#[test]
 fn bulk_stop_folds_each_users_answer_into_succeeded_and_failed() {
     let pending = serde_json::json!({
         "status": "pending_user_override",
