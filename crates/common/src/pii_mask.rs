@@ -49,6 +49,16 @@ pub fn mask_short_text(text: &str) -> String {
     mask_text(&redact::redact_token_shapes(text))
 }
 
+/// The first `max_chars` characters of `text` with everything above hidden, for a caller that shows
+/// only the start of a long string. The numbers are masked over the WHOLE text first (linear), then
+/// the text is cut, then the token pass runs on what is left: cutting first would let the token pass
+/// shrink the text and move a number across the cut, showing its first digits.
+pub fn mask_bounded(text: &str, max_chars: usize) -> String {
+    let numbers_hidden = mask_text(text);
+    let head: String = numbers_hidden.chars().take(max_chars).collect();
+    redact::redact_token_shapes(&head)
+}
+
 fn luhn(digits: &[u8]) -> bool {
     let mut total = 0u32;
     for (i, d) in digits.iter().rev().enumerate() {
@@ -413,6 +423,17 @@ mod tests {
         }
         assert!(!mask_short_text("key=AKIAIOSFODNN7EXAMPLE").contains("AKIAIOSFODNN7"));
         assert!(!mask_short_text("see https://x.test/ghp_abcdefghijklmnopqrstuvwxyz0123").contains("ghp_abcdef"));
+    }
+
+    #[test]
+    fn a_number_across_the_cut_is_hidden_even_after_a_token_shrinks_the_text() {
+        // A token before the cut shrinks when redacted, which moves a later number across the cut.
+        let text = format!("ghp_{} {} 4111111111111111", "a".repeat(300), "x".repeat(90));
+        let shown = mask_bounded(&text, 400);
+        assert!(!shown.contains("4111"), "{shown}");
+        assert!(shown.contains(CARD) || shown.chars().count() <= 400, "{shown}");
+        // Short text is returned in full.
+        assert_eq!(mask_bounded("plain words", 400), "plain words");
     }
 
     #[test]

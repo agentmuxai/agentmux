@@ -143,8 +143,7 @@ fn table() -> std::sync::MutexGuard<'static, Table> {
 fn clip(s: &str, n: usize) -> String {
     // The Log is mirrored to the pane's header, the host log and the agent's own `log` read: a
     // label the page chose (a button named with a card number) is masked before it is kept.
-    let head: String = s.trim().chars().take(n.saturating_mul(4).max(400)).collect();
-    let masked = agentmux_common::pii_mask::mask_short_text(&head);
+    let masked = agentmux_common::pii_mask::mask_bounded(s.trim(), n.saturating_mul(4).max(400));
     let s = masked.trim();
     if s.chars().count() <= n {
         return s.to_string();
