@@ -76,10 +76,10 @@ import type { AgentSortOption } from "./AgentPickerFilterBar";
 import { RuntimeBadge } from "./RuntimeBadge";
 
 import { WpsEvent } from "@/app/store/mps-events";
-/** "type" sort groups Host before Sandbox (Container) before anything
+/** "type" sort groups Native (stored as "host") before Container before anything
  *  unrecognized, matching `RuntimeBadge`'s own known-runtime ordering —
- *  not alphabetical ("container" < "host" would put Sandbox first, which
- *  reads backwards next to the badge's own HOST/SANDBOX vocabulary).
+ *  not alphabetical ("container" < "host" would put Container first, which
+ *  reads backwards next to the badge's own NATIVE/CONTAINER vocabulary).
  *
  *  Codex P2, PR #2789: `"standalone"` is the LEGACY default `agent_type`
  *  (`default_agent_type()`, `backend/storage/agents/mod.rs`) for definitions
@@ -1096,11 +1096,11 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                 <Show
                                                     when={row.agent_type === "host" || row.agent_type === "container"}
                                                 >
-                                                    {/* size="tag" — same HOST/SANDBOX wording + white/
+                                                    {/* size="tag" — same NATIVE/CONTAINER wording + white/
                                                     yellow styling as AgentComposerStrip's runtime
                                                     tag, so the badge reads as one consistent
                                                     vocabulary instead of two ("Container" here vs.
-                                                    "SANDBOX" in the pane the row launches into). */}
+                                                    "CONTAINER" in the pane the row launches into). */}
                                                     <RuntimeBadge runtime={row.agent_type} size="tag" />
                                                 </Show>
                                                 <Show when={row.seat}>

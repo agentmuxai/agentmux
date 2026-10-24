@@ -341,9 +341,9 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
                     disabled={submitting()}
                     data-testid="create-from-template-runtime-select"
                 >
-                    <option value="host">On this computer (host)</option>
+                    <option value="host">Native (runs on this computer)</option>
                     <option value="container" disabled={!canPickContainer()}>
-                        In a safe sandbox (container)
+                        Container (runs in Docker)
                         {canPickContainer() ? "" : " — Docker not detected"}
                     </option>
                 </Select>
@@ -354,7 +354,7 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
                 </Show>
                 <Show when={draft.runtime() === "container"}>
                     <span class="agent-create-form-note">
-                        Isolated Docker sandbox — the agent only sees its workspace.
+                        Isolated in a Docker container — the agent only sees its workspace.
                     </span>
                 </Show>
                 <Show when={containerSupported() && containerImageNote(imageAccess())}>
@@ -365,7 +365,7 @@ export const AgentCreateForm = (props: AgentCreateFormProps): JSX.Element => {
                     )}
                 </Show>
                 <Show when={!containerSupported()}>
-                    <span class="agent-create-form-note">{props.template.name} can only run on the host.</span>
+                    <span class="agent-create-form-note">{props.template.name} can only run as a Native agent.</span>
                 </Show>
             </label>
             <Show when={modelOptions().length > 0}>

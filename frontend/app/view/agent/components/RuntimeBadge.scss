@@ -21,7 +21,7 @@
     }
 
     // Minimal icon-less text tag — agent composer strip, next to the model
-    // selector. No border/icon; yellow HOST / plain-white SANDBOX per explicit
+    // selector. No border/icon; yellow NATIVE / plain-white CONTAINER per explicit
     // design spec (overrides &--container/&--host below via the compound
     // selectors, which win on specificity regardless of source order).
     // Explicit font-size/padding — unlike &--sm/&--md above, this had none of

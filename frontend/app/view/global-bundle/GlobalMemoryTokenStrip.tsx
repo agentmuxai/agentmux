@@ -11,10 +11,10 @@ import { For, Show, type JSX } from "solid-js";
 import { SegmentedControl } from "@/app/element/ui";
 import { topContributors, topContributorsLabel } from "@/app/view/native-memory/memory-aggregates";
 import { shareLabel, tokensLabel, tokensTitle, TOKEN_ESTIMATE_NOTE } from "@/app/view/native-memory/memory-tokens";
-import type { AgentKind, GlobalBundleViewModel } from "./global-bundle-model";
+import { agentKindLabel, type AgentKind, type GlobalBundleViewModel } from "./global-bundle-model";
 
 const KINDS: { value: AgentKind; label: string }[] = [
-    { value: "host", label: "Host" },
+    { value: "host", label: "Native" },
     { value: "container", label: "Container" },
 ];
 
@@ -51,7 +51,7 @@ export function GlobalMemoryTokenStrip(props: { model: GlobalBundleViewModel }):
                 >
                     {(t) => (
                         <span class="global-memory-token-strip-total" title={tokensTitle(t().total)}>
-                            Every {m.agentKindAtom()} agent starts with{" "}
+                            Every {agentKindLabel(m.agentKindAtom())} agent starts with{" "}
                             <strong>{tokensLabel(t().total)}</strong> of Global Memory
                         </span>
                     )}

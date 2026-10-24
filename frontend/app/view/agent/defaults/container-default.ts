@@ -48,9 +48,9 @@ export function shouldPreselectContainer(input: PreselectInput): boolean {
 export function containerImageNote(image: ContainerImageState): string | null {
     switch (image) {
         case "denied":
-            return "The sandbox image can't be downloaded: its registry refuses access. New agents run on this computer (host) until that is fixed.";
+            return "The container image can't be downloaded: its registry refuses access. New agents run as Native agents (on this computer) until that is fixed.";
         case "not_found":
-            return "The sandbox image wasn't found in its registry. New agents run on this computer (host) until that is fixed.";
+            return "The container image wasn't found in its registry. New agents run as Native agents (on this computer) until that is fixed.";
         default:
             return null;
     }

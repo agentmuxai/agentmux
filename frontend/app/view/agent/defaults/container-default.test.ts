@@ -60,7 +60,7 @@ describe("imageBlocksContainer", () => {
 describe("containerImageNote", () => {
     it("says why, and what happens, when the image is blocked", () => {
         expect(containerImageNote("denied")).toMatch(/refuses access/);
-        expect(containerImageNote("denied")).toMatch(/host/);
+        expect(containerImageNote("denied")).toMatch(/Native/);
         expect(containerImageNote("not_found")).toMatch(/wasn't found/);
     });
 

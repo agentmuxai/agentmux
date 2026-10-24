@@ -276,7 +276,7 @@ describe("AgentCreateForm", () => {
             vi.mocked(RpcApi.ContainerImageCheckCommand).mockResolvedValue({ status });
             const select = renderContainerTemplate();
             const note = await screen.findByTestId("create-from-template-image-note");
-            expect(note.textContent).toMatch(/host/);
+            expect(note.textContent).toMatch(/Native/);
             expect(select.value).toBe("host");
             // Still selectable: the user may know better.
             const containerOpt = Array.from(select.options).find((o) => o.value === "container")!;
