@@ -36,11 +36,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// rename (§4). Best-effort: a pane that
 /// can't be patched shows the old seat until it's opened again.
 pub(super) async fn refresh_pane_seats(state: &AppState) {
-    use crate::backend::agent_seat::{stale_seat_meta, summary_by_id, SEAT_META_KEY};
+    use crate::backend::agent_seat::{stale_seat_meta, summary_in, SEAT_META_KEY};
     let mstore = state.mstore.clone();
     let stale = tokio::task::spawn_blocking(move || {
         let blocks = mstore.get_all::<crate::backend::obj::Block>().unwrap_or_default();
-        stale_seat_meta(&blocks, |id| summary_by_id(&mstore, id))
+        // Listed once: the overlaid definitions name each lead (#5382).
+        let defs = mstore.agent_def_list().unwrap_or_default();
+        stale_seat_meta(&blocks, |id| summary_in(&mstore, &defs, id))
     })
     .await
     .unwrap_or_default();

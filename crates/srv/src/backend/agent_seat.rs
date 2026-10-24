@@ -175,11 +175,13 @@ pub fn summary_in(mstore: &Store, defs: &[AgentDefinition], def_id: &str) -> Opt
     Some(summarize(&seat, |id| defs.iter().find(|d| d.id == id).map(|d| d.name.clone())))
 }
 
-/// [`summary_in`] by uid, for a reader that has no definition list: the
-/// lead is named by looking its definition up.
+/// [`summary_in`] by uid, for a reader that has no definition list. The
+/// list is `agent_def_list`'s, which lays each shared record over the local
+/// row, so a lead renamed in another channel is named as My Agents names it
+/// (`agent_def_get` returns the local row as it is).
 pub fn summary_by_id(mstore: &Store, id: &str) -> Option<SeatSummary> {
-    let seat = effective_seat_by_id(mstore, id)?;
-    Some(summarize(&seat, |lead| mstore.agent_def_get(lead).ok().flatten().map(|d| d.name)))
+    let defs = mstore.agent_def_list().ok()?;
+    summary_in(mstore, &defs, id)
 }
 
 /// The block meta key an agent pane keeps its agent's seat summary under,
