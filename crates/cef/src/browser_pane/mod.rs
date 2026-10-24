@@ -20,5 +20,7 @@ pub mod hwnd;
 pub mod wrapper;
 #[cfg(not(target_os = "windows"))]
 pub mod creation_views;
+#[cfg(not(target_os = "windows"))]
+pub mod side_button_cdp;
 
 pub use creation::CreateBrowserPaneTask;

@@ -718,6 +718,11 @@ impl AgentMuxHandler {
             return;
         }
         let Some(frame) = frame else { return };
+        // A document of any frame committed: the side-button listener goes into it.
+        #[cfg(not(target_os = "windows"))]
+        if let Some(b) = browser.as_deref() {
+            crate::browser_pane::side_button_cdp::on_frame_commit(b);
+        }
         if frame.is_main() != 1 {
             return;
         }

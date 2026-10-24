@@ -171,3 +171,50 @@ pub(crate) fn browser_pane_event_target(
         .filter(|label| !label.is_empty())
         .map(str::to_string)
 }
+
+/// The payload of the `side-button` event: a mouse side button the page's own
+/// DOM listener can't act on (`frontend/app/store/side-buttons.ts`,
+/// `onHostSideButton`). `blocked`: Shift, Alt, a Windows/Command key or the
+/// left button was down, the presses the page listener leaves alone. One shape
+/// for every route: Windows' pane window procedure and `WM_APPCOMMAND`
+/// (`side_buttons.rs`), and the listener injected into a Linux / macOS browser
+/// pane (`browser_pane::side_button_cdp`).
+/// docs/specs/SPEC_MOUSE_SIDE_BUTTONS_PANE_AND_TAB_NAV_2026_10_19.md §5.
+pub(crate) fn side_button_payload(button: &str, ctrl: bool, blocked: bool, source: &str, block_id: Option<&str>) -> serde_json::Value {
+    serde_json::json!({
+        "button": button,
+        "ctrl": ctrl,
+        "blocked": blocked,
+        "source": source,
+        "block_id": block_id,
+    })
+}
+
+/// Send the `side-button` event to `window`'s frontend, and log it the way the
+/// frontend logs the presses it acts on, so a press can be followed end to end.
+pub(crate) fn emit_side_button(
+    state: &crate::state::AppState,
+    window: &str,
+    button: &str,
+    ctrl: bool,
+    blocked: bool,
+    source: &str,
+    block_id: Option<&str>,
+) {
+    tracing::info!("[side-button] {button} ctrl={ctrl} blocked={blocked} source={source} window={window} block={block_id:?}");
+    emit_event_to_window(state, window, "side-button", &side_button_payload(button, ctrl, blocked, source, block_id));
+}
+
+#[cfg(test)]
+mod side_button_tests {
+    use super::*;
+
+    #[test]
+    fn the_side_button_payload_is_the_shape_the_frontend_reads() {
+        assert_eq!(
+            side_button_payload("back", false, true, "pane", Some("blk-1")),
+            serde_json::json!({ "button": "back", "ctrl": false, "blocked": true, "source": "pane", "block_id": "blk-1" })
+        );
+        assert!(side_button_payload("forward", true, false, "window", None)["block_id"].is_null());
+    }
+}

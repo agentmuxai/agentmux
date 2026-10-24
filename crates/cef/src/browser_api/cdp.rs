@@ -302,6 +302,8 @@ wrap_dev_tools_message_observer! {
                         // An event, or someone else's reply: learn about
                         // frames from it, and leave it for other observers.
                         ATTACHED.lock().note_event(id, m);
+                        #[cfg(not(target_os = "windows"))]
+                        crate::browser_pane::side_button_cdp::note_event(id, m);
                         0
                     }
                 }
@@ -312,6 +314,9 @@ wrap_dev_tools_message_observer! {
         fn on_dev_tools_agent_detached(&self, browser: Option<&mut Browser>) {
             if let Some(b) = browser {
                 release_browser(b.identifier(), "DevTools agent detached");
+                // Its binding and injected script went with it: add them again.
+                #[cfg(not(target_os = "windows"))]
+                crate::browser_pane::side_button_cdp::reinstall(b.identifier());
             }
         }
     }
@@ -377,6 +382,8 @@ fn release_browser(browser_id: i32, reason: &str) {
 /// reply can't land on a dead browser and no caller waits out the timeout.
 pub fn on_browser_closed(browser_id: i32) {
     release_browser(browser_id, "browser closed");
+    #[cfg(not(target_os = "windows"))]
+    crate::browser_pane::side_button_cdp::forget(browser_id);
 }
 
 // ── Session ─────────────────────────────────────────────────────────────────
