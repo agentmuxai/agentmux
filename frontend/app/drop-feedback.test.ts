@@ -9,6 +9,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as sass from "sass";
+import { BLINK_COST, BLINK_COUNT, CHANGES_PER_SECOND } from "./element/drop-blink-clock";
 import { describe, expect, it } from "vitest";
 
 const APP = dirname(fileURLToPath(import.meta.url));
@@ -30,17 +31,20 @@ describe("drop target hover that lands inverted", () => {
     const strip = compile("element/PaneTabStrip.scss");
     const indicators = compile("drag/drop-indicators.scss");
 
-    it("a blink is 200 ms and there are three: at most three flashes in any one second (WCAG 2.3.1)", () => {
+    it("a hover costs at most three flashes in any one second, counting its entry and its exit (WCAG 2.3.1)", () => {
         const header = rule(strip, ".pane-header--foreign-hover");
         const m = /tab-drop-invert-hold (\d+)ms steps\(1, end\) (\d+) forwards/.exec(header);
         expect(m).not.toBeNull();
         const [cycleMs, count] = [Number(m![1]), Number(m![2])];
+        // The stylesheet and the clock that budgets it must agree.
+        expect(count).toBe(BLINK_COUNT);
         expect(cycleMs).toBeLessThanOrEqual(200);
-        // One cycle is one flash. The burst is the only flashing: after it the row holds.
+        // Changes in the worst second: entering (1), two per blink, leaving (1); the burst is the only flashing.
         const burstMs = cycleMs * count;
-        const flashesInTheWorstSecond = Math.min(count, Math.ceil(1000 / cycleMs));
-        expect(flashesInTheWorstSecond).toBeLessThanOrEqual(3);
-        expect(burstMs).toBeGreaterThanOrEqual(400);
+        expect(burstMs).toBeLessThanOrEqual(1000);
+        const changes = 1 + 2 * count + 1;
+        expect(changes).toBeLessThanOrEqual(CHANGES_PER_SECOND);
+        expect(changes).toBe(BLINK_COST);
     });
 
     it("the outline pulse runs at 0.4 s a direction, twice as fast as before", () => {
@@ -48,15 +52,18 @@ describe("drop target hover that lands inverted", () => {
         expect(header).toMatch(/tab-drop-pulse 0\.4s /);
     });
 
-    it("a hover that lost the blink budget lands inverted with no blink, tabs cancelled", () => {
-        const header = rule(strip, ".pane-header--foreign-hover.pane-header--no-blink");
-        expect(header).toContain("filter: invert(1)");
-        expect(header).not.toContain("tab-drop-invert-hold");
-        const tabs = rule(strip, ".pane-header--foreign-hover.pane-header--no-blink .block-frame-default-header-tabstrip");
-        expect(tabs).toContain("animation: none");
-        expect(tabs).toContain("filter: invert(1)");
-        const own = rule(strip, ".pane-tab-strip--foreign-hover.pane-tab-strip--no-blink");
-        expect(own).toContain("filter: invert(1)");
+    it("a hover that finds the flash budget spent shows the outline alone, tabs and all, in both motion tiers", () => {
+        for (const prefix of ["", ":root[data-motion-reduce~=feedback] "]) {
+            const header = rule(strip, prefix + ".pane-header--foreign-hover.pane-header--no-invert");
+            expect(header).toContain("filter: none");
+            expect(header).toContain("tab-drop-pulse");
+            expect(header).not.toContain("tab-drop-invert-hold");
+            const tabs = rule(strip, prefix + ".pane-header--foreign-hover.pane-header--no-invert .block-frame-default-header-tabstrip");
+            expect(tabs).toContain("animation: none");
+            expect(tabs).toContain("filter: none");
+            const own = rule(strip, prefix + ".pane-tab-strip--foreign-hover.pane-tab-strip--no-invert");
+            expect(own).toContain("filter: none");
+        }
     });
 
     it("the hold keyframes end inverted, after a blink", () => {
@@ -73,19 +80,19 @@ describe("drop target hover that lands inverted", () => {
 
     it("the pane header drop zone runs the hold animation, and keeps the pulse", () => {
         const header = rule(strip, ".pane-header--foreign-hover");
-        expect(header).toContain("tab-drop-invert-hold 200ms steps(1, end) 3 forwards");
+        expect(header).toContain("tab-drop-invert-hold 200ms steps(1, end) 2 forwards");
         expect(header).not.toContain("tab-drop-invert-strobe");
         expect(header).toContain("tab-drop-pulse");
     });
 
     it("the tab strip used as its own drop zone does the same", () => {
         const own = rule(strip, ".pane-tab-strip--foreign-hover");
-        expect(own).toContain("tab-drop-invert-hold 200ms steps(1, end) 3 forwards");
+        expect(own).toContain("tab-drop-invert-hold 200ms steps(1, end) 2 forwards");
     });
 
     it("the tabs inside run the same animation, so the pair cancels while the hover lasts", () => {
         const tabs = rule(strip, ".pane-header--foreign-hover .block-frame-default-header-tabstrip");
-        expect(tabs).toContain("animation: tab-drop-invert-hold 200ms steps(1, end) 3 forwards");
+        expect(tabs).toContain("animation: tab-drop-invert-hold 200ms steps(1, end) 2 forwards");
     });
 
     it("the reduced-motion treatment holds the negative without blinking", () => {

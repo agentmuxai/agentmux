@@ -42,7 +42,7 @@ This reads "the off color" as the inverted (negative) colour: the one colour the
 - **Reduced motion:** the reduced treatment (`feedback`) drops the blink, as it did the strobe. With `$hold` it holds the negative with no animation (`filter: invert(1)`), and the cancelling wrapper does the same, so the end state is the same and nothing flashes.
 - **WCAG 2.3.1** (no more than three flashes in any one second): a single blink is two inversions in the first 400 ms and then a steady state. The earlier two-blink design had three transitions in 800 ms; this has fewer.
 
-> **Update 2026-10-24:** the blink is now three 200 ms cycles (not one 400 ms cycle), the pulse 0.4 s a direction, and a window-wide blink budget keeps WCAG 2.3.1's three flashes a second across re-entries. See SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §3.
+> **Update 2026-10-24:** the blink is now two 200 ms cycles (not one 400 ms cycle), the pulse 0.4 s a direction, and a window-wide flash budget keeps WCAG 2.3.1's three flashes a second, counting each hover's entry and exit; a hover that does not fit shows the outline alone. See SPEC_PANE_TAB_MULTI_SELECT_MOVE_AND_COLLAPSED_EXPAND_2026_10_24.md §3.
 
 ## 5. Why only the Pane Tab strip
 

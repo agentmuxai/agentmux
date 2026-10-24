@@ -152,9 +152,13 @@
         @include drop.drop-target-hover($hold: true);
     }
 
-    // Blink budget spent (PaneTabStrip.tsx `claimBlink`): land inverted, no blink.
-    &--foreign-hover#{&}--no-blink {
-        @include drop.drop-target-steady;
+    // Flash budget spent (PaneTabStrip.tsx `claimHoverFlash`): the outline alone.
+    &--foreign-hover#{&}--no-invert {
+        @include drop.drop-target-plain;
+
+        @include mixins.when-motion-reduced(feedback) {
+            @include drop.drop-target-plain;
+        }
     }
 }
 
@@ -187,12 +191,20 @@
         @include drop.drop-target-strobe-exempt($hold: true);
     }
 
-    // Blink budget spent: the same look as the reduced treatment, for this hover only.
-    &.pane-header--no-blink {
-        @include drop.drop-target-steady;
+    // Flash budget spent: the outline alone, for this hover only.
+    &.pane-header--no-invert {
+        @include drop.drop-target-plain;
 
         .block-frame-default-header-tabstrip {
-            @include drop.drop-target-steady-exempt;
+            @include drop.drop-target-plain-exempt;
+        }
+
+        @include mixins.when-motion-reduced(feedback) {
+            @include drop.drop-target-plain;
+
+            .block-frame-default-header-tabstrip {
+                @include drop.drop-target-plain-exempt;
+            }
         }
     }
 }

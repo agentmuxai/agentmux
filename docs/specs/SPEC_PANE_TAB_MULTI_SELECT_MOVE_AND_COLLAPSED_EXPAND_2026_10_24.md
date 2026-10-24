@@ -61,22 +61,23 @@ A collapsed pane is a leaf with `minimized: true`. It keeps its **full header, p
 
 **Asked-for numbers.** Twice as fast: a 200 ms cycle (100 ms negative, 100 ms normal). Twice as long: the blinking phase lasts 800 ms instead of 400 ms. Together that is **four blinks in 800 ms: five flashes per second.**
 
-**The conflict.** The repo's rule (WCAG 2.3.1, written into `drop-feedback.scss` and the 2026-10-21 spec) is no more than three flashes in any one second. Four blinks in 800 ms breaks it. A pane header is a small area, below WCAG's general-flash area threshold, so the content standard would not forbid it, but the repo's rule is stricter on purpose and this is the operator's call (D1):
+**The conflict, and what the rule really counts.** The repo's rule (WCAG 2.3.1, written into `drop-feedback.scss` and the 2026-10-21 spec) is no more than three flashes in any one second, and a flash is a pair of opposing luminance changes: six changes a second. The hover makes one change when it begins (normal to negative) and one when it ends (negative back to normal) besides the changes of the blinks themselves, and the ending can come at any time. So a burst of *n* blinks costs 2 + 2*n* changes in the worst second:
 
-| Option | Cycle | Blinks | Blinking phase | Flashes in the worst second |
+| Option | Cycle | Blinks | Burst | Changes in the worst second (entry + blinks + exit) |
 |---|---|---|---|---|
-| **A (chosen)** | 200 ms | 3 | 600 ms | 3 (at the limit) |
-| B (not chosen) | 200 ms | 4 | 800 ms | 4 in 0.8 s |
+| **A (chosen)** | 200 ms | 2 | 400 ms | 6 = 3 flashes, at the limit |
+| (first draft of this spec) | 200 ms | 3 | 600 ms | 8 = 4 flashes, over the limit when the pointer leaves soon after (muxreview/Codex, #5423) |
+| B (literal ask) | 200 ms | 4 | 800 ms | 10 = 5 flashes |
 
-A is twice as fast, three times as many blinks and one and a half times as long; B is the literal ask and needs the rule relaxed for this one case.
+Two blinks is the most the rule allows. The operator's instruction (2026-10-24: follow WCAG, as fast as the standard allows) is met by A: **each blink is twice as fast (200 ms, 100 ms a phase, six frames at 60 Hz), and there are twice as many (two, not one)**. The burst is 400 ms long, the same as before; it cannot also be twice as long without more blinks than the rule permits or a slower cycle. A faster cycle only shortens the burst for a blink that is harder to see, so 200 ms stays.
 
-**Pulse.** 0.8 s becomes 0.4 s per direction (a 1.25 Hz outline colour fade on a 2 px outline, no luminance flash, so no conflict). It runs for the whole hover, so "twice as long" does not apply to it.
+**Pulse.** 0.8 s becomes 0.4 s per direction (a 1.25 Hz fade of a 2 px outline: no luminance flash, so no conflict). It runs for the whole hover, so "twice as long" does not apply to it.
 
 **Design.**
-- `drop-feedback.scss`: replace the literal in `$drop-hold` with two variables, `$drop-blink-ms: 200ms` and `$drop-blink-count: 3` (4 for B), giving `tab-drop-invert-hold $drop-blink-ms steps(1, end) $drop-blink-count forwards`; `$drop-pulse` and `$drop-pulse-reduced` go to `0.4s`. The keyframes `tab-drop-invert-hold` do not change (0% negative, 50% normal, 100% negative): each iteration is one blink, and `forwards` holds the last keyframe, negative. The header and the counter-inverting pill strip use the same variable, so the two stay in step on the same frame.
-- The reduced-motion treatment is untouched: no blink, the negative on for the whole hover.
-- **Re-entry budget (new, needed for the rule to hold).** Today a pointer that leaves and re-enters replays the burst at once, so a quick wobble over two panes could put six flashes in a second. The build keeps one blink clock per window: a blink burst starts only when at least 1000 ms have passed since the previous burst began, anywhere in the window. Inside that second the target lands directly in the held negative (the reduced treatment's look, no blink). That makes "at most three flashes in any one-second window" true for the whole window, not only for one hover.
-- `frontend/app/drop-feedback.test.ts` pins the literal `400ms steps(1, end) forwards` in four places; the build updates it to the new variable values and adds an assertion that the blink count times the cycle never puts more than three flashes in one second (with A: 3 blinks at 200 ms).
+- `drop-feedback.scss`: the literal in `$drop-hold` becomes `$drop-blink-cycle: 200ms` and `$drop-blink-count: 2`, giving `tab-drop-invert-hold 200ms steps(1, end) 2 forwards`; `$drop-pulse` and `$drop-pulse-reduced` go to `0.4s`. The keyframes `tab-drop-invert-hold` do not change (0% negative, 50% normal, 100% negative): each iteration is one blink, and `forwards` holds the last keyframe, negative. The header and the counter-inverting pill strip use the same variable, so the two stay in step on the same frame.
+- The reduced-motion treatment is untouched: no blink, the negative on for the whole hover (two changes, entering and leaving).
+- **A flash budget for the window (needed for the rule to hold across hovers).** Today a pointer that leaves and re-enters replays the burst at once, so a quick wobble over two panes could put several flashes in a second. `element/drop-blink-clock.ts` charges each hover entry its changes (6 for a burst) up front, for the second that follows, and an entry that does not fit in the six-a-second budget gets **the outline pulse alone, without the negative** (`.pane-header--no-invert`, in both motion tiers). One burst a second, per window, at most. The reduced-motion tier's plain negative (two changes) is not charged, as before.
+- `frontend/app/drop-feedback.test.ts` pins the animation string in four places and now also pins the cycle and count to the clock's `BLINK_COUNT` and checks the entry-plus-blinks-plus-exit arithmetic; `drop-blink-clock.test.ts` covers the budget.
 
 ## 4. Multi-select
 
@@ -192,7 +193,7 @@ N sequential `pane.moveTab` calls would be N optimistic edits, N RPCs and N vers
 
 ## 9. Decisions for the operator (recommendations first)
 
-- **D1 (flash) — decided: A.** The operator: follow WCAG 2.3.1 and go as fast as the standard allows. The standard caps the number of flashes in a second, not the speed of a burst, so the limit on speed is that each phase stays clearly visible: with a 200 ms cycle each phase is 100 ms, six frames at 60 Hz. A faster cycle (150 ms and below) would shorten the whole burst below the 400 ms of today and undo "twice as long", for a blink that is harder to see, so the build uses 200 ms × 3 = 600 ms, plus the re-entry budget in §3 so the three-per-second limit holds across re-entries. B is not used.
+- **D1 (flash) — decided: A, as corrected in review.** The operator: follow WCAG 2.3.1 and go as fast as the standard allows. The first draft chose three 200 ms blinks; review counted the exit as well and found four flashes in the worst second, so the build uses **two 200 ms blinks** (twice as fast, twice as many blinks as the single 400 ms blink it replaces; §3) plus the window flash budget. B is not used.
 - **D2 — decided as recommended.** "The drag flash" means the blink and pulse on the destination pane's header. The landing bounce after the drop (300 ms) is left alone. Say if it should speed up too. **Recommend as written.**
 - **D3 — decided as recommended.** Expand on a plain click of any pill, including the active one, and not on back/forward history or Cmd+1..9. **Recommend as written.**
 - **D4 — decided as recommended.** Mod+click selects without activating, focusing or expanding. **Recommend as written.**

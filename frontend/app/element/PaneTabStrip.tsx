@@ -50,7 +50,7 @@ import { asDocTabDragData, docTabItemType, paneTabItemType, type DocTabDragData 
 import { createScrollEdges } from "./scroll-edges";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
-import { claimBlink } from "./drop-blink-clock";
+import { claimHoverFlash } from "./drop-blink-clock";
 import { createStripReveal, registerStripWithPane } from "./strip-reveal-controller";
 
 // Matches the other reveal-gate/cross-fade durations added alongside this
@@ -377,10 +377,10 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
     // to reveal before committing; see the spec's own reasoning for
     // skipping that dwell timer.
     const [foreignHover, setForeignHover] = createSignal(false);
-    // Whether this hover entry lost the window's blink budget (drop-blink-clock.ts):
-    // it then lands inverted without the blink. Set before `foreignHover`, so both
-    // class toggles are applied in the same frame.
-    const [noBlink, setNoBlink] = createSignal(false);
+    // Whether this hover entry found the window's flash budget spent
+    // (drop-blink-clock.ts): it then shows the outline alone, with no negative. Set
+    // before `foreignHover`, so both class toggles are applied in the same frame.
+    const [noInvert, setNoInvert] = createSignal(false);
     // Whether the hover highlight belongs on the strip box itself. False
     // once the drop zone resolves to the enclosing header row, so the
     // feedback outlines exactly the area that actually accepts the drop
@@ -406,9 +406,9 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
             // would be permanent.
             createEffect(() => {
                 highlightEl.classList.toggle("pane-header--foreign-hover", foreignHover());
-                highlightEl.classList.toggle("pane-header--no-blink", foreignHover() && noBlink());
+                highlightEl.classList.toggle("pane-header--no-invert", foreignHover() && noInvert());
             });
-            onCleanup(() => highlightEl.classList.remove("pane-header--foreign-hover", "pane-header--no-blink"));
+            onCleanup(() => highlightEl.classList.remove("pane-header--foreign-hover", "pane-header--no-invert"));
         }
         const cleanup = dropTargetForElements({
             element: el,
@@ -416,7 +416,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                 source.data.type === paneTabItemType && source.data.sourceNodeId !== paneKey,
             onDragEnter: () => {
                 batch(() => {
-                    setNoBlink(!claimBlink());
+                    setNoInvert(claimHoverFlash() === "plain");
                     setForeignHover(true);
                 });
             },
@@ -587,7 +587,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
             class="pane-tab-strip"
             classList={{
                 "pane-tab-strip--foreign-hover": foreignHover() && highlightStrip(),
-                "pane-tab-strip--no-blink": foreignHover() && highlightStrip() && noBlink(),
+                "pane-tab-strip--no-invert": foreignHover() && highlightStrip() && noInvert(),
                 "has-more-left": edges.moreLeft(),
                 "has-more-right": edges.moreRight(),
             }}
