@@ -84,24 +84,27 @@ log_history() { # waited-secs held-secs exit-code
   reason=$(printf '%s' "$reason" | tr '\t\n' '  ' | cut -c1-120)
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(now)" "$ME" "$reason" "$1" "$2" "$3" >> "$HISTORY" 2>/dev/null || true
 }
-# Keeps the newest half once the log passes 4000 lines. Only the holder calls it, so two
-# trims never run together.
-trim_history() {
-  [ "$(wc -l < "$HISTORY" 2>/dev/null || echo 0)" -gt 4000 ] || return 0
-  tail -n 2000 "$HISTORY" > "$HISTORY.tmp.$$" 2>/dev/null && mv -f "$HISTORY.tmp.$$" "$HISTORY" 2>/dev/null
-  rm -f "$HISTORY.tmp.$$" 2>/dev/null
+# Two generations: past 2000 lines the log is renamed to history.log.1 (replacing the older one)
+# and the next append starts a new file. A rename rewrites nothing, so a line a waiter appends
+# at that moment lands in one file or the other and is never dropped. Only the holder calls
+# it, so two rotations never run together.
+rotate_history() {
+  [ "$(wc -l < "$HISTORY" 2>/dev/null || echo 0)" -gt 2000 ] || return 0
+  mv -f "$HISTORY" "$HISTORY.1" 2>/dev/null
   return 0
 }
 
 history() {
-  [ -s "$HISTORY" ] || { echo "history: no runs recorded yet ($HISTORY)"; return 0; }
+  [ -s "$HISTORY" ] || [ -s "$HISTORY.1" ] || { echo "history: no runs recorded yet ($HISTORY)"; return 0; }
+  local files="" f
+  for f in "$HISTORY.1" "$HISTORY"; do [ -s "$f" ] && files="$files $f"; done
   awk -F'\t' '
     { n++; w[$3]+=$4; h[$3]+=$5; c[$3]++; if ($4>wm[$3]) wm[$3]=$4; tw+=$4; th+=$5; if ($6==75) gu++; if ($4>0) q++ }
     END {
       printf "runs: %d, waited at all: %d, gave up: %d, total wait %d min, total held %d min\n", n, q, gu, tw/60, th/60
       printf "%-40s %5s %9s %9s %10s\n", "reason", "runs", "avg wait", "max wait", "held (min)"
       for (r in c) printf "%-40s %5d %8ds %8ds %10d\n", substr(r,1,40), c[r], w[r]/c[r], wm[r], h[r]/60
-    }' "$HISTORY"
+    }' $files
 }
 
 if [ "${1:-}" = "status" ]; then status; exit 0; fi
@@ -122,6 +125,8 @@ CMDLINE="$*"
 TOKEN="$$-$(now)-${RANDOM:-0}"   # tells our slot from one a later holder created
 printf '%s: %s\n' "$ME" "$CMDLINE" > "$TICKET"
 HOLDING=0
+LOGGED=0
+ACQUIRED_AT=0
 HB_PID=""
 release() {
   rm -f "$TICKET"
@@ -129,6 +134,12 @@ release() {
   # Remove the slot only if it is still ours: if our heartbeat died and a waiter
   # took the slot over, deleting it now would free it under the new holder.
   if [ "$HOLDING" -eq 1 ]; then
+    # A run cut short by a signal never reaches the logging after its command; record it here
+    # (130 is the exit code the signal trap gives).
+    if [ "$LOGGED" -eq 0 ]; then
+      LOGGED=1
+      log_history "$(( ACQUIRED_AT - QUEUED_AT ))" "$(( $(now) - ACQUIRED_AT ))" "${rc:-130}"
+    fi
     [ "$(field token)" = "$TOKEN" ] && rm -rf "$SLOT"
     HOLDING=0
   fi
@@ -151,7 +162,7 @@ while :; do
   touch "$TICKET"
   if first_in_line; then
     if [ -d "$SLOT" ] && slot_is_stale; then rm -rf "$SLOT"; fi
-    if mkdir "$SLOT" 2>/dev/null; then HOLDING=1; break; fi
+    if mkdir "$SLOT" 2>/dev/null; then HOLDING=1; ACQUIRED_AT=$(now); break; fi
   fi
   if [ "$waited" -ge "$MAX_WAIT" ]; then
     log_history "$(( $(now) - QUEUED_AT ))" 0 75
@@ -182,14 +193,14 @@ rm -f "$TICKET"
     touch "$SLOT/heartbeat" 2>/dev/null; sleep 20
   done ) >/dev/null 2>&1 </dev/null &
 HB_PID=$!
-ACQUIRED_AT=$(now)
 echo "build-slot: acquired by $ME after $(( ACQUIRED_AT - QUEUED_AT ))s: $CMDLINE" >&2
 
 BUILD_SLOT_HELD=1 "$@"
 rc=$?
-# Still holding the slot here, so a trim cannot overlap another holder's.
+# Still holding the slot here, so a rotation cannot overlap another holder's.
+LOGGED=1
 log_history "$(( ACQUIRED_AT - QUEUED_AT ))" "$(( $(now) - ACQUIRED_AT ))" "$rc"
-trim_history
+rotate_history
 echo "build-slot: released (exit $rc)" >&2
 exit "$rc"
 }
