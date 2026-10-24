@@ -412,6 +412,8 @@ mod spawn_site_coverage {
          "test: disposable children the scan tracker tests find and kill"),
         ("src/backend/process_tracker/cgroup_linux.rs", "\"sleep\"", 2,
          "test: the argv the PTY-wrap test wraps, and a child the listing test describes; never spawned as built"),
+        ("src/backend/process_tracker/roots_file.rs", "\"sleep\"", 1,
+         "test: a stand-in agent CLI the roots-file prune test records and kills"),
         ("src/backend/process_tracker/cgroup_linux.rs", "&argv[0]", 1,
          "test: runs the wrapped argv the cgroup tests track and kill"),
         ("src/backend/process_tracker/cgroup_linux.rs", "\"sh\"", 1,

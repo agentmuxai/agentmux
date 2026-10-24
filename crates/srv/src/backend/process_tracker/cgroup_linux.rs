@@ -385,6 +385,40 @@ system_usec 234567
         true
     }
 
+    /// The launcher's cleanup after srv died (`agent_roots::kill_orphans`):
+    /// `cgroup.kill` ends an agent's CLI and whatever detached from it, and
+    /// leaves the rest of srv's scope alone.
+    #[tokio::test]
+    async fn the_launchers_cleanup_kills_agent_cgroups_only() {
+        let Some(root) = test_root().await else { return };
+        // A scope of its own inside the test's, so other tests' agent
+        // cgroups aren't touched.
+        let scope = root.join(format!("cleanup-{}", std::process::id()));
+        std::fs::create_dir_all(&scope).unwrap();
+        let agent = CgroupTracker::new(&scope, "cli").unwrap();
+        let other = scope.join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        let _cli = sh("setsid sleep 3041 & sleep 3042", agent.spawn_target());
+        let _bystander = sh("exec sleep 3043", Some(other.join("cgroup.procs")));
+        let started = wait_for(|| agent.pids().len() >= 3 && pids_in(&other).len() == 1).await;
+
+        let killed = agentmux_common::agent_roots::kill_agent_cgroups(&scope);
+        let emptied = wait_for(|| agent.pids().is_empty()).await;
+        let bystanders = pids_in(&other).len();
+
+        // Clean up before asserting, so a failure leaves nothing running.
+        let _ = std::fs::write(other.join("cgroup.kill"), "1");
+        wait_for(|| pids_in(&other).is_empty()).await;
+        drop(agent);
+        let _ = std::fs::remove_dir(&other);
+        let _ = std::fs::remove_dir(&scope);
+
+        assert!(started);
+        assert_eq!(killed, 1);
+        assert!(emptied, "the agent cgroup is empty");
+        assert_eq!(bystanders, 1, "the rest of the scope is untouched");
+    }
+
     /// The case process groups can't hold: a `setsid` daemon, a double
     /// fork, and a plain child all stay in the agent's cgroup, are listed,
     /// and end with `kill_tree`.

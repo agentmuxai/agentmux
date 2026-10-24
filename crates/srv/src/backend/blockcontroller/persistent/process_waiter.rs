@@ -520,13 +520,14 @@ impl PersistentSubprocessController {
                     let killed = tokio::select! {
                         _ = child.wait() => false,
                         _ = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)) => {
-                            let _ = child.kill().await;
+                            // With its process group: its MCP servers go too.
+                            let _ = agentmux_common::process::kill_child_and_group(&mut child).await;
                             true
                         }
                     };
                     inner_wait.lock().unwrap().stop_exit = Some((my_generation_wait, killed));
                 } else {
-                    let _ = child.kill().await;
+                    let _ = agentmux_common::process::kill_child_and_group(&mut child).await;
                     inner_wait.lock().unwrap().stop_exit = Some((my_generation_wait, true));
                 }
                 super::segments::record_segment_end(

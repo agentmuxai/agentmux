@@ -610,8 +610,10 @@ impl SubprocessController {
                         "subprocess kill requested"
                     );
 
+                    // The final kill takes the CLI's process group (its MCP
+                    // servers) with it; the SIGTERM stays the CLI's own.
                     if force {
-                        let _ = child.kill().await;
+                        let _ = agentmux_common::process::kill_child_and_group(&mut child).await;
                     } else {
                         // On Unix, send SIGTERM. On Windows, kill() is the only option.
                         #[cfg(unix)]
@@ -623,7 +625,7 @@ impl SubprocessController {
                             tokio::time::sleep(tokio::time::Duration::from_millis(
                                 DEFAULT_GRACEFUL_KILL_WAIT_MS,
                             )).await;
-                            let _ = child.kill().await;
+                            let _ = agentmux_common::process::kill_child_and_group(&mut child).await;
                         }
                         #[cfg(not(unix))]
                         {

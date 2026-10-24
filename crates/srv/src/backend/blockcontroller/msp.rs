@@ -326,7 +326,7 @@ impl MspController {
             // `stop` killed it.
             let exited = tokio::select! {
                 _ = kill_rx => {
-                    let _ = child.kill().await;
+                    let _ = agentmux_common::process::kill_child_and_group(&mut child).await;
                     None
                 }
                 status = child.wait() => Some(status.map(|s| s.code().unwrap_or(-1)).unwrap_or(-1)),

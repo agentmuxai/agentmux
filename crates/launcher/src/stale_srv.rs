@@ -99,16 +99,30 @@ pub fn reclaim_stale_srv_lock(data_dir: &Path) {
     unsafe { libc::kill(pid, libc::SIGTERM) };
     if wait_for_free(&lock_path, TERM_GRACE) {
         crate::log(&format!("stale-srv: pid {pid} exited after SIGTERM; lock is free"));
+        kill_orphaned_agents(data_dir, pid);
         return;
     }
-    // srv leads its own process group (srv_spawner's process_group(0)), which
-    // holds its agent CLIs; take them down with it.
+    // srv leads its own process group (srv_spawner's process_group(0)); take
+    // what else is in it down with it.
     let target = if unsafe { libc::getpgid(pid) } == pid { -pid } else { pid };
     unsafe { libc::kill(target, libc::SIGKILL) };
     if wait_for_free(&lock_path, Duration::from_secs(3)) {
         crate::log(&format!("stale-srv: pid {pid} killed; lock is free"));
+        kill_orphaned_agents(data_dir, pid);
     } else {
         crate::log(&format!("stale-srv: lock still held after killing pid {pid}"));
+    }
+}
+
+/// The stale srv is gone; its agent CLIs lead their own process groups and
+/// are still running unless it closed them. End them (`agent_roots`).
+fn kill_orphaned_agents(data_dir: &Path, pid: i32) {
+    let Ok(pid) = u32::try_from(pid) else { return };
+    if let Some(done) = agentmux_common::agent_roots::kill_orphans(data_dir, pid) {
+        crate::log(&format!(
+            "stale-srv: ended its agent CLIs: {} agent cgroup(s), {} CLI process group(s); {} had already exited",
+            done.cgroups, done.groups, done.gone
+        ));
     }
 }
 

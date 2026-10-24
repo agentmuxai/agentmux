@@ -815,17 +815,36 @@ pub(crate) async fn run_unix(
         agentmux_common::process::SRV_EXIT_WAIT,
     );
     let ((), srv_stopped) = tokio::join!(stop_host, stop_srv);
-    match srv_stopped {
+    let srv_gone = match srv_stopped {
         Ok((_, crate::upgrade::QuiesceOutcome::ExitedAfterForceKill)) => {
-            // Killed mid-teardown: its agent CLIs share its process group
-            // and would outlive it.
+            // Killed mid-teardown: whatever else is in its process group
+            // would outlive it. Its agent CLIs lead their own groups; they
+            // are ended just below.
             log("WARN: srv didn't exit in time — killed it and its process group");
             if let Some(pgid) = srv_pgid {
                 crate::host_spawn::kill_group_forcefully(pgid);
             }
+            true
         }
-        Ok((_, outcome)) => log(&format!("srv stopped ({outcome:?})")),
-        Err(e) => log(&format!("WARN: stopping srv failed: {e}")),
+        Ok((_, outcome)) => {
+            log(&format!("srv stopped ({outcome:?})"));
+            true
+        }
+        Err(e) => {
+            log(&format!("WARN: stopping srv failed: {e}"));
+            false
+        }
+    };
+    // srv is gone. An agent CLI it didn't close (srv was killed, crashed, or
+    // ran out of time) still runs in its own process group: end it and what
+    // it started. srv deletes the file when it closed every agent itself.
+    if let Some(srv_pid) = srv_pgid.filter(|_| srv_gone) {
+        if let Some(done) = agentmux_common::agent_roots::kill_orphans(&paths.data_dir, srv_pid) {
+            log(&format!(
+                "srv left agent CLIs running: killed {} agent cgroup(s) and {} CLI process group(s); {} had already exited",
+                done.cgroups, done.groups, done.gone
+            ));
+        }
     }
     // srv has stopped, so the new version copies complete data on its first
     // start. Only after a clean quit the user confirmed recently.
