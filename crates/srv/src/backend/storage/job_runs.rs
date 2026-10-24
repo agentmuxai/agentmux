@@ -11,8 +11,9 @@
 //! job finds the slot taken and doesn't fire.
 //!
 //! Nothing here deletes a run: history is kept forever (§3.1, "Retention:
-//! none"). The one delete removes the placeholder of a skip that was folded
-//! into the previous row of the same job and reason.
+//! none"). A skip folded into the previous row of the same job and reason
+//! keeps its own row, marked `collapsed_into` that row and left out of
+//! history, so its slot stays leased.
 
 use rusqlite::{params, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
@@ -55,7 +56,8 @@ pub(crate) const SCHEMA: &str = "
         skip_count       INTEGER NOT NULL DEFAULT 0,
         last_skip_at_ms  INTEGER,
         reporter         TEXT NOT NULL DEFAULT '',
-        recorded_by      TEXT NOT NULL DEFAULT ''
+        recorded_by      TEXT NOT NULL DEFAULT '',
+        collapsed_into   TEXT NOT NULL DEFAULT ''
     );
     CREATE INDEX IF NOT EXISTS idx_ids_job_runs_job_started ON db_job_runs(job_id, started_at_ms);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_ids_job_runs_slot ON db_job_runs(job_id, scheduled_for_ms)
@@ -293,7 +295,7 @@ impl Store {
         let conn = self.conn().lock().unwrap();
         let mut stmt = conn.prepare(&format!(
             "SELECT {COLS} FROM db_job_runs
-              WHERE job_id = ?1 AND (?2 IS NULL OR started_at_ms < ?2)
+              WHERE job_id = ?1 AND collapsed_into = '' AND (?2 IS NULL OR started_at_ms < ?2)
               ORDER BY started_at_ms DESC, rowid DESC LIMIT ?3"
         ))?;
         let rows = stmt.query_map(params![job_id, before, limit.max(0)], row_to_run)?;
@@ -307,9 +309,11 @@ impl Store {
 
     /// Turn the just-inserted placeholder `id` into a skip for `reason`, or,
     /// when the job's previous row is a skip for the same reason, fold it
-    /// into that row (`skip_count` + `count`) and remove the placeholder, so
-    /// consecutive skips are one row (§3.1). Returns the id of the row that
-    /// now holds the skip.
+    /// into that row (`skip_count` + `count`), so consecutive skips show as
+    /// one row (§3.1). A folded placeholder stays, marked `collapsed_into`
+    /// and hidden from history, so the unique index keeps its slot taken: a
+    /// second scheduler accounting for the same slot finds it leased and
+    /// doesn't count it again. Returns the id of the row that shows the skip.
     pub fn job_run_skip(&self, id: &str, reason: &str, count: i64, now_ms: i64) -> Result<String, StoreError> {
         let mut conn = self.conn().lock().unwrap();
         let tx = conn.transaction()?;
@@ -321,7 +325,7 @@ impl Store {
         let previous: Option<(String, String, String)> = tx
             .query_row(
                 "SELECT id, state, reason FROM db_job_runs
-                  WHERE job_id = ?1 AND id <> ?2
+                  WHERE job_id = ?1 AND id <> ?2 AND collapsed_into = ''
                   ORDER BY started_at_ms DESC, rowid DESC LIMIT 1",
                 params![job_id, id],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
@@ -333,7 +337,10 @@ impl Store {
                     "UPDATE db_job_runs SET skip_count = skip_count + ?2, last_skip_at_ms = ?3 WHERE id = ?1",
                     params![prev, count, now_ms],
                 )?;
-                tx.execute("DELETE FROM db_job_runs WHERE id = ?1", params![id])?;
+                tx.execute(
+                    "UPDATE db_job_runs SET state = ?2, reason = ?3, collapsed_into = ?4, ended_at_ms = ?5 WHERE id = ?1",
+                    params![id, state::SKIPPED, reason, prev, now_ms],
+                )?;
                 prev
             }
             _ => {

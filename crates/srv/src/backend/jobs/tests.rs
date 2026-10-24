@@ -531,37 +531,80 @@ async fn a_pending_fire_expires_at_the_next_fire_time() {
     assert_eq!((r.reason.as_str(), r.ended_at_ms.is_some()), (reason::EXPIRED, true));
 }
 
-/// Startup: a job that fired before and missed slots while AgentMux was off
-/// gets one collapsed `app_not_running` skip; `latest` also fires once for
-/// the newest slot, `skip` doesn't.
+/// Start a scheduler over one hourly job whose missed slots are counted from
+/// `last_fired`, or from `created_at` when it never fired; returns its runs
+/// and how many fires were delivered.
+async fn startup_case(policy: &str, never_fired: bool, fires: usize) -> (Vec<JobRun>, usize) {
+    let rig = rig();
+    let mut job = test_job(&format!("j-start-{policy}-{never_fired}"), "p", "AgentY", "uid-y", "c");
+    job.expression = "0 * * * *".into();
+    job.catch_up = policy.into();
+    // 3 h 10 min ago: three hourly slots missed since.
+    let now = chrono::Utc::now().timestamp();
+    let boundary = now - now % 3600 - 3 * 3600 + 60;
+    if never_fired {
+        job.created_at = boundary;
+    } else {
+        job.last_fired = Some(boundary);
+        job.created_at = boundary - 86_400;
+    }
+    rig.store.cron_create(&job).unwrap();
+    rig.sched.start().await;
+    let mut runs = Vec::new();
+    for _ in 0..100 {
+        runs = rig.runs(&job.id);
+        if runs.iter().any(|r| r.state == state::SKIPPED) && (fires == 0 || runs.len() >= 2) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    rig.sched.cancel_job(&job.id);
+    let delivered = rig.seen.lock().unwrap().len();
+    (runs, delivered)
+}
+
+/// Startup: a job that missed slots while AgentMux was off gets one
+/// collapsed `app_not_running` skip; `latest` also fires once for the newest
+/// slot, `skip` doesn't. A job that never fired counts from its creation, so
+/// a slot after it was created is caught up too (§5.2).
 #[tokio::test(flavor = "multi_thread")]
 async fn startup_records_slots_missed_while_off_by_catch_up_policy() {
-    for (policy, fires, skipped) in [(CATCH_UP_LATEST, 1, 2), (CATCH_UP_SKIP, 0, 3)] {
-        let rig = rig();
-        let mut job = test_job(&format!("j-start-{policy}"), "p", "AgentY", "uid-y", "c");
-        job.expression = "0 * * * *".into();
-        job.catch_up = policy.into();
-        // Last fired 3 h 10 min ago: three hourly slots missed.
-        let now = chrono::Utc::now().timestamp();
-        job.last_fired = Some(now - now % 3600 - 3 * 3600 + 60);
-        rig.store.cron_create(&job).unwrap();
-        rig.sched.start().await;
-        let mut runs = Vec::new();
-        for _ in 0..100 {
-            runs = rig.runs(&job.id);
-            let settled = runs.iter().any(|r| r.state == state::SKIPPED) && (fires == 0 || runs.len() >= 2);
-            if settled {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    for never_fired in [false, true] {
+        for (policy, fires, skipped) in [(CATCH_UP_LATEST, 1, 2), (CATCH_UP_SKIP, 0, 3)] {
+            let (runs, delivered) = startup_case(policy, never_fired, fires).await;
+            let case = format!("{policy}, never_fired={never_fired}");
+            let skips: Vec<_> = runs.iter().filter(|r| r.state == state::SKIPPED).collect();
+            assert_eq!(skips.len(), 1, "{case}: one collapsed row: {runs:?}");
+            assert_eq!((skips[0].reason.as_str(), skips[0].skip_count), (reason::APP_NOT_RUNNING, skipped), "{case}");
+            let catch_ups = runs.iter().filter(|r| r.trigger == TRIGGER_CATCH_UP).count();
+            assert_eq!(catch_ups, fires, "{case}: {runs:?}");
+            assert_eq!(delivered, fires, "{case}");
         }
-        rig.sched.cancel_job(&job.id);
-        let skip = runs.iter().find(|r| r.state == state::SKIPPED).unwrap_or_else(|| panic!("{policy}: {runs:?}"));
-        assert_eq!((skip.reason.as_str(), skip.skip_count), (reason::APP_NOT_RUNNING, skipped), "{policy}");
-        let catch_ups = runs.iter().filter(|r| r.trigger == TRIGGER_CATCH_UP).count();
-        assert_eq!(catch_ups, fires, "{policy}: {runs:?}");
-        assert_eq!(rig.seen.lock().unwrap().len(), fires, "{policy}");
     }
+}
+
+/// Two schedulers sharing the identity store account for the same startup
+/// interval: the downtime is counted once, whether its skip starts a row or
+/// folds into an earlier one.
+#[tokio::test(flavor = "multi_thread")]
+async fn two_schedulers_count_the_same_downtime_once() {
+    let a = rig();
+    let b = RunLedger::new(a.store.clone(), None, Arc::new(Broker::new()));
+    let job = a.job("j-down", CATCH_UP_SKIP);
+    let first = 1_800_000_000_000;
+    a.ledger.record_missed_while_off(&job, first, 5);
+    b.record_missed_while_off(&job, first, 5);
+    let skips = a.runs("j-down");
+    assert_eq!(skips.iter().map(|r| r.skip_count).collect::<Vec<_>>(), vec![5]);
+
+    // The next downtime folds into that row; the second scheduler still finds
+    // its first slot leased and adds nothing.
+    let later = first + 10 * HOUR;
+    a.ledger.record_missed_while_off(&job, later, 3);
+    b.record_missed_while_off(&job, later, 3);
+    let skips = a.runs("j-down");
+    assert_eq!(skips.len(), 1, "consecutive skips show as one row");
+    assert_eq!(skips[0].skip_count, 8, "each downtime counted once");
 }
 
 /// After a restart, this channel's cron runs left `scheduled` or `running`

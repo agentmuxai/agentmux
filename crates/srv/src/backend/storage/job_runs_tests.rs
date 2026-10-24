@@ -55,6 +55,12 @@ fn consecutive_skips_collapse_with_a_count() {
 
     assert_eq!(skip("r4", NOW + 3 * MIN, reason::APP_NOT_RUNNING), "r4", "another reason");
     assert_eq!(s.job_runs_for_job("j1", 10, None).unwrap().len(), 2);
+
+    // A folded skip keeps its row, hidden from history, so its slot stays
+    // leased: inserting it again is refused.
+    let folded = s.job_run_get("r2").unwrap().unwrap();
+    assert_eq!((folded.state.as_str(), folded.skip_count), (state::SKIPPED, 0));
+    assert!(!s.job_run_insert(&slot_run("r2b", "j1", Some(NOW + MIN))).unwrap(), "the slot is still taken");
 }
 
 /// A run goes scheduled → running → finished, with the turn's figures; a

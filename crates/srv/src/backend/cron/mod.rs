@@ -252,7 +252,7 @@ impl CronScheduler {
         if !should_catchup(job, now_dt) {
             return None;
         }
-        let mut base_ms = job.last_fired.unwrap_or(0).saturating_mul(1000);
+        let mut base_ms = catch_up_base_secs(job).saturating_mul(1000);
         if let Some(last) = self.runs().and_then(|r| r.store().job_run_last(&job.id).ok().flatten()) {
             let seen = last.last_skip_at_ms.or(last.scheduled_for_ms).unwrap_or(last.started_at_ms);
             base_ms = base_ms.max(seen);
@@ -640,10 +640,10 @@ impl CronScheduler {
 /// 09:05 yields a next-after-last of TOMORROW 09:00, which is NOT < now, so
 /// no spurious catch-up fires.
 ///
-/// Jobs that have never fired are skipped (they'll fire at the next naturally
-/// scheduled time without any missed-window concept).
+/// A job that has never fired counts from its creation: a slot after it was
+/// created and already past was missed too (jobs spec §5.2).
 fn should_catchup(job: &CronJob, now_dt: DateTime<Utc>) -> bool {
-    let Some(last) = job.last_fired else { return false; };
+    let last = catch_up_base_secs(job);
     let last_dt = match DateTime::from_timestamp(last, 0) {
         Some(dt) => dt,
         None => return false,
@@ -656,6 +656,12 @@ fn should_catchup(job: &CronJob, now_dt: DateTime<Utc>) -> bool {
         Some(next_after_last) => next_after_last < now_dt,
         None => false,
     }
+}
+
+/// Where missed slots are counted from: the last fire, or, for a job that
+/// never fired, its creation.
+fn catch_up_base_secs(job: &CronJob) -> i64 {
+    job.last_fired.unwrap_or(job.created_at)
 }
 
 /// True when a job's hard age-expiry bound (`max_age_secs`, seconds since
