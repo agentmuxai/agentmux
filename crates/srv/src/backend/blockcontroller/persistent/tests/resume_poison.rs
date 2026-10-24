@@ -332,3 +332,41 @@ fn calling_try_capture_session_id_on_the_doomed_error_frame_does_not_clear_track
         "tracking is still live, so the line must be held back, not persisted immediately"
     );
 }
+
+// ── `Agents fresh` (SPEC_AGENT_SELF_COMPACTION_2026_10_23.md §3.3) ───────
+
+fn fresh_controller(sid: &str) -> PersistentSubprocessController {
+    let c = PersistentSubprocessController::new("tab".to_string(), "block-fresh".to_string(), None, None, None, None);
+    c.inner.lock().unwrap().session_id = Some(sid.to_string());
+    c
+}
+
+#[test]
+fn a_fresh_start_retires_the_old_session_for_good() {
+    let c = fresh_controller("old-sid");
+    assert_eq!(c.start_fresh_session(), Ok(Some("old-sid".to_string())));
+    let mut inner = c.inner.lock().unwrap();
+    assert!(inner.session_id.is_none() && inner.stop_pending);
+    // The retiring process's result frame still names the old id: not adopted.
+    let generation = inner.spawn_generation;
+    let (adopted, _) = inner.try_capture_session_id("old-sid", generation, true);
+    assert!(!adopted && inner.session_id.is_none());
+}
+
+#[test]
+fn a_fresh_start_waits_for_a_turn_that_began_first() {
+    let c = fresh_controller("old-sid");
+    c.health_monitor.set_active_turn(true);
+    assert_eq!(c.start_fresh_session(), Err("a turn is running"));
+    let inner = c.inner.lock().unwrap();
+    assert!(!inner.stop_pending, "nothing was stopped");
+    assert_eq!(inner.session_id.as_deref(), Some("old-sid"), "and nothing was cleared");
+}
+
+#[test]
+fn a_fresh_start_refuses_while_a_stop_is_pending() {
+    let c = fresh_controller("old-sid");
+    c.inner.lock().unwrap().stop_pending = true;
+    assert_eq!(c.start_fresh_session(), Err("the agent's process is already stopping or restarting"));
+    assert_eq!(c.inner.lock().unwrap().session_id.as_deref(), Some("old-sid"));
+}
