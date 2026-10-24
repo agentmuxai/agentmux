@@ -47,8 +47,8 @@ pub fn redact_secrets(text: &str) -> String {
 /// Blanks credential-prefixed tokens that start a word, and PEM private keys, and nothing else: the
 /// two passes of [`redact_secrets`] that look for a secret by its shape alone, without its
 /// `key: value` passes. Unlike [`redact_secrets`], a prefix inside a word does not count, so page
-/// text such as `disk-usage-report-weekly` (`sk-` inside `disk-`) comes back whole. For text of
-/// bounded length (it rescans for every prefix it finds).
+/// text such as `disk-usage-report-weekly` (`sk-` inside `disk-`) comes back whole. Linear in the
+/// length of the text.
 pub fn redact_token_shapes(text: &str) -> String {
     redact_private_keys(&redact_prefixed_tokens_at_word_start(text))
 }
@@ -56,25 +56,21 @@ pub fn redact_token_shapes(text: &str) -> String {
 fn redact_prefixed_tokens_at_word_start(text: &str) -> String {
     let word_char = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
     let mut out = String::with_capacity(text.len());
-    // Everything before `copied` is in `out`; the search resumes at `from`.
-    let (mut copied, mut from) = (0, 0);
-    loop {
-        let hit = SECRET_PREFIXES
-            .iter()
-            .filter_map(|p| text[from..].find(p).map(|i| (from + i, *p)))
-            .min_by_key(|(i, p)| (*i, std::cmp::Reverse(p.len())));
-        let Some((at, prefix)) = hit else { break };
-        let starts_a_word = text[..at].chars().next_back().is_none_or(|c| !word_char(c));
-        let after = &text[at + prefix.len()..];
-        let body = after.find(|c: char| !word_char(c)).unwrap_or(after.len());
-        if starts_a_word && body >= 16 {
-            out.push_str(&text[copied..at]);
-            out.push_str("[redacted secret]");
-            copied = at + prefix.len() + body;
-            from = copied;
-        } else {
-            from = at + 1;
+    let mut copied = 0;
+    let mut prev_is_word = false;
+    for (i, c) in text.char_indices() {
+        let is_word = word_char(c);
+        if is_word && !prev_is_word {
+            // A word starts here: its end is the next character that isn't one.
+            let word_end = text[i..].find(|c: char| !word_char(c)).map_or(text.len(), |n| i + n);
+            let word = &text[i..word_end];
+            if SECRET_PREFIXES.iter().any(|p| word.starts_with(p) && word.len() - p.len() >= 16) {
+                out.push_str(&text[copied..i]);
+                out.push_str("[redacted secret]");
+                copied = word_end;
+            }
         }
+        prev_is_word = is_word;
     }
     out.push_str(&text[copied..]);
     out

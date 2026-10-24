@@ -1134,7 +1134,7 @@ pub(super) fn redact_secret(mut after: Value, facts: &DomFacts) -> Value {
 fn mask_strings(v: &mut Value) {
     match v {
         Value::String(s) => {
-            let masked = if s.len() > 4096 { agentmux_common::pii_mask::mask_text(s) } else { agentmux_common::pii_mask::mask_short_text(s) };
+            let masked = agentmux_common::pii_mask::mask_short_text(s);
             if masked != *s {
                 *s = masked;
             }

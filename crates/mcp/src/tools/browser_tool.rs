@@ -54,10 +54,10 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
 /// *field*'s value; this hides the number a page prints in plain text, or a dialog, a popup title
 /// or the Log repeats). Not grantable: no site grant reaches it.
 fn masked(result: Result<String>) -> Result<String> {
-    use agentmux_common::pii_mask::mask_text;
+    use agentmux_common::pii_mask::mask_short_text;
     match result {
-        Ok(text) => Ok(mask_text(&text)),
-        Err(e) => Err(anyhow::anyhow!(mask_text(&format!("{e:#}")))),
+        Ok(text) => Ok(mask_short_text(&text)),
+        Err(e) => Err(anyhow::anyhow!(mask_short_text(&format!("{e:#}")))),
     }
 }
 

@@ -42,21 +42,17 @@ pub fn mask_text(text: &str) -> String {
     mask_runs(&out)
 }
 
-/// [`mask_text`], and credential-prefixed tokens and private keys too. For text of bounded length (a
-/// snapshot line's name or value, a Log label): the token pass rescans for each prefix it finds, so
-/// it is not for a whole page.
+/// [`mask_text`], and credential-prefixed tokens and private keys too. Linear in the length of the
+/// text.
 pub fn mask_short_text(text: &str) -> String {
     mask_text(&redact::redact_token_shapes(text))
 }
 
 /// The first `max_chars` characters of `text` with everything above hidden, for a caller that shows
-/// only the start of a long string. The numbers are masked over the WHOLE text first (linear), then
-/// the text is cut, then the token pass runs on what is left: cutting first would let the token pass
-/// shrink the text and move a number across the cut, showing its first digits.
+/// only the start of a long string. The whole text is masked first and cut after, so no number or
+/// token that straddles the cut can show its first characters.
 pub fn mask_bounded(text: &str, max_chars: usize) -> String {
-    let numbers_hidden = mask_text(text);
-    let head: String = numbers_hidden.chars().take(max_chars).collect();
-    redact::redact_token_shapes(&head)
+    mask_short_text(text).chars().take(max_chars).collect()
 }
 
 fn luhn(digits: &[u8]) -> bool {
@@ -114,13 +110,6 @@ fn digit_groups(bytes: &[u8], start: usize) -> (usize, Vec<(usize, usize)>) {
     }
     groups.push((group_start, end));
     (end, groups)
-}
-
-/// The digits of a run (every group's), without the separators.
-fn digit_run(bytes: &[u8], start: usize) -> (usize, Vec<u8>) {
-    let (end, groups) = digit_groups(bytes, start);
-    let digits = groups.iter().flat_map(|(s, e)| bytes[*s..*e].iter().map(|b| b - b'0')).collect();
-    (end, digits)
 }
 
 /// Hides card numbers and SSNs wherever they stand in the text. A run of digit groups is tried
@@ -241,10 +230,21 @@ fn mask_labelled(text: &str) -> String {
                 if j >= bytes.len() || !bytes[j].is_ascii_digit() {
                     continue;
                 }
-                let (end, digits) = digit_run(bytes, j);
-                if digits.len() < *min || digits.len() > *max {
-                    continue;
+                // The longest start of the run, by whole groups, that has as many digits as the
+                // label takes: `CVV: 123 12/29` is the code `123`, not a run of five digits.
+                let (_, groups) = digit_groups(bytes, j);
+                let mut taken = 0;
+                let mut best: Option<usize> = None;
+                for (_, (s, e)) in groups.iter().enumerate() {
+                    taken += e - s;
+                    if taken > *max {
+                        break;
+                    }
+                    if taken >= *min {
+                        best = Some(*e);
+                    }
                 }
+                let Some(end) = best else { continue };
                 hits.push((j, end, shown));
             }
         }
@@ -434,6 +434,22 @@ mod tests {
         assert!(shown.contains(CARD) || shown.chars().count() <= 400, "{shown}");
         // Short text is returned in full.
         assert_eq!(mask_bounded("plain words", 400), "plain words");
+    }
+
+    #[test]
+    fn a_labelled_secret_followed_by_other_numbers_is_still_hidden() {
+        assert_eq!(mask_text("CVV: 123 12/29"), format!("CVV: {CODE} 12/29"));
+        assert_eq!(mask_text("Your verification code is 482913 2026-10-24"), format!("Your verification code is {CODE} 2026-10-24"));
+        assert_eq!(mask_text("SSN 123-45-6789 4 dependants"), format!("SSN {ID_NUMBER} 4 dependants"));
+        assert_eq!(mask_text("Routing number 021000021 account number 12345678"), format!("Routing number {ACCOUNT} account number {ACCOUNT}"));
+    }
+
+    #[test]
+    fn a_token_that_crosses_the_cut_never_shows_its_prefix() {
+        let text = format!("ghp_{} ghp_abcdefghijklmnopqrstuv", "a".repeat(1980));
+        let shown = mask_bounded(&text, 2000);
+        assert!(!shown.contains("ghp_"), "{shown}");
+        assert_eq!(mask_bounded(&format!("{} sk-abcdefghijklmnopqrstuvwxyz", "word ".repeat(10)), 60).contains("sk-"), false);
     }
 
     #[test]
