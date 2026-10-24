@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import type { JobView } from "@/types/rpc/JobView";
 
-import { costText, describeCron, failingCount, inWords, runBadge, stateText } from "./jobs-format";
+import { costText, describeCron, failingCount, inWords, kanbanTask, runBadge, stateText } from "./jobs-format";
 import { mkRun } from "./jobs-fixtures";
 
 describe("describeCron", () => {
@@ -79,5 +79,13 @@ describe("the rest", () => {
         const jobs = [{ failing: true }, { failing: false }, { failing: true }] as JobView[];
         expect(failingCount(jobs)).toBe(2);
         expect(failingCount(null)).toBe(0);
+    });
+});
+
+describe("kanbanTask", () => {
+    it("reads the incident's task srv linked to a run, and nothing else", () => {
+        expect(kanbanTask(mkRun({ links: { kanban_task: { id: "w1", num: 12 } } }))).toEqual({ id: "w1", num: 12 });
+        expect(kanbanTask(mkRun())).toBeNull();
+        expect(kanbanTask(mkRun({ links: { kanban_task: { id: "w1", num: "12" } } }))).toBeNull();
     });
 });

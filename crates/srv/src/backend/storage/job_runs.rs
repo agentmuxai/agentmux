@@ -76,10 +76,12 @@ pub(crate) const SCHEMA: &str = "
 /// schema version bump.
 const JOB_RUNS_COLUMNS: [&str; 1] = ["ALTER TABLE db_job_runs ADD COLUMN collapsed_into TEXT NOT NULL DEFAULT ''"];
 
-/// Create the table, then add any column it lacks; "duplicate column" is
-/// the column already being there.
+/// Create the tables (the ledger's, and its incidents', `job_incidents`),
+/// then add any column the ledger lacks; "duplicate column" is the column
+/// already being there.
 pub(crate) fn apply_schema(conn: &rusqlite::Connection) -> Result<(), StoreError> {
     conn.execute_batch(SCHEMA)?;
+    conn.execute_batch(super::job_incidents::SCHEMA)?;
     for stmt in JOB_RUNS_COLUMNS {
         if let Err(e) = conn.execute_batch(stmt) {
             if !e.to_string().contains("duplicate column") {

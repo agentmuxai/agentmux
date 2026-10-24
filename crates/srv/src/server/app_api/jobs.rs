@@ -29,6 +29,7 @@ use crate::backend::jobs::{self, RunLedger};
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::*;
 use crate::backend::storage::cron::CronJob;
+use crate::backend::storage::job_incidents::JobIncident;
 use crate::backend::storage::job_runs::{JobFlag, JobRun};
 use crate::drone::storage::DroneStore;
 use crate::server::caller::Caller;
@@ -95,6 +96,8 @@ pub struct JobView {
     pub recent: Vec<JobRunRow>,
     /// Its newest decisive run failed (§3.4).
     pub failing: bool,
+    /// Its open incident (§3.4): the Kanban task its failures went to.
+    pub incident: Option<JobIncident>,
     /// Spend since local midnight, and over the last 7 days.
     pub cost_today_usd: f64,
     pub cost_week_usd: f64,
@@ -200,6 +203,7 @@ fn block_of(regs: &[crate::backend::reactive::types::AgentRegistration], uid: &s
 struct Ledgered {
     recent: Vec<JobRunRow>,
     failing: bool,
+    incident: Option<JobIncident>,
     cost_today_usd: f64,
     cost_week_usd: f64,
     cost_known: bool,
@@ -216,6 +220,7 @@ fn ledgered(ledger: &RunLedger, job_id: &str, midnight: i64, week: i64) -> Ledge
     Ledgered {
         recent: runs.into_iter().map(JobRunRow::from).collect(),
         failing,
+        incident: store.job_incident_open_for(job_id).ok().flatten(),
         cost_today_usd: today,
         cost_week_usd: week_usd,
         cost_known: known_today || known_week,
@@ -241,6 +246,7 @@ fn cron_view(job: &CronJob, l: Ledgered, paused_all: bool, owner_block_id: Optio
         missed_count: job.missed_count,
         recent: l.recent,
         failing: l.failing,
+        incident: l.incident,
         cost_today_usd: l.cost_today_usd,
         cost_week_usd: l.cost_week_usd,
         cost_known: l.cost_known,
@@ -266,6 +272,7 @@ fn drone_view(id: &str, name: &str, l: Ledgered) -> JobView {
         missed_count: 0,
         recent: l.recent,
         failing: l.failing,
+        incident: l.incident,
         cost_today_usd: l.cost_today_usd,
         cost_week_usd: l.cost_week_usd,
         cost_known: l.cost_known,
