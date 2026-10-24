@@ -682,6 +682,14 @@
     font-variant-numeric: tabular-nums;
 }
 
+.swarm-cron-missed {
+    flex-shrink: 0;
+    font-size: var(--text-2xs);
+    color: var(--warning-color);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
 .swarm-cron-status-badge {
     flex-shrink: 0;
     font-size: var(--text-2xs);

@@ -1031,6 +1031,9 @@ function formatLastFired(unixSec: number | null): string {
     return `${Math.floor(deltaHr / 24)}d ago`;
 }
 
+/** `last_miss_reason` (backend/cron/mod.rs `FireOutcome::miss_reason`) in a few words. */
+const MISS_REASON_TEXT: Record<string, string> = { target_stopped: "agent not running", target_missing: "no target" };
+
 function CronRow({ cron }: { cron: ActiveCron }): JSX.Element {
     // 60s tick — "last fired" doesn't need per-second granularity like a
     // shell's live elapsed counter.
@@ -1041,6 +1044,10 @@ function CronRow({ cron }: { cron: ActiveCron }): JSX.Element {
     });
     const fireCountLabel = createMemo(() =>
         cron.max_fires != null ? `${cron.fire_count}/${cron.max_fires}` : `${cron.fire_count}`
+    );
+    // Fires that reached no one don't count above; say so instead of looking healthy.
+    const missedLabel = createMemo(() =>
+        cron.missed_count ? `missed ${cron.missed_count} · ${MISS_REASON_TEXT[cron.last_miss_reason ?? ""] ?? "not delivered"}` : ""
     );
 
     return (
@@ -1063,6 +1070,9 @@ function CronRow({ cron }: { cron: ActiveCron }): JSX.Element {
             <span class="swarm-cron-expression">{cron.expression}</span>
             <span class="swarm-cron-last-fired">{lastFired()}</span>
             <span class="swarm-cron-fire-count">{fireCountLabel()}</span>
+            <Show when={missedLabel()}>
+                <span class="swarm-cron-missed" title={cron.last_miss_reason}>{missedLabel()}</span>
+            </Show>
             <span class={`swarm-cron-status-badge swarm-cron-status-badge--${cron.enabled ? "active" : "paused"}`}>
                 {cron.enabled ? "Active" : "Paused"}
             </span>

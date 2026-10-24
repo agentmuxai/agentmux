@@ -91,8 +91,13 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 let max = j["max_fires"].as_i64().map(|n| format!("/{n}")).unwrap_or_default();
                 let age_bound = j["expires_in_secs"].as_i64().map(|n| format!("  expires_in={n}s")).unwrap_or_default();
                 let last = j.get("last_run").filter(|r| r.is_object()).map(run_brief).unwrap_or_else(|| "none".to_string());
+                // Scheduled fires that reached no one (not counted in fires=), and why the last did
+                let missed = match j["missed_count"].as_i64().unwrap_or(0) {
+                    0 => String::new(),
+                    n => format!("  missed={n} ({})", j["last_miss_reason"].as_str().unwrap_or("")),
+                };
                 lines.push(format!(
-                    "  {}  {}  [{}]  fires={fires}{max}  next={}  expr='{}'{age_bound}\n      last run: {last}",
+                    "  {}  {}  [{}]  fires={fires}{max}{missed}  next={}  expr='{}'{age_bound}\n      last run: {last}",
                     j["id"].as_str().unwrap_or("?"),
                     j["name"].as_str().unwrap_or("?"),
                     status_str,

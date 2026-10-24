@@ -51,6 +51,18 @@ pub struct CronJob {
     /// `latest`, today's startup catch-up; new jobs default to `skip`.
     #[serde(default = "default_catch_up")]
     pub catch_up: String,
+    /// Scheduled fires that reached no one at their time (the target wasn't
+    /// running, or names no agent). They don't count in `fire_count` or
+    /// toward `max_fires`. A `latest` job's pending fire delivered later
+    /// counts then, as a fire.
+    #[serde(default)]
+    pub missed_count: i64,
+    #[serde(default)]
+    pub last_missed_at: Option<i64>,
+    /// Why the last miss happened: `target_stopped`, `target_missing` or
+    /// `failed: <error>` (`FireOutcome::miss_reason`). Empty = never missed.
+    #[serde(default)]
+    pub last_miss_reason: String,
 }
 
 fn default_catch_up() -> String {
@@ -63,8 +75,13 @@ fn default_catch_up() -> String {
 ///
 /// `catch_up` defaults to `latest` so every existing job keeps today's
 /// startup catch-up; a create writes `skip` unless asked.
-pub(super) const CRON_JOBS_COLUMNS: [&str; 1] =
-    ["ALTER TABLE db_cron_jobs ADD COLUMN catch_up TEXT NOT NULL DEFAULT 'latest'"];
+pub(super) const CRON_JOBS_COLUMNS: [&str; 4] = [
+    "ALTER TABLE db_cron_jobs ADD COLUMN catch_up TEXT NOT NULL DEFAULT 'latest'",
+    // The miss record (`CronJob::missed_count`).
+    "ALTER TABLE db_cron_jobs ADD COLUMN missed_count INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE db_cron_jobs ADD COLUMN last_missed_at INTEGER",
+    "ALTER TABLE db_cron_jobs ADD COLUMN last_miss_reason TEXT NOT NULL DEFAULT ''",
+];
 
 impl Store {
     pub fn cron_create(&self, job: &CronJob) -> Result<(), StoreError> {
@@ -101,7 +118,7 @@ impl Store {
         let mut stmt = conn.prepare(
             "SELECT id, name, expression, prompt, target, created_by, enabled,
                     last_fired, fire_count, max_fires, created_at, max_age_secs,
-                    target_uid, created_by_uid, catch_up
+                    target_uid, created_by_uid, catch_up, missed_count, last_missed_at, last_miss_reason
              FROM db_cron_jobs ORDER BY created_at ASC",
         )?;
         let iter = stmt.query_map([], map_row)?;
@@ -113,7 +130,7 @@ impl Store {
         let mut stmt = conn.prepare(
             "SELECT id, name, expression, prompt, target, created_by, enabled,
                     last_fired, fire_count, max_fires, created_at, max_age_secs,
-                    target_uid, created_by_uid, catch_up
+                    target_uid, created_by_uid, catch_up, missed_count, last_missed_at, last_miss_reason
              FROM db_cron_jobs WHERE enabled = 1 ORDER BY created_at ASC",
         )?;
         let iter = stmt.query_map([], map_row)?;
@@ -125,7 +142,7 @@ impl Store {
         let mut stmt = conn.prepare(
             "SELECT id, name, expression, prompt, target, created_by, enabled,
                     last_fired, fire_count, max_fires, created_at, max_age_secs,
-                    target_uid, created_by_uid, catch_up
+                    target_uid, created_by_uid, catch_up, missed_count, last_missed_at, last_miss_reason
              FROM db_cron_jobs WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map(params![id], map_row)?;
@@ -160,6 +177,19 @@ impl Store {
         Ok(())
     }
 
+    /// A scheduled fire that reached no one: count the miss and say why,
+    /// leaving `last_fired`, `fire_count` and `max_fires` alone.
+    pub fn cron_record_miss(&self, id: &str, now: i64, reason: &str) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE db_cron_jobs
+             SET missed_count = missed_count + 1, last_missed_at = ?1, last_miss_reason = ?2
+             WHERE id = ?3",
+            params![now, reason, id],
+        )?;
+        Ok(())
+    }
+
     pub fn cron_delete(&self, id: &str) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
         let rows = conn.execute("DELETE FROM db_cron_jobs WHERE id = ?1", params![id])?;
@@ -184,5 +214,8 @@ fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronJob> {
         target_uid:    row.get(12)?,
         created_by_uid: row.get(13)?,
         catch_up:      row.get(14)?,
+        missed_count:  row.get(15)?,
+        last_missed_at: row.get(16)?,
+        last_miss_reason: row.get(17)?,
     })
 }

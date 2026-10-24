@@ -71,11 +71,11 @@ pub type AgentPresence = Arc<dyn Fn(&str) -> bool + Send + Sync>;
 /// Why a fire reached no one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MissReason {
-    /// A known agent with no process to take it.
+    /// No live agent answered to the job's target UID or name. Cron fires
+    /// are never held, so inject can't tell a stopped agent from a deleted
+    /// one: this covers both.
     TargetStopped,
-    /// No agent of that name or UID. Told apart from a stopped one by the
-    /// cron fix's classification (missed fires); the ledger already maps it.
-    #[allow(dead_code)]
+    /// The job names no target at all ([`CronScheduler::deliver`]).
     TargetMissing,
 }
 
@@ -90,6 +90,17 @@ pub(crate) enum FireOutcome {
 impl FireOutcome {
     pub(crate) fn delivered(&self) -> bool {
         matches!(self, FireOutcome::Delivered { .. })
+    }
+
+    /// The job's `last_miss_reason` for an undelivered fire; `None` when
+    /// delivered.
+    pub(crate) fn miss_reason(&self) -> Option<String> {
+        match self {
+            FireOutcome::Delivered { .. } => None,
+            FireOutcome::Missed { reason: MissReason::TargetStopped } => Some("target_stopped".into()),
+            FireOutcome::Missed { reason: MissReason::TargetMissing } => Some("target_missing".into()),
+            FireOutcome::Failed { error } => Some(format!("failed: {error}")),
+        }
     }
 }
 
@@ -473,8 +484,10 @@ impl CronScheduler {
             let (runs, run_id, job, o) = (runs.clone(), run_id.clone(), job.clone(), outcome.clone());
             let _ = tokio::task::spawn_blocking(move || runs.record_delivery(&run_id, &job, &o, scheduled, delivery_started)).await;
         }
-        if scheduled && outcome.delivered() {
-            self.record_fire(id);
+        // Run now (manual) is in the ledger only: it neither counts as a
+        // fire nor as a miss.
+        if scheduled {
+            self.record_result(id, &outcome);
         }
         self.publish_changed();
         Fired { run_id, outcome: Some(outcome) }
@@ -489,6 +502,10 @@ impl CronScheduler {
             crate::backend::agent_resolve::record_uid_fallback("m4c.cron_fire_unattributed");
         }
         let target_agent = fire_target(&job.target, &job.target_uid).to_string();
+        if target_agent.trim().is_empty() {
+            tracing::warn!(id, "cron: the job names no target");
+            return Some(FireOutcome::Missed { reason: MissReason::TargetMissing });
+        }
         let message = fire_message(&job.prompt, run_id, late_for);
         let request_id = run_id.map(str::to_string);
         let body = match self.delivery.get() {
@@ -557,11 +574,19 @@ impl CronScheduler {
         }
     }
 
-    fn record_fire(&self, id: &str) {
+    /// Record a scheduled fire on the job: a delivered one counts
+    /// (`last_fired`, `fire_count`, `max_fires`); one that reached no one is
+    /// a miss (`missed_count`, `last_missed_at`, `last_miss_reason`), which
+    /// Swarm's Cron bucket and `Schedule list` show.
+    fn record_result(&self, id: &str, outcome: &FireOutcome) {
         if let Some(store) = &self.shared_store {
             let now = Utc::now().timestamp();
-            if let Err(e) = store.cron_record_fire(id, now) {
-                tracing::warn!(id, error = %e, "cron: failed to record fire in DB");
+            let recorded = match outcome.miss_reason() {
+                None => store.cron_record_fire(id, now),
+                Some(reason) => store.cron_record_miss(id, now, &reason),
+            };
+            if let Err(e) = recorded {
+                tracing::warn!(id, error = %e, "cron: failed to record the fire in DB");
             }
         }
     }
@@ -623,8 +648,11 @@ impl CronScheduler {
             let delivery_started = agentmux_common::time::now_ms();
             let Some(outcome) = self.deliver(&job, Some(&run.id), run.scheduled_for_ms).await else { continue };
             runs.record_pending_delivery(&run, &outcome, delivery_started);
+            // Only a delivery is recorded here: the slot already counted as one
+            // miss when it first went undelivered, and a pending fire that
+            // misses again stays pending (it is retried, not a new miss).
             if outcome.delivered() {
-                self.record_fire(&job.id);
+                self.record_result(&job.id, &outcome);
                 self.stop_at_max_fires(&job.id);
                 delivered += 1;
                 self.publish_changed();
@@ -766,6 +794,9 @@ pub(crate) fn test_job(id: &str, prompt: &str, target: &str, target_uid: &str, c
         created_at: 0,
         max_age_secs: None,
         catch_up: jobs::CATCH_UP_SKIP.to_string(),
+        missed_count: 0,
+        last_missed_at: None,
+        last_miss_reason: String::new(),
     }
 }
 
@@ -828,5 +859,117 @@ mod identity_m4c3_tests {
         assert_eq!(req.source_agent.as_deref(), Some("cron"), "the sender name stays cron");
         assert_eq!(creator_uid, "uid-creator");
         assert_eq!(req.audit_source_uid, "", "the delivery path sets it, on this instance only");
+    }
+}
+
+
+#[cfg(test)]
+mod missed_fire_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn sched_with(store: Option<Arc<Store>>, answer: serde_json::Value) -> Arc<CronScheduler> {
+        let sched = CronScheduler::new(
+            store,
+            reqwest::Client::new(),
+            "http://127.0.0.1:1".to_string(),
+            "test".to_string(),
+            Arc::new(Broker::new()),
+        );
+        sched.install_delivery(Arc::new(move |_, _| {
+            let answer = answer.clone();
+            Box::pin(async move { answer })
+        }));
+        sched
+    }
+
+    fn store_with(job: &CronJob) -> Arc<Store> {
+        let store = Arc::new(Store::open_in_memory().expect("store"));
+        store.apply_identity_schema_for_tests().expect("the identity schema, which holds db_cron_jobs");
+        store.cron_create(job).expect("create");
+        store
+    }
+
+    #[test]
+    fn reads_the_inject_response() {
+        assert_eq!(
+            fire_outcome(Some(&json!({"success": true, "block_id": "b-1"}))),
+            FireOutcome::Delivered { block_id: Some("b-1".into()) }
+        );
+        assert_eq!(
+            fire_outcome(Some(&json!({"success": false, "error": "agent not found: uid-t"}))),
+            FireOutcome::Missed { reason: MissReason::TargetStopped }
+        );
+        assert!(matches!(
+            fire_outcome(Some(&json!({"success": false, "error": "ambiguous agent name: 'AgentY'"}))),
+            FireOutcome::Failed { .. }
+        ));
+        assert!(matches!(fire_outcome(None), FireOutcome::Failed { .. }));
+    }
+
+    #[test]
+    fn a_miss_says_why_and_a_delivery_has_no_reason() {
+        assert_eq!(FireOutcome::Delivered { block_id: None }.miss_reason(), None);
+        assert_eq!(
+            FireOutcome::Missed { reason: MissReason::TargetStopped }.miss_reason().as_deref(),
+            Some("target_stopped")
+        );
+        assert_eq!(
+            FireOutcome::Missed { reason: MissReason::TargetMissing }.miss_reason().as_deref(),
+            Some("target_missing")
+        );
+        assert_eq!(FireOutcome::Failed { error: "x".into() }.miss_reason().as_deref(), Some("failed: x"));
+    }
+
+    /// A scheduled fire nobody received is recorded as a miss with its
+    /// reason, and `fire_count` (which `max_fires` reads) is left alone.
+    #[tokio::test]
+    async fn an_undelivered_fire_is_a_miss_not_a_fire() {
+        let job = test_job("job-m", "tick", "AgentZ", "uid-z", "uid-y");
+        let store = store_with(&job);
+        let sched = sched_with(Some(store.clone()), json!({"success": false, "error": "agent not found: uid-z"}));
+
+        let fired = sched.fire(&job, Slot::Scheduled(0)).await;
+        assert_eq!(fired.outcome, Some(FireOutcome::Missed { reason: MissReason::TargetStopped }));
+        let stored = store.cron_get("job-m").unwrap().unwrap();
+        assert_eq!((stored.fire_count, stored.last_fired), (0, None));
+        assert_eq!((stored.missed_count, stored.last_miss_reason.as_str()), (1, "target_stopped"));
+        assert!(stored.last_missed_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn a_delivered_fire_counts_and_leaves_the_miss_record() {
+        let job = test_job("job-d", "tick", "AgentZ", "uid-z", "uid-y");
+        let store = store_with(&job);
+        let sched = sched_with(Some(store.clone()), json!({"success": true, "block_id": "b-1"}));
+
+        sched.fire(&job, Slot::Scheduled(0)).await;
+        let stored = store.cron_get("job-d").unwrap().unwrap();
+        assert_eq!((stored.fire_count, stored.missed_count), (1, 0));
+        assert!(stored.last_fired.is_some());
+    }
+
+    /// A job with no target misses without trying to deliver.
+    #[tokio::test]
+    async fn a_job_with_no_target_is_a_miss() {
+        let job = test_job("job-n", "tick", "", "", "uid-y");
+        let store = store_with(&job);
+        let sched = sched_with(Some(store.clone()), json!({"success": true}));
+
+        let fired = sched.fire(&job, Slot::Scheduled(0)).await;
+        assert_eq!(fired.outcome, Some(FireOutcome::Missed { reason: MissReason::TargetMissing }));
+        assert_eq!(store.cron_get("job-n").unwrap().unwrap().last_miss_reason, "target_missing");
+    }
+
+    /// Run now is the ledger's alone: neither a fire nor a miss on the job.
+    #[tokio::test]
+    async fn run_now_counts_neither_way() {
+        let job = test_job("job-r", "tick", "AgentZ", "uid-z", "uid-y");
+        let store = store_with(&job);
+        let sched = sched_with(Some(store.clone()), json!({"success": false, "error": "agent not found: uid-z"}));
+
+        sched.fire(&job, Slot::Manual { triggered_by: "user".into() }).await;
+        let stored = store.cron_get("job-r").unwrap().unwrap();
+        assert_eq!((stored.fire_count, stored.missed_count), (0, 0));
     }
 }

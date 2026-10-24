@@ -94,13 +94,9 @@ export interface ActiveShell {
 }
 
 /**
- * Mirrors the backend's `CronSummary` (`server/cron.rs`) — one persistent
- * cron job whose `created_by` agent currently resolves to a live block.
- * Fetched via `cron.ListActive` (unfiltered, like `ActiveShell` above);
- * `buildTree()` groups by `block_id` client-side. Unlike Shell, a job stays
- * visible whether `enabled` or paused — Phase 2's scope is "does this agent
- * have a recurring job", not just "is it firing right now". See
- * SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 2.
+ * Mirrors the backend's `CronSummary` (`server/cron.rs`): a persistent cron job whose
+ * `created_by` agent resolves to a live block, from `cron.ListActive`, grouped by `block_id`
+ * in `buildTree()`. Shown enabled or paused (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 2).
  */
 export interface ActiveCron {
     id: string;
@@ -114,6 +110,9 @@ export interface ActiveCron {
     fire_count: number;
     max_fires: number | null;
     next_fire: string | null;
+    /** Scheduled fires that reached no one, and why the last one did (`target_stopped`, ...). */
+    missed_count?: number;
+    last_miss_reason?: string;
 }
 
 /**
