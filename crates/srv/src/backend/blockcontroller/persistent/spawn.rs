@@ -283,7 +283,7 @@ impl PersistentSubprocessController {
             // no `kill_tx` to reach the child through (codex P1 on #3990).
             if let Err(e) = Self::commit_restart_spawn_locked(&mut inner) {
                 drop(inner);
-                let _ = child.start_kill();
+                let _ = agentmux_common::process::start_kill_child_and_group(&mut child);
                 tokio::spawn(async move {
                     let _ = child.wait().await;
                 });

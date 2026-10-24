@@ -15,6 +15,11 @@ const mode = process.argv[2];
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
 const rl = require("readline").createInterface({ input: process.stdin });
 out({ type: "system", subtype: "init", session_id: "stub-session" });
+if (process.argv[3]) {
+  // A helper the CLI starts, like an MCP server: its pid goes to argv[3].
+  const helper = require("child_process").spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  require("fs").writeFileSync(process.argv[3], String(helper.pid));
+}
 rl.on("line", (line) => {
   let m;
   try { m = JSON.parse(line); } catch { return; }
@@ -53,6 +58,10 @@ fn stub_path() -> Option<std::path::PathBuf> {
 }
 
 fn start(block_id: &str, mode: &str, stub: &std::path::Path) -> (PersistentSubprocessController, Arc<mps::Broker>) {
+    start_with(block_id, vec![stub.to_string_lossy().to_string(), mode.to_string()])
+}
+
+fn start_with(block_id: &str, cli_args: Vec<String>) -> (PersistentSubprocessController, Arc<mps::Broker>) {
     let broker = Arc::new(mps::Broker::new());
     let c = PersistentSubprocessController::new(
         "tab".to_string(),
@@ -64,7 +73,7 @@ fn start(block_id: &str, mode: &str, stub: &std::path::Path) -> (PersistentSubpr
     );
     let config = PersistentSpawnConfig {
         cli_command: "node".to_string(),
-        cli_args: vec![stub.to_string_lossy().to_string(), mode.to_string()],
+        cli_args,
         working_dir: String::new(),
         env_vars: HashMap::new(),
         session_id_field: "session_id".to_string(),
@@ -249,6 +258,57 @@ async fn stubborn_process_is_killed_at_the_deadline() {
     assert!(elapsed >= std::time::Duration::from_millis(1400), "killed early: {elapsed:?}");
     assert!(elapsed < std::time::Duration::from_secs(4), "killed late: {elapsed:?}");
     let _ = std::fs::remove_file(stub);
+}
+
+/// The CLI leads its own process group, so the kill at the deadline (a
+/// config restart's, a close's) takes what it started, like its MCP servers,
+/// and a signal to that group can't reach srv.
+#[cfg(unix)]
+#[tokio::test]
+async fn the_deadline_kill_takes_the_helpers_the_cli_started() {
+    let Some(stub) = stub_path() else { return };
+    let pid_file = std::env::temp_dir().join(format!("agentmux-shutdown-helper-{}.pid", uuid::Uuid::new_v4()));
+    let args = vec![stub.to_string_lossy().to_string(), "stubborn".to_string(), pid_file.to_string_lossy().to_string()];
+    let (c, _broker) = start_with("blk-shutdown-helper", args);
+    wait_for_pid(&c).await;
+    let cli = c.inner.lock().unwrap().current_pid.unwrap() as i32;
+    let mut helper = None;
+    for _ in 0..200 {
+        helper = std::fs::read_to_string(&pid_file).ok().and_then(|s| s.trim().parse::<i32>().ok());
+        if helper.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let helper = helper.expect("the stub wrote its helper's pid");
+    assert_eq!(unsafe { libc::getpgid(cli) }, cli, "the CLI leads its own group");
+    assert_eq!(unsafe { libc::getpgid(helper) }, cli, "its helper is in that group");
+    assert_ne!(unsafe { libc::getpgid(0) }, cli, "not this process's group");
+
+    let outcome = c.shutdown(std::time::Instant::now() + std::time::Duration::from_millis(500)).await;
+    assert_eq!(outcome, StopOutcome::Killed);
+    let mut gone = false;
+    for _ in 0..100 {
+        if helper_gone(helper) {
+            gone = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(gone, "the helper {helper} outlived the CLI's kill");
+    let _ = std::fs::remove_file(pid_file);
+    let _ = std::fs::remove_file(stub);
+}
+
+/// Exited, or a zombie waiting for init to reap it.
+#[cfg(unix)]
+fn helper_gone(pid: i32) -> bool {
+    match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+        Ok(stat) => stat.rfind(')').is_some_and(|i| stat[i + 1..].trim_start().starts_with('Z')),
+        // No /proc (macOS): ask the kernel.
+        Err(_) if !std::path::Path::new("/proc/self").exists() => (unsafe { libc::kill(pid, 0) }) != 0,
+        Err(_) => true,
+    }
 }
 
 /// The watchdog's inputs for a persistent agent: its status carries the spawn

@@ -83,13 +83,48 @@ pub fn track_adopted(block_id: &str, pid: u32) {
 /// `!cmd`, like [`track_adopted`]). Still call `track_spawned*` /
 /// `track_adopted` after the spawn: that records the PID and covers platforms
 /// with no pre-exec placement.
+///
+/// An agent's own CLI (`create`) also leads its own process group on Unix,
+/// so a signal to its group (its own, or one of its tools') can't reach srv,
+/// and its teardown (`process::kill_child_and_group`) takes its MCP servers
+/// too. The launcher finds these groups through `agent_roots` if srv dies
+/// without closing them.
 pub fn place_spawn(block_id: &str, cmd: &mut tokio::process::Command, create: bool) {
+    #[cfg(unix)]
+    if create {
+        cmd.process_group(0);
+    }
     #[cfg(target_os = "linux")]
     if let Some(target) = spawn_target(block_id, create) {
         super::cgroup_linux::join_before_exec(cmd, target);
     }
     #[cfg(not(target_os = "linux"))]
     let _ = (block_id, cmd, create);
+}
+
+/// An agent CLI srv runs outside any block's tracker (the Drone runner, the
+/// ambient side call): it too leads its own process group on Unix, like
+/// [`place_spawn`]'s, so its kill takes its helpers and a signal to its group
+/// can't reach srv. Call [`record_untracked_cli`] once it is spawned.
+pub fn own_process_group(cmd: &mut tokio::process::Command) {
+    #[cfg(unix)]
+    cmd.process_group(0);
+    #[cfg(not(unix))]
+    let _ = cmd;
+}
+
+/// Record a CLI spawned with [`own_process_group`] for the launcher
+/// (`roots_file`), which ends it if srv dies first.
+pub fn record_untracked_cli(pid: Option<u32>) {
+    #[cfg(unix)]
+    if let Some(pid) = pid {
+        debug_assert!(agentmux_common::process::leads_own_group(pid), "{pid} should lead its own process group");
+        if global().is_some() {
+            super::roots_file::record(pid);
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = pid;
 }
 
 /// How a spawn joins its block's tracker (see [`spawn_tracked`]).
@@ -192,6 +227,8 @@ pub const SETTING_AGENT_BELOW_NORMAL_PRIORITY: &str = "agent:belownormalpriority
 pub fn track_spawned_agent(block_id: &str, pid: u32) {
     track(block_id, pid, true);
     let Some(registry) = global() else { return };
+    #[cfg(unix)]
+    super::roots_file::record(pid);
     let on = registry.agent_below_normal_priority();
     if let Err(e) = registry.set_below_normal_priority(block_id, on) {
         tracing::warn!(block_id = %block_id, err = %e, "[process-tracker] could not set job CPU priority");
@@ -437,6 +474,8 @@ impl AgentProcessRegistry {
     ///
     /// Called by a background Tokio task on a ~2s interval.
     pub fn poll_and_emit(&self) {
+        #[cfg(unix)]
+        super::roots_file::prune();
         let mut map = self.inner.lock();
         for (block_id, entry) in map.iter_mut() {
             let current_members = agent_started(entry.tracker.list_members(), &entry.roots);

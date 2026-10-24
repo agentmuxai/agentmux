@@ -351,13 +351,6 @@ pub(crate) fn kill_process_group_forcefully(child: &tokio::process::Child) {
     kill_process_group(child, libc::SIGKILL, "SIGKILL");
 }
 
-/// [`kill_process_group_forcefully`] by pgid, for a child already reaped
-/// (whose `id()` is gone): srv's group after srv was force-killed.
-#[cfg(not(target_os = "windows"))]
-pub(crate) fn kill_group_forcefully(pgid: u32) {
-    kill_group(pgid, libc::SIGKILL, "SIGKILL");
-}
-
 #[cfg(all(test, not(target_os = "windows")))]
 mod tests {
     //! `kill_process_group_forcefully` and the `.process_group(0)` calls in

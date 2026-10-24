@@ -210,7 +210,8 @@ pub(crate) async fn run_agent_with_bin(
     {
         cmd.no_window();
     }
-    let mut child = cmd
+    crate::backend::process_tracker::registry::own_process_group(&mut cmd);
+    let mut child = agentmux_common::process::KillGroupOnDrop(cmd
         .arg(&task.prompt)
         .current_dir(&working_dir)
         .stdin(Stdio::null())
@@ -218,7 +219,8 @@ pub(crate) async fn run_agent_with_bin(
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|e| AgentError::Spawn(format!("spawn `{bin}`: {e}")))?;
+        .map_err(|e| AgentError::Spawn(format!("spawn `{bin}`: {e}")))?);
+    crate::backend::process_tracker::registry::record_untracked_cli(child.id());
 
     let stdout = child
         .stdout
@@ -924,6 +926,34 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// The Drone task CLI leads its own process group (like an agent pane's),
+    /// so a signal to its group can't reach srv and its helpers die with it.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_task_cli_leads_its_own_process_group() {
+        let dir = std::env::temp_dir().join(format!("amux-runner-group-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let report = dir.join("report");
+        let stub = dir.join("claude-stub.sh");
+        write_stub_script(
+            &stub,
+            &[&format!(
+                "echo \"$$ $(ps -o pgid= -p $$ | tr -d ' ')\" > {r}.tmp && mv {r}.tmp {r}",
+                r = report.display()
+            )],
+        );
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let task = AgentTask { prompt: "hi".to_string(), context: serde_json::Map::new(), max_turns: None };
+        let handle = run_stub(&stub, task, tx).await.expect("spawn ok");
+        let _ = handle.final_result.await;
+        let text = std::fs::read_to_string(&report).expect("the stub reported");
+        let fields: Vec<u32> = text.split_whitespace().filter_map(|f| f.parse().ok()).collect();
+        assert_eq!(fields.len(), 2, "{text:?}");
+        assert_eq!(fields[0], fields[1], "the CLI leads its own process group");
+        assert_ne!(fields[1] as i32, unsafe { libc::getpgid(0) }, "not srv's group");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

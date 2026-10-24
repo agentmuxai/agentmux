@@ -789,7 +789,7 @@ impl AcpController {
         tokio::spawn(async move {
             tokio::select! {
                 _ = kill_rx => {
-                    let _ = child.kill().await;
+                    let _ = agentmux_common::process::kill_child_and_group(&mut child).await;
                     tracing::info!(block_id = %block_id_wait, "ACP process killed");
 
                     let mut inner = inner_wait.lock().unwrap();

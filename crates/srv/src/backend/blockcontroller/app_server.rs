@@ -829,6 +829,8 @@ pub struct AppServerProcess {
     stderr_task: AsyncMutex<Option<tokio::task::JoinHandle<()>>>,
     shutdown_requested: AtomicBool,
     pid: Option<u32>,
+    // `shutdown`'s force-kill, done by the reaper task (it owns `Child`); dropped, the reaper just waits.
+    kill_tx: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
 }
 
 impl AppServerProcess {
@@ -877,14 +879,15 @@ impl AppServerProcess {
         let transport = Arc::new(AppServerTransport::new(stdout, stdin, limits));
 
         let (exit_tx, exit_rx) = watch::channel(None);
+        let (kill_tx, mut kill_rx) = tokio::sync::oneshot::channel::<()>();
         tokio::spawn(async move {
-            let result = child
-                .wait()
-                .await
-                .map_err(|error| error.to_string());
-            // `child` (and its `kill_on_drop`) drops here, after it has
-            // already exited — a no-op, not a race with anyone else, since
-            // this task is the only place that ever touches `Child`.
+            let result = tokio::select! {
+                result = child.wait() => result,
+                Ok(()) = &mut kill_rx => { let _ = agentmux_common::process::kill_child_and_group(&mut child).await; child.wait().await }
+            }
+            .map_err(|error| error.to_string());
+            // `child` (and its `kill_on_drop`) drops here, already exited: a
+            // no-op, since this task is the only one that touches `Child`.
             let _ = exit_tx.send(Some(result));
         });
 
@@ -895,6 +898,7 @@ impl AppServerProcess {
             stderr_task: AsyncMutex::new(Some(stderr_task)),
             shutdown_requested: AtomicBool::new(false),
             pid,
+            kill_tx: Mutex::new(Some(kill_tx)),
         })
     }
 
@@ -930,14 +934,10 @@ impl AppServerProcess {
         let status = match tokio::time::timeout(timeout, self.await_exit()).await {
             Ok(result) => Some(result?),
             Err(_) => {
-                // Force-kill by pid rather than `Child::kill()` — the
-                // reaper task spawned in `spawn()` owns the `Child` value
-                // exclusively for its whole lifetime (that's what fixes the
-                // concurrent-shutdown deadlock this replaces), so nothing
-                // outside that task can get `&mut Child` to call `.kill()`
-                // on it. `kill_pid` needs only the raw pid, not the handle.
-                if let Some(pid) = self.pid {
-                    let _ = agentmux_common::process::kill_pid(pid);
+                // Force-kill via the reaper task: it owns `Child` (the concurrent-shutdown
+                // deadlock fix), so only it knows the child is unreaped, as a group kill needs.
+                if let Some(kill_tx) = self.kill_tx.lock().unwrap().take() {
+                    let _ = kill_tx.send(());
                 }
                 // The kill above makes the reaper's own wait() return
                 // shortly; discard the resulting status like the pre-fix
