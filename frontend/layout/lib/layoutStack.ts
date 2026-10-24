@@ -385,7 +385,7 @@ export function moveBlocksInStack(
     let emptied = false;
     for (const id of moving) {
         // Re-resolved every time: removing an emptied pane can collapse a parent and
-        // re-home the destination (closeBlockInStack's comment, reagent P1 on #3422).
+        // re-home the destination (the hazard closeBlockInStack guards against (#3422)).
         const cur = model.treeState.rootNode;
         const src = cur && findNodeByBlockId(cur, id);
         const dst = cur && findNodeByBlockId(cur, targetBlockId);
