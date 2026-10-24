@@ -393,7 +393,7 @@ Built into P1–P3 so the later phases add, not change:
 |---|---|---|
 | Create a job | Any action | `message` and `task` actions; `spawn` only with itself as the leader, and only after the operator approves the job once (the spawn consent rule, `agent_spawn.rs:632`, made at creation since the runs are unattended); `drone` never |
 | Use a template | Approve and use it | Use one the operator approved |
-| Edit, pause, resume, delete, Run now | Any job | Jobs it created or owns (`Caller` in `handle_cron_delete` and `handle_cron_patch`) |
+| Edit, pause, resume, delete, Run now | Any job | Jobs it created or owns (`Caller` in `handle_cron_delete` and `handle_cron_patch`, with the missed-fires fix, #5392) |
 | Raise a cap | Yes | No: clamped to the defaults |
 | Pause all / resume all | Yes | No |
 | Approve a template, pin a reporter or catalog key | Yes | No |
@@ -416,7 +416,7 @@ Container agents get `list` and `history` only, as they can't spawn either (`age
 **srv:**
 - Ledger: a cron fire writes `scheduled` then `running` then `finished`, with the turn's cost; a fire to a stopped agent is never held: it is `missed` (`target_stopped`) and raises `missed_count`, not `fire_count`; with catch-up `latest`, missed fires coalesce into one pending fire that a newer one replaces, which expires at the next fire time and is delivered once when the agent comes back; two schedulers sharing the identity store fire a slot once (unique index); consecutive skips collapse with a count; nothing removes runs (no retention sweep).
 - Drone: `rundrone` writes a row with summed cost; rows left `running` become `interrupted` at startup.
-- Caller checks: an agent can't delete or pause another agent's job; `pause_all` refuses an agent caller.
+- Caller checks: an agent can't delete or pause another agent's job (#5392); `pause_all` refuses an agent caller.
 - Failure alerts: the first failure files one task (`job-failure`, the owning leader resolved through `worker_of` and, once seats exist, a seat), sends one note and one `JobFailed`; the second failure only adds to the card; a success adds "recovered".
 - Cloud events: a valid signed event writes a row; a repeated `event_id` is ignored; a bad signature, unknown reporter or unknown `job_id` is dropped and counted; a `finished` without `started` makes a closed row; a late event turns `missed` into late.
 - Watchdog: a missing expected slot after grace is `missed`; a started run past `max_duration_minutes` is `lost`; three misses make one incident.
@@ -433,7 +433,7 @@ Each PR adds a changeset.
 
 | PR | Phase | Scope |
 |---|---|---|
-| 1 | P1 | `db_job_runs` (identity store), cron fires write runs, cron fires never held (missed, with catch-up `skip` or `latest`; AgentA's cron fix owns the missed counters), `fire_count` only for delivered fires, the slot lease, caller checks on delete and pause, the turn follower, Drone runs in the ledger and interrupted-run cleanup; `Schedule` `history`, `run_now`, `report`; `list` with last and next run |
+| 1 | P1 | `db_job_runs` (identity store), cron fires write runs, cron fires never held (missed, with catch-up `skip` or `latest`; AgentA's cron fix owns the missed counters), `fire_count` only for delivered fires, the slot lease, the turn follower, Drone runs in the ledger and interrupted-run cleanup; `Schedule` `history`, `run_now`, `report`; `list` with last and next run |
 | 2 | P1 | The Warden Jobs tab, `jobs.*` RPCs, `JobsChanged`, Pause all |
 | 3 | P1 | Failure incidents: the Kanban task, the note to the owning leader, `NotifyKind::JobFailed` |
 | 4 | P2 | The job-event schema file; Settings → Jobs → Cloud reporters; ingesting job events into the ledger; cloud job manifests; the cloud group in the tab. |
