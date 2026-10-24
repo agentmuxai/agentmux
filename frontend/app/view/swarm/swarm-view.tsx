@@ -226,11 +226,13 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
                     >
                         <For each={swarmOrder.order()}>
                             {(key) =>
-                                remoteByKey().has(key) ? (
-                                    <RemoteAgentRowHost rowKey={key} rows={remoteByKey} model={model} />
-                                ) : (
+                                // Which kind of row it is comes from the maps the rows are read from. A key in
+                                // neither (the agent just left) has no row to show.
+                                rowsByKey().has(key) ? (
                                     <AgentRowHost rowKey={key} rows={rowsByKey} focusedBlockId={focusedBlockId} model={model} />
-                                )
+                                ) : remoteByKey().has(key) ? (
+                                    <RemoteAgentRowHost rowKey={key} rows={remoteByKey} model={model} />
+                                ) : null
                             }
                         </For>
                     </div>

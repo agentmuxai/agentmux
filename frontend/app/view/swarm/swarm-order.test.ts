@@ -1,6 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { createComputed, createRoot } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SWARM_SETTLE_MS, SwarmOrderController, orderSwarmItems, type SwarmOrderItem } from "./swarm-order";
 
@@ -264,6 +265,27 @@ describe("SwarmOrderController", () => {
         ctl.setHold("menu", false);
         vi.advanceTimersByTime(SWARM_SETTLE_MS);
         expect(ctl.order()).toEqual(["b", "a"]);
+    });
+
+    it("is not re-run by the order it publishes, when the view calls it from a computed", () => {
+        const { ctl } = make();
+        const facts = [local("a", { lastActive: 2 }), local("b", { lastActive: 1 })];
+        let runs = 0;
+        const dispose = createRoot((d) => {
+            createComputed(() => {
+                runs++;
+                ctl.update(facts);
+            });
+            return d;
+        });
+        expect(runs).toBe(1);
+        ctl.setHold("pointer", true);
+        ctl.update([facts[0], { ...facts[1], working: true }]);
+        ctl.setHold("pointer", false);
+        vi.advanceTimersByTime(SWARM_SETTLE_MS);
+        expect(ctl.order()).toEqual(["b", "a"]);
+        expect(runs).toBe(1);
+        dispose();
     });
 
     it("stops its timers when disposed", () => {

@@ -137,6 +137,28 @@ describe("Swarm order", () => {
         expect(names()).toEqual(["B", "A"]);
     });
 
+    it("ends a press at the right-click that follows it, since the menu can swallow the pointerup", () => {
+        const { names, change, container } = setup({ A: "idle", B: "idle" });
+        const tree = container.querySelector(".swarm-tree")!;
+        fireEvent.pointerDown(tree);
+        fireEvent.contextMenu(tree);
+        change({ A: "idle", B: "working" });
+        // The menu holds the list for a while; a key press ends that, and the press is already over.
+        fireEvent.keyDown(window, { key: "Escape" });
+        vi.advanceTimersByTime(SWARM_SETTLE_MS);
+        expect(names()).toEqual(["B", "A"]);
+    });
+
+    it("drops a row whose agent has left while the list is held, without error", () => {
+        const { names, change, container } = setup({ A: "idle", B: "idle", C: "idle" });
+        hovered = true;
+        fireEvent.pointerEnter(container.querySelector(".swarm-tree")!);
+        change({ A: "idle", C: "idle" });
+        expect(names()).toEqual(["A", "C"]);
+        change({ A: "idle", C: "idle", D: "working" });
+        expect(names()).toEqual(["A", "C", "D"]);
+    });
+
     it("moves the same row element, so focus and a ticked checkbox follow the agent", () => {
         // Rows are keyed by agent, not by place: a move reorders the elements, it does not rebuild them.
         const { container, change } = setup({ A: "idle", B: "idle" });

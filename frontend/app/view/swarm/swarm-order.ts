@@ -11,7 +11,7 @@
  */
 
 import { sameList } from "@/app/util/select-trace";
-import { createSignal, type Accessor } from "solid-js";
+import { createSignal, untrack, type Accessor } from "solid-js";
 
 /** How long the order waits after the last change, and after the user lets go of the list. */
 export const SWARM_SETTLE_MS = 400;
@@ -110,7 +110,9 @@ export class SwarmOrderController {
         this.trackWorkingSince(items);
         const keys = new Set(items.map((item) => item.key));
         const target = orderSwarmItems(items, this.workingSince);
-        const shown = this.order();
+        // Read without subscribing: the view calls update from a computed, which must follow the
+        // facts, not the order this publishes.
+        const shown = untrack(this.order);
         if (shown.length === 0) {
             this.target = target;
             this.setOrder(target);

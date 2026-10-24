@@ -61,6 +61,7 @@ export function useSwarmOrder(opts: {
             ["pointerup", release],
             ["pointercancel", release],
             ["dragend", release],
+            ["blur", release],
             ["pointerdown", closeMenu],
             ["keydown", closeMenu],
         ] as const;
@@ -77,7 +78,11 @@ export function useSwarmOrder(opts: {
             onPointerEnter: () => control.setHold("pointer", true),
             onPointerLeave: () => control.setHold("pointer", false),
             onPointerDown: () => control.setHold("press", true),
-            onContextMenu: () => control.setHold("menu", true),
+            // The native menu can swallow the pointerup, so a right-click ends the press.
+            onContextMenu: () => {
+                control.setHold("press", false);
+                control.setHold("menu", true);
+            },
             onFocusIn: () => control.setHold("focus", true),
             onFocusOut: (e) => {
                 if (!opts.list()?.contains(e.relatedTarget as Node | null)) control.setHold("focus", false);
