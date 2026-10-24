@@ -119,6 +119,9 @@ pub fn on_turn(a: &mut Armed, t: &TurnSeen) -> Vec<Effect> {
 
 enum Msg {
     Arm { block_id: String, run_id: String, armed_at_ms: i64 },
+    /// A run another channel's pane took: checked at each sweep
+    /// (`RunLedger::check_remote`, #1988).
+    Watch { run_id: String, armed_at_ms: i64 },
     Turn(TurnSeen),
     Sweep,
 }
@@ -161,13 +164,21 @@ impl Follower {
     pub(super) fn arm(&self, block_id: &str, run_id: &str, armed_at_ms: i64) {
         let _ = self.tx.send(Msg::Arm { block_id: block_id.to_string(), run_id: run_id.to_string(), armed_at_ms });
     }
+
+    pub(super) fn watch(&self, run_id: &str, armed_at_ms: i64) {
+        let _ = self.tx.send(Msg::Watch { run_id: run_id.to_string(), armed_at_ms });
+    }
 }
 
 async fn run(ledger: Weak<RunLedger>, broker: Arc<Broker>, mut rx: tokio::sync::mpsc::UnboundedReceiver<Msg>) {
     let mut armed: HashMap<String, Vec<Armed>> = HashMap::new();
+    let mut watched: HashMap<String, i64> = HashMap::new();
     while let Some(msg) = rx.recv().await {
         let Some(ledger) = ledger.upgrade() else { break };
         match msg {
+            Msg::Watch { run_id, armed_at_ms } => {
+                watched.insert(run_id, armed_at_ms);
+            }
             Msg::Arm { block_id, run_id, armed_at_ms } => {
                 armed.entry(block_id.clone()).or_default().push(Armed { run_id, armed_at_ms, turn_id: None, last: None });
                 let latest = broker
@@ -199,6 +210,17 @@ async fn run(ledger: Weak<RunLedger>, broker: Arc<Broker>, mut rx: tokio::sync::
                         ledger.turn_finished(&run_id, infra::OK, None, "AgentMux saw no turn for this run")
                     })
                     .await;
+                }
+                if !watched.is_empty() {
+                    let (l, list) = (ledger.clone(), watched.clone());
+                    let done = tokio::task::spawn_blocking(move || {
+                        list.into_iter().filter(|(id, at)| l.check_remote(id, *at, now)).map(|(id, _)| id).collect::<Vec<_>>()
+                    })
+                    .await
+                    .unwrap_or_default();
+                    for id in done {
+                        watched.remove(&id);
+                    }
                 }
             }
         }

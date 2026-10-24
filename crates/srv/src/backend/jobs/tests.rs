@@ -299,10 +299,11 @@ fn an_agent_in_another_channel_counts_as_back() {
 }
 
 /// A fire another channel's agent took names a pane this instance doesn't
-/// have: its turn can't be followed from here, so the run closes at once,
-/// with no transcript link. A pane of this channel's store is followed.
+/// have: its turn can't be followed from here, so the run stays running for
+/// the receiver to close (#1988), with no transcript link. A pane of this
+/// channel's store is followed here.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_run_delivered_to_another_channel_closes_at_once() {
+async fn a_run_delivered_to_another_channel_is_left_to_the_receiver() {
     let dir = tempfile::tempdir().unwrap();
     let store = Arc::new(Store::open_identity_store(&dir.path().join("identity-store.db")).unwrap());
     let mstore = Arc::new(Store::open_in_memory().unwrap());
@@ -313,8 +314,7 @@ async fn a_run_delivered_to_another_channel_closes_at_once() {
     let Begin::Run(remote) = ledger.begin_cron(&job, TRIGGER_SCHEDULE, Some(1), BY_SCHEDULER) else { panic!() };
     ledger.record_delivery(&remote, &job, &delivered("b-other-channel"), true, 0);
     let r = store.job_run_get(&remote).unwrap().unwrap();
-    assert_eq!((r.state.as_str(), r.infra.as_str(), r.cost_known), (state::FINISHED, infra::OK, false));
-    assert!(r.summary.contains("another channel"), "{}", r.summary);
+    assert_eq!((r.state.as_str(), r.ended_at_ms, r.block_id.as_str()), (state::RUNNING, None, "b-other-channel"));
     assert!(r.links.get("transcript").is_none(), "no link that wouldn't resolve here");
 
     let mut pane = crate::backend::obj::Block { oid: "b-local-pane".to_string(), ..Default::default() };
