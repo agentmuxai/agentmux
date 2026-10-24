@@ -1,7 +1,7 @@
 # SPEC: unresponsive agents — out-of-quota and signed-out states, the reset time, held messages, the per-account notice
 
 **Date:** 2026-10-23
-**Status:** active — approved by the operator on 2026-10-23. Step 1 (§3, §4.1, §4.2, §4.5) shipped in #5389; steps 2a–2e (§4.3, §4.4, §4.6, §5, §6) and step 3 (§7, §8) remain. Implements R1–R4, R6 and R7 of `docs/reports/REPORT_UNRESPONSIVE_AGENTS_2026_10_23.md` (Kanban #1255, operator: "yes proceed with all"); R5 and R8 are scoped here only as far as they read this spec's state. Ships with the first build PR (§9, step 1).
+**Status:** active — approved by the operator on 2026-10-23. Step 1 (§3, §4.1, §4.2, §4.5) shipped in #5389; step 2b (§4.4 and the R8 display) is in #5398; steps 2a and 2c–2e (§4.3, §4.6, §5, §6) and step 3 (§7, §8) remain. Implements R1–R4, R6 and R7 of `docs/reports/REPORT_UNRESPONSIVE_AGENTS_2026_10_23.md` (Kanban #1255, operator: "yes proceed with all"); R5 and R8 are scoped here only as far as they read this spec's state. Ships with the first build PR (§9, step 1).
 **Author:** Loap-3 (loap-loap-2-loap-3). Build order and owners agreed with AgentX and AgentY.
 **Task:** Kanban #1787.
 
