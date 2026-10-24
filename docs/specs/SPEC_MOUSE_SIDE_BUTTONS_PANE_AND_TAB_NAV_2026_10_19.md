@@ -1,6 +1,6 @@
 # Mouse side buttons walk back and forward through the panes you selected, and the caret follows
 
-**Status:** implemented in #5209. Built on the Windows host and the frontend (all platforms handle the host events); the mouse behavior awaits a check in a live browser pane. macOS/Linux browser panes (P3) are not built. §10 records what was built and where it differs from this draft.
+**Status:** implemented in #5209 (Windows host and the frontend; all platforms handle the host events) and for Linux and macOS browser panes in the P3 build (§10.1; checked on Linux X11, macOS to be checked). The mouse behavior awaits a check in a live browser pane on Windows. §10 records what was built and where it differs from this draft.
 **Date:** 2026-10-19.
 **Requested by:** repo owner (asafebgi): use the mouse's side Forward/Back buttons to move through the selected pane,
 across tabs, selecting the input if there is one. Clarified: Back/Forward in browser panes move to Ctrl + side button;
@@ -135,7 +135,7 @@ command palette or a context menu is open; the setting is off.
 | Main UI webview, all platforms | `window` capture listener, `pointerdown/mousedown/mouseup/auxclick`, `button` 3/4, non-passive, `preventDefault` + `stopPropagation`; acts on `mouseup` | **Yes**, if P0 shows the DOM receives them in CEF |
 | Windows, top-level frame | `client/wndproc.rs`: swallow `WM_APPCOMMAND` `BROWSER_BACKWARD/FORWARD` with the mouse device bit, so Chromium never navigates the SPA's history. Keyboard browser keys untouched | Only if P0 shows the DOM *doesn't* get the buttons; otherwise swallow-only |
 | Windows, browser panes | `browser_pane/hwnd.rs` `wndproc_hook`: handle `WM_XBUTTONUP` (`GET_XBUTTON_WPARAM`; `MK_CONTROL` from `wParam`): Ctrl → `go_back/go_forward` on that pane, plain → post a `history:back/forward` event to the owning window; return 0 (swallow the down and up) | **Yes**: the DOM never sees these |
-| macOS / Linux browser panes | no per-pane hook exists (`hwnd.rs` is Windows-only, the same gap Ctrl+wheel zoom has) | *verify*; until then the buttons over a browser pane keep Chromium's default there |
+| macOS / Linux browser panes | a listener added to each document of the pane through the in-process CDP client (`browser_pane/side_button_cdp.rs`, §10.1): it claims the buttons in the page, and its release reaches the host through a binding | **Yes** (Chromium doesn't navigate; the window gets the press) |
 | Terminal / editor / agent panes | the main-webview listener, which consumes the event so xterm and CodeMirror never see it | Yes |
 
 A 150 ms same-direction debounce is the backstop against any remaining double delivery.
@@ -173,7 +173,7 @@ A 150 ms same-direction debounce is the backstop against any remaining double de
 - **P1.** The history module (window-scoped; record, cursor, dead-entry skipping, chained steps), the DOM listener,
   the two commands, the setting, the Help rows.
 - **P2.** Windows host: top-level `WM_APPCOMMAND` swallow, browser-pane `WM_XBUTTONUP` with the Ctrl split.
-- **P3.** macOS / Linux browser panes from what P0 finds.
+- **P3.** macOS / Linux browser panes. P0 on Linux (X11, real buttons through XTest on a private display) found: the page's DOM gets `pointerdown/mousedown/pointerup/mouseup/auxclick` with `button` 3 / 4; Chromium navigates the page back on button 8 unless the pointer events are cancelled; cancelling them stops it. Built as §10.1.
 
 **Tests.** The history is a pure reducer (`record`, `back`, `forward`, `prune`) unit-tested for: your tab1·B → tab4·G
 example both ways; recording after Back truncates forward entries; consecutive duplicate collapse; a dead entry skipped
@@ -210,8 +210,50 @@ The §9 recommendations were taken as written (Q1–Q6). Differences from the pl
 - **Code:** `app/store/pane-history-core.ts` (the reducer), `pane-history.ts` (recording and stepping),
   `side-button-rules.ts` (the press rules), `side-buttons.ts` (listener and host event), `crates/cef/src/side_buttons.rs`
   (Win32 decoding).
-- **Not built:** the §4.2 "ignore while a context menu is open" rule (only modals are detected), and macOS / Linux
-  browser panes.
+- **Not built:** the §4.2 "ignore while a context menu is open" rule (only modals are detected).
+
+### 10.1 Linux and macOS browser panes (P3)
+
+There is no window procedure to hook, so each pane gets a listener through CDP (`browser_pane/side_button_cdp.rs`,
+`side_button.js`), added from `on_after_created_browser_pane`:
+
+1. Once per DevTools session: `Runtime.enable` and `Runtime.addBinding { name: "agentmuxSideButton", executionContextName:
+   "agentmux-side-buttons" }`. The function exists only in that isolated world, so the page can't call it.
+2. For every document, when the host sees it commit (`on_load_start`, any frame): `Page.getFrameTree`, then in each frame not yet done
+   (`(frameId, loaderId)`), `Page.createIsolatedWorld { worldName: "agentmux-side-buttons" }` and the listener evaluated in it
+   (the way `browser_api/act.rs` works in a page). It claims `button` 3 / 4 on `pointerdown/pointerup/mousedown/mouseup/auxclick`
+   in the capture phase (`preventDefault`, `stopImmediatePropagation`). The release (`pointerup` or `mouseup`, one 150 ms
+   debounce) calls the binding with `{button, ctrl, blocked}`.
+3. The observer in `browser_api/cdp.rs` hands `Runtime.bindingCalled` to the route. From there it is the Windows route: a plain
+   press sends the window the `side-button` event (source `pane`, with the block id; `blocked` when Shift, Alt, Meta or the left
+   button is down, as the frontend's `hostPressActs` expects), and Ctrl calls the pane's `go_back` / `go_forward`. With
+   `mouse:sidebuttons` off the frontend gives the press back to the page's own history, as on Windows.
+
+The event shape is one function for every route (`events.rs`, `emit_side_button`).
+
+**Why not `Page.addScriptToEvaluateOnNewDocument`.** It was the first design and it works (the script runs before the page's own),
+but only while the Page domain is enabled: `Page.disable` removes the scripts, and an enabled Page domain takes the page's
+JavaScript dialogs away from the host's own handler (`client::jsdialog`). `Runtime.enable` has no such effect. The price is the
+second limit below.
+
+**P0 and what was tried** (Linux, X11, real buttons through XTest on a private display, a packaged build):
+- Over a pane the page's DOM gets `pointerdown/mousedown/pointerup/mouseup/auxclick` with `button` 3 / 4, and Chromium navigates the
+  page back on button 8 unless those are cancelled (`preventDefault` on them stops it).
+- With the route: a plain press over the page is claimed (the page stays, the window gets `side-button` and moves the selection
+  history); Ctrl + 8 / 9 is the page's own back / forward; a press with the middle button held works the same; a cross-site
+  navigation of the pane (a new process) gets a new world and works; the host's own error page works; a same-site iframe works.
+
+**Limits** (each one tried):
+- **Cross-site iframes:** they run in their own process and CDP target, which the page target's session can't create a world in.
+  A press over one acts as the page's own: Chromium navigates the page back and the window gets no event. Reaching them means the
+  same injection in every attached frame session (`CdpSession::attach_frames`), which is not built.
+- **Earlier page listeners:** the listener is added after the document commits, a few milliseconds after it starts, so a page
+  listener registered in its first scripts runs before ours. The press is still claimed (Chromium doesn't navigate, the window
+  gets the event) but the page sees it as well; a page that acts on side buttons itself would act in addition. The Windows route
+  doesn't have this (the page never gets them).
+- **DevTools agent detach:** the binding goes with the session; the route is set up again on the detach event. Until then a plain
+  press is claimed but not reported.
+- **macOS:** built for it (nothing in the route is Linux-specific) and not yet checked on a Mac.
 
 ## Sources
 

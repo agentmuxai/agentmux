@@ -87,28 +87,7 @@ pub(crate) fn emit(
     source: &str,
     block_id: Option<&str>,
 ) {
-    let blocked = others_down();
-    tracing::info!(
-        "[side-button] {} ctrl={} blocked={} source={} window={} block={:?}",
-        button.as_str(),
-        ctrl,
-        blocked,
-        source,
-        window,
-        block_id,
-    );
-    crate::events::emit_event_to_window(
-        state,
-        window,
-        "side-button",
-        &serde_json::json!({
-            "button": button.as_str(),
-            "ctrl": ctrl,
-            "blocked": blocked,
-            "source": source,
-            "block_id": block_id,
-        }),
-    );
+    crate::events::emit_side_button(state, window, button.as_str(), ctrl, others_down(), source, block_id);
 }
 
 #[cfg(test)]

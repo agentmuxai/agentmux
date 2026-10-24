@@ -302,6 +302,8 @@ pub fn on_after_created_browser_pane(state: &Arc<AppState>, browser: &Browser) {
     }
     #[cfg(not(target_os = "windows"))]
     {
+        // The mouse side buttons over this pane (no window procedure to take them in).
+        crate::browser_pane::side_button_cdp::install(state, browser);
         // CEF's on_after_created fires from inside add_overlay_view
         // (when the BrowserView is added to the widget hierarchy) and gives
         // focus to the new pane browser. creation_views::create_browser_pane_view
@@ -657,6 +659,12 @@ pub(crate) fn main_frame_url(browser: &Browser) -> String {
 /// label whose browser handle matches the given one by `is_same`, then
 /// strip the prefix and the trailing `-<seq>` to recover the uuid.
 pub(crate) fn resolve_pane_block_id(state: &Arc<AppState>, browser: &Browser) -> Option<String> {
+    resolve_pane_label_and_block(state, browser).map(|(_, block_id)| block_id)
+}
+
+/// The host-state label (`browser-pane-<block_id>-<seq>`) and the block id of
+/// the pane `browser` is.
+pub(crate) fn resolve_pane_label_and_block(state: &Arc<AppState>, browser: &Browser) -> Option<(String, String)> {
     // Phase H.2.b — reducer-aware iteration with fallback.
     state
         .list_browsers()
@@ -669,6 +677,7 @@ pub(crate) fn resolve_pane_block_id(state: &Arc<AppState>, browser: &Browser) ->
         .and_then(|(label, _)| {
             let rest = label.strip_prefix("browser-pane-")?;
             let dash = rest.rfind('-')?;
-            Some(rest[..dash].to_string())
+            let block_id = rest[..dash].to_string();
+            Some((label, block_id))
         })
 }
