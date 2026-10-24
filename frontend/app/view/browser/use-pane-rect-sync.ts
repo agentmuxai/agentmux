@@ -347,7 +347,11 @@ export function usePaneRectSync(params: {
             parkedForDiscard = false;
             lastSentRect = null;
             if (!asleep()) {
+                // Woken during the park: the page is alive and was never discarded, so it
+                // will not load again, and the sleep record would never end (the card
+                // waits for a load that does not come). The wake is done: end the sleep.
                 syncPosition();
+                void model.endSleep(undefined).catch(() => {});
                 return;
             }
         }

@@ -480,6 +480,9 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
     // timed from the wake's start like a new one.
     createEffect(
         on(wakeRequested, (requested) => {
+            // A wake that ended without a load (woken during the park before a discard)
+            // must not time a later, unrelated navigation from its start.
+            if (!requested) loadClockFrom = 0;
             if (!requested || !rectSync.paneCreated()) return;
             loadClockFrom = wakeStartedAt();
             sawLoading = false;
