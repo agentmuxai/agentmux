@@ -695,6 +695,132 @@ pub fn seed_transcript_retention_if_missing(
     Ok(true)
 }
 
+/// `agent:compactat`: the context size, in tokens, at which Claude agents
+/// auto-compact. `0` leaves Claude Code's own point (the window minus 33K,
+/// about 967K on a 1M window). `docs/specs/SPEC_AGENT_SELF_COMPACTION_2026_10_23.md` §3.1.
+pub const SETTING_COMPACT_AT: &str = "agent:compactat";
+pub const DEFAULT_COMPACT_AT: u64 = 600_000;
+/// Claude Code compacts at its auto-compact window minus this much.
+const AUTO_COMPACT_MARGIN: u64 = 33_000;
+/// The range Claude Code accepts for `autoCompactWindow`.
+const AUTO_COMPACT_WINDOW_RANGE: (u64, u64) = (100_000, 1_000_000);
+/// The value applied by hand on every host on 2026-10-23, before this setting
+/// existed: AgentMux's own, so the setting may move it.
+const HAND_APPLIED_AUTO_COMPACT_WINDOW: u64 = 633_000;
+const AUTO_COMPACT_WINDOW_KEY: &str = "autoCompactWindow";
+/// What AgentMux last wrote into a config dir's `settings.json`, so a value it
+/// wrote can follow the setting while one a person chose is left alone.
+const SEEDED_SIDECAR: &str = ".agentmux-seeded.json";
+
+static CONFIG: std::sync::OnceLock<std::sync::Arc<crate::backend::wconfig::ConfigState>> = std::sync::OnceLock::new();
+
+/// Attach the live settings (bootstrap), so [`SETTING_COMPACT_AT`] can be read.
+pub fn install_config(config: std::sync::Arc<crate::backend::wconfig::ConfigState>) {
+    let _ = CONFIG.set(config);
+}
+
+/// [`SETTING_COMPACT_AT`] now, or its default.
+pub fn compact_at_setting() -> u64 {
+    CONFIG.get().and_then(|c| c.extra_u64(SETTING_COMPACT_AT)).unwrap_or(DEFAULT_COMPACT_AT)
+}
+
+/// The `autoCompactWindow` that makes Claude Code compact at `compact_at`
+/// tokens, clamped to the range it accepts; `None` for `0`, which leaves
+/// Claude Code's own.
+pub fn auto_compact_window(compact_at: u64) -> Option<u64> {
+    (compact_at > 0).then(|| (compact_at + AUTO_COMPACT_MARGIN).clamp(AUTO_COMPACT_WINDOW_RANGE.0, AUTO_COMPACT_WINDOW_RANGE.1))
+}
+
+/// Seeds Claude Code's `autoCompactWindow` into a config dir's
+/// `settings.json` from [`SETTING_COMPACT_AT`] (`compact_at`), so agents
+/// compact at that size instead of near a full 1M window.
+///
+/// Writes it when absent, or when the present value is AgentMux's own (the
+/// one recorded in [`SEEDED_SIDECAR`], or 633,000 with no sidecar); any other
+/// value is a person's choice and is left alone. `compact_at` 0 removes
+/// AgentMux's own value. Claude only; never rewrites a `settings.json` it
+/// can't parse as a JSON object. Returns `Ok(true)` only when it wrote.
+pub fn seed_auto_compact_window(provider: &ProviderConfig, config_dir: &str, compact_at: u64) -> std::io::Result<bool> {
+    if provider.auth_dir_name != "claude" {
+        return Ok(false);
+    }
+    if config_dir.trim().is_empty() {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "config_dir is empty"));
+    }
+    let dir = std::path::Path::new(config_dir);
+    let path = dir.join("settings.json");
+    let mut settings = match std::fs::read_to_string(&path) {
+        Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
+            Ok(serde_json::Value::Object(map)) => map,
+            _ => return Ok(false),
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => serde_json::Map::new(),
+        Err(e) => return Err(e),
+    };
+    let sidecar = dir.join(SEEDED_SIDECAR);
+    let seeded = std::fs::read_to_string(&sidecar)
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|v| v.get(AUTO_COMPACT_WINDOW_KEY).and_then(serde_json::Value::as_u64));
+    let current = settings.get(AUTO_COMPACT_WINDOW_KEY);
+    let ours = match current {
+        None => true,
+        Some(v) => v.as_u64().is_some_and(|n| Some(n) == seeded || (seeded.is_none() && n == HAND_APPLIED_AUTO_COMPACT_WINDOW)),
+    };
+    if !ours {
+        return Ok(false);
+    }
+    let current = current.and_then(serde_json::Value::as_u64);
+    let desired = auto_compact_window(compact_at);
+    if current == desired && seeded == desired {
+        return Ok(false);
+    }
+    match desired {
+        Some(window) => {
+            settings.insert(AUTO_COMPACT_WINDOW_KEY.to_string(), serde_json::json!(window));
+            write_json_atomically(&path, &serde_json::Value::Object(settings))?;
+            let mut record = serde_json::Map::new();
+            record.insert(AUTO_COMPACT_WINDOW_KEY.to_string(), serde_json::json!(window));
+            write_json_atomically(&sidecar, &serde_json::Value::Object(record))?;
+            Ok(true)
+        }
+        None => {
+            let _ = std::fs::remove_file(&sidecar);
+            if current.is_none() {
+                return Ok(false);
+            }
+            settings.remove(AUTO_COMPACT_WINDOW_KEY);
+            write_json_atomically(&path, &serde_json::Value::Object(settings))?;
+            Ok(true)
+        }
+    }
+}
+
+fn write_json_atomically(path: &std::path::Path, value: &serde_json::Value) -> std::io::Result<()> {
+    let body = serde_json::to_string_pretty(value).map_err(std::io::Error::other)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let tmp = path.with_extension("json.agentmux-tmp");
+    std::fs::write(&tmp, body)?;
+    std::fs::rename(&tmp, path)
+}
+
+/// Seeds every Claude setting AgentMux manages into `config_dir`'s
+/// `settings.json`: transcript retention and the auto-compact window. Each
+/// soft-fails on its own; returns what couldn't be written, and why.
+pub fn seed_managed_claude_settings(provider: &ProviderConfig, config_dir: &str) -> Vec<(&'static str, std::io::Error)> {
+    let mut failed = Vec::new();
+    if let Err(e) = seed_transcript_retention_if_missing(provider, config_dir) {
+        // Claude Code's 30-day default would sweep the account's shared history.
+        failed.push(("transcript retention", e));
+    }
+    if let Err(e) = seed_auto_compact_window(provider, config_dir, compact_at_setting()) {
+        failed.push(("the auto-compact window", e));
+    }
+    failed
+}
+
 /// `provider`'s DEFAULT auth/config dir: `~/.agentmux/shared/providers/<auth_dir_name>/`
 /// — account-wide and version/channel-independent, so one login is shared by
 /// every instance (the structural fix for the per-channel validate-spin
@@ -736,8 +862,8 @@ pub fn prepare_provider_auth_dir(
     }
     std::fs::create_dir_all(auth_dir)?;
     seed_claude_md_placeholder_if_missing(provider, auth_dir)?;
-    if let Err(e) = seed_transcript_retention_if_missing(provider, auth_dir) {
-        tracing::warn!(auth_dir, error = %e, "could not set Claude transcript retention");
+    for (what, e) in seed_managed_claude_settings(provider, auth_dir) {
+        tracing::warn!(auth_dir, error = %e, "could not set Claude's {what}");
     }
     Ok(())
 }
