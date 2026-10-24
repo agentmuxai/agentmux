@@ -233,6 +233,9 @@ impl PersistentSubprocessController {
                         });
                     }
                 }
+                // The latest `rate_limit_event`: a usage limit stored later
+                // reads its reset from it (`agents::limit_reset`).
+                crate::agents::limit_reset::observe_frame(&block_id_read, &parsed);
                 // This block's CLI compacted: only its pane may send the
                 // hidden memory reinjection for that boundary.
                 if parsed.get("subtype").and_then(|v| v.as_str()) == Some("compact_boundary") {

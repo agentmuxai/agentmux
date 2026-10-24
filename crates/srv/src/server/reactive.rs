@@ -1168,6 +1168,9 @@ pub(in crate::server) async fn hold_for_absent_target(
                         "agent {target} is not signed in — held for delivery on this AgentMux instance for up to 24 h, delivered when it signs in"
                     )
                 }
+                HoldReason::Limited => format!(
+                    "agent {target}'s account is out of quota — held for delivery on this AgentMux instance for up to 24 h, delivered when it can work again (an account move or the reset)"
+                ),
             };
             Some(json!({
                 "success": false,
@@ -1299,8 +1302,15 @@ fn absent_route_for(answer: &crate::muxbus::wan_lease::Holder) -> AbsentRoute {
 pub(crate) enum HoldReason {
     /// A known agent with no process here.
     NotRunning,
-    /// The agent is here but its spawn gate refused: not signed in.
+    /// The agent is here but its spawn gate refused: not signed in. Also an
+    /// agent whose sign-in was refused (`AgentState::SignedOut`): to the
+    /// sender it is the same condition.
     NeedsLogin,
+    /// The agent is here but its account is out of quota
+    /// (`AgentState::Limited`). Held from step 2c of
+    /// `docs/specs/SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md` §5.
+    #[allow(dead_code)]
+    Limited,
 }
 
 impl HoldReason {
@@ -1308,6 +1318,34 @@ impl HoldReason {
         match self {
             HoldReason::NotRunning => "not_running",
             HoldReason::NeedsLogin => "needs_login",
+            HoldReason::Limited => "usage_limit",
+        }
+    }
+
+    /// The reason a message to an agent in `state` is held, or `None` when
+    /// that state doesn't hold messages.
+    #[allow(dead_code)]
+    pub(crate) fn for_state(state: crate::backend::agent_state::AgentState) -> Option<Self> {
+        use crate::backend::agent_state::AgentState;
+        match state {
+            AgentState::Limited => Some(HoldReason::Limited),
+            AgentState::SignedOut => Some(HoldReason::NeedsLogin),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod hold_reason_tests {
+    use super::HoldReason;
+    use crate::backend::agent_state::AgentState;
+
+    #[test]
+    fn an_unavailable_agent_holds_with_its_reason_and_the_rest_do_not() {
+        assert_eq!(HoldReason::for_state(AgentState::Limited).map(HoldReason::as_str), Some("usage_limit"));
+        assert_eq!(HoldReason::for_state(AgentState::SignedOut).map(HoldReason::as_str), Some("needs_login"));
+        for s in [AgentState::Idle, AgentState::Working, AgentState::Waiting, AgentState::Stopped, AgentState::Error] {
+            assert_eq!(HoldReason::for_state(s), None, "{s:?}");
         }
     }
 }

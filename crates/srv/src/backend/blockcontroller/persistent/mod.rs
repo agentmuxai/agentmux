@@ -1632,6 +1632,8 @@ fn surface_failure(
     mstore: &Option<Arc<Store>>,
     event_bus: &Option<Arc<EventBus>>,
 ) {
+    // With its reset, so the published event and the stored meta agree.
+    let failure = &crate::agents::limit_reset::with_reset(block_id, failure);
     core::persist_last_failure(block_id, Some(failure), mstore, event_bus);
     if let Some(broker) = broker {
         broker.publish_event::<crate::backend::mps_events::AgentFailed>(failure, vec![format!("block:{}", block_id)], 1);
