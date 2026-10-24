@@ -412,8 +412,18 @@ impl Store {
     /// Set the card fields an agent's `update` or `submit` carries.
     pub fn work_card_update(&self, work_id: &str, u: &CardUpdate, now_ms: i64) -> Result<(), StoreError> {
         let checklist = u.checklist.as_ref().map(|c| serde_json::to_string(c).unwrap_or_default());
-        let conn = self.conn().lock().unwrap();
-        conn.execute(
+        let mut conn = self.conn().lock().unwrap();
+        let tx = conn.transaction()?;
+        // A different PR: what was learned about the old one (its merge, its
+        // release) isn't this one's.
+        if let Some(pr) = &u.pr_url {
+            tx.execute(
+                "DELETE FROM db_work_prs WHERE work_id = ?1
+                   AND EXISTS (SELECT 1 FROM db_work_cards WHERE work_id = ?1 AND pr_url <> ?2)",
+                params![work_id, pr],
+            )?;
+        }
+        tx.execute(
             "UPDATE db_work_cards
                 SET note = COALESCE(?2, note),
                     checklist = COALESCE(?3, checklist),
@@ -423,6 +433,7 @@ impl Store {
               WHERE work_id = ?1",
             params![work_id, u.note, checklist, u.branch, u.pr_url, now_ms],
         )?;
+        tx.commit()?;
         Ok(())
     }
 

@@ -389,6 +389,31 @@ pub async fn run_merge_loop() {
         let live: std::collections::HashSet<&str> = tasks.iter().map(|t| t.item.id.as_str()).collect();
         checked.at.retain(|id, _| live.contains(id.as_str()));
         let mut changed = false;
+        // Releases first: one call a repository, so the PR checks, one a task,
+        // can't use the hour's budget up before a shipped task is seen.
+        for (repo, waiting) in awaiting_release(&tasks, &checked, now) {
+            match get(&ctx.http, &format!("/repos/{repo}/releases?per_page=30"), now).await {
+                Ok(list) => {
+                    checked.releases_at.insert(repo, now);
+                    let identity = ctx.identity.clone();
+                    changed |= tokio::task::spawn_blocking(move || {
+                        let mut any = false;
+                        for (id, merged) in waiting {
+                            if let Some((tag, published)) = release_containing(&list, merged) {
+                                any |= identity.work_pr_released(&id, &tag, published, now).unwrap_or(false);
+                            }
+                        }
+                        any
+                    })
+                    .await
+                    .unwrap_or(false);
+                }
+                Err(Miss::Limited) => break,
+                Err(_) => {
+                    checked.releases_at.insert(repo, now);
+                }
+            }
+        }
         for (id, pr) in due(&tasks, &checked, now) {
             match get(&ctx.http, &format!("/repos/{}/pulls/{}", pr.repo, pr.number), now).await {
                 Ok(v) => {
@@ -424,29 +449,6 @@ pub async fn run_merge_loop() {
                 Err(Miss::Other(e)) => {
                     checked.at.insert(id, (now, None));
                     tracing::debug!(error = %e, "kanban: a PR's state not read");
-                }
-            }
-        }
-        for (repo, waiting) in awaiting_release(&tasks, &checked, now) {
-            match get(&ctx.http, &format!("/repos/{repo}/releases?per_page=30"), now).await {
-                Ok(list) => {
-                    checked.releases_at.insert(repo, now);
-                    let identity = ctx.identity.clone();
-                    changed |= tokio::task::spawn_blocking(move || {
-                        let mut any = false;
-                        for (id, merged) in waiting {
-                            if let Some((tag, published)) = release_containing(&list, merged) {
-                                any |= identity.work_pr_released(&id, &tag, published, now).unwrap_or(false);
-                            }
-                        }
-                        any
-                    })
-                    .await
-                    .unwrap_or(false);
-                }
-                Err(Miss::Limited) => break,
-                Err(_) => {
-                    checked.releases_at.insert(repo, now);
                 }
             }
         }

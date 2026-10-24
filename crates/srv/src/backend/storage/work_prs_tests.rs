@@ -82,3 +82,17 @@ fn pruned_with_its_task() {
     assert_eq!(s.work_prs_prune().unwrap(), 1);
     assert!(s.work_pr_get("a").unwrap().is_some());
 }
+
+#[test]
+fn a_new_pr_link_forgets_the_old_prs_merge() {
+    use crate::backend::storage::work_board::CardUpdate;
+    let (s, _d) = store();
+    add(&s, "a", "build");
+    let link = |url: &str| CardUpdate { pr_url: Some(url.into()), ..Default::default() };
+    s.work_card_update("a", &link("https://github.com/o/r/pull/1"), 2).unwrap();
+    s.work_pr_merged("a", 10, 3).unwrap();
+    s.work_card_update("a", &link("https://github.com/o/r/pull/1"), 4).unwrap();
+    assert!(s.work_pr_get("a").unwrap().is_some(), "the same link keeps it");
+    s.work_card_update("a", &link("https://github.com/o/r/pull/2"), 5).unwrap();
+    assert_eq!(s.work_pr_get("a").unwrap(), None, "a different PR starts unknown");
+}
