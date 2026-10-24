@@ -102,6 +102,8 @@ windows = { version = "0.61", features = [
     "UI_Notifications",
     "Data_Xml_Dom",
     "Foundation",
+    # NotificationData's value map (a shutdown toast's live countdown).
+    "Foundation_Collections",
     "Win32_System_WinRT",
     "Win32_UI_WindowsAndMessaging",
 ] }

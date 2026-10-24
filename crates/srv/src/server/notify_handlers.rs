@@ -75,6 +75,11 @@ pub struct NotifyFocusParams {
 pub struct NotifyAckParams {
     pub id: String,
     pub clicked: bool,
+    /// A button on the toast: `keep` (Keep running). Absent for a body click or
+    /// a dismissal, and from a launcher that predates buttons.
+    #[serde(default)]
+    #[ts(optional)]
+    pub action: Option<String>,
 }
 
 /// `notify.attention`: the calls to action srv holds open now
@@ -102,6 +107,11 @@ pub struct NotifyAckResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub workspace_id: Option<String>,
+    /// For a `keep` press: `kept_by_user`, or `too_late` when the shutdown had
+    /// already begun. Absent when the press named no live shutdown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub kept: Option<String>,
 }
 
 #[derive(serde::Deserialize, ts_rs::TS)]
@@ -209,6 +219,21 @@ async fn activate_in_stored_layout(state: &AppState, tab_id: &str, block_id: &st
     crate::server::service::publish_events(state, &events);
 }
 
+/// The Keep running button on a pending shutdown's toast: the same
+/// `pending_shutdown::keep` the pane banner's RPC calls, so exactly one of
+/// this and the window running out wins. Which request it cancels comes from
+/// srv's own record of the notification, never from the press, and is the
+/// request the toast was raised for: a press on a toast whose request already
+/// ended finds `too_late` and cannot cancel a newer request for the same block.
+/// `None` when the id is no live shutdown notification.
+fn keep_from_toast(state: &AppState, r: &Arc<router::Router>, notification_id: &str) -> Option<String> {
+    let (kind, block_id, request_id) = r.live_by_id(notification_id)?;
+    if kind != crate::backend::notify::policy::NotifyKind::ShutdownPending {
+        return None;
+    }
+    Some(crate::sagas::pending_shutdown::keep(state, &block_id, &request_id?).to_string())
+}
+
 pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, conn_id: String) {
     let r = router_for(state);
 
@@ -262,14 +287,19 @@ pub fn register_notify_handlers(engine: &Arc<WshRpcEngine>, state: &AppState, co
     });
 
     let rr = r.clone();
+    let ack_state = state.clone();
     engine.register_typed("notify.ack", move |p: NotifyAckParams, _ctx| {
         let r = rr.clone();
+        let state = ack_state.clone();
         async move {
+            let kept = if p.action.as_deref() == Some("keep") { keep_from_toast(&state, &r, &p.id) } else { None };
+            // A button is not a click on the body: it must not raise a window.
+            let clicked = p.clicked && p.action.is_none();
             // Resolving the click's pane reads the store — off the async workers.
-            let o = tokio::task::spawn_blocking(move || r.ack(&p.id, p.clicked))
+            let o = tokio::task::spawn_blocking(move || r.ack(&p.id, clicked))
                 .await
                 .map_err(|e| format!("notify.ack: {e}"))?;
-            Ok(NotifyAckResult { has_window: o.has_window, known: o.known, window_id: o.window_id, workspace_id: o.workspace_id })
+            Ok(NotifyAckResult { has_window: o.has_window, known: o.known, window_id: o.window_id, workspace_id: o.workspace_id, kept })
         }
     });
 
@@ -607,5 +637,254 @@ mod live_tests {
         assert_eq!(resp["window_id"], window.oid.as_str(), "the launcher raises that window: {resp}");
         assert_eq!(resp["known"], true);
         assert_eq!(resp["has_window"], true);
+    }
+
+    /// The Keep running button on a pending shutdown's toast, over the real wire
+    /// (spec §3.8, §3.9): the toast names what will happen, carries a countdown
+    /// and one button, and never the asker's reason; pressing the button runs
+    /// the same `keep` as the pane banner, retracts the toast, and a second
+    /// press finds nothing to keep.
+    #[tokio::test]
+    async fn keep_running_on_the_toast_cancels_the_shutdown_over_ws() {
+        use crate::backend::obj::Block;
+        let state = crate::server::tests::test_state();
+        state
+            .broker
+            .set_client(Box::new(crate::backend::eventbus::EventBusBridge::new(state.event_bus.clone())));
+        crate::backend::wcore::ensure_initial_data(&state.mstore).unwrap();
+        let block = state.mstore.get_all::<Block>().unwrap().into_iter().next().expect("seeded block");
+        let (broker, auth) = (state.broker.clone(), state.auth_key.clone());
+        let st = state.clone();
+        let app = crate::server::build_router(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
+                .await
+                .unwrap();
+        });
+        let uri: tokio_tungstenite::tungstenite::http::Uri = format!("ws://{addr}/ws").parse().unwrap();
+        let (ws, _) = tokio_tungstenite::connect_async(ClientRequestBuilder::new(uri).with_header("X-AuthKey", auth))
+            .await
+            .unwrap();
+        let (mut tx, mut rx) = ws.split();
+        let send = |cmd: &str, reqid: &str, data: serde_json::Value| {
+            serde_json::json!({"wscommand":"rpc","message":{"command":cmd,"reqid":reqid,"data":data}}).to_string()
+        };
+        for (i, ev) in ["notification", "notification:retract"].iter().enumerate() {
+            tx.send(Message::Text(send("eventsub", &format!("s{i}"), serde_json::json!({"event":ev,"scopes":[],"allscopes":true})).into()))
+                .await
+                .unwrap();
+        }
+        // A round trip, so the subscriptions above are in place before anything is published.
+        tx.send(Message::Text(send("notify.focus", "f1", serde_json::json!({"window_focused": false})).into()))
+            .await
+            .unwrap();
+        loop {
+            let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.next()).await.expect("focus answered").unwrap().unwrap();
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(msg.to_text().unwrap_or("")) else { continue };
+            if v["data"]["resid"] == "f1" {
+                break;
+            }
+        }
+        assert!(crate::backend::notify::router::get(&broker).is_some(), "router created by the connection");
+
+        let v = crate::sagas::pending_shutdown::request(
+            &st,
+            &block.oid,
+            "AgentY",
+            "FleetBulkStop",
+            "tidying up, the token is abc123",
+            crate::sagas::pending_shutdown::Action::CloseTab { detail: "test".into() },
+        );
+        let n = next_event(&mut rx, "notification").await;
+        assert_eq!(n["kind"], "shutdown_pending");
+        assert_eq!(n["title"], "Closing An agent in 15 s");
+        assert_eq!(n["body"], "AgentY asked to close it. It stays in My Agents, with its conversation.");
+        assert_eq!(n["actions"], serde_json::json!([{ "id": "keep", "label": "Keep open" }]), "no session runs here");
+        assert_eq!(n["countdown"]["title_template"], "Closing An agent in {n} s");
+        let left = n["countdown"]["remaining_ms"].as_i64().unwrap();
+        assert!((13_000..=15_000).contains(&left), "{left}");
+        assert!(!n.to_string().contains("abc123") && !n.to_string().contains("tidying"), "the reason is not in the toast: {n}");
+        let (id, tag) = (n["id"].as_str().unwrap().to_string(), n["tag"].as_str().unwrap().to_string());
+
+        tx.send(Message::Text(send("notify.ack", "a1", serde_json::json!({"id": id, "clicked": false, "action": "keep"})).into()))
+            .await
+            .unwrap();
+        // The retract can arrive before or after the answer: keeping it retracts the
+        // toast (the shutdown is over), and so does the ack.
+        let (mut answer, mut retracted) = (None, None);
+        while answer.is_none() || retracted.is_none() {
+            let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.next()).await.expect("ack answered and toast retracted").unwrap().unwrap();
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(msg.to_text().unwrap_or("")) else { continue };
+            if v["data"]["resid"] == "a1" {
+                answer = Some(v["data"]["data"].clone());
+            } else if v["data"]["command"] == "eventrecv" && v["data"]["data"]["event"] == "notification:retract" {
+                retracted = Some(v["data"]["data"]["data"].clone());
+            }
+        }
+        assert_eq!(answer.unwrap()["kept"], "kept_by_user");
+        assert_eq!(crate::sagas::pending_shutdown::status(&v.request_id).unwrap().status, "kept_by_user");
+        assert_eq!(retracted.unwrap()["tag"], tag, "the toast goes");
+
+        // A second press, or a press on a toast whose window ended: nothing to keep.
+        tx.send(Message::Text(send("notify.ack", "a2", serde_json::json!({"id": id, "clicked": false, "action": "keep"})).into()))
+            .await
+            .unwrap();
+        let mut again = None;
+        while again.is_none() {
+            let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.next()).await.expect("ack answered").unwrap().unwrap();
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(msg.to_text().unwrap_or("")) else { continue };
+            if v["data"]["resid"] == "a2" {
+                again = Some(v["data"]["data"].clone());
+            }
+        }
+        assert!(again.unwrap().get("kept").is_none());
+    }
+
+    /// A toast's button is bound to the request it was raised for (#5397): once
+    /// that request has ended, pressing it cannot cancel a newer one for the
+    /// same block.
+    #[tokio::test]
+    async fn a_stale_toast_button_does_not_cancel_a_newer_shutdown_of_the_same_block() {
+        use crate::backend::obj::Block;
+        let state = crate::server::tests::test_state();
+        state
+            .broker
+            .set_client(Box::new(crate::backend::eventbus::EventBusBridge::new(state.event_bus.clone())));
+        crate::backend::wcore::ensure_initial_data(&state.mstore).unwrap();
+        let block = state.mstore.get_all::<Block>().unwrap().into_iter().next().expect("seeded block");
+        let (broker, auth) = (state.broker.clone(), state.auth_key.clone());
+        let st = state.clone();
+        let app = crate::server::build_router(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
+                .await
+                .unwrap();
+        });
+        let uri: tokio_tungstenite::tungstenite::http::Uri = format!("ws://{addr}/ws").parse().unwrap();
+        let (ws, _) = tokio_tungstenite::connect_async(ClientRequestBuilder::new(uri).with_header("X-AuthKey", auth))
+            .await
+            .unwrap();
+        let (mut tx, mut rx) = ws.split();
+        let send = |cmd: &str, reqid: &str, data: serde_json::Value| {
+            serde_json::json!({"wscommand":"rpc","message":{"command":cmd,"reqid":reqid,"data":data}}).to_string()
+        };
+        tx.send(Message::Text(send("eventsub", "s0", serde_json::json!({"event":"notification","scopes":[],"allscopes":true})).into()))
+            .await
+            .unwrap();
+        tx.send(Message::Text(send("notify.focus", "f1", serde_json::json!({"window_focused": false})).into()))
+            .await
+            .unwrap();
+        loop {
+            let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.next()).await.expect("focus answered").unwrap().unwrap();
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(msg.to_text().unwrap_or("")) else { continue };
+            if v["data"]["resid"] == "f1" {
+                break;
+            }
+        }
+        assert!(crate::backend::notify::router::get(&broker).is_some(), "router created by the connection");
+
+        // Request A raises a toast; the user keeps A from the pane banner.
+        let close = || crate::sagas::pending_shutdown::Action::CloseTab { detail: "test".into() };
+        let a = crate::sagas::pending_shutdown::request(&st, &block.oid, "AgentY", "FleetBulkStop", "", close());
+        let toast_a = next_event(&mut rx, "notification").await["id"].as_str().unwrap().to_string();
+        assert_eq!(crate::sagas::pending_shutdown::keep(&st, &block.oid, &a.request_id), "kept_by_user");
+
+        // Request B for the same block, before A's toast is taken down.
+        let b = crate::sagas::pending_shutdown::request(&st, &block.oid, "AgentY", "FleetBulkStop", "", close());
+        assert_ne!(a.request_id, b.request_id);
+
+        // A's Keep running button, pressed late.
+        tx.send(Message::Text(send("notify.ack", "a1", serde_json::json!({"id": toast_a, "clicked": false, "action": "keep"})).into()))
+            .await
+            .unwrap();
+        let mut answer = None;
+        while answer.is_none() {
+            let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.next()).await.expect("ack answered").unwrap().unwrap();
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(msg.to_text().unwrap_or("")) else { continue };
+            if v["data"]["resid"] == "a1" {
+                answer = Some(v["data"]["data"].clone());
+            }
+        }
+        let kept = answer.unwrap().get("kept").and_then(|k| k.as_str().map(str::to_string));
+        assert_ne!(kept.as_deref(), Some("kept_by_user"), "the stale button cancelled nothing");
+        assert_eq!(crate::sagas::pending_shutdown::status(&b.request_id).unwrap().status, "pending", "B still counts down");
+        crate::sagas::pending_shutdown::keep(&st, &block.oid, &b.request_id);
+    }
+
+    /// A pending stop taken over by a close (the migration's stop, then an
+    /// agent's `Stop agents`): the notification is replaced to say so, on the
+    /// same request and deadline (#5397).
+    #[tokio::test]
+    async fn the_toast_follows_a_stop_that_is_upgraded_to_a_close() {
+        use crate::backend::obj::Block;
+        let state = crate::server::tests::test_state();
+        state
+            .broker
+            .set_client(Box::new(crate::backend::eventbus::EventBusBridge::new(state.event_bus.clone())));
+        crate::backend::wcore::ensure_initial_data(&state.mstore).unwrap();
+        let block = state.mstore.get_all::<Block>().unwrap().into_iter().next().expect("seeded block");
+        let (broker, auth) = (state.broker.clone(), state.auth_key.clone());
+        let st = state.clone();
+        let app = crate::server::build_router(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
+                .await
+                .unwrap();
+        });
+        let uri: tokio_tungstenite::tungstenite::http::Uri = format!("ws://{addr}/ws").parse().unwrap();
+        let (ws, _) = tokio_tungstenite::connect_async(ClientRequestBuilder::new(uri).with_header("X-AuthKey", auth))
+            .await
+            .unwrap();
+        let (mut tx, mut rx) = ws.split();
+        let send = |cmd: &str, reqid: &str, data: serde_json::Value| {
+            serde_json::json!({"wscommand":"rpc","message":{"command":cmd,"reqid":reqid,"data":data}}).to_string()
+        };
+        tx.send(Message::Text(send("eventsub", "s0", serde_json::json!({"event":"notification","scopes":[],"allscopes":true})).into()))
+            .await
+            .unwrap();
+        tx.send(Message::Text(send("notify.focus", "f1", serde_json::json!({"window_focused": false})).into()))
+            .await
+            .unwrap();
+        loop {
+            let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.next()).await.expect("focus answered").unwrap().unwrap();
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(msg.to_text().unwrap_or("")) else { continue };
+            if v["data"]["resid"] == "f1" {
+                break;
+            }
+        }
+        assert!(crate::backend::notify::router::get(&broker).is_some(), "router created by the connection");
+
+        let stop = crate::sagas::pending_shutdown::request(
+            &st,
+            &block.oid,
+            "Settings",
+            "FleetBulkStop",
+            "",
+            crate::sagas::pending_shutdown::Action::Stop { signal: None },
+        );
+        let first = next_event(&mut rx, "notification").await;
+        assert_eq!(first["title"], "Stopping An agent in 15 s");
+
+        let close = crate::sagas::pending_shutdown::request(
+            &st,
+            &block.oid,
+            "AgentY",
+            "FleetBulkStop",
+            "",
+            crate::sagas::pending_shutdown::Action::CloseTab { detail: "test".into() },
+        );
+        assert_eq!(close.request_id, stop.request_id, "the same request and deadline");
+        let second = next_event(&mut rx, "notification").await;
+        assert!(second["title"].as_str().unwrap().starts_with("Closing An agent in "), "{second}");
+        assert!(second["body"].as_str().unwrap().contains("asked to close it"), "{second}");
+        assert_eq!(second["tag"], first["tag"], "replaces the toast in place");
+        assert!(second["countdown"]["remaining_ms"].as_i64().unwrap() <= first["countdown"]["remaining_ms"].as_i64().unwrap(), "the deadline did not restart");
+        crate::sagas::pending_shutdown::keep(&st, &block.oid, &stop.request_id);
     }
 }
