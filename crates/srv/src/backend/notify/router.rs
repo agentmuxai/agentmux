@@ -26,7 +26,7 @@ use crate::backend::storage::store::Store;
 use crate::backend::wconfig::ConfigState;
 
 use super::policy::{
-    Action, Family, FocusReport, Input, NotifyKind, PolicyState, Preview, Request, Settings, TrayState, When,
+    Action, Family, FocusReport, Input, NotifyKind, PolicyState, Preview, Request, Settings, ShutdownInfo, TrayState, When,
 };
 
 pub const EVENT_NOTIFICATION: &str = "notification";
@@ -799,7 +799,7 @@ impl Router {
             _ => None,
         };
         let (agent_name, summary) = self.block_labels(block_id);
-        self.step(Input::Emit(Request { kind, block_id: block_id.to_string(), agent_name, body, summary }));
+        self.step(Input::Emit(Request { kind, block_id: block_id.to_string(), agent_name, body, summary, shutdown: None }));
     }
 
     /// srv-internal sources: the body is app-controlled fixed text, so it is
@@ -807,7 +807,29 @@ impl Router {
     /// BLOCKING, like `emit`.
     pub fn emit_fixed(&self, kind: NotifyKind, block_id: &str, body: Option<String>) {
         let (agent_name, summary) = self.block_labels(block_id);
-        self.step(Input::Emit(Request { kind, block_id: block_id.to_string(), agent_name, body, summary }));
+        self.step(Input::Emit(Request { kind, block_id: block_id.to_string(), agent_name, body, summary, shutdown: None }));
+    }
+
+    /// A shutdown waiting on the user's override: the toast says what will
+    /// happen, counts down and offers Keep running (spec §3.8). The body is
+    /// app wording and the asker's cleaned name; never the reason. BLOCKING,
+    /// like `emit`.
+    pub fn emit_shutdown(&self, block_id: &str, body: Option<String>, info: ShutdownInfo) {
+        let (agent_name, summary) = self.block_labels(block_id);
+        self.step(Input::Emit(Request {
+            kind: NotifyKind::ShutdownPending,
+            block_id: block_id.to_string(),
+            agent_name,
+            body,
+            summary,
+            shutdown: Some(info),
+        }));
+    }
+
+    /// What a press on the live notification `id` is about: its kind and
+    /// block, from this router's own record.
+    pub fn live_by_id(&self, id: &str) -> Option<(NotifyKind, String)> {
+        self.policy.lock().unwrap_or_else(|e| e.into_inner()).live_by_id(id)
     }
 
     /// srv-observed "agent is waiting on you" (Phase 5). Non-blocking: safe
@@ -841,6 +863,7 @@ impl Router {
             agent_name: String::new(),
             body: Some("You'll see alerts like this when an agent needs you.".to_string()),
             summary: None,
+            shutdown: None,
         }));
     }
 
@@ -854,6 +877,7 @@ impl Router {
             agent_name: String::new(),
             body: Some(CLOUD_SIGNED_OUT_BODY.to_string()),
             summary: None,
+            shutdown: None,
         }));
     }
 

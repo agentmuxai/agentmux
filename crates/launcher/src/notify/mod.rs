@@ -37,7 +37,7 @@ mod linux;
 
 /// Mirrors srv's `OsNotification` (`crates/srv/src/backend/notify/policy.rs`).
 /// Unknown fields are ignored so srv can grow the payload first.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
 pub struct Notification {
     pub id: String,
     pub kind: String,
@@ -50,12 +50,78 @@ pub struct Notification {
     /// §1.3). Absent from an older srv, and when the agent has none.
     #[serde(default)]
     pub summary: Option<String>,
+    /// Buttons the toast offers. Absent from an older srv, and for every
+    /// notification but a pending shutdown. The id is one of a closed set
+    /// (`keep`); the label is app text, never an agent's.
+    #[serde(default)]
+    pub actions: Vec<NotifyAction>,
+    /// A live countdown to tick, where the platform can show one. Absent from
+    /// an older srv.
+    #[serde(default)]
+    pub countdown: Option<Countdown>,
     pub tag: String,
 }
 
 impl Notification {
     pub fn is_attention(&self) -> bool {
         self.priority == "attention"
+    }
+
+    /// The label of the Keep running button, when the toast offers one.
+    pub fn keep_label(&self) -> Option<&str> {
+        self.actions.iter().find(|a| a.id == "keep").map(|a| a.label.as_str())
+    }
+}
+
+/// A button on a toast (srv's `NotifyAction`).
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+pub struct NotifyAction {
+    pub id: String,
+    pub label: String,
+}
+
+/// srv's `Countdown`: time left when shown (relative, so clock skew never
+/// matters) and the title with `{n}` where the whole seconds go.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+pub struct Countdown {
+    pub remaining_ms: i64,
+    pub title_template: String,
+}
+
+/// One tick of a countdown, for a backend that can redraw a live toast.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CountdownUpdate {
+    /// "Closing QTimer in 9 s".
+    pub title: String,
+    /// 1.0 when it starts, 0.0 when the time is up: the bar drains.
+    pub fraction_left: f64,
+    /// "9 s".
+    pub seconds_text: String,
+}
+
+/// The whole seconds left, rounded up, never negative.
+fn seconds_left(remaining_ms: i64) -> i64 {
+    (remaining_ms.max(0) + 999) / 1000
+}
+
+/// `template` with `{n}` replaced by `value`. Only the last `{n}`: the
+/// template ends with the app's own placeholder, and an agent name earlier in
+/// it can't take its place.
+fn fill_countdown(template: &str, value: &str) -> String {
+    match template.rfind("{n}") {
+        Some(i) => format!("{}{}{}", &template[..i], value, &template[i + 3..]),
+        None => template.to_string(),
+    }
+}
+
+/// What the toast shows with `remaining_ms` of `total_ms` left. Pure.
+pub fn countdown_update(template: &str, remaining_ms: i64, total_ms: i64) -> CountdownUpdate {
+    let secs = seconds_left(remaining_ms);
+    let fraction_left = if total_ms <= 0 { 0.0 } else { (remaining_ms.max(0) as f64 / total_ms as f64).clamp(0.0, 1.0) };
+    CountdownUpdate {
+        title: fill_countdown(template, &secs.to_string()),
+        fraction_left,
+        seconds_text: format!("{secs} s"),
     }
 }
 
@@ -65,6 +131,8 @@ impl Notification {
 pub enum UserAction {
     Clicked(String),
     Dismissed(String),
+    /// The Keep running button on a toast (by notification id).
+    Keep(String),
     /// Set `notify:pause:until` (epoch ms; 0 = resume).
     SetPause(i64),
     /// Set `app:startatlogin` (the tray's check item; `start_at_login`).
@@ -76,6 +144,9 @@ pub trait Presenter: Send + Sync {
     fn show(&self, n: &Notification);
     fn retract(&self, tag: &str);
     fn clear_all(&self);
+    /// Redraw the live toast `tag` for one tick of its countdown. Only a
+    /// backend that can show a countdown does anything.
+    fn update(&self, _tag: &str, _update: &CountdownUpdate) {}
 }
 
 /// No platform backend (macOS today — needs a signed bundle and a Mac to
@@ -329,6 +400,62 @@ pub fn parse_frame(text: &str) -> Frame {
     }
 }
 
+/// The data of a `notify.ack`: a body click, a dismissal, or (`action`) a
+/// button. The id is the notification's; what a button does is decided in srv
+/// from its own record, never from this.
+fn ack_params(id: &str, clicked: bool, action: Option<&str>) -> serde_json::Value {
+    let mut data = serde_json::json!({ "id": id, "clicked": clicked });
+    if let Some(action) = action {
+        data["action"] = serde_json::Value::String(action.to_string());
+    }
+    data
+}
+
+/// The tasks ticking live toasts' countdowns, by toast tag. One a second until
+/// the time is up; stopped when the toast is retracted or replaced, and all of
+/// them when the session ends.
+#[derive(Default)]
+struct Countdowns {
+    tasks: std::collections::HashMap<String, tokio::task::JoinHandle<()>>,
+}
+
+impl Countdowns {
+    fn start(&mut self, presenter: &Arc<dyn Presenter>, n: &Notification) {
+        self.stop(&n.tag);
+        let Some(c) = n.countdown.clone().filter(|c| c.remaining_ms > 0) else { return };
+        let (presenter, tag) = (presenter.clone(), n.tag.clone());
+        let started = std::time::Instant::now();
+        let task = tokio::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(1));
+            tick.tick().await; // the show itself drew the first frame
+            loop {
+                tick.tick().await;
+                let elapsed = started.elapsed().as_millis() as i64;
+                let remaining = c.remaining_ms - elapsed;
+                presenter.update(&tag, &countdown_update(&c.title_template, remaining, c.remaining_ms));
+                if remaining <= 0 {
+                    return;
+                }
+            }
+        });
+        self.tasks.insert(n.tag.clone(), task);
+    }
+
+    fn stop(&mut self, tag: &str) {
+        if let Some(task) = self.tasks.remove(tag) {
+            task.abort();
+        }
+    }
+}
+
+impl Drop for Countdowns {
+    fn drop(&mut self) {
+        for (_, task) in self.tasks.drain() {
+            task.abort();
+        }
+    }
+}
+
 fn rpc(command: &str, reqid: Option<&str>, data: serde_json::Value) -> String {
     let mut msg = serde_json::json!({ "command": command, "data": data });
     if let Some(r) = reqid {
@@ -408,6 +535,8 @@ async fn session(
 
     // reqid → was it a click (needs has_window handling)?
     let mut pending_clicks: std::collections::HashSet<String> = Default::default();
+    // tag → the task ticking that toast's countdown; dropped with the session.
+    let mut countdowns = Countdowns::default();
 
     loop {
         tokio::select! {
@@ -418,9 +547,10 @@ async fn session(
             }
             action = act_rx.recv() => {
                 let Some(action) = action else { return SessionEnd::Closed("presenter gone".into()) };
-                let (id, clicked) = match &action {
-                    UserAction::Clicked(id) => (id.clone(), true),
-                    UserAction::Dismissed(id) => (id.clone(), false),
+                let (id, clicked, button) = match &action {
+                    UserAction::Clicked(id) => (id.clone(), true, None),
+                    UserAction::Dismissed(id) => (id.clone(), false, None),
+                    UserAction::Keep(id) => (id.clone(), false, Some("keep")),
                     UserAction::SetPause(until) => {
                         let msg = rpc("setconfig", Some(&uuid::Uuid::new_v4().to_string()), serde_json::json!({ "notify:pause:until": until }));
                         if let Err(e) = write.send(Message::Text(msg.into())).await {
@@ -440,7 +570,7 @@ async fn session(
                 if clicked {
                     pending_clicks.insert(reqid.clone());
                 }
-                let msg = rpc("notify.ack", Some(&reqid), serde_json::json!({ "id": id, "clicked": clicked }));
+                let msg = rpc("notify.ack", Some(&reqid), ack_params(&id, clicked, button));
                 if let Err(e) = write.send(Message::Text(msg.into())).await {
                     return SessionEnd::Closed(format!("send ack: {e}"));
                 }
@@ -453,8 +583,14 @@ async fn session(
                     Some(Err(e)) => return SessionEnd::Closed(format!("read: {e}")),
                 };
                 match parse_frame(&text) {
-                    Frame::Show(n) => presenter.show(&n),
-                    Frame::Retract(tag) => presenter.retract(&tag),
+                    Frame::Show(n) => {
+                        presenter.show(&n);
+                        countdowns.start(&presenter, &n);
+                    }
+                    Frame::Retract(tag) => {
+                        countdowns.stop(&tag);
+                        presenter.retract(&tag);
+                    }
                     Frame::State(state) => crate::tray::notify_menu::set(state),
                     Frame::StartAtLogin(v) => crate::start_at_login::observe(v),
                     Frame::Response { reqid, ack } => {
@@ -732,5 +868,90 @@ mod tests {
         assert_eq!(v["message"]["command"], "notify.ack");
         assert_eq!(v["message"]["reqid"], "r1");
         assert_eq!(v["message"]["data"]["clicked"], true);
+    }
+
+    #[test]
+    fn a_notification_with_buttons_and_a_countdown_parses_and_an_older_srv_still_does() {
+        let f = r#"{"eventtype":"rpc","data":{"command":"eventrecv","data":{"event":"notification","data":{
+            "id":"n1","kind":"shutdown_pending","priority":"attention","title":"Closing QTimer in 15 s",
+            "body":"AgentY asked to close it.","tag":"t1",
+            "actions":[{"id":"keep","label":"Keep running"}],
+            "countdown":{"remaining_ms":15000,"title_template":"Closing QTimer in {n} s"}}}}}"#;
+        let Frame::Show(n) = parse_frame(f) else { panic!("not a show") };
+        assert_eq!(n.keep_label(), Some("Keep running"));
+        assert_eq!(n.countdown, Some(Countdown { remaining_ms: 15_000, title_template: "Closing QTimer in {n} s".into() }));
+        // Without either field (every other notification, or an older srv).
+        let plain = r#"{"eventtype":"rpc","data":{"command":"eventrecv","data":{"event":"notification","data":{
+            "id":"n2","kind":"turn_completed","priority":"normal","title":"lark finished","tag":"t2"}}}}"#;
+        let Frame::Show(p) = parse_frame(plain) else { panic!("not a show") };
+        assert!(p.actions.is_empty() && p.countdown.is_none() && p.keep_label().is_none());
+    }
+
+    #[test]
+    fn the_countdown_counts_whole_seconds_down_and_drains_the_bar() {
+        let t = "Closing QTimer in {n} s";
+        let at = |remaining: i64| countdown_update(t, remaining, 15_000);
+        assert_eq!((at(15_000).title.as_str(), at(15_000).fraction_left, at(15_000).seconds_text.as_str()), ("Closing QTimer in 15 s", 1.0, "15 s"));
+        assert_eq!(at(14_001).title, "Closing QTimer in 15 s", "rounded up, so it never reads 0 with time left");
+        assert_eq!(at(9_000).title, "Closing QTimer in 9 s");
+        assert_eq!(at(1).title, "Closing QTimer in 1 s");
+        let done = at(0);
+        assert_eq!((done.title.as_str(), done.fraction_left, done.seconds_text.as_str()), ("Closing QTimer in 0 s", 0.0, "0 s"));
+        assert_eq!(at(-400).fraction_left, 0.0, "never negative");
+        assert_eq!(countdown_update(t, 5_000, 0).fraction_left, 0.0, "no total, no bar");
+        assert!((at(7_500).fraction_left - 0.5).abs() < 1e-9);
+    }
+
+    /// An agent's name can't take the placeholder's place: the last `{n}` is ours.
+    #[test]
+    fn only_the_last_placeholder_is_filled() {
+        assert_eq!(countdown_update("Closing {n} in {n} s", 3_000, 15_000).title, "Closing {n} in 3 s");
+        assert_eq!(countdown_update("no placeholder", 3_000, 15_000).title, "no placeholder");
+    }
+
+    #[test]
+    fn a_button_press_acks_with_its_action_and_a_click_does_not() {
+        assert_eq!(ack_params("n1", true, None), serde_json::json!({ "id": "n1", "clicked": true }));
+        assert_eq!(ack_params("n1", false, Some("keep")), serde_json::json!({ "id": "n1", "clicked": false, "action": "keep" }));
+    }
+
+    /// The ticker redraws a live toast once a second and stops with its retract.
+    #[tokio::test]
+    async fn a_countdown_toast_is_redrawn_each_second_until_retracted() {
+        use std::sync::Mutex;
+        #[derive(Default)]
+        struct Rec(Mutex<Vec<(String, CountdownUpdate)>>);
+        impl Presenter for Rec {
+            fn show(&self, _: &Notification) {}
+            fn retract(&self, _: &str) {}
+            fn clear_all(&self) {}
+            fn update(&self, tag: &str, u: &CountdownUpdate) {
+                self.0.lock().unwrap().push((tag.to_string(), u.clone()));
+            }
+        }
+        let rec = Arc::new(Rec::default());
+        let presenter: Arc<dyn Presenter> = rec.clone();
+        let n = Notification {
+            id: "n1".into(),
+            tag: "t1".into(),
+            countdown: Some(Countdown { remaining_ms: 2_200, title_template: "Closing QTimer in {n} s".into() }),
+            ..Default::default()
+        };
+        let mut countdowns = Countdowns::default();
+        countdowns.start(&presenter, &n);
+        // Real time: a redraw at 1 s and 2 s, and the third only at 3 s. Loose on
+        // the count so a loaded machine can't fail it, strict on what matters.
+        tokio::time::sleep(std::time::Duration::from_millis(2_500)).await;
+        let seen = rec.0.lock().unwrap().clone();
+        assert!((1..=2).contains(&seen.len()), "about one redraw a second, none at the show itself: {seen:?}");
+        assert!(seen.iter().all(|(tag, _)| tag == "t1"));
+        assert_eq!(seen[0].1.title, "Closing QTimer in 2 s", "1.2 s left rounds up to 2");
+        countdowns.stop("t1");
+        let after_stop = rec.0.lock().unwrap().len();
+        tokio::time::sleep(std::time::Duration::from_millis(1_500)).await;
+        assert_eq!(rec.0.lock().unwrap().len(), after_stop, "nothing after the retract");
+        // A notification with no countdown starts no ticker.
+        countdowns.start(&presenter, &Notification { tag: "t2".into(), ..Default::default() });
+        assert!(countdowns.tasks.is_empty());
     }
 }

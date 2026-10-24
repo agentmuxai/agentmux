@@ -370,10 +370,13 @@ fn request_within(
         // Action Center and on a lock screen.
         let body = toast_body(&view);
         let block = block_id.to_string();
-        // `emit_fixed` reads the block (blocking): off the async workers.
-        tokio::task::spawn_blocking(move || {
-            router.emit_fixed(crate::backend::notify::policy::NotifyKind::ShutdownPending, &block, Some(body))
-        });
+        let info = crate::backend::notify::policy::ShutdownInfo {
+            deadline_ms: view.deadline_ms,
+            effect: view.effect,
+            running: crate::backend::blockcontroller::get_controller(block_id).is_some(),
+        };
+        // `emit_shutdown` reads the block (blocking): off the async workers.
+        tokio::task::spawn_blocking(move || router.emit_shutdown(&block, Some(body), info));
     }
     tracing::info!(block_id, by, via, request_id = %view.request_id, "shutdown pending: user has 15 s to keep it");
 
