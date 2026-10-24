@@ -133,8 +133,12 @@ export class SwarmOrderController {
         }
     }
 
-    /** Turn a reason for holding the list on or off. */
+    /**
+     * Turn a reason for holding the list on or off. Letting go of a hold that was not on does
+     * nothing: the page reports every key and pointer-up, and none of those may restart the wait.
+     */
     setHold(hold: SwarmHold, on: boolean): void {
+        const had = this.holds.has(hold);
         if (on) this.holds.add(hold);
         else this.holds.delete(hold);
         if (hold === "menu") {
@@ -142,6 +146,7 @@ export class SwarmOrderController {
             // A right-click menu says nothing when it closes, so it holds for a bounded time.
             if (on) this.menuTimer = setTimeout(() => this.setHold("menu", false), CONTEXT_MENU_HOLD_MS);
         }
+        if (on || !had) return;
         if (this.holds.size === 0 && !sameList(this.target, this.order())) this.arm();
     }
 

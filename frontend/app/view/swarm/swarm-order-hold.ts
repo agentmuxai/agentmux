@@ -15,14 +15,16 @@ import { captureRowTops, playRowMoves } from "./swarm-order-motion";
 export interface SwarmOrder {
     /** The keys of the rows, in the order to show them. */
     order: Accessor<string[]>;
-    /** Lets go of the holds the list element gave, for when it is removed. */
-    releaseListHolds: () => void;
+    /**
+     * Call from the list element's ref callback. A right-click menu stops the event before it
+     * bubbles, so the menu hold listens in the capture phase; and the list's holds end with it.
+     */
+    bindList: (list: HTMLElement) => void;
     /** Event handlers for the list element, which hold the order still. */
     listHandlers: {
         onPointerEnter: () => void;
         onPointerLeave: () => void;
         onPointerDown: () => void;
-        onContextMenu: () => void;
         onFocusIn: () => void;
         onFocusOut: (e: FocusEvent) => void;
     };
@@ -74,16 +76,23 @@ export function useSwarmOrder(opts: {
 
     return {
         order: control.order,
-        releaseListHolds: () => control.releaseListHolds(),
+        bindList: (list) => {
+            // The native menu can swallow the pointerup, so a right-click ends the press.
+            const onMenu = () => {
+                control.setHold("press", false);
+                control.setHold("menu", true);
+            };
+            list.addEventListener("contextmenu", onMenu, true);
+            // The pointer and focus holds end with the list, if its events never come.
+            onCleanup(() => {
+                list.removeEventListener("contextmenu", onMenu, true);
+                control.releaseListHolds();
+            });
+        },
         listHandlers: {
             onPointerEnter: () => control.setHold("pointer", true),
             onPointerLeave: () => control.setHold("pointer", false),
             onPointerDown: () => control.setHold("press", true),
-            // The native menu can swallow the pointerup, so a right-click ends the press.
-            onContextMenu: () => {
-                control.setHold("press", false);
-                control.setHold("menu", true);
-            },
             onFocusIn: () => control.setHold("focus", true),
             onFocusOut: (e) => {
                 if (!opts.list()?.contains(e.relatedTarget as Node | null)) control.setHold("focus", false);

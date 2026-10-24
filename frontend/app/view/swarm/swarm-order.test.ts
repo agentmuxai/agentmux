@@ -288,6 +288,16 @@ describe("SwarmOrderController", () => {
         dispose();
     });
 
+    it("does not restart the wait when a hold that was not on is let go, as every key and pointer-up does", () => {
+        const { ctl } = make();
+        ctl.update([local("a", { lastActive: 2 }), local("b", { lastActive: 1 })]);
+        ctl.update([local("a", { lastActive: 2 }), local("b", { working: true, lastActive: 3 })]);
+        vi.advanceTimersByTime(SWARM_SETTLE_MS - 1);
+        for (const hold of ["menu", "press", "pointer", "focus"] as const) ctl.setHold(hold, false);
+        vi.advanceTimersByTime(1);
+        expect(ctl.order()).toEqual(["b", "a"]);
+    });
+
     it("stops its timers when disposed", () => {
         const { ctl } = make();
         ctl.update([local("a", { lastActive: 2 }), local("b", { lastActive: 1 })]);

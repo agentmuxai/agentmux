@@ -149,6 +149,19 @@ describe("Swarm order", () => {
         expect(names()).toEqual(["B", "A"]);
     });
 
+    it("holds for a right-click menu even though the row's own handler stops the event, as the copy menu does", () => {
+        const { names, change, container } = setup({ A: "idle", B: "idle" });
+        const row = container.querySelector<HTMLElement>(".swarm-remote-agent")!;
+        row.addEventListener("contextmenu", (e) => e.stopPropagation());
+        fireEvent.contextMenu(row);
+        change({ A: "idle", B: "working" });
+        vi.advanceTimersByTime(10_000);
+        expect(names()).toEqual(["A", "B"]);
+        fireEvent.keyDown(window, { key: "Escape" });
+        vi.advanceTimersByTime(SWARM_SETTLE_MS);
+        expect(names()).toEqual(["B", "A"]);
+    });
+
     it("drops a row whose agent has left while the list is held, without error", () => {
         const { names, change, container } = setup({ A: "idle", B: "idle", C: "idle" });
         hovered = true;
