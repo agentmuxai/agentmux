@@ -8,6 +8,8 @@
  * - `UnavailableChip`: the agent can't start a turn, because its plan is out of quota until a
  *   reset or its sign-in was refused. It takes the place of the status chip, whose green "idle"
  *   would read as an agent that is simply resting.
+ * - `BuildSlotNote`: this agent holds the machine's build slot, so other builds wait for it
+ *   (SPEC_BUILD_SLOT_ENFORCEMENT_2026_10_20.md §6). Information only.
  * - `LongToolNote`: a tool call has been running for minutes. Information only: nothing is
  *   killed or flagged as failed (the August removal of hung-turn detection stands,
  *   SPEC_REMOVE_AGENT_UNRESPONSIVE_DETECTION_2026_08_25.md).
@@ -15,6 +17,7 @@
 
 import { unavailableChipText, unavailableTitle, type AgentUnavailable } from "@/app/store/agent-unavailable";
 import { Show, type Accessor, type JSX } from "solid-js";
+import { buildSlotText, buildSlotTitle, useBuildSlotHolder } from "./swarm-build-slot";
 import type { LongRunningToolRow } from "./swarm-longrunning";
 
 /** The chip for an agent that can't start a turn, with the reset time when it is known. */
@@ -66,6 +69,24 @@ export function LongToolNote(props: {
                     title="A tool call that has been running a while. Nothing is wrong with it by itself."
                 >
                     {t()}
+                </span>
+            )}
+        </Show>
+    );
+}
+
+/** The note on the row of the agent holding the build slot. Reads `now` so the minutes count up. */
+export function BuildSlotNote(props: { blockId: string | null; now: Accessor<number> }): JSX.Element {
+    const holder = useBuildSlotHolder();
+    const mine = () => {
+        const h = holder();
+        return h && props.blockId && h.block_id === props.blockId ? h : null;
+    };
+    return (
+        <Show when={mine()}>
+            {(h) => (
+                <span class="swarm-build-slot" title={buildSlotTitle(h())}>
+                    {buildSlotText(h(), props.now())}
                 </span>
             )}
         </Show>

@@ -55,6 +55,7 @@ import type { BlockfileReadStateResult } from "@/types/rpc/BlockfileReadStateRes
 import type { BlockfileWriteStateResult } from "@/types/rpc/BlockfileWriteStateResult";
 import type { BookmarksResult } from "@/types/rpc/BookmarksResult";
 import type { BrowserProfilesResult } from "@/types/rpc/BrowserProfilesResult";
+import type { BuildSlotView } from "@/types/rpc/BuildSlotView";
 import type { Bundle } from "@/types/rpc/Bundle";
 import type { BundleImportCommitResponse } from "@/types/rpc/BundleImportCommitResponse";
 import type { BundleImportPreviewResponse } from "@/types/rpc/BundleImportPreviewResponse";
@@ -126,6 +127,7 @@ import type { CommandGetAgentBundlesData } from "@/types/rpc/CommandGetAgentBund
 import type { CommandGetAgentContentData } from "@/types/rpc/CommandGetAgentContentData";
 import type { CommandGetAgentInstanceData } from "@/types/rpc/CommandGetAgentInstanceData";
 import type { CommandGetAllAgentContentData } from "@/types/rpc/CommandGetAllAgentContentData";
+import type { CommandGetBuildSlotData } from "@/types/rpc/CommandGetBuildSlotData";
 import type { CommandGetBundleData } from "@/types/rpc/CommandGetBundleData";
 import type { CommandGetClaudeGlobalConfigData } from "@/types/rpc/CommandGetClaudeGlobalConfigData";
 import type { CommandGetIdentityAccountData } from "@/types/rpc/CommandGetIdentityAccountData";
@@ -1269,6 +1271,14 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<Array<AgentContent>> {
     return client.rpcCall("getallagentcontent", data, opts);
+  },
+  // command "getbuildslot"
+  GetBuildSlotCommand(
+    client: RpcClient,
+    data?: CommandGetBuildSlotData,
+    opts?: RpcOpts
+  ): Promise<BuildSlotView | null> {
+    return client.rpcCall("getbuildslot", data ?? {}, opts);
   },
   // command "getmemory"
   GetBundleCommand(client: RpcClient, data: CommandGetBundleData, opts?: RpcOpts): Promise<Bundle> {
