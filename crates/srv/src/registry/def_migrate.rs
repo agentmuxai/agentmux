@@ -157,15 +157,29 @@ pub fn migrate_definitions_global_once(
             None
         }
     };
-    let mut holders: HashMap<String, String> = HashMap::new();
-    for (uid, names) in store.slug_index()?.iter() {
-        for s in std::iter::once(&names.slug).chain(&names.former) {
-            let folded = s.trim().to_lowercase();
-            if !folded.is_empty() {
-                holders.entry(folded).or_insert_with(|| uid.clone());
+    // The strict index, as every allocation reads: a newer-schema record's
+    // slugs count. When a record can't be read, no slug is known to be free,
+    // so this pass publishes none (`None`); the agents it holds back go global
+    // on their next edit, through the live allocation. A failed migration
+    // stops srv starting, so one bad file mustn't fail it.
+    let mut holders: Option<HashMap<String, String>> = match store.slug_index_strict() {
+        Ok(index) => {
+            let mut held = HashMap::new();
+            for (uid, names) in index {
+                for s in std::iter::once(&names.slug).chain(&names.former) {
+                    let folded = s.trim().to_lowercase();
+                    if !folded.is_empty() {
+                        held.entry(folded).or_insert_with(|| uid.clone());
+                    }
+                }
             }
+            Some(held)
         }
-    }
+        Err(e) => {
+            tracing::warn!(error = %e, "def migrate: a definition can't be read; publishing no new slug this pass");
+            None
+        }
+    };
     let mut ordered: Vec<(String, (DefinitionRecord, i64))> = best.into_iter().collect();
     ordered.sort_by(|(a_id, (a, _)), (b_id, (b, _))| a.data.created_at.cmp(&b.data.created_at).then_with(|| a_id.cmp(b_id)));
     for (id, (mut rec, freshness)) in ordered {
@@ -206,7 +220,11 @@ pub fn migrate_definitions_global_once(
         // `upsert` keeps a record's slug; only one without a slug takes this.
         let folded = rec.data.slug.trim().to_lowercase();
         let publishes = existing_slug.as_ref().is_none_or(|s| s.trim().is_empty()) && !folded.is_empty();
-        if let Some(holder) = holders.get(&folded).filter(|h| publishes && h.as_str() != id) {
+        let holder = match &holders {
+            Some(held) => held.get(&folded).filter(|h| h.as_str() != id).cloned(),
+            None => Some("(unknown: a definition can't be read)".to_string()),
+        };
+        if let Some(holder) = holder.filter(|_| publishes) {
             tracing::warn!(
                 def_id = %id,
                 slug = %rec.data.slug,
@@ -222,8 +240,8 @@ pub fn migrate_definitions_global_once(
         match store.upsert(&rec) {
             Ok(()) => {
                 stats.records_written += 1;
-                if publishes && !rec.data.slug.is_empty() {
-                    holders.entry(folded).or_insert_with(|| id.clone());
+                if let Some(held) = holders.as_mut().filter(|_| publishes && !rec.data.slug.is_empty()) {
+                    held.entry(folded).or_insert_with(|| id.clone());
                 }
             }
             Err(e) => {
@@ -781,6 +799,35 @@ mod tests {
         }
         assert_eq!(store.get("u-holder").unwrap().unwrap().data.slug, "kept");
         assert_eq!((stats.records_written, stats.records_skipped_slug_taken), (1, 3));
+    }
+
+    /// A slug a newer version's record holds is taken, and a definition that
+    /// can't be read stops the pass publishing any slug without failing it
+    /// (a failed migration stops srv starting).
+    #[test]
+    fn newer_and_unreadable_records_keep_slugs_from_the_backfill() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        let db = make_channel_db(home, "ch-a", "0.44.1");
+        insert_slugged(&db, "u-new", "future-held", 100);
+        let store = store_at(home);
+        let future = r#"{"schema_version":99,"data":{"id":"u-future","slug":"future-held"}}"#;
+        std::fs::write(store.root().join("u-future.json"), future).unwrap();
+
+        let stats = migrate_definitions_global_once(home, &store).unwrap();
+        assert!(store.get("u-new").unwrap().is_none(), "a newer record's slug is held");
+        assert_eq!((stats.records_written, stats.records_skipped_slug_taken), (0, 1));
+
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        let db = make_channel_db(home, "ch-a", "0.44.1");
+        insert_slugged(&db, "u-free", "free-slug", 100);
+        let store = store_at(home);
+        std::fs::write(store.root().join("u-broken.json"), "{").unwrap();
+
+        let stats = migrate_definitions_global_once(home, &store).unwrap();
+        assert!(store.get("u-free").unwrap().is_none(), "no slug is known free");
+        assert_eq!((stats.records_written, stats.records_skipped_slug_taken), (0, 1));
     }
 
     #[test]
