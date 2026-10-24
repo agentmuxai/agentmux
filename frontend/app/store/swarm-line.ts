@@ -30,7 +30,6 @@
 
 import { readSwarmSummary } from "./activitySummary";
 import { rankAgentStatus, type AgentStatus } from "./agent-status";
-import { unavailableLineText, unavailableOfMeta } from "./agent-unavailable";
 import { isUsableTitle } from "./ambient-title";
 import { supervisorPauseReason } from "./supervisor";
 
@@ -149,25 +148,17 @@ export interface SwarmLineInput {
     currentTool: string | null;
     /** Context tokens used so far, as a sign that there is conversation history. */
     contextTokens: number | null;
-    /** The time to judge a usage limit's reset against, Unix ms. Defaults to now. */
-    now?: number;
 }
 
 /** The ranked status of a Swarm agent, from what its row knows: whether a
- *  turn is in flight, the pending-question flag (`term:awaiting_user`),
- *  whether the Swarm Supervisor stopped it for the user, and whether its last
- *  failure leaves it unable to start a turn (out of quota, or signed out). */
-function swarmAgentStatus(
-    meta: Record<string, unknown> | undefined,
-    status: "running" | "idle",
-    now: number = Date.now()
-): AgentStatus {
+ *  turn is in flight, the pending-question flag (`term:awaiting_user`), and
+ *  whether the Swarm Supervisor stopped it for the user. */
+function swarmAgentStatus(meta: Record<string, unknown> | undefined, status: "running" | "idle"): AgentStatus {
     const live = status === "running";
     return rankAgentStatus({
         live,
         needsYou: meta?.[META_AWAITING_USER] === true,
         pausedForYou: supervisorPauseReason(meta, live) !== null,
-        unavailable: unavailableOfMeta(meta, live, now)?.reason ?? null,
     });
 }
 
@@ -183,18 +174,12 @@ export function isAwaitingUser(meta: Record<string, unknown> | undefined, status
 /** The line for one agent row. Always returns something. */
 export function resolveSwarmLine(input: SwarmLineInput): SwarmLine {
     const { meta, currentTool, contextTokens } = input;
-    const now = input.now ?? Date.now();
-    const status = swarmAgentStatus(meta, input.status, now);
+    const status = swarmAgentStatus(meta, input.status);
 
     if (status.kind === "needs-you") {
         const paused = supervisorPauseReason(meta, input.status === "running");
         return { text: paused ? `${STATUS_NEEDS_YOU}: ${paused}` : STATUS_WAITING, source: "status" };
     }
-
-    // An agent that can't start a turn says so ahead of any title, like one waiting on you:
-    // a title would read as work in progress.
-    const unavailable = status.kind === "unavailable" ? unavailableOfMeta(meta, false, now) : null;
-    if (unavailable) return { text: unavailableLineText(unavailable, now), source: "status" };
 
     const generated = readSwarmSummary(meta);
     if (generated) return { text: generated, source: "generated" };

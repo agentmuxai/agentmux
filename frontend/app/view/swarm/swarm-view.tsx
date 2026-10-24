@@ -30,7 +30,7 @@ import { useSwarmOrder } from "./swarm-order-hold";
 import { phaseToDisplayStatus, type AgentDisplayStatus } from "./swarm-display-status";
 import { LongToolNote, UnavailableChip } from "./swarm-row-notes";
 import { AgentStatusChip, chipStatus } from "./swarm-status-chip";
-import { unavailableOfMeta } from "@/app/store/agent-unavailable";
+import { unavailableLineText, unavailableOfMeta, unavailableTitle } from "@/app/store/agent-unavailable";
 import { BackgroundTaskBucket, SubagentBackgroundTasks, visibleBackgroundTasks } from "./swarm-background-tasks";
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 import { swarmRowColors } from "./swarm-row-colors";
@@ -654,11 +654,13 @@ export function AgentRow({
                     classList={{
                         "swarm-activity-summary": true,
                         "swarm-activity-summary--flash": summaryFlash(),
-                        "swarm-activity-summary--fallback": node().line.source !== "generated",
+                        "swarm-activity-summary--fallback": node().line.source !== "generated" || unavailable() !== null,
                     }}
-                    title={swarmLineTooltip(node().line)}
+                    title={unavailable() ? unavailableTitle(unavailable()!) : swarmLineTooltip(node().line)}
                 >
-                    {node().line.text}
+                    {/* An agent that can't start a turn says so ahead of any title. Read from the
+                        row's tick, like the chip, so the words go when the reset passes. */}
+                    {unavailable() ? unavailableLineText(unavailable()!, rowNow()) : node().line.text}
                 </div>
                 {/* The Kanban task this agent is on, which opens it there (SPEC_WARDEN_KANBAN_2026_10_20.md §6.14). */}
                 <Show when={node().blockId}>{(blockId) => <HeldTaskChip blockId={blockId()} />}</Show>

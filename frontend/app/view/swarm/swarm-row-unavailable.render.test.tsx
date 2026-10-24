@@ -216,3 +216,34 @@ describe("a remote agent that can't start a turn", () => {
         expect(container.querySelector(".swarm-status-chip")).toBeNull();
     });
 });
+
+describe("AgentRow — the line says it too, and follows the clock", () => {
+    afterEach(() => vi.useRealTimers());
+
+    function lineOf(container: HTMLElement): string {
+        return container.querySelector(".swarm-activity-summary")?.textContent?.trim() ?? "";
+    }
+
+    it("replaces the title with the same words as the chip", () => {
+        seedBlockMeta({ "agent:last_failure": { code: "auth" } });
+        const { container } = renderRow("idle");
+        expect(lineOf(container)).toBe("Needs sign-in");
+    });
+
+    it("says out of quota until the reset, then goes back to the title when it passes", () => {
+        vi.useFakeTimers();
+        const resets = Date.now() + 90_000;
+        seedBlockMeta({ "agent:last_failure": { code: "usage_limit", resetsAtMs: resets } });
+        const { container } = renderRow("idle");
+        expect(lineOf(container)).toMatch(/^Out of quota until /);
+        vi.advanceTimersByTime(91_000);
+        expect(lineOf(container)).toBe("No activity yet");
+        expect(container.querySelector(".swarm-unavailable-chip")).toBeNull();
+    });
+
+    it("leaves the title alone for an agent that can work", () => {
+        seedBlockMeta({});
+        const { container } = renderRow("idle");
+        expect(lineOf(container)).toBe("No activity yet");
+    });
+});
