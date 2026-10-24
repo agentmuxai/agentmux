@@ -699,6 +699,10 @@ impl PersistentSubprocessController {
                 // to the user (per its own "must never reach the user"
                 // invariant at `process_waiter.rs`'s ProcessExited/FireRetry arm) —
                 // classify() only runs once this error is confirmed final.
+                if is_error_result {
+                    // A failed turn ends without the hint, so a finished task stays no boundary.
+                    crate::backend::context_reading::clear_task_boundary(&block_id_read);
+                }
                 if is_error_result && !hold_back_for_resume_retry && early_failure.is_none() {
                     let failure = crate::agents::failure::classify(None, None, "", Some(&parsed));
                     surface_failure(&block_id_read, &failure, broker_read.as_deref(), &mstore_read, &event_bus_read);

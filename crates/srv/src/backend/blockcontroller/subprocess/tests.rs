@@ -491,3 +491,28 @@ async fn a_turn_stamps_its_spawn_time_and_last_output() {
     assert!(output >= spawned, "output {output} before spawn {spawned}");
     let _ = std::fs::remove_file(script);
 }
+
+/// `Agents fresh` on a Codex pane: a message queued behind the finishing turn
+/// must not bring the old thread back with its config's session id.
+#[test]
+fn a_fresh_start_drops_the_old_session_from_queued_messages() {
+    let ctrl = SubprocessController::new(
+        "tab-1".to_string(),
+        "block-1".to_string(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        std::sync::Arc::from("test-boot"),
+    );
+    {
+        let mut inner = ctrl.inner.lock().unwrap();
+        inner.session_id = Some("old-thread".to_string());
+        inner.pending_messages.push_back(SubprocessSpawnConfig { session_id: Some("old-thread".to_string()), ..Default::default() });
+    }
+    assert_eq!(ctrl.forget_session(), Some("old-thread".to_string()));
+    let inner = ctrl.inner.lock().unwrap();
+    assert!(inner.session_id.is_none());
+    assert!(inner.pending_messages.iter().all(|c| c.session_id.is_none()));
+}

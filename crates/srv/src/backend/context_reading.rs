@@ -189,7 +189,14 @@ pub fn observe_codex(block_id: &str, tokens: u64, window: Option<u64>, model: Op
         if tokens < HINT_REARM_BELOW {
             r.hinted = false;
         }
+        // A Codex turn gets no turn-end note; its boundary ends with the turn.
+        r.task_boundary = false;
     });
+}
+
+/// A turn ended without giving its turn-end hint (an error result).
+pub fn clear_task_boundary(block_id: &str) {
+    with(block_id, |r| r.task_boundary = false);
 }
 
 /// What the §3.5 rule says for a reading: `fresh` from `fresh_at` tokens
@@ -438,6 +445,12 @@ mod tests {
         let note = take_turn_end_hint(&b).expect("a task finished at 200K");
         assert!(note.contains("Agents fresh"), "{note}");
         assert!(!get(&b).unwrap().hinted, "a fresh hint doesn't use up the compact hint");
+        note_task_boundary(&b);
+        clear_task_boundary(&b);
+        assert!(!get(&b).unwrap().task_boundary, "a failed turn leaves no boundary behind");
+        note_task_boundary(&b);
+        observe_codex(&b, 200_000, None, None);
+        assert!(!get(&b).unwrap().task_boundary, "nor does a Codex turn");
         mark_fresh_by_choice(&b);
         assert!(take_fresh_by_choice(&b) && !take_fresh_by_choice(&b), "the spawn reads it once");
         assert!(!get(&b).unwrap().task_boundary, "the boundary is used up");
