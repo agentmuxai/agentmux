@@ -13,6 +13,7 @@
 
 pub mod follower;
 pub mod paused;
+pub mod remote;
 pub mod verdict;
 
 use std::sync::Arc;
@@ -55,13 +56,6 @@ pub const PAUSED_ALL_REFUSAL: &str =
 /// The status a Drone run left `running` by a restart gets in
 /// `db_drone_runs` (§3.2). An open string there, like every other status.
 pub const DRONE_STATUS_INTERRUPTED: &str = "interrupted";
-
-/// The channel and version that write rows here, `<channel>@<version>`.
-/// Startup cleanup and the pending-fire delivery only touch rows their own
-/// channel wrote: the ledger is shared by every instance on the computer.
-pub fn recorded_by() -> String {
-    format!("{}@{}", crate::backend::reactive::registry::local_channel_id(), env!("CARGO_PKG_VERSION"))
-}
 
 /// Woken whenever an agent registers (`reactive::registered`), so a pending
 /// fire reaches its agent as soon as it is back.
@@ -139,6 +133,12 @@ pub struct RunLedger {
     /// The channel's object store: a pane's meta (its account) and agent
     /// definitions. `None` in tests that don't need them.
     mstore: Option<Arc<Store>>,
+    /// This instance's channel (`registry::local_channel_id`).
+    channel: String,
+    /// The channel and version that write rows here, `<channel>@<version>`.
+    /// Startup cleanup and the pending-fire delivery only touch rows their
+    /// own channel wrote: the ledger is shared by every instance on the
+    /// computer.
     recorded_by: String,
     follower: follower::Follower,
     /// Where `JobsChanged` goes after each write, so the Jobs tab refreshes.
@@ -149,13 +149,20 @@ impl RunLedger {
     /// A ledger over `store` (the identity store), following turns on
     /// `broker`. Needs a tokio runtime (the follower's task).
     pub fn new(store: Arc<Store>, mstore: Option<Arc<Store>>, broker: Arc<Broker>) -> Arc<Self> {
+        Self::new_in(store, mstore, broker, &crate::backend::reactive::registry::local_channel_id())
+    }
+
+    /// [`Self::new`] as the instance of `channel`: tests run two channels'
+    /// ledgers in one process.
+    pub(crate) fn new_in(store: Arc<Store>, mstore: Option<Arc<Store>>, broker: Arc<Broker>, channel: &str) -> Arc<Self> {
         if let Err(e) = store.job_runs_ensure_schema() {
             tracing::warn!(error = %e, "jobs: couldn't create the run ledger table");
         }
         Arc::new_cyclic(|weak: &std::sync::Weak<RunLedger>| RunLedger {
             store: store.clone(),
             mstore,
-            recorded_by: recorded_by(),
+            channel: channel.to_string(),
+            recorded_by: format!("{channel}@{}", env!("CARGO_PKG_VERSION")),
             follower: follower::Follower::start(weak.clone(), broker.clone()),
             broker,
         })
@@ -326,9 +333,8 @@ impl RunLedger {
 
     /// This channel's pending fires still waiting for their agent.
     pub fn waiting_here(&self) -> Vec<JobRun> {
-        let channel = crate::backend::reactive::registry::local_channel_id();
         self.store
-            .job_runs_open_recorded_by(&channel, SOURCE_CRON, &[state::PENDING])
+            .job_runs_open_recorded_by(&self.channel, SOURCE_CRON, &[state::PENDING])
             .unwrap_or_default()
             .into_iter()
             .filter(|r| r.ended_at_ms.is_none())
@@ -339,8 +345,19 @@ impl RunLedger {
     /// and its turn followed to the end. `target_agent_uid` becomes the UID
     /// of the agent whose pane took it (a job created by name records none),
     /// so that agent can report the run.
+    ///
+    /// A pane on another instance (another channel took it) sends its turn
+    /// events to that instance's broker, so that instance follows the run
+    /// ([`Self::follow_forwarded`], #1988). This one only watches the row:
+    /// a receiver too old to follow is closed after the no-turn timeout.
     fn mark_running(&self, run_id: &str, target_uid: &str, block_id: &str, now: i64) {
         let pane = self.pane(block_id);
+        let remote = !block_id.is_empty() && self.mstore.is_some() && !pane.found && !registered_here(block_id);
+        if remote && self.followed_elsewhere(run_id) {
+            // The receiver marked it running with its pane's account.
+            self.follower.watch(run_id, now);
+            return;
+        }
         let receiver = [pane.agent_uid.as_str(), registered_uid(block_id).as_deref().unwrap_or(""), target_uid]
             .into_iter()
             .find(|u| !u.is_empty())
@@ -358,17 +375,9 @@ impl RunLedger {
             self.turn_finished(run_id, infra::OK, None, "delivered; AgentMux can't follow this run's turn");
             return;
         }
-        if !(self.mstore.is_none() || pane.found || registered_here(block_id)) {
-            // The pane is on another instance (another channel took it): its
-            // turn events never reach this broker, so close it now rather
-            // than wait out the no-turn timeout. No transcript link: it
-            // wouldn't resolve here.
-            self.turn_finished(
-                run_id,
-                infra::OK,
-                None,
-                "delivered to an agent in another channel; AgentMux can't follow its turn from here",
-            );
+        if remote {
+            // No transcript link: it wouldn't resolve here.
+            self.follower.watch(run_id, now);
             return;
         }
         let _ = self.store.job_run_add_links(run_id, &json!({ "transcript": { "block_id": block_id } }));
@@ -464,20 +473,31 @@ impl RunLedger {
 
     /// After a restart: close what this channel left open (§3.2). Cron runs
     /// still `scheduled` or `running`, and Drone runs still `running`, were
-    /// interrupted, in the ledger and in `db_drone_runs`. Pending fires stay:
-    /// they wait for their agent across a restart. Call before the scheduler
-    /// starts.
+    /// interrupted, in the ledger and in `db_drone_runs`; so were the runs
+    /// it followed for another channel (#1988). A run another channel
+    /// follows goes on there, and is watched again from here. Pending fires
+    /// stay: they wait for their agent across a restart. Call before the
+    /// scheduler starts.
     pub fn recover_after_restart(&self) -> usize {
-        let channel = crate::backend::reactive::registry::local_channel_id();
         let now = now_ms();
         let open = |source: &str, states: &[&str]| {
-            self.store.job_runs_open_recorded_by(&channel, source, states).unwrap_or_else(|e| {
+            self.store.job_runs_open_recorded_by(&self.channel, source, states).unwrap_or_else(|e| {
                 tracing::warn!(error = %e, "jobs: couldn't read open runs");
                 Vec::new()
             })
         };
         let mut closed = 0;
-        let stale = open(SOURCE_CRON, &[state::SCHEDULED, state::RUNNING]).into_iter().chain(open(SOURCE_DRONE, &[state::RUNNING]));
+        let followed_here = self.store.job_runs_open_followed_by(&self.channel).unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "jobs: couldn't read followed runs");
+            Vec::new()
+        });
+        let (ours, followed_elsewhere): (Vec<JobRun>, Vec<JobRun>) = open(SOURCE_CRON, &[state::SCHEDULED, state::RUNNING])
+            .into_iter()
+            .partition(|r| remote::followed_by(r).is_none_or(|f| f.channel == self.channel));
+        for run in &followed_elsewhere {
+            self.follower.watch(&run.id, now);
+        }
+        let stale = ours.into_iter().chain(open(SOURCE_DRONE, &[state::RUNNING])).chain(followed_here);
         for run in stale {
             if self.store.job_run_finish(&run.id, infra::INTERRUPTED, None, "AgentMux restarted during this run", now).unwrap_or(false) {
                 closed += 1;
@@ -492,6 +512,7 @@ impl RunLedger {
         }
         if closed > 0 {
             tracing::info!(count = closed, "jobs: closed runs left open by the restart");
+            self.changed("");
         }
         closed
     }

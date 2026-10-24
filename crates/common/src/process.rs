@@ -197,6 +197,129 @@ pub fn force_kill_tree(pid: u32) -> io::Result<()> {
     }
 }
 
+/// Force-kill a child and, on Unix, the process group it leads: what an
+/// agent CLI spawned with `process_group(0)` needs, since its MCP servers
+/// and other helpers live in that group, not in srv's. Then reap it.
+///
+/// The group is signalled only while tokio hasn't reaped the child
+/// (`id()` is `Some` until then), so the pid, and the group it names, are
+/// still this child's and can't have been reused. A child that doesn't lead
+/// its own group (spawned without `process_group(0)`) gets only the
+/// single-pid kill, as before: its group is srv's.
+pub async fn kill_child_and_group(child: &mut tokio::process::Child) -> io::Result<()> {
+    signal_unreaped_group(child);
+    child.kill().await
+}
+
+/// [`kill_child_and_group`] without the wait, for a caller that reaps the
+/// child later (`start_kill`).
+pub fn start_kill_child_and_group(child: &mut tokio::process::Child) -> io::Result<()> {
+    signal_unreaped_group(child);
+    child.start_kill()
+}
+
+/// A child that, if dropped before it was reaped, takes its process group
+/// with it ([`start_kill_child_and_group`]) rather than only itself, as
+/// `kill_on_drop` does. For a CLI a caller may abandon (a cancelled task):
+/// its helpers live in the CLI's group and would otherwise outlive it. Derefs
+/// to the child.
+pub struct KillGroupOnDrop(pub tokio::process::Child);
+
+impl std::ops::Deref for KillGroupOnDrop {
+    type Target = tokio::process::Child;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for KillGroupOnDrop {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl Drop for KillGroupOnDrop {
+    fn drop(&mut self) {
+        let _ = start_kill_child_and_group(&mut self.0);
+    }
+}
+
+fn signal_unreaped_group(child: &tokio::process::Child) {
+    #[cfg(unix)]
+    if let Some(pid) = child.id() {
+        if leads_own_group(pid) {
+            let _ = signal_process_group(pid, libc::SIGKILL);
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = child;
+}
+
+/// True when `pid` is the leader of its own process group, so `kill(-pid)`
+/// reaches its group and nothing else (never the caller's own group, whose
+/// leader is someone else).
+#[cfg(unix)]
+pub fn leads_own_group(pid: u32) -> bool {
+    let Ok(pid) = checked_pid(pid) else { return false };
+    // SAFETY: getpgid(2) only reads; a pid that isn't running returns -1.
+    pid >= 2 && unsafe { libc::getpgid(pid) } == pid
+}
+
+/// True when process group `pgid` still has members although no process has
+/// that pid any more: its leader exited and was reaped, but what the leader
+/// started (an agent CLI's MCP servers) lives on. The kernel does not hand a
+/// pid out again while it is still a group id, so `kill(-pgid)` reaches
+/// exactly those survivors. `false` while the pid is a live process (the
+/// caller decides then whether it is the same one), and for an empty group.
+#[cfg(unix)]
+pub fn orphaned_group_alive(pgid: u32) -> bool {
+    let Ok(pid) = checked_pid(pgid) else { return false };
+    // SAFETY: signal 0 only checks that the group exists; `pid >= 2` keeps
+    // `-pid` clear of the caller's own group (0) and the broadcast (-1).
+    pid >= 2 && process_start_time(pgid).is_none() && unsafe { libc::kill(-pid, 0) } == 0
+}
+
+/// When `pid` started, in a unit fixed per platform (clock ticks since boot
+/// on Linux, microseconds since the epoch on macOS), or `None` when it isn't
+/// running or the platform can't say. A pid plus its start time names one
+/// process even across pid reuse: the launcher checks both before it
+/// signals a pid it read from a file (`agent_roots`).
+#[cfg(unix)]
+pub fn process_start_time(pid: u32) -> Option<u64> {
+    let pid = checked_pid(pid).ok()?;
+    #[cfg(target_os = "linux")]
+    {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        start_time_from_stat(&stat)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+        let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+        // SAFETY: proc_pidinfo writes at most `size` bytes into `info`, a
+        // zeroed proc_bsdinfo of exactly that size.
+        let got = unsafe {
+            libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&mut info as *mut libc::proc_bsdinfo).cast(), size)
+        };
+        (got == size).then(|| info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
+/// Field 22 (`starttime`) of a `/proc/<pid>/stat` line. The command name in
+/// field 2 is in parentheses and may itself hold spaces and `)`, so the
+/// fields are counted from the last `)`.
+#[cfg(any(target_os = "linux", test))]
+fn start_time_from_stat(stat: &str) -> Option<u64> {
+    let rest = &stat[stat.rfind(')')? + 1..];
+    // After the `)`: field 3 (state) is the first, so field 22 is the 20th.
+    rest.split_whitespace().nth(19)?.parse().ok()
+}
+
 /// `taskkill /F /T /PID <pid>` with stdio detached and the console flash
 /// suppressed — the one Windows kill command, built once.
 #[cfg(windows)]
@@ -324,6 +447,161 @@ mod tests {
         force_kill_tree(child.id()).expect("signal the group");
         let status = child.wait().expect("reap sleep");
         assert_eq!(status.signal(), Some(libc::SIGKILL));
+    }
+
+    #[test]
+    fn start_time_is_field_22_even_with_a_paren_in_the_name() {
+        let stat = "4242 (a) b (c) S 1 4242 4242 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 1 0 987654 1000 10";
+        assert_eq!(start_time_from_stat(stat), Some(987654));
+        assert_eq!(start_time_from_stat("4242 (x) S 1"), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_running_process_has_a_start_time_and_a_gone_one_has_none() {
+        let mut child = std::process::Command::new("sleep").arg("30").spawn().expect("spawn sleep");
+        let start = process_start_time(child.id());
+        assert!(start.is_some());
+        assert_eq!(process_start_time(child.id()), start, "stable while it runs");
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert_eq!(process_start_time(child.id()), None);
+        assert_eq!(process_start_time(0), None);
+    }
+
+    /// An agent CLI's teardown: the CLI leads its own group, so the kill
+    /// takes what it started too (here a grandchild `sleep`), and leaves the
+    /// caller's group alone.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn kill_child_and_group_takes_the_grandchild() {
+        let mut cmd = tokio::process::Command::new("sh");
+        cmd.args(["-c", "sleep 30 & echo $!; wait"]).stdout(std::process::Stdio::piped()).process_group(0);
+        let mut child = cmd.spawn().expect("spawn sh");
+        let pid = child.id().unwrap();
+        assert!(leads_own_group(pid));
+        let mut out = child.stdout.take().unwrap();
+        let mut line = Vec::new();
+        let mut byte = [0u8; 1];
+        while tokio::io::AsyncReadExt::read(&mut out, &mut byte).await.unwrap() == 1 && byte[0] != b'\n' {
+            line.push(byte[0]);
+        }
+        let grandchild: u32 = String::from_utf8(line).unwrap().trim().parse().unwrap();
+        assert!(process_start_time(grandchild).is_some());
+        kill_child_and_group(&mut child).await.unwrap();
+        let mut gone = false;
+        for _ in 0..50 {
+            // The grandchild is reparented and reaped by init once killed.
+            if process_start_time(grandchild).is_none() || is_zombie(grandchild) {
+                gone = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(gone, "the grandchild in the CLI's group was killed");
+    }
+
+    #[cfg(unix)]
+    fn is_zombie(pid: u32) -> bool {
+        #[cfg(target_os = "linux")]
+        {
+            std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                .ok()
+                .and_then(|s| s.rfind(')').map(|i| s[i + 1..].trim_start().starts_with('Z')))
+                .unwrap_or(false)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = pid;
+            false
+        }
+    }
+
+    /// One agent's teardown leaves another agent's CLI and helpers alone.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn kill_child_and_group_leaves_a_sibling_group_alone() {
+        let spawn = || {
+            let mut cmd = tokio::process::Command::new("sh");
+            cmd.args(["-c", "sleep 30 & wait"]).process_group(0);
+            cmd.spawn().expect("spawn sh")
+        };
+        let mut one = spawn();
+        let mut other = spawn();
+        kill_child_and_group(&mut one).await.unwrap();
+        let other_pid = other.id().unwrap();
+        assert!(leads_own_group(other_pid), "the sibling's group still has its leader");
+        assert!(other.try_wait().unwrap().is_none(), "the sibling still runs");
+        kill_child_and_group(&mut other).await.unwrap();
+    }
+
+    /// A leader that exited and was reaped leaves a group the kernel still
+    /// holds: it is reported alive until its last member is gone.
+    #[cfg(unix)]
+    #[test]
+    fn a_group_outlives_its_reaped_leader_until_its_last_member_exits() {
+        use std::io::BufRead as _;
+        use std::os::unix::process::CommandExt as _;
+        let mut leader = std::process::Command::new("sh")
+            .args(["-c", "sleep 30 & echo $!"])
+            .stdout(std::process::Stdio::piped())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pgid = leader.id();
+        let mut line = String::new();
+        std::io::BufReader::new(leader.stdout.take().unwrap()).read_line(&mut line).unwrap();
+        let helper: i32 = line.trim().parse().unwrap();
+        leader.wait().unwrap();
+        assert!(orphaned_group_alive(pgid), "the helper still holds the group");
+        assert!(!orphaned_group_alive(0) && !orphaned_group_alive(1));
+        // SAFETY: the helper is the sleep started above.
+        unsafe { libc::kill(helper, libc::SIGKILL) };
+        for _ in 0..100 {
+            if !orphaned_group_alive(pgid) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        panic!("the group is still reported alive after its last member was killed");
+    }
+
+    /// An abandoned CLI (its task dropped) takes its helpers with it.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_dropped_guard_kills_the_childs_group() {
+        let mut cmd = tokio::process::Command::new("sh");
+        cmd.args(["-c", "sleep 30 & echo $!; wait"]).stdout(std::process::Stdio::piped()).process_group(0);
+        let mut guard = KillGroupOnDrop(cmd.spawn().expect("spawn sh"));
+        let mut out = guard.stdout.take().unwrap();
+        let mut line = Vec::new();
+        let mut byte = [0u8; 1];
+        while tokio::io::AsyncReadExt::read(&mut out, &mut byte).await.unwrap() == 1 && byte[0] != b'\n' {
+            line.push(byte[0]);
+        }
+        let helper: u32 = String::from_utf8(line).unwrap().trim().parse().unwrap();
+        assert!(process_start_time(helper).is_some());
+        drop(guard);
+        let mut gone = false;
+        for _ in 0..100 {
+            if process_start_time(helper).is_none() || is_zombie(helper) {
+                gone = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(gone, "the helper outlived the dropped guard");
+    }
+
+    /// A child that doesn't lead its own group is killed by pid alone: its
+    /// group is the caller's.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_child_in_the_callers_group_is_killed_alone() {
+        let mut child = tokio::process::Command::new("sleep").arg("30").spawn().expect("spawn sleep");
+        assert!(!leads_own_group(child.id().unwrap()));
+        kill_child_and_group(&mut child).await.unwrap();
+        assert!(child.wait().await.is_ok());
     }
 
     #[cfg(windows)]

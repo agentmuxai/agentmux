@@ -436,6 +436,8 @@ async fn app_main() {
         muxbus::wan_presence::goodbye_on_shutdown(),
     );
     tracing::info!(agents = closed, "shutdown: agents closed");
+    #[cfg(unix)]
+    backend::process_tracker::roots_file::finish();
 }
 
 // This test binary must hold this checkout's code, not another clone's from

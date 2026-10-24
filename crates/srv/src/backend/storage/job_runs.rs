@@ -104,6 +104,9 @@ pub mod state {
     pub const RUNNING: &str = "running";
     pub const FINISHED: &str = "finished";
     pub const MISSED: &str = "missed";
+    /// The states a run can still move on from, while `ended_at_ms` is
+    /// unset: `OPEN_NOT_ENDED`'s list, and [`super::JobRun::is_open`].
+    pub const OPEN: [&str; 3] = [SCHEDULED, PENDING, RUNNING];
 }
 
 /// Why a run was skipped, missed or stopped, or how a pending one ended
@@ -216,6 +219,11 @@ impl JobRun {
             ..Default::default()
         }
     }
+
+    /// Whether the run can still move on: what `OPEN_NOT_ENDED` selects.
+    pub fn is_open(&self) -> bool {
+        self.ended_at_ms.is_none() && state::OPEN.contains(&self.state.as_str())
+    }
 }
 
 fn row_to_run(row: &Row) -> rusqlite::Result<JobRun> {
@@ -266,7 +274,8 @@ pub struct RunCost {
 }
 
 /// States a run can still move on from. A pending run that was superseded
-/// or expired keeps its state, with `ended_at_ms` set: it is closed.
+/// or expired keeps its state, with `ended_at_ms` set: it is closed. The
+/// list is [`state::OPEN`] (a test holds them equal).
 const OPEN_NOT_ENDED: &str = "state IN ('scheduled','pending','running') AND ended_at_ms IS NULL";
 
 impl Store {
@@ -608,6 +617,20 @@ impl Store {
               ORDER BY started_at_ms"
         ))?;
         let rows = stmt.query_map(params![job_source, channel], row_to_run)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Every open run `channel` follows for the channel that fired it
+    /// (`links.followed_by_channel`, #1988).
+    pub fn job_runs_open_followed_by(&self, channel: &str) -> Result<Vec<JobRun>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {COLS} FROM db_job_runs
+              WHERE {OPEN_NOT_ENDED}
+                AND CASE WHEN json_valid(links) THEN json_extract(links, '$.followed_by_channel') END = ?1
+              ORDER BY started_at_ms"
+        ))?;
+        let rows = stmt.query_map(params![channel], row_to_run)?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 

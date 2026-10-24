@@ -64,13 +64,15 @@ pub async fn invoke_haiku(
     if let Some(dir) = ambient_call_cwd() {
         cmd.current_dir(dir);
     }
-    let mut child = cmd
+    crate::backend::process_tracker::registry::own_process_group(&mut cmd);
+    let mut child = agentmux_common::process::KillGroupOnDrop(cmd
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|e| format!("failed to spawn the ambient CLI: {e}"))?;
+        .map_err(|e| format!("failed to spawn the ambient CLI: {e}"))?);
+    crate::backend::process_tracker::registry::record_untracked_cli(child.id());
 
     if let Some(mut stdin) = child.stdin.take() {
         use tokio::io::AsyncWriteExt;
@@ -82,7 +84,7 @@ pub async fn invoke_haiku(
 
     // `child.wait()` only borrows (unlike `wait_with_output()`, which
     // consumes `child` by value and would make the cancel branch's
-    // `child.kill()` below impossible). Drain stdout concurrently via a
+    // group kill below impossible). Drain stdout concurrently via a
     // separate task — same rationale `wait_with_output()` itself uses
     // internally — so a chatty response can't fill the OS pipe buffer and
     // deadlock the child waiting to write while nothing is reading.
@@ -98,13 +100,16 @@ pub async fn invoke_haiku(
     let status = tokio::select! {
         biased;
         _ = cancel.cancelled() => {
-            let _ = child.kill().await;
+            let _ = agentmux_common::process::kill_child_and_group(&mut child).await;
             return Err("cancelled: superseded by a newer request".to_string());
         }
-        result = tokio::time::timeout(timeout, child.wait()) => {
-            result.map_err(|_| format!("ambient CLI timed out after {}s", timeout.as_secs()))?
-                .map_err(|e| format!("ambient CLI wait: {e}"))?
-        }
+        result = tokio::time::timeout(timeout, child.wait()) => match result {
+            Ok(status) => status.map_err(|e| format!("ambient CLI wait: {e}"))?,
+            Err(_) => {
+                let _ = agentmux_common::process::kill_child_and_group(&mut child).await;
+                return Err(format!("ambient CLI timed out after {}s", timeout.as_secs()));
+            }
+        },
     };
 
     if !status.success() {
@@ -195,6 +200,73 @@ mod ambient_cli_stream_tests {
     fn a_transcript_with_no_result_line_has_no_usage() {
         let out = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"x"}]}}"#;
         assert!(parse_cli_stream(out).1.is_none());
+    }
+}
+
+/// The side call's CLI leads its own process group, so cancelling it ends the
+/// helpers it started, and a signal to its group can't reach srv.
+#[cfg(all(test, unix))]
+mod ambient_cli_group_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt as _;
+
+    #[tokio::test]
+    async fn the_cli_leads_its_own_group_and_cancel_ends_its_helper() {
+        let dir = std::env::temp_dir().join(format!("ambient-group-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let report = dir.join("report");
+        let stub = dir.join("claude-stub.sh");
+        std::fs::write(
+            &stub,
+            format!(
+                "#!/bin/sh\ncat >/dev/null\nsleep 30 &\necho \"$$ $(ps -o pgid= -p $$ | tr -d ' ') $!\" > {r}.tmp && mv {r}.tmp {r}\nwait\n",
+                r = report.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let call = tokio::spawn({
+            let (stub, cancel) = (stub.to_string_lossy().into_owned(), cancel.clone());
+            async move {
+                invoke_haiku(&stub, "hi", &Default::default(), cancel, std::time::Duration::from_secs(30)).await
+            }
+        });
+        let mut fields = Vec::new();
+        for _ in 0..200 {
+            if let Ok(text) = std::fs::read_to_string(&report) {
+                fields = text.split_whitespace().filter_map(|f| f.parse::<u32>().ok()).collect();
+                if fields.len() == 3 {
+                    break;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert_eq!(fields.len(), 3, "the stub reported");
+        let (pid, pgid, helper) = (fields[0], fields[1], fields[2]);
+        assert_eq!(pid, pgid, "the CLI leads its own process group");
+        assert_ne!(pgid as i32, unsafe { libc::getpgid(0) }, "not srv's group");
+
+        cancel.cancel();
+        assert!(call.await.unwrap().unwrap_err().starts_with("cancelled"));
+        let mut gone = false;
+        for _ in 0..100 {
+            if agentmux_common::process::process_start_time(helper).is_none() || is_zombie(helper) {
+                gone = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(gone, "the CLI's helper {helper} outlived the cancel");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn is_zombie(pid: u32) -> bool {
+        std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .ok()
+            .and_then(|s| s.rfind(')').map(|i| s[i + 1..].trim_start().starts_with('Z')))
+            .unwrap_or(false)
     }
 }
 

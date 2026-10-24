@@ -228,3 +228,21 @@ fn a_jobs_spend_since_a_time() {
     assert_eq!(s.job_runs_cost_since("j1", NOW + MIN).unwrap(), (0.0, false));
     assert_eq!(s.job_runs_cost_since("nobody", 0).unwrap(), (0.0, false));
 }
+
+/// `OPEN_NOT_ENDED`'s SQL list and `state::OPEN` are the same set, so
+/// `JobRun::is_open` agrees with every conditional update here.
+#[test]
+fn the_open_states_are_one_list() {
+    let list = OPEN_NOT_ENDED.split(['(', ')']).nth(1).unwrap();
+    let mut sql: Vec<&str> = list.split(',').map(|s| s.trim().trim_matches('\'')).collect();
+    let mut open = state::OPEN.to_vec();
+    sql.sort_unstable();
+    open.sort_unstable();
+    assert_eq!(sql, open);
+    let mut run = slot_run("r", "j", None);
+    for (st, ended, open) in [(state::PENDING, None, true), (state::RUNNING, Some(1), false), (state::FINISHED, None, false)] {
+        run.state = st.to_string();
+        run.ended_at_ms = ended;
+        assert_eq!(run.is_open(), open, "{st} {ended:?}");
+    }
+}

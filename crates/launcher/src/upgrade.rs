@@ -61,7 +61,12 @@ pub async fn quiesce_srv(
     match tokio::time::timeout(graceful_timeout, child.wait()).await {
         Ok(status) => Ok((status?, QuiesceOutcome::ExitedGracefully)),
         Err(_elapsed) => {
-            child.start_kill()?;
+            // With srv's process group, while srv is still unreaped (so its
+            // pid is still its own): whatever else srv started in that group
+            // (its helpers, anything not in a group of its own) goes with it.
+            // Its agent CLIs lead groups of their own and are ended by the
+            // caller (`agent_roots::kill_orphans`).
+            agentmux_common::process::start_kill_child_and_group(child)?;
             let status = child.wait().await?;
             Ok((status, QuiesceOutcome::ExitedAfterForceKill))
         }
@@ -131,6 +136,40 @@ mod tests {
         assert_eq!(line.trim(), "ready", "trap must be installed before the test signals this child");
 
         child
+    }
+
+    /// The force-kill takes srv's process group too: a helper srv started in
+    /// its own group (not a group of its own) must not outlive it.
+    #[cfg(not(target_os = "windows"))]
+    #[tokio::test]
+    async fn the_force_kill_takes_the_childs_process_group() {
+        use std::os::unix::process::CommandExt as _;
+        let mut child = tokio::process::Command::new("sh")
+            .args(["-c", "trap '' TERM; sleep 30 & echo $!; wait"])
+            .stdout(std::process::Stdio::piped())
+            .process_group(0)
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn a group leader that ignores SIGTERM");
+        let mut lines = BufReader::new(child.stdout.take().expect("piped stdout")).lines();
+        let helper: u32 = lines.next_line().await.unwrap().unwrap().trim().parse().unwrap();
+        assert!(agentmux_common::process::process_start_time(helper).is_some());
+
+        let (_, outcome) = quiesce_srv(&mut child, None, Duration::from_millis(300)).await.unwrap();
+        assert_eq!(outcome, QuiesceOutcome::ExitedAfterForceKill);
+        let mut gone = false;
+        for _ in 0..100 {
+            let zombie = std::fs::read_to_string(format!("/proc/{helper}/stat"))
+                .ok()
+                .and_then(|t| t.rfind(')').map(|i| t[i + 1..].trim_start().starts_with('Z')))
+                .unwrap_or(false);
+            if agentmux_common::process::process_start_time(helper).is_none() || zombie {
+                gone = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(gone, "helper {helper} outlived the force-kill of its group leader");
     }
 
     #[tokio::test]

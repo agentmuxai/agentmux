@@ -650,6 +650,26 @@ pub(super) async fn finish(
     result: &str,
     update: Option<CardUpdate>,
 ) -> (StatusCode, Json<Value>) {
+    let out = finish_task(state, caller, id, agent_id, attempt, result, update).await;
+    // A finished task is a boundary: the caller's next work may start fresh
+    // (SPEC_AGENT_SELF_COMPACTION_2026_10_23.md §3.5).
+    if out.0.is_success() {
+        if let Some(block) = super::actor::own_pane_by_token(&state.mstore, caller, agent_id) {
+            crate::backend::context_reading::note_task_boundary(&block);
+        }
+    }
+    out
+}
+
+async fn finish_task(
+    state: &AppState,
+    caller: Option<&Caller>,
+    id: &str,
+    agent_id: &str,
+    attempt: i64,
+    result: &str,
+    update: Option<CardUpdate>,
+) -> (StatusCode, Json<Value>) {
     let now = now_ms();
     let uid = holder_uid(caller);
     let review = state

@@ -1158,6 +1158,7 @@ declare global {
         "agent:compactat"?: number;
         "agent:compacthints"?: boolean;
         "agent:compacthintat"?: number;
+        "agent:freshhintat"?: number;
         "agent:overlapnotes"?: boolean;
         "agent:retryonreconnect"?: boolean;
         "kanban:reminders"?: boolean;

@@ -37,6 +37,9 @@ pub mod windows;
 #[cfg(target_os = "linux")]
 pub mod cgroup_linux;
 
+#[cfg(unix)]
+pub mod roots_file;
+
 pub mod scan;
 
 // `stub` is defined inline below; there is no separate `stub` file. A file-form

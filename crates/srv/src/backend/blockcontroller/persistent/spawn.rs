@@ -53,7 +53,9 @@ impl PersistentSubprocessController {
         // conversation instead of starting blank.
         if !config.session_id.is_empty() {
             let mut inner = self.inner.lock().unwrap();
-            if inner.session_id.is_none() {
+            // Not a retired one (`Agents fresh`): a config prepared before the
+            // transition still names it.
+            if inner.session_id.is_none() && inner.resume_poisoned.as_deref() != Some(config.session_id.as_str()) {
                 inner.session_id = Some(config.session_id.clone());
             }
         }
@@ -283,7 +285,7 @@ impl PersistentSubprocessController {
             // no `kill_tx` to reach the child through (codex P1 on #3990).
             if let Err(e) = Self::commit_restart_spawn_locked(&mut inner) {
                 drop(inner);
-                let _ = child.start_kill();
+                let _ = agentmux_common::process::start_kill_child_and_group(&mut child);
                 tokio::spawn(async move {
                     let _ = child.wait().await;
                 });
@@ -410,7 +412,11 @@ impl PersistentSubprocessController {
         // (`DocumentRow.tsx`'s session-outcome body).
         let mut continuation: Option<String> = None;
         let fresh_onto_history = attempted_resume_sid.is_none() && self.has_prior_transcript();
-        if fresh_onto_history {
+        // An `Agents fresh` start carries the agent's handoff alone: the packet
+        // tells the model to continue as if uninterrupted, the opposite of what
+        // it asked for. The old session stays searchable.
+        let by_choice = crate::backend::context_reading::take_fresh_by_choice(&self.block_id);
+        if fresh_onto_history && !by_choice {
             // The provider can't give this process the conversation the pane
             // shows, so AgentMux's own record rides on its first message
             // (SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md §4.4). On any
@@ -423,7 +429,9 @@ impl PersistentSubprocessController {
         }
         // After the packet is built, so the disclosure can say whether this
         // fresh session was given the record ("continued") or not.
-        if fresh_onto_history && fresh_start_needs_disclosure(attempted_resume_sid.as_deref(), my_generation) {
+        // Also for a start the agent asked for (generation > 1): the pane's
+        // marker, its meter reset and the memory fallback follow from it.
+        if fresh_onto_history && (by_choice || fresh_start_needs_disclosure(attempted_resume_sid.as_deref(), my_generation)) {
             tracing::info!(
                 block_id = %self.block_id,
                 continued = continuation.is_some(),
@@ -431,7 +439,8 @@ impl PersistentSubprocessController {
             );
             // Idle when no message flows with this spawn (the same test as the
             // turn-active check below).
-            let idle_start = !had_retry_payload && self.inner.lock().unwrap().pending_send_messages.is_empty();
+            // A start the agent asked for always has its handoff in flight.
+            let idle_start = !by_choice && !had_retry_payload && self.inner.lock().unwrap().pending_send_messages.is_empty();
             self.emit_fresh_outcome_now(String::new(), continuation.is_some(), idle_start);
         }
         let pid = child.id().unwrap_or(0);

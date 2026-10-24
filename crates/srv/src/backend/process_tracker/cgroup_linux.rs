@@ -385,6 +385,40 @@ system_usec 234567
         true
     }
 
+    /// The launcher's cleanup after srv died (`agent_roots::kill_orphans`):
+    /// `cgroup.kill` ends an agent's CLI and whatever detached from it, and
+    /// leaves the rest of srv's scope alone.
+    #[tokio::test]
+    async fn the_launchers_cleanup_kills_agent_cgroups_only() {
+        let Some(root) = test_root().await else { return };
+        // A scope of its own inside the test's, so other tests' agent
+        // cgroups aren't touched.
+        let scope = root.join(format!("cleanup-{}", std::process::id()));
+        std::fs::create_dir_all(&scope).unwrap();
+        let agent = CgroupTracker::new(&scope, "cli").unwrap();
+        let other = scope.join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        let _cli = sh("setsid sleep 3041 & sleep 3042", agent.spawn_target());
+        let _bystander = sh("exec sleep 3043", Some(other.join("cgroup.procs")));
+        let started = wait_for(|| agent.pids().len() >= 3 && pids_in(&other).len() == 1).await;
+
+        let killed = agentmux_common::agent_roots::kill_agent_cgroups(&scope);
+        let emptied = wait_for(|| agent.pids().is_empty()).await;
+        let bystanders = pids_in(&other).len();
+
+        // Clean up before asserting, so a failure leaves nothing running.
+        let _ = std::fs::write(other.join("cgroup.kill"), "1");
+        wait_for(|| pids_in(&other).is_empty()).await;
+        drop(agent);
+        let _ = std::fs::remove_dir(&other);
+        let _ = std::fs::remove_dir(&scope);
+
+        assert!(started);
+        assert_eq!(killed, 1);
+        assert!(emptied, "the agent cgroup is empty");
+        assert_eq!(bystanders, 1, "the rest of the scope is untouched");
+    }
+
     /// The case process groups can't hold: a `setsid` daemon, a double
     /// fork, and a plain child all stay in the agent's cgroup, are listed,
     /// and end with `kill_tree`.
@@ -407,6 +441,26 @@ system_usec 234567
         tracker.kill_tree();
         assert!(wait_for(|| !populated(&tracker.dir)).await, "left: {:?}", tracker.pids());
         let _ = child.wait().await;
+    }
+
+    /// An agent CLI leads its own process group (`place_spawn`) and joins its
+    /// agent cgroup before it runs: the two don't get in each other's way.
+    #[tokio::test]
+    async fn a_group_leader_still_joins_its_cgroup_before_exec() {
+        use std::os::unix::process::CommandExt as _;
+        let Some(root) = test_root().await else { return };
+        let tracker = CgroupTracker::new(root, "group-leader").unwrap();
+        let mut cmd = tokio::process::Command::new("sh");
+        cmd.args(["-c", "sleep 3051 & wait"]).kill_on_drop(true).process_group(0);
+        join_before_exec(&mut cmd, tracker.spawn_target().unwrap());
+        let child = cmd.spawn().expect("spawn sh");
+        let pid = child.id().unwrap();
+        assert!(wait_for(|| tracker.pids().len() >= 2).await, "the CLI and its child are in the agent cgroup");
+        assert_eq!(unsafe { libc::getpgid(pid as i32) }, pid as i32, "and the CLI leads its own group");
+        let own = std::fs::read_to_string(format!("/proc/{pid}/cgroup")).unwrap();
+        assert!(own.trim().ends_with("/agent-group-leader"), "{own}");
+        drop(child);
+        drop(tracker);
     }
 
     /// `terminate` asks politely: a process that exits on SIGTERM is gone
