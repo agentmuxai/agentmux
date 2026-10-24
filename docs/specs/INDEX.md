@@ -862,6 +862,7 @@ partial list.
 | [`SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25`](SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25.md) | SPEC: Linux AppImage Per-Build Channel Isolation |
 | [`SPEC_LINUX_DOCS_UPDATE_2026_06_06`](SPEC_LINUX_DOCS_UPDATE_2026_06_06.md) | SPEC — Linux documentation catch-up |
 | [`SPEC_LINUX_FLOATING_PANE_TEAROFF_2026_05_30`](SPEC_LINUX_FLOATING_PANE_TEAROFF_2026_05_30.md) | Linux floating-pane tear-off — implementation spec |
+| [`SPEC_LINUX_PACKAGE_UPGRADE_AND_REPOSITORY_2026_10_24`](SPEC_LINUX_PACKAGE_UPGRADE_AND_REPOSITORY_2026_10_24.md) | Spec: upgrading a .deb or .rpm install from the app, and an apt/dnf repository |
 | [`SPEC_LINUX_WINDOW_CONTROLS_GNOME_STYLE_2026_10_16`](SPEC_LINUX_WINDOW_CONTROLS_GNOME_STYLE_2026_10_16.md) | Spec: Linux window controls that look like Linux |
 | [`SPEC_LOCAL_BUILD_VERSIONING_2026_05_28`](SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md) | SPEC: Local-build versioning — stop committing bumps for smoke builds (2026-05-28) |
 | [`SPEC_LONG_RUNNING_PROCESS_UX_2026_06_24`](SPEC_LONG_RUNNING_PROCESS_UX_2026_06_24.md) | SPEC — Long-Running Process UX: Working Stuck + Red X |
