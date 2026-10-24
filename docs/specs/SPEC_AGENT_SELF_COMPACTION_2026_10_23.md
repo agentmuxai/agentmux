@@ -1,7 +1,7 @@
 # Agent Self-Compaction: Context, Compact, Fresh Session, and a Lower Auto-Compact Backstop
 
 **Date:** 2026-10-23
-**Status:** active — approved by the operator on 2026-10-23. PR 1 (§3.1, the backstop setting) shipped in #5393; PR 2 (§3.2–§3.6: context, compact, the hint) and PR 3 (fresh) remain.
+**Status:** active — approved by the operator on 2026-10-23. PR 1 (§3.1, the backstop setting) shipped in #5393; PR 2 (§3.2–§3.6: context, compact, the compact hint) in #5399; PR 3 (fresh, and the fresh hint) remains.
 **Owner:** agent-pane lifecycle
 **Research:** [`REPORT_AGENT_SELF_COMPACTION_AND_TOKEN_USE_2026_10_23.md`](../reports/REPORT_AGENT_SELF_COMPACTION_AND_TOKEN_USE_2026_10_23.md) (measurements, economics, options, probe)
 **Related:** [`SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md`](SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md) (detection and display), [`SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md`](SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md) (running summary and continuation packet), [`SPEC_RESUME_PHASE_CATCH_UP_TURN_2026_10_13.md`](SPEC_RESUME_PHASE_CATCH_UP_TURN_2026_10_13.md) (catch-up turn), [`REPORT_AGENT_PANE_CONTEXT_METER_2026_10_05.md`](../reports/REPORT_AGENT_PANE_CONTEXT_METER_2026_10_05.md) (context readings, `get_context_usage`)
@@ -99,13 +99,13 @@ All three act on the **caller's own pane** only, resolved from its token the way
 
 `hint` is the §3.5 rule's verdict: `none`, `compact` or `fresh`. Providers without a reading return `tokens: null` and say why.
 
-**`compact`**: `{ "focus": "keep: PR #5401, the failing test in reducer.test.ts, the three files I'm editing; drop: the CI logs" }` (optional, ≤2,000 characters).
+**`compact`**: `{ "keep": "PR #5401, the failing test in reducer.test.ts, the three files I'm editing; the CI logs don't matter" }` (optional, ≤2,000 characters; `keep`, because the `Agents` tool's `focus` is already `open`'s boolean).
 
 - Returns at once: `scheduled` (runs when the current turn ends), or `refused` with a reason (§3.6).
 - **Claude:** at the turn boundary, srv writes `/compact <focus>` straight to the process's stdin as a stream-json user message (`persistent/input.rs`, the locked stdin writer), as a `TurnOrigin::System` turn. It does **not** go through message delivery (`deliver_agent_message_from`), which would wrap it or append held `[AgentMux]` notes; the probe showed appended text becomes part of the compaction instructions (report §3.3).
 - **Codex:** at the boundary, srv runs the existing `compact_codex_thread` (`subprocess/codex_compact.rs`, `thread/compact/start`). Codex takes no per-call focus, so a focus is ignored and the result says so.
 - **Other providers:** `refused: unsupported`.
-- Afterwards the existing machinery runs unchanged: the `compact_boundary` frame, the compaction bar, memory re-delivery through the `SessionStart` hook with source `compact`, and the catch-up turn. The catch-up turn for a self-requested compaction starts with the agent's focus note, so it resumes on what it chose to keep.
+- Afterwards the existing machinery runs unchanged: the `compact_boundary` frame, the compaction bar, memory re-delivery through the `SessionStart` hook with source `compact`, and the catch-up turn. The catch-up turn needs no change: Claude Code's summary records the focus note itself (report §3.3), so the agent resumes on what it chose to keep.
 
 **`fresh`**: `{ "handoff": "Task #1791 (spec written, uncommitted at docs/specs/...). Open PRs: #5401 (in review). Decided: 600K default. Next: wait for AgentY's go, then PR 1." }` (required, ≤4,000 characters).
 
@@ -136,7 +136,7 @@ All three act on the **caller's own pane** only, resolved from its token the way
 ### 3.4 Tool descriptions (what the agent reads)
 
 - **`context`**: "How full your context is and when it will auto-compact. Free; check it at the end of a piece of work, not every turn."
-- **`compact`**: "Compact your own context when your current turn ends. Use it when the same task continues and your context is large (the hint says so). Say in `focus` what to keep: PR and issue numbers, file paths you're editing, decisions, the next step. A focus steers the summary; it doesn't delete anything. Never needed mid-task; it waits for the end of your turn."
+- **`compact`**: "Compact your own context when your current turn ends. Use it when the same task continues and your context is large (the hint says so). Say in `keep` what to keep: PR and issue numbers, file paths you're editing, decisions, the next step. A focus steers the summary; it doesn't delete anything. Never needed mid-task; it waits for the end of your turn."
 - **`fresh`**: "Start a fresh session when your current turn ends, keeping your pane, memory, workspace and tasks. Use it when the next work is unrelated to what's in your context. Write a `handoff`: task number, spec or file paths, open PRs, decisions, next step. Don't call it while background shells, monitors or subagents are running; they stop with the session."
 
 ### 3.5 The turn-end hint
@@ -150,9 +150,9 @@ At the end of every turn, srv evaluates (no model call):
 
 The hint is one `[AgentMux]` note appended after the turn (the held-notes path, `reactive/held_notes.rs`), for example:
 
-`[AgentMux] Your context is 512K of 1M. Compacting (Agents compact, with a focus) costs about $0.75 and saves about $0.09 a call; if your next work is unrelated, start fresh instead (Agents fresh, with a handoff).`
+`[AgentMux] Your context is 512K of 1000K tokens. If your next work continues this task, compact now: Agents compact, with a focus saying what to keep (PR and task numbers, files you're editing, decisions, the next step); it runs when this turn ends.`
 
-The dollar figures come from the model's list prices in srv's model table; for unknown models the note gives tokens only. The thresholds are settings: `agent:compacthintat` (default 400000), `agent:freshhintat` (default 150000), and `agent:compacthints` (default on). The hint's default sits below the backstop (400K < 600K), so an agent that follows hints compacts at a boundary before the backstop fires mid-task.
+The note gives tokens, not dollars: prices change and differ by account, and the agent only needs to know the context is large. PR 3 adds the fresh-session suggestion (rule 2) with `Agents fresh`. The thresholds are settings: `agent:compacthintat` (default 400000), `agent:freshhintat` (default 150000, with PR 3), and `agent:compacthints` (default on). The hint's default sits below the backstop (400K < 600K), so an agent that follows hints compacts at a boundary before the backstop fires mid-task.
 
 The agent decides with one judgment it already holds at the end of its turn: is the next work related? Everything else is srv arithmetic. A hint costs ~40 input tokens; acting on it costs the focus or handoff note, ~100–300 output tokens.
 

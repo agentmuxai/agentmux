@@ -17,4 +17,9 @@ window_id?: string,
 /**
  * No window shows the pane: open one on this workspace.
  */
-workspace_id?: string, };
+workspace_id?: string, 
+/**
+ * For a `keep` press: `kept_by_user`, or `too_late` when the shutdown had
+ * already begun. Absent when the press named no live shutdown.
+ */
+kept?: string, };

@@ -26,7 +26,7 @@ use crate::backend::storage::store::Store;
 use crate::backend::wconfig::ConfigState;
 
 use super::policy::{
-    Action, Family, FocusReport, Input, NotifyKind, PolicyState, Preview, Request, Settings, TrayState, When,
+    Action, Family, FocusReport, Input, NotifyKind, PolicyState, Preview, Request, Settings, ShutdownInfo, TrayState, When,
 };
 
 pub const EVENT_NOTIFICATION: &str = "notification";
@@ -76,7 +76,9 @@ enum Internal {
     /// `own_blocks_only`: the source is process-global (the reactive handler
     /// is shared by every AppState), so drop blocks this Router's store
     /// doesn't know.
-    Emit { kind: NotifyKind, block_id: String, body: Option<String>, own_blocks_only: bool },
+    /// `account_failure`: a usage limit or refused sign-in, which an account
+    /// episode may speak for instead.
+    Emit { kind: NotifyKind, block_id: String, body: Option<String>, own_blocks_only: bool, account_failure: bool },
     /// Raw question text — redacted by `emit` like a renderer report.
     /// `count`: how many questions the call asks (0 = unknown).
     InputWaiting { block_id: String, question: Option<String>, count: usize },
@@ -395,6 +397,7 @@ fn attach_sources(r: &Arc<Router>, broker: &Arc<Broker>, reactive: &'static crat
                 body: Some(body.to_string()),
                 // Per-broker observer: already scoped to this AppState.
                 own_blocks_only: false,
+                account_failure: matches!(code, "usage_limit" | "auth"),
             });
         }
     }));
@@ -407,6 +410,7 @@ fn attach_sources(r: &Arc<Router>, broker: &Arc<Broker>, reactive: &'static crat
             // (spec §9.1: the toast can only say "go look").
             body: Some("Open AgentMux to see the sender and trust level before it acts.".to_string()),
             own_blocks_only: true,
+            account_failure: false,
         });
     }));
 }
@@ -419,10 +423,15 @@ fn spawn_internal(r: std::sync::Weak<Router>, mut rx: tokio::sync::mpsc::Unbound
         while let Some(msg) = rx.recv().await {
             let Some(r) = r.upgrade() else { return };
             match msg {
-                Internal::Emit { kind, block_id, body, own_blocks_only } => {
+                Internal::Emit { kind, block_id, body, own_blocks_only, account_failure } => {
                     // Store lookups — off the async workers.
                     let _ = tokio::task::spawn_blocking(move || {
                         if own_blocks_only && !r.owns_block(&block_id) {
+                            return;
+                        }
+                        // The account's one notice speaks for it
+                        // (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §6.2).
+                        if account_failure && crate::server::account_episodes::covers_block(&block_id) {
                             return;
                         }
                         r.emit_fixed(kind, &block_id, body)
@@ -459,6 +468,11 @@ fn spawn_internal(r: std::sync::Weak<Router>, mut rx: tokio::sync::mpsc::Unbound
                         // "needs you" itself, once it has judged the turn
                         // (SPEC_SWARM_SUPERVISOR_2026_10_16.md §3.7).
                         if is_supervised_block(&r.store, &block_id) {
+                            return;
+                        }
+                        // A turn that ended on its account's limit or sign-in
+                        // finished nothing: the account's notice speaks for it.
+                        if crate::server::account_episodes::covers_block(&block_id) {
                             return;
                         }
                         r.emit(NotifyKind::TurnCompleted, &block_id, None, 0)
@@ -686,6 +700,7 @@ pub fn settings_from_extra(extra: &std::collections::HashMap<String, serde_json:
         NotifyKind::AgentCrashed,
         NotifyKind::MessageNeedsReview,
         NotifyKind::CloudSignedOut,
+        NotifyKind::AccountUnavailable,
     ] {
         if let Some(sfx) = kind.setting_suffix() {
             s.kind_enabled.insert(kind, setting_bool(extra, &format!("notify:os:{sfx}"), true));
@@ -799,7 +814,7 @@ impl Router {
             _ => None,
         };
         let (agent_name, summary) = self.block_labels(block_id);
-        self.step(Input::Emit(Request { kind, block_id: block_id.to_string(), agent_name, body, summary }));
+        self.step(Input::Emit(Request { kind, block_id: block_id.to_string(), agent_name, body, summary, shutdown: None }));
     }
 
     /// srv-internal sources: the body is app-controlled fixed text, so it is
@@ -807,7 +822,29 @@ impl Router {
     /// BLOCKING, like `emit`.
     pub fn emit_fixed(&self, kind: NotifyKind, block_id: &str, body: Option<String>) {
         let (agent_name, summary) = self.block_labels(block_id);
-        self.step(Input::Emit(Request { kind, block_id: block_id.to_string(), agent_name, body, summary }));
+        self.step(Input::Emit(Request { kind, block_id: block_id.to_string(), agent_name, body, summary, shutdown: None }));
+    }
+
+    /// A shutdown waiting on the user's override: the toast says what will
+    /// happen, counts down and offers Keep running (spec §3.8). The body is
+    /// app wording and the asker's cleaned name; never the reason. BLOCKING,
+    /// like `emit`.
+    pub fn emit_shutdown(&self, block_id: &str, body: Option<String>, info: ShutdownInfo) {
+        let (agent_name, summary) = self.block_labels(block_id);
+        self.step(Input::Emit(Request {
+            kind: NotifyKind::ShutdownPending,
+            block_id: block_id.to_string(),
+            agent_name,
+            body,
+            summary,
+            shutdown: Some(info),
+        }));
+    }
+
+    /// What a press on the live notification `id` is about: its kind, block
+    /// and (for a shutdown) request, from this router's own record.
+    pub fn live_by_id(&self, id: &str) -> Option<(NotifyKind, String, Option<String>)> {
+        self.policy.lock().unwrap_or_else(|e| e.into_inner()).live_by_id(id)
     }
 
     /// srv-observed "agent is waiting on you" (Phase 5). Non-blocking: safe
@@ -841,6 +878,22 @@ impl Router {
             agent_name: String::new(),
             body: Some("You'll see alerts like this when an agent needs you.".to_string()),
             summary: None,
+            shutdown: None,
+        }));
+    }
+
+    /// Agents on one account can't work (`server::account_episodes`). `key`
+    /// is the account's toast key (`account:<hash>`); the body is fixed text
+    /// with a count, never the account. Taken down with
+    /// `resolve(key, Family::Account)`.
+    pub fn account_unavailable(&self, key: &str, body: String) {
+        self.step(Input::Emit(Request {
+            kind: NotifyKind::AccountUnavailable,
+            block_id: key.to_string(),
+            agent_name: String::new(),
+            body: Some(body),
+            summary: None,
+            shutdown: None,
         }));
     }
 
@@ -854,6 +907,7 @@ impl Router {
             agent_name: String::new(),
             body: Some(CLOUD_SIGNED_OUT_BODY.to_string()),
             summary: None,
+            shutdown: None,
         }));
     }
 

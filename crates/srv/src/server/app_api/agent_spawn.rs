@@ -406,7 +406,14 @@ fn choose_account(state: &AppState, leader: &Leader, provider: &str, requested: 
 /// The accounts that can't take a worker now, and why: signed out (its
 /// status), or a pane on it whose last run ended on the plan's usage limit or
 /// a refused sign-in (`agent:last_failure`, which its next clean turn clears).
+/// A usage limit counts until its reset, when one is known, even with the
+/// pane still open (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §6.3).
 pub(crate) fn account_blocks(state: &AppState, accounts: &[IdentityAccount]) -> std::collections::HashMap<String, String> {
+    account_blocks_at(state, accounts, agentmux_common::time::now_ms_u64())
+}
+
+/// [`account_blocks`] at `now_ms`.
+pub(crate) fn account_blocks_at(state: &AppState, accounts: &[IdentityAccount], now_ms: u64) -> std::collections::HashMap<String, String> {
     use crate::agents::failure::FailureClass;
     let mut blocked = std::collections::HashMap::new();
     for a in accounts {
@@ -419,16 +426,12 @@ pub(crate) fn account_blocks(state: &AppState, accounts: &[IdentityAccount]) -> 
     };
     let blocks = tabs.iter().flat_map(|t| t.blockids.iter()).filter_map(|id| state.mstore.get::<Block>(id).ok().flatten());
     for block in blocks {
-        // Only its class: the stored failure leaves out empty fields that
-        // reading the whole `AgentFailure` back would require.
-        let code = block
-            .meta
-            .get(LAST_FAILURE_META_KEY)
-            .and_then(|f| f.get("code").cloned())
-            .and_then(|c| serde_json::from_value::<FailureClass>(c).ok());
-        let why = match code {
-            Some(FailureClass::UsageLimit) => "is out of quota (a pane on it hit the plan's usage limit)",
-            Some(FailureClass::Auth) => "had its sign-in refused",
+        let failure = crate::backend::agent_state::failure_of_block(&block);
+        let why = match failure.map(|f| (f.code, f.resets_at_ms)) {
+            Some((FailureClass::UsageLimit, reset)) if reset.is_none_or(|r| r > now_ms) => {
+                "is out of quota (a pane on it hit the plan's usage limit)"
+            }
+            Some((FailureClass::Auth, _)) => "had its sign-in refused",
             _ => continue,
         };
         // The account that run was on (the rule `unavailable_of_block` shares).
@@ -442,6 +445,7 @@ pub(crate) fn account_blocks(state: &AppState, accounts: &[IdentityAccount]) -> 
 }
 
 /// `agent:last_failure` (`blockcontroller::core::META_LAST_FAILURE`).
+#[cfg(test)]
 const LAST_FAILURE_META_KEY: &str = "agent:last_failure";
 
 /// The account a pane's run launched on (`agent_state::RUN_ACCOUNT_META_KEY`).
@@ -476,7 +480,7 @@ pub(crate) fn note_run_account(mstore: &Store, identity_store: &Store, block_id:
     }
 }
 
-fn account_label(a: &IdentityAccount) -> String {
+pub(crate) fn account_label(a: &IdentityAccount) -> String {
     let email = a.context.get("email").and_then(|e| e.as_str()).unwrap_or("");
     [a.display_name.as_str(), email, a.name.as_str()]
         .into_iter()

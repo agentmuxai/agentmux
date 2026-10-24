@@ -449,6 +449,11 @@
           "default": true,
           "description": "Notify once when this AgentMux is signed out of MuxBus and agents stop getting messages from other computers and GitHub."
         },
+        "notify:os:accountunavailable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notify once per account when its agents hit a weekly usage limit or need you to sign in again. A session limit shows only in the Kanban and Swarm strip. The notification never names the account."
+        },
         "notify:pause:until": {
           "type": "integer",
           "default": 0,
@@ -626,6 +631,17 @@
           "minimum": 0,
           "default": 600000,
           "description": "The context size, in tokens, at which Claude agents compact automatically. AgentMux writes Claude Code's autoCompactWindow (this plus 33,000, between 100,000 and 1,000,000) into each Claude config dir it prepares, unless a person set their own value there; it takes effect when each agent next starts. 0 leaves Claude Code's own point, about 967,000 on a 1M window. See docs/specs/SPEC_AGENT_SELF_COMPACTION_2026_10_23.md §3.1."
+        },
+        "agent:compacthints": {
+          "type": "boolean",
+          "default": true,
+          "description": "At the end of a turn whose context is at least agent:compacthintat tokens, give the agent one [AgentMux] note suggesting it compact itself (Agents compact, with what to keep) if its next work continues the task. Once per crossing: again only after the context has dropped below 250,000 tokens. Set false to turn the notes off. See docs/specs/SPEC_AGENT_SELF_COMPACTION_2026_10_23.md §3.5."
+        },
+        "agent:compacthintat": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 400000,
+          "description": "The context size, in tokens, from which the agent:compacthints note suggests compacting. Keep it below agent:compactat, so the agent can compact at the end of a turn before Claude Code compacts on its own mid-task."
         },
         "agent:overlapnotes": {
           "type": "boolean",

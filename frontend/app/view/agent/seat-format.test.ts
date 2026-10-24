@@ -6,7 +6,15 @@
 import { describe, expect, it } from "vitest";
 
 import type { SeatSummary } from "@/types/rpc/SeatSummary";
-import { leadName, readSeatMeta, roleLabel, seatBadgeText, seatReportsLine, seatTooltipLine } from "./seat-format";
+import {
+    leadName,
+    readSeatMeta,
+    roleLabel,
+    seatBadgeText,
+    seatReportsLine,
+    seatsByAgent,
+    seatTooltipLine,
+} from "./seat-format";
 
 const leader: SeatSummary = { role: "leader", qualifier: "product", lead: null, area: "agent pane, identity, …" };
 const worker: SeatSummary = {
@@ -50,5 +58,31 @@ describe("seat-format", () => {
         expect(readSeatMeta({ "agent:seat": { role: "boss" } })).toBeNull();
         expect(readSeatMeta({ "agent:seat": "leader" })).toBeNull();
         expect(readSeatMeta({ "agent:seat": { role: "worker", lead: { id: "" } } })?.lead).toBeNull();
+    });
+
+    it("lists each agent's seat by uid, its lead named from the same list", () => {
+        const seats = seatsByAgent([
+            { id: "uid-camper", name: "Camper", seat: { role: "leader", qualifier: "product", set_at_ms: 1 } },
+            {
+                id: "uid-w",
+                name: "W",
+                seat: { role: "worker", qualifier: "spawned", lead: "uid-camper", set_at_ms: 0 },
+            },
+            {
+                id: "uid-far",
+                name: "Far",
+                seat: { role: "specialist", lead: "uid-elsewhere", area: " ", set_at_ms: 1 },
+            },
+            { id: "uid-none", name: "None" },
+        ]);
+        expect(seats.get("uid-camper")).toEqual({ role: "leader", qualifier: "product", lead: null, area: null });
+        expect(seats.get("uid-w")?.lead).toEqual({ id: "uid-camper", name: "Camper" });
+        expect(seats.get("uid-far")).toEqual({
+            role: "specialist",
+            qualifier: null,
+            lead: { id: "uid-elsewhere", name: null },
+            area: null,
+        });
+        expect(seats.has("uid-none")).toBe(false);
     });
 });

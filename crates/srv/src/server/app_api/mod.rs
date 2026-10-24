@@ -38,6 +38,7 @@ pub(crate) mod agent_spawn;
 // `stop_one_agent_block` directly — same function `fleet_bulk_stop_impl`
 // already uses for a LOCAL target, reused rather than duplicated for a
 // forwarded one.
+pub(crate) mod agent_context;
 pub(crate) mod agent_io;
 mod agent_define;
 /// Re-exported so the human-facing creation/edit RPC handlers
@@ -140,6 +141,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     history_usage::register(engine, state);
     shells::register(engine, state);
     kanban::register(engine, state);
+    crate::server::account_episodes::register(engine, state);
     connectivity::register(engine);
 }
 

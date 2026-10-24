@@ -13,7 +13,9 @@ import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, 
 
 import { Button, FilterInput, IconButton, Select, Switch } from "@/app/element/ui";
 import { useTick } from "@/app/hook/useTick";
+import { useAccountEpisodes } from "@/app/store/account-availability";
 import { settingsAtom } from "@/app/store/config-signals";
+import { AccountAvailabilityStrip } from "@/app/view/account-availability/account-availability-strip";
 import { revealBlock } from "@/app/util/reveal-block";
 
 import { KanbanBoard, useCardDrop } from "./kanban-board";
@@ -32,6 +34,7 @@ import { KanbanDrawer } from "./kanban-drawer";
 import { KanbanModel } from "./kanban-model";
 import { KanbanNewTask } from "./kanban-new-task";
 import { KANBAN_REMINDERS_DESCRIPTION, kanbanRemindersOn, setKanbanReminders } from "./kanban-reminders";
+import { reportsTo, ReportsToSelect, seatOf, taskReportsTo, useSeatIndex } from "./kanban-seats";
 import type { KanbanAgent, KanbanTask } from "./kanban-types";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
@@ -71,7 +74,9 @@ export const WardenKanbanManager = (props: {
     const model = new KanbanModel();
     onCleanup(() => model.dispose());
     createEffect(() => model.setVisible(props.visible));
-    createEffect(() => props.onNeedsCount?.(model.needsCount()));
+    // An account episode counts once (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §6.2).
+    const accountEpisodes = useAccountEpisodes();
+    createEffect(() => props.onNeedsCount?.(model.needsCount() + accountEpisodes().length));
 
     const tick = useTick(10_000);
     // The narrow layout (SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23.md §8): Warden's container at
@@ -89,6 +94,9 @@ export const WardenKanbanManager = (props: {
     const now = () => (tick(), Date.now());
     const [query, setQuery] = createSignal("");
     const [repo, setRepo] = createSignal("");
+    // "Reports to …" (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §4): the owner's seat names its lead.
+    const [lead, setLead] = createSignal("");
+    const seats = useSeatIndex();
     const [showUntracked, setShowUntracked] = createSignal(true);
     const [adding, setAdding] = createSignal(false);
     const [openId, setOpenId] = createSignal<string | null>(null);
@@ -116,12 +124,20 @@ export const WardenKanbanManager = (props: {
     const agents = () => board()?.agents ?? [];
     const repos = createMemo(() => [...new Set((board()?.tasks ?? []).map((t) => t.card.repo).filter(Boolean))].sort());
     const tasks = createMemo(() =>
-        (board()?.tasks ?? []).filter((t) => (!repo() || t.card.repo === repo()) && matchesQuery(t, query()))
+        (board()?.tasks ?? []).filter(
+            (t) => (!repo() || t.card.repo === repo()) && matchesQuery(t, query()) && taskReportsTo(seats(), t, lead())
+        )
     );
     const openTask = () => (board()?.tasks ?? []).find((t) => t.id === openId()) ?? null;
     const holding = (agent: string) =>
         (board()?.tasks ?? []).find((t) => (t.state === "claimed" || t.state === "blocked") && t.claimed_by === agent);
-    const untracked = createMemo(() => (showUntracked() ? untrackedAgents(agents(), board()?.tasks ?? []) : []));
+    const untracked = createMemo(() =>
+        showUntracked()
+            ? untrackedAgents(agents(), board()?.tasks ?? []).filter((a) =>
+                  reportsTo(seatOf(seats(), a.uid, a.name), lead())
+              )
+            : []
+    );
     const laneList = createMemo(() => repoLanes(tasks()));
     // The soft limit is on the board's whole Review column: every lane's, and those a filter hides.
     const reviewTotal = createMemo(() => (board()?.tasks ?? []).filter((t) => columnOf(t) === "review").length);
@@ -130,6 +146,7 @@ export const WardenKanbanManager = (props: {
 
     return (
         <div ref={root} class="warden-manager-body kanban">
+            <AccountAvailabilityStrip />
             <div class="kanban-toolbar">
                 <FilterInput
                     value={query()}
@@ -149,6 +166,7 @@ export const WardenKanbanManager = (props: {
                         ]}
                     />
                 </Show>
+                <ReportsToSelect value={lead()} onChange={setLead} />
                 <label class="kanban-toolbar__switch" title="One row of columns per repository">
                     <Switch checked={lanes()} onChange={setLanes} density="compact" ariaLabel="Lanes by repository" />
                     Lanes

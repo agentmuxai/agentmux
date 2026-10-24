@@ -221,6 +221,8 @@ events! {
     AppDesktop: "app:desktop" => crate::backend::desktop_gate::DesktopEvent,
     /// What srv knows about newer releases changed (`update_check`).
     AppUpdateStatusChanged: crate::backend::update_check::EVENT_APP_UPDATE_STATUS => crate::backend::update_check::AppUpdateStatus,
+    /// An account episode opened, changed or closed (`server::account_episodes`).
+    AccountAvailability: crate::server::account_episodes::EVENT_ACCOUNT_AVAILABILITY => crate::server::account_episodes::AccountAvailabilityEvent,
     /// Tell a window's renderer to reveal a block (`notify::router`).
     BlockReveal: crate::backend::notify::router::EVENT_BLOCK_REVEAL => crate::backend::notify::router::BlockRevealEvent,
 

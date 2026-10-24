@@ -195,6 +195,9 @@ export const WpsEvent = {
     AppUpgradeRequests: "app:upgraderequests",
     /** Agents' requests to drive a native app, and the grants in force (crates/srv/src/backend/desktop_gate.rs). */
     AppDesktop: "app:desktop",
+    /** An account episode opened, changed or closed: agents out of quota or signed out on one account
+     *  (crates/srv/src/server/account_episodes/mod.rs). */
+    AccountAvailability: "accountavailability",
     AgentInputHistoryChanged: "agent:inputhistory",
     AgentShutdown: "agent:shutdown",
     AgentShutdownPending: "agent:shutdown-pending",

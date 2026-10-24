@@ -666,8 +666,8 @@ pub(crate) async fn run_unix(
                                             break 0;
                                         }
                                         log(&format!(
-                                            "srv exited UNEXPECTEDLY during OOM wait with code {} — terminating launcher",
-                                            s.code().unwrap_or(1)
+                                            "srv exited UNEXPECTEDLY during OOM wait {} — terminating launcher",
+                                            srv_exit_text(&s)
                                         ));
                                     }
                                     Err(e) => log(&format!("FATAL: srv wait failed during OOM wait: {}", e)),
@@ -771,8 +771,8 @@ pub(crate) async fn run_unix(
                             break 0;
                         }
                         log(&format!(
-                            "srv exited UNEXPECTEDLY (host still running) with code {} — terminating launcher",
-                            s.code().unwrap_or(1)
+                            "srv exited UNEXPECTEDLY (host still running) {} — terminating launcher",
+                            srv_exit_text(&s)
                         ));
                     }
                     Err(e) => log(&format!("FATAL: srv wait failed: {}", e)),
@@ -856,4 +856,87 @@ pub(crate) async fn run_unix(
     }
     log(&format!("launcher exiting with code {}", exit_code));
     std::process::exit(exit_code);
+}
+
+/// How srv ended, for the log: "with code 3", or "killed by signal 9
+/// (SIGKILL)" when a signal ended it and there is no exit code. An outage on
+/// 2026-10-24 logged "code 1" for an srv that was killed, which hid the signal.
+fn describe_srv_exit(code: Option<i32>, signal: Option<i32>, core_dumped: bool) -> String {
+    match (code, signal) {
+        (Some(code), _) => format!("with code {code}"),
+        (None, Some(sig)) => {
+            let name = match sig {
+                libc::SIGHUP => "SIGHUP",
+                libc::SIGINT => "SIGINT",
+                libc::SIGQUIT => "SIGQUIT",
+                libc::SIGILL => "SIGILL",
+                libc::SIGTRAP => "SIGTRAP",
+                libc::SIGABRT => "SIGABRT",
+                libc::SIGBUS => "SIGBUS",
+                libc::SIGFPE => "SIGFPE",
+                libc::SIGKILL => "SIGKILL",
+                libc::SIGSEGV => "SIGSEGV",
+                libc::SIGPIPE => "SIGPIPE",
+                libc::SIGTERM => "SIGTERM",
+                _ => "",
+            };
+            let core = if core_dumped { ", core dumped" } else { "" };
+            if name.is_empty() {
+                format!("killed by signal {sig}{core}")
+            } else {
+                format!("killed by signal {sig} ({name}){core}")
+            }
+        }
+        (None, None) => "with no exit code or signal".to_string(),
+    }
+}
+
+/// [`describe_srv_exit`] for a real exit status.
+fn srv_exit_text(s: &std::process::ExitStatus) -> String {
+    use std::os::unix::process::ExitStatusExt;
+    describe_srv_exit(s.code(), s.signal(), s.core_dumped())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::describe_srv_exit;
+
+    #[test]
+    fn an_exit_code_is_reported_as_a_code() {
+        assert_eq!(describe_srv_exit(Some(1), None, false), "with code 1");
+    }
+
+    #[test]
+    fn a_signal_is_named_not_reported_as_code_1() {
+        assert_eq!(
+            describe_srv_exit(None, Some(libc::SIGKILL), false),
+            "killed by signal 9 (SIGKILL)"
+        );
+        assert_eq!(
+            describe_srv_exit(None, Some(libc::SIGSEGV), true),
+            "killed by signal 11 (SIGSEGV), core dumped"
+        );
+    }
+
+    #[test]
+    fn an_unnamed_signal_keeps_its_number() {
+        assert_eq!(
+            describe_srv_exit(None, Some(libc::SIGUSR2), false),
+            format!("killed by signal {}", libc::SIGUSR2)
+        );
+    }
+
+    #[test]
+    fn a_real_kill_reaches_the_log_as_its_signal() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        child.kill().unwrap();
+        let status = child.wait().unwrap();
+        assert_eq!(
+            super::srv_exit_text(&status),
+            "killed by signal 9 (SIGKILL)"
+        );
+    }
 }

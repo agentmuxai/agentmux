@@ -1,7 +1,7 @@
 # SPEC: Agent seats in the UI: role, lead and area on the agent, shown where you meet it
 
 **Date:** 2026-10-23
-**Status:** active — approved by the operator 2026-10-23 (open questions as proposed: operator-only seats in v1, the seat in startup instructions in phase 2, seats inform and don't gate). PR 1 (data and API) in #5378; PR 2 (the Seat tab, roster import, My Agents tile and header tooltip) in #5382; PRs 3–4 not started.
+**Status:** active — approved by the operator 2026-10-23 (open questions as proposed: operator-only seats in v1, the seat in startup instructions in phase 2, seats inform and don't gate). PR 1 (data and API) in #5378; PR 2 (the Seat tab, roster import, My Agents tile and header tooltip) in #5382; PR 3 (Swarm badge and Group by lead, Kanban owner tooltip and "Reports to" filter) in #5405; PR 4 not started.
 **Trigger:** The operator, 2026-10-23: *"how does the user know what seat AgentX is in?"* Seats were approved that day: which agent leads, which reports to whom, and what each owns. Today a seat exists only in a Global Memory entry ("Agent seats: …") and an internal report. Nothing in the app shows it.
 **Related:** the internal organization spec's phase 4 (a lane and a role on the agent definition, Swarm grouped by lane; not public, so only its conclusions are used here); `crates/srv/src/server/app_api/agent_spawn.rs` (`agent:worker_of`, the spawned-worker relationship); `SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md` (identity is the uid, names are labels).
 
@@ -72,6 +72,10 @@ seat: {
 | **Swarm** | A small role badge after the name. The view gets a **Group by: none / lead** control: by lead, each leader heads its group and the operator heads the leaders | `swarm-view.tsx` row; `AgentTreeNode` gains `seat` from block meta |
 | **Kanban** | A card's owner shows the owner's seat on hover; a filter "reports to …" | Warden Kanban card owner chip |
 | **MuxAPI `Agents list`** | Each `host.agents` entry gains `seat: {role, qualifier, lead: {id, name}, area}`, from its definition | `handle_discovery` (`http_health.rs`), by `definition_id`; the `Agents` tool description says so |
+
+As built in PR 3:
+- Swarm reads `agent:seat` from each row's pane meta where it draws the row, not through `AgentTreeNode`: `swarm-model.ts` is at its size limit. The choice is kept in the Swarm pane's meta (`swarm:groupby`), as its zoom is. A lead with no pane open heads its own group by name. Other instances' rows go under their own heading, because `swarm.other-instances` doesn't carry seats yet.
+- The Kanban reads seats from `listagents`, not from the board. The filter keeps the tasks whose owner (the agent holding the task, else the one it waits for) reports to the chosen lead. That lead's own tasks are not included.
 
 The agent's own instructions are left alone in v1. The roster Global Memory entry remains for agents launched before a seat shows in `Agents list`. Phase 2 can compose a one-line "Your seat: …" into the agent's startup file, from the stored seat.
 

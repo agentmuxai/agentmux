@@ -336,10 +336,14 @@ async fn app_main() {
     backend::transcript::append::install_config(Arc::clone(&state.config_watcher));
     // Claude config dirs get the auto-compact window `agent:compactat` asks for.
     backend::providers::install_config(Arc::clone(&state.config_watcher));
+    backend::context_reading::install_config(Arc::clone(&state.config_watcher));
     backend::transcript::framer::install_config(Arc::clone(&state.config_watcher));
     backend::transcript::damage::install_broker(Arc::clone(&state.broker));
     // The open workspace saves itself as it changes (SPEC_WORKSPACES_2026_10_23.md §4.1).
     server::service::user_workspace::spawn_saver(Arc::clone(&state.mstore));
+    // One notice per account its agents are out of quota or signed out on
+    // (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §6).
+    server::account_episodes::install(state.clone());
     // A leader hears from its workers (SPEC_AGENT_WORKERS_2026_10_15.md §3.3).
     backend::worker_notes::install(
         Arc::clone(&state.broker),

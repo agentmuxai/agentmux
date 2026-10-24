@@ -42,6 +42,59 @@ pub fn shim_dir(home: &Path) -> PathBuf {
     home.join(".agentmux").join("tools").join("bin")
 }
 
+/// A slot with no heartbeat for this long belongs to a dead holder (the script's own rule).
+const STALE_SECS: u64 = 90;
+
+/// Who holds the build slot right now, read from the lock's owner file.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SlotHolder {
+    /// The holder's `AGENTMUX_AGENT_ID` (else its user name), as the script recorded it.
+    pub agent: String,
+    /// When it took the slot, in epoch milliseconds.
+    pub since_ms: u64,
+    /// Why: the shim's reason (`cargo test`), else the command line.
+    pub reason: String,
+    /// The command line it runs, cut to 120 characters: a background subagent's build holds the slot under its leader's id, and this says what is really running.
+    pub command: String,
+}
+
+/// `~/.agentmux/shared/locks/build`, the lock's own folder, or `AGENTMUX_BUILD_SLOT_DIR` when
+/// that is set (the script honours it too).
+fn lock_dir() -> Option<PathBuf> {
+    match std::env::var_os("AGENTMUX_BUILD_SLOT_DIR").filter(|d| !d.is_empty()) {
+        Some(dir) => Some(PathBuf::from(dir)),
+        None => dirs::home_dir().map(|h| h.join(".agentmux").join("shared").join("locks").join("build")),
+    }
+}
+
+/// The current holder of this machine's build slot, if there is a live one.
+pub fn holder() -> Option<SlotHolder> {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
+    read_holder(&lock_dir()?, now)
+}
+
+/// The holder recorded under `root` at `now_secs`: none when the slot is free, when its owner
+/// file is not written yet, or when nobody has kept it alive for `STALE_SECS` (a dead holder).
+pub fn read_holder(root: &Path, now_secs: u64) -> Option<SlotHolder> {
+    let slot = root.join("slot");
+    let text = std::fs::read_to_string(slot.join("owner")).ok()?;
+    let alive_at = [slot.join("heartbeat"), slot.clone()]
+        .iter()
+        .find_map(|p| std::fs::metadata(p).ok()?.modified().ok())?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    if now_secs.saturating_sub(alive_at) > STALE_SECS {
+        return None;
+    }
+    let field = |key: &str| text.lines().find_map(|l| l.strip_prefix(key)?.strip_prefix('=')).map(str::trim);
+    let agent = field("agent").filter(|a| !a.is_empty())?.to_string();
+    let start: u64 = field("start")?.parse().ok()?;
+    let reason = field("reason").filter(|r| !r.is_empty()).or_else(|| field("cmd")).unwrap_or_default().to_string();
+    let command: String = field("cmd").unwrap_or_default().chars().take(120).collect();
+    Some(SlotHolder { agent, since_ms: start.saturating_mul(1000), reason, command })
+}
+
 /// What one `install` call did.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Installed {
@@ -137,6 +190,38 @@ mod tests {
 
     fn home() -> tempfile::TempDir {
         tempfile::tempdir().unwrap()
+    }
+
+    fn write_slot(root: &Path, owner: &str, heartbeat: bool) {
+        let slot = root.join("slot");
+        std::fs::create_dir_all(&slot).unwrap();
+        std::fs::write(slot.join("owner"), owner).unwrap();
+        if heartbeat {
+            std::fs::write(slot.join("heartbeat"), "").unwrap();
+        }
+    }
+
+    fn now_secs() -> u64 {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
+    }
+
+    #[test]
+    fn the_holder_is_read_from_the_owner_file_and_a_dead_one_is_not_a_holder() {
+        let h = home();
+        let root = h.path();
+        assert_eq!(read_holder(root, now_secs()), None, "no slot: free");
+        write_slot(root, "agent=Lazo\npid=1\ntoken=t\nstart=1792830000\ncwd=/x\ncmd=/c/bin/cargo test -p x\nreason=cargo test\n", true);
+        assert_eq!(
+            read_holder(root, now_secs()),
+            Some(SlotHolder { agent: "Lazo".into(), since_ms: 1_792_830_000_000, reason: "cargo test".into(), command: "/c/bin/cargo test -p x".into() })
+        );
+        assert_eq!(read_holder(root, now_secs() + 10 * 60), None, "no heartbeat for minutes: its holder died");
+        write_slot(root, "agent=Manoz\nstart=1792830001\ncmd=npm run build\n", true);
+        assert_eq!(read_holder(root, now_secs()).unwrap().reason, "npm run build", "no reason: the command line");
+        write_slot(root, "agent=Manoz\n", true);
+        assert_eq!(read_holder(root, now_secs()), None, "an owner file still being written names no start");
+        write_slot(root, "", false);
+        assert_eq!(read_holder(root, now_secs()), None);
     }
 
     #[test]

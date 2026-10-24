@@ -1121,6 +1121,7 @@ declare global {
         "notify:os:agentcrashed"?: boolean;
         "notify:os:messageneedsreview"?: boolean;
         "notify:os:cloudsignedout"?: boolean;
+        "notify:os:accountunavailable"?: boolean;
         "notify:pause:until"?: number;
         "notify:pause:allowattention"?: boolean;
         "notify:taskbar:attention"?: boolean;
@@ -1155,6 +1156,8 @@ declare global {
         "attachments:retentiondays"?: number;
         "agent:askquestiontimeoutms"?: number;
         "agent:compactat"?: number;
+        "agent:compacthints"?: boolean;
+        "agent:compacthintat"?: number;
         "agent:overlapnotes"?: boolean;
         "agent:retryonreconnect"?: boolean;
         "kanban:reminders"?: boolean;

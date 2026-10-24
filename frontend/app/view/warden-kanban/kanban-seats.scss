@@ -1,0 +1,11 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Seats on the Kanban (kanban-seats.tsx).
+
+// A long lead name must not push the toolbar wider than a narrow Warden.
+.kanban-toolbar__reports {
+    max-width: 16em;
+    min-width: 0;
+    text-overflow: ellipsis;
+}

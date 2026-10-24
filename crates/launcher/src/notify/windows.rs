@@ -31,20 +31,31 @@
 //! (spec §9.1/§9.3). The `launch` argument carries only our own notification
 //! id, and it isn't what activation trusts anyway — the handler closure
 //! captures the id.
+//!
+//! ## A pending shutdown's toast
+//!
+//! It stays on screen for the whole window (`scenario="reminder"`), has one
+//! Keep running button (`arguments="keep"`, a constant: the id of the
+//! notification comes from the handler's closure, never from the arguments),
+//! and counts down: the title and a progress bar are data-bound, and the
+//! shared ticker (`notify/mod.rs`) redraws them once a second with
+//! `UpdateWithTagAndGroup`. The bound values are plain strings in
+//! `NotificationData`, never parsed as XML.
+//! (docs/specs/SPEC_STOP_AN_AGENT_ONE_WAY_AND_SHUTDOWN_TOAST_2026_10_23.md §3.8)
 
 use std::collections::HashMap;
 use std::sync::mpsc as std_mpsc;
 
 use tokio::sync::mpsc;
-use windows::core::HSTRING;
-use windows::Data::Xml::Dom::XmlDocument;
-use windows::Foundation::TypedEventHandler;
+use windows::core::{IInspectable, Interface, HSTRING};
+use windows::Data::Xml::Dom::{XmlDocument, XmlElement};
+use windows::Foundation::{DateTime, IReference, PropertyValue, TypedEventHandler};
 use windows::UI::Notifications::{
-    ToastDismissalReason, ToastDismissedEventArgs, ToastNotification, ToastNotificationManager,
-    ToastNotificationPriority, ToastNotifier,
+    NotificationData, NotificationUpdateResult, ToastActivatedEventArgs, ToastDismissalReason, ToastDismissedEventArgs,
+    ToastNotification, ToastNotificationManager, ToastNotificationPriority, ToastNotifier,
 };
 
-use super::{Notification, Presenter, UserAction};
+use super::{countdown_update, CountdownUpdate, Notification, Presenter, UserAction};
 
 /// Must match the host's `SetCurrentProcessExplicitAppUserModelID`
 /// (`crates/cef/src/lib.rs`) so toasts and taskbar grouping agree.
@@ -72,6 +83,7 @@ const READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 enum Cmd {
     Show(Notification),
+    Update(String, CountdownUpdate),
     Retract(String),
     ClearAll(std_mpsc::Sender<()>),
 }
@@ -117,6 +129,9 @@ impl Presenter for WindowsPresenter {
     fn retract(&self, tag: &str) {
         let _ = self.tx.send(Cmd::Retract(tag.to_string()));
     }
+    fn update(&self, tag: &str, update: &CountdownUpdate) {
+        let _ = self.tx.send(Cmd::Update(tag.to_string(), update.clone()));
+    }
     /// This instance's toasts only (`group_for`) — never another instance's.
     fn clear_all(&self) {
         // Synchronous (bounded): called on launcher exit, which must not race
@@ -153,22 +168,47 @@ fn thread_main(
     let _ = ready.send(Ok(()));
 
     let mut live: HashMap<String, ToastNotification> = HashMap::new();
+    // tag → the sequence number of the last countdown update (Windows drops an
+    // update that isn't newer), and the tags the user already took down.
+    let mut seq: HashMap<String, u32> = HashMap::new();
+    let mut gone: std::collections::HashSet<String> = Default::default();
     while let Ok(cmd) = rx.recv() {
         match cmd {
             Cmd::Show(n) => match show(&notifier, &n, &actions, &group) {
                 Ok(toast) => {
+                    gone.remove(&n.tag);
+                    seq.insert(n.tag.clone(), 1);
                     live.insert(n.tag.clone(), toast);
                 }
                 Err(e) => crate::logging::log(&format!("notify: show failed: {e}")),
             },
+            Cmd::Update(tag, update) => {
+                if gone.contains(&tag) || !live.contains_key(&tag) {
+                    continue;
+                }
+                let next = seq.entry(tag.clone()).and_modify(|n| *n += 1).or_insert(2);
+                match update_toast(&notifier, &tag, &group, &update, *next) {
+                    Ok(NotificationUpdateResult::NotificationNotFound) => {
+                        // Swiped away: stop redrawing a toast that isn't there.
+                        crate::logging::log("notify: countdown toast was dismissed; no more updates");
+                        gone.insert(tag);
+                    }
+                    Ok(_) => {}
+                    Err(e) => crate::logging::log(&format!("notify: countdown update failed: {e}")),
+                }
+            }
             Cmd::Retract(tag) => {
                 live.remove(&tag);
+                seq.remove(&tag);
+                gone.remove(&tag);
                 if let Ok(h) = ToastNotificationManager::History() {
                     let _ = h.RemoveGroupedTagWithId(&HSTRING::from(tag), &HSTRING::from(group.as_str()), &aumid);
                 }
             }
             Cmd::ClearAll(done) => {
                 live.clear();
+                seq.clear();
+                gone.clear();
                 if let Ok(h) = ToastNotificationManager::History() {
                     let _ = h.RemoveGroupWithId(&HSTRING::from(group.as_str()), &aumid);
                 }
@@ -181,28 +221,107 @@ fn thread_main(
 /// Build the toast document: constant skeleton, text via text nodes.
 pub fn build_xml(n: &Notification) -> windows::core::Result<XmlDocument> {
     let doc = XmlDocument::new()?;
+    let live = n.countdown.is_some();
+    let keep = n.keep_label();
     // Title, then the body, then the summary in the `attribution` slot, which
     // Windows renders small and grey under the body without using up one of
     // ToastGeneric's three text lines (rich-content spec §1.3). The skeleton
-    // is fixed markup; every line is filled as a text node below.
-    let mut skeleton = String::from(r#"<toast><visual><binding template="ToastGeneric"><text/>"#);
+    // is fixed markup; every line is filled as a text node below. A toast with
+    // a countdown binds its title and bar to `NotificationData` instead
+    // (`data_for`), and one with a Keep running button stays up for its whole
+    // window (`scenario="reminder"`).
+    let mut skeleton = String::from("<toast");
+    if keep.is_some() {
+        skeleton.push_str(r#" scenario="reminder""#);
+    }
+    skeleton.push_str(r#"><visual><binding template="ToastGeneric">"#);
+    skeleton.push_str(if live { "<text>{title}</text>" } else { "<text/>" });
     if n.body.is_some() {
         skeleton.push_str("<text/>");
     }
     if n.summary.is_some() {
         skeleton.push_str(r#"<text placement="attribution"/>"#);
     }
-    skeleton.push_str(r#"</binding></visual><audio silent="true"/></toast>"#);
+    if live {
+        skeleton.push_str(r#"<progress value="{progressValue}" valueStringOverride="{progressValueString}" status="Closing"/>"#);
+    }
+    skeleton.push_str("</binding></visual>");
+    if keep.is_some() {
+        skeleton.push_str(&format!(r#"<actions><action content="" arguments="{KEEP_ARGUMENT}" activationType="foreground"/></actions>"#));
+    }
+    skeleton.push_str(r#"<audio silent="true"/></toast>"#);
     doc.LoadXml(&HSTRING::from(skeleton))?;
     let root = doc.DocumentElement()?;
     root.SetAttribute(&HSTRING::from("launch"), &HSTRING::from(format!("agentmux-notify:{}", n.id)))?;
     let texts = doc.GetElementsByTagName(&HSTRING::from("text"))?;
     let lines = std::iter::once(n.title.as_str()).chain(n.body.as_deref()).chain(n.summary.as_deref());
     for (i, line) in lines.enumerate() {
+        if live && i == 0 {
+            continue; // the title is data-bound
+        }
         let node = texts.Item(i as u32)?;
         node.AppendChild(&doc.CreateTextNode(&HSTRING::from(line))?)?;
     }
+    if let Some(label) = keep {
+        let button: XmlElement = doc.GetElementsByTagName(&HSTRING::from("action"))?.Item(0)?.cast()?;
+        button.SetAttribute(&HSTRING::from("content"), &HSTRING::from(label))?;
+    }
     Ok(doc)
+}
+
+/// What the Keep running button's `arguments` is. A constant: which
+/// notification it belongs to comes from the handler's closure.
+const KEEP_ARGUMENT: &str = "keep";
+
+/// What a toast activation was.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Activation {
+    /// The Keep running button.
+    Keep,
+    /// The toast itself: open the pane.
+    Body,
+}
+
+/// Only the one constant argument is a button press; anything else is a click
+/// on the body.
+pub fn activation_for(arguments: &str) -> Activation {
+    if arguments == KEEP_ARGUMENT {
+        Activation::Keep
+    } else {
+        Activation::Body
+    }
+}
+
+/// The bound values of a countdown toast, as `NotificationData`.
+fn data_for(u: &CountdownUpdate, sequence: u32) -> windows::core::Result<NotificationData> {
+    let data = NotificationData::new()?;
+    let values = data.Values()?;
+    values.Insert(&HSTRING::from("title"), &HSTRING::from(u.title.as_str()))?;
+    values.Insert(&HSTRING::from("progressValue"), &HSTRING::from(format!("{:.3}", u.fraction_left)))?;
+    values.Insert(&HSTRING::from("progressValueString"), &HSTRING::from(u.seconds_text.as_str()))?;
+    data.SetSequenceNumber(sequence)?;
+    Ok(data)
+}
+
+fn update_toast(
+    notifier: &ToastNotifier,
+    tag: &str,
+    group: &str,
+    u: &CountdownUpdate,
+    sequence: u32,
+) -> windows::core::Result<NotificationUpdateResult> {
+    notifier.UpdateWithTagAndGroup(&data_for(u, sequence)?, &HSTRING::from(tag), &HSTRING::from(group))
+}
+
+/// Take the toast out of the Action Center on its own shortly after the window
+/// ends, so one nobody answered doesn't linger there once the agent is gone.
+fn expire_after(toast: &ToastNotification, ms: i64) -> windows::core::Result<()> {
+    // FILETIME epoch (1601) in 100 ns ticks.
+    const UNIX_TO_FILETIME_TICKS: i64 = 116_444_736_000_000_000;
+    let unix_ms = agentmux_common::time::now_ms();
+    let at = DateTime { UniversalTime: (unix_ms + ms) * 10_000 + UNIX_TO_FILETIME_TICKS };
+    let at: IReference<DateTime> = PropertyValue::CreateDateTime(at)?.cast()?;
+    toast.SetExpirationTime(&at)
 }
 
 fn show(
@@ -217,9 +336,24 @@ fn show(
     if n.is_attention() {
         let _ = toast.SetPriority(ToastNotificationPriority::High);
     }
+    if let Some(c) = &n.countdown {
+        toast.SetData(&data_for(&countdown_update(&c.title_template, c.remaining_ms, c.remaining_ms), 1)?)?;
+        let _ = expire_after(&toast, c.remaining_ms + 2_000);
+    }
 
     let (tx, id) = (actions.clone(), n.id.clone());
-    toast.Activated(&TypedEventHandler::new(move |_, _| {
+    toast.Activated(&TypedEventHandler::<ToastNotification, IInspectable>::new(move |_, args| {
+        let pressed = args
+            .as_ref()
+            .and_then(|a| a.cast::<ToastActivatedEventArgs>().ok())
+            .and_then(|a| a.Arguments().ok())
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        if activation_for(&pressed) == Activation::Keep {
+            // A button, not a click on the pane: no window is raised.
+            let _ = tx.send(UserAction::Keep(id.clone()));
+            return Ok(());
+        }
         // The toast click made us the foreground-eligible process; pass that
         // right on so the host can raise its window (SetForegroundWindow
         // would otherwise be refused for a background process).
@@ -302,8 +436,24 @@ mod tests {
             title: title.into(),
             body: body.map(Into::into),
             summary: None,
+            actions: vec![],
+            countdown: None,
             tag: "abcdef0123456789".into(),
         }
+    }
+
+    fn closing(body: Option<&str>) -> Notification {
+        Notification {
+            kind: "shutdown_pending".into(),
+            title: "Closing QTimer in 15 s".into(),
+            actions: vec![super::super::NotifyAction { id: "keep".into(), label: "Keep running".into() }],
+            countdown: Some(super::super::Countdown { remaining_ms: 15_000, title_template: "Closing QTimer in {n} s".into() }),
+            ..n("", body)
+        }
+    }
+
+    fn count(doc: &XmlDocument, tag: &str) -> u32 {
+        doc.GetElementsByTagName(&HSTRING::from(tag)).unwrap().Length().unwrap()
     }
 
     /// Hostile agent-influenced text must come out as literal text, never as
@@ -350,6 +500,53 @@ mod tests {
         let secs = std::env::var("SMOKE_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(8);
         std::thread::sleep(std::time::Duration::from_secs(secs));
         p.clear_all();
+    }
+
+    /// Live check of a shutdown toast's countdown against Windows itself — shows
+    /// a REAL toast for about 15 s, redraws it once a second as the ticker does,
+    /// and prints what Windows answered to each update. Manual only:
+    /// `cargo test -p agentmux-launcher --bins live_countdown_smoke -- --ignored --nocapture`.
+    /// Windows answers `Succeeded` while the toast is still there and
+    /// `NotificationNotFound` once it is not (swiped away, or never shown).
+    #[test]
+    #[ignore]
+    fn live_countdown_smoke() {
+        use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
+        unsafe { RoInitialize(RO_INIT_MULTITHREADED).unwrap() };
+        let aumid = HSTRING::from(AUMID);
+        let notifier = ToastNotificationManager::CreateToastNotifierWithId(&aumid).expect("notifier");
+        println!("SMOKE setting={:?}", notifier.Setting().map(|s| s.0));
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let group = "am-smoke-countdown".to_string();
+        let total_ms = 15_000;
+        let toast_n = Notification {
+            id: "smoke-1".into(),
+            tag: "smoke-tag".into(),
+            kind: "shutdown_pending".into(),
+            priority: "attention".into(),
+            title: "Closing QTimer in 15 s".into(),
+            body: Some("AgentY asked to close it. It stays in My Agents, with its conversation.".into()),
+            actions: vec![super::super::NotifyAction { id: "keep".into(), label: "Keep running".into() }],
+            countdown: Some(super::super::Countdown { remaining_ms: total_ms, title_template: "Closing QTimer in {n} s".into() }),
+            ..Default::default()
+        };
+        let _toast = show(&notifier, &toast_n, &tx, &group).expect("shown");
+        let history = ToastNotificationManager::History().and_then(|h| h.GetHistoryWithId(&aumid)).and_then(|v| v.Size());
+        println!("SMOKE shown; history_count={history:?}");
+        let started = std::time::Instant::now();
+        let mut results = Vec::new();
+        for seq in 2..=16u32 {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            let remaining = total_ms - started.elapsed().as_millis() as i64;
+            let u = countdown_update("Closing QTimer in {n} s", remaining, total_ms);
+            let r = update_toast(&notifier, "smoke-tag", &group, &u, seq);
+            println!("SMOKE t+{:>2}s update #{seq}: {:?} -> {} / bar {:.2}", started.elapsed().as_secs(), r.as_ref().map(|r| r.0), u.title, u.fraction_left);
+            results.push(r.map(|r| r == NotificationUpdateResult::Succeeded).unwrap_or(false));
+        }
+        let history = ToastNotificationManager::History().and_then(|h| h.GetHistoryWithId(&aumid)).and_then(|v| v.Size());
+        println!("SMOKE end; history_count={history:?}");
+        let _ = ToastNotificationManager::History().and_then(|h| h.RemoveGroupWithId(&HSTRING::from(group.as_str()), &aumid));
+        assert!(results.iter().all(|ok| *ok), "every update should have been Succeeded: {results:?}");
     }
 
     /// Lines in order — title, body, then the summary as the attribution —
@@ -402,5 +599,67 @@ mod tests {
         let xml = doc.GetXml().unwrap().to_string();
         assert!(xml.contains(r#"launch="agentmux-notify:n1-1""#), "{xml}");
         assert!(xml.contains(r#"silent="true""#), "{xml}");
+    }
+
+    /// A pending shutdown's toast: stays up for its window, one Keep running
+    /// button with the constant argument, a bound title and bar, and the title
+    /// text is not in the markup at all.
+    #[test]
+    fn a_shutdown_toast_has_the_keep_button_a_bound_title_and_a_progress_bar() {
+        let doc = build_xml(&closing(Some("AgentY asked to close it."))).unwrap();
+        let xml = doc.GetXml().unwrap().to_string();
+        assert!(xml.contains(r#"scenario="reminder""#), "{xml}");
+        assert_eq!(count(&doc, "action"), 1, "{xml}");
+        assert!(xml.contains(r#"arguments="keep""#) && xml.contains(r#"content="Keep running""#), "{xml}");
+        assert!(xml.contains("{title}") && xml.contains("{progressValue}") && xml.contains("{progressValueString}"), "{xml}");
+        assert!(!xml.contains("Closing QTimer"), "the title travels as bound data, not markup: {xml}");
+        assert!(xml.contains("AgentY asked to close it."), "{xml}");
+        assert!(xml.contains(r#"launch="agentmux-notify:n1-1""#), "{xml}");
+    }
+
+    /// Agent-influenced text in the body is still text: it adds no second button
+    /// and cannot reach the Keep running one.
+    #[test]
+    fn hostile_text_in_a_shutdown_toast_adds_no_second_action() {
+        let evil = r#"</text><action content="Approve" arguments="rm -rf"/><text>"#;
+        let doc = build_xml(&closing(Some(evil))).unwrap();
+        assert_eq!(count(&doc, "action"), 1);
+        let xml = doc.GetXml().unwrap().to_string();
+        assert_eq!(xml.matches("<action ").count(), 1, "only our one button is markup: {xml}");
+        assert!(xml.contains(r#"arguments="keep""#), "{xml}");
+        assert!(xml.contains("&lt;/text&gt;&lt;action"), "{xml}");
+    }
+
+    #[test]
+    fn a_toast_with_no_button_or_countdown_is_the_old_one() {
+        let doc = build_xml(&n("lark finished", Some("done"))).unwrap();
+        let xml = doc.GetXml().unwrap().to_string();
+        assert!(!xml.contains("scenario") && !xml.contains("<progress") && !xml.contains("{title}"), "{xml}");
+        assert_eq!((count(&doc, "action"), count(&doc, "actions")), (0, 0));
+        assert!(xml.contains("lark finished"));
+    }
+
+    #[test]
+    fn only_the_one_constant_argument_is_a_button_press() {
+        assert_eq!(activation_for("keep"), Activation::Keep);
+        for other in ["", "agentmux-notify:n1-1", "keep ", "KEEP", "keep&x=1", "approve"] {
+            assert_eq!(activation_for(other), Activation::Body, "{other:?}");
+        }
+    }
+
+    /// The bound values: the title as the template filled for the time left, a
+    /// bar that drains from 1 to 0, and the seconds text.
+    #[test]
+    fn the_bound_values_follow_the_countdown() {
+        let get = |d: &NotificationData, k: &str| d.Values().unwrap().Lookup(&HSTRING::from(k)).unwrap().to_string();
+        let first = data_for(&countdown_update("Closing QTimer in {n} s", 15_000, 15_000), 1).unwrap();
+        assert_eq!(get(&first, "title"), "Closing QTimer in 15 s");
+        assert_eq!(get(&first, "progressValue"), "1.000");
+        assert_eq!(get(&first, "progressValueString"), "15 s");
+        let mid = data_for(&countdown_update("Closing QTimer in {n} s", 8_200, 15_000), 7).unwrap();
+        assert_eq!((get(&mid, "title").as_str(), get(&mid, "progressValueString").as_str()), ("Closing QTimer in 9 s", "9 s"));
+        assert_eq!(mid.SequenceNumber().unwrap(), 7);
+        let last = data_for(&countdown_update("Closing QTimer in {n} s", 0, 15_000), 16).unwrap();
+        assert_eq!((get(&last, "progressValue").as_str(), get(&last, "title").as_str()), ("0.000", "Closing QTimer in 0 s"));
     }
 }

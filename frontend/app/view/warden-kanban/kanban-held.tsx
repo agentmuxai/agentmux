@@ -10,6 +10,7 @@
 import { createSignal, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 
 import { Button } from "@/app/element/ui";
+import { useAccountEpisodes } from "@/app/store/account-availability";
 import { openOrFocusPaneByView } from "@/app/store/block-component-registry";
 import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
@@ -107,10 +108,14 @@ export function useHeldTask(blockId: () => string): Accessor<HeldTask | null> {
 }
 
 /** How many tasks need the operator (the same count as the Warden tab title), kept current while the
- *  caller is mounted. */
+ *  caller is mounted. An account episode counts once per account, however many agents it holds
+ *  (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §6.2); its `agent_ids` and `block_ids` say which holders it
+ *  covers, so the Needs-you reason for a stuck task (#1847) skips those holders instead of counting them
+ *  again. */
 export function useKanbanNeeds(): Accessor<number> {
     follow();
-    return needs;
+    const episodes = useAccountEpisodes();
+    return () => needs() + episodes().length;
 }
 
 /** Open the Kanban (this tab's Warden, or a new one) with this task's drawer open. */

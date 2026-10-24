@@ -23,6 +23,7 @@ import { longRunningToolRows, type LongRunningToolRow } from "./swarm-longrunnin
 import { formatCompactNumber } from "@/util/format-count";
 import { formatElapsedClock, formatTimeLeft } from "@/util/format-time";
 import { HeldTaskChip } from "@/app/view/warden-kanban/kanban-held";
+import { AccountAvailabilityStrip } from "@/app/view/account-availability/account-availability-strip";
 import { revealBlock } from "@/app/util/reveal-block";
 import { selectTrace } from "@/app/util/select-trace";
 import type { SwarmOrderItem } from "./swarm-order";
@@ -40,6 +41,7 @@ import { setSupervisorMode, SupervisorBucket, SupervisorChip, supervisorRows } f
 import { subagentStatus } from "@/app/store/agent-status";
 import { remoteAgentKey } from "./swarm-fleet-targets";
 import { remoteChip, remoteLine, remoteRows, remoteSections, seenAgo, type RemoteRow } from "./swarm-remote";
+import { SwarmGroupByControl, SwarmSeatBadge, SwarmSeatList, useSwarmSeats } from "./swarm-seats";
 import { FleetToolbar, FleetResultPanel } from "./swarm-fleet-toolbar";
 import "./swarm-view.scss";
 import { readZoom } from "@/app/store/zoom-factor";
@@ -148,6 +150,7 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
             ),
         ],
     });
+    const seats = useSwarmSeats(ctx, keyedRows, remoteByKey); // Group by lead (swarm-seats.tsx)
     const localKeys = createMemo(() => tree().flatMap((n) => (n.blockId ? [n.blockId] : [])));
     // Everything a checkbox can select: this instance's agents, then the remote
     // ones not gone stale. Select all and the selection both follow it.
@@ -186,6 +189,7 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
                 {/* Outside the tree's own Show: agents on other instances can be selected
                     when this instance has none, and the toolbar is what acts on them. It
                     shows itself only when there is something to select or act on. */}
+                <AccountAvailabilityStrip />
                 <FleetToolbar model={model} allBlockIds={selectableKeys} />
                 <FleetResultPanel model={model} />
                 <Show
@@ -216,6 +220,7 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
                 {/* One list: this instance's agents and the other instances', working ones
                     first (swarm-order.ts; docs/specs/SPEC_SWARM_REFINEMENTS_2026_10_17.md §5). */}
                 <Show when={tree().length > 0 || remote().length > 0}>
+                    <SwarmGroupByControl seats={seats} />
                     <div
                         class="swarm-tree"
                         ref={(el) => {
@@ -224,7 +229,7 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
                         }}
                         {...swarmOrder.listHandlers}
                     >
-                        <For each={swarmOrder.order()}>
+                        <SwarmSeatList seats={seats} order={swarmOrder.order}>
                             {(key) =>
                                 // Which kind of row it is comes from the maps the rows are read from. A key in
                                 // neither (the agent just left) has no row to show.
@@ -234,7 +239,7 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
                                     <RemoteAgentRowHost rowKey={key} rows={remoteByKey} model={model} />
                                 ) : null
                             }
-                        </For>
+                        </SwarmSeatList>
                     </div>
                 </Show>
             </Show>
@@ -616,6 +621,7 @@ export function AgentRow({
                         <SwarmProviderIcon provider={node().agentProvider} unknownTitle={LOCAL_PROVIDER_UNKNOWN} />
                     </span>
                     <span class="swarm-agent-label">{node().agentName}</span>
+                    <SwarmSeatBadge meta={blockMeta()} />
                     {/* Turns this agent didn't get from you that finished
                         unseen: the same mark as its pane header (UnseenTurnsDot). */}
                     <Show when={node().blockId}>{(blockId) => <UnseenTurnsDot blockId={blockId()} />}</Show>
@@ -1031,6 +1037,9 @@ function formatLastFired(unixSec: number | null): string {
     return `${Math.floor(deltaHr / 24)}d ago`;
 }
 
+/** `last_miss_reason` (backend/cron/mod.rs `FireOutcome::miss_reason`) in a few words. */
+const MISS_REASON_TEXT: Record<string, string> = { target_stopped: "agent not running", target_missing: "no target" };
+
 function CronRow({ cron }: { cron: ActiveCron }): JSX.Element {
     // 60s tick — "last fired" doesn't need per-second granularity like a
     // shell's live elapsed counter.
@@ -1041,6 +1050,10 @@ function CronRow({ cron }: { cron: ActiveCron }): JSX.Element {
     });
     const fireCountLabel = createMemo(() =>
         cron.max_fires != null ? `${cron.fire_count}/${cron.max_fires}` : `${cron.fire_count}`
+    );
+    // Fires that reached no one don't count above; say so instead of looking healthy.
+    const missedLabel = createMemo(() =>
+        cron.missed_count ? `missed ${cron.missed_count} · ${MISS_REASON_TEXT[cron.last_miss_reason ?? ""] ?? "not delivered"}` : ""
     );
 
     return (
@@ -1063,6 +1076,9 @@ function CronRow({ cron }: { cron: ActiveCron }): JSX.Element {
             <span class="swarm-cron-expression">{cron.expression}</span>
             <span class="swarm-cron-last-fired">{lastFired()}</span>
             <span class="swarm-cron-fire-count">{fireCountLabel()}</span>
+            <Show when={missedLabel()}>
+                <span class="swarm-cron-missed" title={cron.last_miss_reason}>{missedLabel()}</span>
+            </Show>
             <span class={`swarm-cron-status-badge swarm-cron-status-badge--${cron.enabled ? "active" : "paused"}`}>
                 {cron.enabled ? "Active" : "Paused"}
             </span>

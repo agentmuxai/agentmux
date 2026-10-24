@@ -326,6 +326,12 @@ fn request_within(
                 for b in &covers {
                     publish_pending(state, b, &view);
                 }
+                // A request that now does more (a stop upgraded to a close) must
+                // not leave the notification saying the old thing: the same
+                // request and deadline, the new wording, replacing the toast.
+                if stronger {
+                    raise_toast(state, &view);
+                }
             }
             return joined;
         }
@@ -364,17 +370,7 @@ fn request_within(
     for b in &new_covers {
         publish_pending(state, b, &view);
     }
-    if let Some(router) = notify_router(state) {
-        // Fixed wording and the asker's cleaned name; never the reason, which
-        // is the asker's own text (spec §3.11). An OS toast also lands in the
-        // Action Center and on a lock screen.
-        let body = toast_body(&view);
-        let block = block_id.to_string();
-        // `emit_fixed` reads the block (blocking): off the async workers.
-        tokio::task::spawn_blocking(move || {
-            router.emit_fixed(crate::backend::notify::policy::NotifyKind::ShutdownPending, &block, Some(body))
-        });
-    }
+    raise_toast(state, &view);
     tracing::info!(block_id, by, via, request_id = %view.request_id, "shutdown pending: user has 15 s to keep it");
 
     let kept = entries().get(&view.request_id).map(|e| e.kept.clone());
@@ -401,6 +397,35 @@ fn request_within(
         set_status(&v.request_id, status, error);
     });
     view
+}
+
+/// Whether the block's session is running, not merely registered: a stopped
+/// agent keeps its controller (`Policy::stop`), and the Keep running button of
+/// its notification would restart nothing (it reads "Keep open" instead).
+fn session_running(block_id: &str) -> bool {
+    crate::backend::blockcontroller::get_controller(block_id)
+        .is_some_and(|c| c.get_runtime_status().shellprocstatus == crate::backend::blockcontroller::STATUS_RUNNING)
+}
+
+/// The OS notification for `view`'s request: what will happen, the time left
+/// to its deadline, and Keep running. Raised when the request opens, and again
+/// when a stronger request takes it over (the same toast is replaced in place,
+/// since both share the block's notification group).
+fn raise_toast(state: &AppState, view: &PendingView) {
+    let Some(router) = notify_router(state) else { return };
+    // Fixed wording and the asker's cleaned name; never the reason, which is
+    // the asker's own text (spec §3.11). An OS toast also lands in the Action
+    // Center and on a lock screen.
+    let body = toast_body(view);
+    let block = view.block_id.clone();
+    let info = crate::backend::notify::policy::ShutdownInfo {
+        deadline_ms: view.deadline_ms,
+        effect: view.effect,
+        running: session_running(&view.block_id),
+        request_id: view.request_id.clone(),
+    };
+    // `emit_shutdown` reads the block (blocking): off the async workers.
+    tokio::task::spawn_blocking(move || router.emit_shutdown(&block, Some(body), info));
 }
 
 /// The OS notification's body for a pending shutdown. App-controlled text and
@@ -722,6 +747,52 @@ mod tests {
         // The block doesn't exist in this test state, so the shutdown finds
         // nothing to close: superseded, not failed.
         assert_eq!(status(&v.request_id).unwrap().status, "superseded");
+    }
+
+    /// A controller that reports whatever process status it is given.
+    struct Reporting(String, &'static str);
+    impl crate::backend::blockcontroller::Controller for Reporting {
+        fn start(&self, _: crate::backend::obj::MetaMapType, _: Option<serde_json::Value>, _: bool) -> Result<(), String> {
+            Ok(())
+        }
+        fn stop(&self, _: bool, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn get_runtime_status(&self) -> crate::backend::blockcontroller::BlockControllerRuntimeStatus {
+            crate::backend::blockcontroller::BlockControllerRuntimeStatus {
+                blockid: self.0.clone(),
+                shellprocstatus: self.1.to_string(),
+                ..Default::default()
+            }
+        }
+        fn send_input(&self, _: crate::backend::blockcontroller::BlockInputUnion, _: Option<u64>) -> Result<(), String> {
+            Ok(())
+        }
+        fn controller_type(&self) -> &str {
+            "stub"
+        }
+        fn block_id(&self) -> &str {
+            &self.0
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    /// A stopped agent keeps its controller registered; only a running session
+    /// is "Keep running" (#5397).
+    #[test]
+    fn a_registered_but_stopped_session_is_not_running() {
+        let id = |p: &str| format!("{p}-{}", uuid::Uuid::new_v4());
+        let (live, stopped, gone) = (id("sr-live"), id("sr-stopped"), id("sr-gone"));
+        for (block, status) in [(&live, crate::backend::blockcontroller::STATUS_RUNNING), (&stopped, crate::backend::blockcontroller::STATUS_DONE)] {
+            crate::backend::blockcontroller::register_controller(block, Arc::new(Reporting(block.clone(), status)));
+        }
+        assert!(session_running(&live));
+        assert!(!session_running(&stopped), "registered, but its process ended");
+        assert!(!session_running(&gone), "no controller at all");
+        crate::backend::blockcontroller::delete_controller(&live);
+        crate::backend::blockcontroller::delete_controller(&stopped);
     }
 
     fn close_tab() -> Action {
