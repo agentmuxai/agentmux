@@ -178,19 +178,17 @@ pub(crate) fn resolve_name_to_uid(
     }
 
     // (4) Nothing here by that name: every channel's definitions, by slug,
-    // by the route form of a display name ("Naki-2" for "Naki #2", the form
-    // agents sign with), or by a former name. An agent defined or running in
-    // another channel on this computer has no row in this channel's store
-    // until it is opened here, and the task queue is shared by every channel,
-    // so a task filed for it by name alone could never be claimed (#1257).
+    // by the route form of the title an agent goes by ("Naki-2" for
+    // "Naki #2", the form agents sign with), or by a former name. An agent
+    // defined or running in another channel on this computer has no row in
+    // this channel's store until it is opened here, and the task queue is
+    // shared by every channel, so a task filed for it by name alone could
+    // never be claimed (#1257).
     if candidates.is_empty() {
-        let defs = store
-            .agent_defs_for_target(typed)
-            .map_err(|e| store_fault(typed, e))?;
-        for def in defs.into_iter().filter(|d| d.is_seeded == 0) {
+        for def in shared_defs_answering_to(store, typed).map_err(|e| store_fault(typed, e))? {
             candidates.push(AgentCandidate {
                 uid: Some(def.id.clone()),
-                name: if def.name.is_empty() { def.slug.clone() } else { def.name.clone() },
+                name: current_title(&def).to_string(),
                 slug: def.slug,
                 block_id: None,
                 live: false,
@@ -214,6 +212,52 @@ pub(crate) fn resolve_name_to_uid(
             }
         }
         _ => Ok(NameResolution::Ambiguous { candidates }),
+    }
+}
+
+/// The definitions, in any channel, that `typed` names: the one whose slug
+/// it is, else every one whose current title routes to it, else the one it
+/// is a former name of. Only agents a name may mean: never a template, never
+/// one the user forgot (`user_hidden`), as `agents_matching_name` holds; they
+/// are left out before matching, so a template's slug can't shadow an
+/// agent's title.
+fn shared_defs_answering_to(
+    store: &Store,
+    typed: &str,
+) -> Result<Vec<crate::backend::storage::agents::AgentDefinition>, crate::backend::storage::StoreError> {
+    let fold = |s: &str| s.trim().to_lowercase();
+    let target = fold(typed);
+    let route = fold(&agentmux_common::slug::agent_route_name(typed));
+    let defs: Vec<_> = store
+        .agent_def_list()?
+        .into_iter()
+        .filter(|d| d.is_seeded == 0 && d.user_hidden == 0)
+        .collect();
+    if let Some(def) = defs.iter().find(|d| fold(&d.slug) == target) {
+        return Ok(vec![def.clone()]);
+    }
+    let by_title: Vec<_> = defs
+        .iter()
+        .filter(|d| fold(&agentmux_common::slug::agent_route_name(current_title(d))) == route)
+        .cloned()
+        .collect();
+    if !by_title.is_empty() {
+        return Ok(by_title);
+    }
+    let Some(owner) = store.former_name_owner(typed)? else {
+        return Ok(Vec::new());
+    };
+    Ok(defs.into_iter().filter(|d| d.id == owner.uid).collect())
+}
+
+/// The title an agent goes by now: a fork's is its `branch_label`, which a
+/// rename updates while `name` keeps the title it was forked with; a root's
+/// is its `name`.
+fn current_title(d: &crate::backend::storage::agents::AgentDefinition) -> &str {
+    if d.parent_id.trim().is_empty() || d.branch_label.trim().is_empty() {
+        if d.name.is_empty() { &d.slug } else { &d.name }
+    } else {
+        &d.branch_label
     }
 }
 
@@ -476,6 +520,40 @@ mod tests {
     fn a_route_form_of_nothing_is_still_none() {
         let store = store_with(&[(UID_Y, "Naki #2", "naki-naki-2")]);
         assert_eq!(resolve_name_to_uid(&store, &registry(), "Naki-3").unwrap(), NameResolution::None);
+    }
+
+    /// Codex on #5369: a local template's slug doesn't shadow an agent whose
+    /// title routes to the same name; a forgotten agent is never a target; a
+    /// renamed fork is found by its current title.
+    #[test]
+    fn templates_and_forgotten_agents_never_shadow_or_answer() {
+        let store = store_with(&[]);
+        let mut tpl = test_agent_def("tpl-claude", "Claude", "claude", "agent", 1, "");
+        tpl.slug = "claude".into();
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        let mut root = test_agent_def(UID_Y, "Claude", "claude", "agent", 2, "");
+        root.slug = "claude-2".into();
+        store.agent_def_insert(&mut root).unwrap();
+        // "claude" is the template's slug, and the user agent's title.
+        let r = resolve_name_to_uid(&store, &registry(), "claude").unwrap();
+        assert!(matches!(r, NameResolution::One { ref uid, .. } if uid == UID_Y), "{r:?}");
+
+        let mut gone = test_agent_def(UID_UP, "Gone #1", "claude", "agent", 3, "");
+        gone.slug = "gone-gone-1".into();
+        gone.user_hidden = 1;
+        store.agent_def_insert(&mut gone).unwrap();
+        for typed in ["Gone-1", "gone-gone-1"] {
+            assert_eq!(resolve_name_to_uid(&store, &registry(), typed).unwrap(), NameResolution::None, "{typed}");
+        }
+
+        let mut fork = test_agent_def("uid-fork-1257", "Loap", "claude", "agent", 4, "");
+        fork.slug = "loap-loap-3".into();
+        fork.parent_id = "uid-root".into();
+        fork.branch_label = "Loap Renamed".into();
+        store.agent_def_insert(&mut fork).unwrap();
+        let r = resolve_name_to_uid(&store, &registry(), "Loap-Renamed").unwrap();
+        assert!(matches!(r, NameResolution::One { ref uid, .. } if uid == "uid-fork-1257"), "{r:?}");
     }
 
     /// Templates are prototypes, never targets (spec §1.2): a provider key
