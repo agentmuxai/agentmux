@@ -94,9 +94,11 @@ pub(crate) async fn handle_compact_self(
         return refused("the pane can't be read");
     };
     let message = match (provider.as_str(), container) {
-        ("claude", _) => compact_message(req.focus.as_deref()),
+        // A container pane runs on the per-turn docker-exec controller, which
+        // srv's context reading doesn't follow.
+        (_, true) => return refused("unsupported in containers"),
+        ("claude", false) => compact_message(req.focus.as_deref()),
         ("codex", false) => "/compact".to_string(),
-        ("codex", true) => return refused("unsupported in containers"),
         _ => return refused("unsupported: only Claude and Codex agents can compact"),
     };
     if let Err(why) = context_reading::schedule_compact(&block_id, agentmux_common::time::now_ms_u64()) {
@@ -122,7 +124,7 @@ async fn compact_when_turn_ends(state: AppState, block_id: String, message: Stri
     while crate::backend::blockcontroller::get_block_controller_status(&block_id).is_some_and(|s| s.turn_active) {
         if tokio::time::Instant::now() >= deadline {
             tracing::warn!(block_id = %block_id, "self-compaction given up: the turn didn't end within 30 minutes");
-            context_reading::compact_sent(&block_id);
+            context_reading::compact_sent(&block_id, false);
             return;
         }
         tokio::time::sleep(TURN_END_POLL).await;
@@ -138,7 +140,7 @@ async fn compact_when_turn_ends(state: AppState, block_id: String, message: Stri
         Vec::new(),
     )
     .await;
-    context_reading::compact_sent(&block_id);
+    context_reading::compact_sent(&block_id, outcome.is_ok());
     match outcome {
         Ok(()) => tracing::info!(block_id = %block_id, "self-compaction sent"),
         Err(e) => tracing::warn!(block_id = %block_id, error = %e, "self-compaction could not be sent"),

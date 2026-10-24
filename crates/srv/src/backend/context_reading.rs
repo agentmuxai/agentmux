@@ -224,14 +224,19 @@ pub fn schedule_compact(block_id: &str, now_ms: u64) -> Result<(), &'static str>
             return Err(why);
         }
         r.compact_scheduled = true;
-        r.last_self_compact_ms = Some(now_ms);
         Ok(())
     })
 }
 
-/// The scheduled self-compaction was sent (or given up).
-pub fn compact_sent(block_id: &str) {
-    with(block_id, |r| r.compact_scheduled = false);
+/// The scheduled self-compaction was sent (`sent`), or given up or refused by
+/// the controller: only one that went counts toward the rate limit.
+pub fn compact_sent(block_id: &str, sent: bool) {
+    with(block_id, |r| {
+        r.compact_scheduled = false;
+        if sent {
+            r.last_self_compact_ms = Some(agentmux_common::time::now_ms_u64());
+        }
+    });
 }
 
 /// At the end of a turn: the hint's note text when it's due, marking it given
@@ -335,8 +340,11 @@ mod tests {
         observe_claude_frame(&b, &call("m1", 500_000));
         assert_eq!(schedule_compact(&b, 1), Ok(()));
         assert_eq!(schedule_compact(&b, 2), Err("already scheduled"));
-        compact_sent(&b);
-        assert!(schedule_compact(&b, 3).unwrap_err().contains("10 minutes"), "then the rate limit applies");
+        compact_sent(&b, false);
+        assert_eq!(schedule_compact(&b, 3), Ok(()), "one that never went doesn't count");
+        compact_sent(&b, true);
+        let now = agentmux_common::time::now_ms_u64();
+        assert!(schedule_compact(&b, now).unwrap_err().contains("10 minutes"), "one that went does");
         forget(&b);
     }
 
