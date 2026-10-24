@@ -358,10 +358,6 @@ impl Store {
         }
     }
 
-    /// Set (`Some`) or clear (`None`) agent `id`'s seat on its shared
-    /// definition record, the only place a seat is kept. A channel-local
-    /// agent with no shared record (a seeded template, or no shared store)
-    /// can't have one, and that's an error.
     /// The host-wide seat lock ([`crate::registry::DefinitionStore::lock_seat_graph`]):
     /// `agent.setSeat` holds it from reading the seats it validates against
     /// to writing its own.
@@ -372,6 +368,10 @@ impl Store {
         reg.lock_seat_graph().map_err(|e| StoreError::Other(format!("seat lock: {e}")))
     }
 
+    /// Set (`Some`) or clear (`None`) agent `id`'s seat on its shared
+    /// definition record, the only place a seat is kept. A channel-local
+    /// agent with no shared record (a seeded template, or no shared store)
+    /// can't have one, and that's an error.
     pub fn agent_seat_set(&self, id: &str, seat: Option<&crate::registry::AgentSeat>) -> Result<(), StoreError> {
         let Some(reg) = self.shared_def_registry() else {
             return Err(StoreError::Other("no shared definition store, so no agent can have a seat".into()));
