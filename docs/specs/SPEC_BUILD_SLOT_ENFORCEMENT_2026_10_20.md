@@ -76,4 +76,4 @@ For `cargo`, the heavy subcommands are:
 2. **Show the holder**: put it in `Presence` and the Swarm view, so a person sees "AgentX holds the build slot, 12 min" without running `status`.
 3. **Report waits and holds**, to tune the heavy list.
 4. **A counted slot**: a machine with more cores than agents' builds need could allow two. One is the safe start.
-5. **Non-Claude providers**: this covers the agent turns that use the shared environment builder. Check each other provider's spawn (ACP and terminal tiers) puts the user tools dir first.
+5. ~~**Non-Claude providers**~~ (checked 2026-10-24): the agent-turn path (Claude and the other persistent providers) already put the tool dirs first. The ACP and MSP controllers (`session_agent_env`) did not, so their agents never reached a shim; both now call `tool_store::prepend_agent_tools_path`, as the agent-turn path does. The terminal tier (Aider, Crush) runs as an ordinary shell pane, where the user's tools dir deliberately comes after the system PATH (`AfterExisting`), so its commands are not slotted; changing that would change every terminal pane, so it is left as it is.
