@@ -62,7 +62,7 @@ pub fn settings_splash_disabled(settings_path: &Path) -> bool {
     let Ok(text) = std::fs::read_to_string(settings_path) else {
         return false;
     };
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+    let Some(json) = agentmux_common::settings_jsonc::parse_jsonc(&text) else {
         return false;
     };
     json.get("splash:disabled")
@@ -86,6 +86,17 @@ mod tests {
         let p = write_tmp("on", r#"{"splash:disabled": true}"#);
         assert!(settings_splash_disabled(&p));
         let _ = std::fs::remove_file(&p);
+    }
+
+    /// The seeded settings.json has comments and trailing commas (#1903).
+    #[test]
+    fn settings_disabled_read_from_a_commented_file() {
+        let p = write_tmp("jsonc", "{
+  // Splash
+  \"splash:disabled\": true,
+}
+");
+        assert!(settings_splash_disabled(&p));
     }
 
     #[test]

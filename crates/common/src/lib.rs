@@ -31,6 +31,7 @@ pub mod process;
 pub mod redact;
 pub mod runtime_mode;
 pub mod secret_eq;
+pub mod settings_jsonc;
 pub mod settings_path;
 pub mod shell_quote;
 pub mod slug;

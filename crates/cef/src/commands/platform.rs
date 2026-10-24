@@ -4,7 +4,6 @@
 // Platform info commands for the CEF host.
 // Ported from src-tauri/src/commands/platform.rs without Tauri dependencies.
 
-use std::io::Read;
 use std::sync::Arc;
 
 use crate::state::AppState;
@@ -367,70 +366,10 @@ pub(crate) fn read_settings_jsonc(path: &std::path::Path) -> serde_json::Map<Str
     if !path.exists() {
         return serde_json::Map::new();
     }
-    match std::fs::read_to_string(path) {
-        Ok(content) => {
-            let stripped = json_comments::StripComments::new(content.as_bytes());
-            let mut json_bytes = Vec::new();
-            std::io::BufReader::new(stripped)
-                .read_to_end(&mut json_bytes)
-                .unwrap_or_default();
-            let json_str = strip_trailing_commas(&String::from_utf8_lossy(&json_bytes));
-            match serde_json::from_str::<serde_json::Value>(&json_str) {
-                Ok(serde_json::Value::Object(map)) => map,
-                _ => serde_json::Map::new(),
-            }
-        }
-        Err(_) => serde_json::Map::new(),
+    match std::fs::read_to_string(path).ok().and_then(|c| agentmux_common::settings_jsonc::parse_jsonc(&c)) {
+        Some(serde_json::Value::Object(map)) => map,
+        _ => serde_json::Map::new(),
     }
-}
-
-fn strip_trailing_commas(input: &str) -> String {
-    let mut result = String::with_capacity(input.len());
-    let mut in_string = false;
-    let mut last_comma_pos: Option<usize> = None;
-
-    for ch in input.chars() {
-        if in_string {
-            result.push(ch);
-            if ch == '"' {
-                let backslashes = result[..result.len() - 1]
-                    .chars()
-                    .rev()
-                    .take_while(|&c| c == '\\')
-                    .count();
-                if backslashes % 2 == 0 {
-                    in_string = false;
-                }
-            }
-            continue;
-        }
-        match ch {
-            '"' => {
-                in_string = true;
-                last_comma_pos = None;
-                result.push(ch);
-            }
-            ',' => {
-                last_comma_pos = Some(result.len());
-                result.push(ch);
-            }
-            '}' | ']' => {
-                if let Some(pos) = last_comma_pos {
-                    result.replace_range(pos..pos + 1, " ");
-                }
-                last_comma_pos = None;
-                result.push(ch);
-            }
-            _ if ch.is_whitespace() => {
-                result.push(ch);
-            }
-            _ => {
-                last_comma_pos = None;
-                result.push(ch);
-            }
-        }
-    }
-    result
 }
 
 fn merge_into_template(

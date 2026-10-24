@@ -102,7 +102,7 @@ use SttError::{NotConfigured, Upstream};
 fn read_settings_json() -> Option<serde_json::Value> {
     let path = crate::backend::config_watcher_fs::resolve_settings_dir().join("settings.json");
     let content = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str(&content).ok()
+    agentmux_common::settings_jsonc::parse_jsonc(&content)
 }
 
 fn settings_str(settings: &Option<serde_json::Value>, key: &str) -> Option<String> {

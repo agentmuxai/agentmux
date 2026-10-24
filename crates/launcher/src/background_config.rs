@@ -93,7 +93,7 @@ pub fn read_settings(settings_path: &Path) -> Settings {
     let Ok(text) = std::fs::read_to_string(settings_path) else {
         return s;
     };
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+    let Some(json) = agentmux_common::settings_jsonc::parse_jsonc(&text) else {
         return s;
     };
     if let Some(v) = json.get(BACKGROUND_KEY).and_then(|v| v.as_bool()) {
