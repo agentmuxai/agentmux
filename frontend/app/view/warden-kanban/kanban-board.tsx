@@ -56,6 +56,7 @@ function BacklogGroupView(props: {
     model: KanbanModel;
     now: number;
     agents: KanbanAgent[];
+    colors?: Record<string, string>;
     holding: (agent: string) => KanbanTask | undefined;
     onOpen: (t: KanbanTask) => void;
 }): JSX.Element {
@@ -78,7 +79,12 @@ function BacklogGroupView(props: {
         <div ref={el} class="kanban-group" classList={{ "kanban-drop--hover": hover() }}>
             <div class="kanban-group__head">
                 <Show when={props.group.key} fallback={<span class="kanban-group__anyone">Anyone</span>}>
-                    <AgentChip name={props.group.label} agent={props.group.agent} />
+                    <AgentChip
+                        name={props.group.label}
+                        agent={props.group.agent}
+                        uid={props.group.tasks[0]?.target_agent_uid}
+                        colors={props.colors}
+                    />
                 </Show>
                 <span class="warden-manager-dim">
                     {props.group.tasks.length} waiting
@@ -87,7 +93,15 @@ function BacklogGroupView(props: {
                 </span>
             </div>
             <For each={props.group.tasks}>
-                {(t) => <KanbanCard task={t} now={props.now} agents={props.agents} onOpen={props.onOpen} />}
+                {(t) => (
+                    <KanbanCard
+                        task={t}
+                        now={props.now}
+                        agents={props.agents}
+                        colors={props.colors}
+                        onOpen={props.onOpen}
+                    />
+                )}
             </For>
         </div>
     );
@@ -106,15 +120,47 @@ export function KanbanBoard(props: {
     reviewLimit: number;
     /** How many tasks the whole board has in Review, which the limit is about (a lane holds some). */
     reviewTotal: number;
+    /** The colours of agents not running here, by uid (`agent_colors`). */
+    colors?: Record<string, string>;
+    /** The narrow layout (§8): one list, Merged and Released folded until opened. */
+    narrow?: boolean;
 }): JSX.Element {
     const groups = (column: ColumnId) => backlogGroups(props.tasks, props.agents, column);
+    // In the narrow list, Merged and Released start folded: one header line each.
+    const [unfolded, setUnfolded] = createSignal<ReadonlySet<ColumnId>>(new Set());
+    const foldable = (id: ColumnId) => !!props.narrow && (id === "merged" || id === "released");
+    const folded = (id: ColumnId) => foldable(id) && !unfolded().has(id);
+    const toggle = (id: ColumnId) =>
+        setUnfolded((s) => {
+            const next = new Set(s);
+            if (!next.delete(id)) next.add(id);
+            return next;
+        });
     const review = createMemo(() => reviewLoad(props.tasks, props.now));
     const over = () => props.reviewLimit > 0 && props.reviewTotal > props.reviewLimit;
     const [showCancelled, setShowCancelled] = createSignal(false);
 
     const columnHead = (id: ColumnId, label: string, count: number) => (
-        <div class="kanban-column__head">
-            <span class="kanban-column__label">{label}</span>
+        <div
+            class="kanban-column__head"
+            classList={{ "kanban-column__head--foldable": foldable(id) }}
+            role={foldable(id) ? "button" : undefined}
+            tabindex={foldable(id) ? 0 : undefined}
+            aria-expanded={foldable(id) ? !folded(id) : undefined}
+            onClick={() => foldable(id) && toggle(id)}
+            onKeyDown={(e) => {
+                if (foldable(id) && (e.key === "Enter" || e.key === " ")) {
+                    e.preventDefault();
+                    toggle(id);
+                }
+            }}
+        >
+            <span class="kanban-column__label">
+                <Show when={foldable(id)}>
+                    <i class={`fa-solid fa-chevron-${folded(id) ? "right" : "down"}`} aria-hidden="true" />
+                </Show>
+                {label}
+            </span>
             <span
                 class="kanban-column__count"
                 classList={{ "kanban-column__count--over": id === "review" && over() }}
@@ -131,7 +177,9 @@ export function KanbanBoard(props: {
         </div>
     );
 
-    const card = (t: KanbanTask) => <KanbanCard task={t} now={props.now} agents={props.agents} onOpen={props.onOpen} />;
+    const card = (t: KanbanTask) => (
+        <KanbanCard task={t} now={props.now} agents={props.agents} colors={props.colors} onOpen={props.onOpen} />
+    );
 
     /** A waiting column: one group per agent, each a drop target. Backlog always shows Anyone, so a card
      *  can be given to anyone; Spec'd only the groups it has. */
@@ -148,6 +196,7 @@ export function KanbanBoard(props: {
                                 model={props.model}
                                 now={props.now}
                                 agents={props.agents}
+                                colors={props.colors}
                                 holding={props.holding}
                                 onOpen={props.onOpen}
                             />
@@ -173,12 +222,20 @@ export function KanbanBoard(props: {
             <For each={COLUMNS}>
                 {(col) => {
                     const tasks = () => columnTasks(props.tasks, col.id);
-                    const finished = () => (col.id === "merged" ? tasks().filter((t) => t.state !== "cancelled") : tasks());
+                    const finished = () =>
+                        col.id === "merged" ? tasks().filter((t) => t.state !== "cancelled") : tasks();
                     const cancelled = () => (col.id === "merged" ? tasks().filter((t) => t.state === "cancelled") : []);
                     return (
                         <section
                             class="kanban-column"
-                            classList={{ [`kanban-column--${col.id}`]: true }}
+                            classList={{
+                                [`kanban-column--${col.id}`]: true,
+                                "kanban-column--empty":
+                                    finished().length + cancelled().length === 0 &&
+                                    !(col.id === "progress" && props.untracked.length > 0) &&
+                                    col.id !== "backlog",
+                                "kanban-column--folded": folded(col.id),
+                            }}
                             aria-label={col.label}
                         >
                             {columnHead(
@@ -186,10 +243,7 @@ export function KanbanBoard(props: {
                                 col.label,
                                 finished().length + (col.id === "progress" ? props.untracked.length : 0)
                             )}
-                            <Show
-                                when={col.id !== "backlog" && col.id !== "specd"}
-                                fallback={waiting(col.id)}
-                            >
+                            <Show when={col.id !== "backlog" && col.id !== "specd"} fallback={waiting(col.id)}>
                                 <div class="kanban-column__list">
                                     <Show when={col.id === "progress"}>
                                         <For each={props.untracked}>

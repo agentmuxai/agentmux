@@ -84,3 +84,9 @@
     // Process kinds (theme.scss, measured by process-kind-colours.test.ts).
     --process-kind-agentmux: var(--term-bright-cyan);
 }
+
+// The Kanban's stage colours this palette needs moved apart, or made readable
+// (view/warden-kanban/kanban-stage-colours.test.ts).
+[data-theme="midnight"] {
+    --kanban-stage-progress: var(--term-bright-magenta);
+}

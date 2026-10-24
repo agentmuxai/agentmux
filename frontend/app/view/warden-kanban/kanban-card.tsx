@@ -12,6 +12,7 @@ import { Button, Pill, StatusDot, type StatusTone } from "@/app/element/ui";
 import { MOS } from "@/app/store/global";
 import { formatAge } from "@/app/view/warden-shared/warden-shared";
 
+import { agentColor } from "./kanban-colors";
 import {
     checklistProgress,
     columnOf,
@@ -69,10 +70,25 @@ export function agentStateWords(state: KanbanAgentState | undefined): string {
     return state ? (STATE_WORDS[state] ?? state) : "not here";
 }
 
-/** An agent's name with its live state. */
-export function AgentChip(props: { name: string; agent?: KanbanAgent | null }): JSX.Element {
+/** An agent's name with its live state, and a swatch of its colour when it has one. */
+export function AgentChip(props: {
+    name: string;
+    agent?: KanbanAgent | null;
+    uid?: string;
+    colors?: Record<string, string>;
+}): JSX.Element {
+    const swatch = () => agentColor(props.agent, props.uid, props.colors, "identity");
     return (
         <span class="kanban-agent-chip">
+            <Show when={swatch()}>
+                {(c) => (
+                    <span
+                        class="kanban-agent-chip__swatch"
+                        style={{ "--kanban-agent-color": c() }}
+                        aria-hidden="true"
+                    />
+                )}
+            </Show>
             <StatusDot
                 tone={agentTone(props.agent?.state)}
                 label={`${props.name}: ${agentStateWords(props.agent?.state)}`}
@@ -86,6 +102,8 @@ export function KanbanCard(props: {
     task: KanbanTask;
     now: number;
     agents: KanbanAgent[];
+    /** The colours of agents not running here, by uid (`agent_colors`). */
+    colors?: Record<string, string>;
     onOpen: (t: KanbanTask) => void;
 }): JSX.Element {
     let el: HTMLDivElement | undefined;
@@ -94,10 +112,19 @@ export function KanbanCard(props: {
     const reason = createMemo(() => needsReason(t()));
     const who = createMemo(() => {
         const task = t();
-        if (task.claimed_by) return { name: task.claimed_by, agent: task.holder };
+        if (task.claimed_by) return { name: task.claimed_by, agent: task.holder, uid: task.claimed_by_uid };
         if (task.target_agent)
-            return { name: task.target_agent, agent: props.agents.find((a) => a.name === task.target_agent) ?? null };
+            return {
+                name: task.target_agent,
+                agent: props.agents.find((a) => a.name === task.target_agent) ?? null,
+                uid: task.target_agent_uid,
+            };
         return null;
+    });
+    // The card's left edge is its agent's colour; a task for no one keeps the plain border.
+    const stripe = createMemo(() => {
+        const w = who();
+        return w ? agentColor(w.agent, w.uid, props.colors) : undefined;
     });
     onMount(() => {
         // Only a waiting task moves by drag: to another agent, to Anyone, or onto an agent to start it.
@@ -118,6 +145,7 @@ export function KanbanCard(props: {
                 "kanban-card--needs": column() === "needs",
                 "kanban-card--cancelled": t().state === "cancelled",
             }}
+            style={stripe() ? { "--kanban-agent-color": stripe() } : undefined}
             role="button"
             tabindex={0}
             aria-label={`Task ${t().card.num}: ${t().title}`}
@@ -133,12 +161,21 @@ export function KanbanCard(props: {
                 <span class="kanban-card__num">#{t().card.num}</span>
                 <span class="kanban-card__text">{t().title}</span>
             </div>
-            <Show when={reason()}>{(r) => <div class="kanban-card__reason">{r()}</div>}</Show>
+            <Show when={reason()}>
+                {(r) => (
+                    <div class="kanban-card__reason">
+                        <i class="fa-solid fa-circle-exclamation" aria-hidden="true" />
+                        {r()}
+                    </div>
+                )}
+            </Show>
             <Show when={!reason() && t().card.note}>
                 <div class="kanban-card__note">{t().card.note}</div>
             </Show>
             <div class="kanban-card__meta">
-                <Show when={who()}>{(w) => <AgentChip name={w().name} agent={w().agent} />}</Show>
+                <Show when={who()}>
+                    {(w) => <AgentChip name={w().name} agent={w().agent} uid={w().uid} colors={props.colors} />}
+                </Show>
                 <Show when={t().state === "held"}>
                     <Pill icon="pause">on hold</Pill>
                 </Show>

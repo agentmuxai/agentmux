@@ -107,3 +107,10 @@
     --process-kind-builds: color-mix(in oklab, var(--term-bright-red) 95%, var(--main-text-color));
     --process-kind-runtimes: color-mix(in oklab, var(--term-blue) 95%, var(--main-text-color));
 }
+
+// The Kanban's stage colours this palette needs moved apart, or made readable
+// (view/warden-kanban/kanban-stage-colours.test.ts).
+[data-theme="solarized-light"] {
+    --kanban-stage-backlog: var(--term-bright-yellow);
+    --kanban-stage-progress: var(--conn-icon-color-4);
+}

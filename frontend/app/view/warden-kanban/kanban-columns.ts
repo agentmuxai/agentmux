@@ -20,6 +20,10 @@ export const COLUMNS: { id: ColumnId; label: string }[] = [
     { id: "released", label: "Released" },
 ];
 
+/** Warden's width at or under which the board is one list (§8 of the stages spec); `kanban.scss`'s
+ *  `$kanban-narrow` is the same number. */
+export const KANBAN_NARROW_PX = 760;
+
 /** The kinds of task that write a document for the operator to approve: a build that starts after one
  *  of them is Spec'd once it is accepted. Matched case-insensitively. */
 const RESEARCH_KINDS = new Set(["spec", "research"]);

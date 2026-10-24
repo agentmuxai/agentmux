@@ -82,3 +82,9 @@
     // Its terminal blue and cyan are one colour: Monokai's orange.
     --process-kind-runtimes: #fd971f;
 }
+
+// The Kanban's stage colours this palette needs moved apart, or made readable
+// (view/warden-kanban/kanban-stage-colours.test.ts).
+[data-theme="monokai"] {
+    --kanban-stage-progress: var(--conn-icon-color-3);
+}

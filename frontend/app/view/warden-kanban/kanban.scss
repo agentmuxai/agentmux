@@ -2,9 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Warden — Kanban section (warden-kanban-manager.tsx). Line style: borders, no fills; the theme's
-// semantic colours mark state, the words carry it.
+// semantic colours mark state, the words carry it. Each column has its stage's colour (a bar over its
+// header, a dot before its name); each card its agent's, on its left edge
+// (SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23.md §7).
 
 @use "../../mixins.scss";
+
+// The width at or under which the board is one list (§8); KANBAN_NARROW_PX in kanban-columns.ts.
+$kanban-narrow: 760px;
 
 .kanban {
     position: relative;
@@ -63,16 +68,49 @@
     overflow-x: auto;
 }
 
-// Narrow panes: one column under another, Needs you first.
-@container warden (max-width: 760px) {
+// Narrow panes: one long list with one scrollbar, each column a section under its sticky header, Needs you
+// first; empty sections are a header line, Merged and Released folded until opened (§8).
+@container warden (max-width: #{$kanban-narrow}) {
     .kanban-board {
         grid-template-columns: 1fr;
+        align-content: start;
         overflow-x: visible;
+        overflow-y: auto;
+    }
+
+    // Qualified by the board: these come before the base rules below and must win over them.
+    .kanban-board .kanban-column {
+        min-height: auto;
+    }
+
+    .kanban-board .kanban-column__list {
+        overflow-y: visible;
+        min-height: 0;
+    }
+
+    .kanban-column__head {
+        position: sticky;
+        top: 0;
+        z-index: var(--z-tab-name);
+        background: var(--main-bg-color);
+    }
+
+    .kanban-board .kanban-column--empty .kanban-column__list {
+        display: none;
     }
 
     .kanban-column--needs {
         order: -1;
     }
+
+    // In lanes the lane header leads; two sticky levels would overlap on a short pane.
+    .kanban-lanes .kanban-column__head {
+        position: static;
+    }
+}
+
+.kanban-column--folded .kanban-column__list {
+    display: none;
 }
 
 .kanban-lanes {
@@ -115,24 +153,81 @@
     flex-direction: column;
     min-height: 0;
     border: 1px solid var(--border-color);
+    border-top: 3px solid var(--kanban-stage, var(--border-color));
     border-radius: var(--radius-sm);
 }
 
+.kanban-column--backlog {
+    --kanban-stage: var(--kanban-stage-backlog);
+}
+
+.kanban-column--research {
+    --kanban-stage: var(--kanban-stage-research);
+}
+
+.kanban-column--specd {
+    --kanban-stage: var(--kanban-stage-specd);
+}
+
+.kanban-column--progress {
+    --kanban-stage: var(--kanban-stage-progress);
+}
+
 .kanban-column--needs {
-    border-color: var(--warning-color);
+    --kanban-stage: var(--kanban-stage-needs);
+
+    border-color: var(--kanban-stage-needs);
+}
+
+.kanban-column--review {
+    --kanban-stage: var(--kanban-stage-review);
+}
+
+.kanban-column--merged {
+    --kanban-stage: var(--kanban-stage-merged);
+}
+
+.kanban-column--released {
+    --kanban-stage: var(--kanban-stage-released);
 }
 
 .kanban-column__head {
     display: flex;
+    flex-wrap: wrap;
     align-items: baseline;
     justify-content: space-between;
+    gap: 0 var(--space-1);
     padding: var(--space-1) var(--space-2);
     border-bottom: 1px solid var(--border-color);
 }
 
 .kanban-column__label {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
     font-weight: 600;
     font-size: var(--text-sm);
+
+    // The stage's dot, beside its name.
+    &::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: var(--radius-full);
+        background: var(--kanban-stage, var(--border-color));
+    }
+}
+
+.kanban-column__head--foldable {
+    cursor: pointer;
+
+    &:focus-visible {
+        @include mixins.focus-ring;
+    }
+}
+
+.kanban-column__fold {
+    align-self: flex-start;
 }
 
 .kanban-column__count {
@@ -189,6 +284,8 @@
     gap: var(--space-1);
     padding: var(--space-2);
     border: 1px solid var(--border-color);
+    // Its agent's colour; the plain border for a task for no one.
+    border-left: 3px solid var(--kanban-agent-color, var(--border-color));
     border-radius: var(--radius-sm);
     background: var(--main-bg-color);
     cursor: pointer;
@@ -209,7 +306,12 @@
 }
 
 .kanban-card--needs {
-    border-left: 2px solid var(--warning-color);
+    border-color: var(--kanban-stage-needs);
+    border-left-color: var(--kanban-agent-color, var(--kanban-stage-needs));
+}
+
+.kanban-card--cancelled {
+    opacity: 0.6;
 }
 
 .kanban-card--untracked {
@@ -234,7 +336,10 @@
 }
 
 .kanban-card__reason {
-    color: var(--warning-color);
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-1);
+    color: var(--kanban-stage-needs);
     font-size: var(--text-xs);
 }
 
@@ -281,6 +386,13 @@
 
 .kanban-agent-chip__name {
     font-weight: 500;
+}
+
+.kanban-agent-chip__swatch {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    background: var(--kanban-agent-color);
 }
 
 .kanban-new {

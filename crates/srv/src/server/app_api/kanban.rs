@@ -59,14 +59,26 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     });
 }
 
-/// An agent of this instance as the board shows it.
-fn agent_json(reg: &AgentRegistration, state: Option<AgentState>) -> Value {
+/// An agent of this instance as the board shows it, with its colour
+/// (SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23.md §7.2).
+fn agent_json(reg: &AgentRegistration, state: Option<AgentState>, color: Option<String>) -> Value {
     json!({
         "name": reg.agent_id,
         "uid": reg.uid,
         "block_id": reg.block_id,
         "state": state.map(AgentState::as_str).unwrap_or("gone"),
+        "color": color,
     })
+}
+
+/// The colour an agent definition keeps (`ui:color`, `#rrggbb`), the one its
+/// pane and Swarm row are drawn from.
+fn color_of(mstore: &crate::backend::storage::store::Store, uid: &str) -> Option<String> {
+    if uid.is_empty() {
+        return None;
+    }
+    let c = mstore.agent_content_get(uid, "ui:color").ok().flatten()?.content;
+    crate::backend::agent_color::is_valid_agent_color(c.trim()).then(|| c.trim().to_string())
 }
 
 /// The registration holding a task, by UID when the task has one.
@@ -101,18 +113,32 @@ async fn list(state: &AppState) -> Result<Value, String> {
         let tasks = identity.work_board_list(now - FINISHED_WINDOW_MS, LIST_LIMIT, now).map_err(|e| e.to_string())?;
         let stamp = identity.work_board_stamp().unwrap_or(0);
         let states: Vec<Option<AgentState>> = regs.iter().map(|r| agent_state::current_state(&mstore, &r.block_id)).collect();
-        let tasks: Vec<Value> = tasks
+        let colors: Vec<Option<String>> = regs.iter().map(|r| r.uid.as_deref().and_then(|u| color_of(&mstore, u))).collect();
+        let tasks_json: Vec<Value> = tasks
             .iter()
             .map(|t| {
                 let holder = holder_of(&regs, &t.item).map(|r| {
                     let i = regs.iter().position(|x| x.block_id == r.block_id).unwrap_or(0);
-                    agent_json(r, states[i])
+                    agent_json(r, states[i], colors[i].clone())
                 });
                 task_json(t, holder)
             })
             .collect();
-        let agents: Vec<Value> = regs.iter().zip(states.iter()).map(|(r, s)| agent_json(r, *s)).collect();
-        Ok(json!({ "tasks": tasks, "agents": agents, "stamp": stamp, "now": now }))
+        let agents: Vec<Value> =
+            regs.iter().zip(states.iter()).zip(colors.iter()).map(|((r, s), c)| agent_json(r, *s, c.clone())).collect();
+        // The colours of agents tasks name that aren't running here (closed,
+        // or in another channel), by uid.
+        let live: std::collections::HashSet<&str> = regs.iter().filter_map(|r| r.uid.as_deref()).collect();
+        let mut agent_colors = serde_json::Map::new();
+        for uid in tasks.iter().flat_map(|t| [t.item.target_agent_uid.as_str(), t.item.claimed_by_uid.as_str()]) {
+            if uid.is_empty() || live.contains(uid) || agent_colors.contains_key(uid) {
+                continue;
+            }
+            if let Some(c) = color_of(&mstore, uid) {
+                agent_colors.insert(uid.to_string(), Value::String(c));
+            }
+        }
+        Ok(json!({ "tasks": tasks_json, "agents": agents, "agent_colors": agent_colors, "stamp": stamp, "now": now }))
     })
     .await
     .map_err(|e| e.to_string())?
