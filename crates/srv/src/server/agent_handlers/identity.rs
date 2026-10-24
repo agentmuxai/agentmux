@@ -513,6 +513,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     return Err(format!("account.key.verify: {e}"));
                 }
                 broker.publish_event::<crate::backend::mps_events::IdentityAccountsChanged>(&(), vec![], 0);
+                // A key the provider just accepted proves the account works (#2237).
+                if valid {
+                    crate::server::account_episodes::after_sign_in(&account_id);
+                }
                 Ok(AccountKeyVerifyResult {
                     valid,
                     error: None,

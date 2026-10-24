@@ -25,7 +25,8 @@
 //! `identity.account.move_agents` ([`moves`]) links an episode's idle agents
 //! to another signed-in account of the same provider and restarts their
 //! panes; any link change clears the failure its old account caused
-//! ([`failed_panes`], [`after_rebind`]).
+//! ([`failed_panes`], [`after_rebind`]), and a sign-in that proves an
+//! account works clears its panes' "signed out" ([`after_sign_in`]).
 
 mod machine;
 mod moves;
@@ -42,7 +43,7 @@ use crate::backend::eventbus::EventBus;
 use crate::backend::mps::MuxEvent;
 use crate::backend::obj::{self, Block, Tab};
 use crate::backend::rpc::engine::WshRpcEngine;
-use crate::backend::rpc_types::{NoArgsReq, COMMAND_IDENTITY_ACCOUNT_AVAILABILITY, COMMAND_IDENTITY_ACCOUNT_MOVE_AGENTS};
+use crate::backend::rpc_types::{NoArgsReq, COMMAND_IDENTITY_ACCOUNT_AVAILABILITY, COMMAND_IDENTITY_ACCOUNT_MOVE_AGENTS, COMMAND_IDENTITY_ACCOUNT_SIGNED_IN};
 use crate::backend::storage::store::Store;
 use crate::server::AppState;
 
@@ -145,6 +146,22 @@ impl From<AccountAvailability> for AccountAvailabilityEvent {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct IdentityAccountAvailabilityResult {
     pub episodes: Vec<AccountAvailability>,
+}
+
+/// `identity.account.signed_in`: the window's sign-in to this account
+/// completed and its CLI confirmed the credential (#2237).
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct IdentityAccountSignedInReq {
+    pub account_id: String,
+}
+
+/// `identity.account.signed_in`: how many of the account's panes stopped
+/// being signed out.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct IdentityAccountSignedInResult {
+    pub cleared: u32,
 }
 
 use moves::IdentityAccountMoveAgentsReq;
@@ -516,16 +533,75 @@ pub fn after_rebind(mstore: &Arc<Store>, event_bus: &Arc<EventBus>, before: Vec<
     }
     if cleared > 0 {
         tracing::info!(cleared, "account episode: a rebind cleared its old account's failures");
-        crate::backend::reactive::held_jekt_wake().notify_one();
-        refresh_soon();
+        after_clearing();
     }
     cleared
 }
 
-/// Both RPCs are the operator's: an agent connection (`bus:register`) is
-/// refused, since the answer names accounts and the move relinks and restarts
-/// other agents.
+/// Failures were cleared: replay what was held for those agents, and let the
+/// episodes see that their panes left.
+fn after_clearing() {
+    crate::backend::reactive::held_jekt_wake().notify_one();
+    refresh_soon();
+}
+
+/// `account_id`'s credentials were just proven good: a sign-in to it
+/// completed, or a validate of it passed (#2237). A rebind to the same
+/// account clears nothing ([`after_rebind`]), so without this its panes
+/// stayed signed out until a turn ran. A token refresh isn't a proof and
+/// doesn't call this. Runs off the async workers; does nothing before
+/// [`install`].
+pub fn after_sign_in(account_id: &str) {
+    let Some(rt) = RUNTIME.get() else { return };
+    let account_id = account_id.to_string();
+    let run = move || {
+        clear_signed_out(&rt.state.mstore, &rt.state.identity_store, &rt.state.event_bus, &account_id);
+    };
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => drop(handle.spawn_blocking(run)),
+        Err(_) => run(),
+    }
+}
+
+/// Clear the refused sign-in stored on each pane whose run was on
+/// `account_id`, then wake held messages and the episodes. A usage limit
+/// stays: it ends at the reset or a move. Returns how many were cleared.
+/// BLOCKING.
+pub(crate) fn clear_signed_out(mstore: &Arc<Store>, identity: &Store, event_bus: &Arc<EventBus>, account_id: &str) -> usize {
+    let mut cleared = 0;
+    for block in tab_blocks(mstore) {
+        let signed_out = failure_of_block(&block).is_some_and(|f| f.code == FailureClass::Auth);
+        if !signed_out || !run_accounts_of_block(identity, &block).iter().any(|a| a == account_id) {
+            continue;
+        }
+        crate::backend::blockcontroller::core::persist_last_failure(&block.oid, None, &Some(mstore.clone()), &Some(event_bus.clone()));
+        cleared += 1;
+    }
+    if cleared > 0 {
+        tracing::info!(cleared, "account episode: a sign-in cleared its account's signed-out panes");
+        after_clearing();
+    }
+    cleared
+}
+
+/// These RPCs are the operator's: an agent connection (`bus:register`) is
+/// refused, since the answer names accounts, the move relinks and restarts
+/// other agents, and a sign-in clears other agents' state.
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let s = state.clone();
+    engine.register_typed(COMMAND_IDENTITY_ACCOUNT_SIGNED_IN, move |req: IdentityAccountSignedInReq, ctx| {
+        let s = s.clone();
+        async move {
+            ctx.operator_only("only the operator's window reports a sign-in")?;
+            if req.account_id.is_empty() {
+                return Err("identity.account.signed_in: account_id is required".to_string());
+            }
+            let cleared = tokio::task::spawn_blocking(move || clear_signed_out(&s.mstore, &s.identity_store, &s.event_bus, &req.account_id))
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(IdentityAccountSignedInResult { cleared: u32::try_from(cleared).unwrap_or(u32::MAX) })
+        }
+    });
     let s = state.clone();
     engine.register_typed(COMMAND_IDENTITY_ACCOUNT_AVAILABILITY, move |_req: Option<NoArgsReq>, ctx| {
         let s = s.clone();

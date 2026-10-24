@@ -26,6 +26,7 @@ const hub = vi.hoisted(() => ({
     openLoginTerminal: vi.fn(),
     ensureAccountDir: vi.fn(),
     upsertIdentityAccount: vi.fn(),
+    identityAccountSignedIn: vi.fn(),
     linkAgentIdentity: vi.fn(),
     setMeta: vi.fn(),
     checkCliAuthCommand: vi.fn(),
@@ -45,6 +46,7 @@ vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         EnsureAccountDirCommand: (...args: unknown[]) => hub.ensureAccountDir(...args),
         UpsertIdentityAccountCommand: (...args: unknown[]) => hub.upsertIdentityAccount(...args),
+        IdentityAccountSignedInCommand: (...args: unknown[]) => hub.identityAccountSignedIn(...args),
         LinkAgentIdentityCommand: (...args: unknown[]) => hub.linkAgentIdentity(...args),
         SetMetaCommand: (...args: unknown[]) => hub.setMeta(...args),
         CheckCliAuthCommand: (...args: unknown[]) => hub.checkCliAuthCommand(...args),
@@ -86,6 +88,7 @@ beforeEach(() => {
     hub.openLoginTerminal.mockReset().mockResolvedValue({ opened: true });
     hub.ensureAccountDir.mockReset().mockResolvedValue(MINTED);
     hub.upsertIdentityAccount.mockReset().mockResolvedValue({});
+    hub.identityAccountSignedIn.mockReset().mockResolvedValue({ cleared: 0 });
     hub.linkAgentIdentity.mockReset().mockResolvedValue(undefined);
     hub.setMeta.mockReset().mockResolvedValue(undefined);
     // Default: the login completes and the CLI reports authenticated on the
@@ -165,6 +168,8 @@ describe("runProviderLogin", () => {
             {},
             expect.objectContaining({ id: MINTED.accountId, provider: "claude", kind: "oauth" }),
         );
+        // A confirmed login ends the account's agents' "signed out" (#2237).
+        expect(hub.identityAccountSignedIn).toHaveBeenCalledWith({}, { account_id: MINTED.accountId });
         // Claude now falls straight to tier 3 like every other provider —
         // the tier-2 seed-from-personal-~/.claude shortcut is gone.
         expect(hub.openLoginTerminal).toHaveBeenCalledTimes(1);
@@ -583,6 +588,7 @@ describe("runProviderLogin", () => {
         expect(onAccountRegistered).toHaveBeenCalledWith(MINTED.accountId, MINTED.dir);
 
         onAccountRegistered.mockClear();
+        hub.identityAccountSignedIn.mockClear();
         // Rejects on BOTH attempts — tier 3 retries once (reagent P2,
         // a safety net against a transient persist hiccup), so a single-rejection
         // mock would now succeed on the retry and fire onAccountRegistered.
@@ -599,6 +605,7 @@ describe("runProviderLogin", () => {
         await vi.advanceTimersByTimeAsync(5_000);
         await promise2;
         expect(onAccountRegistered).not.toHaveBeenCalled();
+        expect(hub.identityAccountSignedIn).not.toHaveBeenCalled();
     });
 
     it("retries persistSeededAccount once on a transient failure after terminal-success is detected (reagent P2)", async () => {
