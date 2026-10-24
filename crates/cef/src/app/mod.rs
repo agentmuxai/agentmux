@@ -932,9 +932,11 @@ wrap_app! {
                 }
 
                 // ── GPU channel + frame-production tuning ─────────────────────
+                // Also WebContentsDiscard: CefBrowserHost::Discard (the CEF
+                // fork, browser_panes::discard) refuses without it.
                 let gpu_features_key = CefString::from("enable-features");
                 let gpu_features_val = CefString::from(
-                    "EarlyEstablishGpuChannel,EstablishGpuChannelAsync",
+                    "EarlyEstablishGpuChannel,EstablishGpuChannelAsync,WebContentsDiscard",
                 );
                 cmd.append_switch_with_value(
                     Some(&gpu_features_key),

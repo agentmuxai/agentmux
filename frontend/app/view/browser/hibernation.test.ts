@@ -7,6 +7,7 @@ vi.mock("@/store/global", () => ({ getSettingsKeyAtom: (k: string) => () => sett
 vi.mock("@/app/store/app-api", () => ({ getApi: () => undefined }));
 
 import {
+    afterDiscard,
     awakeReason,
     etaLabel,
     hibernateAfterMs,
@@ -43,7 +44,9 @@ describe("readSleep", () => {
             title: "X",
             favicon: "f",
             loadMs: 900,
+            kept: false,
         });
+        expect(readSleep({ since: 1, url: "https://x", kept: true })?.kept).toBe(true);
     });
 
     it("treats an unknown reason as manual and a bad load time as none", () => {
@@ -241,5 +244,19 @@ describe("when a hidden pane sleeps", () => {
         settings["browser:hibernate"] = false;
         expect(await policyTick(now, async () => "critical")).toEqual([]);
         offs.forEach((off) => off());
+    });
+});
+
+describe("afterDiscard", () => {
+    it("keeps a page the engine discarded in place, and closes it otherwise", () => {
+        expect(afterDiscard({ supported: true, ok: true }, true)).toBe("kept");
+        expect(afterDiscard({ supported: true, ok: false }, true)).toBe("close");
+        expect(afterDiscard({ supported: false, ok: false }, true)).toBe("close");
+        expect(afterDiscard(null, true)).toBe("close");
+    });
+    it("loads back a page discarded while it was being woken, and leaves an undiscarded one alone", () => {
+        expect(afterDiscard({ supported: true, ok: true }, false)).toBe("load");
+        expect(afterDiscard({ supported: true, ok: false }, false)).toBe("nothing");
+        expect(afterDiscard(undefined, false)).toBe("nothing");
     });
 });

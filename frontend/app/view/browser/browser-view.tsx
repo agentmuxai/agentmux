@@ -177,7 +177,9 @@ function BrowserSleepCard(props: { sleep: BrowserSleep; startedAt: () => number;
                     <span>{eta()}</span>
                 </div>
                 <p class="browser-sleep-card-why">{sleepReasonText(props.sleep.reason)}</p>
-                <p class="browser-sleep-card-lost">{NOT_KEPT_TEXT}</p>
+                <Show when={!props.sleep.kept}>
+                    <p class="browser-sleep-card-lost">{NOT_KEPT_TEXT}</p>
+                </Show>
                 <div class="browser-sleep-card-actions">
                     <Button density="compact" onClick={props.onKeepAwake}>
                         Keep this pane awake
@@ -253,6 +255,9 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
         void model.hibernate("launch").catch(() => setLaunchAsleep(false));
     }
     const sleeping = () => model.sleepAtom() != null || launchAsleep();
+    // A pane that mounts asleep has no page yet: a "kept" record is from a page
+    // discarded before a restart or reload, which is gone.
+    if (model.sleepAtom()?.kept) void model.clearSleepKept().catch(() => {});
     createEffect(() => {
         if (model.sleepAtom() != null && launchAsleep()) setLaunchAsleep(false);
     });
@@ -469,6 +474,18 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             }
             loadClockFrom = sleeping() && wakeStartedAt() > 0 ? wakeStartedAt() : performance.now();
             sawLoading = model.loadingAtom();
+        }),
+    );
+    // A page discarded in place still exists: its wake is a load of that page,
+    // timed from the wake's start like a new one.
+    createEffect(
+        on(wakeRequested, (requested) => {
+            // A wake that ended without a load (woken during the park before a discard)
+            // must not time a later, unrelated navigation from its start.
+            if (!requested) loadClockFrom = 0;
+            if (!requested || !rectSync.paneCreated()) return;
+            loadClockFrom = wakeStartedAt();
+            sawLoading = false;
         }),
     );
     createEffect(
