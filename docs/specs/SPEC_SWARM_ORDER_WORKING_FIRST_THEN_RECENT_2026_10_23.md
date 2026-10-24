@@ -42,7 +42,7 @@ The chip and the order read the same function, so a row cannot say "working" and
 - remote agents in band 1 join the top band, after the local ones (by section order, then name);
 - remote agents in band 2 stay after all local rows, in the existing order.
 
-Sharing a last-active time over `swarm.other-instances` would let remote idle agents sort by recency. That is a separate change; it is not in #1272.
+Sharing a last-active time over `swarm.other-instances` would let remote idle agents sort by recency. That is a separate change; it is not in this change.
 
 ## 3. "Last active"
 
@@ -83,8 +83,8 @@ The Swarm is one flat list today, so §2 applies to it whole. When a grouping ex
 
 ## 7. Where it goes
 
-- A pure function `orderSwarmRows(rows, workingSince, remote)` in a new `frontend/app/view/swarm/swarm-order.ts`: no store reads, no timers.
-- A small controller, owned by `SwarmViewModel`, that keeps `workingSince`, runs the 400 ms settle and the hold, and publishes the order `swarm-view.tsx` renders. `buildTree()` stays unsorted, so the other callers (`collectClearableRows`, the selection prune) are unaffected.
+- A pure function `orderSwarmItems(items, workingSince)` in a new `frontend/app/view/swarm/swarm-order.ts`: no store reads, no timers. Local and remote rows are one list of items, told apart by `remote`.
+- A small controller, `SwarmOrderController` in the same file, that keeps `workingSince`, runs the 400 ms settle and the hold, and publishes the order `swarm-view.tsx` renders. The view creates it through `useSwarmOrder` (`swarm-order-hold.ts`), which also wires the holds to the list element; the slide is in `swarm-order-motion.ts`. `buildTree()` stays unsorted, so the other callers (`collectClearableRows`, the selection prune) are unaffected.
 - No srv change, no setting. The old order was arbitrary, so there is nothing to keep.
 
 ## 8. Tests
@@ -96,7 +96,7 @@ The Swarm is one flat list today, so §2 applies to it whole. When a grouping ex
 
 ## 9. Rollout
 
-One frontend-only PR (#1272) with a `minor` changeset. No migration, no flag; it ships in the next release.
+One frontend-only PR (#5376) with a `minor` changeset. No migration, no flag; it ships in the next release.
 
 ## 10. Decisions for the operator
 

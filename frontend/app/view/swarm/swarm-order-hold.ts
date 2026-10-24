@@ -61,7 +61,8 @@ export function useSwarmOrder(opts: {
             ["pointerup", release],
             ["pointercancel", release],
             ["dragend", release],
-            ["blur", release],
+            // Only the window losing focus: an element losing it does not reach this far unless captured.
+            ["blur", (e: Event) => e.target === window && release()],
             ["pointerdown", closeMenu],
             ["keydown", closeMenu],
         ] as const;
