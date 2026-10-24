@@ -13,8 +13,11 @@
 //! notification is up (`notified`), so the next success takes it down.
 //!
 //! `db_job_incident_cursors` is how far the keeper has walked each job's
-//! decisive runs (`jobs::incidents`): advancing it is a conditional UPDATE
-//! on where it was, so each run is taken by one keeper, once.
+//! decisive runs (`jobs::incidents`); it moves on only after a run was
+//! applied, and a report that changes a run's outcome moves it back
+//! (`job_run_report`). `db_job_incident_runs` holds every failure counted
+//! into an incident, written in the same transaction as the count, so a run
+//! walked again is never counted twice.
 
 use rusqlite::{params, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
@@ -51,6 +54,11 @@ pub(crate) const SCHEMA: &str = "
         job_id      TEXT PRIMARY KEY,
         ended_at_ms INTEGER NOT NULL,
         run_id      TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS db_job_incident_runs (
+        run_id        TEXT PRIMARY KEY,
+        incident_id   TEXT NOT NULL,
+        counted_at_ms INTEGER NOT NULL
     );";
 
 /// How an incident ended (`end_reason`).
@@ -129,6 +137,23 @@ fn row_to_incident(row: &Row) -> rusqlite::Result<JobIncident> {
     })
 }
 
+/// Whether run `run_id` was counted into an incident.
+fn counted(conn: &rusqlite::Connection, run_id: &str) -> Result<bool, StoreError> {
+    Ok(conn
+        .query_row("SELECT 1 FROM db_job_incident_runs WHERE run_id = ?1", params![run_id], |_| Ok(()))
+        .optional()?
+        .is_some())
+}
+
+/// Record run `run_id` as counted into incident `incident_id`.
+fn count_run(conn: &rusqlite::Connection, run_id: &str, incident_id: &str, now_ms: i64) -> Result<(), StoreError> {
+    conn.execute(
+        "INSERT OR REPLACE INTO db_job_incident_runs (run_id, incident_id, counted_at_ms) VALUES (?1, ?2, ?3)",
+        params![run_id, incident_id, now_ms],
+    )?;
+    Ok(())
+}
+
 /// How far the keeper has walked a job's decisive runs: the last one it
 /// took, by when it ended and its id.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -138,11 +163,16 @@ pub struct IncidentCursor {
 }
 
 impl Store {
-    /// Open `incident` (its first failure) unless the job already has an open
-    /// one. `false` when it has.
+    /// Open `incident` (its first failure, `first_run_id`) unless the job
+    /// already has an open one, or that run was counted already. `false`
+    /// when it wasn't opened.
     pub fn job_incident_open(&self, incident: &JobIncident) -> Result<bool, StoreError> {
-        let conn = self.conn().lock().unwrap();
-        let n = conn.execute(
+        let mut conn = self.conn().lock().unwrap();
+        let tx = conn.transaction()?;
+        if counted(&tx, &incident.first_run_id)? {
+            return Ok(false);
+        }
+        let n = tx.execute(
             &format!(
                 "INSERT OR IGNORE INTO db_job_incidents ({COLS}) VALUES
                  (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, NULL, '', '', NULL, ?13)"
@@ -163,6 +193,10 @@ impl Store {
                 incident.notified as i64,
             ],
         )?;
+        if n > 0 {
+            count_run(&tx, &incident.first_run_id, &incident.id, incident.opened_at_ms)?;
+        }
+        tx.commit()?;
         Ok(n > 0)
     }
 
@@ -205,8 +239,8 @@ impl Store {
     }
 
     /// Count run `run_id` into open incident `id` as another failure, if its
-    /// last counted run is still `seen_run_id`. Returns the new count, or
-    /// `None` when someone else counted first or it ended.
+    /// last counted run is still `seen_run_id` and `run_id` wasn't counted
+    /// before. Returns the new count, or `None` when it wasn't counted.
     pub fn job_incident_fail_again(
         &self,
         id: &str,
@@ -214,8 +248,12 @@ impl Store {
         run_id: &str,
         now_ms: i64,
     ) -> Result<Option<i64>, StoreError> {
-        let conn = self.conn().lock().unwrap();
-        Ok(conn
+        let mut conn = self.conn().lock().unwrap();
+        let tx = conn.transaction()?;
+        if counted(&tx, run_id)? {
+            return Ok(None);
+        }
+        let count: Option<i64> = tx
             .query_row(
                 "UPDATE db_job_incidents
                     SET failures = failures + 1, last_run_id = ?3, last_failed_at_ms = ?4
@@ -224,7 +262,62 @@ impl Store {
                 params![id, seen_run_id, run_id, now_ms],
                 |r| r.get(0),
             )
+            .optional()?;
+        if count.is_some() {
+            count_run(&tx, run_id, id, now_ms)?;
+        }
+        tx.commit()?;
+        Ok(count)
+    }
+
+    /// Whether run `run_id` was counted into an incident as a failure.
+    pub fn job_incident_run_counted(&self, run_id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        counted(&conn, run_id)
+    }
+
+    /// The incident run `run_id` recovered while it was open, if any: a run
+    /// judged a success that a later report says failed.
+    pub fn job_incident_recovered_by(&self, job_id: &str, run_id: &str) -> Result<Option<JobIncident>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        Ok(conn
+            .query_row(
+                &format!(
+                    "SELECT {COLS} FROM db_job_incidents
+                      WHERE job_id = ?1 AND ended_by_run = ?2 AND end_reason = ?3 AND recovered_at_ms IS NOT NULL"
+                ),
+                params![job_id, run_id, ended::RECOVERED],
+                row_to_incident,
+            )
             .optional()?)
+    }
+
+    /// Reopen incident `id`, recovered by run `run_id`, which turned out to
+    /// have failed: open again, its notification up, and `run_id` counted.
+    /// `None` when it can't be (the job has another open incident, or the
+    /// run was counted already); else the new count.
+    pub fn job_incident_reopen(&self, id: &str, run_id: &str, now_ms: i64) -> Result<Option<i64>, StoreError> {
+        let mut conn = self.conn().lock().unwrap();
+        let tx = conn.transaction()?;
+        if counted(&tx, run_id)? {
+            return Ok(None);
+        }
+        let count: Option<i64> = tx
+            .query_row(
+                "UPDATE OR IGNORE db_job_incidents
+                    SET ended_at_ms = NULL, end_reason = '', ended_by_run = '', recovered_at_ms = NULL, notified = 1,
+                        failures = failures + 1, last_run_id = ?2, last_failed_at_ms = ?3
+                  WHERE id = ?1 AND ended_by_run = ?2 AND recovered_at_ms IS NOT NULL
+                  RETURNING failures",
+                params![id, run_id, now_ms],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if count.is_some() {
+            count_run(&tx, run_id, id, now_ms)?;
+        }
+        tx.commit()?;
+        Ok(count)
     }
 
     /// End open incident `id` because its task was closed while the job
@@ -261,6 +354,8 @@ impl Store {
               WHERE job_id = ?1 AND recovered_at_ms IS NULL",
             params![job_id, run_id, now_ms, ended::RECOVERED],
         )?;
+        // A run counted as a failure that a report turned into a success.
+        tx.execute("DELETE FROM db_job_incident_runs WHERE run_id = ?1", params![run_id])?;
         tx.commit()?;
         Ok(before)
     }
@@ -277,9 +372,9 @@ impl Store {
             .optional()?)
     }
 
-    /// Take the next run: move job `job_id`'s cursor from `from` (`None`:
+    /// Move job `job_id`'s cursor past an applied run: from `from` (`None`:
     /// it has none yet) to `to`. `false` when it isn't at `from` any more:
-    /// another keeper took the run.
+    /// another keeper moved it, or a report moved it back.
     pub fn job_incident_cursor_advance(
         &self,
         job_id: &str,

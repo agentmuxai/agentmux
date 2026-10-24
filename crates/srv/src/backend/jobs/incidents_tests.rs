@@ -124,6 +124,70 @@ fn every_run_between_two_looks_counts() {
     assert_eq!(rig.failure_tasks().len(), 2);
 }
 
+/// A run that can't be applied stops the walk there: what came before it
+/// still alerts, and the run is taken again at the next look.
+#[test]
+fn an_error_mid_walk_keeps_the_steps_taken_and_retries_the_run() {
+    let rig = rig();
+    rig.run("j", "finished", "ok", "ok", "");
+    assert_eq!(rig.keeper.assess("j"), NONE);
+    rig.run("j", "missed", "", "unknown", "target_stopped");
+    let stuck = rig.run("j", "finished", "ok", "ok", "");
+    rig.run("j", "finished", "timeout", "unknown", "");
+    *rig.keeper.fail_on.lock().unwrap() = Some(stuck.id.clone());
+    let steps = rig.keeper.assess("j");
+    assert!(matches!(steps.as_slice(), [Step::Opened { .. }]), "the incident before the error alerts: {steps:?}");
+    assert_ne!(rig.store.job_incident_cursor("j").unwrap().unwrap().run_id, stuck.id, "not past the run that failed");
+    assert_eq!(rig.keeper.assess("j"), NONE, "stuck at it while it fails");
+    *rig.keeper.fail_on.lock().unwrap() = None;
+    let steps = rig.keeper.assess("j");
+    assert!(matches!(steps.as_slice(), [Step::Recovered, Step::Opened { .. }]), "taken again: {steps:?}");
+}
+
+/// A run judged a success, reported failed later, is judged again.
+#[test]
+fn a_late_failed_report_on_a_success_reopens_or_opens_an_incident() {
+    let rig = rig();
+    let fine = rig.run("j", "finished", "ok", "ok", "");
+    assert_eq!(rig.keeper.assess("j"), NONE);
+    assert!(rig.store.job_run_report(&fine.id, "failed", "it wasn't fine", &serde_json::Value::Null).unwrap());
+    assert!(matches!(one(rig.keeper.assess("j")), Step::Opened { .. }), "no incident before: one opens");
+
+    let rig = rig_with_incident_recovered_by_a_success();
+    let (incident, success) = rig.1;
+    let rig = rig.0;
+    assert!(rig.store.job_run_report(&success.id, "failed", "", &serde_json::Value::Null).unwrap());
+    let Step::Reopened { incident: again, count, .. } = one(rig.keeper.assess("j")) else { panic!() };
+    assert_eq!((again.id.as_str(), count), (incident.id.as_str(), 2), "the incident it recovered goes on");
+    assert_eq!(rig.store.job_incident_open_for("j").unwrap().unwrap().id, incident.id);
+    assert_eq!(rig.store.job_run_get(&success.id).unwrap().unwrap().links["kanban_task"]["num"], incident.task_num.unwrap());
+    assert_eq!(rig.keeper.assess("j"), NONE);
+    assert_eq!(rig.failure_tasks().len(), 1);
+}
+
+/// Walking runs again (a report moved the cursor back) counts none twice.
+#[test]
+fn a_run_walked_again_is_not_counted_twice() {
+    let rig = rig();
+    rig.run("j", "finished", "ok", "ok", "");
+    assert_eq!(rig.keeper.assess("j"), NONE);
+    let first = rig.run("j", "finished", "error", "unknown", "");
+    rig.run("j", "finished", "error", "unknown", "");
+    assert_eq!(rig.keeper.assess("j").len(), 2);
+    assert!(rig.store.job_run_report(&first.id, "failed", "", &serde_json::Value::Null).unwrap());
+    assert_eq!(rig.keeper.assess("j"), NONE);
+    assert_eq!(rig.store.job_incident_open_for("j").unwrap().unwrap().failures, 2);
+}
+
+fn rig_with_incident_recovered_by_a_success() -> (Rig, (JobIncident, JobRun)) {
+    let rig = rig();
+    rig.run("j", "finished", "error", "unknown", "");
+    let Step::Opened { incident, .. } = one(rig.keeper.assess("j")) else { panic!() };
+    let success = rig.run("j", "finished", "ok", "ok", "");
+    assert_eq!(rig.keeper.assess("j"), [Step::Recovered]);
+    (rig, (incident, success))
+}
+
 #[test]
 fn a_success_notes_recovered_and_leaves_the_task_open_and_the_next_failure_is_a_new_incident() {
     let rig = rig();

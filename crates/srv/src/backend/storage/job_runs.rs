@@ -583,7 +583,10 @@ impl Store {
     }
 
     /// The run's own verdict (§3.2): its outcome, a summary, links merged
-    /// into `links.reported`. Refused for a run that never ran.
+    /// into `links.reported`. Refused for a run that never ran. A report
+    /// that changes the outcome of a run that has ended moves the incident
+    /// keeper's cursor back to just before it, in the same transaction, so
+    /// the run is judged again (`job_incidents`).
     pub fn job_run_report(
         &self,
         id: &str,
@@ -593,14 +596,14 @@ impl Store {
     ) -> Result<bool, StoreError> {
         let mut conn = self.conn().lock().unwrap();
         let tx = conn.transaction()?;
-        let current: Option<String> = tx
+        let current: Option<(String, String, String, Option<i64>)> = tx
             .query_row(
-                "SELECT links FROM db_job_runs WHERE id = ?1 AND state IN ('running','finished')",
+                "SELECT links, outcome, job_id, ended_at_ms FROM db_job_runs WHERE id = ?1 AND state IN ('running','finished')",
                 params![id],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
             .optional()?;
-        let Some(current) = current else {
+        let Some((current, was, job_id, ended)) = current else {
             return Ok(false);
         };
         let mut merged: serde_json::Value = serde_json::from_str(&current).unwrap_or_else(|_| serde_json::json!({}));
@@ -614,6 +617,13 @@ impl Store {
             "UPDATE db_job_runs SET outcome = ?2, summary = ?3, links = ?4 WHERE id = ?1",
             params![id, outcome, clip_summary(summary), merged.to_string()],
         )?;
+        if let (true, Some(ended)) = (was != outcome, ended) {
+            tx.execute(
+                "UPDATE db_job_incident_cursors SET ended_at_ms = ?2, run_id = ''
+                  WHERE job_id = ?1 AND (ended_at_ms > ?2 OR (ended_at_ms = ?2 AND run_id >= ?3))",
+                params![job_id, ended, id],
+            )?;
+        }
         tx.commit()?;
         Ok(true)
     }

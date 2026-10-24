@@ -23,6 +23,9 @@
 //! - **A task its owner finished or cancelled** while the job still failed
 //!   ends the incident; the job's next failure opens a new one, and the next
 //!   success still takes its notification down.
+//! - **A late report that changes a run's outcome** moves the cursor back to
+//!   it (`job_run_report`), so it is judged again: a success reported failed
+//!   reopens the incident it recovered, or opens one.
 //!
 //! Only the instance that has the cron job (its shared store lists it) moves
 //! an incident: the owner is resolved from the job, and the notification is
@@ -84,6 +87,18 @@ pub enum Step {
     FailedAgain { count: i64 },
     /// The job succeeded again after failing.
     Recovered,
+    /// A run judged a success, which recovered `incident`, was reported
+    /// failed later: the incident is open again, its notification back up.
+    Reopened { incident: JobIncident, count: i64, notify_body: String },
+}
+
+/// What one walk over a job's runs did: the steps it took, whether it
+/// stopped at [`PASS_MAX`] with more to take, and the error it stopped at.
+#[derive(Default)]
+struct Walked {
+    steps: Vec<Step>,
+    more: bool,
+    error: Option<crate::backend::storage::StoreError>,
 }
 
 /// The incident keeper: one per instance, beside the run ledger.
@@ -98,12 +113,23 @@ pub struct Incidents {
     jobs: Option<Arc<Store>>,
     broker: Arc<Broker>,
     queue: std::sync::OnceLock<tokio::sync::mpsc::UnboundedSender<String>>,
+    /// Tests: applying this run fails, as a store error would.
+    #[cfg(test)]
+    fail_on: std::sync::Mutex<Option<String>>,
 }
 
 impl Incidents {
     /// A keeper that acts only when [`Self::assess`] is called.
     pub fn new(store: Arc<Store>, mstore: Option<Arc<Store>>, jobs: Option<Arc<Store>>, broker: Arc<Broker>) -> Arc<Self> {
-        Arc::new(Incidents { store, mstore, jobs, broker, queue: std::sync::OnceLock::new() })
+        Arc::new(Incidents {
+            store,
+            mstore,
+            jobs,
+            broker,
+            queue: std::sync::OnceLock::new(),
+            #[cfg(test)]
+            fail_on: std::sync::Mutex::new(None),
+        })
     }
 
     /// Look at each nudged job, and every job each [`SWEEP_MS`], on a task
@@ -164,11 +190,8 @@ impl Incidents {
         let Some(job) = self.jobs.as_ref().and_then(|s| s.cron_get(job_id).ok().flatten()) else {
             return Vec::new();
         };
-        let (steps, more) = self.walk(&job).unwrap_or_else(|e| {
-            tracing::warn!(job_id, error = %e, "jobs: couldn't judge an incident");
-            (Vec::new(), false)
-        });
-        for step in &steps {
+        let walked = self.walk(&job);
+        for step in &walked.steps {
             match step {
                 Step::Opened { incident, leader, note, notify_body } => self.alert(incident, leader.as_ref(), note, notify_body),
                 Step::FailedAgain { .. } => {}
@@ -177,43 +200,74 @@ impl Incidents {
                         router.resolve(&notify_key(job_id), crate::backend::notify::policy::Family::Job);
                     }
                 }
+                Step::Reopened { incident, notify_body, .. } => self.alert(incident, None, "", notify_body),
             }
         }
-        if !steps.is_empty() {
+        if let Some(e) = &walked.error {
+            // The run it stopped at is taken again at the next look.
+            tracing::warn!(job_id, error = %e, "jobs: couldn't judge an incident");
+        }
+        if !walked.steps.is_empty() {
             self.changed(job_id);
         }
-        if more {
+        if walked.more {
             self.nudge(job_id);
         }
-        steps
+        walked.steps
     }
 
-    /// Take the job's decisive runs after its cursor, one at a time, and
-    /// apply each. Moving the cursor is the claim: two keepers can't both
-    /// take a run. With no cursor yet, only the newest run counts, so a
-    /// job's history from before this build opens nothing. `true` beside
-    /// the steps when the pass stopped at [`PASS_MAX`].
-    fn walk(&self, job: &CronJob) -> Result<(Vec<Step>, bool), crate::backend::storage::StoreError> {
+    /// Apply the job's decisive runs after its cursor, one at a time, moving
+    /// the cursor past each only once it is applied: an error stops the walk
+    /// at that run, for the next look to take again, and the steps already
+    /// taken are kept. Applying a run twice changes nothing
+    /// (`db_job_incident_runs`), so two keepers, or a report that moved the
+    /// cursor back, are safe. With no cursor yet, only the newest run
+    /// counts, so a job's history from before this build opens nothing.
+    fn walk(&self, job: &CronJob) -> Walked {
+        let mut walked = Walked::default();
         let now = now_ms();
-        self.end_if_task_closed(&job.id, now)?;
-        let mut cursor = self.store.job_incident_cursor(&job.id)?;
-        let after = cursor.as_ref().map(|c| (c.ended_at_ms, c.run_id.as_str()));
-        let runs = self.store.job_runs_decisive_after(&job.id, after, PASS_MAX)?;
-        let more = runs.len() as i64 >= PASS_MAX;
-        let mut steps = Vec::new();
+        let started = self.end_if_task_closed(&job.id, now).and_then(|_| {
+            let cursor = self.store.job_incident_cursor(&job.id)?;
+            let after = cursor.as_ref().map(|c| (c.ended_at_ms, c.run_id.as_str()));
+            let runs = self.store.job_runs_decisive_after(&job.id, after, PASS_MAX)?;
+            Ok((cursor, runs))
+        });
+        let (mut cursor, runs) = match started {
+            Ok(got) => got,
+            Err(e) => {
+                walked.error = Some(e);
+                return walked;
+            }
+        };
+        walked.more = runs.len() as i64 >= PASS_MAX;
         for run in runs {
+            if run.job_source == super::SOURCE_CRON {
+                match self.apply(job, &run, now) {
+                    Ok(step) => walked.steps.extend(step),
+                    Err(e) => {
+                        walked.error = Some(e);
+                        walked.more = false;
+                        return walked;
+                    }
+                }
+            }
             let next = IncidentCursor { ended_at_ms: run.ended_at_ms.unwrap_or_default(), run_id: run.id.clone() };
-            if !self.store.job_incident_cursor_advance(&job.id, cursor.as_ref(), &next)? {
-                // Another keeper took it, and goes on from there.
-                return Ok((steps, false));
+            match self.store.job_incident_cursor_advance(&job.id, cursor.as_ref(), &next) {
+                Ok(true) => cursor = Some(next),
+                // Another keeper moved it, or a report moved it back: the
+                // next look goes on from there.
+                Ok(false) => {
+                    walked.more = false;
+                    return walked;
+                }
+                Err(e) => {
+                    walked.error = Some(e);
+                    walked.more = false;
+                    return walked;
+                }
             }
-            cursor = Some(next);
-            if run.job_source != super::SOURCE_CRON {
-                continue;
-            }
-            steps.extend(self.apply(job, &run, now)?);
         }
-        Ok((steps, more))
+        walked
     }
 
     /// End the job's open incident when its task was finished or cancelled.
@@ -227,6 +281,10 @@ impl Incidents {
 
     /// What one decisive run does to the job's incident.
     fn apply(&self, job: &CronJob, run: &JobRun, now: i64) -> Result<Option<Step>, crate::backend::storage::StoreError> {
+        #[cfg(test)]
+        if self.fail_on.lock().unwrap().as_deref() == Some(run.id.as_str()) {
+            return Err(crate::backend::storage::StoreError::NotFound);
+        }
         if !run_failed(run) {
             let recovered = self.store.job_incidents_recover(&job.id, &run.id, now)?;
             if recovered.is_empty() {
@@ -238,6 +296,19 @@ impl Incidents {
                 self.history(&inc.work_id, &format!("recovered at {}: the job's last run succeeded, after {streak}", clock(at)));
             }
             return Ok(Some(Step::Recovered));
+        }
+        if self.store.job_incident_run_counted(&run.id)? {
+            return Ok(None);
+        }
+        // Judged a success before, it recovered an incident: a report says it
+        // failed after all, so that incident goes on.
+        if let Some(inc) = self.store.job_incident_recovered_by(&job.id, &run.id)? {
+            if let Some(count) = self.store.job_incident_reopen(&inc.id, &run.id, now)? {
+                self.link_run(&run.id, &inc);
+                let line = format!("failed after all: the run of {} reported it failed, {count} in a row", clock(failed_at(run)));
+                self.history(&inc.work_id, &line);
+                return Ok(Some(Step::Reopened { notify_body: notify_body(run, inc.task_num), incident: inc, count }));
+            }
         }
         self.end_if_task_closed(&job.id, now)?;
         let Some(inc) = self.store.job_incident_open_for(&job.id)? else { return self.open(job, run, now) };
