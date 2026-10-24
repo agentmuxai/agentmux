@@ -40,7 +40,7 @@
 
 import { isLinux, isMacOS, isWindows } from "@/util/platformutil";
 import { isNativeWayland } from "@/app/host/window-system";
-import { FLOATER_EDGE_RESIZE_BORDER } from "@/app/workspace/floater-resize";
+import { FLOATER_EDGE_NONE, FLOATER_RESIZE_CURSORS, floaterEdgeDirection, isFloaterBandControl } from "@/app/workspace/floater-resize";
 import { ErrorBoundary } from "@/app/element/errorboundary";
 import { CenteredDiv } from "@/app/element/quickelems";
 import { ModalsRenderer } from "@/app/modals/modalsrenderer";
@@ -281,32 +281,25 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         // move SetWindowPos the new rect. Same mechanism as the JS-driven
         // header MOVE below. SPEC_FLOATING_PANE_EDGE_RESIZE.
         if (label.startsWith("floating-")) {
-            // Invisible edge grab-band depth (CSS px). Shared with the browser
-            // pane's web-content inset so they can't drift — see floater-resize.ts.
-            const RESIZE_BORDER = FLOATER_EDGE_RESIZE_BORDER;
             const MIN_W = 240;
             const MIN_H = 140;
             // Direction codes 1..8: LEFT, RIGHT, TOP, TOP-LEFT, TOP-RIGHT,
-            // BOTTOM, BOTTOM-LEFT, BOTTOM-RIGHT (WMSZ_* ordering).
-            const edgeDirection = (e: { clientX: number; clientY: number }): number => {
-                const w = window.innerWidth;
-                const h = window.innerHeight;
-                const left = e.clientX <= RESIZE_BORDER;
-                const right = e.clientX >= w - RESIZE_BORDER;
-                const top = e.clientY <= RESIZE_BORDER;
-                const bottom = e.clientY >= h - RESIZE_BORDER;
-                if (top && left) return 4;
-                if (top && right) return 5;
-                if (bottom && left) return 7;
-                if (bottom && right) return 8;
-                if (left) return 1;
-                if (right) return 2;
-                if (top) return 3;
-                if (bottom) return 6;
-                return 0;
+            // BOTTOM, BOTTOM-LEFT, BOTTOM-RIGHT (WMSZ_* ordering). The band's
+            // depths, its corners and the cursor for each direction are in
+            // floater-resize.ts.
+            const edgeDirection = (e: PointerEvent): number =>
+                isFloaterBandControl(e.target)
+                    ? FLOATER_EDGE_NONE
+                    : floaterEdgeDirection(e.clientX, e.clientY, window.innerWidth, window.innerHeight);
+            // Show the resize cursor for a direction (0 clears it) on <html>. The band
+            // is invisible, so the cursor is the only sign it is there, and a cursor
+            // set on <body> loses to any child that sets its own (a header button).
+            // floating-pane-workspace.scss applies it to every element.
+            const showEdgeCursor = (d: number): void => {
+                const root = document.documentElement;
+                if (d) root.dataset.floaterEdge = FLOATER_RESIZE_CURSORS[d];
+                else delete root.dataset.floaterEdge;
             };
-            const CURSORS = ["", "ew-resize", "ew-resize", "ns-resize",
-                "nwse-resize", "nesw-resize", "ns-resize", "nesw-resize", "nwse-resize"];
 
             let resizing = false;
             let dir = 0;
@@ -338,6 +331,8 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 e.preventDefault();
                 e.stopImmediatePropagation();
                 dir = d;
+                // The cursor stays this one for the whole drag, wherever the pointer goes.
+                showEdgeCursor(d);
                 startX = e.screenX;
                 startY = e.screenY;
                 const target = e.target as Element;
@@ -360,8 +355,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             const onPointerMove = (e: PointerEvent): void => {
                 if (!resizing) {
                     // Hover feedback only.
-                    const d = edgeDirection(e);
-                    document.body.style.cursor = d ? CURSORS[d] : "";
+                    showEdgeCursor(edgeDirection(e));
                     return;
                 }
                 // screenX/Y are CSS px. Windows: rect is physical px → scale by DPR.
@@ -390,7 +384,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 if (!resizing) return;
                 resizing = false;
                 try { (e.target as Element).releasePointerCapture(e.pointerId); } catch { /* ignore */ }
-                document.body.style.cursor = "";
+                showEdgeCursor(0);
             };
 
             // Capture phase + registered before the header listener so the
@@ -402,6 +396,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 document.removeEventListener("pointerdown", onPointerDown, true);
                 document.removeEventListener("pointermove", onPointerMove, true);
                 document.removeEventListener("pointerup", onPointerUp, true);
+                showEdgeCursor(0);
             });
         }
 
