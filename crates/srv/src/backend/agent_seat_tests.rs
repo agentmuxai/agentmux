@@ -202,3 +202,55 @@ fn a_peer_summary_is_bounded_and_needs_a_known_role() {
     let blank = serde_json::json!({ "role": "worker", "qualifier": null, "lead": { "id": " ", "name": null }, "area": null });
     assert_eq!(sanitize_peer_summary(&blank, 64).unwrap().lead, None);
 }
+
+fn pane(oid: &str, view: &str, agent_id: &str, seat: Option<serde_json::Value>) -> crate::backend::obj::Block {
+    let mut block = crate::backend::obj::Block { oid: oid.into(), ..Default::default() };
+    block.meta.insert("view".into(), serde_json::json!(view));
+    block.meta.insert("agentId".into(), serde_json::json!(agent_id));
+    if let Some(seat) = seat {
+        block.meta.insert(SEAT_META_KEY.into(), seat);
+    }
+    block
+}
+
+#[test]
+fn only_agent_panes_whose_seat_changed_are_patched() {
+    let leader = SeatSummary { role: "leader".into(), qualifier: Some("product".into()), lead: None, area: None };
+    let current = seat_meta(Some(&leader));
+    let blocks = vec![
+        // Up to date: left alone.
+        pane("b1", "agent", "a", Some(current.clone())),
+        // Same agent, no seat yet: given it.
+        pane("b2", "agent", "a", None),
+        // Its seat was cleared: the key is removed (null).
+        pane("b3", "agent", "b", Some(current.clone())),
+        // No seat and none wanted: left alone.
+        pane("b4", "agent", "c", None),
+        // Not an agent pane, or an empty one: never touched.
+        pane("b5", "term", "a", None),
+        pane("b6", "agent", "", None),
+    ];
+    let mut asked = Vec::new();
+    let stale = stale_seat_meta(&blocks, |id| {
+        asked.push(id.to_string());
+        (id == "a").then(|| leader.clone())
+    });
+    assert_eq!(stale, vec![("b2".to_string(), current), ("b3".to_string(), serde_json::Value::Null)]);
+    assert_eq!(asked, vec!["a", "b", "c"], "each agent is looked up once");
+}
+
+#[test]
+fn a_pane_is_seeded_with_its_agents_seat() {
+    let (store, _tmp) = store_with_registry();
+    agent(&store, "lead-1", "Camper");
+    agent(&store, "work-1", "Worker");
+    make_worker_of(&store, "work-1", "lead-1");
+    let mut meta = crate::backend::obj::MetaMapType::new();
+    seed_meta(&store, "work-1", &mut meta);
+    let seeded: SeatSummary = serde_json::from_value(meta[SEAT_META_KEY].clone()).unwrap();
+    assert_eq!(seeded.qualifier.as_deref(), Some(SPAWNED_QUALIFIER));
+    assert_eq!(seeded.lead, Some(SeatLead { id: "lead-1".into(), name: Some("Camper".into()) }));
+    let mut none = crate::backend::obj::MetaMapType::new();
+    seed_meta(&store, "lead-1", &mut none);
+    assert!(none.is_empty(), "no seat, no key");
+}

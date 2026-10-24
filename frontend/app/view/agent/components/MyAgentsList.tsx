@@ -47,6 +47,7 @@ import {
     For,
     onCleanup,
     Show,
+    useContext,
     type Accessor,
     type JSX,
 } from "solid-js";
@@ -54,7 +55,8 @@ import { createStore, reconcile } from "solid-js/store";
 import { TransitionGroup } from "solid-transition-group";
 
 import { AnchoredPopover } from "@/app/element/anchored-popover";
-import { Button } from "@/app/element/ui";
+import { ModalLayerContext } from "@/app/element/modal-layer";
+import { Button, Pill } from "@/app/element/ui";
 import { getOpenBlockIdsForDefinition } from "@/app/store/agent-pane-state-store";
 import { shouldReduceMotion } from "@/app/motion/motion";
 import { pushNotification } from "@/app/store/global";
@@ -69,6 +71,7 @@ import { formatTimeAgo } from "@/util/format-time";
 import { Logger } from "@/util/logger";
 import type { OpenAgentLocation } from "../open-agent-panes";
 import { resolveEffectiveVendor } from "../providers/catalog";
+import { seatBadgeText, seatReportsLine, seatTooltipLine } from "../seat-format";
 import type { AgentSortOption } from "./AgentPickerFilterBar";
 import { RuntimeBadge } from "./RuntimeBadge";
 
@@ -594,6 +597,19 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
         document.removeEventListener("keydown", onDocumentKeyDown);
     });
 
+    // "Seat…" opens the Seat editor over the picker; the Stash drawer's
+    // Seat tab needs the agent's own pane (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §3).
+    // No modal layer (a bare test render): no item.
+    const modalLayer = useContext(ModalLayerContext);
+    const handleSeatOpen = (row: RecentSessionRow): void => {
+        closeMenu(row.definition_id);
+        modalLayer?.open({
+            kind: "agent-seat",
+            agentId: row.definition_id,
+            agentName: row.instance_name || row.definition_name,
+        });
+    };
+
     // Duplicate — reuses the EXISTING fork-and-launch flow unchanged
     // (handleOpenNewSession/handleForkStart above, already wired to
     // props.onFork = AgentPicker.handleFork). The naming UI that flow
@@ -1087,6 +1103,13 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                     "SANDBOX" in the pane the row launches into). */}
                                                     <RuntimeBadge runtime={row.agent_type} size="tag" />
                                                 </Show>
+                                                <Show when={row.seat}>
+                                                    {(seat) => (
+                                                        <Pill class="agent-seat-badge" title={seatTooltipLine(seat())}>
+                                                            {seatBadgeText(seat())}
+                                                        </Pill>
+                                                    )}
+                                                </Show>
                                             </span>
                                             {/* Own line, not squeezed onto line1 via flex:1 next to
                                             the name — the account is as important as the name
@@ -1099,6 +1122,13 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                             (SPEC_MY_AGENTS_TILES_AUTH_AND_HISTORY_2026_10_03.md §5.2). */}
                                             <Show when={row.identity_name}>
                                                 <span class="agent-recent-sessions-account">{row.identity_name}</span>
+                                            </Show>
+                                            <Show when={row.seat}>
+                                                {(seat) => (
+                                                    <span class="agent-recent-sessions-seat" data-testid="agent-my-agents-seat-line">
+                                                        {seatReportsLine(seat())}
+                                                    </span>
+                                                )}
                                             </Show>
                                             <Show
                                                 when={row.preview}
@@ -1216,6 +1246,17 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                         <i class="fa-solid fa-clock-rotate-left" aria-hidden="true" />{" "}
                                                         View History
                                                     </button>
+                                                    <Show when={modalLayer}>
+                                                        <Button
+                                                            tone="quiet"
+                                                            icon="chair"
+                                                            class="agent-row-menu-item"
+                                                            onClick={() => handleSeatOpen(row)}
+                                                            data-testid="agent-my-agents-seat"
+                                                        >
+                                                            Seat…
+                                                        </Button>
+                                                    </Show>
                                                     <button
                                                         type="button"
                                                         class="agent-row-menu-item agent-row-menu-item--danger"

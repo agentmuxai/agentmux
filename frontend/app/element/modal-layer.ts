@@ -20,6 +20,7 @@ export type ModalLayerRequest =
     | BrowserAuthRequest
     | AgentIdentityRequest
     | AgentMemoryRequest
+    | AgentSeatRequest
     | BundleImportSelectRequest
     | BundleImportPreviewRequest
     | BundleImportConfirmRequest;
@@ -85,6 +86,18 @@ export interface AgentMemoryRequest {
     agentName: string;
     /** Agent's working directory — used to compute the memory folder path. */
     workingDirectory: string;
+}
+
+/**
+ * An agent's seat (role, lead, area), opened by "Seat…" in My Agents' row
+ * menu: the Stash drawer's Seat tab lives in the agent's own pane, which the
+ * picker's row may not have open. Same panel as that tab (AgentSeatPanel).
+ * SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §3.
+ */
+export interface AgentSeatRequest {
+    kind: "agent-seat";
+    agentId: string;
+    agentName: string;
 }
 
 /*

@@ -236,6 +236,12 @@ export interface PaneTabStripProps<T> {
      * nothing the tab's tooltip is exactly what it was.
      */
     getTooltipDetail?: (tab: T) => string | undefined;
+    /**
+     * A line between the label and the detail: an agent's seat ("Leader · product —
+     * reports to the operator — agent pane, identity"). Shown, immediately, like the
+     * detail, with or without one (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §4).
+     */
+    getTooltipSeat?: (tab: T) => string | undefined;
     /** "Attention" tabs (unsaved changes, needs-review, …) always show
      *  their close × instead of only on hover. */
     getAttention?: (tab: T) => boolean;
@@ -595,6 +601,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                             getIcon={props.getIcon}
                             getTooltip={props.getTooltip}
                             getTooltipDetail={props.getTooltipDetail}
+                            getTooltipSeat={props.getTooltipSeat}
                             getAttention={props.getAttention}
                             getTabClass={props.getTabClass}
                             getColor={props.getColor}
@@ -647,6 +654,7 @@ interface PaneTabStripItemProps<T> {
     getIcon?: (tab: T) => JSX.Element;
     getTooltip?: (tab: T) => string;
     getTooltipDetail?: (tab: T) => string | undefined;
+    getTooltipSeat?: (tab: T) => string | undefined;
     getAttention?: (tab: T) => boolean;
     getTabClass?: (tab: T) => Record<string, boolean>;
     getColor?: (tab: T) => PaneTabColors | undefined;
@@ -910,12 +918,17 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
         <Tooltip
             placement="bottom"
             divClassName="pane-tab-tip"
-            immediate={!!props.getTooltipDetail?.(props.tab)}
+            immediate={!!(props.getTooltipDetail?.(props.tab) || props.getTooltipSeat?.(props.tab))}
             content={
-                props.getTooltipDetail?.(props.tab) ? (
+                props.getTooltipDetail?.(props.tab) || props.getTooltipSeat?.(props.tab) ? (
                     <div class="pane-tab-tip-body" data-testid="pane-tab-tip-body">
                         <div class="pane-tab-tip-label">{props.getTooltip?.(props.tab) ?? props.getLabel(props.tab)}</div>
-                        <div class="pane-tab-tip-summary">{props.getTooltipDetail?.(props.tab)}</div>
+                        <Show when={props.getTooltipSeat?.(props.tab)}>
+                            {(seat) => <div class="pane-tab-tip-seat">{seat()}</div>}
+                        </Show>
+                        <Show when={props.getTooltipDetail?.(props.tab)}>
+                            {(detail) => <div class="pane-tab-tip-summary">{detail()}</div>}
+                        </Show>
                     </div>
                 ) : (
                     (props.getTooltip?.(props.tab) ?? props.getLabel(props.tab))

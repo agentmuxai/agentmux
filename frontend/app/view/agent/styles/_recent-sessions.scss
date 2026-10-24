@@ -333,6 +333,21 @@
         max-width: 100%;
     }
 
+    // The agent's seat, under the account: "reports to Camper · panes, layout,
+    // tabs" (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §4). The role is the
+    // badge on line1.
+    .agent-recent-sessions-seat {
+        font-size: var(--text-sm);
+        color: var(--secondary-text-color);
+        @include mixins.truncate;
+        max-width: 100%;
+    }
+
+    .agent-seat-badge {
+        flex-shrink: 0;
+        align-self: center;
+    }
+
     .agent-recent-sessions-preview {
         font-size: var(--text-base);
         color: var(--secondary-text-color);
@@ -523,6 +538,19 @@
         outline: 2px solid var(--accent-color);
         outline-offset: -2px;
     }
+}
+
+// "Seat…" is an element/ui Button (check-ui-primitives): give it the plain
+// row look of its neighbours.
+.agent-row-menu-item.ui-button {
+    justify-content: flex-start;
+    min-height: 0;
+    padding: var(--space-2) 10px;
+    font-size: var(--text-sm);
+    font-weight: normal;
+    color: var(--main-text-color);
+    border: none;
+    border-radius: 0;
 }
 
 // Visually separated + red — "the destructive one goes at the end."
