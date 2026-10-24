@@ -284,3 +284,24 @@ fn a_name_no_display_name_routes_to_costs_no_store_read() {
     store.agent_def_insert(&mut kiwi).unwrap();
     assert_eq!(store.display_route_owner("Kiwi-1").unwrap().map(|o| o.uid).as_deref(), Some("uid-kiwi"), "seen at once");
 }
+
+/// #1459, Codex on #5370: a renamed fork is found by the title it goes by now
+/// (its `branch_label`), not the one it was forked with; a forgotten agent
+/// (`user_hidden`) is never found.
+#[test]
+fn display_route_owner_uses_a_forks_current_title_and_skips_forgotten_agents() {
+    let store = Store::open_in_memory().unwrap();
+    let mut fork = test_agent_def("uid-fork", "Loap", "claude", "host", 1, "");
+    fork.slug = "loap-loap-3".into();
+    fork.parent_id = "uid-root".into();
+    fork.branch_label = "Loap Renamed".into();
+    store.agent_def_insert(&mut fork).unwrap();
+    assert_eq!(store.display_route_owner("Loap-Renamed").unwrap().map(|o| o.uid).as_deref(), Some("uid-fork"));
+    assert!(store.display_route_owner("Loap").unwrap().is_none(), "not by the title it was forked with");
+
+    let mut gone = test_agent_def("uid-gone", "Gone #1", "claude", "host", 2, "");
+    gone.slug = "gone-gone-1".into();
+    gone.user_hidden = 1;
+    store.agent_def_insert(&mut gone).unwrap();
+    assert!(store.display_route_owner("Gone-1").unwrap().is_none(), "a forgotten agent is never found");
+}

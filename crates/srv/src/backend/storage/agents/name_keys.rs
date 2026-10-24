@@ -523,14 +523,15 @@ impl Store {
 
 /// The index behind `Store::display_route_owner`: each current display
 /// name's route key to the one agent holding it, `None` for a key two hold,
-/// and none for a key some agent holds as its slug. Templates and agents
-/// with no slug are left out; `agent_def_list` holds no deleted agent.
+/// and none for a key some agent holds as its slug. Templates, forgotten
+/// agents (`user_hidden`) and agents with no slug are left out;
+/// `agent_def_list` holds no deleted agent.
 fn display_routes(defs: &[AgentDefinition]) -> std::collections::HashMap<String, Option<super::FormerSlugOwner>> {
     let fold = |s: &str| s.trim().to_lowercase();
     let slugs: std::collections::HashSet<String> = defs.iter().map(|d| fold(&d.slug)).filter(|s| !s.is_empty()).collect();
     let mut map: std::collections::HashMap<String, Option<super::FormerSlugOwner>> = std::collections::HashMap::new();
-    for d in defs.iter().filter(|d| d.is_seeded == 0 && !d.slug.trim().is_empty()) {
-        let Some(key) = super::former_names::route_key(&d.name) else { continue };
+    for d in defs.iter().filter(|d| d.is_seeded == 0 && d.user_hidden == 0 && !d.slug.trim().is_empty()) {
+        let Some(key) = super::former_names::route_key(current_title(d)) else { continue };
         if slugs.contains(&key) {
             continue;
         }
@@ -539,4 +540,15 @@ fn display_routes(defs: &[AgentDefinition]) -> std::collections::HashMap<String,
             .or_insert_with(|| Some(super::FormerSlugOwner { uid: d.id.clone(), slug: d.slug.clone() }));
     }
     map
+}
+
+/// The title an agent goes by now: a fork's is its `branch_label`, which a
+/// rename updates (`renameagentdefinitiontitle`) while `name` keeps the
+/// title it was forked with; a root's is its `name`.
+fn current_title(d: &AgentDefinition) -> &str {
+    if d.parent_id.trim().is_empty() || d.branch_label.trim().is_empty() {
+        &d.name
+    } else {
+        &d.branch_label
+    }
 }
