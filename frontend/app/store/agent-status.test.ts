@@ -20,6 +20,7 @@ const ALONE: Record<AgentStatusKind, AgentStatusFacts> = {
     "needs-you": { live: true, needsYou: true },
     held: { live: false, held: { compacting: true } },
     working: { live: true },
+    unavailable: { live: false, unavailable: "limited" },
     interrupted: { live: false, ended: "interrupted" },
     errored: { live: false, ended: "errored" },
     idle: { live: false },
@@ -31,6 +32,7 @@ function merge(a: AgentStatusFacts, b: AgentStatusFacts): AgentStatusFacts {
         live: a.live || b.live,
         needsYou: a.needsYou || b.needsYou,
         held: { ...a.held, ...b.held },
+        unavailable: a.unavailable ?? b.unavailable,
         ended: a.ended ?? b.ended,
     };
 }
@@ -53,6 +55,25 @@ describe("rankAgentStatus", () => {
     it.each(pairs)("%s outranks %s", (better, worse) => {
         expect(rankAgentStatus(merge(ALONE[better], ALONE[worse])).kind).toBe(better);
         expect(rankAgentStatus(merge(ALONE[worse], ALONE[better])).kind).toBe(better);
+    });
+
+    it("an agent that can't start a turn is unavailable, with its reason, whatever its last turn did", () => {
+        expect(rankAgentStatus({ live: false, unavailable: "limited", ended: "errored" })).toEqual({
+            kind: "unavailable",
+            reason: "limited",
+        });
+        expect(rankAgentStatus({ live: false, unavailable: "signed_out", ended: "interrupted" })).toEqual({
+            kind: "unavailable",
+            reason: "signed_out",
+        });
+    });
+
+    it("a turn in flight outranks unavailable, since it is evidence the agent can work", () => {
+        expect(rankAgentStatus({ live: true, unavailable: "limited" }).kind).toBe("working");
+    });
+
+    it("unavailable is not active: the agent is not doing anything", () => {
+        expect(isActiveStatus(rankAgentStatus({ live: false, unavailable: "limited" }))).toBe(false);
     });
 
     it("a live turn hides how the last one ended", () => {
@@ -92,7 +113,7 @@ describe("rankAgentStatus", () => {
 
 describe("bestStatus", () => {
     it("picks the best kind, and is idle for none", () => {
-        const s = (kind: Exclude<AgentStatusKind, "held">): AgentStatus => ({ kind });
+        const s = (kind: Exclude<AgentStatusKind, "held" | "unavailable">): AgentStatus => ({ kind });
         expect(bestStatus([])).toEqual({ kind: "idle" });
         expect(bestStatus([s("idle"), s("interrupted"), s("working")])).toEqual({ kind: "working" });
         expect(bestStatus([s("idle"), s("interrupted")])).toEqual({ kind: "interrupted" });

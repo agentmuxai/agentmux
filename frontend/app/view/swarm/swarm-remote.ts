@@ -13,10 +13,11 @@
  */
 
 import { formatAgoPrecise } from "@/util/format-time";
+import type { UnavailableReason } from "@/app/store/agent-status";
 import type { AgentDisplayStatus } from "./swarm-view";
 
 /** An agent's state as its own instance reports it (srv `agent_state::AgentState`). */
-export type RemoteAgentState = "working" | "waiting" | "idle" | "stopped" | "error";
+export type RemoteAgentState = "working" | "waiting" | "idle" | "stopped" | "error" | "limited" | "signed_out";
 
 export interface RemoteAgent {
     name: string;
@@ -132,6 +133,8 @@ export interface RemoteChip {
     awaitingUser: boolean;
     /** The exact state, for the tooltip: the chip folds stopped and error into idle. */
     label: string;
+    /** Set when the agent can't start a turn: the chip says out of quota or signed out, not idle. */
+    unavailable?: UnavailableReason;
 }
 
 const REMOTE_CHIPS: Record<RemoteAgentState, RemoteChip> = {
@@ -140,6 +143,8 @@ const REMOTE_CHIPS: Record<RemoteAgentState, RemoteChip> = {
     idle: { status: "idle", awaitingUser: false, label: "Idle" },
     stopped: { status: "idle", awaitingUser: false, label: "Stopped" },
     error: { status: "error", awaitingUser: false, label: "Exited with an error" },
+    limited: { status: "idle", awaitingUser: false, label: "Out of quota", unavailable: "limited" },
+    signed_out: { status: "idle", awaitingUser: false, label: "Signed out", unavailable: "signed_out" },
 };
 
 /**

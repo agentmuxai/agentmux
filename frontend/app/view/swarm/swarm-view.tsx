@@ -28,20 +28,21 @@ import { selectTrace } from "@/app/util/select-trace";
 import type { SwarmOrderItem } from "./swarm-order";
 import { useSwarmOrder } from "./swarm-order-hold";
 import { phaseToDisplayStatus, type AgentDisplayStatus } from "./swarm-display-status";
+import { LongToolNote, UnavailableChip } from "./swarm-row-notes";
+import { AgentStatusChip, chipStatus } from "./swarm-status-chip";
+import { unavailableLineText, unavailableOfMeta, unavailableTitle } from "@/app/store/agent-unavailable";
 import { BackgroundTaskBucket, SubagentBackgroundTasks, visibleBackgroundTasks } from "./swarm-background-tasks";
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 import { swarmRowColors } from "./swarm-row-colors";
 import { lastActiveLabel, lastActiveMs, lastActiveTitle } from "./swarm-last-active";
 import { isAwaitingUser, swarmLineTooltip } from "@/app/store/swarm-line";
 import { setSupervisorMode, SupervisorBucket, SupervisorChip, supervisorRows } from "./swarm-supervisor";
-import { isActiveStatus, rankAgentStatus, subagentStatus } from "@/app/store/agent-status";
-import { questionCountdown } from "@/app/store/question-timer";
+import { subagentStatus } from "@/app/store/agent-status";
 import { remoteAgentKey } from "./swarm-fleet-targets";
 import { remoteChip, remoteLine, remoteRows, remoteSections, seenAgo, type RemoteRow } from "./swarm-remote";
 import { FleetToolbar, FleetResultPanel } from "./swarm-fleet-toolbar";
 import "./swarm-view.scss";
 import { readZoom } from "@/app/store/zoom-factor";
-import { AsciiSpinner } from "@/app/element/AsciiSpinner";
 
 /** The block shown in the focused pane — for a multi-tab pane, its active
  *  tab. Reactive to tab switches inside the pane, not just pane focus. */
@@ -304,7 +305,12 @@ export function RemoteAgentRow(props: { model: SwarmViewModel; row: RemoteRow })
                 <Show when={remoteChip(props.row.agent.status, section().stale)}>
                     {(chip) => (
                         <span class="swarm-remote-agent-status" title={chip().label}>
-                            <AgentStatusChip status={chip().status} awaitingUser={chip().awaitingUser} />
+                            <Show
+                                when={chip().unavailable}
+                                fallback={<AgentStatusChip status={chip().status} awaitingUser={chip().awaitingUser} />}
+                            >
+                                {(reason) => <UnavailableChip unavailable={{ reason: reason() }} />}
+                            </Show>
                         </span>
                     )}
                 </Show>
@@ -440,6 +446,18 @@ export function AgentRow({
         return visibleBackgroundTasks(node().backgroundTasks.own, Date.now());
     });
     const supervisorDecisions = createMemo(() => supervisorRows(blockMeta()));
+    // Out of quota until a reset, or signed out: why a quiet agent is quiet. It counts
+    // down with the row's tick, so the chip is gone when the reset passes.
+    const rowNow = () => {
+        tick();
+        return Date.now();
+    };
+    // A question, or a Supervisor pause that needs you, ranks ahead of it (store/agent-status.ts).
+    const unavailable = createMemo(() =>
+        isAwaitingUser(blockMeta(), node().agentStatus)
+            ? null
+            : unavailableOfMeta(blockMeta(), node().agentStatus === "running", rowNow())
+    );
     const totalRows = createMemo(() =>
         agentChildRowCount(node(), longRunningRows().length, ownBackgroundRows().length, supervisorDecisions().length)
     );
@@ -612,11 +630,19 @@ export function AgentRow({
                             {lastActiveText()}
                         </span>
                     </Show>
-                    <AgentStatusChip
-                        status={displayStatus()}
-                        awaitingUser={isAwaitingUser(blockMeta(), node().agentStatus)}
-                        blockId={node().blockId}
-                    />
+                    <LongToolNote rows={longRunningRows} live={() => node().agentStatus === "running"} now={rowNow} />
+                    <Show
+                        when={unavailable()}
+                        fallback={
+                            <AgentStatusChip
+                                status={displayStatus()}
+                                awaitingUser={isAwaitingUser(blockMeta(), node().agentStatus)}
+                                blockId={node().blockId}
+                            />
+                        }
+                    >
+                        {(u) => <UnavailableChip unavailable={u()} now={rowNow} />}
+                    </Show>
                     <Show when={node().blockId}>
                         {(blockId) => (
                             <SupervisorChip
@@ -633,11 +659,13 @@ export function AgentRow({
                     classList={{
                         "swarm-activity-summary": true,
                         "swarm-activity-summary--flash": summaryFlash(),
-                        "swarm-activity-summary--fallback": node().line.source !== "generated",
+                        "swarm-activity-summary--fallback": node().line.source !== "generated" || unavailable() !== null,
                     }}
-                    title={swarmLineTooltip(node().line)}
+                    title={unavailable() ? unavailableTitle(unavailable()!) : swarmLineTooltip(node().line)}
                 >
-                    {node().line.text}
+                    {/* An agent that can't start a turn says so ahead of any title. Read from the
+                        row's tick, like the chip, so the words go when the reset passes. */}
+                    {unavailable() ? unavailableLineText(unavailable()!, rowNow()) : node().line.text}
                 </div>
                 {/* The Kanban task this agent is on, which opens it there (SPEC_WARDEN_KANBAN_2026_10_20.md §6.14). */}
                 <Show when={node().blockId}>{(blockId) => <HeldTaskChip blockId={blockId()} />}</Show>
@@ -1420,67 +1448,4 @@ function SubagentRow({
     );
 }
 
-// ── Status chip ──────────────────────────────────────────────────────────
-
-/**
- * The chip collapses the finer AgentDisplayStatus to three states:
- * **working**, the agent is mid-turn, whether generating, running tools, or
- * stopping, in red (user, 2026-09-27); **question**, mid-turn and waiting on
- * the user's answer, in the theme's primary colour; and **idle**, everything
- * else, in green. The finer-grained AgentDisplayStatus is still computed and
- * still drives other logic (e.g. which subagent rows can be retired); only
- * what the chip shows collapses.
- * docs/specs/SPEC_SWARM_QUESTION_STATE_AND_QUESTION_TIMEOUT_ACTIVITY_2026_10_02.md §3.
- */
-export type ChipStatus = "working" | "question" | "idle";
-
-/** `awaitingUser` is `isAwaitingUser(meta, agentStatus)` from swarm-line.ts,
- *  the same check as the row's "Waiting for you" line. */
-export function chipStatus(status: AgentDisplayStatus, awaitingUser = false): ChipStatus {
-    const ranked = rankAgentStatus({
-        live: status === "working" || status === "tools" || status === "stopping",
-        needsYou: awaitingUser,
-        held: { stopping: status === "stopping" },
-    });
-    if (ranked.kind === "needs-you") return "question";
-    return isActiveStatus(ranked) ? "working" : "idle";
-}
-
-// Reads `props.status`, not a destructured `status`: in Solid a destructured
-// prop is read once at creation, so the chip would never follow the agent from
-// working to idle.
-//
-// A question shows the one question timer's countdown (store/question-timer.ts),
-// the same seconds as the question panel: "question 23s", or "question · paused"
-// while the user is active. No timer state (the pane isn't mounted anywhere, or
-// a remote row) shows plain "question".
-export function AgentStatusChip(props: {
-    status: AgentDisplayStatus;
-    awaitingUser?: boolean;
-    blockId?: string;
-}): JSX.Element {
-    const chip = () => chipStatus(props.status, props.awaitingUser);
-    const countdown = () => (chip() === "question" && props.blockId ? questionCountdown(props.blockId) : null);
-    return (
-        <span class={`swarm-status-chip swarm-status-chip--${chip()}`}>
-            {/* The two animated states carry the ASCII spinner (the composer's
-                mark, one shared timer); the resting state keeps a still dot. */}
-            <Show when={chip() !== "idle"} fallback={<span class="swarm-status-dot" />}>
-                <AsciiSpinner class="swarm-status-spinner" />
-            </Show>
-            <span class="swarm-status-label">{chip()}</span>
-            <Show when={countdown()}>
-                {(cd) => (
-                    <Show
-                        when={!cd().paused}
-                        fallback={<span class="swarm-status-countdown">· paused</span>}
-                    >
-                        <span class={`swarm-status-countdown swarm-status-countdown--${cd().band}`}>
-                            {cd().seconds}s
-                        </span>
-                    </Show>
-                )}
-            </Show>
-        </span>
-    );
-}
+export { AgentStatusChip, chipStatus, type ChipStatus } from "./swarm-status-chip";
