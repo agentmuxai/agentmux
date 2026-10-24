@@ -223,12 +223,29 @@ pub fn recover(paths: &Paths) -> Recovered {
     Recovered::Nothing
 }
 
+/// The gate file, opened for locking.
+fn open_gate(paths: &Paths) -> std::io::Result<File> {
+    OpenOptions::new().create(true).truncate(false).write(true).open(&paths.gate)
+}
+
+/// [`recover`], but only while holding the gate exclusively: an srv that
+/// starts while another reclaims must not touch its files (muxreview on
+/// #5383). When the gate is held, by a reclaim in progress or an srv opening
+/// the store, it does nothing; the next start looks again.
+pub fn recover_if_alone(paths: &Paths) -> Recovered {
+    let Ok(gate) = open_gate(paths) else { return Recovered::Nothing };
+    if gate.try_lock().is_err() {
+        return Recovered::Nothing;
+    }
+    recover(paths)
+}
+
 /// Hold the gate shared while opening the store, so an srv that starts during
 /// another's reclaim waits instead of opening the file mid-swap. `None` when
 /// the gate can't be taken in [`GATE_WAIT`] or the file can't be made: the
 /// open goes ahead (a running reclaim then sees this srv and gives up).
 pub fn gate_shared(db: &Path) -> Option<File> {
-    let file = OpenOptions::new().create(true).truncate(false).write(true).open(Paths::for_db(db).gate).ok()?;
+    let file = open_gate(&Paths::for_db(db)).ok()?;
     let deadline = Instant::now() + GATE_WAIT;
     loop {
         match file.try_lock_shared() {
@@ -302,6 +319,14 @@ pub enum Outcome {
 /// asked once at the start and again right before the swap.
 pub fn run_at_start(db: &Path, others: impl Fn() -> Option<String>, now_ms: u64) -> Outcome {
     let paths = Paths::for_db(db);
+    // The gate first: nothing below, the recovery included, may run while
+    // another srv reclaims or opens the store.
+    let Ok(gate) = open_gate(&paths) else {
+        return Outcome::Waiting("the store's gate file can't be opened".to_string());
+    };
+    if gate.try_lock().is_err() {
+        return Outcome::Waiting("another AgentMux is opening the store".to_string());
+    }
     recover(&paths);
     let Some(mut marker) = read_json::<Marker>(&paths.marker) else {
         return Outcome::NotRequested;
@@ -319,12 +344,6 @@ pub fn run_at_start(db: &Path, others: impl Fn() -> Option<String>, now_ms: u64)
         tracing::info!(why = %why, "history reclaim: waiting");
         Outcome::Waiting(why)
     };
-    let Ok(gate) = OpenOptions::new().create(true).truncate(false).write(true).open(&paths.gate) else {
-        return wait(&mut marker, "the store's gate file can't be opened".to_string());
-    };
-    if gate.try_lock().is_err() {
-        return wait(&mut marker, "another AgentMux is opening the store".to_string());
-    }
     if let Some(who) = others() {
         return wait(&mut marker, who);
     }

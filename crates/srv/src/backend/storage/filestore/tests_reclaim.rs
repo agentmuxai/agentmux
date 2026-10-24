@@ -195,6 +195,24 @@ fn a_swapped_in_store_that_doesnt_open_is_swapped_back() {
 }
 
 #[test]
+fn nothing_touches_a_reclaim_in_progress() {
+    // Another srv holds the gate exclusively, as a reclaim does for its whole
+    // run: a starting srv must leave its rewrite and its moved-aside original alone.
+    let dir = tempfile::tempdir().unwrap();
+    let (path, _) = store_with_free_pages(dir.path());
+    let paths = Paths::for_db(&path);
+    std::fs::write(&paths.new, b"a rewrite in progress").unwrap();
+    let held = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&paths.gate).unwrap();
+    held.lock().unwrap();
+    assert_eq!(reclaim::recover_if_alone(&paths), Recovered::Nothing);
+    reclaim::request(&path, "test", 1).unwrap();
+    assert!(matches!(reclaim::run_at_start(&path, alone, 2), Outcome::Waiting(_)));
+    assert!(paths.new.exists(), "the other srv's rewrite is untouched");
+    drop(held);
+    assert_eq!(reclaim::recover_if_alone(&paths), Recovered::DroppedNew);
+}
+
+#[test]
 fn incremental_steps_give_freed_pages_back() {
     let dir = tempfile::tempdir().unwrap();
     let (path, kept) = store_with_free_pages(dir.path());

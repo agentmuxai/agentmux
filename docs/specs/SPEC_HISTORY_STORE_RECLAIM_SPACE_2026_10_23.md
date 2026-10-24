@@ -81,7 +81,7 @@ So: reclaim once, offline, with option 2. After that the store gives space back 
 
 ### 4.3 Crash safety and rollback
 
-The original is never written. Every crash leaves one of three states, which the next srv start resolves before opening the store:
+The original is never written. Every crash leaves one of three states, which the next srv start resolves before opening the store. It does so only while holding the gate exclusively, so an srv starting during another's reclaim never touches that reclaim's files; it leaves them for a later start:
 
 | Found at start | Meaning | Action |
 |---|---|---|

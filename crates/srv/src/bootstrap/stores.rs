@@ -340,7 +340,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                     // shows it as a step.
                     {
                         use crate::backend::storage::filestore::reclaim;
-                        reclaim::recover(&reclaim::Paths::for_db(&path));
+                        reclaim::recover_if_alone(&reclaim::Paths::for_db(&path));
                         if reclaim::requested(&path) {
                             eprintln!("{}", agentmux_common::srv_stderr::migrating_line("reclaiming-history", 1));
                             crate::boot_timing::step("reclaim-history", "Giving back history disk space", || {
