@@ -1,7 +1,7 @@
 # Agent Self-Compaction: Context, Compact, Fresh Session, and a Lower Auto-Compact Backstop
 
 **Date:** 2026-10-23
-**Status:** active — approved by the operator on 2026-10-23. PR 1 (§3.1, the backstop setting) shipped in #5393; PR 2 (§3.2–§3.6: context, compact, the compact hint) in #5399; PR 3 (fresh, and the fresh hint) remains.
+**Status:** implemented — approved by the operator on 2026-10-23. PR 1 (§3.1, the backstop setting) in #5393; PR 2 (§3.2–§3.6: context, compact, the compact hint) in #5399; PR 3 (fresh, and the fresh hint) in #5411.
 **Owner:** agent-pane lifecycle
 **Research:** [`REPORT_AGENT_SELF_COMPACTION_AND_TOKEN_USE_2026_10_23.md`](../reports/REPORT_AGENT_SELF_COMPACTION_AND_TOKEN_USE_2026_10_23.md) (measurements, economics, options, probe)
 **Related:** [`SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md`](SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md) (detection and display), [`SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md`](SPEC_DURABLE_CONVERSATION_MEMORY_2026_09_23.md) (running summary and continuation packet), [`SPEC_RESUME_PHASE_CATCH_UP_TURN_2026_10_13.md`](SPEC_RESUME_PHASE_CATCH_UP_TURN_2026_10_13.md) (catch-up turn), [`REPORT_AGENT_PANE_CONTEXT_METER_2026_10_05.md`](../reports/REPORT_AGENT_PANE_CONTEXT_METER_2026_10_05.md) (context readings, `get_context_usage`)
@@ -110,8 +110,8 @@ All three act on the **caller's own pane** only, resolved from its token the way
 **`fresh`**: `{ "handoff": "Task #1791 (spec written, uncommitted at docs/specs/...). Open PRs: #5401 (in review). Decided: 600K default. Next: wait for AgentY's go, then PR 1." }` (required, ≤4,000 characters).
 
 - Returns `scheduled` or `refused`.
-- **Claude:** at the turn boundary, srv stops the CLI gracefully (the `stop_for_config_restart` path), clears the session id (`inner.session_id` and the `agent:sessionid` meta), and respawns **without** `--resume`. The existing continuation path (`persistent/spawn.rs`, `resume_retry.rs` `carry_continuation`) builds the packet and prefixes it to the first message. The agent's handoff goes into the packet as its own section, "Handoff from your previous session", ahead of the running summary (`continuity.rs` `build_continuation_packet`). The packet's size cap still applies; the handoff is kept whole and the recent exchange is cut first.
-- **Codex:** at the boundary, srv drops the thread id, so the next `codex exec` starts a new thread, and sends the packet, with the handoff, as that turn's first message.
+- **Claude:** at the turn boundary, srv stops the CLI gracefully (the `stop_for_config_restart` path), clears the session id (`inner.session_id` and the `agent:sessionid` meta), and respawns **without** `--resume`. The agent's handoff is sent as AgentMux's own turn (`TurnOrigin::System`), which starts the new session, with a line pointing at `search_history` for the old one. The continuation packet is **not** attached (`spawn.rs` skips it for a start the agent asked for): it tells the model to continue as if uninterrupted and that its last request is unanswered, which is the opposite of a fresh start, and it would spend tokens on the conversation the agent chose to leave. The handoff is the only carry-over, so the tool description says it must stand on its own.
+- **Codex:** `refused: unsupported` for now. A Codex fresh session needs the same pane outcome frame a Claude one emits (the transcript divider, the meter reset, the memory fallback), and the Codex controller has no equivalent; a follow-up adds both. Codex agents keep `compact`.
 - The pane's existing `fresh_session` catch-up turn follows (`useAgentStream.ts`).
 - This is **not** the pane's "New session" button, which archives the transcript and the running summary. The transcript continues in the same pane, so the user sees one conversation with a "fresh session" marker.
 
@@ -123,8 +123,8 @@ All three act on the **caller's own pane** only, resolved from its token the way
 | Global and Personal Memory | Startup instructions file and the `SessionStart` hook, as at every start |
 | Workspace: working directory, files, git state, branches | Untouched on disk |
 | Kanban tasks it claimed, Presence claims, schedules | Server-side state, not part of the conversation |
-| Its handoff note | First section of the continuation packet |
-| Running summary, up to 40 identifiers (PR numbers, paths, ids), the last request and the recent exchange | The continuation packet (≤ ~24K characters) |
+| Its handoff note | The new session's first message, from AgentMux |
+| A way back to the old conversation | `Agents search_history`; the old session stays in the segments ledger |
 | The transcript the user sees | Same pane, continued |
 
 | Not kept | Why, and what to do |
@@ -146,7 +146,7 @@ At the end of every turn, srv evaluates (no model call):
 1. **C < 250K** (C = context tokens): nothing.
 2. **A task boundary just happened and C ≥ 150K**: hint `fresh`. A boundary srv can see is a `Tasks complete`, `submit` or `claim` by this agent during the turn, or a PR it opened being merged.
 3. **C ≥ 400K**: hint `compact`.
-4. At most one hint per crossing (it repeats only after the context has dropped below 250K and crossed again), never within 50 calls of the last compaction or fresh start, and never right after a catch-up turn.
+4. At most one compact hint per crossing (it repeats only after the context has dropped below 250K and crossed again); a fresh hint comes with each finished task while the context is above `agent:freshhintat` and doesn't use up the compact hint. Never within 50 calls of the last compaction or fresh start, and never right after a catch-up turn.
 
 The hint is one `[AgentMux]` note appended after the turn (the held-notes path, `reactive/held_notes.rs`), for example:
 
@@ -173,7 +173,7 @@ The agent decides with one judgment it already holds at the end of its turn: is 
 | Seeding | `crates/srv/src/backend/providers.rs` (`seed_auto_compact_window`, called from `prepare_provider_auth_dir`), `crates/srv/src/identity/resolver/inject.rs`, `providers/tests.rs` |
 | Context in srv | `blockcontroller/persistent/mod.rs` (`PersistentInner`), `persistent/stdout_reader.rs`, `subprocess/codex_context.rs` and the Codex host spawn |
 | Compact | `persistent/input.rs` (direct stdin write at the boundary), `persistent/stdout_reader.rs` (boundary hook), `subprocess/codex_compact.rs` |
-| Fresh | `persistent/lifecycle.rs`, `persistent/spawn.rs`, `persistent/resume_retry.rs`, `backend/continuity.rs` (handoff section), Codex host spawn (thread id) |
+| Fresh | `persistent/lifecycle.rs`, `persistent/spawn.rs`, `persistent/resume_retry.rs`, `context_reading.rs` (the flag that skips the packet) |
 | MuxAPI | `crates/mcp/src/tool_schemas.rs`, the `Agents` family handler in `crates/mcp/src/tools/`, `crates/srv/src/server/routes.rs` (`/api/v1/agent/self/context`, `/compact`, `/fresh`), a handler next to `server/app_api/mcp_health.rs` |
 | Hint | `reactive/held_notes.rs` (or the turn-end path in `stdout_reader.rs`), the model price table |
 | Frontend | the catch-up turn for a self-requested compaction (`useAgentStream.ts`), the "fresh session" marker in the transcript |
@@ -183,7 +183,7 @@ The agent decides with one judgment it already holds at the end of its turn: is 
 
 1. **PR 1, backstop:** the `agent:compactat` setting, `seed_auto_compact_window`, Settings UI, tests; with this spec and the public report. (The hand-applied 633,000 on 2026-10-23 becomes AgentMux's own value under §3.1.)
 2. **PR 2, context and compact:** srv's context reading, `Agents context` and `compact`, the hint, its settings, the catch-up turn with the focus.
-3. **PR 3, fresh:** `Agents fresh`, the handoff section, the Codex path, the transcript marker.
+3. **PR 3, fresh:** `Agents fresh` for Claude, the handoff, the transcript marker. The Codex path follows.
 
 Each PR is independently useful; PR 2 doesn't need PR 3.
 
@@ -192,7 +192,7 @@ Each PR is independently useful; PR 2 doesn't need PR 3.
 - **Seeding** (unit, `providers/tests.rs`): absent → written; AgentMux's own value (sidecar or 633,000) → follows the setting; a person's value → left; unparsable or non-object file → untouched; `compactat` 0 → own value removed; the clamp; never blocks a spawn.
 - **Context reading** (unit): Claude frames → tokens, window and model as the frontend computes them (shared fixtures with `context-reading` tests); subagent frames ignored; Codex reading kept.
 - **Compact** (integration, fake CLI on stdin/stdout): a request mid-turn writes nothing until the turn ends, then exactly one `/compact <focus>` line, no held notes; rate limit; already-scheduled; Codex path calls `thread/compact/start`.
-- **Fresh** (integration): graceful stop, no `--resume` on respawn, the packet contains the handoff first, task claims and memory delivery unchanged, transcript not archived.
+- **Fresh** (integration): graceful stop, no `--resume` on respawn, no continuation packet, the handoff is the first message, task claims and memory delivery unchanged, transcript not archived.
 - **Hint** (unit): the rule's thresholds, one hint per crossing, suppression after compaction and catch-up.
 - **Live check** before PR 2 merges: re-run the report's probe (§3.3) through the new action on the pinned CLI.
 

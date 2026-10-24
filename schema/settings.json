@@ -637,6 +637,12 @@
           "default": true,
           "description": "At the end of a turn whose context is at least agent:compacthintat tokens, give the agent one [AgentMux] note suggesting it compact itself (Agents compact, with what to keep) if its next work continues the task. Once per crossing: again only after the context has dropped below 250,000 tokens. Set false to turn the notes off. See docs/specs/SPEC_AGENT_SELF_COMPACTION_2026_10_23.md §3.5."
         },
+        "agent:freshhintat": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 150000,
+          "description": "The context size, in tokens, from which a turn that finished a Kanban task (Tasks complete or submit) gets the agent:compacthints note suggesting a fresh session (Agents fresh, with a handoff) if its next work is unrelated. See docs/specs/SPEC_AGENT_SELF_COMPACTION_2026_10_23.md §3.5."
+        },
         "agent:compacthintat": {
           "type": "integer",
           "minimum": 0,

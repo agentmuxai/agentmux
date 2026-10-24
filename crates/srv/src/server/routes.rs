@@ -503,6 +503,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // An agent's own context, and compacting itself (SPEC_AGENT_SELF_COMPACTION §3.3).
         .route("/api/v1/agent/self/context", post(app_api::agent_context::handle_context_self))
         .route("/api/v1/agent/self/compact", post(app_api::agent_context::handle_compact_self))
+        .route("/api/v1/agent/self/fresh", post(app_api::agent_context::handle_fresh_self))
         // The outcome of a shutdown waiting on the user's override (§6.5):
         // the MCP tools poll it after their 202.
         // axum 0.7: a path parameter is `:name`; `{name}` would be a literal.

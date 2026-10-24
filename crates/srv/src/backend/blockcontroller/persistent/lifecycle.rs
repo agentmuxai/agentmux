@@ -82,6 +82,41 @@ impl PersistentSubprocessController {
         Self::request_stop_inner(&self.inner, request, false, true);
     }
 
+    /// `Agents fresh` (SPEC_AGENT_SELF_COMPACTION_2026_10_23.md §3.3): end
+    /// this provider session so the next message starts a new one. Clears the
+    /// session id here and on the block, so nothing resumes it, then stops the
+    /// CLI as a Stop does. The next message spawns a fresh CLI onto the pane's
+    /// history (no continuation packet: `spawn.rs` skips it for this start), and
+    /// a new segment of the agent's chain (`continuity_segments`), so the old
+    /// session stays in its record. Only between turns. Returns the old id.
+    pub(crate) fn start_fresh_session(&self) -> Result<Option<String>, &'static str> {
+        // The idle check and the stop are one `inner` acquisition, as message
+        // delivery's turn reservation is: a message arriving at the boundary
+        // either started its turn first (refused here, the caller retries) or
+        // finds the stop pending and is refused.
+        let (old, kill_tx) = {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.stop_pending || inner.restart_pending {
+                return Err("the agent's process is already stopping or restarting");
+            }
+            if self.health_monitor.is_active_turn() {
+                return Err("a turn is running");
+            }
+            let old = inner.session_id.take();
+            // The retiring process's reader may still capture the old id from
+            // its result frame; a poisoned id is never adopted or resumed.
+            if let Some(sid) = &old {
+                inner.resume_poisoned = Some(sid.clone());
+            }
+            (old, Self::stop_locked(&mut inner, false, false).0)
+        };
+        super::super::core::persist_session_id(&self.block_id, "", &self.mstore, &self.event_bus);
+        if let Some(tx) = kill_tx {
+            let _ = tx.send(KillRequest::Graceful(std::time::Instant::now() + super::super::SHUTDOWN_GRACE));
+        }
+        Ok(old)
+    }
+
     /// A kill for teardown: drains the deferred queue in the SAME `inner`
     /// acquisition that issues the kill, and returns what it drained for the
     /// caller to report. Draining in a second acquisition left a window
@@ -104,39 +139,46 @@ impl PersistentSubprocessController {
         drain_deferred: bool,
         config_restart: bool,
     ) -> Vec<String> {
-        let (kill_tx, drained) = {
-            let mut inner = inner_arc.lock().unwrap();
-            // Recorded unconditionally, not only when `kill_tx` is already
-            // `None` — codex P1 on PR #2360 (round 16, commit ce1642d90):
-            // `stop_process` can race a process that already exited (a
-            // confirmed stale-`--resume` death) and is about to be
-            // silently retried — sending through `kill_tx` is futile in
-            // that window regardless of whether it's already `None` (the
-            // exit-handler cleared it) or still `Some` (`tokio::select!`
-            // already committed to the `child.wait()` exit arm before
-            // this call reached the lock, so the `kill_rx` arm will never
-            // be polled again even if the send succeeds). Recording this
-            // as a `StopRequested` event — resolved by
-            // `persistent_resume::update` once `ProcessExited` arrives —
-            // is the only way the exit-handler's retry decision can know
-            // the user explicitly asked to stop.
-            let generation = inner.spawn_generation;
-            inner.apply_resume_event(persistent_resume::ResumeEvent::StopRequested { generation });
-            inner.stop_pending = true;
-            if !config_restart {
-                inner.config_restart_generation = None;
-            }
-            let drained = if drain_deferred {
-                inner.deferred_deliveries.drain(..).collect()
-            } else {
-                Vec::new()
-            };
-            (inner.kill_tx.take(), drained)
-        };
+        let (kill_tx, drained) = Self::stop_locked(&mut inner_arc.lock().unwrap(), drain_deferred, config_restart);
         if let Some(tx) = kill_tx {
             let _ = tx.send(request);
         }
         drained
+    }
+
+    /// The bookkeeping of a stop request, in the caller's `inner` acquisition:
+    /// the kill channel to send on, and what `drain_deferred` drained.
+    fn stop_locked(
+        inner: &mut PersistentInner,
+        drain_deferred: bool,
+        config_restart: bool,
+    ) -> (Option<tokio::sync::oneshot::Sender<KillRequest>>, Vec<String>) {
+        // Recorded unconditionally, not only when `kill_tx` is already
+        // `None` — codex P1 on PR #2360 (round 16, commit ce1642d90):
+        // `stop_process` can race a process that already exited (a
+        // confirmed stale-`--resume` death) and is about to be
+        // silently retried — sending through `kill_tx` is futile in
+        // that window regardless of whether it's already `None` (the
+        // exit-handler cleared it) or still `Some` (`tokio::select!`
+        // already committed to the `child.wait()` exit arm before
+        // this call reached the lock, so the `kill_rx` arm will never
+        // be polled again even if the send succeeds). Recording this
+        // as a `StopRequested` event — resolved by
+        // `persistent_resume::update` once `ProcessExited` arrives —
+        // is the only way the exit-handler's retry decision can know
+        // the user explicitly asked to stop.
+        let generation = inner.spawn_generation;
+        inner.apply_resume_event(persistent_resume::ResumeEvent::StopRequested { generation });
+        inner.stop_pending = true;
+        if !config_restart {
+            inner.config_restart_generation = None;
+        }
+        let drained = if drain_deferred {
+            inner.deferred_deliveries.drain(..).collect()
+        } else {
+            Vec::new()
+        };
+        (inner.kill_tx.take(), drained)
     }
 
     pub fn session_id(&self) -> Option<String> {
