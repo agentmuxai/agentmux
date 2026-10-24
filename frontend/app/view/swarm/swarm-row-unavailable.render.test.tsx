@@ -142,6 +142,23 @@ describe("AgentRow — an agent that can't start a turn", () => {
         expect(container.querySelector(".swarm-status-chip")).not.toBeNull();
     });
 
+    it("leaves a Supervisor pause ahead of it: the row keeps the line the model built, which says why it needs you", () => {
+        seedBlockMeta({
+            "agent:last_failure": { code: "usage_limit", resetsAtMs: hours(3) },
+            "supervisor:mode": "steady",
+            "supervisor:state": {
+                status: "paused",
+                reason: "out of quota until Sun 7 PM",
+                mode: "steady",
+                history: [],
+            },
+        });
+        const { container } = renderRow("idle");
+        expect(container.querySelector(".swarm-unavailable-chip")).toBeNull();
+        expect(container.querySelector(".swarm-status-chip")).not.toBeNull();
+        expect(container.querySelector(".swarm-activity-summary")?.textContent?.trim()).toBe("No activity yet");
+    });
+
     it("ignores a transient failure", () => {
         seedBlockMeta({ "agent:last_failure": { code: "overloaded" } });
         const { container } = renderRow("idle");

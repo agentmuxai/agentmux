@@ -452,7 +452,12 @@ export function AgentRow({
         tick();
         return Date.now();
     };
-    const unavailable = createMemo(() => unavailableOfMeta(blockMeta(), node().agentStatus === "running", rowNow()));
+    // A question, or a Supervisor pause that needs you, ranks ahead of it (store/agent-status.ts).
+    const unavailable = createMemo(() =>
+        isAwaitingUser(blockMeta(), node().agentStatus)
+            ? null
+            : unavailableOfMeta(blockMeta(), node().agentStatus === "running", rowNow())
+    );
     const totalRows = createMemo(() =>
         agentChildRowCount(node(), longRunningRows().length, ownBackgroundRows().length, supervisorDecisions().length)
     );
