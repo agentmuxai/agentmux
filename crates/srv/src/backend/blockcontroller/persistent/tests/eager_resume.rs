@@ -60,6 +60,7 @@ fn wire_ungated_agent(store: &Store, block_id: &str) {
     store.insert(&mut block).unwrap();
 
     let mut def = AgentDefinition {
+        seat: None,
         conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
         id: "def-1".to_string(),
         slug: String::new(),

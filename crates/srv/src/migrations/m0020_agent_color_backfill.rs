@@ -157,6 +157,7 @@ mod tests {
 
     fn insert_def(mstore: &Store, name: &str) -> String {
         let mut def = AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: format!("test-{name}"),
             slug: String::new(),
@@ -284,6 +285,7 @@ mod tests {
                     container_name: String::new(),
                     use_ambient_login: 0,
                     former_slugs: Vec::new(),
+                    seat: None,
                     content: Vec::new(),
                     skills: Vec::new(),
                 },

@@ -298,6 +298,7 @@ pub fn migrate_promote_template_sessions_v1(
                 // same convention as use_ambient_login just above (opt-in
                 // settings reset, not carried over, on a fresh
                 // instantiation).
+                seat: None,
                 conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             };
             if let Err(e) = mstore.agent_def_insert(&mut new_def) {

@@ -99,6 +99,7 @@ mod resolve_vendor_env_override_tests {
 
     fn base_agent(model_vendor_base_url: &str) -> AgentDefinition {
         AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "a1".to_string(),
             slug: "a1".to_string(),
@@ -1297,6 +1298,7 @@ mod write_agent_config_files_tests {
 
     fn make_agent(id: &str, working_directory: &str) -> AgentDefinition {
         AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: id.to_string(),
             slug: String::new(),

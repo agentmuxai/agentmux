@@ -62,6 +62,11 @@ pub(super) fn agent_definition_to_record(
         // Not a column: the mirror writes add this channel's copy
         // (`former_slugs`), and `upsert` keeps the file's and appends.
         former_slugs: Vec::new(),
+        // Never written by the mirror: only `Store::agent_seat_set` writes the
+        // record's seat, and leaving it out here makes `upsert` keep the
+        // file's copy, so no definition save (`updateagent`, `agent.define`,
+        // a content refresh) can drop or roll back a seat.
+        seat: None,
         content: content
             .iter()
             .map(|c| DefContentBlob {
@@ -141,6 +146,8 @@ pub(super) fn record_to_agent_definition(rec: &DefinitionRecord) -> AgentDefinit
         // memory_id; this default only applies to a genuinely
         // never-seen-locally cross-channel agent.
         conversation_visibility: super::agents::default_conversation_visibility(),
+        // The record is where a seat lives, so this is the stored seat.
+        seat: d.seat.clone(),
     }
 }
 
@@ -336,6 +343,35 @@ impl Store {
         .ok_or_else(|| StoreError::Other(format!("agent {agent_id} not in global registry")))?;
         Ok(())
     }
+
+    /// The stored seat of agent `id`, from its shared definition record
+    /// (`SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md` §2). `None` when it has
+    /// no seat or no shared record.
+    pub fn agent_seat_get(&self, id: &str) -> Option<crate::registry::AgentSeat> {
+        let reg = self.shared_def_registry()?;
+        match reg.get(id) {
+            Ok(rec) => rec.and_then(|r| r.data.seat),
+            Err(e) => {
+                tracing::warn!(agent_id = %id, error = %e, "def registry: seat read failed");
+                None
+            }
+        }
+    }
+
+    /// Set (`Some`) or clear (`None`) agent `id`'s seat on its shared
+    /// definition record, the only place a seat is kept. A channel-local
+    /// agent with no shared record (a seeded template, or no shared store)
+    /// can't have one, and that's an error.
+    pub fn agent_seat_set(&self, id: &str, seat: Option<&crate::registry::AgentSeat>) -> Result<(), StoreError> {
+        let Some(reg) = self.shared_def_registry() else {
+            return Err(StoreError::Other("no shared definition store, so no agent can have a seat".into()));
+        };
+        match reg.set_seat(id, seat) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(StoreError::Other(format!("agent {id} has no shared definition, so it can't have a seat"))),
+            Err(e) => Err(StoreError::Other(format!("could not save the seat of agent {id}: {e}"))),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -460,8 +496,73 @@ mod tests {
         );
     }
 
+    fn seat(role: &str) -> crate::registry::AgentSeat {
+        crate::registry::AgentSeat { role: role.to_string(), qualifier: Some("product".into()), set_at_ms: 5, ..Default::default() }
+    }
+
+    /// The seat lives on the shared record: `agent_def_list`'s overlay reads
+    /// it for a local agent (whose row has none) and a cross-channel one, and
+    /// a definition save (`agent_def_update`, a content write) keeps it.
+    #[test]
+    fn a_seat_reads_through_the_overlay_and_survives_definition_writes() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let def_store = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+        store.set_def_registry(def_store.clone());
+
+        let mut def = local_def("agent-1", "Seated");
+        store.agent_def_insert(&mut def).unwrap();
+        store.agent_seat_set("agent-1", Some(&seat("leader"))).unwrap();
+        let listed = |store: &Store| store.agent_def_list().unwrap().into_iter().find(|d| d.id == "agent-1").unwrap();
+        assert_eq!(listed(&store).seat, Some(seat("leader")));
+        assert_eq!(store.agent_seat_get("agent-1"), Some(seat("leader")));
+
+        let mut edited = listed(&store);
+        edited.name = "Renamed".into();
+        edited.seat = None;
+        assert!(store.agent_def_update(&mut edited).unwrap());
+        store
+            .agent_content_set(&AgentContent { agent_id: "agent-1".into(), content_type: "ui:zoom".into(), content: "1.2".into(), updated_at: 2 })
+            .unwrap();
+        let after = listed(&store);
+        assert_eq!(after.name, "Renamed");
+        assert_eq!(after.seat, Some(seat("leader")), "no definition write drops the seat");
+
+        store.agent_seat_set("agent-1", None).unwrap();
+        assert_eq!(listed(&store).seat, None);
+
+        // A cross-channel agent (no local row) carries its seat too.
+        let mut remote = global_user_agent("remote-1", "Remote");
+        remote.data.seat = Some(seat("analyst"));
+        def_store.upsert(&remote).unwrap();
+        assert_eq!(store.agent_def_get("remote-1").unwrap().unwrap().seat, Some(seat("analyst")));
+        assert_eq!(listed_id(&store, "remote-1").seat, Some(seat("analyst")));
+    }
+
+    fn listed_id(store: &Store, id: &str) -> AgentDefinition {
+        store.agent_def_list().unwrap().into_iter().find(|d| d.id == id).unwrap()
+    }
+
+    /// No shared record, no seat: a seeded template stays channel-local.
+    #[test]
+    fn an_agent_without_a_shared_record_cannot_have_a_seat() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        store.set_def_registry(Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap()));
+        let mut tpl = local_def("tpl-1", "Coder");
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        let err = store.agent_seat_set("tpl-1", Some(&seat("leader"))).unwrap_err().to_string();
+        assert!(err.contains("no shared definition"), "{err}");
+
+        let bare = Store::open_in_memory().unwrap();
+        assert!(bare.agent_seat_set("x", Some(&seat("leader"))).is_err());
+        assert!(bare.agent_seat_get("x").is_none());
+    }
+
     fn local_def(id: &str, name: &str) -> AgentDefinition {
         AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: id.to_string(),
             slug: id.to_string(),

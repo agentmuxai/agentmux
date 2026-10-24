@@ -236,6 +236,12 @@ pub struct RecentSessionRow {
     /// "host" or "container" — drives the runtime badge in the My Agents list.
     #[serde(default)]
     pub agent_type: String,
+    /// The agent's seat (its effective one, so a spawned worker's too), with
+    /// its lead named, for the My Agents tile's role badge and "reports to"
+    /// line. Absent when it has none. SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §4.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub seat: Option<super::SeatSummary>,
 }
 
 /// Response envelope for `listrecentsessions`. Introduced alongside the

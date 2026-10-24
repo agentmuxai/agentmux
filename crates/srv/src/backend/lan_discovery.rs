@@ -243,6 +243,12 @@ pub struct LanInstance {
     /// Each listed agent's provider id, a known one only (`agent_names.rs`).
     #[serde(default)]
     pub agent_providers: BTreeMap<String, String>,
+    /// Each listed agent's seat as the peer reported it, by lower-cased name
+    /// (`agent_names.rs`; SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §5).
+    /// Omitted when none has one.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[ts(as = "Option<BTreeMap<String, crate::backend::rpc_types::SeatSummary>>", optional)]
+    pub agent_seats: BTreeMap<String, crate::backend::rpc_types::SeatSummary>,
     #[ts(type = "number")]
     pub first_seen: u64,
     #[ts(type = "number")]
@@ -1191,6 +1197,7 @@ impl LanDiscovery {
                     agent_status: Default::default(),
                     agent_lines: Default::default(),
                     agent_providers: Default::default(),
+                    agent_seats: Default::default(),
                     first_seen: now,
                     last_seen: now,
                     last_polled_ok: 0,

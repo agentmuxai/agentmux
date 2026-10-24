@@ -20,6 +20,7 @@ pub(crate) use template::copy_definition;
 mod identity;
 mod instance;
 mod session;
+mod seat;
 pub(crate) mod bundle;
 mod bash_prefix;
 pub(crate) mod container_turn;
@@ -56,6 +57,7 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     identity::register(engine, state);
     instance::register(engine, state);
     session::register(engine, state);
+    seat::register(engine, state);
     bundle::register(engine, state);
 }
 
@@ -420,6 +422,7 @@ mod recent_sessions_tests {
         // db_agents fold semantics require the seed shape to avoid
         // the collision.
         let def = AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "def-claude".to_string(),
             slug: "claude-code".to_string(),
@@ -768,6 +771,7 @@ mod recent_sessions_tests {
 
         // One seeded template + one already-user-owned definition.
         let mut tpl = AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "tpl-claude".to_string(),
             slug: String::new(),
@@ -801,6 +805,7 @@ mod recent_sessions_tests {
         mstore.agent_def_insert(&mut tpl).unwrap();
 
         let mut user_a = AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "user-a".to_string(),
             slug: String::new(),

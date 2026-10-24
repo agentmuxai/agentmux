@@ -82,6 +82,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         include_hidden || a.is_seeded != 1 || a.user_hidden == 0
                     })
                     .collect();
+                let mut filtered = filtered;
+                // A spawned worker with no seat of its own shows its leader
+                // as its lead (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §2).
+                crate::backend::agent_seat::apply_effective_seats(&mstore, &mut filtered);
                 Ok(filtered)
         }
     });
@@ -134,6 +138,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // (the App-API/MCP path) can set a model vendor override.
                     model_vendor_base_url: String::new(),
                     memory_id: String::new(),
+                    seat: None,
                     conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
                 };
                 mstore.agent_def_insert(&mut agent).map_err(|e| format!("createagent: {e}"))?;
@@ -248,6 +253,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // needs the real value: it's what gets serialized back
                     // to the frontend as the "updated" agent.
                     memory_id: old.memory_id.clone(),
+                    // Not this RPC's: a seat is set only by `agent.setSeat`, and
+                    // the mirror write keeps the stored one whatever this says.
+                    seat: old.seat.clone(),
                     // Not yet exposed by this RPC's own command schema
                     // (CommandUpdateAgentData has no conversation_visibility
                     // field) — preserve the existing value, same as
@@ -260,6 +268,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 if !found {
                     return Err(format!("updateagent: agent {} not found", agent.id));
                 }
+                // The seat `listagents` would show.
+                agent.seat = crate::backend::agent_seat::effective_seat(&mstore, &agent);
                 broker.publish_event::<crate::backend::mps_events::AgentsChanged>(&(), vec![], 0);
                 Ok(agent)
             }
@@ -450,6 +460,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     use_ambient_login: 0,
                     model_vendor_base_url: String::new(),
                     memory_id: String::new(),
+                    seat: None,
                     conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
                 };
                 mstore.agent_def_insert(&mut agent).map_err(|e| format!("importagentfromclaw: {e}"))?;
@@ -575,6 +586,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         use_ambient_login: 0,
                         model_vendor_base_url: String::new(),
                         memory_id: String::new(),
+                        seat: None,
                         conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
                     };
 
@@ -737,6 +749,7 @@ mod tests {
     // carries "codex", which `importagents` gives the imported agent.
     fn seed_drifted_agent(state: &AppState, def_id: &str, bundle_id: &str) {
         let mut def = AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: def_id.to_string(),
             slug: def_id.to_string(),

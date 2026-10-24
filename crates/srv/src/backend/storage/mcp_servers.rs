@@ -457,6 +457,7 @@ mod effective_tests {
 
     fn agent(store: &Store, id: &str, memory_id: &str) {
         let mut def = crate::backend::storage::store::AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: id.to_string(),
             slug: String::new(),

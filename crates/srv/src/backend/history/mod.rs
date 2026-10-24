@@ -1171,6 +1171,7 @@ mod tests {
 
         let store = Store::open_in_memory().unwrap();
         let mut def = crate::backend::storage::store::AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "agent-1".to_string(),
             slug: String::new(),
@@ -1241,6 +1242,7 @@ mod tests {
     /// agent, since the id is a UUID and the slug is human-readable.
     fn insert_agent(store: &Store, id: &str, name: &str, slug: &str, working_directory: &str) {
         let mut def = crate::backend::storage::store::AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: id.to_string(),
             slug: slug.to_string(),
@@ -1760,6 +1762,7 @@ mod tests {
 
     fn insert_test_agent_and_link(store: &Store, agent_id: &str, account_id: &str) {
         let mut def = crate::backend::storage::store::AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: agent_id.to_string(),
             slug: String::new(),

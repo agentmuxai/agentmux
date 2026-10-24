@@ -87,6 +87,7 @@ pub(super) fn map_agent_definition_row(row: &rusqlite::Row) -> rusqlite::Result<
         use_ambient_login: row.get(25)?,
         model_vendor_base_url: row.get(26)?,
         memory_id: row.get(27)?,
+        seat: None,
         conversation_visibility: row.get(28)?,
     })
 }
