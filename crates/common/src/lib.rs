@@ -31,6 +31,7 @@ pub mod process;
 pub mod redact;
 pub mod runtime_mode;
 pub mod secret_eq;
+pub mod settings_path;
 pub mod shell_quote;
 pub mod slug;
 pub mod srv_stderr;
@@ -50,6 +51,7 @@ pub use data_paths::{
     IsolatedSettingsReason,
 };
 pub use errors::{AgentMuxError, AmxCode};
+pub use settings_path::{settings_dir_for, SETTINGS_FILE};
 pub use layout_intent::{LayoutIntent, LayoutResizeOp, LayoutViewState};
 pub use layout_types::{
     FlexDirection, LayoutClientSlices, LayoutNode, LayoutNodeData, SplitPosition,

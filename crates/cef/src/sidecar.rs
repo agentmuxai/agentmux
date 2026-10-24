@@ -163,22 +163,10 @@ pub fn use_launcher_endpoints(
     Some(result)
 }
 
-/// Spawn the agentmux-srv backend sidecar and wait for it to signal
-/// readiness via a `AGENTMUXSRV-ESTART` line on stderr (30s timeout).
-pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, String> {
-    tracing::info!("spawn_backend() called");
-
-    // 1. Resolve directories.
-    //
-    // Two reachable paths:
-    //   a) The `restart_backend` RPC after launcher-managed startup —
-    //      `DataPaths::from_env()` succeeds because the host inherits
-    //      the launcher's env.
-    //   b) Standalone `task dev` (host launched directly by `task dev`,
-    //      no launcher in the loop) — env vars absent. We re-derive
-    //      via the same `agentmux_common` API the launcher would have
-    //      used, so the disk layout is identical. This is functionally
-    //      a fallback the launcher would otherwise have produced.
+/// The paths `spawn_backend` starts srv with: the launcher's env on the
+/// `restart_backend` path, else the same `agentmux_common` resolution the
+/// launcher would have done (standalone `task dev`).
+fn resolve_spawn_paths() -> Result<agentmux_common::DataPaths, String> {
     let current_version = env!("CARGO_PKG_VERSION");
     // Mirror the env-isolation guard from main.rs: a dev build never
     // trusts inherited AGENTMUX_* env, even on the restart_backend path
@@ -189,27 +177,51 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     let host_exe_dir = host_exe_dir
         .parent()
         .ok_or_else(|| "current_exe has no parent".to_string())?;
-    let paths = if agentmux_common::is_dev_build_exe(host_exe_dir) {
+    if agentmux_common::is_dev_build_exe(host_exe_dir) {
         let mode = agentmux_common::RuntimeMode::current_path_only(host_exe_dir);
         // resolve_path_only mirrors current_path_only's env-isolation:
         // ignore inherited AGENTMUX_CHANNEL so a re-spawned dev sidecar
         // doesn't redirect into a parent agentmux instance's channel
         // (would trip the channel single-instance lock).
-        agentmux_common::DataPaths::resolve_path_only(current_version, &mode)?
-    } else {
-        match agentmux_common::DataPaths::from_env() {
-            Some(p) => p,
-            None => {
-                // No launcher env — derive from the host's own vantage.
-                // Mode detection works at this point even though the host
-                // exe lives inside `runtime/`: the `agentmux-portable.marker`
-                // is packaged INTO `runtime/`, so it sits next to this host
-                // exe (`is_portable_marker_present` checks the exe dir).
-                let mode = agentmux_common::RuntimeMode::current(host_exe_dir);
-                agentmux_common::DataPaths::resolve(current_version, &mode)?
-            }
+        return agentmux_common::DataPaths::resolve_path_only(current_version, &mode);
+    }
+    match agentmux_common::DataPaths::from_env() {
+        Some(p) => Ok(p),
+        None => {
+            // No launcher env — derive from the host's own vantage.
+            // Mode detection works at this point even though the host
+            // exe lives inside `runtime/`: the `agentmux-portable.marker`
+            // is packaged INTO `runtime/`, so it sits next to this host
+            // exe (`is_portable_marker_present` checks the exe dir).
+            let mode = agentmux_common::RuntimeMode::current(host_exe_dir);
+            agentmux_common::DataPaths::resolve(current_version, &mode)
         }
+    }
+}
+
+/// The `settings.json` this host's srv reads: the launcher's paths when the
+/// launcher started srv, else the ones `spawn_backend` starts it with. Every
+/// host read and write of settings.json goes through this, so it is the same
+/// file srv loads, under `AGENTMUX_HOME_OVERRIDE` too (#1903). `None` when the
+/// paths can't be resolved; callers then use their defaults rather than guess
+/// a location.
+pub(crate) fn settings_file() -> Option<std::path::PathBuf> {
+    let paths = if std::env::var_os("AGENTMUX_BACKEND_WS").is_some() {
+        agentmux_common::DataPaths::from_env()
+    } else {
+        resolve_spawn_paths().ok()
     };
+    paths.map(|p| p.settings_file())
+}
+
+/// Spawn the agentmux-srv backend sidecar and wait for it to signal
+/// readiness via a `AGENTMUXSRV-ESTART` line on stderr (30s timeout).
+pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, String> {
+    tracing::info!("spawn_backend() called");
+
+    // 1. Resolve directories.
+    let current_version = env!("CARGO_PKG_VERSION");
+    let paths = resolve_spawn_paths()?;
     let version_instance_id = format!("v{}", current_version);
     let data_dir = paths.data_dir.clone();
     let config_dir = paths.config_dir.clone();

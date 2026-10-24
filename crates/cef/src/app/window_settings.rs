@@ -170,104 +170,47 @@ pub(crate) fn read_window_transparent_setting() -> bool {
 /// A boolean `window:` key from the live settings.json, or `default` when the
 /// file or the key is absent.
 pub(crate) fn read_window_bool_setting(key: &str, default: bool) -> bool {
-    // Candidate locations for the LIVE settings.json, in priority order —
-    // mirrors srv's `config_watcher_fs::resolve_settings_dir()` (the file the
-    // settings UI actually edits). See
-    // docs/specs/SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md.
-    //
-    // Isolated (default for every channel except `stable` —
-    // agentmux_common::isolated_settings_enabled()):
-    //   1. $AGENTMUX_SETTINGS_DIR/settings.json (explicit override)
-    //   2. $AGENTMUX_CONFIG_DIR (or $AGENTMUX_CONFIG_HOME — pre-unification
-    //      name, same value)/settings.json — the channel-scoped config dir.
-    // Deliberately does NOT fall through to the shared/legacy candidates
-    // below: an isolated channel's own settings.json existing-but-lacking
-    // `window:transparent` must read the default (false), not silently
-    // inherit the shared file's value — that fallthrough would defeat
-    // isolation for exactly the surprise-carry-over case this spec exists
-    // to prevent, just for a different key.
-    //
-    // Global (`stable`, or an explicit AGENTMUX_ISOLATED_SETTINGS=0
-    // opt-out) — unchanged from before this spec:
-    //   1. $AGENTMUX_SETTINGS_DIR/settings.json (explicit override)
-    //   2. $AGENTMUX_CONFIG_HOME/../../settings.json (channels-root shared
-    //      file — the modern location, e.g. ~/.agentmux/channels/settings.json)
-    //   3. $AGENTMUX_CONFIG_DIR/settings.json (per-instance config dir)
-    //   4. ~/.agentmux/channels/settings.json
-    //   5. ~/.agentmux/settings.json (legacy)
-    // First file that exists wins. The old code (pre-dating this
-    // module's original fix) checked ONLY (3), which is empty in every
-    // real deployment — so `window:transparent` silently read `false`
-    // for everyone on Linux/macOS.
-    fn candidates() -> Vec<std::path::PathBuf> {
-        let mut out = Vec::new();
-        if let Some(d) = std::env::var_os("AGENTMUX_SETTINGS_DIR").filter(|s| !s.is_empty()) {
-            out.push(std::path::PathBuf::from(d).join("settings.json"));
-        }
-
-        if agentmux_common::isolated_settings_enabled() {
-            // Isolated channel: the per-instance config dir IS the settings
-            // dir (no parent-walk to a shared location) — same value
-            // srv's resolve_settings_dir() uses on an isolated channel.
-            // Prefers AGENTMUX_CONFIG_DIR (the canonical var) but accepts
-            // AGENTMUX_CONFIG_HOME too, since srv's bootstrap/stores.rs
-            // re-exports the same value under that legacy name and this
-            // function may run in a process that only has one of the two set.
-            //
-            // No DataPaths::from_env() fallback here (#2664): from_env()
-            // itself requires AGENTMUX_CONFIG_DIR via `?`
-            // (crates/common/src/data_paths.rs), so it can only ever succeed in
-            // exactly the case already handled above, and can only be
-            // reached here when that case already failed — i.e. it would
-            // always return None too. A branch that can never produce a
-            // value is worse than no branch: it reads as "there's a
-            // working fallback" when there isn't one. If both vars are
-            // genuinely absent, there is no isolated candidate to offer.
-            if let Some(d) = std::env::var_os("AGENTMUX_CONFIG_DIR")
-                .or_else(|| std::env::var_os("AGENTMUX_CONFIG_HOME"))
-                .filter(|s| !s.is_empty())
-            {
-                out.push(std::path::PathBuf::from(d).join("settings.json"));
-            }
-            return out;
-        }
-
-        if let Some(d) = std::env::var_os("AGENTMUX_CONFIG_HOME").filter(|s| !s.is_empty()) {
-            let p = std::path::PathBuf::from(d);
-            if let Some(root) = p.parent().and_then(|p| p.parent()) {
-                out.push(root.join("settings.json"));
-            }
-        }
-        // No DataPaths::from_env() fallback here either (same dead-branch
-        // reasoning as above, pre-existing before this PR but the same
-        // bug: from_env() requires AGENTMUX_CONFIG_DIR, and this branch
-        // is only reached when AGENTMUX_CONFIG_DIR is already unset — so
-        // it could never have produced a value here either).
-        if let Some(d) = std::env::var_os("AGENTMUX_CONFIG_DIR").filter(|s| !s.is_empty()) {
-            out.push(std::path::PathBuf::from(d).join("settings.json"));
-        }
-        if let Some(home) = dirs::home_dir() {
-            out.push(home.join(".agentmux").join("channels").join("settings.json"));
-            out.push(home.join(".agentmux").join("settings.json"));
-        }
-        out
+    // One file: the settings.json srv loads and the settings UI edits
+    // (`sidecar::settings_file`). No fallback to other locations: under
+    // AGENTMUX_HOME_OVERRIDE a scan of `~/.agentmux/...` read the real
+    // home's settings, and on an isolated channel a shared file's value
+    // would defeat the isolation (#1903,
+    // docs/specs/SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md).
+    match crate::sidecar::settings_file() {
+        Some(path) => bool_setting_in(&path, key, default),
+        None => default,
     }
-    for path in candidates() {
-        if !path.exists() {
-            continue;
-        }
-        // settings.json is JSONC (comments + trailing commas) — a strict
-        // serde_json parse fails on the shipped template. Use the same
-        // lenient reader the settings command path uses.
-        let map = crate::commands::platform::read_settings_jsonc(&path);
-        if let Some(v) = map.get(key).and_then(|v| v.as_bool()) {
+}
+
+/// A boolean key from one settings.json, or `default` when the file, the key
+/// or a boolean value is absent.
+fn bool_setting_in(path: &std::path::Path, key: &str, default: bool) -> bool {
+    // settings.json is JSONC (comments + trailing commas) — a strict
+    // serde_json parse fails on the shipped template. Use the same
+    // lenient reader the settings command path uses.
+    let map = crate::commands::platform::read_settings_jsonc(path);
+    match map.get(key).and_then(|v| v.as_bool()) {
+        Some(v) => {
             tracing::info!("{}={} (from {})", key, v, path.display());
-            return v;
+            v
         }
-        // File exists but has no (uncommented) key → the default, but keep
-        // scanning lower-priority locations in case an older file has it.
+        None => default,
     }
-    default
+}
+
+#[cfg(test)]
+mod bool_setting_tests {
+    use super::bool_setting_in;
+
+    #[test]
+    fn reads_a_jsonc_boolean_and_defaults_otherwise() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("settings.json");
+        assert!(bool_setting_in(&path, "window:transparent", true));
+        std::fs::write(&path, "{\n  // comment\n  \"window:transparent\": true,\n}\n").unwrap();
+        assert!(bool_setting_in(&path, "window:transparent", false));
+        assert!(!bool_setting_in(&path, "window:autorecycle", false));
+    }
 }
 
 #[cfg(all(test, target_os = "linux"))]

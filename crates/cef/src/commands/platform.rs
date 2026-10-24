@@ -338,19 +338,17 @@ fn spawn_detached(program: &str, args: &[std::ffi::OsString]) -> std::io::Result
     Ok(())
 }
 
-/// Ensure settings.json exists in the config directory with the latest template.
+/// Ensure the channel's settings.json (the file srv loads, not always
+/// `<config dir>/settings.json`: #1903) exists with the latest template.
 pub fn ensure_settings_file(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
-    let config_dir_str = state
-        .version_config_dir
-        .lock()
-        .clone()
-        .ok_or_else(|| "Config dir not initialized yet".to_string())?;
-    let config_dir = std::path::PathBuf::from(&config_dir_str);
-
-    std::fs::create_dir_all(&config_dir)
-        .map_err(|e| format!("Failed to create config dir: {}", e))?;
-
-    let settings_path = config_dir.join("settings.json");
+    if state.version_config_dir.lock().is_none() {
+        return Err("Config dir not initialized yet".to_string());
+    }
+    let settings_path = crate::sidecar::settings_file()
+        .ok_or_else(|| "Cannot resolve the settings.json location".to_string())?;
+    if let Some(dir) = settings_path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("Failed to create settings dir: {}", e))?;
+    }
 
     // Read existing user values (strips JSONC comments, parses JSON)
     let existing = read_settings_jsonc(&settings_path);

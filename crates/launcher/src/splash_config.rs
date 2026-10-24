@@ -9,7 +9,7 @@
 //! **Fail-safe:** any error reading/parsing settings resolves to *enabled* — a
 //! broken read must never silently suppress the splash.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// True when the splash should be suppressed entirely (no window created).
 pub fn splash_disabled() -> bool {
@@ -25,8 +25,8 @@ pub fn splash_disabled() -> bool {
     // Best-effort settings.json read. Wrapped so a resolver panic/IO error can
     // never take down launcher startup — on any failure we keep the splash.
     std::panic::catch_unwind(|| {
-        config_dir()
-            .map(|d| settings_splash_disabled(&d.join("settings.json")))
+        crate::data_dir::settings_file()
+            .map(|f| settings_splash_disabled(&f))
             .unwrap_or(false)
     })
     .unwrap_or(false)
@@ -70,20 +70,10 @@ pub fn settings_splash_disabled(settings_path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Best-effort config dir (holds settings.json) resolved the same way
-/// `launcher_main` does — but early and failure-tolerant.
-fn config_dir() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    let exe_dir = exe.parent()?;
-    let version = env!("CARGO_PKG_VERSION");
-    crate::data_dir::resolve_paths(exe_dir, version)
-        .ok()
-        .map(|p| p.config_dir)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn write_tmp(tag: &str, content: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!("agentmux-splashcfg-{tag}-{}.json", std::process::id()));
