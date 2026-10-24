@@ -12,6 +12,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { measuredAgo } from "@/app/statusbar/HistoryUsagePopover";
 import type { HistoryCompression } from "@/types/rpc/HistoryCompression";
+import type { HistoryReclaim } from "@/types/rpc/HistoryReclaim";
 import type { HistoryUsage } from "@/types/rpc/HistoryUsage";
 import { formatBytes } from "@/util/format-bytes";
 
@@ -38,6 +39,87 @@ const CompressionLine = (props: { c: HistoryCompression }): JSX.Element => {
             </Show>
             <Show when={props.c.enabled && props.c.waiting}>
                 <span class="warden-manager-dim"> Compression waits: {props.c.waiting}</span>
+            </Show>
+        </div>
+    );
+};
+
+/** An srv from before reclaiming answers without these. */
+const NO_RECLAIM: HistoryReclaim = { pending: false, last_done_ms: 0, last_before_bytes: 0, last_after_bytes: 0 };
+const reclaimOf = (c: HistoryCompression): HistoryReclaim => c.reclaim ?? NO_RECLAIM;
+
+/** Free space worth offering back: 1 GB and a fifth of the file (spec §6). */
+export const reclaimOffered = (c: HistoryCompression): boolean =>
+    !c.incremental && !reclaimOf(c).pending && c.steady && (c.free_bytes ?? 0) >= 1e9 && c.free_bytes >= (c.file_bytes ?? 0) * 0.2;
+
+/**
+ * Giving the shared store's free space back (`history.reclaim`): offered once,
+ * it runs at the next start of AgentMux (SPEC_HISTORY_STORE_RECLAIM_SPACE_2026_10_23).
+ */
+const ReclaimLine = (props: { c: HistoryCompression; onChange: (r: HistoryReclaim) => void }): JSX.Element => {
+    const [confirm, setConfirm] = createSignal(false);
+    const [busy, setBusy] = createSignal(false);
+    const [error, setError] = createSignal<string | null>(null);
+    const r = () => reclaimOf(props.c);
+    const act = async (action: "request" | "cancel") => {
+        setBusy(true);
+        try {
+            props.onChange(await RpcApi.HistoryReclaimCommand(TabRpcClient, { action }));
+            setError(null);
+            setConfirm(false);
+        } catch (e) {
+            setError(String(e));
+        } finally {
+            setBusy(false);
+        }
+    };
+    return (
+        <div class="warden-history-compression" data-testid="history-reclaim">
+            <Show when={r().pending}>
+                <span>
+                    {formatBytes(props.c.free_bytes)} of free space is given back the next time AgentMux starts (after an update, or quit
+                    and reopen it).
+                </span>
+                <Show when={r().waiting_for}>
+                    <span class="warden-manager-dim"> Last start: {r().waiting_for}.</span>
+                </Show>{" "}
+                <Button tone="quiet" density="compact" busy={busy()} onClick={() => void act("cancel")}>
+                    Don't reclaim
+                </Button>
+            </Show>
+            <Show when={reclaimOffered(props.c)}>
+                <span>{formatBytes(props.c.free_bytes)} of the shared pane history's file is free space AgentMux can give back.</span>{" "}
+                <Show
+                    when={confirm()}
+                    fallback={
+                        <Button tone="quiet" density="compact" onClick={() => setConfirm(true)}>
+                            {`Reclaim ${formatBytes(props.c.free_bytes)}…`}
+                        </Button>
+                    }
+                >
+                    <span class="warden-manager-dim">
+                        It runs at the next start, before agents load, and takes about a minute; nothing is deleted.{" "}
+                    </span>
+                    <Button tone="accent" density="compact" busy={busy()} onClick={() => void act("request")}>
+                        Reclaim at next start
+                    </Button>
+                    <Button tone="quiet" density="compact" onClick={() => setConfirm(false)}>
+                        Cancel
+                    </Button>
+                </Show>
+            </Show>
+            <Show when={!r().pending && r().last_done_ms > 0}>
+                <span class="warden-manager-dim">
+                    Gave back {formatBytes(Math.max(0, r().last_before_bytes - r().last_after_bytes))} on{" "}
+                    {new Date(r().last_done_ms).toLocaleDateString()}
+                    {props.c.incremental ? "; freed space now goes back by itself." : "."}
+                </span>
+            </Show>
+            <Show when={r().last_error}>
+                <span class="warden-manager-error"> Reclaiming failed: {r().last_error}</span>
+            </Show>
+            <Show when={error()}>
+                <span class="warden-manager-error"> ⚠ {error()}</span>
             </Show>
         </div>
     );
@@ -107,7 +189,14 @@ export const WardenHistoryStorage = (props: { visible: boolean }): JSX.Element =
                                 </For>
                             </tbody>
                         </table>
-                        <Show when={u().compression}>{(c) => <CompressionLine c={c()} />}</Show>
+                        <Show when={u().compression}>
+                            {(c) => (
+                                <>
+                                    <CompressionLine c={c()} />
+                                    <ReclaimLine c={c()} onChange={(reclaim) => setUsage({ ...u(), compression: { ...c(), reclaim } })} />
+                                </>
+                            )}
+                        </Show>
                         <div class="warden-history-bar">
                             <span class="warden-manager-dim">Measured {measuredAgo(u().computed_at_ms, Date.now())}</span>
                             <Button tone="quiet" density="compact" busy={loading()} onClick={() => void load(true)}>

@@ -539,6 +539,9 @@ pub const COMMAND_BLOCKSTATS_DETAIL: &str = "blockstats.detail";
 // How much agent history is on this machine and where (the status bar total and its
 // panel, backend::history_usage). The window's, not an agent API.
 pub const COMMAND_HISTORY_USAGE: &str = "history.usage";
+// Give the shared pane-history store's free space back at the next start
+// (SPEC_HISTORY_STORE_RECLAIM_SPACE_2026_10_23). The window's, not an agent API.
+pub const COMMAND_HISTORY_RECLAIM: &str = "history.reclaim";
 // Warden's History section: every agent with history (backend::history_registry), and one
 // agent's sessions from its record. The window's, not agent APIs.
 pub const COMMAND_HISTORY_AGENTS: &str = "history.agents";
