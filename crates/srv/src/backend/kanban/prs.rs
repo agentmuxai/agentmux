@@ -11,6 +11,13 @@
 //!   merge can't close the task.
 //! - **Closing on merge.** A task in Review whose PR has merged is accepted:
 //!   the merge was the review. Off with the setting `kanban:closeonmerge`.
+//! - **Merged, then Released** (SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23.md
+//!   §4): a task's PR that merged is recorded with when (`work_prs.rs`), so
+//!   the board can show the task in Merged even while its agent still holds
+//!   it; and once a release of the repository was made from a commit at or
+//!   after that merge, the task is recorded as in that release (Released).
+//!   `main` is linear (a merge queue), so a release made after a merge
+//!   contains it.
 //!
 //! srv holds no GitHub credential, so both read GitHub's public API without
 //! one: they work for public repositories, and a private one stays as it was
@@ -46,6 +53,9 @@ const PRIVATE_FOR_MS: i64 = 6 * 60 * 60 * 1000;
 pub const HOURLY_BUDGET: usize = 30;
 /// When to look for a just-opened PR, in seconds after the command was seen.
 const FIND_AFTER_S: [u64; 4] = [20, 60, 180, 600];
+/// How often one repository's releases are asked about, while a merged task
+/// of it waits to be released.
+const RELEASES_EVERY_MS: i64 = 30 * 60 * 1000;
 
 /// A PR on GitHub: `owner/repo` and its number.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -133,6 +143,34 @@ pub enum PrState {
     Closed,
     /// No such PR in a repository GitHub shows (a mistyped link).
     Missing,
+}
+
+/// When GitHub's answer for one PR says it merged (ms).
+pub fn merged_at(v: &Value) -> Option<i64> {
+    rfc3339_ms(v.get("merged_at")?.as_str()?)
+}
+
+fn rfc3339_ms(s: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(s).ok().map(|d| d.timestamp_millis())
+}
+
+/// The first release (oldest; not a draft) made from a commit at or after
+/// `merged_ms`, from GitHub's list of a repository's releases: its tag and
+/// when it was published (ms). A release's `created_at` is the date of the
+/// commit it was made from.
+pub fn release_containing(releases: &Value, merged_ms: i64) -> Option<(String, i64)> {
+    releases
+        .as_array()?
+        .iter()
+        .filter(|r| r.get("draft").and_then(Value::as_bool) != Some(true))
+        .filter_map(|r| {
+            let made = rfc3339_ms(r.get("created_at")?.as_str()?)?;
+            let tag = r.get("tag_name")?.as_str()?.to_string();
+            let published = r.get("published_at").and_then(Value::as_str).and_then(rfc3339_ms).unwrap_or(made);
+            (made >= merged_ms).then_some((made, tag, published))
+        })
+        .min_by_key(|(made, ..)| *made)
+        .map(|(_, tag, published)| (tag, published))
 }
 
 /// The state in GitHub's answer for one PR.
@@ -261,18 +299,32 @@ pub fn close_on_merge_enabled(extra: &HashMap<String, Value>) -> bool {
     extra.get(SETTING_CLOSE_ON_MERGE).and_then(Value::as_bool).unwrap_or(true)
 }
 
-/// When each task's PR was last asked about, and what came back.
+/// When each task's PR was last asked about, and what came back; when each
+/// repository's releases were.
 #[derive(Default)]
 struct Checked {
     at: HashMap<String, (i64, Option<PrState>)>,
     private_repos: HashMap<String, i64>,
+    releases_at: HashMap<String, i64>,
 }
 
-/// The tasks in Review whose PR is due a look, oldest look first.
+/// Whether a task's PR is worth asking about: in Review (its merge closes
+/// it), held with a PR in review (Review, then Merged), or finished with a
+/// PR whose merge srv hasn't seen yet (its time decides its release).
+fn watched(t: &BoardTask) -> bool {
+    let merged = t.card.pr.as_ref().is_some_and(|p| p.merged_at.is_some());
+    match t.item.state.as_str() {
+        work_state::REVIEW => true,
+        work_state::CLAIMED | work_state::BLOCKED | work_state::DONE => !merged,
+        _ => false,
+    }
+}
+
+/// The tasks whose PR is due a look, oldest look first.
 fn due(tasks: &[BoardTask], checked: &Checked, now_ms: i64) -> Vec<(String, PrRef)> {
     let mut out: Vec<(i64, String, PrRef)> = tasks
         .iter()
-        .filter(|t| t.item.state == work_state::REVIEW)
+        .filter(|t| watched(t))
         .filter_map(|t| Some((t.item.id.clone(), parse_pr_ref(&t.card.pr_url, &t.card.repo)?)))
         .filter(|(_, pr)| checked.private_repos.get(&pr.repo).is_none_or(|at| now_ms - at >= PRIVATE_FOR_MS))
         .filter_map(|(id, pr)| {
@@ -294,6 +346,22 @@ fn due(tasks: &[BoardTask], checked: &Checked, now_ms: i64) -> Vec<(String, PrRe
         .collect();
     out.sort_by_key(|(last, ..)| *last);
     out.into_iter().map(|(_, id, pr)| (id, pr)).collect()
+}
+
+/// The merged, unreleased tasks by repository, for the repositories whose
+/// releases are due a look.
+fn awaiting_release(tasks: &[BoardTask], checked: &Checked, now_ms: i64) -> HashMap<String, Vec<(String, i64)>> {
+    let mut out: HashMap<String, Vec<(String, i64)>> = HashMap::new();
+    for t in tasks {
+        let Some(pr) = t.card.pr.as_ref() else { continue };
+        let (Some(merged), true) = (pr.merged_at, pr.released_in.is_empty()) else { continue };
+        let Some(r) = parse_pr_ref(&t.card.pr_url, &t.card.repo) else { continue };
+        if checked.releases_at.get(&r.repo).is_some_and(|at| now_ms - at < RELEASES_EVERY_MS) {
+            continue;
+        }
+        out.entry(r.repo).or_default().push((t.item.id.clone(), merged));
+    }
+    out
 }
 
 /// The merge loop: every minute, ask GitHub about the PRs of the tasks in
@@ -322,7 +390,13 @@ pub async fn run_merge_loop() {
                     if state == Some(PrState::Merged) {
                         let identity = ctx.identity.clone();
                         let (id, pr) = (id.clone(), pr.clone());
-                        changed |= tokio::task::spawn_blocking(move || close_merged(&identity, &id, &pr, now)).await.unwrap_or(false);
+                        let when = merged_at(&v).unwrap_or(now);
+                        changed |= tokio::task::spawn_blocking(move || {
+                            let noted = identity.work_pr_merged(&id, when, now).unwrap_or(false);
+                            close_merged(&identity, &id, &pr, now) || noted
+                        })
+                        .await
+                        .unwrap_or(false);
                     }
                 }
                 // A missing PR, or a repository GitHub doesn't show without a
@@ -343,6 +417,29 @@ pub async fn run_merge_loop() {
                 Err(Miss::Other(e)) => {
                     checked.at.insert(id, (now, None));
                     tracing::debug!(error = %e, "kanban: a PR's state not read");
+                }
+            }
+        }
+        for (repo, waiting) in awaiting_release(&tasks, &checked, now) {
+            match get(&ctx.http, &format!("/repos/{repo}/releases?per_page=30"), now).await {
+                Ok(list) => {
+                    checked.releases_at.insert(repo, now);
+                    let identity = ctx.identity.clone();
+                    changed |= tokio::task::spawn_blocking(move || {
+                        let mut any = false;
+                        for (id, merged) in waiting {
+                            if let Some((tag, published)) = release_containing(&list, merged) {
+                                any |= identity.work_pr_released(&id, &tag, published, now).unwrap_or(false);
+                            }
+                        }
+                        any
+                    })
+                    .await
+                    .unwrap_or(false);
+                }
+                Err(Miss::Limited) => break,
+                Err(_) => {
+                    checked.releases_at.insert(repo, now);
                 }
             }
         }

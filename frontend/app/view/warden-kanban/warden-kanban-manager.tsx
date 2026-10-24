@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Warden — Kanban section: what work there is and where it stands, kept current by the agents doing it
-// (docs/specs/SPEC_WARDEN_KANBAN_2026_10_20.md). Five columns: Backlog (grouped by the agent each
-// task waits for), In progress, Needs you, Review, Done. Agents file and move tasks with the `Tasks`
-// tool; srv moves them on what it knows (an agent asks, errors, closes); the operator starts, answers,
-// accepts and sends back here.
+// (docs/specs/SPEC_WARDEN_KANBAN_2026_10_20.md). Eight columns
+// (SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23.md): Backlog and Spec'd (grouped by the agent each
+// task waits for), In Research, In progress, Needs you, Review (its PR in review), Merged, Released.
+// Agents file and move tasks with the `Tasks` tool; srv moves them on what it knows (an agent asks,
+// errors, closes; a PR merges; a release ships it); the operator starts, answers, accepts and sends back
+// here.
 
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 
@@ -16,7 +18,15 @@ import { revealBlock } from "@/app/util/reveal-block";
 
 import { KanbanBoard, useCardDrop } from "./kanban-board";
 import { AgentChip, agentStateWords } from "./kanban-card";
-import { columnOf, matchesQuery, repoLabel, repoLanes, reviewLimitOf, untrackedAgents } from "./kanban-columns";
+import {
+    columnOf,
+    isFinishedColumn,
+    matchesQuery,
+    repoLabel,
+    repoLanes,
+    reviewLimitOf,
+    untrackedAgents,
+} from "./kanban-columns";
 import { KanbanDrawer } from "./kanban-drawer";
 import { KanbanModel } from "./kanban-model";
 import { KanbanNewTask } from "./kanban-new-task";
@@ -101,7 +111,7 @@ export const WardenKanbanManager = (props: {
     const untracked = createMemo(() => (showUntracked() ? untrackedAgents(agents(), board()?.tasks ?? []) : []));
     const laneList = createMemo(() => repoLanes(tasks()));
     // The soft limit is on the board's whole Review column: every lane's, and those a filter hides.
-    const reviewTotal = createMemo(() => (board()?.tasks ?? []).filter((t) => t.state === "review").length);
+    const reviewTotal = createMemo(() => (board()?.tasks ?? []).filter((t) => columnOf(t) === "review").length);
     const open = (t: KanbanTask) => setOpenId(t.id);
     const openAgent = (blockId: string) => void revealBlock(blockId, { source: "kanban" });
 
@@ -235,7 +245,7 @@ export const WardenKanbanManager = (props: {
                                             >
                                                 <span class="kanban-lane__name">{lane().label}</span>
                                                 <span class="warden-manager-dim">
-                                                    {lane().tasks.filter((t) => columnOf(t) !== "done").length} open
+                                                    {lane().tasks.filter((t) => !isFinishedColumn(columnOf(t))).length} open
                                                     {" · "}
                                                     {lane().tasks.filter((t) => columnOf(t) === "needs").length} need
                                                     you

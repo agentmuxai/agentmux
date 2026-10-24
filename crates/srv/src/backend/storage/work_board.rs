@@ -118,6 +118,13 @@ pub struct WorkCard {
     /// The tasks this one starts after (`work_deps.rs`), finished or not.
     #[serde(default)]
     pub after: Vec<AfterTask>,
+    /// The tasks that start after this one, finished or not.
+    #[serde(default)]
+    pub followers: Vec<AfterTask>,
+    /// What GitHub said about its PR: merged when, released in which
+    /// release (`work_prs.rs`). `None` until srv has looked.
+    #[serde(default)]
+    pub pr: Option<super::work_prs::WorkPr>,
 }
 
 /// A task as the board shows it: the queue row and its card.
@@ -193,6 +200,8 @@ fn row_to_card(row: &Row) -> rusqlite::Result<WorkCard> {
         last_reminded_at: row.get("last_reminded_at")?,
         updated_at: row.get("updated_at")?,
         after: Vec::new(),
+        followers: Vec::new(),
+        pr: None,
     })
 }
 
@@ -281,6 +290,7 @@ impl Store {
         };
         let mut one = [t];
         attach_after(&conn, &mut one)?;
+        super::work_prs::attach_prs(&conn, &mut one)?;
         let [t] = one;
         Ok(Some(t))
     }
@@ -314,6 +324,7 @@ impl Store {
             out.push(r?);
         }
         attach_after(&conn, &mut out)?;
+        super::work_prs::attach_prs(&conn, &mut out)?;
         Ok(out)
     }
 

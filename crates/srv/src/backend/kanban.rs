@@ -189,6 +189,7 @@ pub async fn run_reminder_loop() {
             let identity = ctx.identity.clone();
             let pruned = tokio::task::spawn_blocking(move || {
                 let _ = identity.work_deps_prune();
+                let _ = identity.work_prs_prune();
                 identity.work_events_prune(now)
             })
             .await;
