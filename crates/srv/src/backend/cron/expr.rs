@@ -59,8 +59,8 @@ fn standard_days(item: &str) -> Result<Vec<u32>, String> {
     let bad = || format!("invalid day of week '{item}' (use 0-7, where 0 and 7 are Sunday, or MON-SUN)");
     let num = |s: &str| s.parse::<u32>().ok().filter(|&n| n <= 7).ok_or_else(bad);
     let (range, step) = match item.split_once('/') {
-        Some((r, s)) => (r, s.parse::<usize>().ok().filter(|&s| s > 0).ok_or_else(bad)?),
-        None => (item, 1),
+        Some((r, s)) => (r, Some(s.parse::<usize>().ok().filter(|&s| s > 0).ok_or_else(bad)?)),
+        None => (item, None),
     };
     let seq: Vec<u32> = if range == "*" {
         (0..=6).collect()
@@ -74,13 +74,13 @@ fn standard_days(item: &str) -> Result<Vec<u32>, String> {
             let len = (to + 7 - from) % 7 + 1;
             (0..len).map(|i| (from + i) % 7).collect()
         }
-    } else if step > 1 {
-        // `a/s`: from a to the end of the week.
-        (num(range)?..=6).collect()
+    } else if step.is_some() {
+        // `a/s`, any step: from a through the end of the week (7, Sunday).
+        (num(range)?..=7).map(|d| d % 7).collect()
     } else {
         vec![num(range)? % 7]
     };
-    Ok(seq.into_iter().step_by(step).collect())
+    Ok(seq.into_iter().step_by(step.unwrap_or(1)).collect())
 }
 
 #[cfg(test)]
@@ -118,7 +118,11 @@ mod tests {
         assert_eq!(fires_on("0 6 * * 1,3,5"), set(&[1, 3, 5]));
         assert_eq!(fires_on("0 6 * * */2"), set(&[0, 2, 4, 6]));
         assert_eq!(fires_on("0 6 * * 1-5/2"), set(&[1, 3, 5]));
-        assert_eq!(fires_on("0 6 * * 1/2"), set(&[1, 3, 5]));
+        assert_eq!(fires_on("0 6 * * 1/2"), set(&[1, 3, 5, 0]), "from Monday through Sunday, every 2");
+        assert_eq!(fires_on("0 6 * * 1/1"), set(&[1, 2, 3, 4, 5, 6, 0]), "a step of 1 is still a range");
+        assert_eq!(fires_on("0 6 * * 3/2"), set(&[3, 5, 0]), "Wednesday, Friday, Sunday");
+        assert_eq!(fires_on("0 6 * * 0/3"), set(&[0, 3, 6]));
+        assert_eq!(fires_on("0 6 * * */1"), set(&[0, 1, 2, 3, 4, 5, 6]));
         assert_eq!(fires_on("0 6 * * 0-7"), set(&[0, 1, 2, 3, 4, 5, 6]));
         assert_eq!(fires_on("0 6 * * 5-7"), set(&[5, 6, 0]), "Friday to Sunday");
         assert_eq!(fires_on("0 6 * * 5-1"), set(&[5, 6, 0, 1]), "wraps: Friday to Monday");
