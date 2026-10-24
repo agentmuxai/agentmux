@@ -3,7 +3,7 @@
 **Date:** 2026-10-24
 **Author:** Maricon@charlie
 **Type:** Spec (a fix to `SPEC_CHIP_DROP_PLACEHOLDER_ON_THE_SEAM_2026_10_21.md`)
-**Status:** implemented
+**Status:** implemented (#5426)
 **Requested by:** the operator, on v0.59.41: *"if I drag a minimized pane over another minimized pane (even one not at the window edge) the ghost appears directly above the underlying pane, ...should be in the middle between the 2"*
 
 ## 1. What is wrong
