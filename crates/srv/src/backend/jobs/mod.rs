@@ -551,6 +551,7 @@ impl RunLedger {
 fn retry_later(error: &str) -> bool {
     crate::backend::reactive::is_transient_delivery_error(error)
         || crate::backend::reactive::is_spawn_gate_refusal(error)
+        || crate::backend::reactive::is_unavailable_refusal(error)
         || error.contains("out of quota")
         || error.contains("usage limit")
 }

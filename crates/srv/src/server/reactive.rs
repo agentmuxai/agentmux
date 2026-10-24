@@ -723,6 +723,14 @@ pub(crate) async fn deliver(
     }
     super::jekt_files::prepare(&mut req).await;
 
+    // An agent here whose account is out of quota or signed out would take
+    // the message into a turn that fails at once, and it would be lost: hold
+    // it until the agent can work again, or refuse it where it can't be held
+    // (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5).
+    if let Some(unavailable) = local_target_unavailable(state, &req.target_agent).await {
+        return hold_for_unavailable(state, auth_via, &req, &unavailable, &mut replay).await;
+    }
+
     // 1. Try local ReactiveHandler first (fast path — same instance).
     let resp = super::cron::inject_here_following_runs(state, &req).await;
     if resp.success {
@@ -1078,6 +1086,84 @@ pub(in crate::server) async fn hold_for_absent_target(
     reason: HoldReason,
     replay: &mut replay::Reservation,
 ) -> Option<serde_json::Value> {
+    hold_with_reason(state, auth_via, req, resp, reason, None, replay).await
+}
+
+/// Whether the agent of this instance that `target` names is `limited` or
+/// `signed_out` now. `None` for an agent that can work, and for a target
+/// that isn't registered here (an absent or remote one: the tiers below
+/// decide, and the receiving instance checks again).
+async fn local_target_unavailable(state: &AppState, target: &str) -> Option<crate::backend::agent_state::Unavailable> {
+    use crate::backend::reactive::handler::LookupOutcome;
+    let target = crate::backend::reactive::sanitize::route_name(target)?;
+    let LookupOutcome::One(reg) = state.reactive_handler.lookup_delivery_target(&target) else {
+        return None;
+    };
+    let mstore = state.mstore.clone();
+    tokio::task::spawn_blocking(move || {
+        crate::backend::agent_state::unavailable_of_block(&mstore, None, &reg.block_id, agentmux_common::time::now_ms_u64())
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+/// Hold a message for an agent that can't work now (`unavailable`), or,
+/// where the hold doesn't apply (a LAN or cross-channel hop, a cron fire),
+/// refuse it with the reason: either way it is not injected into a turn
+/// that would fail and lose it. The refusal begins with
+/// [`crate::backend::reactive::UNAVAILABLE_PREFIX`].
+async fn hold_for_unavailable(
+    state: &AppState,
+    auth_via: super::ReactiveAuthVia,
+    req: &InjectionRequest,
+    unavailable: &crate::backend::agent_state::Unavailable,
+    replay: &mut replay::Reservation,
+) -> serde_json::Value {
+    use crate::backend::agent_state::AgentState;
+    let reason = HoldReason::for_state(unavailable.state).unwrap_or(HoldReason::Limited);
+    let target = &req.target_agent;
+    let why = match (unavailable.state, unavailable.resets_at_ms.and_then(local_time_label)) {
+        (AgentState::SignedOut, _) => format!("{target} needs to sign in again"),
+        (_, Some(until)) => format!("{target}'s account is out of quota until {until}"),
+        (_, None) => format!("{target}'s account is out of quota"),
+    };
+    let resp = crate::backend::reactive::types::InjectionResponse {
+        deferred: None,
+        success: false,
+        request_id: req.request_id.clone().filter(|id| !id.is_empty()).unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+        block_id: None,
+        error: Some(format!("{}{why}", crate::backend::reactive::UNAVAILABLE_PREFIX)),
+        timestamp: agentmux_common::time::now_ms_u64(),
+        effective_tier: None,
+        requires_stop: None,
+        channel_verified: None,
+    };
+    tracing::info!(target = %target, state = ?unavailable.state, "reactive inject: target can't work now, holding or refusing");
+    if let Some(held) = hold_with_reason(state, auth_via, req, &resp, reason, unavailable.resets_at_ms, replay).await {
+        return held;
+    }
+    serde_json::to_value(&resp).unwrap_or_default()
+}
+
+/// "Sun 7:00 PM": a reset time in this machine's zone, as the Kanban and
+/// Swarm show it (`agent_state::Unavailable::reason`).
+fn local_time_label(ms: u64) -> Option<String> {
+    let t = chrono::DateTime::from_timestamp_millis(i64::try_from(ms).ok()?)?;
+    Some(t.with_timezone(&chrono::Local).format("%a %-I:%M %p").to_string())
+}
+
+/// [`hold_for_absent_target`], with the reset time of a usage limit for the
+/// answer (`held_until_ms`).
+async fn hold_with_reason(
+    state: &AppState,
+    auth_via: super::ReactiveAuthVia,
+    req: &InjectionRequest,
+    resp: &crate::backend::reactive::types::InjectionResponse,
+    reason: HoldReason,
+    until_ms: Option<u64>,
+    replay: &mut replay::Reservation,
+) -> Option<serde_json::Value> {
     use crate::backend::storage::jekt_held::{HeldJekt, HoldOutcome, HELD_TTL_MS};
     if !hold_applies(auth_via, req, resp) {
         return None;
@@ -1172,13 +1258,20 @@ pub(in crate::server) async fn hold_for_absent_target(
                     "agent {target}'s account is out of quota — held for delivery on this AgentMux instance for up to 24 h, delivered when it can work again (an account move or the reset)"
                 ),
             };
-            Some(json!({
+            let mut answer = json!({
                 "success": false,
                 "held": true,
                 "held_reason": reason.as_str(),
                 "request_id": resp.request_id,
                 "error": error,
-            }))
+            });
+            if let Some(until) = until_ms.filter(|_| reason == HoldReason::Limited) {
+                answer["held_until_ms"] = json!(until);
+                if let Some(label) = local_time_label(until) {
+                    answer["held_until"] = json!(label);
+                }
+            }
+            Some(answer)
         }
         Ok(HoldOutcome::Full) => Some(json!({
             "success": false,

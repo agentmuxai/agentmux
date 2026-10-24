@@ -154,6 +154,21 @@ fn send_message_outcome_names_the_state_and_the_id() {
     assert!(t.contains("signing in") && t.ends_with(" id=1-2-3"), "{t}");
     assert!(!t.contains("  "), "no runs of spaces: {t:?}");
 
+    // Held because the receiver's account is out of quota (unresponsive
+    // agents step 2c), with and without a known reset.
+    let t = ok(json!({ "success": false, "held": true, "held_reason": "usage_limit", "request_id": "1-2-3",
+        "held_until_ms": 1_792_886_400_000u64, "held_until": "Sun 7:00 PM", "error": "agent Camper's account is out of quota" }));
+    assert!(t.starts_with("HELD for Camper (usage_limit, until Sun 7:00 PM)"), "{t}");
+    assert!(t.contains("account move or the reset") && t.contains("24 hours") && t.ends_with(" id=1-2-3"), "{t}");
+    assert!(!t.contains("  "), "no runs of spaces: {t:?}");
+    let t = ok(json!({ "success": false, "held": true, "held_reason": "usage_limit", "request_id": "1-2-3" }));
+    assert!(t.starts_with("HELD for Camper (usage_limit) "), "{t}");
+
+    // Out of quota where it can't be held (a LAN hop): refused, not kept.
+    let e = err(json!({ "success": false, "error": "agent unavailable: Camper's account is out of quota until Sun 7:00 PM" }));
+    assert!(e.starts_with("Message delivery failed (unavailable): Camper's account is out of quota until Sun 7:00 PM, and"), "{e}");
+    assert!(e.contains("NOT kept"), "{e}");
+
     let e = err(json!({ "success": false, "block_id": "b1",
         "error": "identity spawn gate: no credentials for claude: the bound account was deleted or is unresolvable." }));
     assert!(e.starts_with("Message delivery failed (needs_login)"), "{e}");
@@ -179,7 +194,7 @@ fn send_message_outcome_names_the_state_and_the_id() {
 fn message_send_description_lists_every_answer() {
     let v: Value = serde_json::from_str(MESSAGE_TOOL).unwrap();
     let d = v["description"].as_str().unwrap();
-    for s in ["Delivered to X", "QUEUED for X — their agent is starting up", "HELD for X (not_running)", "HELD for X (needs_login)",
+    for s in ["Delivered to X", "QUEUED for X — their agent is starting up", "HELD for X (not_running)", "HELD for X (needs_login)", "HELD for X (usage_limit", "(unavailable)",
               "via the cloud relay (unconfirmed", "signed in from your account", "(needs_login)", "(not_found)", "id="] {
         assert!(d.contains(s), "missing {s:?}");
     }
