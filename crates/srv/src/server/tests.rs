@@ -3388,7 +3388,7 @@ mod fleet_tests {
     }
 
     /// An instance that predates the override only stops, leaving the pane: the
-    /// tool result says so rather than reporting a close (Codex P2 on #5375).
+    /// tool result says so rather than reporting a close (#5375).
     #[tokio::test]
     async fn stop_agents_tells_the_caller_when_an_older_instance_only_stopped_its_agent() {
         let _guard = home_override_guard();

@@ -404,10 +404,13 @@ fn request_within(
 }
 
 /// The OS notification's body for a pending shutdown. App-controlled text and
-/// the asker's name (cleaned); the reason is left out on purpose.
+/// the asker's name (cleaned); the reason is left out on purpose. "My Agents"
+/// is only for a closed agent tab: a pane close now reaches only panes that hold
+/// no agent (a browser, an editor), which have no conversation to keep.
 pub fn toast_body(v: &PendingView) -> String {
     match v.effect {
         "stop" => format!("{} asked to stop it. Open it to keep it running.", v.by),
+        "close_pane" => format!("{} asked to close it.", v.by),
         _ => format!("{} asked to close it. It stays in My Agents, with its conversation.", v.by),
     }
 }
@@ -868,5 +871,8 @@ mod tests {
             joined: false,
         };
         assert_eq!(toast_body(&stop), "Settings asked to stop it. Open it to keep it running.");
+        // A pane with no agent in it has no conversation to keep: no My Agents claim.
+        assert_eq!(toast_body(&PendingView { effect: "close_pane", ..stop.clone() }), "Settings asked to close it.");
+        assert!(toast_body(&PendingView { effect: "close_tab", ..stop }).contains("My Agents"));
     }
 }
