@@ -107,6 +107,13 @@ export const NOTIFICATIONS_SETTINGS = {
         section: "notifications",
         keywords: ["muxbus", "cloud", "sign in", "notify:os:cloudsignedout"],
     },
+    osAccountUnavailable: {
+        id: "notifications.os_account_unavailable",
+        label: "Agents out of quota or signed out",
+        description: "Once per account, when its agents hit a weekly limit or need you to sign in again (not for a session limit)",
+        section: "notifications",
+        keywords: ["quota", "usage limit", "account", "sign in", "notify:os:accountunavailable"],
+    },
     pauseAllowAttention: {
         id: "notifications.pause_allow_attention",
         label: "While paused, still alert when an agent needs me",
@@ -242,6 +249,7 @@ export function NotificationsSection(): JSX.Element {
                 {kindRow(NOTIFICATIONS_SETTINGS.osAgentCrashed, "notify:os:agentcrashed")}
                 {kindRow(NOTIFICATIONS_SETTINGS.osNeedsReview, "notify:os:messageneedsreview")}
                 {kindRow(NOTIFICATIONS_SETTINGS.osCloudSignedOut, "notify:os:cloudsignedout")}
+                {kindRow(NOTIFICATIONS_SETTINGS.osAccountUnavailable, "notify:os:accountunavailable")}
                 {kindRow(NOTIFICATIONS_SETTINGS.osSummary, "notify:os:summary")}
                 {kindRow(NOTIFICATIONS_SETTINGS.taskbarAttention, "notify:taskbar:attention")}
                 <SettingRow

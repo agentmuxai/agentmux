@@ -449,6 +449,11 @@
           "default": true,
           "description": "Notify once when this AgentMux is signed out of MuxBus and agents stop getting messages from other computers and GitHub."
         },
+        "notify:os:accountunavailable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notify once per account when its agents hit a weekly usage limit or need you to sign in again. A session limit shows only in the Kanban and Swarm strip. The notification never names the account."
+        },
         "notify:pause:until": {
           "type": "integer",
           "default": 0,

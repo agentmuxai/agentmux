@@ -39,6 +39,11 @@ pub enum NotifyKind {
     /// getting cloud messages (`muxbus::delivery_status`). About no agent;
     /// once per episode.
     CloudSignedOut,
+    /// Agents on one account are out of quota (a weekly or unknown limit, not
+    /// a session limit) or need a sign-in: one per account episode
+    /// (`server::account_episodes`). About no agent; its key is the
+    /// account's (`account:<hash>`), never the account itself.
+    AccountUnavailable,
 }
 
 impl NotifyKind {
@@ -51,6 +56,7 @@ impl NotifyKind {
             NotifyKind::AgentCrashed => Some("agentcrashed"),
             NotifyKind::MessageNeedsReview => Some("messageneedsreview"),
             NotifyKind::CloudSignedOut => Some("cloudsignedout"),
+            NotifyKind::AccountUnavailable => Some("accountunavailable"),
             // Follows the master switch only: a shutdown the user can still
             // stop must not be silenceable per kind.
             NotifyKind::ShutdownPending => None,
@@ -68,7 +74,8 @@ impl NotifyKind {
             NotifyKind::TurnCompleted | NotifyKind::TurnErrored | NotifyKind::AgentCrashed => 10_000,
             NotifyKind::MessageNeedsReview => 2_000,
             // The window is only 15 s: tell the user at once.
-            NotifyKind::ShutdownPending | NotifyKind::CloudSignedOut => 0,
+            // The episode's scan already waited for the failure to settle.
+            NotifyKind::ShutdownPending | NotifyKind::CloudSignedOut | NotifyKind::AccountUnavailable => 0,
             NotifyKind::Summary | NotifyKind::Test => 0,
         }
     }
@@ -79,7 +86,8 @@ impl NotifyKind {
             | NotifyKind::AgentCrashed
             | NotifyKind::MessageNeedsReview
             | NotifyKind::ShutdownPending
-            | NotifyKind::CloudSignedOut => {
+            | NotifyKind::CloudSignedOut
+            | NotifyKind::AccountUnavailable => {
                 Priority::Attention
             }
             _ => Priority::Normal,
@@ -99,13 +107,15 @@ impl NotifyKind {
             NotifyKind::Summary => "summary".to_string(),
             NotifyKind::Test => "test".to_string(),
             NotifyKind::CloudSignedOut => "cloud".to_string(),
+            // One per account: the key already names it.
+            NotifyKind::AccountUnavailable => block_id.to_string(),
         }
     }
 
     /// Kinds about one agent carry its summary line; the digest and the test
     /// toast are about no agent.
     fn has_summary(self) -> bool {
-        !matches!(self, NotifyKind::Summary | NotifyKind::Test | NotifyKind::CloudSignedOut)
+        !matches!(self, NotifyKind::Summary | NotifyKind::Test | NotifyKind::CloudSignedOut | NotifyKind::AccountUnavailable)
     }
 
     /// Within one group, a later event must not replace a more informative
@@ -252,6 +262,8 @@ pub enum Family {
     Shutdown,
     /// This channel's MuxBus sign-in works again, or the user signed out.
     Cloud,
+    /// An account episode ended (`server::account_episodes`).
+    Account,
 }
 
 impl Family {
@@ -263,6 +275,7 @@ impl Family {
             }
             Family::Shutdown => kind == NotifyKind::ShutdownPending,
             Family::Cloud => kind == NotifyKind::CloudSignedOut,
+            Family::Account => kind == NotifyKind::AccountUnavailable,
         }
     }
 }
@@ -362,6 +375,7 @@ pub fn title_for(kind: NotifyKind, agent_name: &str) -> String {
         NotifyKind::Summary => "More agent updates".to_string(),
         NotifyKind::Test => "AgentMux notifications are working".to_string(),
         NotifyKind::CloudSignedOut => "AgentMux is signed out of MuxBus".to_string(),
+        NotifyKind::AccountUnavailable => "An account can't run your agents".to_string(),
     }
 }
 
@@ -724,6 +738,35 @@ mod tests {
         assert_eq!(n[0].summary, None, "about no agent");
         assert_eq!(retracts(&p.step(Input::Resolve { block_id: String::new(), family: Family::Turn }, 1, &s)), 0);
         assert_eq!(retracts(&p.step(Input::Resolve { block_id: String::new(), family: Family::Cloud }, 1, &s)), 1);
+    }
+
+    /// One per account episode, keyed by the account, taken down when it ends
+    /// (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §6.2).
+    #[test]
+    fn an_account_episode_has_one_toast_per_account_until_it_ends() {
+        let k = NotifyKind::AccountUnavailable;
+        assert_eq!(k.setting_suffix(), Some("accountunavailable"));
+        let s = Settings::default();
+        let mut p = PolicyState::new();
+        p.step(focus(true, Some("b1")), 0, &s);
+        let account = |key: &str| Request { kind: k, block_id: key.into(), agent_name: String::new(), body: Some("2 agents are out of quota".into()), summary: Some("s".into()) };
+        p.step(Input::Emit(account("account:aaaa")), 0, &s);
+        p.step(Input::Emit(account("account:bbbb")), 0, &s);
+        let a = p.step(Input::Tick, 0, &s);
+        let n = shows(&a);
+        assert_eq!(n.len(), 2, "two accounts, two toasts, shown at once while focused");
+        assert_eq!((n[0].title.as_str(), n[0].summary.as_deref()), ("An account can't run your agents", None));
+        assert_ne!(n[0].tag, n[1].tag);
+        assert_eq!(retracts(&p.step(Input::Resolve { block_id: "account:aaaa".into(), family: Family::Turn }, 1, &s)), 0);
+        assert_eq!(retracts(&p.step(Input::Resolve { block_id: "account:aaaa".into(), family: Family::Account }, 1, &s)), 1);
+        assert_eq!(p.tray_state(&s, 1).attention.len(), 1, "the other account's is still up");
+        let off = crate::backend::notify::router::settings_from_extra(&std::collections::HashMap::from([(
+            "notify:os:accountunavailable".to_string(),
+            serde_json::json!(false),
+        )]));
+        let mut q = PolicyState::new();
+        q.step(Input::Emit(account("account:cccc")), 0, &off);
+        assert!(shows(&q.step(Input::Tick, 0, &off)).is_empty(), "its own setting turns it off");
     }
 
     #[test]

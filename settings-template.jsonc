@@ -106,6 +106,7 @@
     // "notify:os:agentcrashed":                 true,
     // "notify:os:messageneedsreview":           true,
     // "notify:os:cloudsignedout":               true,
+    // "notify:os:accountunavailable":           true,         // agents out of quota or signed out, once per account
     // "notify:pause:until":                     0,            // epoch ms; set from the tray
     // "notify:pause:allowattention":            false,
     // "notify:taskbar:attention":               true,         // badge + flash the taskbar button

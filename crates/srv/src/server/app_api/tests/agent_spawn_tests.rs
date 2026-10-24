@@ -485,6 +485,32 @@ async fn a_worker_moves_to_another_account_when_the_leaders_cannot_run() {
     assert_eq!(choose_account(&state, &leader_in(&state, &def, &block), "claude", None).unwrap().note, None);
 }
 
+/// An out-of-quota block lifts at its reset, with the pane still open
+/// (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §6.3); a sign-in refusal has no
+/// reset and stays.
+#[tokio::test]
+async fn an_out_of_quota_block_expires_at_its_reset() {
+    let state = test_state();
+    let (_, tab, _) = seed_leader(&state, "claude", "host", json!({})).await;
+    let accounts = [account("weekly", "w@example.com", "valid"), account("nodate", "n@example.com", "valid"), account("auth", "a@example.com", "valid")];
+    for a in &accounts {
+        state.id_store.identity_upsert(a).unwrap();
+    }
+    let now = agentmux_common::time::now_ms_u64();
+    let limited = json!({ "code": "usage_limit", "title": "t", "detail": "d", "retryable": false, "resetsAtMs": now + 60_000 });
+    new_block(&state, &tab, json!({ "view": "agent", "agentId": "a1", LAST_FAILURE_META_KEY: limited, RUN_ACCOUNT_META_KEY: "weekly" })).await;
+    let no_reset = json!({ "code": "usage_limit", "title": "t", "detail": "d", "retryable": false });
+    new_block(&state, &tab, json!({ "view": "agent", "agentId": "a2", LAST_FAILURE_META_KEY: no_reset, RUN_ACCOUNT_META_KEY: "nodate" })).await;
+    let auth = json!({ "code": "auth", "title": "t", "detail": "d", "retryable": false });
+    new_block(&state, &tab, json!({ "view": "agent", "agentId": "a3", LAST_FAILURE_META_KEY: auth, RUN_ACCOUNT_META_KEY: "auth" })).await;
+    let mut before: Vec<String> = account_blocks_at(&state, &accounts, now).into_keys().collect();
+    before.sort();
+    assert_eq!(before, ["auth", "nodate", "weekly"]);
+    let mut after: Vec<String> = account_blocks_at(&state, &accounts, now + 60_000).into_keys().collect();
+    after.sort();
+    assert_eq!(after, ["auth", "nodate"], "the weekly limit reset");
+}
+
 /// The accounts come from this channel's store, the one a spawn launches
 /// with (`resolve_account_for_spawn`); the global mirror can hold an account
 /// signed in only in another channel (#5023).

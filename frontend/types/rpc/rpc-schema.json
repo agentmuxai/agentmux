@@ -3389,6 +3389,44 @@
     }
   },
   {
+    "command": "identity.account.availability",
+    "request": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestTs": {
+      "imports": [
+        "NoArgsReq"
+      ],
+      "name": "NoArgsReq | null"
+    },
+    "response": "agentmux_srv::server::account_episodes::IdentityAccountAvailabilityResult",
+    "responseName": "IdentityAccountAvailabilityResult",
+    "responseTs": {
+      "imports": [
+        "IdentityAccountAvailabilityResult"
+      ],
+      "name": "IdentityAccountAvailabilityResult"
+    }
+  },
+  {
+    "command": "identity.account.move_agents",
+    "request": "agentmux_srv::server::account_episodes::moves::IdentityAccountMoveAgentsReq",
+    "requestName": "IdentityAccountMoveAgentsReq",
+    "requestTs": {
+      "imports": [
+        "IdentityAccountMoveAgentsReq"
+      ],
+      "name": "IdentityAccountMoveAgentsReq"
+    },
+    "response": "agentmux_srv::server::account_episodes::moves::IdentityAccountMoveAgentsResult",
+    "responseName": "IdentityAccountMoveAgentsResult",
+    "responseTs": {
+      "imports": [
+        "IdentityAccountMoveAgentsResult"
+      ],
+      "name": "IdentityAccountMoveAgentsResult"
+    }
+  },
+  {
     "command": "identity.account.upsert",
     "request": "agentmux_srv::server::app_api::identity::IdentityAccountUpsertReq",
     "requestName": "IdentityAccountUpsertReq",

@@ -1,5 +1,14 @@
 [
   {
+    "event": "accountavailability",
+    "payloadTs": {
+      "imports": [
+        "AccountAvailability"
+      ],
+      "name": "AccountAvailability"
+    }
+  },
+  {
     "event": "agent-api-retry",
     "payloadTs": {
       "imports": [
