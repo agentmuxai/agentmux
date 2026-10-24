@@ -244,7 +244,12 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
                 // closeNode/onNodeDelete here, same reason as the DeleteNode
                 // case above (R1 / #1681).
                 // SPEC_PANE_TAB_DRAG_LANDING_FLASH_AND_LAST_TAB_CLOSE_2026_09_24.md §4.2.
-                if (result === "emptied") removeLeafEmptiedByMove(model, leaf.id);
+                if (result === "emptied") {
+                    removeLeafEmptiedByMove(model, leaf.id);
+                    // Normalize before the next queued move: a multi-tab move queues one per tab, and two
+                    // removals in a row on one tree leave a hole in a parent's children.
+                    model.updateTree(true);
+                }
             }
             break;
         }

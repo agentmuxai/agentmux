@@ -1451,10 +1451,16 @@ describe("moveBlocksInStack", () => {
     it("empties two sibling panes of one column into the pane beside them (the nested tree a real window has)", () => {
         const model = createLayoutModel();
         insertRootBlock(model, "agent");
-        addPane(model, "cpu");
-        addPane(model, "swarm");
+        const cpuId = addPane(model, "cpu");
+        model.treeReducer({
+            type: LayoutTreeActionType.SplitVertical,
+            targetNodeId: cpuId,
+            newNode: newLayoutNode(undefined, undefined, undefined, { blockId: "swarm" }),
+            position: "after",
+        } as any);
         model.updateTree();
         expect(model.leafs()).toHaveLength(3);
+        expect(model.treeState.rootNode!.children!.some((c) => (c.children?.length ?? 0) === 2)).toBe(true);
 
         const moved = moveBlocksInStack(model, ["swarm", "cpu"], "agent", "swarm");
 
