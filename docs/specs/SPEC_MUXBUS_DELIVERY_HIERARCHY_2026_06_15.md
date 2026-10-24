@@ -1,7 +1,8 @@
 # MuxBus Delivery Hierarchy
 
 **Date:** 2026-06-15  
-**Status:** Draft  
+**Status:** historical — shipped in #1430, #1438 (agent ID injection, cloud push subscriber), #1452 (LAN tier) and #3023 (cloud relay performed by srv); tiers and their order have changed since.
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
 **Authors:** naki
 
 ---

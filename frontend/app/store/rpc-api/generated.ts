@@ -33,6 +33,7 @@ import type { AgentSessionAppendOutputResult } from "@/types/rpc/AgentSessionApp
 import type { AgentSessionArchiveResult } from "@/types/rpc/AgentSessionArchiveResult";
 import type { AgentSessionReadResult } from "@/types/rpc/AgentSessionReadResult";
 import type { AgentSessionWriteStateResult } from "@/types/rpc/AgentSessionWriteStateResult";
+import type { AgentSetSeatResult } from "@/types/rpc/AgentSetSeatResult";
 import type { AgentShutdownKeepResult } from "@/types/rpc/AgentShutdownKeepResult";
 import type { AgentSkill } from "@/types/rpc/AgentSkill";
 import type { AgentTrackedBlocksResult } from "@/types/rpc/AgentTrackedBlocksResult";
@@ -74,6 +75,7 @@ import type { CommandAgentSessionArchiveData } from "@/types/rpc/CommandAgentSes
 import type { CommandAgentSessionListArchivesData } from "@/types/rpc/CommandAgentSessionListArchivesData";
 import type { CommandAgentSessionReadData } from "@/types/rpc/CommandAgentSessionReadData";
 import type { CommandAgentSessionWriteStateData } from "@/types/rpc/CommandAgentSessionWriteStateData";
+import type { CommandAgentSetSeatData } from "@/types/rpc/CommandAgentSetSeatData";
 import type { CommandAgentShutdownKeepData } from "@/types/rpc/CommandAgentShutdownKeepData";
 import type { CommandAgentStopData } from "@/types/rpc/CommandAgentStopData";
 import type { CommandAmbientNarrateData } from "@/types/rpc/CommandAmbientNarrateData";
@@ -161,6 +163,7 @@ import type { CommandMcpUpsertData } from "@/types/rpc/CommandMcpUpsertData";
 import type { CommandMemoryDeliveryClaimFallbackData } from "@/types/rpc/CommandMemoryDeliveryClaimFallbackData";
 import type { CommandMemoryDeliveryComposeData } from "@/types/rpc/CommandMemoryDeliveryComposeData";
 import type { CommandMemoryLaunchCostData } from "@/types/rpc/CommandMemoryLaunchCostData";
+import type { CommandMigrateForkSlugsData } from "@/types/rpc/CommandMigrateForkSlugsData";
 import type { CommandNativeMemoryAdoptionListData } from "@/types/rpc/CommandNativeMemoryAdoptionListData";
 import type { CommandNativeMemoryClaimsData } from "@/types/rpc/CommandNativeMemoryClaimsData";
 import type { CommandNativeMemoryDiffData } from "@/types/rpc/CommandNativeMemoryDiffData";
@@ -232,6 +235,7 @@ import type { DeleteDroneReq } from "@/types/rpc/DeleteDroneReq";
 import type { DeleteDroneResp } from "@/types/rpc/DeleteDroneResp";
 import type { DeleteEditorFileReq } from "@/types/rpc/DeleteEditorFileReq";
 import type { DeleteIdentityAccountResult } from "@/types/rpc/DeleteIdentityAccountResult";
+import type { DesktopEvent } from "@/types/rpc/DesktopEvent";
 import type { DroneDefinition } from "@/types/rpc/DroneDefinition";
 import type { DroneRun } from "@/types/rpc/DroneRun";
 import type { EditorRootsReq } from "@/types/rpc/EditorRootsReq";
@@ -332,6 +336,7 @@ import type { McpServerReach } from "@/types/rpc/McpServerReach";
 import type { McpUnbindResult } from "@/types/rpc/McpUnbindResult";
 import type { MemoryDeliveryClaimFallbackResult } from "@/types/rpc/MemoryDeliveryClaimFallbackResult";
 import type { MemoryDeliveryComposeResult } from "@/types/rpc/MemoryDeliveryComposeResult";
+import type { MigrateForkSlugsResult } from "@/types/rpc/MigrateForkSlugsResult";
 import type { MoveScratchFileReq } from "@/types/rpc/MoveScratchFileReq";
 import type { MoveScratchFileResult } from "@/types/rpc/MoveScratchFileResult";
 import type { MuxBusCloudConfigResp } from "@/types/rpc/MuxBusCloudConfigResp";
@@ -645,6 +650,10 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<AgentSessionWriteStateResult> {
     return client.rpcCall("agent:session:write_state", data, opts);
+  },
+  // command "agent.setSeat"
+  AgentSetSeatCommand(client: RpcClient, data: CommandAgentSetSeatData, opts?: RpcOpts): Promise<AgentSetSeatResult> {
+    return client.rpcCall("agent.setSeat", data, opts);
   },
   // command "agentshutdownkeep"
   AgentShutdownKeepCommand(
@@ -1789,6 +1798,14 @@ export const GeneratedApi = {
   ): Promise<OtherBuildLayoutsResult> {
     return client.rpcCall("layout.otherBuilds", data, opts);
   },
+  // command "agents.migrateForkSlugs"
+  AgentsMigrateForkSlugsCommand(
+    client: RpcClient,
+    data: CommandMigrateForkSlugsData,
+    opts?: RpcOpts
+  ): Promise<MigrateForkSlugsResult> {
+    return client.rpcCall("agents.migrateForkSlugs", data, { timeout: 120000, ...opts });
+  },
   // command "layout.restoreOtherBuild"
   RestoreOtherBuildLayoutCommand(
     client: RpcClient,
@@ -2458,6 +2475,10 @@ export const GeneratedApi = {
   // command "app.upgrade-requests"
   AppUpgradeRequestsCommand(client: RpcClient, opts?: RpcOpts): Promise<UpgradeRequestsEvent> {
     return client.rpcCall("app.upgrade-requests", {}, opts);
+  },
+  // command "app.desktop"
+  AppDesktopCommand(client: RpcClient, opts?: RpcOpts): Promise<DesktopEvent> {
+    return client.rpcCall("app.desktop", {}, opts);
   },
   // command "viewer.agent-hidden"
   ViewerAgentHiddenCommand(

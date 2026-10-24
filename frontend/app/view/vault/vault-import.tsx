@@ -17,6 +17,10 @@ import type { ImportResult } from "@/types/rpc/ImportResult";
 import { SECTION_LABELS, VAULT_KINDS, vaultKind } from "./vault-kinds";
 import { cancelImport, commitImport, deleteImportFile, pickImport, type CsvMapping, type Duplicates, type ImportStep } from "./vault-store";
 
+/** Files that are encrypted but can't be a KeePass database, which is the only kind with a key file. The
+ *  host recognises a database by its contents, so a renamed one (`backup.bin`) still gets the key-file row. */
+const KNOWN_NOT_KEEPASS = /\.(vault|json)$/i;
+
 /** The kinds a row of an unknown CSV can become, each with what its main column is called. */
 const MAPPABLE = VAULT_KINDS.filter((k) => k.name !== "card" && k.name !== "bank-account").map((k) => ({ value: k.name, label: k.label, main: k.parts[0].label }));
 
@@ -169,11 +173,12 @@ export function VaultImportDialog(props: { onClose: () => void }): JSX.Element {
                                 void unlock();
                             }}
                         >
-                            <Field label="Passphrase" layout="stacked" description="This file is encrypted. Type the passphrase it was exported with, or a KeePass database's master password.">
+                            <Field label="Passphrase" layout="stacked" description="This file is encrypted. Type the passphrase it was exported with: a Vault file's, a KeePass database's master password, or the password a Bitwarden export was protected with.">
                                 <TextInput type="password" autocomplete="new-password" spellcheck={false} autofocus value={pass()} onInput={(e) => setPass(e.currentTarget.value)} />
                             </Field>
                             <input type="submit" hidden />
                         </form>
+                        <Show when={!KNOWN_NOT_KEEPASS.test((step() as Extract<ImportStep, { kind: "needs_passphrase" }>).fileName)}>
                         <div class="vault-keyfile">
                             <span class="warden-manager-dim">A KeePass database can also need a key file.</span>{" "}
                             <Show
@@ -194,6 +199,7 @@ export function VaultImportDialog(props: { onClose: () => void }): JSX.Element {
                                 )}
                             </Show>
                         </div>
+                        </Show>
                     </Show>
                     <Show when={step()?.kind === "needs_mapping" ? (step() as Extract<ImportStep, { kind: "needs_mapping" }>) : null}>
                         {(s) => (

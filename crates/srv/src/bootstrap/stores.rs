@@ -29,6 +29,17 @@ pub fn load_config() -> config::Config {
         std::process::exit(code);
     }
 
+    if let Some(config::SrvCommand::MigrateForkSlugs { plan: _, apply, rollback, restore }) = &args.command {
+        use crate::backend::rpc_types::ForkSlugMigrationMode as Mode;
+        let (mode, journal) = match (apply, rollback, restore) {
+            (true, _, _) => (Mode::Apply, None),
+            (_, Some(j), _) => (Mode::Rollback, Some(j.as_str())),
+            (_, _, Some(j)) => (Mode::Restore, Some(j.as_str())),
+            _ => (Mode::Plan, None),
+        };
+        std::process::exit(crate::backend::slug_migration::run_cli(mode, journal));
+    }
+
     let config = config::Config::from_env_and_args(&args).unwrap_or_else(|e| {
         tracing::error!("Failed to load config: {}", e);
         std::process::exit(1);
@@ -114,6 +125,9 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         tracing::error!("Failed to ensure db dir: {}", e);
         std::process::exit(1);
     });
+    // What this srv can do, beside the lock that names its pid, for a fork
+    // slug migration's precondition (`slug_migration::stamp`).
+    crate::backend::slug_migration::stamp::write(&base::get_mux_data_dir());
 
     // Startup diagnostics
     tracing::info!(
@@ -227,6 +241,17 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                 });
                 mstore_raw.set_def_registry(Arc::new(def_store));
                 tracing::info!(dir = %def_dir.display(), "def registry: global definition store attached");
+                // New slugs are checked against every channel's and version's
+                // objects.db too, the root the fork slug migration reads.
+                match backend::slug_migration::Home::from_env() {
+                    Ok(home) => mstore_raw.set_slug_home(home),
+                    Err(e) => tracing::warn!(error = %e, "agent slugs: other channels' agents can't be checked; only the shared definitions are"),
+                }
+                // This channel's copy of every agent's former slugs, in step
+                // with the shared records (SPEC_FORK_SLUG_MIGRATION_2026_10_22.md Phase 1).
+                if let Err(e) = mstore_raw.agent_former_slugs_sync_from_shared() {
+                    tracing::warn!(error = %e, "former slugs: not copied from the shared definitions");
+                }
             }
             Err(e) => tracing::warn!(
                 dir = %def_dir.display(),
@@ -260,11 +285,11 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         Err(e) => tracing::warn!(error = %e, "identity: agent token index unavailable — requests stay unattributed"),
     }
     // W3-S (SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md §2.2): the channel-wide
-    // WAN identity store. Opened and its instance minted here, once, so every
-    // spawn signs as the same instance. Best-effort and never redirected: if
-    // the file can't be opened or the instance can't be minted, WAN signing
-    // is simply off for this process (agents get no WAN key), which degrades
-    // every WAN jekt to today's unsigned `TRUST=network-claimed`.
+    // WAN identity store. Opened and its instance minted here, once, so srv
+    // signs every WAN jekt as the same instance. Best-effort and never
+    // redirected: if the file can't be opened or the instance can't be
+    // minted, WAN signing is simply off for this process, and its WAN jekts
+    // go unsigned (`TRUST=network-claimed` at the receiver).
     match backend::storage::wan_identity::resolve_wan_identity_path() {
         Some(path) => match crate::boot_timing::time("open_wan_db", || backend::storage::wan_identity::WanIdentityStore::open(&path)).and_then(|store| {
             let instance = store.instance_ensure(&crate::backend::reactive::registry::local_host_label())?;
@@ -315,6 +340,8 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                     match crate::boot_timing::time("open_transcripts_db", || FileStore::open_global_transcripts(&dir.join("filestore.db"))) {
                         Ok(fs) => {
                             tracing::info!(dir = %dir.display(), "global transcripts: store attached");
+                            // This srv reads compressed frames (transcript::framer).
+                            crate::backend::transcript::framer::mark_reader(&dir);
                             Some(Arc::new(fs))
                         }
                         Err(e) => {
@@ -481,6 +508,13 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         );
     }
 
+    // The user's workspace (SPEC_WORKSPACES_2026_10_23.md §4.2): Default
+    // Workspace, or a new version's copy of the previous version's. Before the
+    // initial data, which a copied workspace with windows replaces.
+    let opened_workspace = crate::server::service::user_workspace::prepare_at_startup(
+        &mstore,
+        crate::server::service::session_other_builds::ScanRoots::live().as_ref(),
+    );
     // Bootstrap data (creates Client/Window/Workspace/Tab on first launch)
     let first_launch = wcore::ensure_initial_data(&mstore).unwrap_or_else(|e| {
         tracing::error!("Failed to ensure initial data: {}", e);
@@ -493,6 +527,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     }
     // A window whose close a quit outran: the session record restores it.
     crate::server::service::forget_windows_left_by_quit(&mstore);
+    crate::server::service::user_workspace::adopt_current(&mstore, opened_workspace);
 
     // Seed ~/.agentmux/.gitignore so accidental git operations inside the
     // data directory (e.g. an agent running `git init` or `git clone` in its

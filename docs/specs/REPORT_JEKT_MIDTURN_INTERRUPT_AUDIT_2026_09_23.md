@@ -3,13 +3,16 @@
 **Date:** 2026-09-23
 **Status:** analysis — a point-in-time audit of `f32aec9a5`, not a plan. The plan it produced is
 `SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`; this document is kept as the evidence behind it and is
-not maintained as the code changes.
+not maintained as the code changes. That spec's delivery policy was itself replaced by
+`SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md` (#3979), the current policy.
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
 **Repo state:** `main` @ `f32aec9a5` (2026-09-23 01:12 -0700)
 **Question asked:** do jekt messages ever cut into an agent's text blob or train of thought?
 **Answer: yes — on every provider except Codex, unconditionally, by design.**
-**Follow-up:** the fix is specified in [`docs/specs/SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`](SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md), which is
-the source of truth for policy and implementation status. This report is retained as the evidence
-behind it — read it for *why*, read the spec for *what now*.
+**Follow-up:** the fix was first specified in [`docs/specs/SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md`](SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md);
+the current policy is [`docs/specs/SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md`](SPEC_JEKT_IMMEDIATE_DELIVERY_2026_09_28.md)
+(jekts are delivered immediately, even mid-turn). This report is retained as the evidence
+behind the first fix — read it for *why*, read the current spec for *what now*.
 
 ---
 

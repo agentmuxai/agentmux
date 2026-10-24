@@ -24,7 +24,7 @@ use crate::backend::storage::bundles::Bundle;
 
 use super::AppState;
 
-mod agent_open;
+pub(crate) mod agent_open;
 /// Re-exported for `server/mod.rs`'s `POST /api/v1/agent/open` handler (the
 /// `OpenAgent` MCP tool's backing route) — the HTTP surface must share the
 /// RPC path's exact implementation, including its AGENT_OPEN_LOCKS TOCTOU
@@ -91,6 +91,7 @@ mod supervisor;
 mod attachments;
 pub(crate) mod connections;
 pub(crate) mod app_update;
+pub(crate) mod desktop;
 pub(crate) mod viewer;
 mod input_history;
 mod presence;
@@ -131,6 +132,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     viewer::register(engine, state);
     input_history::register(engine, state);
     app_update::register(engine, state);
+    desktop::register(engine, state);
     presence::register(engine, state);
     tower_pane::register(engine, state);
     blockstats::register(engine, state);
@@ -500,6 +502,10 @@ mod cross_channel_tests;
 #[cfg(test)]
 #[path = "tests/pane_open_reducer_tests.rs"]
 mod pane_open_reducer_tests;
+
+#[cfg(test)]
+#[path = "tests/stop_agents_tests.rs"]
+mod stop_agents_tests;
 
 #[cfg(test)]
 #[path = "tests/agent_zoom_seed_tests.rs"]

@@ -737,6 +737,7 @@ mod tests {
         let config_b = tempfile::tempdir().unwrap();
         for (id, dir) in [("sweep-agent-a", config_a.path()), ("sweep-agent-b", config_b.path())] {
             let mut def = crate::backend::storage::AgentDefinition {
+                seat: None,
                 conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
                 id: id.to_string(),
                 slug: id.to_string(),
@@ -815,6 +816,7 @@ mod tests {
         let config = tempfile::tempdir().unwrap();
 
         let mut def = crate::backend::storage::AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "sweep-delete-agent".to_string(),
             slug: "sweep-delete-agent".to_string(),

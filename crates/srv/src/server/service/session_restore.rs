@@ -369,6 +369,10 @@ fn flush_snapshot(store: &Store, for_quit: bool) -> WebReturnType {
     match super::session_windows::snapshot_session(store, for_quit) {
         Some(snapshot) => {
             let windows = snapshot["windows"].as_array().map_or(1, Vec::len);
+            // The open workspace keeps the same record (`user_workspace`). Its
+            // own result isn't reported: the session record below is what the
+            // shutdown hook's retry is about.
+            super::user_workspace::write_record_now(store, snapshot.clone());
             if save_last_session_snapshot(store, snapshot) {
                 tracing::info!(windows, "session_restore: snapshot flushed for {why}");
                 WebReturnType::success_empty()
@@ -442,7 +446,7 @@ pub(crate) struct ReplayedTab {
 /// Rebuild `tabs` inside an existing workspace: per tab `CreateTab`, each
 /// block `CreateBlock` (its saved meta), then `LayoutSetTree` with the tree's
 /// placeholders resolved to the new block ids. Shared by restore-on-relaunch
-/// (into a fresh workspace) and Layouts → Open layout… (into the current
+/// (into a fresh workspace) and `layout.open` (into the current
 /// window's) — `SPEC_LAYOUT_FILES_2026_09_25.md` §1.1.
 ///
 /// Per-tab and per-block failures are logged and skipped, never fatal: a
@@ -548,7 +552,10 @@ pub(crate) async fn replay_tabs(
 }
 
 /// Restore the last session: every window it holds (`session_windows::restore_all`).
-/// The one returned is for the window being created.
+/// The one returned is for the window being created. A cold start goes
+/// through `user_workspace::restore_at_launch`, which tries this record among
+/// the open workspace's.
+#[cfg(test)]
 pub(crate) async fn restore_last_session(
     state: &AppState,
 ) -> Result<Option<(String, Vec<Event>)>, String> {
@@ -1401,6 +1408,8 @@ mod tests {
         );
         let mut top = snapshot;
         top.as_object_mut().unwrap().remove("windows");
+        // It names the workspace, which the close keeps for the restore.
+        assert_eq!(top.as_object_mut().unwrap().remove("workspaceid"), Some(json!(ws_id)));
         assert_eq!(
             top, expected,
             "must resolve to and capture the real workspace, not silently skip it"
@@ -1466,6 +1475,8 @@ mod tests {
         );
         let mut top = snapshot;
         top.as_object_mut().unwrap().remove("windows");
+        // It names the workspace, which the close keeps for the restore.
+        assert_eq!(top.as_object_mut().unwrap().remove("workspaceid"), Some(json!(live_ws_id)));
         assert_eq!(
             top, expected,
             "must resolve to and capture the live workspace, not the dead one it's paired with"

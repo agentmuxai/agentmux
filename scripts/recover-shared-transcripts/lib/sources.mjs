@@ -10,6 +10,7 @@
 
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { partIndex, readFileBytes, scanFrames } from "./frames.mjs";
 import { open } from "./sqlite.mjs";
 
 const subdirs = (dir) => {
@@ -66,10 +67,16 @@ function agentBlocks(objectsDb, want) {
 function outputState(db, zone, contentScan) {
     const f = db.prepare("SELECT size FROM db_wave_file WHERE zoneid = ? AND name = 'output'").get(zone);
     if (!f || Number(f.size) <= 0) return null;
-    const p = db.prepare("SELECT COUNT(*) AS n, MIN(partidx) AS lo, MAX(partidx) AS hi, SUM(LENGTH(data)) AS bytes FROM db_file_data WHERE zoneid = ? AND name = 'output'").get(zone);
-    let whole = p.n > 0 && p.lo === 0 && p.hi + 1 === p.n && Number(p.bytes) === Number(f.size);
+    const parts = partIndex(db, zone, "output");
+    const bytes = parts.reduce((sum, p) => sum + p.len, 0);
+    let whole = parts.length > 0 && parts.every((p, i) => p.partidx === i) && bytes === Number(f.size);
     if (whole && contentScan) {
         whole = db.prepare("SELECT COUNT(*) AS n FROM db_file_data WHERE zoneid = ? AND name = 'output' AND instr(data, x'00') > 0").get(zone).n === 0;
+        if (whole) {
+            // Frame by frame: a candidate is never assembled in memory just to be checked.
+            const frames = scanFrames(db, { zone, name: "output" });
+            whole = frames.bad.length === 0 && frames.nul.length === 0;
+        }
     }
     return { size: Number(f.size), whole };
 }
@@ -116,12 +123,11 @@ export function findSources(home, want, { contentScan = true } = {}) {
     return { dataDirsScanned: dataDirs.length, byAgent: found };
 }
 
-/** The bytes of a chosen copy (its parts in order). */
+/** The bytes of a chosen copy (its parts in order, frames decoded). */
 export function readSource(cand) {
     const db = open(join(cand.dataDir, "db", "filestore.db"));
     try {
-        const parts = db.prepare("SELECT data FROM db_file_data WHERE zoneid = ? AND name = 'output' ORDER BY partidx").all(cand.blockOid);
-        return Buffer.concat(parts.map((p) => Buffer.from(p.data)));
+        return readFileBytes(db, cand.blockOid, "output");
     } finally {
         db.close();
     }

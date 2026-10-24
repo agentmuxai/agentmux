@@ -236,6 +236,10 @@ pub(crate) fn persist_last_failure(
     // "it is never recorded". See
     // docs/specs/SPEC_HEADLESS_TRANSIENT_RETRY_2026_08_31.md §Phase 0.
     //
+    // A usage limit carries when it lifts, from the provider's own report
+    // (`agents::limit_reset`), here too so every path stores it.
+    let enriched = failure.map(|f| crate::agents::limit_reset::with_reset(block_id, f));
+    let failure = enriched.as_ref();
     // Logged only for `Some` — this is also called with `None` after every
     // clean turn, and that is not an event worth a line.
     if let Some(f) = failure {
@@ -244,6 +248,7 @@ pub(crate) fn persist_last_failure(
             block_id = %block_id,
             code = ?f.code,
             retryable = f.retryable,
+            resets_at_ms = ?f.resets_at_ms,
             "agent failure classified: {}",
             f.title,
         );
@@ -308,6 +313,7 @@ mod tests {
     /// `definition_id` — field values otherwise irrelevant to these tests.
     fn sample_agent(id: &str) -> AgentDefinition {
         AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: id.to_string(),
             slug: id.to_string(),

@@ -137,7 +137,7 @@ pub(crate) fn close_pane_outcome(block: &str, now: &Value) -> anyhow::Result<Str
             "failed" => anyhow::bail!("close failed: {}", now["error"].as_str().unwrap_or("no detail")),
             "" | "pending" => anyhow::bail!("close of {block:?}: no answer from the user's override window"),
             state => Ok(format!(
-                "{by}'s {via} was already shutting pane {block:?}'s agent down ({state}); the pane itself may still be open — call Stop with action \"pane\" again to close it."
+                "{by}'s {via} was already shutting pane {block:?}'s agent down ({state}); the pane itself may still be open — check Pane layout, and close an agent with Stop action \"agents\" or any other pane with action \"pane\"."
             )),
         };
     }
@@ -151,9 +151,10 @@ pub(crate) fn close_pane_outcome(block: &str, now: &Value) -> anyhow::Result<Str
     }
 }
 
-/// Folds each waited-on target into `FleetBulkStop`'s usual shape: stopped
-/// (or already gone) → `succeeded`; kept by the user or failed → `failed`,
-/// with the kept ones also listed in `kept_by_user`.
+/// Folds each waited-on target into `Stop agents`' shape: closed (or already
+/// gone) → `succeeded`; kept by the user or failed → `failed`, with the kept
+/// ones also listed in `kept_by_user`. A target srv refused up front is already
+/// in `failed`.
 pub(crate) fn merge_bulk_stop_outcomes(pending: Value, outcomes: Vec<(String, Value)>) -> Value {
     let mut succeeded = pending["succeeded"].as_array().cloned().unwrap_or_default();
     let mut failed = pending["failed"].as_array().cloned().unwrap_or_default();
@@ -173,8 +174,29 @@ pub(crate) fn merge_bulk_stop_outcomes(pending: Value, outcomes: Vec<(String, Va
         "succeeded": succeeded,
         "failed": failed,
         "kept_by_user": kept,
-        "aborted_early": pending["aborted_early"].as_bool().unwrap_or(false),
     })
+}
+
+/// The `note` of a `Stop agents` result: what srv said (a passed `signal` or
+/// `staged` no longer applies) and, for a target on an older AgentMux on this
+/// machine, which only stops (its answer names the `effect` `stop`), that its
+/// pane was left open.
+pub(crate) fn add_stop_notes(result: &mut Value, srv_note: Option<String>, pending: &[Value]) {
+    let older: Vec<&str> = pending
+        .iter()
+        .filter(|p| p["effect"].as_str() == Some("stop"))
+        .filter_map(|p| p["block_id"].as_str())
+        .collect();
+    let mut notes: Vec<String> = srv_note.into_iter().collect();
+    if !older.is_empty() {
+        notes.push(format!(
+            "{} run on an older AgentMux on this machine: stopped, but the pane was left open; the user has to close it",
+            older.join(", ")
+        ));
+    }
+    if !notes.is_empty() {
+        result["note"] = json!(notes.join("; "));
+    }
 }
 
 /// What `QuitSelf` tells the agent once the user's override window has

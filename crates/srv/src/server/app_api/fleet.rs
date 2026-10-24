@@ -38,9 +38,10 @@
 //! The forward uses the same loopback auth as the stop forward, and reaches only
 //! what that channel's own `fleet.broadcast` already does.
 //! An AGENT-initiated broadcast instead loops the EXISTING signed single-target
-//! `SendMessage` MCP tool path client-side (see `agentmux-mcp`'s `FleetBroadcast`
-//! tool) — only the calling agent's own process holds its `AGENTMUX_JEKT_KEY`, so
-//! per-message signing can only happen there, never in a server-side batch RPC.
+//! `Message` send path client-side (`Message` broadcast in `agentmux-mcp`) —
+//! srv mints, stores and serves each agent's keys and the agent's MCP signs
+//! with its copy, so per-message signing happens there, never in a
+//! server-side batch RPC.
 //! `fleet.bulk-stop` has no such constraint (a controller stop involves no
 //! jekt signing at all, same as `agent.stop` today) and IS exposed over
 //! HTTP (`POST /api/v1/fleet/bulk-stop`) for `FleetBulkStop`.
@@ -637,12 +638,16 @@ async fn forward_stop_pending(
     block_id: &str,
     by: &str,
     signal: Option<&str>,
+    close: bool,
 ) -> Forwarded {
     let url = format!("{}/agentmux/agent/stop-pending", entry.local_url);
+    // `mode` is new: an instance that predates it ignores it and only stops,
+    // which its answer shows (no `effect`).
     let mut req = state.http_client.post(&url).json(&serde_json::json!({
         "block_id": block_id,
         "signal": signal,
         "by": by,
+        "mode": if close { "close" } else { "stop" },
     }));
     if !entry.auth_key.is_empty() {
         req = req.header(AUTH_KEY_HEADER, &entry.auth_key);
@@ -680,6 +685,11 @@ async fn forward_stop_pending(
         target: entry.agent_id.clone(),
         via: p["via"].as_str().unwrap_or("FleetBulkStop").to_string(),
         reason: String::new(),
+        effect: match p["effect"].as_str() {
+            Some("close_tab") => "close_tab",
+            Some("close_pane") => "close_pane",
+            _ => "stop",
+        },
         deadline_ms: p["deadline_ms"].as_i64().unwrap_or_default(),
         status: "pending",
         error: None,
@@ -687,14 +697,16 @@ async fn forward_stop_pending(
     })
 }
 
-/// `FleetBulkStop` from an agent (the HTTP path; the Swarm UI's own
-/// `fleet.bulk-stop` is the user and stops at once): every target running on
+/// Stop agents and KEEP their panes, behind the user's 15 s override. Internal
+/// only, since `Stop agents` closes the tab (`fleet_close_agents_with_override`):
+/// the fork slug migration, which restarts the agents in the same panes, is its
+/// one caller. Every target running on
 /// this instance waits for its user's 15 s override, all windows in parallel
 /// (docs/specs/SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.5). A target running on
 /// another instance on this machine is asked there, in that instance's own
 /// window (`forward_stop_pending`). Targets running nowhere go through
 /// `fleet_bulk_stop_impl` as before, `staged` included.
-pub(crate) async fn fleet_bulk_stop_with_override(
+pub(crate) async fn fleet_stop_keep_pane_with_override(
     state: &AppState,
     by: &str,
     targets: Vec<String>,
@@ -733,8 +745,6 @@ pub(crate) async fn fleet_bulk_stop_with_override(
             v
         })
         .collect();
-    let mut now = FleetActionResult::default();
-    let mut remote_pending = Vec::new();
     let mut nowhere = Vec::new();
     // Local windows are open (above); now ask the other instances, all at
     // once, so one slow peer delays neither the rest nor any countdown
@@ -746,8 +756,34 @@ pub(crate) async fn fleet_bulk_stop_with_override(
             None => nowhere.push(block_id),
         }
     }
+    let (mut now, remote_pending, _) = ask_other_instances(state, by, signal, false, forwards).await;
+    pending.extend(remote_pending);
+    if !nowhere.is_empty() {
+        let rest = fleet_bulk_stop_impl(state, nowhere, signal, staged).await;
+        now.succeeded.extend(rest.succeeded);
+        now.failed.extend(rest.failed);
+        now.aborted_early = rest.aborted_early;
+    }
+    (now, pending)
+}
+
+/// Ask each target's own instance (a target running on another AgentMux on
+/// this machine) to open its override window, all at once. `close`: ask for
+/// the tab to close (`Stop agents`) rather than only stop (the migration).
+/// The third answer lists the targets of a `close` that an instance predating
+/// the override only stopped at once, leaving the pane open.
+async fn ask_other_instances(
+    state: &AppState,
+    by: &str,
+    signal: Option<&str>,
+    close: bool,
+    forwards: Vec<(String, crate::backend::reactive::registry::AgentEntry)>,
+) -> (FleetActionResult, Vec<crate::sagas::pending_shutdown::PendingView>, Vec<String>) {
+    let mut now = FleetActionResult::default();
+    let mut remote_pending = Vec::new();
+    let mut left_open = Vec::new();
     let answers = futures_util::future::join_all(
-        forwards.iter().map(|(block_id, entry)| forward_stop_pending(state, entry, block_id, by, signal)),
+        forwards.iter().map(|(block_id, entry)| forward_stop_pending(state, entry, block_id, by, signal, close)),
     )
     .await;
     for ((block_id, entry), answer) in forwards.into_iter().zip(answers) {
@@ -762,13 +798,19 @@ pub(crate) async fn fleet_bulk_stop_with_override(
                 remote_pending.push(v);
             }
             Forwarded::Immediate(outcome) => {
-                let note = format!("channel {} predates the user override: stopped at once", entry.channel);
+                let left = if close { "; its pane was left open" } else { "" };
+                let note = format!("channel {} predates the user override: stopped at once{left}", entry.channel);
                 state.reactive_handler.log_fleet_action_audit(
                     Some(by), &entry.agent_id, &block_id, FLEET_BULK_STOP_AUDIT_ACTION,
                     outcome.is_ok(), outcome.as_ref().err().map(String::as_str), &request_id, Some(&note),
                 );
                 match outcome {
-                    Ok(()) => now.succeeded.push(block_id),
+                    Ok(()) => {
+                        if close {
+                            left_open.push(block_id.clone());
+                        }
+                        now.succeeded.push(block_id)
+                    }
                     Err(error) => now.failed.push(FleetActionFailure { id: block_id, error }),
                 }
             }
@@ -781,14 +823,84 @@ pub(crate) async fn fleet_bulk_stop_with_override(
             }
         }
     }
-    pending.extend(remote_pending);
-    if !nowhere.is_empty() {
-        let rest = fleet_bulk_stop_impl(state, nowhere, signal, staged).await;
-        now.succeeded.extend(rest.succeeded);
-        now.failed.extend(rest.failed);
-        now.aborted_early = rest.aborted_early;
+    (now, remote_pending, left_open)
+}
+
+/// `Stop agents`, from an agent: close each target agent's tab, as the user's
+/// tab × does, after the same 15 s override window as any other shutdown the
+/// user didn't ask for (docs/specs/SPEC_STOP_AN_AGENT_ONE_WAY_AND_SHUTDOWN_TOAST_2026_10_23.md
+/// §3.1). One window per target, all in parallel; only that agent's tab
+/// closes, so an agent stacked in the same pane keeps running.
+///
+/// Refused up front, as `failed` with a pointer: the caller's own block (that
+/// is `Stop self`), and a block that is not an agent's (that is `Stop pane`).
+/// A target on another AgentMux instance on this machine is asked there. The
+/// third answer lists targets that an older instance only stopped at once, so
+/// the caller can say their panes were left open.
+pub(crate) async fn fleet_close_agents_with_override(
+    state: &AppState,
+    by: &str,
+    caller_block: Option<&str>,
+    targets: Vec<String>,
+) -> (FleetActionResult, Vec<crate::sagas::pending_shutdown::PendingView>, Vec<String>) {
+    let mut now = FleetActionResult::default();
+    let mut pending: Vec<crate::sagas::pending_shutdown::PendingView> = Vec::new();
+    let mut forwards = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for block_id in targets {
+        if !seen.insert(block_id.clone()) {
+            continue;
+        }
+        if caller_block == Some(block_id.as_str()) {
+            now.failed.push(FleetActionFailure {
+                id: block_id,
+                error: "your own block: Stop agents closes other agents; to end your own session use Stop with action \"self\"".to_string(),
+            });
+            continue;
+        }
+        let here = state.srv_state.lock().await.blocks.contains_key(&block_id);
+        if !here {
+            match shared_channel_for(state, &block_id) {
+                Some(entry) => forwards.push((block_id, entry)),
+                None => now.failed.push(FleetActionFailure { id: block_id.clone(), error: format!("block not found: {block_id}") }),
+            }
+            continue;
+        }
+        if !crate::sagas::orphan_reaper::is_agent_block(state, &block_id) {
+            now.failed.push(FleetActionFailure {
+                id: block_id,
+                error: "not an agent pane: close it with Stop with action \"pane\"".to_string(),
+            });
+            continue;
+        }
+        let target = state
+            .reactive_handler
+            .get_agent_by_block(&block_id)
+            .map(|a| a.agent_id)
+            .unwrap_or_else(|| block_id.clone());
+        let mut v = crate::sagas::pending_shutdown::request(
+            state,
+            &block_id,
+            by,
+            "FleetBulkStop",
+            "",
+            crate::sagas::pending_shutdown::Action::CloseTab { detail: format!("asked by {by} (Stop agents)") },
+        );
+        state.reactive_handler.log_fleet_action_audit(
+            Some(by), &target, &block_id, FLEET_BULK_STOP_AUDIT_ACTION,
+            true, None, &v.request_id, Some(&crate::sagas::pending_shutdown::audit_note(&v, by, "FleetBulkStop")),
+        );
+        // A target can join a request opened for another block (its pane's
+        // close, via a sibling tab): report it under the block named.
+        v.block_id = block_id.clone();
+        v.target = target;
+        pending.push(v);
     }
-    (now, pending)
+    let (asked, remote_pending, left_open) = ask_other_instances(state, by, None, true, forwards).await;
+    now.succeeded.extend(asked.succeeded);
+    now.failed.extend(asked.failed);
+    pending.extend(remote_pending);
+    (now, pending, left_open)
 }
 
 /// `batch_failures / batch_len` (as a percentage) exceeds `max_pct`.
@@ -985,7 +1097,7 @@ mod override_tests {
         let gone = format!("bulk-override-gone-{}", uuid::Uuid::new_v4());
 
         let (now, pending) =
-            fleet_bulk_stop_with_override(&state, "Korp", vec![a.clone(), b.clone(), gone.clone()], None, None).await;
+            fleet_stop_keep_pane_with_override(&state, "Korp", vec![a.clone(), b.clone(), gone.clone()], None, None).await;
         assert_eq!(now.failed.iter().map(|f| f.id.clone()).collect::<Vec<_>>(), vec![gone], "not running: fails at once");
         assert_eq!(pending.iter().map(|p| p.block_id.clone()).collect::<Vec<_>>(), vec![a.clone(), b.clone()]);
         assert!(pending.iter().all(|p| p.by == "Korp" && p.via == "FleetBulkStop"));
@@ -1016,7 +1128,7 @@ mod override_tests {
             crate::sagas::pending_shutdown::Action::ClosePane { block_ids: vec![sibling.clone(), tab.clone()] },
         );
 
-        let (_, pending) = fleet_bulk_stop_with_override(&state, "Posa", vec![tab.clone()], None, None).await;
+        let (_, pending) = fleet_stop_keep_pane_with_override(&state, "Posa", vec![tab.clone()], None, None).await;
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].block_id, tab, "the block the caller named, not the sibling");
         assert_eq!(pending[0].request_id, close.request_id, "the pane's one window");

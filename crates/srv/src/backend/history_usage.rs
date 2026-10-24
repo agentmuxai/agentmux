@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::backend::rpc_types::{HistoryUsage, HistoryUsageAgent, HistoryUsageStore};
+use crate::backend::rpc_types::{HistoryCompression, HistoryUsage, HistoryUsageAgent, HistoryUsageStore};
 use crate::backend::storage::filestore::FileStore;
 
 /// Where each store lives. Built from the machine's data roots, or from temp
@@ -122,7 +122,39 @@ pub fn compute(
     ];
     let total_bytes = stores.iter().map(|s| s.bytes).sum();
 
-    HistoryUsage { total_bytes, stores, agents: largest_agents(transcripts, name_of), computed_at_ms: now_ms }
+    HistoryUsage {
+        total_bytes,
+        stores,
+        agents: largest_agents(transcripts, name_of),
+        computed_at_ms: now_ms,
+        compression: transcripts.map(|t| compression(t, roots.transcripts_db.parent())),
+    }
+}
+
+/// The shared store's compression as it is now, for a cached answer.
+pub fn compression_now() -> Option<HistoryCompression> {
+    let store = crate::backend::agent_session::global_transcript_store()?;
+    let roots = Roots::on_this_machine();
+    Some(compression(&store, roots.as_ref().and_then(|r| r.transcripts_db.parent())))
+}
+
+/// The shared store's frames: one sum over the frame table. What compression
+/// waits for is checked here, the way the framer checks it, because only the
+/// srv that owns the store runs the framer and any srv may answer this.
+fn compression(transcripts: &FileStore, store_dir: Option<&Path>) -> HistoryCompression {
+    use crate::backend::transcript::framer;
+    let (logical, stored, frames) = transcripts.frame_totals().unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "history.usage: couldn't sum the transcript store's frames");
+        (0, 0, 0)
+    });
+    let enabled = framer::enabled();
+    HistoryCompression {
+        enabled,
+        frames: frames.max(0) as u64,
+        logical_bytes: logical.max(0) as u64,
+        stored_bytes: stored.max(0) as u64,
+        waiting: if enabled { store_dir.and_then(framer::who_blocks) } else { None },
+    }
 }
 
 /// The agents with the most pane history, largest first.

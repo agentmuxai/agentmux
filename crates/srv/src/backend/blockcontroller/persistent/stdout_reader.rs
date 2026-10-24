@@ -233,6 +233,9 @@ impl PersistentSubprocessController {
                         });
                     }
                 }
+                // The latest `rate_limit_event`: a usage limit stored later
+                // reads its reset from it (`agents::limit_reset`).
+                crate::agents::limit_reset::observe_frame(&block_id_read, &parsed);
                 // This block's CLI compacted: only its pane may send the
                 // hidden memory reinjection for that boundary.
                 if parsed.get("subtype").and_then(|v| v.as_str()) == Some("compact_boundary") {
@@ -248,6 +251,21 @@ impl PersistentSubprocessController {
                 }
                 let is_result_frame =
                     parsed.get("type").and_then(|v| v.as_str()) == Some("result");
+                // A quota or sign-in failure is stored, and a successful turn's
+                // stale failure cleared, before the turn's end is published
+                // below: whoever reacts to that end (the Supervisor) reads the
+                // block's state from them (#5389). The steps after
+                // leave both alone, except to restore an older turn's flushed
+                // failure.
+                let result_is_error = is_result_frame && parsed.get("is_error").and_then(|v| v.as_bool()) == Some(true);
+                let early_failure = (result_is_error && inner_read.lock().unwrap().shutdown_generation != Some(my_generation_read))
+                    .then(|| crate::agents::failure::classify(None, None, "", Some(&parsed)))
+                    .filter(|f| matches!(f.code, crate::agents::failure::FailureClass::UsageLimit | crate::agents::failure::FailureClass::Auth));
+                if let Some(failure) = &early_failure {
+                    surface_failure(&block_id_read, failure, broker_read.as_deref(), &mstore_read, &event_bus_read);
+                } else if is_result_frame && !result_is_error {
+                    core::persist_last_failure(&block_id_read, None, &mstore_read, &event_bus_read);
+                }
                 // Claude's turn-ending marker. Persistent mode never exits
                 // between turns, so this is the only place `turn_active`
                 // can go back to false without waiting for process exit —
@@ -680,7 +698,7 @@ impl PersistentSubprocessController {
                 // to the user (per its own "must never reach the user"
                 // invariant at `process_waiter.rs`'s ProcessExited/FireRetry arm) —
                 // classify() only runs once this error is confirmed final.
-                if is_error_result && !hold_back_for_resume_retry {
+                if is_error_result && !hold_back_for_resume_retry && early_failure.is_none() {
                     let failure = crate::agents::failure::classify(None, None, "", Some(&parsed));
                     surface_failure(&block_id_read, &failure, broker_read.as_deref(), &mstore_read, &event_bus_read);
                 } else if is_result_frame && !is_error_result && !flushed_failure_this_tick {

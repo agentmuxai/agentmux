@@ -112,6 +112,10 @@
             "method": "AgentSessionWriteStateCommand"
         },
         {
+            "command": "agent.setSeat",
+            "method": "AgentSetSeatCommand"
+        },
+        {
             "command": "agentshutdownkeep",
             "method": "AgentShutdownKeepCommand"
         },
@@ -957,6 +961,11 @@
             "method": "OtherBuildLayoutsCommand"
         },
         {
+            "command": "agents.migrateForkSlugs",
+            "method": "AgentsMigrateForkSlugsCommand",
+            "opts": "{ timeout: 120000, ...opts }"
+        },
+        {
             "command": "layout.restoreOtherBuild",
             "method": "RestoreOtherBuildLayoutCommand"
         },
@@ -1427,6 +1436,10 @@
         {
             "command": "app.upgrade-requests",
             "method": "AppUpgradeRequestsCommand"
+        },
+        {
+            "command": "app.desktop",
+            "method": "AppDesktopCommand"
         },
         {
             "command": "viewer.agent-hidden",

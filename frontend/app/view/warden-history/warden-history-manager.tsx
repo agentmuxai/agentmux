@@ -3,7 +3,7 @@
 //
 // Warden — History section: the record of what agents did, beside Audit.
 // Agents lists every agent's kept history and opens it; Storage shows where it
-// is kept, how much, and for how long. See
+// is kept, how much, and for how long. Typed shows what the user typed to an agent. See
 // docs/specs/SPEC_WARDEN_HISTORY_SECTION_2026_10_18.md.
 
 import { createSignal, type JSX } from "solid-js";
@@ -11,14 +11,16 @@ import { createSignal, type JSX } from "solid-js";
 import { SegmentedControl } from "@/app/element/ui";
 import { WardenHistoryAgents } from "./warden-history-agents";
 import { WardenHistoryStorage } from "./warden-history-storage";
+import { WardenHistoryTyped } from "./warden-history-typed";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./warden-history.scss";
 
-type HistoryView = "agents" | "storage";
+type HistoryView = "agents" | "typed" | "storage";
 
 const VIEWS = [
     { value: "agents" as const, label: "Agents", icon: "users" },
+    { value: "typed" as const, label: "Typed", icon: "keyboard" },
     { value: "storage" as const, label: "Storage", icon: "hard-drive" },
 ];
 
@@ -29,6 +31,9 @@ export const WardenHistoryManager = (props: { wardenBlockId: string; visible: bo
             <SegmentedControl options={VIEWS} value={view()} onChange={setView} density="compact" ariaLabel="History view" />
             <div classList={{ "is-hidden": view() !== "agents" }}>
                 <WardenHistoryAgents wardenBlockId={props.wardenBlockId} visible={props.visible && view() === "agents"} />
+            </div>
+            <div classList={{ "is-hidden": view() !== "typed" }}>
+                <WardenHistoryTyped visible={props.visible && view() === "typed"} />
             </div>
             <div classList={{ "is-hidden": view() !== "storage" }}>
                 <WardenHistoryStorage visible={props.visible && view() === "storage"} />

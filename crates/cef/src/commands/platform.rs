@@ -4,7 +4,6 @@
 // Platform info commands for the CEF host.
 // Ported from src-tauri/src/commands/platform.rs without Tauri dependencies.
 
-use std::io::Read;
 use std::sync::Arc;
 
 use crate::state::AppState;
@@ -338,19 +337,17 @@ fn spawn_detached(program: &str, args: &[std::ffi::OsString]) -> std::io::Result
     Ok(())
 }
 
-/// Ensure settings.json exists in the config directory with the latest template.
+/// Ensure the channel's settings.json (the file srv loads, not always
+/// `<config dir>/settings.json`: #1903) exists with the latest template.
 pub fn ensure_settings_file(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
-    let config_dir_str = state
-        .version_config_dir
-        .lock()
-        .clone()
-        .ok_or_else(|| "Config dir not initialized yet".to_string())?;
-    let config_dir = std::path::PathBuf::from(&config_dir_str);
-
-    std::fs::create_dir_all(&config_dir)
-        .map_err(|e| format!("Failed to create config dir: {}", e))?;
-
-    let settings_path = config_dir.join("settings.json");
+    if state.version_config_dir.lock().is_none() {
+        return Err("Config dir not initialized yet".to_string());
+    }
+    let settings_path = crate::sidecar::settings_file()
+        .ok_or_else(|| "Cannot resolve the settings.json location".to_string())?;
+    if let Some(dir) = settings_path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("Failed to create settings dir: {}", e))?;
+    }
 
     // Read existing user values (strips JSONC comments, parses JSON)
     let existing = read_settings_jsonc(&settings_path);
@@ -369,70 +366,10 @@ pub(crate) fn read_settings_jsonc(path: &std::path::Path) -> serde_json::Map<Str
     if !path.exists() {
         return serde_json::Map::new();
     }
-    match std::fs::read_to_string(path) {
-        Ok(content) => {
-            let stripped = json_comments::StripComments::new(content.as_bytes());
-            let mut json_bytes = Vec::new();
-            std::io::BufReader::new(stripped)
-                .read_to_end(&mut json_bytes)
-                .unwrap_or_default();
-            let json_str = strip_trailing_commas(&String::from_utf8_lossy(&json_bytes));
-            match serde_json::from_str::<serde_json::Value>(&json_str) {
-                Ok(serde_json::Value::Object(map)) => map,
-                _ => serde_json::Map::new(),
-            }
-        }
-        Err(_) => serde_json::Map::new(),
+    match std::fs::read_to_string(path).ok().and_then(|c| agentmux_common::settings_jsonc::parse_jsonc(&c)) {
+        Some(serde_json::Value::Object(map)) => map,
+        _ => serde_json::Map::new(),
     }
-}
-
-fn strip_trailing_commas(input: &str) -> String {
-    let mut result = String::with_capacity(input.len());
-    let mut in_string = false;
-    let mut last_comma_pos: Option<usize> = None;
-
-    for ch in input.chars() {
-        if in_string {
-            result.push(ch);
-            if ch == '"' {
-                let backslashes = result[..result.len() - 1]
-                    .chars()
-                    .rev()
-                    .take_while(|&c| c == '\\')
-                    .count();
-                if backslashes % 2 == 0 {
-                    in_string = false;
-                }
-            }
-            continue;
-        }
-        match ch {
-            '"' => {
-                in_string = true;
-                last_comma_pos = None;
-                result.push(ch);
-            }
-            ',' => {
-                last_comma_pos = Some(result.len());
-                result.push(ch);
-            }
-            '}' | ']' => {
-                if let Some(pos) = last_comma_pos {
-                    result.replace_range(pos..pos + 1, " ");
-                }
-                last_comma_pos = None;
-                result.push(ch);
-            }
-            _ if ch.is_whitespace() => {
-                result.push(ch);
-            }
-            _ => {
-                last_comma_pos = None;
-                result.push(ch);
-            }
-        }
-    }
-    result
 }
 
 fn merge_into_template(
@@ -1105,6 +1042,45 @@ pub async fn show_open_bundle_dialog(
 /// (docs/specs/SPEC_LAYOUT_FILES_2026_09_25.md §3.1). Mirrors
 /// `agentmux-srv`'s `layout_file::LAYOUT_EXTENSION`, which refuses any other.
 const LAYOUT_EXTENSION: &str = ".agentmux-layout.json";
+/// An exported workspace's (docs/specs/SPEC_WORKSPACES_2026_10_23.md §4.2),
+/// `layout_file::WORKSPACE_EXTENSION` in srv.
+const WORKSPACE_EXTENSION: &str = ".agentmux-workspace.json";
+
+/// What a file dialog is for: a layout file, or a workspace (`kind:
+/// "workspace"`, ☰ → Workspaces → Export… / Import…).
+struct DialogKind {
+    save_title: &'static str,
+    open_title: &'static str,
+    filter: &'static str,
+    extension: &'static str,
+    /// The extensions the Open dialog offers, without the leading dot.
+    opens: &'static [&'static str],
+    /// The folder under `~/.agentmux/shared/` it opens in.
+    folder: &'static str,
+}
+
+fn dialog_kind(args: &serde_json::Value) -> DialogKind {
+    if args.get("kind").and_then(|v| v.as_str()) == Some("workspace") {
+        DialogKind {
+            save_title: "Export workspace",
+            open_title: "Import workspace",
+            filter: "AgentMux workspace",
+            extension: WORKSPACE_EXTENSION,
+            // An older layout file imports as a workspace too.
+            opens: &["agentmux-workspace.json", "agentmux-layout.json"],
+            folder: "workspaces",
+        }
+    } else {
+        DialogKind {
+            save_title: "Save layout",
+            open_title: "Open layout",
+            filter: "AgentMux layout",
+            extension: LAYOUT_EXTENSION,
+            opens: &["agentmux-layout.json"],
+            folder: "layouts",
+        }
+    }
+}
 
 /// A layout name as a file stem: path separators and characters Windows
 /// rejects become `-`; empty becomes `layout`.
@@ -1125,17 +1101,24 @@ fn layout_file_stem(name: &str) -> String {
 /// The path the dialog returned, with the layout extension added if the user
 /// typed a bare name. OS dialogs append a filter's extension inconsistently,
 /// and a double extension like this one least of all.
+#[cfg(test)]
 fn with_layout_extension(path: std::path::PathBuf) -> std::path::PathBuf {
+    with_extension(path, LAYOUT_EXTENSION)
+}
+
+/// The path the dialog returned, with `extension` added if the user typed a
+/// bare name.
+fn with_extension(path: std::path::PathBuf, extension: &str) -> std::path::PathBuf {
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
     let lower = name.to_ascii_lowercase();
-    if lower.ends_with(LAYOUT_EXTENSION) {
+    if lower.ends_with(extension) {
         return path;
     }
     // Case-insensitive, like the check above (ReAgent P2 on #3787): `x.JSON`
     // becomes `x.agentmux-layout.json`, not `x.JSON.agentmux-layout.json`.
     // `.json` is ASCII, so cutting its byte length off the end is safe.
     let base = if lower.ends_with(".json") { &name[..name.len() - ".json".len()] } else { name.as_str() };
-    path.with_file_name(format!("{base}{LAYOUT_EXTENSION}"))
+    path.with_file_name(format!("{base}{extension}"))
 }
 
 /// Save dialog for a layout file — Phase 1 of
@@ -1144,19 +1127,23 @@ fn with_layout_extension(path: std::path::PathBuf) -> std::path::PathBuf {
 /// cross-channel so a layout saved in one build is found by every other) with
 /// `<defaultName>.agentmux-layout.json` suggested; the user may save
 /// anywhere. Returns the chosen absolute path, or `null` on cancel. Writes
-/// nothing itself — the srv's `layout.save` does.
+/// nothing itself — the srv's `layout.save` does. With `kind: "workspace"`
+/// it is Export…'s: `*.agentmux-workspace.json` in
+/// `~/.agentmux/shared/workspaces/`, written by srv's `ExportUserWorkspace`.
 pub async fn show_save_layout_dialog(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let kind = dialog_kind(args);
     let stem = layout_file_stem(args.get("defaultName").and_then(|v| v.as_str()).unwrap_or(""));
-    let dir = agentmux_common::DataPaths::from_env().map(|p| p.shared_dir.join("layouts"));
+    let dir = agentmux_common::DataPaths::from_env().map(|p| p.shared_dir.join(kind.folder));
     if let Some(dir) = &dir {
         let _ = std::fs::create_dir_all(dir);
     }
+    let extension = kind.extension;
     let path = tokio::task::spawn_blocking(move || {
         let _dialog_guard = host_dialog_guard();
         let mut dialog = rfd::FileDialog::new()
-            .set_title("Save layout")
-            .set_file_name(format!("{stem}{LAYOUT_EXTENSION}"))
-            .add_filter("AgentMux layout", &["agentmux-layout.json", "json"]);
+            .set_title(kind.save_title)
+            .set_file_name(format!("{stem}{}", kind.extension))
+            .add_filter(kind.filter, &[kind.extension.trim_start_matches('.'), "json"]);
         if let Some(dir) = dir.filter(|d| d.is_dir()) {
             dialog = dialog.set_directory(dir);
         }
@@ -1165,7 +1152,7 @@ pub async fn show_save_layout_dialog(args: &serde_json::Value) -> Result<serde_j
     .await
     .map_err(|e| format!("show_save_layout_dialog: task join error: {e}"))?;
     Ok(match path {
-        Some(p) => serde_json::json!(with_layout_extension(p).to_string_lossy()),
+        Some(p) => serde_json::json!(with_extension(p, extension).to_string_lossy()),
         None => serde_json::Value::Null,
     })
 }
@@ -1175,14 +1162,15 @@ pub async fn show_save_layout_dialog(args: &serde_json::Value) -> Result<serde_j
 /// `~/.agentmux/shared/layouts/`, filtered to layout files. Returns the
 /// chosen absolute path, or `null` on cancel. Reads nothing itself — the
 /// srv's `layout.preview` / `layout.open` do, and they refuse any path not
-/// ending in `.agentmux-layout.json`.
-pub async fn show_open_layout_dialog(_args: &serde_json::Value) -> Result<serde_json::Value, String> {
-    let dir = agentmux_common::DataPaths::from_env().map(|p| p.shared_dir.join("layouts"));
+/// ending in `.agentmux-layout.json`. With `kind: "workspace"` it is
+/// Import…'s: an exported workspace or a layout file, from
+/// `~/.agentmux/shared/workspaces/`.
+pub async fn show_open_layout_dialog(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let kind = dialog_kind(args);
+    let dir = agentmux_common::DataPaths::from_env().map(|p| p.shared_dir.join(kind.folder));
     let path = tokio::task::spawn_blocking(move || {
         let _dialog_guard = host_dialog_guard();
-        let mut dialog = rfd::FileDialog::new()
-            .set_title("Open layout")
-            .add_filter("AgentMux layout", &["agentmux-layout.json"]);
+        let mut dialog = rfd::FileDialog::new().set_title(kind.open_title).add_filter(kind.filter, kind.opens);
         if let Some(dir) = dir.filter(|d| d.is_dir()) {
             dialog = dialog.set_directory(dir);
         }
@@ -1224,6 +1212,17 @@ mod layout_dialog_tests {
             with_layout_extension(dir.join("X.AgentMux-Layout.JSON")),
             dir.join("X.AgentMux-Layout.JSON")
         );
+    }
+
+    #[test]
+    fn a_workspace_dialog_uses_the_workspace_extension_and_folder() {
+        let kind = dialog_kind(&serde_json::json!({ "kind": "workspace" }));
+        assert_eq!((kind.extension, kind.folder), (WORKSPACE_EXTENSION, "workspaces"));
+        assert_eq!(kind.opens, ["agentmux-workspace.json", "agentmux-layout.json"]);
+        assert_eq!(dialog_kind(&serde_json::json!({})).extension, LAYOUT_EXTENSION);
+        let dir = PathBuf::from("workspaces");
+        assert_eq!(with_extension(dir.join("Ops"), WORKSPACE_EXTENSION), dir.join("Ops.agentmux-workspace.json"));
+        assert_eq!(with_extension(dir.join("Ops.json"), WORKSPACE_EXTENSION), dir.join("Ops.agentmux-workspace.json"));
     }
 }
 

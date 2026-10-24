@@ -41,6 +41,14 @@ pub struct Store {
     /// in one channel is visible in every channel (cross-channel agent
     /// persistence, `docs/specs/SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md`).
     def_registry: Mutex<Option<Arc<DefinitionStore>>>,
+    /// The AgentMux root whose every `objects.db` and live registration a
+    /// new agent's slug is also checked against
+    /// (`slug_migration::HostSlugs`). `None` except on the channel's object
+    /// store at runtime, and in tests that ask for it.
+    slug_home: Mutex<Option<Arc<crate::backend::slug_migration::Home>>>,
+    /// Every former slug this channel can see, cached so a sender or target
+    /// that isn't one costs no store read (`agents/former_slugs.rs`).
+    pub(super) former_slugs: super::agents::FormerSlugSet,
     /// token → UID for attributing requests (identity M4a). `None` except on
     /// the channel's object store at runtime; see `attach_token_index`.
     pub(super) token_index: Mutex<Option<Arc<super::agent_tokens::TokenIndex>>>,
@@ -91,6 +99,9 @@ pub struct Store {
     /// SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.6). `None` except on
     /// the channel's Global Memory store at runtime.
     global_memory_observer: Mutex<Option<GlobalMemoryObserver>>,
+    /// Writes to the objects a user workspace is saved from, counted so the
+    /// workspace saver knows when something changed (`user_workspaces.rs`).
+    pub(super) layout_writes: super::user_workspaces::LayoutWrites,
 }
 
 /// A change to Global Memory, for [`Store::set_global_memory_observer`].
@@ -129,11 +140,14 @@ impl Store {
             conn: Mutex::new(conn),
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
+            slug_home: Mutex::new(None),
+            former_slugs: Default::default(),
             token_index: Mutex::new(None),
             wan_identity: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
             global_memory_observer: Mutex::new(None),
+            layout_writes: Default::default(),
         })
     }
 
@@ -177,7 +191,8 @@ impl Store {
         conn.execute_batch(super::work_claims::SCHEMA)?;
         conn.execute_batch(super::coord_posts::SCHEMA)?;
         conn.execute_batch(super::work_board::SCHEMA)?;
-        Ok(conn.execute_batch(super::work_deps::SCHEMA)?)
+        conn.execute_batch(super::work_deps::SCHEMA)?;
+        Ok(conn.execute_batch(super::work_prs::SCHEMA)?)
     }
 
     /// Open the GLOBAL shared store at `path` (`~/.agentmux/shared/store.db`).
@@ -205,11 +220,14 @@ impl Store {
             conn: Mutex::new(conn),
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
+            slug_home: Mutex::new(None),
+            former_slugs: Default::default(),
             token_index: Mutex::new(None),
             wan_identity: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
             global_memory_observer: Mutex::new(None),
+            layout_writes: Default::default(),
         })
     }
 
@@ -242,16 +260,20 @@ impl Store {
         conn.execute_batch(super::coord_posts::SCHEMA)?;
         conn.execute_batch(super::work_board::SCHEMA)?;
         conn.execute_batch(super::work_deps::SCHEMA)?;
+        conn.execute_batch(super::work_prs::SCHEMA)?;
         stamp_version(&conn, IDENTITY_STORE_SCHEMA_VERSION)?;
         Ok(Self {
             conn: Mutex::new(conn),
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
+            slug_home: Mutex::new(None),
+            former_slugs: Default::default(),
             token_index: Mutex::new(None),
             wan_identity: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
             global_memory_observer: Mutex::new(None),
+            layout_writes: Default::default(),
         })
     }
 
@@ -274,11 +296,14 @@ impl Store {
             conn: Mutex::new(conn),
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
+            slug_home: Mutex::new(None),
+            former_slugs: Default::default(),
             token_index: Mutex::new(None),
             wan_identity: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
             global_memory_observer: Mutex::new(None),
+            layout_writes: Default::default(),
         })
     }
 
@@ -348,16 +373,20 @@ impl Store {
         // partially mutate a newer DB before the error fired.)
         check_schema_compat(&conn, OBJECT_SCHEMA_VERSION, "objects.db")?;
         run_object_schema(&conn)?;
+        conn.execute_batch(super::user_workspaces::SCHEMA)?;
         stamp_version(&conn, OBJECT_SCHEMA_VERSION)?;
         Ok(Self {
             conn: Mutex::new(conn),
             registry: Mutex::new(None),
             def_registry: Mutex::new(None),
+            slug_home: Mutex::new(None),
+            former_slugs: Default::default(),
             token_index: Mutex::new(None),
             wan_identity: Mutex::new(None),
             registry_agents_base: Mutex::new(None),
             muxbus_save_lock: Mutex::new(()),
             global_memory_observer: Mutex::new(None),
+            layout_writes: Default::default(),
         })
     }
 
@@ -445,6 +474,18 @@ impl Store {
 
     pub fn set_def_registry(&self, def_registry: Arc<DefinitionStore>) {
         *self.def_registry.lock().unwrap_or_else(|e| e.into_inner()) = Some(def_registry);
+        self.former_slugs.invalidate();
+    }
+
+    /// Check new slugs against every `objects.db` and live registration
+    /// under `home` too, not only this channel's rows and the shared
+    /// definitions.
+    pub fn set_slug_home(&self, home: crate::backend::slug_migration::Home) {
+        *self.slug_home.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(home));
+    }
+
+    pub(super) fn slug_home(&self) -> Option<Arc<crate::backend::slug_migration::Home>> {
+        self.slug_home.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Public accessor for the global agent-definition store. `None` when
@@ -549,6 +590,7 @@ impl Store {
             &format!("INSERT INTO {table} (oid, version, data) VALUES (?1, 1, ?2)"),
             params![oid, data],
         )?;
+        self.layout_writes.wrote(T::get_otype());
 
         Ok(())
     }
@@ -575,6 +617,7 @@ impl Store {
             params![data, oid],
             |row| row.get(0),
         )?;
+        self.layout_writes.wrote(T::get_otype());
 
         obj.set_version(new_version);
         Ok(new_version)
@@ -597,6 +640,7 @@ impl Store {
             params![data, oid],
             |row| row.get(0),
         )?;
+        self.layout_writes.wrote(otype);
         Ok(new_version)
     }
 
@@ -609,6 +653,7 @@ impl Store {
             &format!("DELETE FROM {table} WHERE oid = ?1"),
             params![oid],
         )?;
+        self.layout_writes.wrote(T::get_otype());
         Ok(())
     }
 
@@ -625,6 +670,7 @@ impl Store {
             &format!("DELETE FROM {table} WHERE oid = ?1"),
             params![oid],
         )?;
+        self.layout_writes.wrote(otype);
         Ok(())
     }
 
@@ -673,7 +719,7 @@ impl Store {
     {
         let conn = self.conn.lock().unwrap();
         conn.execute_batch("BEGIN")?;
-        let tx = StoreTx { conn: &conn };
+        let tx = StoreTx { conn: &conn, layout_writes: &self.layout_writes };
         match f(&tx) {
             Ok(result) => {
                 conn.execute_batch("COMMIT")?;
@@ -730,11 +776,18 @@ impl Store {
 /// already-locked connection without additional Mutex acquisition.
 pub struct StoreTx<'a> {
     conn: &'a Connection,
+    layout_writes: &'a super::user_workspaces::LayoutWrites,
 }
 
 impl<'a> StoreTx<'a> {
     fn table_name<T: StoreObj>() -> String {
         format!("db_{}", T::get_otype())
+    }
+
+    /// The locked connection, for sibling modules' own tables
+    /// (`user_workspaces`), written in the same transaction.
+    pub(super) fn raw_conn(&self) -> &Connection {
+        self.conn
     }
 
     pub fn get<T: StoreObj>(&self, oid: &str) -> Result<Option<T>, StoreError> {
@@ -777,6 +830,7 @@ impl<'a> StoreTx<'a> {
             &format!("INSERT INTO {table} (oid, version, data) VALUES (?1, 1, ?2)"),
             params![oid, data],
         )?;
+        self.layout_writes.wrote(T::get_otype());
 
         Ok(())
     }
@@ -797,6 +851,7 @@ impl<'a> StoreTx<'a> {
             params![data, oid],
             |row| row.get(0),
         )?;
+        self.layout_writes.wrote(T::get_otype());
 
         obj.set_version(new_version);
         Ok(new_version)
@@ -828,6 +883,7 @@ impl<'a> StoreTx<'a> {
             &format!("DELETE FROM {table} WHERE oid = ?1"),
             params![oid],
         )?;
+        self.layout_writes.wrote(T::get_otype());
         Ok(())
     }
 }

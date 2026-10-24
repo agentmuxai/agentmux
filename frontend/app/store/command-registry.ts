@@ -274,8 +274,37 @@ export function registerDefaultCommands(): void {
         label: "Close Window",
         category: "Window",
         icon: "xmark",
-        execute: () => getApi().closeWindow().catch(console.error),
+        // Keeps it in the workspace as a closed window; warns first when an
+        // agent in it is working. Loaded when run: window-close.ts reads the
+        // window's stores, which pane code must not import.
+        execute: () =>
+            fireAndForget(async () => {
+                const { requestCloseWindow } = await import("@/app/window/window-close");
+                await requestCloseWindow();
+            }),
     });
+    // ---- workspace (SPEC_WORKSPACES_2026_10_23.md §3.2) ----
+    // Loaded when run, like window-close.ts: the actions read the window's stores.
+    const workspaceCommand = (
+        id: string,
+        label: string,
+        icon: string,
+        run: (m: typeof import("@/app/window/workspaces")) => Promise<void> | void
+    ) =>
+        commandRegistry.register({
+            id,
+            label,
+            category: "Workspace",
+            icon,
+            keywords: "workspace windows",
+            execute: () => fireAndForget(async () => run(await import("@/app/window/workspaces"))),
+        });
+    workspaceCommand("workspace:new", "New Workspace…", "plus", (m) => m.newWorkspace());
+    workspaceCommand("workspace:open", "Open Workspace…", "folder-open", (m) => m.openWorkspacePicker());
+    workspaceCommand("workspace:rename", "Rename Workspace…", "pen", (m) => m.renameWorkspacePrompt());
+    workspaceCommand("workspace:delete", "Delete Workspace…", "trash-can", (m) => m.deleteWorkspacePrompt());
+    workspaceCommand("workspace:export", "Export Workspace…", "file-export", (m) => m.exportWorkspace());
+    workspaceCommand("workspace:import", "Import Workspace…", "file-import", (m) => m.importWorkspace());
     commandRegistry.register({
         id: "window:recycle",
         label: "Reload Window (Free Memory)",
@@ -508,6 +537,25 @@ export function registerDefaultCommands(): void {
         icon: "brain",
         keywords: "global personal memory skills bundles abf",
         execute: () => openMemory(),
+    });
+    // Settings and Toolchain left the ☰ menu (SPEC_WORKSPACES_2026_10_23.md
+    // §3); the palette is one of their ways in. The key binding's own handler
+    // (keymodel.ts) runs first for Ctrl+, / Cmd+,.
+    commandRegistry.register({
+        id: "app:settings",
+        label: "Settings",
+        category: "App",
+        icon: "cog",
+        keywords: "preferences options configure",
+        execute: () => fireAndForget(() => openOrFocusPaneByView("settings")),
+    });
+    commandRegistry.register({
+        id: "open:toolchain",
+        label: "Open Toolchain",
+        category: "Open",
+        icon: "wrench",
+        keywords: "cli install node npm git docker providers",
+        execute: () => fireAndForget(() => openOrFocusPaneByView("toolchain")),
     });
     commandRegistry.register({
         id: "help:docs",

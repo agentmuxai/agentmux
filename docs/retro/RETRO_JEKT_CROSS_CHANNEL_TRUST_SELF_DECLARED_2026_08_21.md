@@ -2,7 +2,8 @@
 
 **Date:** 2026-08-21
 **Author:** Lazo
-**Status:** Draft — for AgentA/product owner to fold into the real repo if useful
+**Status:** retro — written for AgentA/product owner to fold into the real repo if useful.
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
 
 ## Summary
 
@@ -55,8 +56,8 @@ established. The `muxspect verify-sender` proposal should account for this case 
 
 ## Root cause — CORRECTED (see below; the first draft of this section was wrong)
 
-**Correction, second pass:** this section originally cited `docs/security/
-trust-model.md` and `docs/internals/interagent-comms.md` as defining the JEKT
+**Correction, second pass:** this section originally cited the trust-model and
+interagent-comms pages (they live in the agentmux-docs repo, not this one) as defining the JEKT
 `TRUST` vocabulary, and concluded the `self-declared` value meant an undefined
 tier gap. **Both citations were wrong** — those files don't exist anywhere in
 this repo's history (verified via `find`/`git log --all`). They were read from
@@ -65,8 +66,9 @@ repo, not this product repo — and I failed to notice the `scratch/` path segme
 as the signal that it wasn't authoritative. Caught by reagentx-workflow's review
 on PR #2702 (P2).
 
-The real JEKT trust vocabulary lives in this repo's own root `CLAUDE.md`
-("Is a jekt's sender identity actually verified? — the real answer") and is
+The real JEKT trust vocabulary then lived in this repo's own root `CLAUDE.md`
+("Is a jekt's sender identity actually verified? — the real answer"; that file was
+removed in #3403, and the current rules are https://docs.agentmux.ai/internals/jekt-protocol/) and was
 **already far more complete** than the scratch docs described: host-tier jekts
 carry a per-agent HMAC-SHA256 signature (`AGENTMUX_JEKT_KEY`, injected at agent
 spawn), LAN-tier jekts get per-agent Ed25519 signing

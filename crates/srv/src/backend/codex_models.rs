@@ -34,6 +34,16 @@ struct CachedModel {
     visibility: String,
     #[serde(default)]
     priority: i64,
+    #[serde(default)]
+    default_reasoning_level: Option<String>,
+    #[serde(default)]
+    supported_reasoning_levels: Vec<ReasoningLevel>,
+}
+
+#[derive(serde::Deserialize)]
+struct ReasoningLevel {
+    #[serde(default)]
+    effort: String,
 }
 
 /// The listed models of one cache, in the CLI's own order (`priority`), and
@@ -51,6 +61,8 @@ fn parse(contents: &str) -> Option<(String, Vec<CatalogModel>)> {
         .map(|m| CatalogModel {
             display_name: if m.display_name.is_empty() { m.slug.clone() } else { m.display_name },
             id: m.slug,
+            efforts: m.supported_reasoning_levels.into_iter().map(|l| l.effort).filter(|e| !e.is_empty()).collect(),
+            default_effort: m.default_reasoning_level.filter(|e| !e.is_empty()),
         })
         .collect();
     Some((cache.fetched_at, models))
@@ -85,8 +97,21 @@ pub fn models_every_account_lists(dirs: impl IntoIterator<Item = PathBuf>) -> Ve
     };
     newest
         .iter()
-        .filter(|m| others.iter().all(|(_, list)| list.iter().any(|o| o.id == m.id)))
-        .cloned()
+        .filter_map(|m| {
+            let same: Vec<&CatalogModel> =
+                others.iter().map(|(_, list)| list.iter().find(|o| o.id == m.id)).collect::<Option<_>>()?;
+            // Effort is passed to whichever account a pane is bound to, so only
+            // the levels every account takes for this model, and a default only
+            // when they all have the same one.
+            let mut model = m.clone();
+            model.efforts.retain(|e| same.iter().all(|o| o.efforts.contains(e)));
+            if same.iter().any(|o| o.default_effort != model.default_effort)
+                || model.default_effort.as_ref().is_some_and(|d| !model.efforts.contains(d))
+            {
+                model.default_effort = None;
+            }
+            Some(model)
+        })
         .collect()
 }
 
@@ -103,14 +128,15 @@ pub fn forget_models_on_sign_in(dir: &Path) {
     }
 }
 
-/// Every Codex config dir AgentMux manages: each account's
-/// `<identities>/<account>/<auth_dir_name>` and the shared provider dir.
-pub fn codex_dirs(identities_dir: &Path, shared_provider_dir: PathBuf, auth_dir_name: &str) -> Vec<PathBuf> {
-    let mut dirs: Vec<PathBuf> = std::fs::read_dir(identities_dir)
+/// Every account's Codex config dir: `<identities>/<account>/<auth_dir_name>`.
+/// Not the old shared provider dir (`shared/providers/codex`): no account uses
+/// it, and its `auth.json` without a model list made the common list unknown
+/// for good, so Codex panes got no `--model` and the curated menu (AgentA,
+/// found testing #5323).
+pub fn codex_dirs(identities_dir: &Path, auth_dir_name: &str) -> Vec<PathBuf> {
+    std::fs::read_dir(identities_dir)
         .map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.path().join(auth_dir_name)).collect())
-        .unwrap_or_default();
-    dirs.push(shared_provider_dir);
-    dirs
+        .unwrap_or_default()
 }
 
 /// The ids every Codex account on this install lists, in order: what a pane
@@ -130,7 +156,7 @@ pub fn installed_common_model_ids() -> Vec<String> {
         let Some(provider) = crate::backend::providers::get_provider("codex") else {
             return Vec::new();
         };
-        let dirs = codex_dirs(&paths.identities_dir(), paths.provider_auth_dir(provider.auth_dir_name), provider.auth_dir_name);
+        let dirs = codex_dirs(&paths.identities_dir(), provider.auth_dir_name);
         models_every_account_lists(dirs).into_iter().map(|m| m.id).collect()
     }
 }
@@ -143,7 +169,15 @@ mod tests {
         let models: Vec<serde_json::Value> = models
             .iter()
             .map(|(slug, vis, prio)| {
-                serde_json::json!({ "slug": slug, "display_name": slug.to_uppercase(), "visibility": vis, "priority": prio, "context_window": 1 })
+                serde_json::json!({
+                    "slug": slug, "display_name": slug.to_uppercase(), "visibility": vis, "priority": prio, "context_window": 1,
+                    "default_reasoning_level": "medium",
+                    "supported_reasoning_levels": [
+                        { "effort": "low", "description": "Fast" },
+                        { "effort": "medium", "description": "Balanced" },
+                        { "effort": "ultra", "description": "Deepest" }
+                    ]
+                })
             })
             .collect();
         serde_json::json!({ "fetched_at": fetched_at, "client_version": "0.154.0", "models": models }).to_string()
@@ -159,6 +193,19 @@ mod tests {
         let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids, ["gpt-6-astra", "gpt-5.6-sol"]);
         assert_eq!(models[0].display_name, "GPT-6-ASTRA");
+    }
+
+    /// Each model's own efforts and default, for the composer's Effort menu.
+    #[test]
+    fn keeps_each_models_efforts_and_default() {
+        let (_, models) = parse(&cache("2026-10-22T06:47:36Z", &[("gpt-6-astra", "list", 2)])).unwrap();
+        assert_eq!(models[0].efforts, ["low", "medium", "ultra"]);
+        assert_eq!(models[0].default_effort.as_deref(), Some("medium"));
+        // A cache from before the CLI listed levels: none, and no default.
+        let bare = serde_json::json!({ "fetched_at": "x", "models": [{ "slug": "m", "visibility": "list" }] }).to_string();
+        let (_, models) = parse(&bare).unwrap();
+        assert!(models[0].efforts.is_empty());
+        assert_eq!(models[0].default_effort, None);
     }
 
     #[test]
@@ -183,6 +230,33 @@ mod tests {
         assert_eq!(ids(models_every_account_lists([plus.clone(), none, pro.clone()])), ["gpt-6-astra", "gpt-5.6-sol"]);
         // One account: its own list.
         assert_eq!(ids(models_every_account_lists([pro])), ["gpt-6-pro", "gpt-6-astra", "gpt-5.6-sol"]);
+    }
+
+    /// One shared list serves every Codex pane, whichever account it is bound
+    /// to, so a level is offered only when every account takes it.
+    #[test]
+    fn offers_only_the_effort_levels_every_account_takes() {
+        let root = tempfile::tempdir().unwrap();
+        let (a, b) = (root.path().join("a"), root.path().join("b"));
+        for d in [&a, &b] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let with_levels = |fetched_at: &str, levels: &[&str], default: &str| {
+            let levels: Vec<serde_json::Value> = levels.iter().map(|l| serde_json::json!({ "effort": l })).collect();
+            serde_json::json!({ "fetched_at": fetched_at, "models": [{
+                "slug": "gpt-6-astra", "visibility": "list", "priority": 1,
+                "default_reasoning_level": default, "supported_reasoning_levels": levels
+            }] })
+            .to_string()
+        };
+        std::fs::write(a.join(MODELS_CACHE_FILE), with_levels("2026-10-22T00:00:00Z", &["low", "medium", "high", "ultra"], "low")).unwrap();
+        std::fs::write(b.join(MODELS_CACHE_FILE), with_levels("2026-10-21T00:00:00Z", &["low", "medium", "high"], "low")).unwrap();
+        let models = models_every_account_lists([a.clone(), b.clone()]);
+        assert_eq!(models[0].efforts, ["low", "medium", "high"], "no ultra: account b's model doesn't take it");
+        assert_eq!(models[0].default_effort.as_deref(), Some("low"), "both default to low");
+        // Defaults that differ: none is claimed, and the CLI uses each account's own.
+        std::fs::write(b.join(MODELS_CACHE_FILE), with_levels("2026-10-21T00:00:00Z", &["low", "medium", "high"], "medium")).unwrap();
+        assert_eq!(models_every_account_lists([a, b])[0].default_effort, None);
     }
 
     #[test]
@@ -231,13 +305,13 @@ mod tests {
     }
 
     #[test]
-    fn finds_every_accounts_codex_dir_and_the_shared_one() {
+    fn finds_every_accounts_codex_dir_but_not_the_old_shared_one() {
         let root = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(root.path().join("acct-1").join("codex")).unwrap();
-        std::fs::create_dir_all(root.path().join("acct-2")).unwrap();
-        let shared = root.path().join("providers").join("codex");
-        let dirs = codex_dirs(root.path(), shared.clone(), "codex");
-        assert!(dirs.contains(&root.path().join("acct-1").join("codex")));
-        assert!(dirs.contains(&shared));
+        let identities = root.path().join("identities");
+        std::fs::create_dir_all(identities.join("acct-1").join("codex")).unwrap();
+        std::fs::create_dir_all(identities.join("acct-2")).unwrap();
+        let dirs = codex_dirs(&identities, "codex");
+        assert!(dirs.contains(&identities.join("acct-1").join("codex")));
+        assert!(!dirs.iter().any(|d| d.starts_with(root.path().join("providers"))), "the shared provider dir is no account's");
     }
 }

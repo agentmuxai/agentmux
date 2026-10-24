@@ -7,16 +7,19 @@
 //!
 //! One row per locally-registered agent_id. The key is minted once (first
 //! call to `agent_jekt_key_ensure` for that agent — normally at spawn, via
-//! `agent_config`/`agent_open`) and never leaves this srv instance except by
-//! being injected into that ONE agent's own MCP server process env
-//! (`AGENTMUX_JEKT_KEY`) — never into any other agent's env, and never
-//! returned over any RPC. This is what makes the resulting signature mean
+//! `agent_config`/`agent_open`) and leaves this srv instance only for that
+//! ONE agent: its MCP fetches it with the agent's own identity token
+//! (`GET /agentmux/agents/self/keys`, `server/agent_self_keys.rs`), and a copy
+//! is written into that agent's own MCP config (`AGENTMUX_JEKT_KEY`) as a
+//! fallback — never into any other agent's env, and never served to any
+//! other caller. This is what makes the resulting signature mean
 //! something: only the agent it claims to be from ever held the key needed
 //! to produce it.
 //!
 //! As of docs/specs/SPEC_JEKT_HOST_KEY_TTL_ROTATION_2026_09_14.md, a key
 //! past `JEKT_KEY_TTL_SECS` old is rotated the next time `agent_jekt_key_ensure`
-//! is called for it (i.e. at that agent's next spawn) — see that spec for
+//! is called for it (at that agent's next spawn, or when its MCP fetches its
+//! keys) — see that spec for
 //! why this is lazy-at-next-mint rather than invalidating a live key.
 //! `agent_jekt_key_load` (the verification-read path) is deliberately
 //! unaffected: it has no concept of "too old," only "matches" or "doesn't."

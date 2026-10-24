@@ -59,6 +59,14 @@ pub(super) fn agent_definition_to_record(
         container_volumes: def.container_volumes.clone(),
         container_name: def.container_name.clone(),
         use_ambient_login: def.use_ambient_login,
+        // Not a column: the mirror writes add this channel's copy
+        // (`former_slugs`), and `upsert` keeps the file's and appends.
+        former_slugs: Vec::new(),
+        // Never written by the mirror: only `Store::agent_seat_set` writes the
+        // record's seat, and leaving it out here makes `upsert` keep the
+        // file's copy, so no definition save (`updateagent`, `agent.define`,
+        // a content refresh) can drop or roll back a seat.
+        seat: None,
         content: content
             .iter()
             .map(|c| DefContentBlob {
@@ -138,6 +146,30 @@ pub(super) fn record_to_agent_definition(rec: &DefinitionRecord) -> AgentDefinit
         // memory_id; this default only applies to a genuinely
         // never-seen-locally cross-channel agent.
         conversation_visibility: super::agents::default_conversation_visibility(),
+        // The record is where a seat lives, so this is the stored seat.
+        seat: d.seat.clone(),
+    }
+}
+
+/// Whether a mirror write may publish the agent's slug as it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Publish {
+    /// A new agent's insert, which picked the slug against every holder and
+    /// still holds the slug allocation lock.
+    Allocated,
+    /// Any other write: a slug the shared record doesn't hold yet is checked
+    /// first ([`Store::registry_def_write`]).
+    CheckFirst,
+}
+
+/// Whether `def_id`'s active record holds a slug, which no update changes
+/// (`DefinitionStore::upsert`). A record that can't be read counts: `upsert`
+/// won't overwrite it either.
+fn reg_slug_is_set(reg: &crate::registry::DefinitionStore, def_id: &str) -> bool {
+    match reg.slug_of_strict(def_id) {
+        Ok(Some(names)) => !names.slug.trim().is_empty(),
+        Ok(None) => false,
+        Err(_) => true,
     }
 }
 
@@ -148,34 +180,115 @@ impl Store {
     /// authoritative). No-op when the definition no longer exists.
     ///
     /// `upsert` itself refuses to resurrect a tombstoned id, so a stale
-    /// mirror call for a deleted agent won't un-delete it.
+    /// mirror call for a deleted agent won't un-delete it, and keeps an
+    /// existing record's slug and former slugs, so this channel's copy of the
+    /// slug can't undo a rename (`SPEC_FORK_SLUG_MIGRATION_2026_10_22.md`
+    /// P0.2). The slug read here is already the shared one when a record
+    /// exists (`agent_def_get`).
     pub(super) fn registry_def_upsert(&self, def_id: &str) {
+        // Best-effort for an edit: the record already exists and holds the
+        // agent's slug, so a missed refresh loses nothing another channel could
+        // claim, and the next write repairs it. A new agent's insert goes
+        // through `registry_def_publish` instead. An agent with no record yet
+        // (one only this channel's row knew) has its slug checked first.
+        if let Err(e) = self.registry_def_write(def_id, Publish::CheckFirst) {
+            tracing::warn!(def_id, error = %e, "def registry: mirror upsert failed");
+        }
+    }
+
+    /// [`Self::registry_def_upsert`] for a NEW agent, whose record is what
+    /// publishes the slug it was just given (`SPEC_FORK_SLUG_MIGRATION_2026_10_22.md`
+    /// P0.1): a failure is returned, so the insert can be undone while it still
+    /// holds the slug allocation lock, rather than leave a slug another channel
+    /// can't see and could take too.
+    pub(super) fn registry_def_publish(&self, def_id: &str) -> Result<(), StoreError> {
+        self.registry_def_write(def_id, Publish::Allocated)
+            .map_err(|e| StoreError::Other(format!("could not publish agent {def_id} to the shared definitions: {e}")))
+    }
+
+    fn registry_def_write(&self, def_id: &str, publish: Publish) -> Result<(), String> {
         let Some(reg) = self.shared_def_registry() else {
-            return;
+            return Ok(());
         };
         let def = match self.agent_def_get(def_id) {
             Ok(Some(d)) => d,
-            Ok(None) => return,
-            Err(e) => {
-                tracing::warn!(def_id, error = %e, "def registry: read definition failed, skipping mirror");
-                return;
-            }
+            Ok(None) => return Ok(()),
+            Err(e) => return Err(format!("read definition: {e}")),
         };
         // Only USER agents go to the global cross-channel store. Seeded
         // templates are manifest-managed and re-seeded per channel (and
         // their hide flag is per-channel UI state), so they stay local.
         if def.is_seeded != 0 {
-            return;
+            return Ok(());
         }
         // LOCAL-only reads: the mirror operates on a local agent, so it must
         // never read the global record (that would re-mirror just-deleted
         // content/skills back, defeating the deletion). (reagent P1 on #1385.)
         let content = self.agent_content_get_all_local(def_id).unwrap_or_default();
         let skills = self.agent_skill_list_local(def_id).unwrap_or_default();
-        let rec = agent_definition_to_record(&def, &content, &skills);
-        if let Err(e) = reg.upsert(&rec) {
-            tracing::warn!(def_id, error = %e, "def registry: mirror upsert failed");
+        let mut rec = agent_definition_to_record(&def, &content, &skills);
+        rec.data.former_slugs = self.agent_former_slugs_local(def_id).unwrap_or_default();
+        if publish == Publish::Allocated || reg_slug_is_set(&reg, def_id) {
+            return reg.upsert(&rec).map_err(|e| e.to_string());
         }
+        // This write would publish the slug: there is no record yet (an
+        // agent only this channel's row knew, from before the shared
+        // definitions), or its record has no slug. Under the allocation lock,
+        // so nobody picks the slug between the check and the write.
+        let _allocating = reg.lock_slug_allocation().map_err(|e| format!("could not check its slug: {e}"))?;
+        if reg_slug_is_set(&reg, def_id) {
+            return reg.upsert(&rec).map_err(|e| e.to_string());
+        }
+        let slug = rec.data.slug.clone();
+        match self.slug_publication_holder(def_id, &slug) {
+            Ok(None) => reg.upsert(&rec).map_err(|e| e.to_string()),
+            Ok(Some(holder)) => self.refuse_publication(&reg, def_id, &mut rec, &format!("its slug {slug:?} is taken: {holder}")),
+            Err(e) => self.refuse_publication(&reg, def_id, &mut rec, &format!("its slug {slug:?} can't be checked: {e}")),
+        }
+    }
+
+    /// Don't publish a slug another agent holds, or one that couldn't be
+    /// checked. With no record, none is written: the agent stays this
+    /// channel's alone, under its slug here, rather than give the host two
+    /// agents of one slug, and the fork slug migration's plan reports it. An
+    /// existing record without a slug is updated and keeps none. Renaming the
+    /// agent instead would move its keys, folders and registrations, which
+    /// only the journaled migration does.
+    fn refuse_publication(
+        &self,
+        reg: &crate::registry::DefinitionStore,
+        def_id: &str,
+        rec: &mut DefinitionRecord,
+        why: &str,
+    ) -> Result<(), String> {
+        tracing::warn!(def_id, reason = why, "def registry: not publishing this agent's slug to the shared definitions");
+        if !reg.exists(def_id) {
+            return Ok(());
+        }
+        rec.data.slug.clear();
+        reg.upsert(rec).map_err(|e| e.to_string())
+    }
+
+    /// Who other than `def_id` holds `slug`: as its slug or a former slug in
+    /// the shared definitions (every record, read strictly) or in any
+    /// `objects.db` on this host. A display name isn't counted here: the
+    /// agent already answers to this slug in its channel; only another
+    /// agent's slug would make two.
+    fn slug_publication_holder(&self, def_id: &str, slug: &str) -> Result<Option<String>, String> {
+        let folded = slug.trim().to_lowercase();
+        if folded.is_empty() {
+            return Ok(None);
+        }
+        let shared = self.shared_slugs_for_allocation().map_err(|e| e.to_string())?;
+        let names_it = |s: &String| s.trim().to_lowercase() == folded;
+        if let Some((uid, _)) = shared.entries().find(|(uid, n)| *uid != def_id && (names_it(&n.slug) || n.former.iter().any(names_it))) {
+            return Ok(Some(format!("agent {uid} holds it in the shared definitions")));
+        }
+        let Some(home) = self.slug_home() else {
+            return Ok(None);
+        };
+        let host = crate::backend::slug_migration::HostSlugs::read(&home)?;
+        Ok(host.slug_holder(&folded, def_id))
     }
 
     /// Same mirror as `registry_def_upsert`, but never CREATES a global
@@ -210,21 +323,9 @@ impl Store {
         if !reg.exists(def_id) {
             return;
         }
-        let def = match self.agent_def_get(def_id) {
-            Ok(Some(d)) => d,
-            Ok(None) => return,
-            Err(e) => {
-                tracing::warn!(def_id, error = %e, "def registry: read definition failed, skipping refresh");
-                return;
-            }
-        };
-        if def.is_seeded != 0 {
-            return;
-        }
-        let content = self.agent_content_get_all_local(def_id).unwrap_or_default();
-        let skills = self.agent_skill_list_local(def_id).unwrap_or_default();
-        let rec = agent_definition_to_record(&def, &content, &skills);
-        if let Err(e) = reg.upsert(&rec) {
+        // The same write as an edit's, so a record without a slug isn't
+        // given a taken one here either.
+        if let Err(e) = self.registry_def_write(def_id, Publish::CheckFirst) {
             tracing::warn!(def_id, error = %e, "def registry: mirror refresh failed");
         }
     }
@@ -256,21 +357,20 @@ impl Store {
         let Some(reg) = self.shared_def_registry() else {
             return false;
         };
-        let mut rec = match reg.get(&agent.id) {
-            Ok(Some(r)) => r,
-            _ => return false,
-        };
-        // Keep the record's content + skills; replace the definition fields.
-        let kept_content = std::mem::take(&mut rec.data.content);
-        let kept_skills = std::mem::take(&mut rec.data.skills);
-        let mut new_rec = agent_definition_to_record(agent, &[], &[]);
-        new_rec.data.content = kept_content;
-        new_rec.data.skills = kept_skills;
-        if let Err(e) = reg.upsert(&new_rec) {
+        // Read and rewritten under the record's lock, so a concurrent writer's
+        // content or skills aren't overwritten with this read's copy.
+        let updated = reg.with_record_locked(&agent.id, |locked| {
+            let Some(mut rec) = locked.get()? else { return Ok(false) };
+            // Keep the record's content + skills; replace the definition fields.
+            let mut new_rec = agent_definition_to_record(agent, &[], &[]);
+            new_rec.data.content = std::mem::take(&mut rec.data.content);
+            new_rec.data.skills = std::mem::take(&mut rec.data.skills);
+            locked.upsert(&new_rec).map(|()| true)
+        });
+        updated.unwrap_or_else(|e| {
             tracing::warn!(def_id = %agent.id, error = %e, "def registry: cross-channel update failed");
-            return false;
-        }
-        true
+            false
+        })
     }
 
     /// Update a single content blob in the global registry record for a
@@ -289,37 +389,68 @@ impl Store {
         let Some(reg) = self.shared_def_registry() else {
             return Err(StoreError::Other("no global registry available".into()));
         };
-        let mut rec = match reg.get(agent_id) {
-            Ok(Some(r)) => r,
-            Ok(None) => {
-                return Err(StoreError::Other(format!(
-                    "agent {agent_id} not in global registry"
-                )))
-            }
-            Err(e) => {
-                return Err(StoreError::Other(format!(
-                    "global registry read failed: {e}"
-                )))
-            }
-        };
-        match value {
-            Some(v) => {
-                if let Some(blob) = rec.data.content.iter_mut().find(|b| b.content_type == content_type) {
-                    blob.content = v.to_string();
-                } else {
-                    rec.data.content.push(DefContentBlob {
-                        content_type: content_type.to_string(),
-                        content: v.to_string(),
-                    });
+        // Read, changed and rewritten under the record's lock (see above).
+        reg.with_record_locked(agent_id, |locked| {
+            let Some(mut rec) = locked.get()? else { return Ok(None) };
+            match value {
+                Some(v) => {
+                    if let Some(blob) = rec.data.content.iter_mut().find(|b| b.content_type == content_type) {
+                        blob.content = v.to_string();
+                    } else {
+                        rec.data.content.push(DefContentBlob {
+                            content_type: content_type.to_string(),
+                            content: v.to_string(),
+                        });
+                    }
+                }
+                None => {
+                    rec.data.content.retain(|b| b.content_type != content_type);
                 }
             }
-            None => {
-                rec.data.content.retain(|b| b.content_type != content_type);
+            locked.upsert(&rec).map(Some)
+        })
+        .map_err(|e| StoreError::Other(format!("global registry update failed: {e}")))?
+        .ok_or_else(|| StoreError::Other(format!("agent {agent_id} not in global registry")))?;
+        Ok(())
+    }
+
+    /// The stored seat of agent `id`, from its shared definition record
+    /// (`SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md` §2). `None` when it has
+    /// no seat or no shared record.
+    pub fn agent_seat_get(&self, id: &str) -> Option<crate::registry::AgentSeat> {
+        let reg = self.shared_def_registry()?;
+        match reg.get(id) {
+            Ok(rec) => rec.and_then(|r| r.data.seat),
+            Err(e) => {
+                tracing::warn!(agent_id = %id, error = %e, "def registry: seat read failed");
+                None
             }
         }
-        reg.upsert(&rec)
-            .map_err(|e| StoreError::Other(format!("global registry write failed: {e}")))?;
-        Ok(())
+    }
+
+    /// The host-wide seat lock ([`crate::registry::DefinitionStore::lock_seat_graph`]):
+    /// `agent.setSeat` holds it from reading the seats it validates against
+    /// to writing its own.
+    pub fn agent_seat_lock(&self) -> Result<crate::registry::SlugAllocationLock, StoreError> {
+        let Some(reg) = self.shared_def_registry() else {
+            return Err(StoreError::Other("no shared definition store, so no agent can have a seat".into()));
+        };
+        reg.lock_seat_graph().map_err(|e| StoreError::Other(format!("seat lock: {e}")))
+    }
+
+    /// Set (`Some`) or clear (`None`) agent `id`'s seat on its shared
+    /// definition record, the only place a seat is kept. A channel-local
+    /// agent with no shared record (a seeded template, or no shared store)
+    /// can't have one, and that's an error.
+    pub fn agent_seat_set(&self, id: &str, seat: Option<&crate::registry::AgentSeat>) -> Result<(), StoreError> {
+        let Some(reg) = self.shared_def_registry() else {
+            return Err(StoreError::Other("no shared definition store, so no agent can have a seat".into()));
+        };
+        match reg.set_seat(id, seat) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(StoreError::Other(format!("agent {id} has no shared definition, so it can't have a seat"))),
+            Err(e) => Err(StoreError::Other(format!("could not save the seat of agent {id}: {e}"))),
+        }
     }
 }
 
@@ -445,8 +576,73 @@ mod tests {
         );
     }
 
+    fn seat(role: &str) -> crate::registry::AgentSeat {
+        crate::registry::AgentSeat { role: role.to_string(), qualifier: Some("product".into()), set_at_ms: 5, ..Default::default() }
+    }
+
+    /// The seat lives on the shared record: `agent_def_list`'s overlay reads
+    /// it for a local agent (whose row has none) and a cross-channel one, and
+    /// a definition save (`agent_def_update`, a content write) keeps it.
+    #[test]
+    fn a_seat_reads_through_the_overlay_and_survives_definition_writes() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let def_store = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+        store.set_def_registry(def_store.clone());
+
+        let mut def = local_def("agent-1", "Seated");
+        store.agent_def_insert(&mut def).unwrap();
+        store.agent_seat_set("agent-1", Some(&seat("leader"))).unwrap();
+        let listed = |store: &Store| store.agent_def_list().unwrap().into_iter().find(|d| d.id == "agent-1").unwrap();
+        assert_eq!(listed(&store).seat, Some(seat("leader")));
+        assert_eq!(store.agent_seat_get("agent-1"), Some(seat("leader")));
+
+        let mut edited = listed(&store);
+        edited.name = "Renamed".into();
+        edited.seat = None;
+        assert!(store.agent_def_update(&mut edited).unwrap());
+        store
+            .agent_content_set(&AgentContent { agent_id: "agent-1".into(), content_type: "ui:zoom".into(), content: "1.2".into(), updated_at: 2 })
+            .unwrap();
+        let after = listed(&store);
+        assert_eq!(after.name, "Renamed");
+        assert_eq!(after.seat, Some(seat("leader")), "no definition write drops the seat");
+
+        store.agent_seat_set("agent-1", None).unwrap();
+        assert_eq!(listed(&store).seat, None);
+
+        // A cross-channel agent (no local row) carries its seat too.
+        let mut remote = global_user_agent("remote-1", "Remote");
+        remote.data.seat = Some(seat("analyst"));
+        def_store.upsert(&remote).unwrap();
+        assert_eq!(store.agent_def_get("remote-1").unwrap().unwrap().seat, Some(seat("analyst")));
+        assert_eq!(listed_id(&store, "remote-1").seat, Some(seat("analyst")));
+    }
+
+    fn listed_id(store: &Store, id: &str) -> AgentDefinition {
+        store.agent_def_list().unwrap().into_iter().find(|d| d.id == id).unwrap()
+    }
+
+    /// No shared record, no seat: a seeded template stays channel-local.
+    #[test]
+    fn an_agent_without_a_shared_record_cannot_have_a_seat() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        store.set_def_registry(Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap()));
+        let mut tpl = local_def("tpl-1", "Coder");
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        let err = store.agent_seat_set("tpl-1", Some(&seat("leader"))).unwrap_err().to_string();
+        assert!(err.contains("no shared definition"), "{err}");
+
+        let bare = Store::open_in_memory().unwrap();
+        assert!(bare.agent_seat_set("x", Some(&seat("leader"))).is_err());
+        assert!(bare.agent_seat_get("x").is_none());
+    }
+
     fn local_def(id: &str, name: &str) -> AgentDefinition {
         AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: id.to_string(),
             slug: id.to_string(),

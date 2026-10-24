@@ -111,10 +111,14 @@ pub async fn wait_for_route(
         return fail("give exactly one of `text`, `url_contains` or `gone`");
     }
     // An element inside a frame is looked for through that frame's session.
+    let mut table_epoch = 0;
     let gone: Option<(i64, Option<FrameRef>)> = match &req.gone {
         Some(r) => {
-            let table = state.browser_api.ref_tables.get(&req.block_id);
-            match table.and_then(|t| Some((t.refs.get(r).copied()?, t.frames.get(r).cloned()))) {
+            let table = state.browser_api.ref_tables.get_at(&req.block_id);
+            if let Some((_, e)) = &table {
+                table_epoch = *e;
+            }
+            match table.and_then(|(t, _)| Some((t.refs.get(r).copied()?, t.frames.get(r).cloned()))) {
                 Some(g) => Some(g),
                 None => return fail(format!("unknown reference {r:?}; take a new snapshot")),
             }
@@ -127,6 +131,10 @@ pub async fn wait_for_route(
         Ok(c) => c,
         Err(e) => return fail(e),
     };
+    if gone.is_some() && !state.browser_api.ref_tables.still_at(&req.block_id, table_epoch) {
+        let _ = cdp.close().await;
+        return fail("the page closed while this was starting; take a new snapshot");
+    }
     let mut worlds = Worlds::new();
     loop {
         let url = page_url(&mut cdp).await;

@@ -3,7 +3,9 @@
 //
 // Restoring the layout another build saved (srv `session_other_builds.rs`).
 // A window that came up with the default because nothing was restored offers
-// the newest; ☰ → Layouts → "Restore layout from another build…" lists them.
+// the newest. (☰ → Layouts → "Restore layout from another build…" went with
+// the Layouts menu, SPEC_WORKSPACES_2026_10_23.md §3.2: a new version copies
+// the previous one's workspaces, and Import… opens another build's export.)
 
 import { reopenRestoredWindows } from "@/app/init/restored-windows";
 import { setNotificationAction } from "@/app/notification/usenotification";
@@ -16,11 +18,8 @@ import type { OtherBuildLayout } from "@/types/rpc/OtherBuildLayout";
 /** Older layouts are not offered unasked; the menu still lists them. */
 export const OFFER_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 
-/** The notice's id: the offer and the menu's list share it, so one replaces the other. */
+/** The notice's id. */
 export const NOTICE_ID = "restore-other-build";
-
-/** The most layouts the menu's notice offers a button for. */
-const MENU_MAX = 4;
 
 const pad = (n: number): string => String(n).padStart(2, "0");
 
@@ -96,8 +95,8 @@ export async function restoreLayoutFromOtherBuild(l: OtherBuildLayout): Promise<
     notify("info", `Restored the layout from ${l.version}`, `${count(result.tab_ids.length, "tab")}${added}.`);
 }
 
-async function listLayouts(offerOnly: boolean): Promise<{ offer: boolean; layouts: OtherBuildLayout[] }> {
-    return RpcApi.OtherBuildLayoutsCommand(TabRpcClient, { window_id: windowId(), offer_only: offerOnly });
+async function listLayouts(): Promise<{ offer: boolean; layouts: OtherBuildLayout[] }> {
+    return RpcApi.OtherBuildLayoutsCommand(TabRpcClient, { window_id: windowId(), offer_only: true });
 }
 
 /** At startup: offer the newest recent layout another build saved, when this
@@ -105,7 +104,7 @@ async function listLayouts(offerOnly: boolean): Promise<{ offer: boolean; layout
 export async function offerLayoutFromOtherBuild(now: number = Date.now()): Promise<void> {
     let found;
     try {
-        found = await listLayouts(true);
+        found = await listLayouts();
     } catch (err) {
         console.warn("[restore-other-build] couldn't look for other builds' layouts", err);
         return;
@@ -123,44 +122,6 @@ export async function offerLayoutFromOtherBuild(now: number = Date.now()): Promi
         timestamp: new Date(now).toISOString(),
         actions: [
             { label: "Restore", actionKey: action(() => void restoreLayoutFromOtherBuild(l)), color: "green" },
-            { label: "Not now", actionKey: action(() => {}), color: "grey" },
-        ],
-    });
-}
-
-/** ☰ → Layouts → "Restore layout from another build…": a notice listing the
- *  layouts other builds saved, newest first, each with its Restore button. */
-export async function chooseLayoutFromOtherBuild(): Promise<void> {
-    let found;
-    try {
-        found = await listLayouts(false);
-    } catch (err) {
-        notify("error", "Couldn't look for other builds' layouts", errorText(err));
-        return;
-    }
-    const layouts = found.layouts.slice(0, MENU_MAX);
-    if (layouts.length === 0) {
-        notify("info", "No other build has a saved layout", "A build saves its layout when its last window closes.");
-        return;
-    }
-    const now = new Date();
-    const versions = layouts.map((l) => l.version);
-    const label = (l: OtherBuildLayout): string =>
-        versions.filter((v) => v === l.version).length > 1 ? `${l.version}, ${whenSaved(l, now)}` : l.version;
-    pushNotification({
-        id: NOTICE_ID,
-        persistent: true,
-        type: "info",
-        icon: "clock-rotate-left",
-        title: "Restore a layout from another build",
-        message: layouts.map((l) => `${l.version} (${whenSaved(l, now)}): ${layoutSummary(l)}`).join("\n"),
-        timestamp: now.toISOString(),
-        actions: [
-            ...layouts.map((l) => ({
-                label: `Restore ${label(l)}`,
-                actionKey: action(() => void restoreLayoutFromOtherBuild(l)),
-                color: "green" as const,
-            })),
             { label: "Not now", actionKey: action(() => {}), color: "grey" },
         ],
     });

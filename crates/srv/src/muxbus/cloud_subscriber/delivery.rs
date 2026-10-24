@@ -63,6 +63,36 @@ pub(super) struct PendingInj {
     // the sender signed it. Absent on a text jekt and from an older relay.
     #[serde(default)]
     files: Option<Vec<agentmux_common::jekt_files::CloudFile>>,
+    // The tier the sender declared (info|coord|sensitive), as the relay
+    // passed it on. Absent when none was declared and from an older relay.
+    #[serde(default)]
+    jekt_tier: Option<String>,
+}
+
+/// The sender's declared tier as the relay carries it. The tier is not part
+/// of the signed material, so only `sensitive` is taken: a carried tier can
+/// mark a message sensitive, never lower it below the default `coord`. The
+/// handler's trust rules apply on top as for any jekt.
+fn declared_tier(raw: Option<&str>) -> Option<crate::backend::reactive::types::JektTier> {
+    (raw == Some("sensitive")).then_some(crate::backend::reactive::types::JektTier::Sensitive)
+}
+
+/// The request a pulled injection is delivered as, before the signature
+/// checks below add their verdicts.
+fn wan_request(inj: &PendingInj, target: &str) -> InjectionRequest {
+    InjectionRequest {
+        target_agent: target.to_string(),
+        message: inj.message.clone(),
+        source_agent: inj.source_agent.clone(),
+        request_id: Some(inj.id.clone()),
+        priority: inj.priority.clone(),
+        // Keyword scanning in the handler still applies on top.
+        jekt_tier: declared_tier(inj.jekt_tier.as_deref()),
+        delivery_tier: Some("wan".to_string()),
+        forward_hops: 0,
+        reagent_key_id: inj.reagent_key_id.clone(),
+        ..Default::default()
+    }
 }
 #[derive(Deserialize)]
 pub(super) struct AckResp {
@@ -215,13 +245,13 @@ pub(super) async fn claim_and_deliver(
         // signing fields is present — a partial set (e.g. a sig but no
         // key_id) is treated the same as "not signed," not "signed but
         // broken," since a legitimate sender always sends all four
-        // together. TRUST is unaffected either way (WAN stays
-        // unconditionally TRUST=network-claimed). TIER is only FORCED to
-        // sensitive when `reagent_verified` is `Some(false)` — a signature
-        // present but which failed to cryptographically verify (see
+        // together. This verdict never changes TRUST; it renders as `SIG=`.
+        // `Some(false)` — a signature present but failed, or valid only
+        // under an untrusted key — forces TIER=sensitive (see
         // InjectionRequest::reagent_verified,
-        // SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15.md); as of that
-        // narrowing. `verify_trusted_reagent_jekt` yields `Some(true)` only
+        // SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15.md, and
+        // https://docs.agentmux.ai/internals/jekt-protocol/).
+        // `verify_trusted_reagent_jekt` yields `Some(true)` only
         // under the trusted production key; a signature under any other
         // registered key is `Some(false)`. `req.reagent_key_id` below must still be carried
         // through from `inj` so the marker's `SIG=` label and the SIG=verified
@@ -341,21 +371,12 @@ pub(super) async fn claim_and_deliver(
         }
 
         let mut req = InjectionRequest {
-            target_agent: target.clone(),
-            message: inj.message.clone(),
-            source_agent: inj.source_agent.clone(),
-            request_id: Some(inj.id.clone()),
-            priority: inj.priority.clone(),
-            jekt_tier: None,       // auto-detected from keywords
-            delivery_tier: Some("wan".to_string()),
-            forward_hops: 0,
             reagent_verified,
-            reagent_key_id: inj.reagent_key_id.clone(),
             wan_verified: wan_verdict.verified,
             wan_instance: wan_verdict.instance.clone(),
             wan_reason: wan_verdict.reason.map(str::to_string),
             wan_detail: wan_verdict.detail.clone(),
-            ..Default::default()
+            ..wan_request(inj, &target)
         };
         // Phase C (muxspect Phase B/C conversation visibility,
         // SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md): this WAN
@@ -456,3 +477,7 @@ async fn release(base: &str, http: &reqwest::Client, agent_token: &str, agent_id
         }
     }
 }
+
+#[cfg(test)]
+#[path = "delivery_tests.rs"]
+mod tests;

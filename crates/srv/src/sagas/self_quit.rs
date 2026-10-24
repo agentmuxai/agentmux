@@ -29,6 +29,9 @@ pub enum QuitOrigin {
     UserSlash,
     /// The agent's own `QuitSelf` tool, in a turn the user started (§6).
     AgentTool,
+    /// Another agent's `Stop agents`, after the user's window ran out
+    /// (docs/specs/SPEC_STOP_AN_AGENT_ONE_WAY_AND_SHUTDOWN_TOAST_2026_10_23.md).
+    ExternalStop,
 }
 
 impl QuitOrigin {
@@ -36,6 +39,7 @@ impl QuitOrigin {
         match self {
             QuitOrigin::UserSlash => "user_slash",
             QuitOrigin::AgentTool => "agent_tool",
+            QuitOrigin::ExternalStop => "external_stop",
         }
     }
 }

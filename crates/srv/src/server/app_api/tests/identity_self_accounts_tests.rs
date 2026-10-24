@@ -32,6 +32,7 @@ async fn skips_a_malformed_linked_account_instead_of_failing_the_whole_call() {
     let state = test_state();
 
     let mut def = AgentDefinition {
+        seat: None,
         conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
         id: uuid::Uuid::new_v4().to_string(),
         slug: String::new(),
@@ -106,6 +107,7 @@ async fn resolve_agent_definition_id_falls_back_to_the_registry_for_a_slug_only_
 
     let state = test_state();
     let mut def = AgentDefinition {
+        seat: None,
         conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
         id: uuid::Uuid::new_v4().to_string(),
         slug: "agenty".to_string(),

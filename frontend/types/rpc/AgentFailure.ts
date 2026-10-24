@@ -6,4 +6,15 @@ import type { FailureClass } from "./FailureClass";
  * the raw exit evidence, the stderr tail, and whether a retry is
  * worth attempting.
  */
-export type AgentFailure = { code: FailureClass, title: string, detail: string, exitCode?: number, signal?: number, stderrTail?: string, retryable: boolean, };
+export type AgentFailure = { code: FailureClass, title: string, detail: string, exitCode?: number, signal?: number, stderrTail?: string, retryable: boolean, 
+/**
+ * When a `UsageLimit` lifts (unix ms), if the provider said
+ * (`agents::limit_reset`). Set when the failure is stored, not by
+ * [`classify`].
+ */
+resetsAtMs?: number, 
+/**
+ * The provider's name for the limit's window, such as `five_hour` or
+ * `seven_day`.
+ */
+limitWindow?: string, };

@@ -82,7 +82,7 @@ doc exists to prevent).
 - During drag, throttled `update_floating_redock_hover` (~50ms) drives the drop-target highlight.
 
 ### 2.3 Edge-resize (floater only)
-`floating-pane-workspace.tsx:130-260` — an 8px (`FLOATER_EDGE_RESIZE_BORDER`) invisible **pointer** grab-band → `get_window_rect`/`set_window_rect`. Browser floaters inset their web-content child by the band depth (`use-pane-rect-sync.ts:70`) so the frontend owns the band. **Note:** the band overlaps the top of the 33px header → grabbing the top edge resizes instead of moving (a known UX sharp-edge; reagent flagged it on #1177). Shipped at 12px, regressed to 4px as a side effect of PR #1829's browser-pane matte fix, restored to 8px — see `docs/retro/retro-floating-pane-resize-hit-target-2026-07-27.md`.
+`floating-pane-workspace.tsx:130-260` — an invisible **pointer** grab-band (12px on the left, right and bottom, `FLOATER_EDGE_RESIZE_BORDER`; 8px on the top; 20px corners) → `get_window_rect`/`set_window_rect`. Browser floaters inset their web-content child by `FLOATER_BROWSER_EDGE_INSET` (8px, `use-pane-rect-sync.ts`) so the frontend owns the band. **Note:** the band overlaps the top of the 33px header → grabbing the top edge resizes instead of moving (a known UX sharp-edge; reagent flagged it on #1177). Shipped at 12px, regressed to 4px as a side effect of PR #1829's browser-pane matte fix, restored to 8px, widened to 12px with larger corners on 2026-10-23 (Kanban #1641) — see `docs/retro/retro-floating-pane-resize-hit-target-2026-07-27.md`.
 
 ### 2.4 Redock (floater → drop on a window)
 `onMouseUp` → `clear_floating_redock_hover` → `tryRedockAtCursor()` (`floating-pane-workspace.tsx:409`):
@@ -240,4 +240,4 @@ The five themes share a root: **identity (which window?) and ownership (whose li
 | HWND cache stale | `docs/specs/SPEC_WINDOW_HWND_CACHE_STALE_FIX_2026_05_28.md` |
 | Redock load race | `docs/analysis/ANALYSIS_BROWSER_PANE_REDOCK_LOAD_RACE_2026_05_29.md` |
 | Browser-pane state | `docs/specs/browser-pane-state-catalog.md`, `…/browser-pane-reducer-roadmap.md` |
-| Per-window opacity (cache origin) | `docs/specs/SPEC_PER_WINDOW_OPACITY_2026-05-14.md` |
+| Per-window opacity (cache origin) | `SPEC_PER_WINDOW_OPACITY_2026-05-14.md` (no longer in this repo) |

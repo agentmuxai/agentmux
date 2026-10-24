@@ -418,6 +418,25 @@
     }
   },
   {
+    "command": "agent.setSeat",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandAgentSetSeatData",
+    "requestName": "CommandAgentSetSeatData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentSetSeatData"
+      ],
+      "name": "CommandAgentSetSeatData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::AgentSetSeatResult",
+    "responseName": "AgentSetSeatResult",
+    "responseTs": {
+      "imports": [
+        "AgentSetSeatResult"
+      ],
+      "name": "AgentSetSeatResult"
+    }
+  },
+  {
     "command": "agent.status",
     "request": "agentmux_srv::backend::rpc_types::agent::CommandAgentStatusData",
     "requestName": "CommandAgentStatusData",
@@ -904,6 +923,25 @@
     }
   },
   {
+    "command": "agents.migrateForkSlugs",
+    "request": "agentmux_srv::backend::rpc_types::slug_migration::CommandMigrateForkSlugsData",
+    "requestName": "CommandMigrateForkSlugsData",
+    "requestTs": {
+      "imports": [
+        "CommandMigrateForkSlugsData"
+      ],
+      "name": "CommandMigrateForkSlugsData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::slug_migration::MigrateForkSlugsResult",
+    "responseName": "MigrateForkSlugsResult",
+    "responseTs": {
+      "imports": [
+        "MigrateForkSlugsResult"
+      ],
+      "name": "MigrateForkSlugsResult"
+    }
+  },
+  {
     "command": "agentshutdownkeep",
     "request": "agentmux_srv::backend::rpc_types::block::CommandAgentShutdownKeepData",
     "requestName": "CommandAgentShutdownKeepData",
@@ -973,6 +1011,25 @@
     "responseTs": {
       "imports": [],
       "name": "null"
+    }
+  },
+  {
+    "command": "app.desktop",
+    "request": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestName": "core::option::Option<agentmux_srv::backend::rpc_types::websocket::NoArgsReq>",
+    "requestTs": {
+      "imports": [
+        "NoArgsReq"
+      ],
+      "name": "NoArgsReq | null"
+    },
+    "response": "agentmux_srv::backend::desktop_gate::DesktopEvent",
+    "responseName": "DesktopEvent",
+    "responseTs": {
+      "imports": [
+        "DesktopEvent"
+      ],
+      "name": "DesktopEvent"
     }
   },
   {

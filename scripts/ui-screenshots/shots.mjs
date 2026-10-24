@@ -18,6 +18,8 @@
 // see the spec's §2 for why these are resolved fresh at capture time
 // instead of hand-maintained pixel coordinates.
 
+import { openWidget as openBarWidget } from "./widget-shots.mjs";
+
 const FOCUSED_PANE = ".pane-stack.pane-stack-focused, .pane-stack.pane-stack-focused-alone";
 
 async function openWidget(session, label) {
@@ -89,12 +91,10 @@ export const shots = [
     {
         id: "settings-appearance",
         title: "Settings — Appearance",
-        description: "The Settings pane, Appearance tab, reached from the hamburger menu.",
+        description: "The Settings pane, Appearance tab, reached from the widget bar.",
         selector: ".settings-view-container",
         prep: async (session) => {
-            await session.clickSelector(".hamburger-btn");
-            await session.wait(300);
-            await session.clickText(".menu", "Settings");
+            await openBarWidget(session, { label: "Settings", icon: "cog" });
             await session.wait(500);
             await session.clickText(null, "Appearance");
         },

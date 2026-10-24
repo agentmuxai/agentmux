@@ -2,19 +2,53 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Where each task sits on the Kanban, and in what order (docs/specs/SPEC_WARDEN_KANBAN_2026_10_20.md
-// §6.3, §6.5). Pure: the section and its tests share it.
+// §6.3, §6.5; the stages: SPEC_KANBAN_STAGES_COLOURS_AND_NARROW_VIEW_2026_10_23.md §4). Pure: the section
+// and its tests share it.
 
 import type { KanbanAfter, KanbanAgent, KanbanTask } from "./kanban-types";
 
-export type ColumnId = "backlog" | "progress" | "needs" | "review" | "done";
+export type ColumnId = "backlog" | "research" | "specd" | "progress" | "needs" | "review" | "merged" | "released";
 
 export const COLUMNS: { id: ColumnId; label: string }[] = [
     { id: "backlog", label: "Backlog" },
+    { id: "research", label: "In Research" },
+    { id: "specd", label: "Spec'd" },
     { id: "progress", label: "In progress" },
     { id: "needs", label: "Needs you" },
     { id: "review", label: "Review" },
-    { id: "done", label: "Done" },
+    { id: "merged", label: "Merged" },
+    { id: "released", label: "Released" },
 ];
+
+/** The kinds of task that write a document for the operator to approve: a build that starts after one
+ *  of them is Spec'd once it is accepted. Matched case-insensitively. */
+const RESEARCH_KINDS = new Set(["spec", "research"]);
+
+export function isResearchKind(kind: string | undefined): boolean {
+    return !!kind && RESEARCH_KINDS.has(kind.trim().toLowerCase());
+}
+
+/** The columns a finished task sits in. */
+export function isFinishedColumn(c: ColumnId): boolean {
+    return c === "merged" || c === "released";
+}
+
+/** Approved and not started: a waiting task whose every predecessor is finished, at least one of them a
+ *  spec or research task that was accepted (done), not cancelled. */
+export function isSpecd(t: KanbanTask): boolean {
+    const after = t.card.after ?? [];
+    const research = after.filter((a) => isResearchKind(a.kind));
+    return (
+        research.length > 0 &&
+        after.every((a) => a.state === "done" || a.state === "cancelled") &&
+        research.some((a) => a.state === "done")
+    );
+}
+
+/** A word for what a task is: "spec", "research" or "build" (any other kind, or none). */
+export function stageWord(t: KanbanTask): string {
+    return isResearchKind(t.kind) ? t.kind.trim().toLowerCase() : "build";
+}
 
 /** Why a task needs the operator, or null when it doesn't. The first line of its card in Needs you. */
 export function needsReason(t: KanbanTask): string | null {
@@ -36,22 +70,28 @@ export function needsReason(t: KanbanTask): string | null {
     }
 }
 
-/** The column a task belongs in: its stored state and its holder's live state. */
+/** The column a task belongs in: its stored state, its kind and what it starts after, its PR, and its
+ *  holder's live state. Review is the PR's review (muxreview), not the operator's: a held task with a PR
+ *  link sits there until the PR merges. A cancelled task sits under Merged, folded away. */
 export function columnOf(t: KanbanTask): ColumnId {
     switch (t.state) {
         case "open":
         case "held":
-            return "backlog";
+            return isSpecd(t) ? "specd" : "backlog";
         case "review":
             return "review";
         case "done":
+            return t.card.pr?.released_in ? "released" : "merged";
         case "cancelled":
-            return "done";
+            return "merged";
         case "blocked":
         case "failed":
             return "needs";
         case "claimed":
-            return needsReason(t) ? "needs" : "progress";
+            if (needsReason(t)) return "needs";
+            if (t.card.pr?.merged_at) return "merged";
+            if (t.card.pr_url) return "review";
+            return isResearchKind(t.kind) ? "research" : "progress";
         default:
             return "backlog";
     }
@@ -88,11 +128,16 @@ export interface BacklogGroup {
     tasks: KanbanTask[];
 }
 
-/** The Backlog grouped by who each task waits for: one group per agent, alphabetically, then Anyone. */
-export function backlogGroups(tasks: KanbanTask[], agents: KanbanAgent[]): BacklogGroup[] {
+/** A waiting column (Backlog, or Spec'd) grouped by who each task waits for: one group per agent,
+ *  alphabetically, then Anyone. */
+export function backlogGroups(
+    tasks: KanbanTask[],
+    agents: KanbanAgent[],
+    column: ColumnId = "backlog"
+): BacklogGroup[] {
     const groups = new Map<string, KanbanTask[]>();
     for (const t of tasks) {
-        if (columnOf(t) !== "backlog") continue;
+        if (columnOf(t) !== column) continue;
         const key = t.target_agent || "";
         groups.set(key, [...(groups.get(key) ?? []), t]);
     }
@@ -108,7 +153,7 @@ export function backlogGroups(tasks: KanbanTask[], agents: KanbanAgent[]): Backl
 /** Tasks of one column, in the order the column shows them. */
 export function columnTasks(tasks: KanbanTask[], column: ColumnId): KanbanTask[] {
     const list = tasks.filter((t) => columnOf(t) === column);
-    if (column === "backlog") return list.sort(backlogOrder);
+    if (column === "backlog" || column === "specd") return list.sort(backlogOrder);
     // Newest change first everywhere else: what just moved is on top.
     return list.sort((a, b) => b.updated_at - a.updated_at);
 }
@@ -125,11 +170,16 @@ export function untrackedAgents(agents: KanbanAgent[], tasks: KanbanTask[]): Kan
     );
 }
 
-/** What the Review column header says: how many, and how long the oldest has waited. */
-export function reviewLoad(tasks: KanbanTask[], now: number): { count: number; oldestMs: number } {
-    const inReview = tasks.filter((t) => t.state === "review");
+/** What the Review column header says: how many, how many of them are specs, and how long the oldest
+ *  has waited. */
+export function reviewLoad(tasks: KanbanTask[], now: number): { count: number; specs: number; oldestMs: number } {
+    const inReview = tasks.filter((t) => columnOf(t) === "review");
     const oldest = inReview.reduce((min, t) => Math.min(min, t.updated_at), now);
-    return { count: inReview.length, oldestMs: inReview.length ? now - oldest : 0 };
+    return {
+        count: inReview.length,
+        specs: inReview.filter((t) => isResearchKind(t.kind)).length,
+        oldestMs: inReview.length ? now - oldest : 0,
+    };
 }
 
 /** Who asked for a task, in words. */
@@ -169,7 +219,7 @@ export function repoLanes(tasks: KanbanTask[]): RepoLane[] {
         list.push(t);
         byRepo.set(t.card.repo, list);
     }
-    const active = (l: KanbanTask[]) => l.some((t) => columnOf(t) !== "done");
+    const active = (l: KanbanTask[]) => l.some((t) => !isFinishedColumn(columnOf(t)));
     return [...byRepo.entries()]
         .map(([repo, list]) => ({ repo, label: repoLabel(repo), tasks: list }))
         .sort((a, b) => {

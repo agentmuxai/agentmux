@@ -24,8 +24,12 @@ use std::collections::HashSet;
 /// - `agent_providers` (`{name: provider id}`, decision D1 of 2026-10-17,
 ///   SPEC_SWARM_REFINEMENTS_2026_10_17 §3, §7): the Swarm's provider icon on
 ///   remote rows. Only an id this build knows (`providers::resolve_provider_alias`).
+/// - `agent_seats` (`{name: {role, qualifier, lead: {id, name}, area}}`,
+///   SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §5, approved 2026-10-23): each
+///   agent's seat as the operator set it (or a spawned worker's effective one),
+///   for the Swarm's remote rows and `Agents list`'s `lan` entries.
 ///
-/// An agent with no kind, state, line or provider is left out of that map.
+/// An agent with no kind, state, line, provider or seat is left out of that map.
 pub(crate) fn agent_names_body(
     mstore: &crate::backend::storage::store::Store,
     settings: &crate::backend::wconfig::SettingsType,
@@ -46,6 +50,17 @@ pub(crate) fn agent_names_body(
             (!id.is_empty()).then_some((name, id))
         })
         .collect();
+    let seats: BTreeMap<&str, crate::backend::rpc_types::SeatSummary> = agents
+        .iter()
+        .filter_map(|a| {
+            let uid = a.uid.as_deref().filter(|u| !u.is_empty())?;
+            let seat = crate::backend::agent_seat::effective_seat_by_id(mstore, uid)?;
+            let summary = crate::backend::agent_seat::summarize(&seat, |id| {
+                mstore.agent_def_get(id).ok().flatten().map(|d| d.name)
+            });
+            Some((a.agent_id.as_str(), summary))
+        })
+        .collect();
     let mut body = json!({
         "agents": agents.iter().map(|a| a.agent_id.as_str()).collect::<Vec<_>>(),
         "agent_kinds": kinds,
@@ -53,6 +68,9 @@ pub(crate) fn agent_names_body(
         "agent_status": status,
         "agent_providers": providers,
     });
+    if !seats.is_empty() {
+        body["agent_seats"] = json!(seats);
+    }
     if let Some(lines) = crate::backend::agent_line::lines_by_name(mstore, settings, pairs()) {
         body["agent_lines"] = json!(lines);
     }
@@ -73,6 +91,9 @@ pub(crate) struct PeerAgents {
     /// this build knows (`providers::resolve_provider_alias`), so a peer can't
     /// put free text in a row (SPEC_SWARM_REFINEMENTS_2026_10_17.md §3).
     pub providers: BTreeMap<String, String>,
+    /// Lower-cased name → seat, for listed names only, bounded by
+    /// `agent_seat::sanitize_peer_summary` (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §5).
+    pub seats: BTreeMap<String, crate::backend::rpc_types::SeatSummary>,
 }
 
 /// Reads an `agent-names` body: the names, capped as above, and each listed
@@ -135,7 +156,20 @@ pub(crate) fn parse_agent_names_body(value: &serde_json::Value) -> PeerAgents {
                 .collect()
         })
         .unwrap_or_default();
-    PeerAgents { names, status, lines, providers }
+    let seats = value
+        .get("agent_seats")
+        .and_then(|s| s.as_object())
+        .map(|map| {
+            map.iter()
+                .filter(|(name, _)| listed.contains(&name.to_lowercase()))
+                .filter_map(|(name, seat)| {
+                    let seat = crate::backend::agent_seat::sanitize_peer_summary(seat, LAN_AGENT_NAMES_MAX_NAME_LEN)?;
+                    Some((name.to_lowercase(), seat))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    PeerAgents { names, status, lines, providers, seats }
 }
 
 /// Applies one poll of a peer's `agent-names` route to its entry, and says
@@ -159,11 +193,13 @@ pub(super) fn apply_agent_names_poll(
     let changed = entry.agents != peer.names
         || entry.agent_status != peer.status
         || entry.agent_lines != peer.lines
-        || entry.agent_providers != peer.providers;
+        || entry.agent_providers != peer.providers
+        || entry.agent_seats != peer.seats;
     entry.agents = peer.names;
     entry.agent_status = peer.status;
     entry.agent_lines = peer.lines;
     entry.agent_providers = peer.providers;
+    entry.agent_seats = peer.seats;
     changed
 }
 
@@ -242,6 +278,70 @@ mod tests {
         // A legacy alias resolves to its id; free text, a non-string and a name
         // the body doesn't list are dropped.
         assert_eq!(got, [("manoz", "claude"), ("opaz", "codex")]);
+    }
+
+    /// Seats on remote rows (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §5): kept
+    /// for listed agents with a known role, bounded, and carried onto the entry.
+    #[test]
+    fn agent_seats_are_kept_for_listed_agents_and_applied() {
+        let body = serde_json::json!({
+            "agents": ["Manoz", "Opaz", "Loap"],
+            "agent_seats": {
+                "Manoz": { "role": "leader", "qualifier": "product", "lead": null, "area": "x".repeat(300) },
+                "opaz": { "role": "worker", "qualifier": null, "lead": { "id": "uid-m", "name": "Manoz" }, "area": null },
+                "Loap": { "role": "overlord", "qualifier": null, "lead": null, "area": null },
+                "Ghost": { "role": "leader", "qualifier": null, "lead": null, "area": null },
+            },
+        });
+        let peer = parse_agent_names_body(&body);
+        assert_eq!(peer.seats.keys().map(String::as_str).collect::<Vec<_>>(), ["manoz", "opaz"]);
+        assert_eq!(peer.seats["manoz"].area.as_ref().map(|a| a.chars().count()), Some(crate::backend::agent_seat::MAX_AREA_CHARS));
+        assert_eq!(peer.seats["opaz"].lead.as_ref().and_then(|l| l.name.as_deref()), Some("Manoz"));
+
+        let mut inst = instance();
+        assert!(apply_agent_names_poll(&mut inst, Some(peer.clone()), 1));
+        assert_eq!(inst.agent_seats, peer.seats);
+        assert!(!apply_agent_names_poll(&mut inst, Some(peer), 2), "the same seats change nothing");
+        // The entry's JSON (the `lan` of `Agents list`) carries them, and
+        // leaves the key out when there are none.
+        let json = serde_json::to_value(&inst).unwrap();
+        assert_eq!(json["agent_seats"]["manoz"]["role"], "leader");
+        assert!(serde_json::to_value(instance()).unwrap().get("agent_seats").is_none());
+        // A body from before seats gives none.
+        assert!(parse_agent_names_body(&serde_json::json!({"agents": ["Manoz"]})).seats.is_empty());
+    }
+
+    /// This machine's answer gives each registered agent with a seat its
+    /// seat, by its uid's definition, the lead named.
+    #[test]
+    fn the_agent_names_body_serves_seats() {
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        store.set_def_registry(std::sync::Arc::new(crate::registry::DefinitionStore::open(tmp.path().join("defs")).unwrap()));
+        for (id, name) in [("uid-l", "Camper"), ("uid-w", "Loap")] {
+            let mut def = crate::backend::storage::agents::test_agent_def(id, name, "claude", "host", 1, "");
+            store.agent_def_insert(&mut def).unwrap();
+        }
+        let seat = crate::registry::AgentSeat { role: "worker".into(), lead: Some("uid-l".into()), area: Some("panes".into()), ..Default::default() };
+        store.agent_seat_set("uid-w", Some(&seat)).unwrap();
+        let reg = |name: &str, uid: Option<&str>| crate::backend::reactive::types::AgentRegistration {
+            agent_id: name.into(),
+            block_id: format!("blk-{name}"),
+            tab_id: None,
+            uid: uid.map(str::to_string),
+            registered_at: 0,
+            last_seen: 0,
+            registration_nonce: 0,
+        };
+        let agents = [reg("Loap", Some("uid-w")), reg("Camper", Some("uid-l")), reg("shell", None)];
+        let body = agent_names_body(&store, &Default::default(), &agents);
+        assert_eq!(
+            body["agent_seats"],
+            serde_json::json!({ "Loap": { "role": "worker", "qualifier": null, "lead": { "id": "uid-l", "name": "Camper" }, "area": "panes" } })
+        );
+        // And it reads back as it was sent.
+        let peer = parse_agent_names_body(&body);
+        assert_eq!(peer.seats["loap"].lead.as_ref().map(|l| l.id.as_str()), Some("uid-l"));
     }
 
     #[test]
@@ -338,6 +438,7 @@ mod tests {
             agent_status: Default::default(),
             agent_lines: Default::default(),
             agent_providers: Default::default(),
+            agent_seats: Default::default(),
             first_seen: 0,
             last_seen: 0,
             last_polled_ok: 0,

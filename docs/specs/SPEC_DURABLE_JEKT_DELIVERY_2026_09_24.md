@@ -4,7 +4,11 @@
 **Status:** active — Phase 1 shipped in PR #3632 (`storage/jekt_held.rs`,
 objects v40; `reactive::hold_for_absent_target`; `server/jekt_held.rs`
 replay; the `HELD_FOR` header field; the MCP's `HELD` report), designed and
-revised after adversarial and Codex review (§2). Phase 2 (§3) not started.
+revised after adversarial and Codex review (§2). Hold-before-relay (an absent
+known agent's message is held here before the cloud relay is tried) in #4236. A
+held replay keeps `DELIVERY=host` and adds `HELD_FOR`; there is no
+`DELIVERY=held` (§4's testing note predates that). Phase 2 (§3) not started.
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
 **Trigger:** Repo owner: *"the durable jekt messaging was another thing we
 couldn't get working."*
 **Related:**

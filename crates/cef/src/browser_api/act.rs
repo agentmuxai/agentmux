@@ -31,86 +31,7 @@ use super::snapshot::{self, DomFacts};
 use super::types::ApiResponse;
 use crate::state::AppState;
 
-/// The references one snapshot handed out for one pane, and the page they
-/// belong to. A new snapshot or a navigation makes them stale.
-#[derive(Debug, Clone, Default)]
-pub struct RefTable {
-    pub url: String,
-    pub refs: HashMap<String, i64>,
-    /// For each reference inside an iframe (`f1e3`), how to find its frame.
-    pub frames: HashMap<String, FrameRef>,
-    /// How many `find`s (and snapshots scoped by name) this pane has had: the
-    /// `k` of their `n{k}e1` references. Kept when the table is replaced, so a
-    /// reference from an earlier find never comes to name another element.
-    pub finds: u32,
-}
-
-/// Per-host store of each pane's latest reference table, by block id.
-/// Bounded: past `MAX_TABLES` panes, the least recently snapshotted is
-/// dropped (its agent just takes a new snapshot).
-#[derive(Default)]
-pub struct RefTables(std::sync::Mutex<Tables>);
-
-type Tables = (u64, HashMap<String, (u64, RefTable)>);
-
-const MAX_TABLES: usize = 64;
-
-impl RefTables {
-    fn lock(&self) -> std::sync::MutexGuard<'_, Tables> {
-        self.0.lock().unwrap_or_else(|p| p.into_inner())
-    }
-
-    fn put(&self, block_id: &str, table: RefTable) {
-        Self::put_locked(&mut self.lock(), block_id, table);
-    }
-
-    fn put_locked(g: &mut Tables, block_id: &str, mut table: RefTable) {
-        if let Some((_, old)) = g.1.get(block_id) {
-            table.finds = table.finds.max(old.finds);
-        }
-        g.0 += 1;
-        let stamp = g.0;
-        g.1.insert(block_id.to_string(), (stamp, table));
-        while g.1.len() > MAX_TABLES {
-            let oldest = g.1.iter().min_by_key(|(_, (t, _))| *t).map(|(k, _)| k.clone());
-            match oldest {
-                Some(k) => {
-                    g.1.remove(&k);
-                }
-                None => break,
-            }
-        }
-    }
-
-    pub(super) fn get(&self, block_id: &str) -> Option<RefTable> {
-        self.lock().1.get(block_id).map(|(_, t)| t.clone())
-    }
-
-    /// The prefix for the next find's references on this pane, `n{k}`.
-    /// Counted under one lock, so two finds at once can't share one.
-    fn next_find_prefix(&self, block_id: &str) -> String {
-        let mut g = self.lock();
-        let mut table = g.1.get(block_id).map(|(_, t)| t.clone()).unwrap_or_default();
-        table.finds += 1;
-        let k = table.finds;
-        Self::put_locked(&mut g, block_id, table);
-        format!("n{k}")
-    }
-
-    /// Add references to the pane's table for `url`, the way a scoped
-    /// snapshot's are: beside the ones already there, unless the page
-    /// changed, which starts a new table.
-    fn merge(&self, block_id: &str, url: &str, refs: &[(String, i64)]) {
-        let mut g = self.lock();
-        let mut table = g.1.get(block_id).map(|(_, t)| t.clone()).unwrap_or_default();
-        if table.url != url {
-            table = RefTable { finds: table.finds, ..RefTable::default() };
-        }
-        table.url = url.to_string();
-        table.refs.extend(refs.iter().cloned());
-        Self::put_locked(&mut g, block_id, table);
-    }
-}
+pub use super::ref_tables::{RefTable, RefTables};
 
 #[derive(Debug, Deserialize)]
 pub struct SnapshotReq {
@@ -738,6 +659,8 @@ pub async fn snapshot_route(
     if req.scope.is_some() && req.scope_match.is_some() {
         return fail("give scope as a reference or as a role and name, not both");
     }
+    // Before the pane is opened, so a close any time after is seen when the references are kept.
+    let epoch = state.browser_api.ref_tables.epoch(&req.block_id);
     let mut cdp = match super::routes::open_dedicated_pane(&state, &req.block_id, "snapshot").await {
         Ok(c) => c,
         Err(e) => return fail(e),
@@ -831,8 +754,8 @@ pub async fn snapshot_route(
     let rendered = snapshot::render_with_frames(&nodes, &facts, scope, &prefix, &frame_trees);
     // A scoped snapshot adds its references to the full snapshot's table, so
     // those stay usable; but never across a navigation. It reads no frames.
-    match scope {
-        Some(_) => state.browser_api.ref_tables.merge(&req.block_id, &url, &rendered.refs),
+    let kept = match scope {
+        Some(_) => state.browser_api.ref_tables.merge_at(&req.block_id, Some(epoch), &url, &rendered.refs),
         None => {
             let mut table = RefTable { url: url.clone(), ..RefTable::default() };
             table.refs.extend(rendered.refs.iter().cloned());
@@ -841,10 +764,14 @@ pub async fn snapshot_route(
                     table.frames.insert(r.clone(), f.clone());
                 }
             }
-            state.browser_api.ref_tables.put(&req.block_id, table);
+            state.browser_api.ref_tables.put_at(&req.block_id, epoch, table)
         }
-    }
+    };
     let _ = cdp.close().await;
+    // The references were not kept, so they would all be unknown to the next click.
+    if !kept {
+        return fail("the page closed while this was being read; take a new snapshot");
+    }
     (
         StatusCode::OK,
         Json(ApiResponse::ok(SnapshotData {
@@ -876,6 +803,8 @@ pub async fn find_route(
     if q.name.trim().is_empty() && q.role.as_deref().unwrap_or("").trim().is_empty() {
         return fail("find needs a name (part of the element's accessible name), a role, or both");
     }
+    // Before the pane is opened, so a close any time after is seen when the references are kept.
+    let find_epoch = state.browser_api.ref_tables.epoch(&req.block_id);
     let mut cdp = match super::routes::open_dedicated_pane(&state, &req.block_id, "find").await {
         Ok(c) => c,
         Err(e) => return fail(e),
@@ -908,7 +837,9 @@ pub async fn find_route(
     let _ = cdp.close().await;
     let prefix = state.browser_api.ref_tables.next_find_prefix(&req.block_id);
     let found = snapshot::find(&nodes, &facts, q, &prefix);
-    state.browser_api.ref_tables.merge(&req.block_id, &url, &found.refs);
+    if !state.browser_api.ref_tables.merge_at(&req.block_id, Some(find_epoch), &url, &found.refs) {
+        return fail("the page closed while this was being read; take a new snapshot");
+    }
     (
         StatusCode::OK,
         Json(ApiResponse::ok(FindData {
@@ -930,7 +861,7 @@ pub async fn act_route(
     if !super::routes::authorized_pub(&headers, &state.ipc_token) {
         return unauthorized();
     }
-    let Some(table) = state.browser_api.ref_tables.get(&req.block_id) else {
+    let Some((table, epoch)) = state.browser_api.ref_tables.get_at(&req.block_id) else {
         return fail("no snapshot of this pane yet: take one with Browser's snapshot action first, or find the element");
     };
     let Some(&backend) = table.refs.get(&req.ref_) else {
@@ -940,6 +871,10 @@ pub async fn act_route(
         Ok(c) => c,
         Err(e) => return fail(e),
     };
+    if !state.browser_api.ref_tables.still_at(&req.block_id, epoch) {
+        let _ = cdp.close().await;
+        return fail("the page closed while this was starting; take a new snapshot");
+    }
     let frame = table.frames.get(&req.ref_).cloned();
     let result = act(&mut cdp, &table, backend, frame.as_ref(), &req).await;
     let _ = cdp.close().await;
@@ -1313,26 +1248,6 @@ Connection: close
     }
 
     #[test]
-    fn find_references_merge_into_the_table_and_are_never_numbered_twice() {
-        let tables = RefTables::default();
-        // A find on a fresh pane starts the table.
-        assert_eq!(tables.next_find_prefix("b"), "n1");
-        tables.merge("b", "https://a.example/", &[("n1e1".into(), 7)]);
-        // A full snapshot replaces the table, but not the find count.
-        tables.put("b", RefTable { url: "https://a.example/".into(), refs: HashMap::from([("e1".into(), 3)]), ..RefTable::default() });
-        assert_eq!(tables.next_find_prefix("b"), "n2");
-        tables.merge("b", "https://a.example/", &[("n2e1".into(), 9)]);
-        let t = tables.get("b").unwrap();
-        assert_eq!((t.refs.get("e1"), t.refs.get("n2e1"), t.refs.get("n1e1")), (Some(&3), Some(&9), None));
-        // Another page starts a new table; the count goes on.
-        tables.merge("b", "https://b.example/", &[("e4.e1".into(), 1)]);
-        let t = tables.get("b").unwrap();
-        assert_eq!((t.url.as_str(), t.refs.len()), ("https://b.example/", 1));
-        assert_eq!(tables.next_find_prefix("b"), "n3");
-        assert_eq!(tables.next_find_prefix("other"), "n1");
-    }
-
-    #[test]
     fn an_ordinary_fields_value_is_kept() {
         let after = json!({ "tag": "input", "value": "lark@example.com" });
         let out = redact_secret(after, &facts("input", &[("type", "email")]));
@@ -1404,7 +1319,7 @@ pub async fn set_files_route(
     if req.files.is_empty() {
         return fail("no files given");
     }
-    let Some(table) = state.browser_api.ref_tables.get(&req.block_id) else {
+    let Some((table, epoch)) = state.browser_api.ref_tables.get_at(&req.block_id) else {
         return fail("no snapshot of this pane yet: take one with Browser's snapshot action first");
     };
     let Some(&backend) = table.refs.get(&req.ref_) else {
@@ -1414,6 +1329,10 @@ pub async fn set_files_route(
         Ok(c) => c,
         Err(e) => return fail(e),
     };
+    if !state.browser_api.ref_tables.still_at(&req.block_id, epoch) {
+        let _ = cdp.close().await;
+        return fail("the page closed while this was starting; take a new snapshot");
+    }
     if table.frames.contains_key(&req.ref_) {
         let _ = cdp.close().await;
         return fail("uploading a file into a field inside an iframe isn't supported yet: ask the user to choose the file in the pane");

@@ -3258,7 +3258,7 @@ mod fleet_tests {
         let state = test_state();
 
         let (now, pending) =
-            crate::server::app_api::fleet::fleet_bulk_stop_with_override(&state, "Korp", vec![block_id.clone()], None, None).await;
+            crate::server::app_api::fleet::fleet_stop_keep_pane_with_override(&state, "Korp", vec![block_id.clone()], None, None).await;
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
 
         assert!(now.succeeded.is_empty() && now.failed.is_empty(), "nothing is stopped at once");
@@ -3299,7 +3299,7 @@ mod fleet_tests {
 
         let started = std::time::Instant::now();
         let (_, pending) =
-            crate::server::app_api::fleet::fleet_bulk_stop_with_override(&state, "Korp", targets, None, None).await;
+            crate::server::app_api::fleet::fleet_stop_keep_pane_with_override(&state, "Korp", targets, None, None).await;
         let took = started.elapsed();
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
 
@@ -3319,7 +3319,7 @@ mod fleet_tests {
         let state = test_state();
 
         let (now, pending) =
-            crate::server::app_api::fleet::fleet_bulk_stop_with_override(&state, "Korp", vec![block_id.clone()], None, None).await;
+            crate::server::app_api::fleet::fleet_stop_keep_pane_with_override(&state, "Korp", vec![block_id.clone()], None, None).await;
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
 
         assert!(pending.is_empty());
@@ -3327,6 +3327,95 @@ mod fleet_tests {
         assert_eq!(hits.lock().unwrap().clone(), vec!["stop".to_string()]);
         let entry = state.reactive_handler.get_audit_log(20).into_iter().find(|e| e.block_id == now.succeeded[0]).unwrap();
         assert!(entry.reason.unwrap_or_default().contains("predates the user override"), "audited as such");
+    }
+
+    /// A fake other instance that records the body of each request it gets, to
+    /// check what `Stop agents` asks of it. `with_pending: false` predates the
+    /// override route.
+    async fn spawn_recording_peer(with_pending: bool) -> (String, std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>) {
+        use axum::routing::post;
+        let hits: std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>> = Default::default();
+        let (h1, h2) = (hits.clone(), hits.clone());
+        let mut app = axum::Router::new().route(
+            "/agentmux/agent/stop",
+            post(move |axum::Json(body): axum::Json<serde_json::Value>| async move {
+                h1.lock().unwrap().push(serde_json::json!({ "route": "stop", "body": body }));
+                axum::Json(serde_json::json!({ "success": true }))
+            }),
+        );
+        if with_pending {
+            app = app.route(
+                "/agentmux/agent/stop-pending",
+                post(move |axum::Json(body): axum::Json<serde_json::Value>| async move {
+                    h2.lock().unwrap().push(serde_json::json!({ "route": "stop-pending", "body": body }));
+                    axum::Json(serde_json::json!({
+                        "success": true,
+                        "pending": { "request_id": "remote-req-2", "by": "Korp", "via": "FleetBulkStop", "effect": "close_tab", "deadline_ms": 42, "joined": false },
+                    }))
+                }),
+            );
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        (url, hits)
+    }
+
+    #[tokio::test]
+    async fn stop_agents_asks_another_instance_to_close_the_tab_not_only_stop() {
+        let _guard = home_override_guard();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", tmp.path());
+        let shared_dir = tmp.path().join("shared").join("agents").join("reactive");
+        let block_id = format!("blk-xchan-close-{}", uuid::Uuid::new_v4());
+        let (peer_url, hits) = spawn_recording_peer(true).await;
+        write_raw_shared_entry(&shared_dir, "peer-agent-close", &peer_url, &block_id, "k");
+        let state = test_state();
+
+        let (now, pending, left_open) =
+            crate::server::app_api::fleet::fleet_close_agents_with_override(&state, "Korp", None, vec![block_id.clone()]).await;
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+
+        assert!(now.succeeded.is_empty() && now.failed.is_empty() && left_open.is_empty());
+        assert_eq!((pending.len(), pending[0].effect), (1, "close_tab"));
+        let hits = hits.lock().unwrap().clone();
+        assert_eq!(hits.len(), 1, "asked there once, never the plain stop: {hits:?}");
+        assert_eq!(hits[0]["route"], "stop-pending");
+        assert_eq!(hits[0]["body"]["mode"], "close");
+        assert_eq!(hits[0]["body"]["by"], "Korp");
+    }
+
+    /// An instance that predates the override only stops, leaving the pane: the
+    /// tool result says so rather than reporting a close (#5375).
+    #[tokio::test]
+    async fn stop_agents_tells_the_caller_when_an_older_instance_only_stopped_its_agent() {
+        let _guard = home_override_guard();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", tmp.path());
+        let shared_dir = tmp.path().join("shared").join("agents").join("reactive");
+        let block_id = format!("blk-xchan-closeold-{}", uuid::Uuid::new_v4());
+        let (peer_url, hits) = spawn_recording_peer(false).await;
+        write_raw_shared_entry(&shared_dir, "peer-agent-closeold", &peer_url, &block_id, "k");
+        let state = test_state();
+
+        let resp = super::super::http_app_api::handle_fleet_bulk_stop(
+            axum::extract::State(state),
+            None,
+            axum::Json(serde_json::json!({ "targets": [block_id.clone()] })),
+        )
+        .await
+        .into_response();
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+
+        assert_eq!(resp.status(), StatusCode::OK, "nothing waits: the old instance stopped it at once");
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["succeeded"], serde_json::json!([block_id.clone()]));
+        let note = body["note"].as_str().unwrap_or_default();
+        assert!(note.contains(&block_id) && note.contains("older AgentMux") && note.contains("the user has to close it"), "{note}");
+        assert_eq!(hits.lock().unwrap()[0]["route"], "stop");
     }
 
     /// The target instance's side: its own window, not an immediate stop.
@@ -3364,7 +3453,7 @@ mod fleet_tests {
 
         let resp = super::super::handle_agent_stop_pending_forward(
             axum::extract::State(state.clone()),
-            axum::Json(super::super::AgentStopPendingForwardRequest { block_id: block_id.clone(), signal: None, by: "Korp".into() }),
+            axum::Json(super::super::AgentStopPendingForwardRequest { block_id: block_id.clone(), signal: None, by: "Korp".into(), mode: String::new() }),
         )
         .await
         .into_response();
@@ -3381,7 +3470,7 @@ mod fleet_tests {
         // Not running here: refused, nothing opened.
         let resp = super::super::handle_agent_stop_pending_forward(
             axum::extract::State(state.clone()),
-            axum::Json(super::super::AgentStopPendingForwardRequest { block_id: "nowhere".into(), signal: None, by: "Korp".into() }),
+            axum::Json(super::super::AgentStopPendingForwardRequest { block_id: "nowhere".into(), signal: None, by: "Korp".into(), mode: String::new() }),
         )
         .await
         .into_response();
@@ -6679,6 +6768,50 @@ async fn a_target_running_under_another_name_is_delivered_by_uid_not_held() {
     assert!(!err.starts_with("agent not found"), "delivered to the UID's block: {v}");
 }
 
+/// A signed jekt this instance takes for a local agent, by UID or by holding
+/// it, keeps its one-delivery reservation (#5346): a copy that arrives later
+/// fails its signature. Held here, since the test handler has
+/// no pane to deliver into; the by-UID branch keeps it the same way.
+#[tokio::test]
+async fn a_held_signed_jekt_proves_its_sender_once() {
+    use crate::backend::storage::agents::test_agent_def;
+    let state = test_state();
+    let slug = format!("heldr-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+    let uid = format!("uid-{slug}");
+    let mut def = test_agent_def(&uid, "Held R", "claude", "agent", 1, "");
+    def.slug = slug.clone();
+    state.mstore.agent_def_insert(&mut def).unwrap();
+    let sender = format!("{slug}-sender");
+    let key = state.mstore.agent_jekt_key_ensure(&sender).unwrap();
+    let id = format!("req-{slug}");
+    let ts = agentmux_common::time::now_secs();
+    let sig = agentmux_common::jekt_sign::sign_jekt(&key, &id, &sender, &slug, ts, "hi");
+    let body = serde_json::json!({
+        "target_agent": slug, "message": "hi", "source_agent": sender,
+        "request_id": id, "ts_secs": ts, "jekt_sig": sig,
+    });
+    let mut v = serde_json::Value::Null;
+    for _ in 0..25 {
+        v = m4c1_send(&state, None, "/agentmux/reactive/inject", body.clone()).await.1;
+        if v["error"] != "rate limit exceeded" {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    assert_eq!(v["held"], true, "{v}");
+    assert_eq!(state.mstore.jekt_held_for_target(&uid, 10).unwrap()[0].sig_verified, Some(true));
+
+    let mut copy = crate::backend::reactive::types::InjectionRequest {
+        source_agent: Some(sender.clone()),
+        target_agent: slug.clone(),
+        request_id: Some(id.clone()),
+        sig_verified: Some(true),
+        ..Default::default()
+    };
+    let _ = super::reactive::replay::reserve(&mut copy, ts);
+    assert_eq!(copy.sig_verified, Some(false), "the held message is counted");
+}
+
 /// Phase 0 item 4 of SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md: a
 /// jekt the target's spawn gate refused (not signed in) is held with
 /// `held_reason: needs_login`, never redelivered by UID at once (the target is
@@ -6723,6 +6856,7 @@ async fn a_jekt_refused_by_the_spawn_gate_is_held_for_sign_in() {
         &req,
         &refused,
         super::reactive::HoldReason::NeedsLogin,
+        &mut super::reactive::replay::reserve(&mut req.clone(), 0),
     )
     .await
     .expect("held");
@@ -6746,6 +6880,7 @@ async fn a_jekt_refused_by_the_spawn_gate_is_held_for_sign_in() {
         &req,
         &refused,
         super::reactive::HoldReason::NeedsLogin,
+        &mut super::reactive::replay::reserve(&mut req.clone(), 0),
     )
     .await
     .is_none());

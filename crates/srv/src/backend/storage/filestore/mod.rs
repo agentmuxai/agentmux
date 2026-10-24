@@ -15,6 +15,8 @@ mod checkpointer;
 mod copy;
 mod core;
 mod counter;
+mod deltas;
+mod frames;
 mod ijson;
 mod lines;
 mod off_worker;
@@ -56,6 +58,7 @@ pub use types::{FileMeta, FileOpts, MuxFile};
 #[allow(unused_imports)] // the memory record (SPEC_MEMORY_FOLLOWS_THE_AGENT M3)
 pub use zone_txn::ZoneTxn;
 pub(crate) use lines::is_blank_line;
+pub(crate) use frames::{FrameOutcome, CODEC_DELTAS, CODEC_ZSTD, FRAME_PARTS};
 #[allow(unused_imports)] // consumed by the transcript writers in 5a-3
 pub use counter::{normalized_records, AppendPos, Counted, CountedAppend, LineState, TailState};
 #[allow(unused_imports)]

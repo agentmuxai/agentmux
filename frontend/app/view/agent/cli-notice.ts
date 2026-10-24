@@ -60,7 +60,8 @@ function compactionFailedNode(e: Record<string, unknown>, now: number): CliNotic
         type: "cli_notice",
         id: `compaction-failed-${uuid}`,
         kind: "compaction_failed",
-        provider: "claude",
+        // Claude Code's own frame names no provider; srv's for a Codex pane does.
+        provider: str(e.provider) ?? "claude",
         error: error ?? undefined,
         timestamp: frameTime(e.timestamp) ?? now,
     };

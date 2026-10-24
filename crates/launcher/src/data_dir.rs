@@ -117,70 +117,84 @@ pub fn resolve_paths(launcher_exe_dir: &Path, version: &str) -> Result<DataPaths
     })
 }
 
+/// This channel's `settings.json`, the file srv loads (#1903), resolved
+/// early and failure-tolerant for the launcher's own startup reads.
+pub fn settings_file() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let version = env!("CARGO_PKG_VERSION");
+    resolve_paths(exe.parent()?, version).ok().map(|p| p.common.settings_file())
+}
+
 /// Create every directory the launcher + srv expect to exist.
 /// Idempotent. Delegates to the common implementation.
+///
+/// It puts no database in them: what a new version's data starts from is
+/// srv's to decide, on its first start (`crates/srv/src/bootstrap/carry_forward.rs`:
+/// the newest older version's databases, else the channel's pre-versioning
+/// `data/db/`). The launcher used to copy that pre-versioning folder here
+/// whenever a version's `data/db/` had no database yet, which is every
+/// upgrade: srv then found an `objects.db` in place and carried nothing
+/// forward, so each upgrade started from that old data instead of the
+/// previous version's, without the layout its quit had saved.
 pub fn ensure_dirs(paths: &DataPaths) -> Result<(), String> {
-    // Migrate BEFORE ensure_dirs creates the destination dirs.
-    // ensure_dirs creates <new>/data/db/ as an empty directory; if we
-    // checked for db dir existence AFTER that, we'd always see it and
-    // skip the copy (codex P1 on #1227).
-    migrate_legacy_data_dir(paths);
     paths.common.ensure_dirs()
 }
 
-/// One-time migration: copy `channels/<ch>/data/db/` into the new
-/// `channels/<ch>/versions/<v>/data/db/` when:
-///   (a) the new versioned db dir has no DB files yet, AND
-///   (b) the old unversioned db dir does exist (pre-Phase-2 install).
-///
-/// Uses *copy* not *move* so the old data is preserved for older
-/// binaries that may still be installed. Silent on any I/O error —
-/// a fresh DB is safer than a partially migrated one blocking launch.
-fn migrate_legacy_data_dir(paths: &DataPaths) {
-    let new_db = paths.data_dir.join("db");
-    // Check for an actual DB file, not just the directory — ensure_dirs
-    // may have already created the empty dir on a previous failed launch.
-    let has_db_files = new_db.is_dir()
-        && std::fs::read_dir(&new_db)
-            .map(|mut d| d.any(|e| e.map(|e| e.path().extension().and_then(|x| x.to_str()) == Some("db")).unwrap_or(false)))
-            .unwrap_or(false);
-    if has_db_files {
-        return; // already migrated or fresh install with data
-    }
-    // The legacy dir is the parent of data_dir in the old layout:
-    // channels/<ch>/data/db/ (instance_dir/data/db/).
-    // After Phase 2, data_dir is channels/<ch>/versions/<v>/data/.
-    // The old path was channels/<ch>/data/.  Walk up from data_dir's
-    // grandparent (versions/) to reach instance_dir.
-    let old_db = match paths.data_dir.parent().and_then(|v| v.parent()) {
-        Some(versions_dir) => versions_dir.parent().map(|ch| ch.join("data").join("db")),
-        None => None,
-    };
-    let old_db = match old_db {
-        Some(p) if p.is_dir() => p,
-        _ => return, // no legacy data — fresh install
-    };
-    crate::log(&format!(
-        "[migrate] copying legacy data dir {} → {}",
-        old_db.display(),
-        new_db.display()
-    ));
-    if let Err(e) = copy_dir_recursive(&old_db, &new_db) {
-        crate::log(&format!("[migrate] copy failed (fresh db will be used): {}", e));
-    }
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(dst)?;
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let ty = entry.file_type()?;
-        let dst_path = dst.join(entry.file_name());
-        if ty.is_dir() {
-            copy_dir_recursive(&entry.path(), &dst_path)?;
-        } else {
-            std::fs::copy(entry.path(), dst_path)?;
+    /// The launcher's paths for `version` of the `stable` channel under `root`.
+    fn paths(root: &Path, version: &str) -> DataPaths {
+        let channel_dir = root.join("channels").join("stable");
+        let version_dir = channel_dir.join("versions").join(version);
+        let common = CommonDataPaths {
+            home_dir: root.to_path_buf(),
+            instance_dir: channel_dir.clone(),
+            channel: "stable".to_string(),
+            data_dir: version_dir.join("data"),
+            config_dir: channel_dir.join("config"),
+            logs_dir: version_dir.join("logs"),
+            cef_cache_dir: version_dir.join("cef-cache"),
+            agents_dir: channel_dir.join("agents"),
+            instance_runtime_dir: version_dir.join("runtime"),
+            shared_dir: root.join("shared"),
+            mode: RuntimeMode::Installed,
+        };
+        DataPaths {
+            data_dir: common.data_dir.clone(),
+            config_dir: common.config_dir.clone(),
+            user_home_dir: common.home_dir.clone(),
+            portable_root: None,
+            common,
         }
     }
-    Ok(())
+
+    fn put_db(dir: &Path) {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join("objects.db"), b"not opened").unwrap();
+    }
+
+    /// The launcher never seeds a version's databases: srv copies the
+    /// previous version's forward on its first start, and finding an
+    /// `objects.db` already there it copies nothing. A copy of the channel's
+    /// pre-versioning `data/db/` made here started every upgrade from that
+    /// months-old data instead, without the layout the quit had saved
+    /// (`docs/incident/RCA_UPGRADE_LOSES_LAYOUT_2026_10_22.md`).
+    #[test]
+    fn ensure_dirs_leaves_a_new_versions_databases_to_srv() {
+        let root = tempfile::tempdir().unwrap();
+        let channel_dir = root.path().join("channels").join("stable");
+        put_db(&channel_dir.join("data").join("db"));
+        put_db(&channel_dir.join("versions").join("0.59.38").join("data").join("db"));
+
+        let new = paths(root.path(), "0.59.39");
+        ensure_dirs(&new).unwrap();
+
+        let db_dir = new.data_dir.join("db");
+        let files: Vec<_> = std::fs::read_dir(&db_dir)
+            .map(|d| d.filter_map(|e| e.ok()).map(|e| e.file_name()).collect())
+            .unwrap_or_default();
+        assert!(files.is_empty(), "the launcher put {files:?} in {}", db_dir.display());
+    }
 }

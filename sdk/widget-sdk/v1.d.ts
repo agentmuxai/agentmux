@@ -39,11 +39,11 @@ export type Visibility = "active" | "dormant" | "windowHidden";
  *  not a view: it lists the sections of Warden's Vault section, set with `vault:section` beside
  *  `"warden:section": "vault"`. */
 export interface PaneSections {
-    warden: "kanban" | "vault" | "host" | "lan" | "internet" | "audit" | "history";
+    warden: "kanban" | "vault" | "host" | "lan" | "internet" | "audit" | "history" | "ambient";
     vault: "personal" | "cards" | "api-keys" | "logins" | "notes" | "kept" | "activity";
     connectors: "accounts" | "mcp" | "remotes";
     memory: "global" | "personal" | "skills" | "bundles";
-    settings: "appearance" | "window" | "browser" | "terminal" | "sounds" | "notifications" | "recording" | "devices" | "widgets" | "advanced";
+    settings: "appearance" | "window" | "browser" | "terminal" | "sounds" | "notifications" | "recording" | "devices" | "widgets" | "agents" | "advanced";
 }
 
 export interface Theme {

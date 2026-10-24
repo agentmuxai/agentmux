@@ -25,6 +25,7 @@ pub mod agents_consolidate;
 pub mod background_tasks;
 pub mod content;
 pub mod coord_posts;
+pub mod user_workspaces;
 pub mod conversation_trust_grants;
 pub mod cron;
 pub mod def_registry_mirror;
@@ -50,6 +51,7 @@ pub mod widget_storage;
 pub mod work_board;
 pub mod work_claims;
 pub mod work_deps;
+pub mod work_prs;
 pub mod work_queue;
 
 pub use agent_bundles::{agent_picked_bundles, format_agent_bundle_block, join_startup_blocks};

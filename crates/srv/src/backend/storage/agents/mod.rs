@@ -10,8 +10,11 @@
 //!
 //! This file holds the types and defaults; the methods are in `definition`
 //! (`agent_def_*`) and `instance` (`instance_*`), the shared column lists and
-//! row mappers in `row`, slugs and name-keyed rows in `name_keys`, and the
-//! delete cascade in `purge`.
+//! row mappers in `row`, slugs and name-keyed rows in `name_keys`, which of
+//! an agent's two stored slugs is its slug in `canonical_slug`, the slugs it
+//! answered to before a rename in `former_slugs`, the display names it was
+//! renamed from (and the one resolver for both kinds) in `former_names`, and
+//! the delete cascade in `purge`.
 //!
 //! Every method in both groups reads and writes `db_agents` only, as of the
 //! agent-concept consolidation's definition flip
@@ -35,19 +38,27 @@ use super::error::StoreError;
 use super::store::Store;
 use crate::registry::RecordScope;
 
+mod canonical_slug;
 mod definition;
+mod former_names;
+mod former_slugs;
 mod instance;
 mod name_keys;
 mod purge;
 mod row;
 
+pub(in crate::backend::storage) use canonical_slug::{canonical_slug, rows_with_canonical_slugs, SharedSlugs};
+pub use former_slugs::FormerSlugOwner;
+pub(super) use former_slugs::FormerSlugSet;
+pub(crate) use former_slugs::FORMER_SLUGS_SCHEMA;
+pub(super) use name_keys::FORMER_BRANCH_LABEL_TRIGGER;
 pub use name_keys::AgentNameMatch;
 #[cfg(test)]
 pub(super) use name_keys::key_tombstones_for_tests;
 #[cfg(test)]
 pub(super) use purge::purge_agent_dependents_for_tests;
 #[allow(unused_imports)]
-use self::{name_keys::*, purge::*, row::*};
+use self::{canonical_slug::*, former_names::*, former_slugs::*, name_keys::*, purge::*, row::*};
 
 /// A user-defined AI agent in the user's agent-definition catalog.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
@@ -193,6 +204,18 @@ pub struct AgentDefinition {
     /// limitation, not a bug — same precedent as those two fields.
     #[serde(default = "default_conversation_visibility")]
     pub conversation_visibility: String,
+    /// The agent's seat: role, lead and area
+    /// (`SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md`). It lives on the shared
+    /// definition record, not in `db_agents`, so it's filled where the record
+    /// is read: `agent_def_list`'s overlay and a cross-channel agent's
+    /// `agent_def_get`. `agent_def_get` of a local row leaves it `None`; read
+    /// it with `Store::agent_seat_get`. Written only by `agent.setSeat`
+    /// (`Store::agent_seat_set`); every other definition write leaves the
+    /// stored seat alone. `listagents` gives a spawned worker with no seat its
+    /// effective one (`backend::agent_seat::effective_seat`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub seat: Option<crate::registry::AgentSeat>,
 }
 
 /// `AgentDefinition::conversation_visibility`'s serde default — the safe,
@@ -381,6 +404,7 @@ pub(crate) fn test_agent_def(
         use_ambient_login: 0,
         model_vendor_base_url: model_vendor_base_url.to_string(),
         memory_id: String::new(),
+        seat: None,
         conversation_visibility: default_conversation_visibility(),
     }
 }

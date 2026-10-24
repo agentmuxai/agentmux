@@ -68,6 +68,64 @@ pub struct DefSkillBlob {
     pub content: String,
 }
 
+/// A slug a definition answered to before a rename. Only the shared record
+/// carries these (`SPEC_FORK_SLUG_MIGRATION_2026_10_22.md` §4); `retired_at`
+/// is epoch ms, like the record's other timestamps.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct FormerSlug {
+    pub slug: String,
+    #[serde(default)]
+    pub retired_at: i64,
+}
+
+/// An agent's seat: its role, whom it reports to and what it owns
+/// (`SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md` §2). Set only by the operator
+/// (`agent.setSeat`); `backend::agent_seat` validates it. Every field but
+/// `role` is optional, and `role` is kept as text, so a seat written by a
+/// newer build with a role this one doesn't know still loads.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AgentSeat {
+    #[serde(default)]
+    #[ts(type = r#""leader" | "worker" | "specialist" | "platform_tester" | "analyst""#)]
+    pub role: String,
+    /// Shown after the role, e.g. "product".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub qualifier: Option<String>,
+    /// The lead's agent uid; absent means the agent reports to the operator.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub lead: Option<String>,
+    /// One line: what the agent owns.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub area: Option<String>,
+    /// Reserved for the organization's lanes; not shown yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub lane: Option<String>,
+    /// When the operator last set it (epoch ms). `0` on an effective seat,
+    /// one computed for a spawned worker and never stored.
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub set_at_ms: i64,
+}
+
+/// `DefinitionRecordV1::seat`'s reader: a seat this build can't read is
+/// dropped (logged) rather than failing the whole record, which would take
+/// the agent off the roster.
+fn lenient_seat<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<AgentSeat>, D::Error> {
+    let raw = Option::<serde_json::Value>::deserialize(d)?;
+    Ok(raw.and_then(|v| match serde_json::from_value::<AgentSeat>(v) {
+        Ok(seat) => Some(seat),
+        Err(e) => {
+            tracing::warn!(error = %e, "def registry: unreadable seat ignored");
+            None
+        }
+    }))
+}
+
 /// v1 definition payload — a faithful mirror of `AgentDefinition`'s
 /// columns, PLUS the per-definition content + skills blobs (which live in
 /// separate per-version tables and must travel with the definition for a
@@ -131,6 +189,21 @@ pub struct DefinitionRecordV1 {
     /// the container_* fields — no envelope bump.
     #[serde(default)]
     pub use_ambient_login: i64,
+    /// The slugs this agent had before its current one, oldest first. Never
+    /// shortened: `DefinitionStore::upsert` keeps every entry already on disk,
+    /// and a mirror write can't put one of them back as `slug` (see
+    /// `merge_for_write`). Omitted when empty, so a writer that doesn't know
+    /// the field leaves the file's copy alone (`merge_known`); additive like
+    /// `use_ambient_login`, no envelope bump.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub former_slugs: Vec<FormerSlug>,
+    /// The agent's seat (`SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md` §2).
+    /// Only `DefinitionStore::set_seat` writes or removes it: the mirror
+    /// writes leave it out, so `merge_for_write` keeps the file's copy, as it
+    /// does for a writer that doesn't know the field. Additive like
+    /// `former_slugs`, no envelope bump.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "lenient_seat")]
+    pub seat: Option<AgentSeat>,
     /// System-prompt / mcp / env / soul / startup blobs (db_agent_content),
     /// embedded so a cross-channel agent launches with its instructions.
     #[serde(default)]
@@ -216,10 +289,77 @@ mod tests {
                 container_volumes: "[]".to_string(),
                 container_name: String::new(),
                 use_ambient_login: 0,
+                former_slugs: Vec::new(),
+                seat: None,
                 content: Vec::new(),
                 skills: Vec::new(),
             },
         }
+    }
+
+    /// `former_slugs` is optional both ways: a file without it reads as
+    /// empty, and an empty list isn't written, so an older reader sees the
+    /// same file it always did.
+    #[test]
+    fn former_slugs_default_empty_and_round_trip() {
+        let raw = serde_json::json!({
+            "schema_version": 1,
+            "data": { "id": "abc", "name": "Demo", "provider": "claude" }
+        });
+        let parsed: DefinitionRecord = serde_json::from_value(raw).unwrap();
+        assert!(parsed.data.former_slugs.is_empty());
+        let written = serde_json::to_value(&parsed).unwrap();
+        assert!(written.pointer("/data/former_slugs").is_none(), "an empty list is not written");
+
+        let mut r = rec("abc");
+        r.data.former_slugs = vec![FormerSlug { slug: "loap-loap-2".into(), retired_at: 7 }];
+        let back: DefinitionRecord = serde_json::from_value(serde_json::to_value(&r).unwrap()).unwrap();
+        assert_eq!(back, r);
+    }
+
+    /// A seat round-trips; a record from before seats reads as none and is
+    /// written without the key; a seat this build can't read is dropped
+    /// without losing the record.
+    #[test]
+    fn seat_round_trips_and_defaults_to_none() {
+        let raw = serde_json::json!({
+            "schema_version": 1,
+            "data": { "id": "abc", "name": "Demo", "provider": "claude" }
+        });
+        let parsed: DefinitionRecord = serde_json::from_value(raw).unwrap();
+        assert!(parsed.data.seat.is_none());
+        assert!(serde_json::to_value(&parsed).unwrap().pointer("/data/seat").is_none());
+
+        let mut r = rec("abc");
+        r.data.seat = Some(AgentSeat {
+            role: "leader".into(),
+            qualifier: Some("product".into()),
+            lead: None,
+            area: Some("agent pane".into()),
+            lane: None,
+            set_at_ms: 7,
+        });
+        let written = serde_json::to_value(&r).unwrap();
+        assert_eq!(written.pointer("/data/seat/role"), Some(&serde_json::json!("leader")));
+        assert!(written.pointer("/data/seat/lead").is_none(), "an absent lead is not written");
+        let back: DefinitionRecord = serde_json::from_value(written).unwrap();
+        assert_eq!(back, r);
+
+        // A role this build doesn't know still loads (seats inform, a newer
+        // build may add roles); a seat of the wrong shape is dropped.
+        let newer = serde_json::json!({
+            "schema_version": 1,
+            "data": { "id": "abc", "name": "Demo", "provider": "claude", "seat": { "role": "reviewer", "set_at_ms": 1 } }
+        });
+        let parsed: DefinitionRecord = serde_json::from_value(newer).unwrap();
+        assert_eq!(parsed.data.seat.map(|s| s.role).as_deref(), Some("reviewer"));
+        let broken = serde_json::json!({
+            "schema_version": 1,
+            "data": { "id": "abc", "name": "Demo", "provider": "claude", "seat": "leader" }
+        });
+        let parsed: DefinitionRecord = serde_json::from_value(broken).unwrap();
+        assert!(parsed.data.seat.is_none());
+        assert_eq!(parsed.data.name, "Demo");
     }
 
     #[test]

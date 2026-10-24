@@ -100,13 +100,20 @@ pub(super) async fn handle_pty_shell_create(
     meta.insert(META_KEY_PTYSHELL_BOOT_ID.to_string(), json!(&*state.boot_id));
     // The agent's plain-`gh` guard, as its Shell and its own CLI get it: the
     // agent types into this shell, so `gh` here must not act as the user.
-    let agent_env: std::collections::HashMap<String, String> = state
+    let mut agent_env: std::collections::HashMap<String, String> = state
         .mstore
         .get::<crate::backend::obj::Block>(&req.agent_block_id)
         .ok()
         .flatten()
         .map(|b| crate::backend::blockcontroller::cmd_env_of(&b.meta))
         .unwrap_or_default();
+    // Its current slug, not a persisted one, names the guard directory, and
+    // the shell gets the identity it may carry (`pty_child_identity_env`).
+    crate::server::agent_handlers::identity_env::carry_block_slug_identity_env(&state.mstore, &req.agent_block_id, &mut agent_env);
+    let child_env = crate::server::agent_handlers::identity_env::pty_child_identity_env(&agent_env);
+    if !child_env.is_empty() {
+        meta.insert(blockcontroller::META_KEY_CMD_ENV.to_string(), serde_json::Value::Object(child_env));
+    }
     meta.insert(
         crate::backend::gh_guard::META_KEY_PTYSHELL_GH_CONFIG_DIR.to_string(),
         json!(crate::backend::gh_guard::guard_dir_for(&agent_env)),

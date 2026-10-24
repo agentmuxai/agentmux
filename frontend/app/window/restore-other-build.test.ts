@@ -29,7 +29,6 @@ vi.mock("@/app/notification/usenotification", () => ({
 }));
 
 import {
-    chooseLayoutFromOtherBuild,
     layoutSummary,
     NOTICE_ID,
     offerLayoutFromOtherBuild,
@@ -144,35 +143,6 @@ describe("the offer at a cold start", () => {
         press("Restore");
         await vi.waitFor(() => expect(notice().type).toBe("error"));
         expect(notice().message).toBe("0.59.32 has no saved layout");
-    });
-});
-
-describe("☰ → Layouts → Restore layout from another build…", () => {
-    it("lists every layout found, offered or not, each with its own button", async () => {
-        h.OtherBuildLayoutsCommand.mockResolvedValue({
-            offer: false,
-            layouts: [layout(), layout({ channel: "stable", version: "0.59.30", saved_at_ms: NOW - 40 * 86_400_000 })],
-        });
-        await chooseLayoutFromOtherBuild();
-        const n = notice();
-        expect(n.id).toBe(NOTICE_ID);
-        expect(n.actions?.map((a) => a.label)).toEqual(["Restore 0.59.32", "Restore 0.59.30", "Not now"]);
-        expect(n.message.split("\n")).toHaveLength(2);
-        h.RestoreOtherBuildLayoutCommand.mockResolvedValue({ workspace_id: "ws", tab_ids: ["t"], replaced_default: false, other_windows: 0 });
-        press("Restore 0.59.30");
-        await vi.waitFor(() =>
-            expect(h.RestoreOtherBuildLayoutCommand).toHaveBeenCalledWith(
-                { tag: "tab-client" },
-                { window_id: "win-7", channel: "stable", version: "0.59.30" },
-            ),
-        );
-    });
-
-    it("says so when no other build has a layout", async () => {
-        h.OtherBuildLayoutsCommand.mockResolvedValue({ offer: false, layouts: [] });
-        await chooseLayoutFromOtherBuild();
-        expect(notice().title).toBe("No other build has a saved layout");
-        expect(notice().actions).toBeUndefined();
     });
 });
 

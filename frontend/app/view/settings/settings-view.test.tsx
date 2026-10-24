@@ -53,6 +53,10 @@ vi.mock("./sections/widgets-section", async (importOriginal) => ({
     ...(await importOriginal<object>()),
     WidgetsSection: () => <div data-testid="widgets-section" />,
 }));
+vi.mock("./sections/agents-section", async (importOriginal) => ({
+    ...(await importOriginal<object>()),
+    AgentsSection: () => <div data-testid="agents-section" />,
+}));
 vi.mock("./sections/advanced-section", async (importOriginal) => ({
     ...(await importOriginal<object>()),
     AdvancedSection: () => <div data-testid="advanced-section" />,
@@ -74,11 +78,11 @@ describe("SettingsView section tabs", () => {
         return { ...result, model };
     }
 
-    it("orders the tabs as Appearance, Window & Panes, Browser, Terminal, Sounds, Notifications & Tray, Recording, Paired devices, Widgets, Advanced", () => {
+    it("orders the tabs as Appearance, Window & Panes, Browser, Terminal, Sounds, Notifications & Tray, Recording, Paired devices, Widgets, Agents, Advanced", () => {
         renderSettings();
         const tabs = screen.getByRole("tablist", { name: "Settings section" });
         const labels = Array.from(tabs.querySelectorAll('[role="tab"]')).map((el) => el.textContent);
-        expect(labels).toEqual(["Appearance", "Window & Panes", "Browser", "Terminal", "Sounds", "Notifications & Tray", "Recording", "Paired devices", "Widgets", "Advanced"]);
+        expect(labels).toEqual(["Appearance", "Window & Panes", "Browser", "Terminal", "Sounds", "Notifications & Tray", "Recording", "Paired devices", "Widgets", "Agents", "Advanced"]);
     });
 
     it("defaults to the Appearance section visible", () => {
@@ -266,5 +270,21 @@ describe("Settings pane: the section to open at", () => {
     it("opens at Appearance when none, or an unknown one, is asked for", () => {
         expect(openWith({ view: "settings" })).toBe("Appearance");
         expect(openWith({ view: "settings", "settings:section": "nope" })).toBe("Appearance");
+    });
+});
+
+describe("SettingsView zoom", () => {
+    afterEach(() => cleanup());
+
+    it("zooms the whole view with the pane's shared zoom", () => {
+        const [meta] = createSignal<Record<string, unknown>>({ "term:zoom": 1.25 });
+        const block = { meta, setMeta: async () => {} };
+        const { container } = render(() => <SettingsView model={new SettingsViewModel(block as never)} />);
+        expect((container.querySelector(".settings-view-container") as HTMLElement).style.zoom).toBe("1.25");
+    });
+
+    it("stays at 100% without a block", () => {
+        const { container } = render(() => <SettingsView model={new SettingsViewModel()} />);
+        expect((container.querySelector(".settings-view-container") as HTMLElement).style.zoom).toBe("1");
     });
 });

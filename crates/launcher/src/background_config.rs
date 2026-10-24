@@ -47,7 +47,7 @@
 //! A settings file that cannot be read or parsed leaves both at their default
 //! (the user's real choice is unknown): background off, tray on.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Settings keys. Flat `namespace:key`, like every other `settings.json` entry.
 pub const BACKGROUND_KEY: &str = "app:runinbackground";
@@ -93,7 +93,7 @@ pub fn read_settings(settings_path: &Path) -> Settings {
     let Ok(text) = std::fs::read_to_string(settings_path) else {
         return s;
     };
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+    let Some(json) = agentmux_common::settings_jsonc::parse_jsonc(&text) else {
         return s;
     };
     if let Some(v) = json.get(BACKGROUND_KEY).and_then(|v| v.as_bool()) {
@@ -115,8 +115,8 @@ pub fn apply(args: &[String]) -> Resolved {
     let env_tray = std::env::var_os(ENV_TRAY).is_some();
     let flag = crate::autostart::background_requested(args);
     let settings = std::panic::catch_unwind(|| {
-        config_dir()
-            .map(|d| read_settings(&d.join("settings.json")))
+        crate::data_dir::settings_file()
+            .map(|f| read_settings(&f))
             .unwrap_or_default()
     })
     .unwrap_or_default();
@@ -131,20 +131,10 @@ pub fn apply(args: &[String]) -> Resolved {
     r
 }
 
-/// Best-effort config dir (holds settings.json), resolved the same way
-/// `splash_config` does — early and failure-tolerant.
-fn config_dir() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    let exe_dir = exe.parent()?;
-    let version = env!("CARGO_PKG_VERSION");
-    crate::data_dir::resolve_paths(exe_dir, version)
-        .ok()
-        .map(|p| p.config_dir)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn write_tmp(tag: &str, content: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!(

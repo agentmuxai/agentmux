@@ -191,6 +191,12 @@ impl SubprocessController {
                     .to_string(),
             );
         }
+        // A host Codex pane compacts through a short-lived App Server
+        // (codex_compact.rs); inside a container that isn't built yet, and
+        // `exec` would take "/compact" as a prompt.
+        if super::codex_compact::is_compact_request(&config) {
+            return Err("Compacting a Codex agent that runs in a container isn't supported yet.".to_string());
+        }
         if !self.try_lock_run() {
             let mut inner = self.inner.lock().unwrap();
             tracing::info!(

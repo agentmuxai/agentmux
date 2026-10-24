@@ -253,6 +253,20 @@ pub fn spawn_background_subsystems(
     reactive_handler.set_block_liveness(Arc::new(|block_id: &str| {
         backend::blockcontroller::get_controller(block_id).is_some()
     }));
+    // A slug or display name an agent was renamed from still reaches it, once
+    // no live name or current one has (SPEC_FORK_SLUG_MIGRATION_2026_10_22.md
+    // Phase 1; `former_names` for display names).
+    let former_slug_store = Arc::clone(mstore);
+    reactive_handler.set_former_slug_resolver(Arc::new(move |name: &str| {
+        former_slug_store.former_name_owner(name).ok().flatten().map(|owner| owner.uid)
+    }));
+    // And the route form of an agent's current display name ("Naki-2" for
+    // "Naki #2"), which only a pane that had a typed turn is registered
+    // under: delivery only, before former names (#1459).
+    let display_route_store = Arc::clone(mstore);
+    reactive_handler.set_display_route_resolver(Arc::new(move |name: &str| {
+        display_route_store.display_route_owner(name).ok().flatten().map(|owner| owner.uid)
+    }));
     let poller = Arc::new(Poller::new(
         PollerConfig {
             muxbus_url: None,

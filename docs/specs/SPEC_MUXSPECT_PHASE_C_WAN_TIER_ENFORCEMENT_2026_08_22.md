@@ -1,7 +1,8 @@
 # SPEC: `muxspect` Phase C — WAN tier enforcement
 
 **Date:** 2026-08-22
-**Status:** Implemented (scoped — see §2 for why this is small) — #2765
+**Status:** implemented (scoped — see §2 for why this is small) — #2765. Note: WAN `trusted_peers` grants are never honored (`storage/conversation_trust_grants.rs`).
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
 **Author:** Korp
 **Repo touched:** `agentmux` (`agentmux-srv`)
 **Related:** [`docs/specs/SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md`](SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md)

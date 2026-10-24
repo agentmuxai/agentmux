@@ -15,6 +15,7 @@
 //! says so, and the pane then offers to delete the file.
 
 mod bitwarden;
+mod bitwarden_encrypted;
 mod env;
 mod kdbx;
 pub use kdbx::{MAX_ARGON_ITERATIONS, MAX_ARGON_MEMORY, MAX_ARGON_PARALLELISM, MAX_KEY_FILE};
@@ -188,7 +189,7 @@ pub fn read_keyed(bytes: &[u8], file_name: &str, mapping: Option<&Mapping>, pass
         if let Some(own) = read_own_json(text) {
             return own;
         }
-        return bitwarden::read(text);
+        return bitwarden::read(text, passphrase);
     }
     if file_name.to_ascii_lowercase().ends_with(".env") || env::looks_like_env(text) {
         return env::read(text);

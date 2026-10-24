@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createEffect, untrack, type Accessor } from "solid-js";
+import { createEffect, onCleanup, untrack, type Accessor } from "solid-js";
 import { useAgentDormant } from "../agent-dormancy";
 import type { DocumentState } from "../types";
 
@@ -30,6 +30,69 @@ export const RETURN_SETTLE_MS = 400;
  * have been had the reader been watching, and its text can leave memory.
  */
 export const CARRY_MAX_MS = 60_000;
+
+/** The most ids kept of rows that finished or arrived while the pane was hidden. */
+export const AWAY_ARRIVALS_MAX = 200;
+/** How long after a show the away rows wait for the layout to settle before they are judged anyway. */
+export const AWAY_APPLY_MAX_MS = 3000;
+
+/**
+ * Rows that finished (a tool) or arrived (a jekt) while the pane was hidden.
+ * Nobody watched them, so they aren't held open then (a held row keeps its
+ * output in memory, #4847). Only their ids are kept, so the cost is a few
+ * hundred short strings. When the pane is shown again, the ones on screen are
+ * held, as they would have been had the reader been watching
+ * (`awayRowsToHold`); the rest, already above the viewport, collapse as they
+ * would have scrolled off.
+ */
+export class AwayArrivals {
+    private ids = new Set<string>();
+    constructor(private readonly max: number = AWAY_ARRIVALS_MAX) {}
+    /** Remember a row's id (its stable node id, never an index). The oldest go past the cap. */
+    add(id: string): void {
+        this.ids.delete(id);
+        this.ids.add(id);
+        while (this.ids.size > this.max) this.ids.delete(this.ids.values().next().value as string);
+    }
+    get size(): number {
+        return this.ids.size;
+    }
+    /** Every id, oldest first, and forget them. */
+    take(): string[] {
+        const out = [...this.ids];
+        this.ids.clear();
+        return out;
+    }
+    clear(): void {
+        this.ids.clear();
+    }
+}
+
+export interface AwayHoldInput {
+    ids: Iterable<string>;
+    held: ReadonlySet<string>;
+    pinned: ReadonlySet<string>;
+    viewportTop: number;
+    viewportBottom: number;
+    /** The row's box in the same space as the viewport, or null when it isn't rendered (virtualized away, removed, replaced). */
+    rect: (id: string) => { top: number; bottom: number } | null;
+}
+
+/**
+ * Which rows that arrived while the pane was hidden to hold open now: those
+ * on screen. A row that isn't rendered (gone, replaced, virtualized away) or
+ * is off screen is left alone, so the held set after a long absence is at most
+ * the rows in view, however many arrived.
+ */
+export function awayRowsToHold(input: AwayHoldInput): string[] {
+    const hold: string[] = [];
+    for (const id of input.ids) {
+        if (input.held.has(id) || input.pinned.has(id)) continue;
+        const r = input.rect(id);
+        if (r && r.bottom > input.viewportTop && r.top < input.viewportBottom) hold.push(id);
+    }
+    return hold;
+}
 
 export interface HeldReleaseInput {
     held: Iterable<string>;
@@ -80,18 +143,61 @@ export function useScrolledOffRelease(opts: {
     onRelease: (id: string) => void;
     /** The show cover is up: a carried row under it isn't seen yet. */
     covered: () => boolean;
+    /** Rows that finished or arrived while the pane was hidden, held if on screen once it is shown. */
+    away?: AwayArrivals;
+    onHold?: (id: string) => void;
 }): () => void {
     const dormant = useAgentDormant();
     let carried = new Set<string>();
     let shownAt = 0;
     let wasDormant = untrack(dormant);
+    // Judge the rows that arrived while hidden once the show has settled.
+    let awayTimer: ReturnType<typeof setTimeout> | undefined;
+    const applyAway = (): void => {
+        awayTimer = undefined;
+        const away = opts.away;
+        const scroller = opts.scroller();
+        if (!away || away.size === 0 || untrack(dormant)) return; // hidden again: keep them for the next show
+        const settled = performance.now() - shownAt >= RETURN_SETTLE_MS && !opts.covered();
+        if (!settled && performance.now() - shownAt < AWAY_APPLY_MAX_MS) {
+            awayTimer = setTimeout(applyAway, 100);
+            return;
+        }
+        const ids = away.take();
+        if (!scroller || !opts.onHold) return;
+        const box = scroller.getBoundingClientRect(); // perf:allow-layout-read — once per show
+        if (box.width === 0 && box.height === 0) return;
+        const ds = untrack(opts.documentState);
+        const hold = awayRowsToHold({
+            ids,
+            held: ds.heldOpenNodes,
+            pinned: ds.pinnedNodes,
+            viewportTop: box.top,
+            viewportBottom: box.bottom,
+            rect: (id) => {
+                const el = scroller.querySelector(`[data-node-id="${id}"]`) as HTMLElement | null;
+                return el ? el.getBoundingClientRect() : null; // perf:allow-layout-read — once per show
+            },
+        });
+        for (const id of hold) opts.onHold(id);
+    };
     createEffect(() => {
         const d = dormant();
         if (wasDormant && !d) {
             carried = new Set(untrack(opts.documentState).heldOpenNodes);
             shownAt = performance.now();
+            if (awayTimer) clearTimeout(awayTimer);
+            awayTimer = setTimeout(applyAway, RETURN_SETTLE_MS + 50);
+        }
+        if (d && awayTimer) {
+            clearTimeout(awayTimer);
+            awayTimer = undefined;
         }
         wasDormant = d;
+    });
+    onCleanup(() => {
+        if (awayTimer) clearTimeout(awayTimer);
+        opts.away?.clear();
     });
     return () => {
         const scroller = opts.scroller();

@@ -10,6 +10,21 @@ use crate::backend::service::{self, WebCallType, WebReturnType};
 use super::super::AppState;
 use super::reducer_helpers::{dispatch_to_reducer, publish_events};
 
+/// How long a restore asks for waits for a window close still on its way.
+pub(crate) const RESTORE_WAITS_FOR_CLOSE: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Windows asking to restore decide one at a time, so exactly one restores
+/// when several open together (a double click on the tray icon) (#5363).
+static RESTORE_ELECTION: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// When a window last asked for and got a restore (epoch ms, client meta).
+const RESTORED_AT_META_KEY: &str = "session:restored_at_ms";
+
+/// An opener arriving this soon after a restore, beside another window still
+/// opening, opens the default panes at once: the window it would wait for is
+/// the one just restored, not one closing.
+const JUST_RESTORED_MS: i64 = 10_000;
+
 // Phase E.5.8 — CreateWindow migrated through the reducer.
 // Two paths: (1) empty workspace_id → CreateWorkspace +
 // CreateTab + CreateWindow as a multi-step dispatch (mirrors
@@ -35,14 +50,48 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
     // misused call with `restoreIfAvailable: true` mid-session (when other
     // windows are legitimately still open) can't resurrect the last snapshot
     // into a spurious extra workspace.
-    let client_windowids_empty = store
-        .get_all::<Client>()
-        .ok()
-        .and_then(|cs| cs.into_iter().next())
-        .map(|c| c.windowids.is_empty())
-        .unwrap_or(true);
-    let restore_if_available: bool =
-        service::get_arg(args, 3).unwrap_or(false) && client_windowids_empty;
+    let windowids_empty = || {
+        store.get_all::<Client>().ok().and_then(|cs| cs.into_iter().next()).map(|c| c.windowids.is_empty()).unwrap_or(true)
+    };
+    let wants_restore: bool = service::get_arg(args, 3).unwrap_or(false);
+    let mut client_windowids_empty = windowids_empty();
+    // Held until this window is registered, so the next opener sees it.
+    let mut _election = None;
+    if wants_restore {
+        let elected = RESTORE_ELECTION.lock().await;
+        client_windowids_empty = windowids_empty();
+        let restored_at = store
+            .get_all::<Client>()
+            .ok()
+            .and_then(|cs| cs.into_iter().next())
+            .and_then(|c| c.meta.get(RESTORED_AT_META_KEY).and_then(|v| v.as_i64()));
+        // The host saw another window still opening (arg 7): the window srv
+        // lists is that concurrent opener's, not a restored window closing
+        // again, which this waits for like any close (#5363).
+        let another_opening: bool = service::get_optional_arg(args, 7).unwrap_or(None).unwrap_or(false);
+        let just_restored =
+            another_opening && restored_at.is_some_and(|at| agentmux_common::time::now_ms() - at < JUST_RESTORED_MS);
+        // A window the tray opens right after the last one closed can arrive
+        // before that close does (the host sends it on its own thread): wait
+        // briefly for it, rather than open the default panes and lose the
+        // window it closed (#5363).
+        if !client_windowids_empty && !just_restored {
+            let deadline = std::time::Instant::now() + RESTORE_WAITS_FOR_CLOSE;
+            while !client_windowids_empty && std::time::Instant::now() < deadline {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                client_windowids_empty = windowids_empty();
+            }
+        }
+        if client_windowids_empty {
+            super::session_windows::set_client_meta(
+                store,
+                RESTORED_AT_META_KEY,
+                Some(serde_json::json!(agentmux_common::time::now_ms())),
+            );
+        }
+        _election = Some(elected);
+    }
+    let restore_if_available: bool = wants_restore && client_windowids_empty;
     // "Open in New Window" from a widget's context menu (arg 4/5, optional,
     // same additive pattern as restoreIfAvailable above) — when present,
     // seed the fresh tab with ONLY this one block instead of the default
@@ -56,12 +105,20 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
     // (this flag set, but the function never reaches that final clear)
     // leaves the snapshot intact for the next launch to retry.
     let mut did_restore = false;
+    // What that restore loaded, and from which copy: the open workspace keeps
+    // it as its last clean load once this window is up (`user_workspace`).
+    let mut restored_copy = None;
     // Resolve / create the workspace.
     let (ws_id, fresh_workspace_events): (String, Vec<agentmux_common::ipc::Event>) =
         if requested_ws_id.is_empty() {
             let restored_from_last_session = if restore_if_available {
-                match super::session_restore::restore_last_session(state).await {
-                    Ok(Some(result)) => Some(result),
+                // The newer of the session record and the open workspace's
+                // record, then that workspace's older copies.
+                match super::user_workspace::restore_at_launch(state).await {
+                    Ok(Some(restored)) => {
+                        restored_copy = Some((restored.loaded, restored.from));
+                        Some(restored.main)
+                    }
                     Ok(None) => None,
                     Err(e) => {
                         tracing::warn!(
@@ -78,222 +135,10 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
                 did_restore = true;
                 result
             } else {
-            // Step 1: create workspace.
-            let ws_events = dispatch_to_reducer(
-                state,
-                agentmux_common::ipc::Command::CreateWorkspace {
-                    name: String::new(),
-                },
-            )
-            .await;
-            if let Some(err_msg) = ws_events.iter().find_map(|e| match e {
-                agentmux_common::ipc::Event::Error { message, .. } => {
-                    Some(message.clone())
+                match create_default_contents(state, seed_view, seed_meta, restore_if_available).await {
+                    Ok(made) => made,
+                    Err(e) => return WebReturnType::error(e),
                 }
-                _ => None,
-            }) {
-                return WebReturnType::error(err_msg);
-            }
-            for ev in &ws_events {
-                if let Err(e) =
-                    crate::persist_subscriber::apply_event_to_mstore(ev, store)
-                {
-                    return WebReturnType::error(format!(
-                        "CreateWindow: SQLite write failed: {}",
-                        e
-                    ));
-                }
-            }
-            let new_ws_id = ws_events
-                .iter()
-                .find_map(|e| match e {
-                    agentmux_common::ipc::Event::WorkspaceCreated {
-                        workspace_id, ..
-                    } => Some(workspace_id.clone()),
-                    _ => None,
-                })
-                .unwrap_or_default();
-            // Step 2: create tab.
-            let tab_events = dispatch_to_reducer(
-                state,
-                agentmux_common::ipc::Command::CreateTab {
-                    workspace_id: new_ws_id.clone(),
-                    name: String::new(),
-                },
-            )
-            .await;
-            if let Some(err_msg) = tab_events.iter().find_map(|e| match e {
-                agentmux_common::ipc::Event::Error { message, .. } => {
-                    Some(message.clone())
-                }
-                _ => None,
-            }) {
-                // Compensate: delete the empty workspace.
-                let comp = dispatch_to_reducer(
-                    state,
-                    agentmux_common::ipc::Command::DeleteWorkspace {
-                        workspace_id: new_ws_id.clone(),
-                        // Internal compensation path — not
-                        // saga-driven (Step 5 PR 2 added the
-                        // `force` flag for saga provenance).
-                        force: false,
-                    },
-                )
-                .await;
-                for ev in &comp {
-                    let _ = crate::persist_subscriber::apply_event_to_mstore(ev, store);
-                }
-                publish_events(state, &comp);
-                return WebReturnType::error(err_msg);
-            }
-            for ev in &tab_events {
-                if let Err(e) =
-                    crate::persist_subscriber::apply_event_to_mstore(ev, store)
-                {
-                    return WebReturnType::error(format!(
-                        "CreateWindow: SQLite write failed: {}",
-                        e
-                    ));
-                }
-            }
-            // Seed the fresh tab so "Open another window" matches first
-            // launch instead of opening blank: the default 3-pane launch
-            // layout (agent | sysinfo / swarm), UNLESS `seed_view` (arg 4)
-            // was supplied — then seed a single pane with just that view
-            // instead (a widget's "Open in New Window"). Only this
-            // fresh-workspace branch seeds; tear-off (existing workspace,
-            // the `else` arm) reattaches its populated workspace as-is.
-            // Non-fatal: a seed failure leaves an empty tab (the prior
-            // behaviour) rather than failing window creation.
-            // See docs/retro/retro-blank-new-window-2026-06-21.md.
-            //
-            // 2nd-window-tear-off desync fix (#1681): the seed blocks
-            // MUST be created through the reducer (CreateBlock command),
-            // NOT via the store-only `seed_default_layout`/`create_block`
-            // path. This handler runs AFTER bootstrap, so anything
-            // written straight to SQLite is invisible to the in-memory
-            // reducer `srv_state` until the next restart. A new window
-            // seeded store-only renders fine (frontend reads SQLite) but
-            // its blocks are absent from `srv_state`, so a later
-            // `TearOffBlock` from that window is rejected "block not
-            // found" (ws/tab exist — they went through the reducer — but
-            // the block did not). Dispatch CreateBlock per pane so the
-            // blocks land in BOTH srv_state and (via the subscriber)
-            // SQLite, then write the shared layout referencing them.
-            let mut block_seed_events: Vec<agentmux_common::ipc::Event> = Vec::new();
-            if let Some(new_tab_id) = tab_events.iter().find_map(|e| match e {
-                agentmux_common::ipc::Event::TabCreated { tab_id, .. } => {
-                    Some(tab_id.clone())
-                }
-                _ => None,
-            }) {
-                let seed_views: Vec<String> = match &seed_view {
-                    Some(v) => vec![v.clone()],
-                    None => vec!["agent".to_string(), "swarm".to_string(), "sysinfo".to_string()],
-                };
-                // Dispatch the seed block(s) through the reducer. For the
-                // default 3-pane case, order is the one
-                // `default_three_pane_tree` expects positionally (agent,
-                // swarm, sysinfo) — NOT top-to-bottom display order, since
-                // sysinfo renders above swarm.
-                let mut seeded_ids: Vec<String> = Vec::new();
-                for view in &seed_views {
-                    let meta = if seed_view.is_some() {
-                        seed_meta.clone().unwrap_or_else(|| serde_json::json!({ "view": view }))
-                    } else {
-                        serde_json::json!({ "view": view })
-                    };
-                    let evs = dispatch_to_reducer(
-                        state,
-                        agentmux_common::ipc::Command::CreateBlock {
-                            tab_id: new_tab_id.clone(),
-                            meta,
-                        },
-                    )
-                    .await;
-                    if let Some(err_msg) = evs.iter().find_map(|e| match e {
-                        agentmux_common::ipc::Event::Error { message, .. } => {
-                            Some(message.clone())
-                        }
-                        _ => None,
-                    }) {
-                        tracing::warn!(
-                            tab_id = %new_tab_id,
-                            view = %view,
-                            error = %err_msg,
-                            "CreateWindow: seed block create failed — opening blank tab"
-                        );
-                        break;
-                    }
-                    for ev in &evs {
-                        if let Err(e) =
-                            crate::persist_subscriber::apply_event_to_mstore(ev, store)
-                        {
-                            tracing::warn!(
-                                tab_id = %new_tab_id,
-                                error = %e,
-                                "CreateWindow: seed block SQLite write failed"
-                            );
-                        }
-                    }
-                    if let Some(block_id) = evs.iter().find_map(|e| match e {
-                        agentmux_common::ipc::Event::BlockCreated { block_id, .. } => {
-                            Some(block_id.clone())
-                        }
-                        _ => None,
-                    }) {
-                        seeded_ids.push(block_id);
-                    }
-                    block_seed_events.extend(evs);
-                }
-
-                let tree_and_focus = if seed_view.is_some() && seeded_ids.len() == 1 {
-                    // "Open in New Window" from a widget — single-pane seed,
-                    // no split. See single_leaf_tree's doc comment.
-                    Some(crate::backend::wcore::single_leaf_tree(&seeded_ids[0]))
-                } else if seed_view.is_none() && seeded_ids.len() == 3 {
-                    // A cold start with nothing of its own to restore: the
-                    // window may offer a layout another build saved.
-                    if restore_if_available {
-                        super::session_other_builds::remember_seeded_default(store, &new_ws_id, &new_tab_id, &seeded_ids);
-                    }
-                    // SPEC_864 Phase 3 — post-bootstrap seed routes
-                    // through the reducer (single writer of
-                    // db_layout); the tree shape is shared with the
-                    // pre-bootstrap store-direct first-launch seed
-                    // via `default_three_pane_tree`.
-                    Some(crate::backend::wcore::default_three_pane_tree(
-                        &seeded_ids[0],
-                        &seeded_ids[1],
-                        &seeded_ids[2],
-                    ))
-                } else {
-                    None
-                };
-
-                if let Some((tree, focused, leaforder)) = tree_and_focus {
-                    if let Err(e) = super::reducer_helpers::seed_layout_via_reducer(
-                        state,
-                        &new_tab_id,
-                        tree,
-                        focused,
-                        leaforder,
-                        String::new(),
-                    )
-                    .await
-                    {
-                        tracing::warn!(
-                            tab_id = %new_tab_id,
-                            error = %e,
-                            "CreateWindow: default layout write failed — opening blank tab"
-                        );
-                    }
-                }
-            }
-            let mut combined = ws_events;
-            combined.extend(tab_events);
-            combined.extend(block_seed_events);
-            (new_ws_id, combined)
             }
         } else {
             // Existing workspace — verify it's in the reducer
@@ -403,6 +248,9 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
     // A window a session restore rebuilt gets back the name, theme and opacity
     // it had (session_windows.rs): the main one, and each reopened beside it.
     // They are forgotten only once written.
+    super::session_windows::restored_window_opened(store, &ws_id);
+    // A closed window reopening (`TakeClosedWindow`) is open now.
+    super::session_closed::forget(store, &ws_id);
     let restored_meta = super::session_windows::restored_window_meta(store, &ws_id);
     let name_events = match (!restored_meta.is_empty()).then_some(restored_meta) {
         None => Vec::new(),
@@ -475,6 +323,9 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
             // workspace even after a genuinely successful restore.
             if did_restore {
                 super::session_restore::clear_last_session_snapshot(store);
+                if let Some((loaded, from)) = &restored_copy {
+                    super::user_workspace::after_clean_load(store, loaded, *from);
+                }
             }
             WebReturnType::success(serde_json::to_value(&win).unwrap_or_default())
         }
@@ -483,6 +334,238 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
             e
         )),
     }
+}
+
+/// A new window's contents: a workspace with one tab seeded with the default
+/// panes (agent | sysinfo / swarm), or with the single `seed_view` pane a
+/// widget's "Open in New Window" asks for. No window shows it yet. Also what
+/// a new user workspace's first window opens (`user_workspace_switch`).
+/// `offer_other_build`: a cold start with nothing to restore, which may offer
+/// a layout another build saved. Returns the workspace and the applied events,
+/// unpublished.
+pub(crate) async fn create_default_contents(
+    state: &AppState,
+    seed_view: Option<String>,
+    seed_meta: Option<serde_json::Value>,
+    offer_other_build: bool,
+) -> Result<(String, Vec<agentmux_common::ipc::Event>), String> {
+    let store = &state.mstore;
+    // Step 1: create workspace.
+    let ws_events = dispatch_to_reducer(
+        state,
+        agentmux_common::ipc::Command::CreateWorkspace {
+            name: String::new(),
+        },
+    )
+    .await;
+    if let Some(err_msg) = ws_events.iter().find_map(|e| match e {
+        agentmux_common::ipc::Event::Error { message, .. } => {
+            Some(message.clone())
+        }
+        _ => None,
+    }) {
+        return Err(err_msg);
+    }
+    for ev in &ws_events {
+        if let Err(e) =
+            crate::persist_subscriber::apply_event_to_mstore(ev, store)
+        {
+            return Err(format!(
+                "CreateWindow: SQLite write failed: {}",
+                e
+            ));
+        }
+    }
+    let new_ws_id = ws_events
+        .iter()
+        .find_map(|e| match e {
+            agentmux_common::ipc::Event::WorkspaceCreated {
+                workspace_id, ..
+            } => Some(workspace_id.clone()),
+            _ => None,
+        })
+        .unwrap_or_default();
+    // Step 2: create tab.
+    let tab_events = dispatch_to_reducer(
+        state,
+        agentmux_common::ipc::Command::CreateTab {
+            workspace_id: new_ws_id.clone(),
+            name: String::new(),
+        },
+    )
+    .await;
+    if let Some(err_msg) = tab_events.iter().find_map(|e| match e {
+        agentmux_common::ipc::Event::Error { message, .. } => {
+            Some(message.clone())
+        }
+        _ => None,
+    }) {
+        // Compensate: delete the empty workspace.
+        let comp = dispatch_to_reducer(
+            state,
+            agentmux_common::ipc::Command::DeleteWorkspace {
+                workspace_id: new_ws_id.clone(),
+                // Internal compensation path — not
+                // saga-driven (Step 5 PR 2 added the
+                // `force` flag for saga provenance).
+                force: false,
+            },
+        )
+        .await;
+        for ev in &comp {
+            let _ = crate::persist_subscriber::apply_event_to_mstore(ev, store);
+        }
+        publish_events(state, &comp);
+        return Err(err_msg);
+    }
+    for ev in &tab_events {
+        if let Err(e) =
+            crate::persist_subscriber::apply_event_to_mstore(ev, store)
+        {
+            return Err(format!(
+                "CreateWindow: SQLite write failed: {}",
+                e
+            ));
+        }
+    }
+    // Seed the fresh tab so "Open another window" matches first
+    // launch instead of opening blank: the default 3-pane launch
+    // layout (agent | sysinfo / swarm), UNLESS `seed_view` (arg 4)
+    // was supplied — then seed a single pane with just that view
+    // instead (a widget's "Open in New Window"). Only this
+    // fresh-workspace branch seeds; tear-off (existing workspace,
+    // the `else` arm) reattaches its populated workspace as-is.
+    // Non-fatal: a seed failure leaves an empty tab (the prior
+    // behaviour) rather than failing window creation.
+    // See docs/retro/retro-blank-new-window-2026-06-21.md.
+    //
+    // 2nd-window-tear-off desync fix (#1681): the seed blocks
+    // MUST be created through the reducer (CreateBlock command),
+    // NOT via the store-only `seed_default_layout`/`create_block`
+    // path. This handler runs AFTER bootstrap, so anything
+    // written straight to SQLite is invisible to the in-memory
+    // reducer `srv_state` until the next restart. A new window
+    // seeded store-only renders fine (frontend reads SQLite) but
+    // its blocks are absent from `srv_state`, so a later
+    // `TearOffBlock` from that window is rejected "block not
+    // found" (ws/tab exist — they went through the reducer — but
+    // the block did not). Dispatch CreateBlock per pane so the
+    // blocks land in BOTH srv_state and (via the subscriber)
+    // SQLite, then write the shared layout referencing them.
+    let mut block_seed_events: Vec<agentmux_common::ipc::Event> = Vec::new();
+    if let Some(new_tab_id) = tab_events.iter().find_map(|e| match e {
+        agentmux_common::ipc::Event::TabCreated { tab_id, .. } => {
+            Some(tab_id.clone())
+        }
+        _ => None,
+    }) {
+        let seed_views: Vec<String> = match &seed_view {
+            Some(v) => vec![v.clone()],
+            None => vec!["agent".to_string(), "swarm".to_string(), "sysinfo".to_string()],
+        };
+        // Dispatch the seed block(s) through the reducer. For the
+        // default 3-pane case, order is the one
+        // `default_three_pane_tree` expects positionally (agent,
+        // swarm, sysinfo) — NOT top-to-bottom display order, since
+        // sysinfo renders above swarm.
+        let mut seeded_ids: Vec<String> = Vec::new();
+        for view in &seed_views {
+            let meta = if seed_view.is_some() {
+                seed_meta.clone().unwrap_or_else(|| serde_json::json!({ "view": view }))
+            } else {
+                serde_json::json!({ "view": view })
+            };
+            let evs = dispatch_to_reducer(
+                state,
+                agentmux_common::ipc::Command::CreateBlock {
+                    tab_id: new_tab_id.clone(),
+                    meta,
+                },
+            )
+            .await;
+            if let Some(err_msg) = evs.iter().find_map(|e| match e {
+                agentmux_common::ipc::Event::Error { message, .. } => {
+                    Some(message.clone())
+                }
+                _ => None,
+            }) {
+                tracing::warn!(
+                    tab_id = %new_tab_id,
+                    view = %view,
+                    error = %err_msg,
+                    "CreateWindow: seed block create failed — opening blank tab"
+                );
+                break;
+            }
+            for ev in &evs {
+                if let Err(e) =
+                    crate::persist_subscriber::apply_event_to_mstore(ev, store)
+                {
+                    tracing::warn!(
+                        tab_id = %new_tab_id,
+                        error = %e,
+                        "CreateWindow: seed block SQLite write failed"
+                    );
+                }
+            }
+            if let Some(block_id) = evs.iter().find_map(|e| match e {
+                agentmux_common::ipc::Event::BlockCreated { block_id, .. } => {
+                    Some(block_id.clone())
+                }
+                _ => None,
+            }) {
+                seeded_ids.push(block_id);
+            }
+            block_seed_events.extend(evs);
+        }
+
+        let tree_and_focus = if seed_view.is_some() && seeded_ids.len() == 1 {
+            // "Open in New Window" from a widget — single-pane seed,
+            // no split. See single_leaf_tree's doc comment.
+            Some(crate::backend::wcore::single_leaf_tree(&seeded_ids[0]))
+        } else if seed_view.is_none() && seeded_ids.len() == 3 {
+            // A cold start with nothing of its own to restore: the
+            // window may offer a layout another build saved.
+            if offer_other_build {
+                super::session_other_builds::remember_seeded_default(store, &new_ws_id, &new_tab_id, &seeded_ids);
+            }
+            // SPEC_864 Phase 3 — post-bootstrap seed routes
+            // through the reducer (single writer of
+            // db_layout); the tree shape is shared with the
+            // pre-bootstrap store-direct first-launch seed
+            // via `default_three_pane_tree`.
+            Some(crate::backend::wcore::default_three_pane_tree(
+                &seeded_ids[0],
+                &seeded_ids[1],
+                &seeded_ids[2],
+            ))
+        } else {
+            None
+        };
+
+        if let Some((tree, focused, leaforder)) = tree_and_focus {
+            if let Err(e) = super::reducer_helpers::seed_layout_via_reducer(
+                state,
+                &new_tab_id,
+                tree,
+                focused,
+                leaforder,
+                String::new(),
+            )
+            .await
+            {
+                tracing::warn!(
+                    tab_id = %new_tab_id,
+                    error = %e,
+                    "CreateWindow: default layout write failed — opening blank tab"
+                );
+            }
+        }
+    }
+    let mut combined = ws_events;
+    combined.extend(tab_events);
+    combined.extend(block_seed_events);
+    Ok((new_ws_id, combined))
 }
 
 #[cfg(test)]

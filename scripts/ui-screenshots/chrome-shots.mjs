@@ -18,7 +18,7 @@
 //     submenus nested in their row.
 
 import { SIZES } from "./sizes.mjs";
-import { VISIBLE_BLOCK_IDS, closeTab, openNewTab, visibleCenter } from "./widget-shots.mjs";
+import { VISIBLE_BLOCK_IDS, closeTab, openNewTab, openWidget, visibleCenter } from "./widget-shots.mjs";
 
 const VIEWPORT = SIZES.medium;
 
@@ -142,11 +142,11 @@ async function maximize(session, pane) {
     throw new Error("the pane didn't maximize");
 }
 
-/** Opens Settings (hamburger → Settings) in the current tab and maximizes its
- *  pane; returns the pane's selector. */
+/** Opens Settings from the widget bar (by its icon or the More list; the
+ *  hamburger menu has no Settings since #5357) in the current tab and
+ *  maximizes its pane; returns the pane's selector. */
 async function openSettings(session) {
-    await openHamburger(session);
-    await session.clickText(MENU, "Settings");
+    await openWidget(session, { label: "Settings", icon: "cog" });
     let pane = null;
     for (let i = 0; i < 20 && !pane; i++) {
         await session.wait(250);
@@ -276,7 +276,7 @@ export const shots = [
     ...[
         ["Theme", "theme"],
         ["Opacity", "opacity"],
-        ["Layouts", "layouts"],
+        ["Workspaces", "workspaces"],
     ].map(([label, key]) =>
         shot({
             id: `chrome-hamburger-${key}`,

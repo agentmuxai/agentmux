@@ -108,6 +108,7 @@ use crate::backend::rpc_types::{RpcMessage};
 
 fn agent_def(id: &str, working_directory: &str) -> AgentDefinition {
     AgentDefinition {
+        seat: None,
         conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
         id: id.to_string(),
         slug: id.to_string(),
@@ -1158,6 +1159,7 @@ async fn list_all_memory_targets_dedupes_an_agent_present_in_both_db_agents_and_
     let state = crate::server::tests::test_state();
     let config_dir = tempfile::tempdir().unwrap();
     let mut def = crate::backend::storage::AgentDefinition {
+        seat: None,
         conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
         id: "dup-agent".to_string(),
         slug: "dup-agent".to_string(),

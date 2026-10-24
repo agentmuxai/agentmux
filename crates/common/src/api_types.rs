@@ -325,11 +325,11 @@ pub struct PtyShellStopResponse {
     pub released: bool,
 }
 
-// ── Inject (SendMessage + Loop) ───────────────────────────────────────────────
+// ── Inject (Message + Schedule) ───────────────────────────────────────────────
 
 /// `POST /agentmux/reactive/inject` — deliver a message to an agent.
 ///
-/// Used by the `SendMessage` and `Loop` MCP tools.
+/// Used by the `Message` and `Schedule` MCP tools.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct InjectRequest {
     pub target_agent: String,
@@ -1011,6 +1011,61 @@ pub struct RequestUpgradeRequest {
     /// The release the agent expects; refused unless it is the latest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+}
+
+/// A window as `Desktop` names it to srv: the id `apps` gave, the app's
+/// executable (name or path), and the window's title.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DesktopWindowRef {
+    pub id: u32,
+    pub app: String,
+    pub title: String,
+}
+
+/// `POST /api/v1/agent/desktop/policy` — backs `Desktop`'s `apps`
+/// (docs/specs/SPEC_DESKTOP_DRIVING_2026_10_20.md §5.1): whether the tool is
+/// on, and for each window whether it is blocked or already granted.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DesktopPolicyRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    pub windows: Vec<DesktopWindowRef>,
+}
+
+/// `POST /api/v1/agent/desktop/authorize` — asked before every `Desktop`
+/// action but `apps` (§5.4); waits while the user is asked.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DesktopAuthorizeRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    /// `look`, `click`, `scroll`, `type`, `key` or `wait`.
+    pub action: String,
+    pub window: DesktopWindowRef,
+}
+
+/// `POST /api/v1/agent/desktop/record` — what an authorized action did
+/// (§5.10). Typed text is never sent, only its length in `details`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DesktopRecordRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    #[serde(default)]
+    pub grant_id: Option<String>,
+    pub action: String,
+    pub window: DesktopWindowRef,
+    /// The point, the key names, the text length, the screenshot's hash.
+    #[serde(default)]
+    pub details: serde_json::Value,
+    /// `ok`, or `error: <why>`.
+    pub result: String,
+}
+
+/// `POST /api/v1/agent/desktop/release` — the agent gives its grant back.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DesktopReleaseRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    pub window: DesktopWindowRef,
 }
 
 /// `POST /api/v1/agent/spawn` — backs the `Agents` tool's `spawn`

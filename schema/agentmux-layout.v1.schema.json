@@ -19,7 +19,7 @@
         "instance": { "type": "string", "pattern": "^[a-z2-7]{26}$" }
       }
     },
-    "scope": { "enum": ["window", "tab"] },
+    "scope": { "enum": ["window", "tab", "workspace"] },
     "windows": { "type": "array", "items": { "$ref": "#/$defs/window" } }
   },
   "$defs": {
@@ -27,6 +27,8 @@
       "type": "object",
       "required": ["tabs"],
       "properties": {
+        "name": { "type": "string", "description": "The window's name (a workspace export)." },
+        "state": { "enum": ["open", "closed"], "description": "A workspace export's window: shown, or closed and kept to reopen. Absent reads as open." },
         "active_tab": { "type": "integer", "minimum": 0 },
         "tabs": { "type": "array", "items": { "$ref": "#/$defs/tab" } }
       }

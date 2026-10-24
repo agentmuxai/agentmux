@@ -124,6 +124,7 @@ mod tests {
 
     fn agent(id: &str, provider: &str, memory_id: &str) -> AgentDefinition {
         AgentDefinition {
+            seat: None,
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: id.to_string(),
             slug: String::new(),

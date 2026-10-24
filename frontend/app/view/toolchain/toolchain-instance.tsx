@@ -3,12 +3,13 @@
 //
 // A Toolchain pane's instance, loaded with the first one (toolchain.tsx).
 
-import type { PaneTabInstance } from "@/app/block/pane-tab-registry";
+import type { PaneTabHostContext, PaneTabInstance } from "@/app/block/pane-tab-registry";
+import { readZoom } from "@/app/store/zoom-factor";
 import { ToolchainView } from "./toolchain-view";
 
-export function create(): PaneTabInstance {
+export function create(ctx: PaneTabHostContext): PaneTabInstance {
     return {
-        component: () => <ToolchainView />,
+        component: () => <ToolchainView zoom={() => readZoom(ctx.meta())} />,
         liveTitle: () => ({ text: "Toolchain" }),
     };
 }

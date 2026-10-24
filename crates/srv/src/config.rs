@@ -92,6 +92,23 @@ pub enum SrvCommand {
         #[arg(long, conflicts_with_all = ["dry_run", "list", "verify"])]
         prepare: bool,
     },
+    /// Give pre-fix forks the agent id `fork_slug` gives, keeping the old one
+    /// as a former slug (SPEC_FORK_SLUG_MIGRATION_2026_10_22.md §4 Phase 2).
+    /// With no flag, or `--plan`, prints what would change and changes nothing.
+    MigrateForkSlugs {
+        /// Print the plan (the default).
+        #[arg(long, conflicts_with_all = ["apply", "rollback", "restore"])]
+        plan: bool,
+        /// Migrate, or resume a run that stopped.
+        #[arg(long, conflicts_with_all = ["rollback", "restore"])]
+        apply: bool,
+        /// Undo a run from its journal.jsonl, step by step.
+        #[arg(long, value_name = "JOURNAL", conflicts_with = "restore")]
+        rollback: Option<String>,
+        /// Put a run's backup back, only while nothing has changed since.
+        #[arg(long, value_name = "JOURNAL")]
+        restore: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -397,5 +414,18 @@ mod tests {
             assert!(parsed.is_err(), "--prepare {flag} must be refused");
         }
         assert!(CliArgs::try_parse_from(["agentmux-srv", "migrate", "--prepare"]).is_ok());
+    }
+
+    #[test]
+    fn migrate_fork_slugs_takes_one_mode() {
+        use clap::Parser;
+        for ok in [vec![], vec!["--plan"], vec!["--apply"], vec!["--rollback", "j.jsonl"], vec!["--restore", "j.jsonl"]] {
+            let args = [vec!["agentmux-srv", "migrate-fork-slugs"], ok.clone()].concat();
+            assert!(CliArgs::try_parse_from(args).is_ok(), "{ok:?}");
+        }
+        for bad in [vec!["--apply", "--plan"], vec!["--apply", "--rollback", "j"], vec!["--rollback", "j", "--restore", "j"]] {
+            let args = [vec!["agentmux-srv", "migrate-fork-slugs"], bad.clone()].concat();
+            assert!(CliArgs::try_parse_from(args).is_err(), "{bad:?} is refused");
+        }
     }
 }

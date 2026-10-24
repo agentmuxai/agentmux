@@ -34,6 +34,7 @@ pub mod dates;
 pub mod frames;
 pub mod hibernation;
 pub mod page_state;
+pub mod ref_tables;
 pub mod resolver;
 pub mod routes;
 pub mod secret;

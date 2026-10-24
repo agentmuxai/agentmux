@@ -77,8 +77,8 @@ in this codebase records a deliberate choice against eagerly resuming an
 existing session (searched [`docs/specs/`](.), [`docs/retro/`](../retro) for
 "eager"/"auto-respawn"/"resume" near "persistent"/"agent"/"cost"/"token" —
 nothing). Per this repo's own house rule about treating an undocumented
-claim of a *rejected* idea with skepticism (see `CLAUDE.md`'s Jekt section
-for the general form of this principle): there is no prior decision this
+claim of a *rejected* idea with skepticism (see the jekt protocol specification,
+https://docs.agentmux.ai/internals/jekt-protocol/, for the general form of this principle): there is no prior decision this
 spec would be overturning. It is filling a gap the original spec explicitly
 left open, not reversing one.
 

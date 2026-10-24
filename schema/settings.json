@@ -257,6 +257,11 @@
         "window:confirmclose": {
           "type": "boolean"
         },
+        "window:confirmcloseworking": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ask before closing a window while an agent in it is mid-turn. Closing stops its agents; the window stays in the workspace, to reopen from the version panel."
+        },
         "window:savelastwindow": {
           "type": "boolean"
         },
@@ -611,6 +616,11 @@
           "default": true,
           "description": "While a message streams, update the still-open last block's text in place instead of rebuilding that block on every update (a growing code block, paragraph, list item or table cell). Set false to restore rebuilding it each time. Takes effect when a message is next rendered. See docs/specs/TRACKING_AGENT_PANE_BOUNDED_LIVE_WINDOW_2026_09_23.md."
         },
+        "agent:retryonreconnect": {
+          "type": "boolean",
+          "default": true,
+          "description": "When an agent's turn failed because its model API couldn't be reached, retry it once by itself when the API answers again, if no tool ran in it, you started it, and you haven't typed in that pane since. Set false to only offer a Retry button. See docs/specs/SPEC_OFFLINE_RESILIENCE_2026_10_20.md §4.3."
+        },
         "agent:overlapnotes": {
           "type": "boolean",
           "default": true,
@@ -626,10 +636,49 @@
           "default": true,
           "description": "When an agent's AgentMux MCP server (its AgentMux tools) doesn't connect, AgentMux reconnects it twice, then restarts the agent once without the shell prefix (the conversation continues), and otherwise tells the agent and shows it in the pane. Set false to only show and tell, with no automatic repair. See docs/specs/SPEC_AGENT_MCP_SELF_HEAL_2026_10_10.md."
         },
+        "agent:outdatedidsnotice": {
+          "type": "boolean",
+          "default": true,
+          "description": "Tell you once, at startup, when some agents have an id an older build chained (loap-loap-2), pointing to Settings › Agents, where they can be updated. Turned off when the notice is dismissed. See docs/specs/SPEC_FORK_SLUG_MIGRATION_2026_10_22.md."
+        },
         "agent:transcriptsinglecopy": {
           "type": "boolean",
           "default": false,
           "description": "Write a defined agent's transcript to the agent's own zone in the global transcript store only, not also to the block's own store. Halves what AgentMux writes to disk while agents run (measured: srv bytes written -50%, srv CPU -43%). Quick-launch panes and writers that have lost the agent lease keep their own copy. Off until it has been through a soak. See docs/specs/SPEC_AGENT_TRANSCRIPT_SINGLE_COPY_2026_10_19.md."
+        },
+        "desktop:enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Let agents look at and control native desktop apps with the Desktop tool (Windows only for now). Off by default. Even when on, an agent can use an app only after you allow it, for a while or for its session, and you can stop it at any time; every action is logged. Web browsers, password managers and AgentMux itself are refused. See docs/specs/SPEC_DESKTOP_DRIVING_2026_10_20.md."
+        },
+        "desktop:blocklist": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "App names the Desktop tool must never control, added to the built-in list. An entry matches an app's name exactly (notepad) or any part of a window's title (bank)."
+        },
+        "desktop:allowlist": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "App names to take off the built-in Desktop blocklist, for example a browser you want an agent to control. AgentMux itself can't be taken off."
+        },
+        "desktop:grantminutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1440,
+          "default": 30,
+          "description": "How many minutes \"Allow for a while\" lasts when you allow an agent to control an app."
+        },
+        "agent:transcriptframes": {
+          "type": "boolean",
+          "default": false,
+          "description": "Compress the finished parts of agent transcripts in the global transcript store, 1 MiB at a time (about 6x smaller). Only parts at least 8 MiB from a transcript's end and received over a day ago; nothing a reader sees changes. Waits while an AgentMux build that can't read compressed history runs on this machine. See docs/specs/SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21.md."
+        },
+        "agent:transcriptdeltas": {
+          "type": "boolean",
+          "default": true,
+          "description": "With agent:transcriptframes on, also store each streamed reply's text once instead of once per streaming line (about 11% smaller again). Off: compression alone. See docs/specs/SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21.md §8."
         },
         "agent:askquestiontimeoutms": {
           "type": "integer",

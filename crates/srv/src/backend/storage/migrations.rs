@@ -171,8 +171,8 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 12;
 ///        (LAN is multi-party: a receiving peer must verify without being
 ///        able to forge, which a shared secret can't provide). public_key
 ///        is distributed to LAN peers on demand (not secret); private_key
-///        is injected into that one agent's own MCP process env
-///        (AGENTMUX_LAN_KEY) at spawn, same never-over-RPC guarantee as
+///        goes only to that one agent (its MCP config's AGENTMUX_LAN_KEY,
+///        and its own token-authenticated key fetch), same guarantee as
 ///        v18. See docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.1.
 ///   v21 — db_lan_peer_pubkey_pins: trust-on-first-use pin of a REMOTE
 ///        agent_id's LAN public key, as first observed from mDNS-discovered
@@ -419,9 +419,9 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 12;
 ///        delete via `purge_agent_dependents`. Unlike v18's jekt key and the
 ///        registry entry files, which are keyed by display name and so are
 ///        shared by two same-named agents (spec §6.3), this is keyed by a
-///        `PRIMARY KEY` that is a UUID for every non-template row. Not read
-///        by anything until M4 — mint-and-carry only, revertible by ignoring
-///        the field. See `storage/agent_tokens.rs`.
+///        `PRIMARY KEY` that is a UUID for every non-template row. Read
+///        since M4: it identifies a request's Caller (host-tier sender
+///        verification, the agent's own key fetch). See `storage/agent_tokens.rs`.
 ///   v38 — db_agent_key_tombstones: the lowercased names (slug, display
 ///        name, instance name) of every deleted agent — identity M4a of
 ///        `SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md` §6.5.4.
@@ -576,7 +576,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         ))?;
     }
 
-    conn.execute_batch(super::agent_input_history::SCHEMA)?; // what the user typed to each agent
+    for sql in [super::agent_input_history::SCHEMA, super::agents::FORMER_SLUGS_SCHEMA] { conn.execute_batch(sql)?; } // typed input; renamed-from slugs
     // ---- Agent + identity + memory + drone schema ----
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS db_agent_content (
@@ -1311,10 +1311,10 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
     //     container_image / container_volumes / container_name on both tables.
     //     Host-agent rows default to '', '[]', '' respectively — ContainerManager
     //     populates them on first container spawn.
-    // v7: create db_muxbus_credentials if it doesn't exist yet (existing DBs
-    //     won't have it since it's a new table, not an added column).
+    // v7: db_muxbus_credentials, a new table (CREATE TABLE IF NOT EXISTS).
     // v10: standalone skill + MCP server tables (new tables, handled via
     //     CREATE TABLE IF NOT EXISTS in the flat batch above; no ALTER needed).
+    conn.execute_batch(super::agents::FORMER_BRANCH_LABEL_TRIGGER)?; // fork renames join the former names
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS db_muxbus_credentials (
             id             TEXT PRIMARY KEY DEFAULT 'global',

@@ -130,14 +130,16 @@ pub(super) async fn handle_agent_memory_write(
     }
 }
 
-/// `POST /api/v1/fleet/bulk-stop` — stop many agent panes (block ids) at
-/// once. Backs the `FleetBulkStop` MCP tool. Infallible per-target (never
-/// a single bool) — see `FleetActionResult`'s doc comment.
+/// `POST /api/v1/fleet/bulk-stop` — `Stop agents`: close each named agent's tab
+/// (docs/specs/SPEC_STOP_AN_AGENT_ONE_WAY_AND_SHUTDOWN_TOAST_2026_10_23.md).
+/// Backs the `Stop` tool's `agents` action. Infallible per target (never a
+/// single bool): `{ succeeded, failed }`.
 ///
-/// Agents' stops wait for each target's user override (§6.5 of
+/// Every running agent waits for its user's override (§6.5 of
 /// SPEC_AGENT_SELF_QUIT_2026_09_24.md): 202 with a request per target, or 200
-/// as before when nothing had to wait. `auth` (optional, signed by
-/// agentmux-mcp) names the caller on the banner and in the audit log.
+/// when nothing had to wait (everything refused or already gone). `auth`
+/// (optional, signed by agentmux-mcp) names the caller on the banner and in the
+/// audit log, and is how the caller's own block is refused.
 pub(super) async fn handle_fleet_bulk_stop(
     State(state): State<AppState>,
     caller: Option<axum::Extension<crate::server::caller::Caller>>,
@@ -147,30 +149,46 @@ pub(super) async fn handle_fleet_bulk_stop(
         Ok(r) => r,
         Err(e) => return (StatusCode::UNPROCESSABLE_ENTITY, Json(json!({ "error": e.to_string() }))).into_response(),
     };
-    let by = body
+    let verified = body
         .get("auth")
         .and_then(|a| serde_json::from_value::<agentmux_common::api_types::UiAutomationAuth>(a.clone()).ok())
-        .filter(|a| ui_handlers::verified_block_id(&state, caller.as_deref(), a).is_ok())
-        .map(|a| a.agent_id)
-        .unwrap_or_else(|| "an agent".to_string());
-    let (result, pending) =
-        app_api::fleet::fleet_bulk_stop_with_override(&state, &by, req.targets, req.signal.as_deref(), req.staged).await;
-    if pending.is_empty() {
-        return (StatusCode::OK, Json(result)).into_response();
+        .and_then(|a| ui_handlers::verified_block_id(&state, caller.as_deref(), &a).ok().map(|block| (a.agent_id, block)));
+    let (by, caller_block) = match verified {
+        Some((agent, block)) => (agent, Some(block)),
+        None => ("an agent".to_string(), None),
+    };
+    // `signal` and `staged` no longer mean anything: a close ends the agent
+    // gracefully and force-kills at its own deadline.
+    let mut notes: Vec<String> = Vec::new();
+    if req.signal.is_some() || req.staged.is_some() {
+        notes.push("signal and staged no longer apply: Stop agents closes the agent's tab".to_string());
     }
-    (
-        StatusCode::ACCEPTED,
-        Json(json!({
-            "status": "pending_user_override",
-            "wait_at_least_ms": crate::sagas::pending_shutdown::OVERRIDE_WINDOW.as_millis() as u64,
-            "deadline_ms": pending.iter().map(|p| p.deadline_ms).max(),
-            "pending": pending.iter().map(|p| json!({ "block_id": p.block_id, "request_id": p.request_id })).collect::<Vec<_>>(),
-            "succeeded": result.succeeded,
-            "failed": result.failed,
-            "aborted_early": result.aborted_early,
-        })),
-    )
-        .into_response()
+    let (result, pending, left_open) =
+        app_api::fleet::fleet_close_agents_with_override(&state, &by, caller_block.as_deref(), req.targets).await;
+    // An older AgentMux on this machine that predates the override only stopped
+    // these at once. Said here for those; the MCP layer says it for a target
+    // whose window an older instance opened (`effect: stop`).
+    if !left_open.is_empty() {
+        notes.push(format!(
+            "{} run on an older AgentMux on this machine: stopped, but the pane was left open; the user has to close it",
+            left_open.join(", ")
+        ));
+    }
+    let mut out = json!({ "succeeded": result.succeeded, "failed": result.failed });
+    if !notes.is_empty() {
+        out["note"] = json!(notes.join("; "));
+    }
+    if pending.is_empty() {
+        return (StatusCode::OK, Json(out)).into_response();
+    }
+    out["status"] = json!("pending_user_override");
+    out["wait_at_least_ms"] = json!(crate::sagas::pending_shutdown::OVERRIDE_WINDOW.as_millis() as u64);
+    out["deadline_ms"] = json!(pending.iter().map(|p| p.deadline_ms).max());
+    out["pending"] = json!(pending
+        .iter()
+        .map(|p| json!({ "block_id": p.block_id, "request_id": p.request_id, "effect": p.effect }))
+        .collect::<Vec<_>>());
+    (StatusCode::ACCEPTED, Json(out)).into_response()
 }
 
 #[derive(serde::Deserialize)]
@@ -209,6 +227,10 @@ pub(super) struct AgentStopPendingForwardRequest {
     /// banner; this instance takes it as claimed.
     #[serde(default)]
     pub(super) by: String,
+    /// `close`: close its tab, as `Stop agents` does. Absent (an instance that
+    /// predates it) or `stop`: stop it and keep its pane.
+    #[serde(default)]
+    pub(super) mode: String,
 }
 
 /// `POST /agentmux/agent/stop-pending` — another instance on this machine
@@ -220,19 +242,30 @@ pub(super) async fn handle_agent_stop_pending_forward(
     State(state): State<AppState>,
     Json(req): Json<AgentStopPendingForwardRequest>,
 ) -> impl IntoResponse {
-    if crate::backend::blockcontroller::get_controller(&req.block_id).is_none() {
+    let close = req.mode == "close";
+    let by = if req.by.trim().is_empty() { "an agent on another AgentMux" } else { req.by.trim() };
+    if close {
+        // A close needs the block and an agent in it, not a running controller:
+        // a stopped agent's pane is closed too.
+        let here = state.srv_state.lock().await.blocks.contains_key(&req.block_id);
+        if !here {
+            let error = format!("block not found: {}", req.block_id);
+            return (StatusCode::OK, Json(json!({ "success": false, "error": error }))).into_response();
+        }
+        if !crate::sagas::orphan_reaper::is_agent_block(&state, &req.block_id) {
+            let error = "not an agent pane: close it with Stop with action \"pane\"".to_string();
+            return (StatusCode::OK, Json(json!({ "success": false, "error": error }))).into_response();
+        }
+    } else if crate::backend::blockcontroller::get_controller(&req.block_id).is_none() {
         let error = format!("NOT_RUNNING: no controller for block {}", req.block_id);
         return (StatusCode::OK, Json(json!({ "success": false, "error": error }))).into_response();
     }
-    let by = if req.by.trim().is_empty() { "an agent on another AgentMux" } else { req.by.trim() };
-    let v = crate::sagas::pending_shutdown::request(
-        &state,
-        &req.block_id,
-        by,
-        "FleetBulkStop",
-        "",
-        crate::sagas::pending_shutdown::Action::Stop { signal: req.signal },
-    );
+    let action = if close {
+        crate::sagas::pending_shutdown::Action::CloseTab { detail: format!("asked by {by} (Stop agents, from another AgentMux)") }
+    } else {
+        crate::sagas::pending_shutdown::Action::Stop { signal: req.signal }
+    };
+    let v = crate::sagas::pending_shutdown::request(&state, &req.block_id, by, "FleetBulkStop", "", action);
     state.reactive_handler.log_fleet_action_audit(
         Some(by),
         &v.target,

@@ -153,6 +153,10 @@ declare global {
          *  host, which srv trusts and agents can't impersonate.
          *  SPEC_UPGRADE_FOR_USERS_AND_AGENTS_2026_10_15.md §5.1. */
         decideUpgrade?(id: string, version: string, accept: boolean): Promise<void>;
+        /** The user's answer to an agent's request to drive a native app: `timed`, `session` or `deny`. */
+        decideDesktop?(id: string, choice: "timed" | "session" | "deny"): Promise<void>;
+        /** The user's Stop for the agent in this pane: its desktop grants end. */
+        stopDesktop?(blockId: string): Promise<void>;
         /** The version panel's Download, Upgrade & restart (`now`: Restart now)
          *  and Cancel. Relayed by the host, which srv trusts and agents can't
          *  impersonate; answers srv's update status after the action. */
@@ -513,18 +517,18 @@ declare global {
          *  the user cancelled. See
          *  docs/specs/SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02.md §4 Step 1. */
         showOpenBundleDialog(): Promise<string | null>;
-        /** Native "save file" dialog for a layout file
-         *  (`*.agentmux-layout.json`), opening in
-         *  `~/.agentmux/shared/layouts/` with `<defaultName>` suggested.
+        /** Native "save file" dialog for an exported workspace
+         *  (`*.agentmux-workspace.json`), opening in
+         *  `~/.agentmux/shared/workspaces/` with `<defaultName>` suggested.
          *  Resolves to the chosen absolute path (extension ensured), or null
          *  if the user cancelled. Writes nothing itself. See
-         *  docs/specs/SPEC_LAYOUT_FILES_2026_09_25.md §6.1. */
-        showSaveLayoutDialog(defaultName: string): Promise<string | null>;
-        /** Native "open file" dialog for a layout file, opening in
-         *  `~/.agentmux/shared/layouts/`. Resolves to the chosen absolute
-         *  path, or null if cancelled. Reads nothing itself. See
-         *  docs/specs/SPEC_LAYOUT_FILES_2026_09_25.md §3.5. */
-        showOpenLayoutDialog(): Promise<string | null>;
+         *  docs/specs/SPEC_WORKSPACES_2026_10_23.md §3.2. */
+        showExportWorkspaceDialog(defaultName: string): Promise<string | null>;
+        /** Native "open file" dialog for Import…: an exported workspace or a
+         *  layout file (`*.agentmux-layout.json`), opening in
+         *  `~/.agentmux/shared/workspaces/`. Resolves to the chosen absolute
+         *  path, or null if cancelled. Reads nothing itself. */
+        showImportWorkspaceDialog(): Promise<string | null>;
         captureScreenshot(rect: { x: number; y: number; width: number; height: number }): Promise<string>;
         openAgent: (agentId: string) => Promise<void>;
         setProviderAuth: (provider: string, token: string) => Promise<void>;

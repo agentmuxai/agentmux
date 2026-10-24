@@ -44,6 +44,20 @@ pub(super) struct EchoTrust<'a> {
     pub channel_verified: Option<bool>,
 }
 
+impl<'a> EchoTrust<'a> {
+    /// The verdicts a delivered request carried: its delivery tier (`host`
+    /// when unset) and each signature check's result.
+    pub(super) fn of(req: &'a crate::backend::reactive::types::InjectionRequest) -> Self {
+        EchoTrust {
+            delivery_tier: req.delivery_tier.as_deref().unwrap_or("host"),
+            sig_verified: req.sig_verified,
+            reagent_verified: req.reagent_verified,
+            lan_verified: req.lan_verified,
+            channel_verified: req.channel_verified,
+        }
+    }
+}
+
 /// The trust an echoed marker should carry after a forward, given the
 /// peer's response body. The RECEIVING instance is the one that computes
 /// `channel_verified` (the forwarder holds the sender's HMAC key, so §D2

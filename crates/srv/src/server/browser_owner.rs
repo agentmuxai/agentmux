@@ -19,6 +19,9 @@
 //!   for good, and no client can set the key at all;
 //! - deleting the block drops its entry (`wcore::delete_block`);
 //! - after srv restarts the map is empty, so agents reopen their panes.
+//! - a Take over is remembered for a while, so the agent that lost the pane is told
+//!   what happened instead of guessing (`lost_message`); a pane that closed is only logged,
+//!   since a deleted block is already answered as "no such pane".
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -35,6 +38,7 @@ fn owners() -> &'static Mutex<HashMap<String, String>> {
 
 /// Record `agent_id` as the owner of `block_id`. Only `OpenBrowser` calls this.
 pub(crate) fn record(block_id: &str, agent_id: &str) {
+    lost().lock().unwrap_or_else(|p| p.into_inner()).remove(block_id);
     // A bypass belongs to the owner it was granted to.
     crate::server::browser_bypass::forget(block_id, "the pane got a new owner");
     owners()
@@ -47,17 +51,83 @@ pub(crate) fn record(block_id: &str, agent_id: &str) {
 /// Drop `block_id`'s owner: the pane was deleted or taken over. Its bypass,
 /// if any, ends with the ownership.
 pub(crate) fn forget(block_id: &str) {
+    forget_because(block_id, Lost::Closed);
+}
+
+/// Why an agent no longer drives a pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Lost {
+    /// The person's Take over.
+    TookOver,
+    /// The pane was closed, or no longer exists.
+    Closed,
+}
+
+/// What srv remembers about a pane an agent lost to a Take over: when, and who drove it.
+type LostEntry = (std::time::Instant, String);
+
+/// Panes the person took over, newest few hundred. In memory like the
+/// owner map, so after an srv restart there is nothing here and the plain
+/// refusal is the right answer.
+fn lost() -> &'static Mutex<HashMap<String, LostEntry>> {
+    static LOST: OnceLock<Mutex<HashMap<String, LostEntry>>> = OnceLock::new();
+    LOST.get_or_init(Default::default)
+}
+
+const LOST_KEPT: usize = 256;
+
+/// Drop `block_id`'s owner and remember why. Its bypass, if any, ends with the
+/// ownership, and so does a pause (the action log stays, for the person to
+/// read). Logged, so a refusal an agent reports can be traced to its cause.
+pub(crate) fn forget_because(block_id: &str, why: Lost) {
     crate::server::browser_bypass::forget(block_id, "the agent no longer drives the pane");
-    // So does a pause; the action log stays, for the person to read.
     crate::server::browser_actions::forget_pause(block_id);
     let removed = owners()
         .lock()
         .unwrap_or_else(|p| p.into_inner())
-        .remove(block_id)
-        .is_some();
-    if removed {
+        .remove(block_id);
+    if let Some(agent) = removed {
+        tracing::info!(pane = %block_id, agent_id = %agent, why = ?why, "[browser-owner] agent no longer drives the pane");
+        // Only a Take over is worth telling the agent about: a closed pane's block is
+        // already gone, so its next call is answered "no such pane" before this is read.
+        if why == Lost::TookOver {
+            let mut map = lost().lock().unwrap_or_else(|p| p.into_inner());
+            if map.len() >= LOST_KEPT {
+                if let Some(oldest) = map.iter().min_by_key(|(_, (at, _))| *at).map(|(k, _)| k.clone()) {
+                    map.remove(&oldest);
+                }
+            }
+            map.insert(block_id.to_string(), (std::time::Instant::now(), agent));
+        }
         changed().notify_one();
     }
+}
+
+/// How long ago, in words an agent can read.
+fn ago(d: std::time::Duration) -> String {
+    let m = d.as_secs() / 60;
+    match m {
+        0 => "just now".to_string(),
+        1..=89 => format!("{m} min ago"),
+        _ => format!("{} h ago", m / 60),
+    }
+}
+
+/// What to tell the agent that lost a pane to the person's Take over. Another
+/// agent asking about the same pane gets the plain refusal, and never learns who
+/// drove it. None after an srv restart (nothing is remembered) or for a pane the
+/// agent never opened.
+pub(crate) fn lost_message(pane: &str, agent_id: &str) -> Option<String> {
+    let map = lost().lock().unwrap_or_else(|p| p.into_inner());
+    let (at, agent) = map.get(pane)?;
+    if !agent.eq_ignore_ascii_case(agent_id) {
+        return None;
+    }
+    Some(format!(
+        "the user took over pane {pane:?} ({}); an agent can't get a pane back once the person takes it over. \
+         Open a new one with Browser's open action: it starts signed in wherever the user is",
+        ago(at.elapsed())
+    ))
 }
 
 /// Every pane an agent owns. The host keeps a copy, to decide inside
@@ -121,6 +191,11 @@ pub(crate) fn check(
         )));
     }
     if !recorded.is_some_and(|r| r.eq_ignore_ascii_case(agent_id)) {
+        if recorded.is_none() {
+            if let Some(why) = lost_message(pane, agent_id) {
+                return Err(Denied::Forbidden(why));
+            }
+        }
         return Err(Denied::Forbidden(format!(
             "pane {pane:?} is not a browser pane you own: an agent can drive only browser \
              panes it opened itself with Browser's open action, and loses one the user takes over"
@@ -216,7 +291,7 @@ pub(crate) fn guard_client_meta_write(oref: &str, meta: &MetaMapType) -> Result<
         ));
     }
     if let Some(block_id) = oref.strip_prefix("block:") {
-        forget(block_id);
+        forget_because(block_id, Lost::TookOver);
         // Take over also answers any hand-off or approval still up on the
         // pane: an Approve clicked after it must not go through.
         crate::server::browser_attention::cancel_for(block_id);
@@ -413,5 +488,71 @@ mod tests {
         .unwrap();
         assert_eq!(owner_of("test-guard-other").as_deref(), Some("lark"));
         forget("test-guard-other");
+    }
+
+    fn null_owner() -> MetaMapType {
+        let mut m = MetaMapType::new();
+        m.insert(OWNER_META_KEY.to_string(), serde_json::Value::Null);
+        m
+    }
+
+    #[test]
+    fn a_take_over_is_named_in_the_agents_next_refusal() {
+        let pane = uuid::Uuid::new_v4().to_string();
+        record(&pane, "lark");
+        guard_client_meta_write(&format!("block:{pane}"), &null_owner()).unwrap();
+        assert!(owner_of(&pane).is_none());
+        let e = check(Some(&block("browser", None)), None, "lark", &pane).unwrap_err();
+        assert!(
+            matches!(&e, Denied::Forbidden(m) if m.contains("the user took over pane") && m.contains("just now")),
+            "{e:?}"
+        );
+    }
+
+    #[test]
+    fn another_agent_is_not_told_who_lost_the_pane() {
+        let pane = uuid::Uuid::new_v4().to_string();
+        record(&pane, "lark");
+        guard_client_meta_write(&format!("block:{pane}"), &null_owner()).unwrap();
+        let e = check(Some(&block("browser", None)), None, "korp", &pane).unwrap_err();
+        assert!(
+            matches!(&e, Denied::Forbidden(m) if m.contains("not a browser pane you own") && !m.contains("lark") && !m.contains("took over")),
+            "{e:?}"
+        );
+    }
+
+    #[test]
+    fn a_pane_that_closed_leaves_no_take_over_note() {
+        let pane = uuid::Uuid::new_v4().to_string();
+        record(&pane, "lark");
+        forget(&pane);
+        assert!(owner_of(&pane).is_none());
+        assert!(lost_message(&pane, "lark").is_none());
+    }
+
+    #[test]
+    fn a_pane_never_owned_gets_the_plain_refusal() {
+        let pane = uuid::Uuid::new_v4().to_string();
+        let e = check(Some(&block("browser", None)), None, "lark", &pane).unwrap_err();
+        assert!(matches!(&e, Denied::Forbidden(m) if m.contains("not a browser pane you own")), "{e:?}");
+    }
+
+    #[test]
+    fn a_new_owner_forgets_the_old_reason() {
+        let pane = uuid::Uuid::new_v4().to_string();
+        record(&pane, "lark");
+        guard_client_meta_write(&format!("block:{pane}"), &null_owner()).unwrap();
+        assert!(lost_message(&pane, "lark").is_some());
+        record(&pane, "korp");
+        assert!(lost_message(&pane, "lark").is_none());
+        forget(&pane);
+    }
+
+    #[test]
+    fn how_long_ago_reads_in_words() {
+        use std::time::Duration;
+        assert_eq!(ago(Duration::from_secs(5)), "just now");
+        assert_eq!(ago(Duration::from_secs(61 * 60)), "61 min ago");
+        assert_eq!(ago(Duration::from_secs(5 * 3600)), "5 h ago");
     }
 }

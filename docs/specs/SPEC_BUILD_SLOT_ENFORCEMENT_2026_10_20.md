@@ -1,6 +1,6 @@
 # Spec: The build slot — one heavy build or test at a time on a machine, enforced for agents' cargo
 
-**Status:** active. Shipped: §3 (the lock script) and §4 (the `cargo` shim, installed at startup), both in #5207. Left: the same for the other heavy commands (§6), the holder on the Swarm and Presence views (§6), and wait/hold reporting (§6).
+**Status:** active. Shipped: §3 (the lock script) and §4 (the `cargo` shim, installed at startup), both in #5207; §4 now also covers `task`, `npm`, `npx` and `docker` (the build-slot shims PR). Left: the holder on the Swarm and Presence views (§6), and wait/hold reporting (§6).
 **Date:** 2026-10-20
 **Author:** Lazo
 **Verified against:** `agentmux` `main` @ `2a864efd4` (2026-10-20), by reading code.
@@ -35,14 +35,21 @@ build-slot.sh status                                       who holds the slot, w
 
 What counts as heavy and how agents behave around the slot (queue etiquette, not killing another agent's build) is the team's dev-host standard and is given to agents in their instructions; this spec covers what AgentMux does about it.
 
-## 4. The enforcement: a `cargo` in the way
+## 4. The enforcement: a shim in the way
 
-Agent shells already put `~/.agentmux/tools/bin` ahead of the system PATH (`tool_store::tools_path`, `UserToolsPrecedence::BeforeExisting`, used for every agent turn in `server/agent_handlers/input.rs`). At startup srv installs two files there (`agentmux_common::build_slot`, called from `bootstrap/background.rs`):
+Agent shells already put `~/.agentmux/tools/bin` ahead of the system PATH (`tool_store::tools_path`, `UserToolsPrecedence::BeforeExisting`, used for every agent turn in `server/agent_handlers/input.rs`). At startup srv installs a shim there for each heavy tool (`agentmux_common::build_slot`, called from `bootstrap/background.rs`): `cargo`, `task`, `npm`, `npx` and `docker`. Each is the same two files under the tool's name:
 
-- `cargo`, a bash script, for Git Bash and Linux and macOS shells;
-- `cargo.cmd`, for `cmd.exe` and PowerShell, which hands over to `cargo` through Git for Windows' bash.
+- `<tool>`, a bash script (`scripts/build-slot/shim`), for Git Bash and Linux and macOS shells;
+- `<tool>.cmd` (`scripts/build-slot/shim.cmd`), for `cmd.exe` and PowerShell, which hands over to the sibling bash script through Git for Windows' bash.
 
-The shim finds the real cargo (the next one on PATH that is not its own directory), and for the heavy subcommands runs it as `build-slot.sh -- <real cargo> <args>`:
+The shim acts for the tool whose name it carries. It finds the real tool (the next one on PATH that is not its own directory; a `.cmd` is the last resort), and for the heavy subcommands runs it as `build-slot.sh -- <real tool> <args>`. A tool's light subcommands run it directly. What is heavy, per tool:
+
+- **`task`**: `package`, `build` and `bundle` (and their `:`-suffixed variants such as `package:portable` and `build:backend`), and `storybook:build`. `dev` and `run` are not slotted, for the reason `cargo run` is not (the app keeps running); the cargo calls inside `task dev` are slotted by the `cargo` shim anyway. Several names may be given: one heavy name slots the call.
+- **`npm`**: `npm run` for `build`, `build:*`, `package`, `package:*`, `coverage` and `test:e2e`, and `npm run test` / `npm test`. The last two are the bare `vitest`, which watches with a terminal and runs once without one, so they are slotted when stdin is not a terminal (an agent's shell has none), or when the arguments ask for a single run (`npm test -- --run`). `--coverage` alone leaves vitest watching, so it does not count.
+- **`npx`**: `vite build`, `vitest run` (or `--run`), and a bare `vitest` without a terminal. `npx tsc` and the other quick tools are not slotted.
+- **`docker`**: `build`, `buildx build`, `builder build`, `image build` and `compose build` or `compose up --build`. `run`, `ps` and plain `compose up` are not.
+
+For `cargo`, the heavy subcommands are:
 
 `build` `check` `test` `clippy` `doc` `bench` `rustc` `rustdoc` `fix` `install` `package` (and their short forms), and the common third-party `nextest` `llvm-cov` `tarpaulin` `udeps` `miri`. A `+toolchain` or option before the subcommand, with the separate value of `-C`, `-Z`, `--config` and `--color`, is skipped when finding it. Everything else (`metadata`, `fmt`, `tree`, `update`, `clean`, …) runs cargo directly.
 
@@ -65,8 +72,8 @@ The shim finds the real cargo (the next one on PATH that is not its own director
 
 ## 6. Next
 
-1. **Other heavy commands**: `task package`, `vite build`, the full vitest and node suites and Docker builds go through the slot only when the agent runs them by hand. The same shim mechanism can cover `docker` and a `vite` front, but a `task` or `npm` shim would slot light invocations too, so those want a subcommand list of their own.
+1. ~~**Other heavy commands**~~ (done): `task`, `npm`, `npx` and `docker` have shims with a heavy-subcommand list each (§4). A direct `vite` or `vitest` binary is not shimmed: it is in `node_modules/.bin`, not on the tools PATH, so `npm run` and `npx` are the ways in.
 2. **Show the holder**: put it in `Presence` and the Swarm view, so a person sees "AgentX holds the build slot, 12 min" without running `status`.
 3. **Report waits and holds**, to tune the heavy list.
 4. **A counted slot**: a machine with more cores than agents' builds need could allow two. One is the safe start.
-5. **Non-Claude providers**: this covers the agent turns that use the shared environment builder. Check each other provider's spawn (ACP and terminal tiers) puts the user tools dir first.
+5. ~~**Non-Claude providers**~~ (checked 2026-10-24): the agent-turn path (Claude and the other persistent providers) already put the tool dirs first. The ACP and MSP controllers (`session_agent_env`) did not, so their agents never reached a shim; both now call `tool_store::prepend_agent_tools_path`, as the agent-turn path does. The terminal tier (Aider, Crush) runs as an ordinary shell pane, where the user's tools dir deliberately comes after the system PATH (`AfterExisting`), so its commands are not slotted; changing that would change every terminal pane, so it is left as it is.

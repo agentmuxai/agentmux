@@ -841,15 +841,11 @@ impl IsolatedSettingsReason {
     }
 }
 
+/// Reads both inputs from the process env; the rule itself is
+/// [`crate::settings_path::isolated_settings_reason_for`].
 pub fn isolated_settings_reason() -> IsolatedSettingsReason {
-    match std::env::var("AGENTMUX_ISOLATED_SETTINGS") {
-        Ok(v) if v == "1" => IsolatedSettingsReason::ExplicitOptIn,
-        Ok(_) => IsolatedSettingsReason::ExplicitOptOut,
-        Err(_) => match std::env::var("AGENTMUX_CHANNEL") {
-            Ok(ch) if ch != "stable" => IsolatedSettingsReason::ChannelDefaultIsolated,
-            _ => IsolatedSettingsReason::ChannelDefaultGlobal,
-        },
-    }
+    let opt = std::env::var(crate::settings_path::ISOLATED_SETTINGS_ENV).ok();
+    crate::settings_path::isolated_settings_reason_for(opt.as_deref(), std::env::var("AGENTMUX_CHANNEL").ok().as_deref())
 }
 
 // The MuxBus reconnect flag lives in its own module; re-exported so callers

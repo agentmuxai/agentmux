@@ -14,6 +14,7 @@ mod app_tool;
 mod browser;
 mod browser_tool;
 mod cron;
+mod desktop;
 mod family;
 mod fleet;
 mod global_memory;
@@ -165,6 +166,8 @@ const REPLACED: &[(&str, &str)] = &[
     ("WorkUpdate", "Tasks with action \"update\""),
     ("WorkAsk", "Tasks with action \"ask\""),
     ("WorkSubmit", "Tasks with action \"submit\""),
+    ("WorkHold", "Tasks with action \"hold\""),
+    ("WorkUnhold", "Tasks with action \"unhold\""),
     ("WhoIsWorkingOn", "Presence with action \"who\""),
     ("ClaimWork", "Presence with action \"claim\""),
     ("ReleaseWork", "Presence with action \"release\""),
@@ -232,7 +235,8 @@ pub(crate) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         identity_tool,
         widget_tool,
         vault_tool,
-        app_tool
+        app_tool,
+        desktop
     );
     if let Some((_, instead)) = REPLACED.iter().find(|(old, _)| *old == name) {
         anyhow::bail!("{name} was replaced: use {instead}");
@@ -249,6 +253,7 @@ mod tests {
         ("agents_tool", include_str!("agents_tool.rs")),
         ("app_tool", include_str!("app_tool.rs")),
         ("browser_tool", include_str!("browser_tool.rs")),
+        ("desktop", include_str!("desktop.rs")),
         ("identity_tool", include_str!("identity_tool.rs")),
         ("memory_tool", include_str!("memory_tool.rs")),
         ("message_tool", include_str!("message_tool.rs")),

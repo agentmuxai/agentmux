@@ -11,6 +11,11 @@ use super::{audit_hash, now_unix_millis, AUDIT_LOG_MAX, RATE_LIMIT_MAX};
 
 pub(super) use super::rate_limiter::RateLimiter;
 
+#[path = "former_slug.rs"]
+mod former_slug;
+pub use former_slug::FormerSlugResolver;
+pub(crate) use former_slug::{former_slug_claim, refuse_former_slug_sender, renamed};
+
 // ---- Handler ----
 
 /// Core reactive messaging handler.
@@ -71,6 +76,8 @@ pub struct Handler {
     /// before ambiguity is decided. `None` (tests) treats every block as
     /// live.
     block_liveness: Option<BlockLivenessProbe>,
+    /// Tries an unbound name as a display name's route or a former name (`former_slug.rs`).
+    alias_resolvers: former_slug::AliasResolvers,
     audit_log: Vec<AuditLogEntry>,
     /// The UID of the delivery in flight
     /// (`InjectionRequest::audit_source_uid`), copied onto every audit entry
@@ -88,34 +95,9 @@ pub struct Handler {
     include_source_in_message: bool,
 }
 
-/// A block's names, typed (identity M2, spec §4.4.2).
-///
-/// `display` is the name the block was most recently registered under —
-/// the Register-tail and the HTTP presence path supply it every time — and
-/// is **replaced** on re-registration, so a retired name does not linger and
-/// make a later agent ambiguous. `stable` is the `AGENTMUX_AGENT_ID` parked
-/// at spawn (what the alias map used to hold) and is **kept** across display
-/// changes: it is the value GitHub PR-body tags embed precisely because it
-/// does not change on rename (`INCIDENT_2026_09_09_JEKT_STABLE_ID_ALIAS.md`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NameBindings {
-    pub display: String,
-    pub stable: Option<String>,
-}
-
-impl NameBindings {
-    /// Every lowercased key this block is bound under.
-    fn keys(&self) -> Vec<String> {
-        let mut keys = vec![self.display.to_lowercase()];
-        if let Some(s) = &self.stable {
-            let k = s.to_lowercase();
-            if !keys.contains(&k) {
-                keys.push(k);
-            }
-        }
-        keys
-    }
-}
+#[path = "name_bindings.rs"]
+mod name_bindings;
+pub use name_bindings::NameBindings;
 
 /// What a by-name unregister did (identity M2, spec §4.4.4 Q7). A name held
 /// by several live blocks is refused, never silently no-op'd as success.
@@ -145,6 +127,8 @@ pub enum LookupOutcome {
 pub(super) enum TargetResolution {
     Uid(String),
     Name(String),
+    /// A slug the agent `uid` was renamed from, which it answers to by UID.
+    FormerSlug { block: String, uid: String },
     Ambiguous(Vec<AgentRegistration>),
     NotFound,
 }
@@ -182,6 +166,7 @@ impl Handler {
             stable_agent_identity_confirmer: None,
             uid_identity_confirmer: None,
             block_liveness: None,
+            alias_resolvers: Default::default(),
             audit_log: Vec::with_capacity(AUDIT_LOG_MAX),
             delivery_source_uid: String::new(),
             delivery_wan: None,
@@ -541,8 +526,9 @@ impl Handler {
     /// is never second-guessed, so a block that is momentarily between
     /// controllers (a `resync_controller` replace, or a frontend register
     /// that beats the resync) is not answered as "not found" — which would
-    /// forward a purely local miss to other instances.
-    fn read_resolve(&self, target: &str) -> Result<Option<String>, Vec<String>> {
+    /// forward a purely local miss to other instances. A former slug answers
+    /// only when `former` (a delivery target, never a name that acts).
+    fn read_resolve(&self, target: &str, former: bool) -> Result<Option<String>, Vec<String>> {
         if let Some(block) = self
             .uid_to_block
             .get(target)
@@ -553,7 +539,7 @@ impl Handler {
         let key = target.to_lowercase();
         let blocks = self.name_to_blocks.get(&key).cloned().unwrap_or_default();
         match blocks.len() {
-            0 => Ok(None),
+            0 => Ok(former.then(|| self.delivery_alias_block(&key)).flatten().map(|(block, _)| block)),
             1 => Ok(Some(blocks[0].clone())),
             _ => {
                 let live: Vec<String> = blocks.into_iter().filter(|b| self.is_live(b)).collect();
@@ -581,7 +567,7 @@ impl Handler {
         let key = target.to_lowercase();
         let blocks = self.name_to_blocks.get(&key).cloned().unwrap_or_default();
         if blocks.is_empty() {
-            return TargetResolution::NotFound;
+            return self.former_slug_target(&key, target);
         }
         let live: Vec<String> = if blocks.len() == 1 {
             blocks
@@ -616,8 +602,13 @@ impl Handler {
     /// Name lookup that tells an ambiguous name apart from an unknown one
     /// (identity M2) — for callers that must refuse with candidates rather
     /// than fall through to cross-instance forwarding (`GetAgentTranscript`).
+    /// No former slugs (`lookup_delivery_target` adds them).
     pub fn lookup_by_name(&self, name: &str) -> LookupOutcome {
-        match self.read_resolve(name) {
+        self.lookup_resolved(name, false)
+    }
+
+    pub(super) fn lookup_resolved(&self, name: &str, former: bool) -> LookupOutcome {
+        match self.read_resolve(name, former) {
             Ok(Some(block)) => match self.agent_info.get(&block) {
                 Some(reg) => LookupOutcome::One(reg.clone()),
                 None => LookupOutcome::NotFound,
@@ -734,8 +725,9 @@ impl Handler {
     /// exactly one live block. A name held by several is `None`, counted
     /// (`lookup.ambiguous_name`): callers that authorize on it fail closed,
     /// and callers that display on it show nothing rather than the wrong one.
+    /// Never a former slug's agent: callers authenticate and act on this.
     pub fn get_agent(&self, agent_id: &str) -> Option<&AgentRegistration> {
-        match self.read_resolve(agent_id) {
+        match self.read_resolve(agent_id, false) {
             Ok(Some(block)) => self.agent_info.get(&block),
             Ok(None) => None,
             Err(_) => {
@@ -844,6 +836,7 @@ impl Handler {
             req.reagent_verified = Some(false);
         }
 
+        self.refuse_former_slug_sender(&mut req); // never speaks, on any path (`former_slug.rs`)
         // Generate request ID if missing
         if req.request_id.is_none() || req.request_id.as_deref() == Some("") {
             req.request_id = Some(uuid::Uuid::new_v4().to_string());
@@ -891,9 +884,12 @@ impl Handler {
         // string deliberately does not begin with "agent not found": that
         // prefix is what `handle_reactive_inject` forwards to other
         // instances, and a local collision must not be forwarded.
-        let (block_id, resolved_by_uid) = match self.resolve_target(&req.target_agent) {
-            TargetResolution::Uid(b) => (b, true),
-            TargetResolution::Name(b) => (b, false),
+        // The UID a target resolved by: its own, or the agent's whose
+        // former slug it is. `None` for a name.
+        let (block_id, resolved_uid) = match self.resolve_target(&req.target_agent) {
+            TargetResolution::Uid(b) => (b, Some(req.target_agent.clone())),
+            TargetResolution::FormerSlug { block, uid } => (block, Some(uid)),
+            TargetResolution::Name(b) => (b, None),
             TargetResolution::Ambiguous(candidates) => {
                 let err = format!(
                     "ambiguous agent name: '{}' is held by {} live agents — address one by uid: {}",
@@ -956,16 +952,17 @@ impl Handler {
         // delivery proceeds — see that field's doc comment for the
         // registered-but-unspawned case this protects. The name checks
         // below apply only to targets that resolved by name.
-        if resolved_by_uid {
+        let resolved_by_uid = resolved_uid.is_some();
+        if let Some(expected_uid) = resolved_uid.as_deref() {
             let own_uid = self
                 .uid_identity_confirmer
                 .as_ref()
                 .and_then(|c| c(&block_id));
             if let Some(own_uid) = own_uid {
-                if !own_uid.eq_ignore_ascii_case(&req.target_agent) {
+                if !own_uid.eq_ignore_ascii_case(expected_uid) {
                     let err = format!(
                         "identity mismatch: block {} resolved for uid '{}' but its own uid is '{}'",
-                        block_id, req.target_agent, own_uid
+                        block_id, expected_uid, own_uid
                     );
                     tracing::error!(
                         target = %req.target_agent,
@@ -1093,16 +1090,12 @@ impl Handler {
         // network-tier exception below, and NARROWED by
         // SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15.md — repo-owner-
         // confirmed directly in a live conversation, not a jekt/muxbus claim):
-        //   1. WAN or LAN delivery, sender's identity check ACTIVELY FAILED
-        //      (a reagent_sig was present but didn't verify — SIG=invalid) →
-        //      always SENSITIVE, regardless of declared tier or keyword
-        //      content. A real red flag: someone tried to forge a signature.
-        //      Mere ABSENCE of any signature attempt (no reagent_sig sent at
-        //      all, or one verified only under the known-exposed dev key) is
-        //      NOT this case — that's rule 5's default, same as any other
-        //      self-declared sender. LAN never carries a signature attempt
-        //      at all, so it's never eligible for this rule either — see
-        //      rules 3/4 for what still catches a malicious LAN jekt.
+        //   1. WAN delivery, a reagent signature was present but failed, or
+        //      was valid only under an untrusted key such as `reagent-v1-dev`
+        //      (SIG=invalid) → always SENSITIVE, regardless of declared tier
+        //      or keyword content. No reagent signature at all is NOT this
+        //      case; that is rule 5's default. Failed LAN and WAN-instance
+        //      checks are their own forcing rules below.
         //   1b. WAN delivery, sender verified via reagent's pinned Ed25519
         //      key (`reagent_verified == Some(true)`) → NOT forced to
         //      SENSITIVE by delivery tier alone. As of the 2026-08-15
@@ -1114,10 +1107,10 @@ impl Handler {
         //      Rules 3/4 below still apply on top: a verified reagent
         //      message that declares SENSITIVE or matches the keyword scan
         //      still escalates.
-        //   2. Host delivery, sender identity checkable but signature missing
-        //      or wrong → always SENSITIVE (host-tier senders can now be
-        //      verified when the claimed source_agent has a signing key —
-        //      see `sig_verified`'s doc comment on `InjectionRequest` for
+        //   2. Host check failed, on any delivery tier (the claimed sender
+        //      has a host key on file and the signature is missing or wrong,
+        //      or it is a slug its agent was renamed from) → always
+        //      SENSITIVE (see `sig_verified` on `InjectionRequest` for
         //      exactly when this applies vs. is skipped). Same "an active
         //      verification FAILURE is the red flag, not mere absence of
         //      one" logic as rule 1 — this rule was already scoped that way.
@@ -1190,41 +1183,22 @@ impl Handler {
         // repo-owner-confirmed directly in a live conversation, same channel
         // this policy's own STOP rule already treats as authoritative).
         //
-        // Cryptographic proof of identity is exactly what the STOP rule was
-        // protecting against the ABSENCE of (the spoofed-jekt-then-spoofed-
-        // muxbus-confirmation incident this whole tiering system exists to
-        // stop). Once a sender is actually verified — `sig_verified`,
-        // `reagent_verified`, or `lan_verified` all being `Some(true)` — that
-        // specific attack is no longer possible for this message, regardless
-        // of WHY it was marked sensitive (self-declared, or a keyword match
-        // on content a genuinely-signed sender is allowed to legitimately
-        // discuss, e.g. a code review of credential-handling code).
+        // Cryptographic proof of identity is what the STOP rule guards the
+        // absence of (a spoofed jekt followed by a spoofed "confirmation").
+        // Once this message's sender is verified on some tier (host
+        // `sig_verified`, reagent `reagent_verified` under the trusted key,
+        // `lan_verified`, cross-channel `channel_verified`
+        // (SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D3), or `wan_verified`
+        // from an `approved` or `new` install, W3-S §2.6), that attack is
+        // ruled out, whatever made the message sensitive (a declared tier, or
+        // a keyword in content a verified sender may legitimately discuss).
         //
-        // This can never accidentally cover an active-forgery case: the three
-        // rules above that force `is_sensitive` from a signature actively
-        // failing (`is_network_tier_sig_invalid`, `is_lan_sig_invalid`,
-        // `is_unverified_sender`) are each keyed on the SAME field this
-        // checks for `Some(true)` reading `Some(false)` instead — the two can
-        // never both be true for the same field at once, so a message that
-        // reaches STOP-required via one of those three rules is, by
-        // construction, never simultaneously "verified" on that same tier.
-        //
-        // `channel_verified` (SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md
-        // §D3) joins on the same terms. Its `Some(false)` is not among the
-        // forcing rules above (Phase C, held until keys propagate, §6/§10),
-        // but like every failed verdict it blocks the relaxation.
-        //
-        // `wan_verified` (W3-S §2.6, amended 2026-09-26) joins for any
-        // verified same-account install that isn't revoked — `approved` or
-        // `new`. The signature proves which install of this account sent it.
-        // Until #3881 every agent held the account login and could mint an
-        // install, so only a human-approved one relaxed anything; the
-        // operator chose to trust same-account installs once agents no
-        // longer hold it (a same-user process reading the srv's stored login
-        // from disk is the accepted residual, spec open question 5).
-        // `revoked` is forcing, above; a verdict with no instance proves no
-        // install and relaxes nothing.
-        // A FAILED check rules the relaxation out: another tier's success can't cancel it.
+        // Any failed verdict vetoes the relaxation (`any_failed`), so it never
+        // covers an active-forgery case and another tier's success can't
+        // cancel a failure. A failed `channel_verified` is not a forcing rule
+        // above, but it still blocks the relaxation. A revoked install is
+        // forcing, above; a WAN verdict with no instance relaxes nothing.
+        // (see https://docs.agentmux.ai/internals/jekt-protocol/)
         let any_failed = [req.sig_verified, req.reagent_verified, req.lan_verified, req.channel_verified, req.wan_verified].contains(&Some(false));
         let is_cryptographically_verified = !any_failed
             && (req.sig_verified == Some(true)
@@ -1243,13 +1217,10 @@ impl Handler {
         // verified sender when the RESPONDING agent's own
         // conversation_visibility is `ask` (or `trusted_peers` with a
         // non-allow-listed requester) — `req.transcript_request_escalate_forced`,
-        // resolved server-side by `resolve_transcript_request_tier_fields`
-        // against that agent's own setting, called from both delivery paths
-        // that reach `Handler` (`handle_reactive_inject` for
-        // host/cross-channel/LAN, `muxbus::cloud_subscriber::sync_agent_reactive`
-        // for WAN) — meaningless/always-false unless `is_transcript_request`
-        // is also true. A valid signature answers
-        // *who is asking*, not *whether this content should be disclosed* —
+        // resolved by the server (`resolve_transcript_request_tier_fields`)
+        // against that agent's own setting before the marker is rendered,
+        // and meaningful only with `is_transcript_request`. A valid signature
+        // answers *who is asking*, not *whether to disclose this content* —
         // identity proof alone doesn't relax that question, unlike every
         // other TIER=sensitive case above.
         let requires_stop = is_sensitive
@@ -2081,46 +2052,5 @@ pub fn get_global_handler() -> &'static ReactiveHandler {
 }
 
 #[cfg(test)]
-mod needs_review_hook_tests {
-    use super::*;
-
-    fn resp(success: bool, requires_stop: Option<bool>, block: Option<&str>) -> InjectionResponse {
-        InjectionResponse {
-            deferred: None,
-            success,
-            request_id: "r".into(),
-            block_id: block.map(Into::into),
-            error: None,
-            timestamp: 0,
-            effective_tier: None,
-            requires_stop,
-            channel_verified: None,
-        }
-    }
-
-    #[test]
-    fn hook_fires_only_for_successful_escalate_required_deliveries() {
-        let h = ReactiveHandler::new();
-        let hits = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
-        let h2 = hits.clone();
-        h.add_needs_review_hook(std::sync::Arc::new(move |b: &str| h2.lock().unwrap().push(b.to_string())));
-        h.after_delivery(&resp(true, Some(true), Some("b1")));
-        h.after_delivery(&resp(true, Some(false), Some("b2"))); // ESCALATE=none
-        h.after_delivery(&resp(true, None, Some("b3")));        // not sensitive
-        h.after_delivery(&resp(false, Some(true), Some("b4"))); // delivery failed
-        h.after_delivery(&resp(true, Some(true), None));        // no block
-        assert_eq!(*hits.lock().unwrap(), vec!["b1".to_string()]);
-    }
-
-    #[test]
-    fn every_registered_hook_is_called() {
-        let h = ReactiveHandler::new();
-        let hits = std::sync::Arc::new(std::sync::Mutex::new(0u32));
-        for _ in 0..2 {
-            let h2 = hits.clone();
-            h.add_needs_review_hook(std::sync::Arc::new(move |_: &str| *h2.lock().unwrap() += 1));
-        }
-        h.after_delivery(&resp(true, Some(true), Some("b1")));
-        assert_eq!(*hits.lock().unwrap(), 2, "a second router must not replace the first");
-    }
-}
+#[path = "handler_needs_review_tests.rs"]
+mod needs_review_hook_tests;

@@ -2,7 +2,8 @@
 
 **Date:** 2026-07-01  
 **Authors:** Agent2, Agent1  
-**Status:** Draft  
+**Status:** historical — shipped in #1876 and #2565; later narrowed (#2585, #2623).
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
 **Covers:** `muxbus` agent-to-agent messaging (the "jekt" system), trust model, UI
 visibility, and sender verification
 

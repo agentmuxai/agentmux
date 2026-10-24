@@ -858,6 +858,16 @@ declare global {
                 unconfirmed?: boolean;
             }[];
         } | null;
+        /** The latest retry of a turn that failed while the model API was
+         *  unreachable, stored before it is sent, so it never goes twice.
+         *  Frontend-only, as above (view/agent/offline/failed-turn.ts). */
+        "agent:retried_turn"?: {
+            agentId: string;
+            text: string;
+            at: number;
+            auto: boolean;
+            state: "sending" | "sent" | "unknown";
+        } | null;
         "agent:runtime"?: {
             permissionMode?: string;
             model?: string | null;
@@ -892,7 +902,7 @@ declare global {
         // block remount and names the pane (section-pane.tsx, warden-model.ts).
         "connectors:section"?: "accounts" | "mcp" | "remotes";
         "memory:section"?: "global" | "personal" | "skills" | "bundles";
-        "warden:section"?: "kanban" | "vault" | "host" | "lan" | "internet" | "audit" | "history";
+        "warden:section"?: "kanban" | "vault" | "host" | "lan" | "internet" | "audit" | "history" | "ambient";
         /** A Kanban task to open in the drawer, set by a link from elsewhere (the Swarm) and cleared once opened. */
         "kanban:open"?: string | null;
         /** The Kanban section shows one lane per repository. */
@@ -908,6 +918,12 @@ declare global {
         // lose; ForkProviderFallbackBanner (agent-view.tsx) reads it.
         // SPEC_AGENT_QUICK_FORK_NEW_TAB_2026_08_21.md §4.4.
         "quickfork:noHistoryFallback"?: boolean;
+        // The client's: the open workspace (a named set of windows), its name,
+        // and which older copy a launch had to open, if one
+        // (srv `user_workspace.rs`, SPEC_WORKSPACES_2026_10_23.md).
+        "workspace:current"?: string;
+        "workspace:name"?: string;
+        "workspace:restored_from"?: "previous" | "pre_upgrade" | null;
     };
 
     // tsgenmeta.MethodMeta
@@ -1071,6 +1087,7 @@ declare global {
         "window:magnifiedblockblurprimarypx"?: number;
         "window:magnifiedblockblursecondarypx"?: number;
         "window:confirmclose"?: boolean;
+        "window:confirmcloseworking"?: boolean;
         "window:savelastwindow"?: boolean;
         "window:keepinactivetabslaidout"?: boolean;
         "window:dimensions"?: string;
@@ -1140,9 +1157,17 @@ declare global {
         "attachments:retentiondays"?: number;
         "agent:askquestiontimeoutms"?: number;
         "agent:overlapnotes"?: boolean;
+        "agent:retryonreconnect"?: boolean;
         "kanban:reminders"?: boolean;
         "agent:mcpselfheal"?: boolean;
+        "agent:outdatedidsnotice"?: boolean;
         "agent:transcriptsinglecopy"?: boolean;
+        "desktop:enabled"?: boolean;
+        "desktop:blocklist"?: string[];
+        "desktop:allowlist"?: string[];
+        "desktop:grantminutes"?: number;
+        "agent:transcriptframes"?: boolean;
+        "agent:transcriptdeltas"?: boolean;
         "agent:turnscopedtail"?: boolean;
         "agent:onewayflow"?: boolean;
         "agent:followcontroller"?: boolean;

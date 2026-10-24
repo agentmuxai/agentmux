@@ -273,20 +273,22 @@ pub fn is_sensitive_message(msg: &str) -> bool {
 ///     all, so nothing was checked (today's pre-existing behavior for every
 ///     host-tier caller, unaffected by this feature). Renders
 ///     `TRUST=self-declared` — explicitly NOT the same as "verified."
-/// Ignored (always renders `TRUST=network-claimed`) for any non-host
-/// delivery tier — network delivery is never treated as verified regardless
-/// of this signal, by design.
+/// These labels are for `host` and `channel` delivery. On `lan` and `wan`
+/// delivery `TRUST` reads `network-claimed` unless a LAN or same-account WAN
+/// signature verified (`lan_verified`, `wan_instance` below); a `channel`
+/// jekt whose own signature verified reads `channel-verified`
+/// (see https://docs.agentmux.ai/internals/jekt-protocol/).
 ///
 /// `reagent_verified` answers an orthogonal question, additively: not "how was this
-/// delivered" (that's `TRUST`, unconditionally `network-claimed` for any
-/// non-host tier, unaffected by this parameter) but "is this specific
+/// delivered" (that's `TRUST`, which this parameter never changes) but "is this specific
 /// message cryptographically proven to come from an AgentMux-operated WAN
 /// service sender" (currently only the GitHub review-notification
 /// consumer). Renders a new, independent `SIG=` marker field:
 ///   - `Some(true)`  — the sender's Ed25519 signature verified against the
 ///     pinned public key. Renders `SIG=verified`.
 ///   - `Some(false)` — a signature was present but didn't verify (wrong
-///     key, tampered content, or unrecognized key id). Renders
+///     key, tampered content, or unrecognized key id), or was valid only
+///     under an untrusted key such as `reagent-v1-dev`. Renders
 ///     `SIG=invalid` — a real red flag, same spirit as host-tier's
 ///     `TRUST=unverified`.
 ///   - `None` — no signature was attempted (the overwhelming majority of
@@ -499,7 +501,7 @@ pub fn wrap_jekt_message_with_files(
     };
 
     let reply_hint = if from_is_agent {
-        format!("Reply: bus:inject to {from}")
+        format!("Reply: mcp__agentmux__Message (action \"send\", to \"{from}\"), not a built-in SendMessage")
     } else {
         "Reply: not available — the sender is not an agent id".to_string()
     };

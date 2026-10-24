@@ -35,8 +35,12 @@ log = "0.4"
 socket2 = { version = "0.5.5", features = ["all"] }
 uuid = { version = "1", features = ["v4", "v5"] }
 chrono = "0.4"
+# This machine's IANA zone name, so a limit's "resets 7pm (America/Los_Angeles)"
+# is read only when it names the local zone (agents/limit_reset.rs). Already in
+# the tree through chrono, so this adds nothing new.
+iana-time-zone = "0.1"
 tokio-util = { version = "0.7", features = ["io", "rt"] }
-rusqlite = { version = "0.39", features = ["bundled"] }
+rusqlite = { version = "0.39", features = ["bundled", "backup"] }
 # TypeScript type generation for the RPC bindings (backend/rpc/schema.rs, and
 # the export_bindings_rpc_schema test that feeds scripts/gen-rpc-stubs.mjs).
 # serde-json-impl gives serde_json::Value a TS impl (JsonValue), which
@@ -87,6 +91,9 @@ encoding_rs = "0.8"
 chardetng = "0.1"
 flate2 = "1"
 sha2 = "0.10"
+# Compressed frames of the shared transcript store
+# (SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21.md §4).
+zstd = "0.13"
 # Image attachments in the agent composer: decode, orient, downscale, re-encode
 # (SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6.4). Same 0.25 line the
 # workspace already locks for agentmux-mcp.
@@ -97,6 +104,11 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 quick-xml = "0.39"
 keepass = { version = "0.17", default-features = false, features = ["save_kdbx4"] }
 argon2 = { package = "rust-argon2", version = "3.0" }
+# Bitwarden's password-protected export: AES-256-CBC, HKDF-Expand and PBKDF2 (its Argon2id is rust-argon2, above).
+aes = "0.8"
+cbc = "0.1"
+hkdf = "0.12"
+pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
 calamine = { version = "0.36", default-features = false }
 lopdf = { version = "0.45", default-features = false }
 hex = "0.4"

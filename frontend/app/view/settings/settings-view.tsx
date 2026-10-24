@@ -18,6 +18,7 @@ import { NotificationsSection } from "./sections/notifications-section";
 import { RecordingSection } from "./sections/recording-section";
 import { DevicesSection } from "./sections/devices-section";
 import { WidgetsSection } from "./sections/widgets-section";
+import { AgentsSection } from "./sections/agents-section";
 import { AdvancedSection } from "./sections/advanced-section";
 import "./settings.scss";
 import { focusWhenRendered } from "@/util/focusutil";
@@ -95,6 +96,7 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
         <div
             ref={container}
             class="settings-view-container"
+            style={{ zoom: props.model.zoom() }}
             onPointerDown={() => {
                 lastPressAt = performance.now();
             }}
@@ -136,6 +138,9 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
                         </Match>
                         <Match when={section() === "widgets"}>
                             <WidgetsSection />
+                        </Match>
+                        <Match when={section() === "agents"}>
+                            <AgentsSection />
                         </Match>
                         <Match when={section() === "advanced"}>
                             <AdvancedSection />

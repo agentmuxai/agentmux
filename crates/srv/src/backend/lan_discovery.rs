@@ -243,6 +243,12 @@ pub struct LanInstance {
     /// Each listed agent's provider id, a known one only (`agent_names.rs`).
     #[serde(default)]
     pub agent_providers: BTreeMap<String, String>,
+    /// Each listed agent's seat as the peer reported it, by lower-cased name
+    /// (`agent_names.rs`; SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §5).
+    /// Omitted when none has one.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[ts(as = "Option<BTreeMap<String, crate::backend::rpc_types::SeatSummary>>", optional)]
+    pub agent_seats: BTreeMap<String, crate::backend::rpc_types::SeatSummary>,
     #[ts(type = "number")]
     pub first_seen: u64,
     #[ts(type = "number")]
@@ -1191,6 +1197,7 @@ impl LanDiscovery {
                     agent_status: Default::default(),
                     agent_lines: Default::default(),
                     agent_providers: Default::default(),
+                    agent_seats: Default::default(),
                     first_seen: now,
                     last_seen: now,
                     last_polled_ok: 0,
@@ -1483,6 +1490,21 @@ pub(crate) enum LanPubkeyLookup {
     /// treat this conservatively (as a failure), never as "nothing to
     /// check."
     RateLimited,
+    /// No peer has a key for this name, and one says it is a slug its agent
+    /// was renamed from, now going by the name given (`current_name`;
+    /// `SPEC_FORK_SLUG_MIGRATION_2026_10_22.md` Phase 1). A former slug never
+    /// signs, so a signature claiming it is a failure. Nothing from that
+    /// answer is cached, under either name: the current name's key is found
+    /// by a lookup of its own, under the usual pinning.
+    Renamed(String),
+}
+
+/// The name a peer's answer says `agent_id` now goes by (`current_name`), when
+/// it is a valid agent id other than `agent_id`. Only ever reported, never
+/// trusted: no key is cached under it.
+fn renamed_to(agent_id: &str, body: &serde_json::Value) -> Option<String> {
+    let current = body.get("current_name")?.as_str()?.trim();
+    (agentmux_common::slug::is_agent_id(current) && !current.eq_ignore_ascii_case(agent_id)).then(|| current.to_string())
 }
 
 /// Minimal token bucket, refilled once per second — same shape as
@@ -1683,20 +1705,32 @@ impl LanDiscoveryController {
         // rule differs: a 2xx whose body has no `lan_public_key` means that
         // peer hosts the agent but hasn't minted a key, so we must keep
         // consuming the stream rather than stopping at the first 2xx.
-        let peers = self.get_instances();
+        self.pubkey_from_peers(&self.get_instances(), agent_id, http).await
+    }
+
+    /// [`Self::find_agent_lan_pubkey`]'s fan-out over `peers`. A key is only
+    /// ever cached under the name asked for.
+    async fn pubkey_from_peers(&self, peers: &[LanInstance], agent_id: &str, http: &reqwest::Client) -> LanPubkeyLookup {
+        let mut renamed = None;
         {
             use futures_util::StreamExt as _;
-            let mut inflight = query_peers_concurrently(&peers, agent_id, http);
+            let mut inflight = query_peers_concurrently(peers, agent_id, http);
             while let Some((peer_url, _auth_key, result)) = inflight.next().await {
                 let Ok(resp) = result else { continue };
                 if !resp.status().is_success() {
                     continue;
                 }
                 let Ok(body) = resp.json::<serde_json::Value>().await else { continue };
+                // A former slug: noted, and its key ignored. Another peer
+                // may still answer for the name itself.
+                if let Some(current) = renamed_to(agent_id, &body) {
+                    renamed = Some(current);
+                    continue;
+                }
+                use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
                 let Some(pubkey_b64) = body.get("lan_public_key").and_then(|v| v.as_str()) else {
                     continue; // this peer has the agent but no LAN key minted for it yet
                 };
-                use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
                 let Ok(pubkey_bytes) = BASE64.decode(pubkey_b64) else { continue };
                 tracing::debug!(agent_id, peer_url = %peer_url, "LAN agent pubkey found on peer");
                 let uid = body.get("uid").and_then(|v| v.as_str()).filter(|u| !u.is_empty());
@@ -1716,7 +1750,10 @@ impl LanDiscoveryController {
                 return LanPubkeyLookup::Found(pubkey_bytes);
             }
         }
-
+        // Not cached: a repeat lookup asks again (rate-limited).
+        if let Some(current) = renamed {
+            return LanPubkeyLookup::Renamed(current);
+        }
         if let Ok(mut cache) = self.pubkey_cache.write() {
             cache.insert(
                 agent_id.to_string(),
@@ -2924,143 +2961,12 @@ mod handle_event_tests {
 }
 
 #[cfg(test)]
-mod lookup_rate_limiter_tests {
-    use super::LookupRateLimiter;
-
-    #[test]
-    fn allows_up_to_max_tokens_per_window() {
-        let mut limiter = LookupRateLimiter::new(3);
-        assert!(limiter.check());
-        assert!(limiter.check());
-        assert!(limiter.check());
-        assert!(!limiter.check(), "a 4th check within the same second must be denied");
-    }
-
-    #[test]
-    fn refills_after_the_window_elapses() {
-        let mut limiter = LookupRateLimiter::new(1);
-        assert!(limiter.check());
-        assert!(!limiter.check());
-        // Simulate the refill window having passed rather than sleeping in
-        // a test — same approach as the existing RATE_LIMIT_MAX tests use
-        // conceptually, just directly on the struct field since this type
-        // has no injectable clock.
-        limiter.last_refill -= std::time::Duration::from_secs(2);
-        assert!(limiter.check(), "must refill once a full second has elapsed");
-    }
-}
+#[path = "lan_discovery_rate_limiter_tests.rs"]
+mod lookup_rate_limiter_tests;
 
 #[cfg(test)]
-mod peer_fanout_tests {
-    use super::*;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-    /// Spawn a minimal HTTP peer that waits `delay` before answering `status`.
-    /// Returns its `127.0.0.1:port`. Same raw-TCP shape as the mock servers in
-    /// `muxbus::pkce`'s tests — no extra dev-dependency needed.
-    async fn mock_peer(delay: std::time::Duration, status: &'static str, body: &'static str) -> String {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            loop {
-                let Ok((mut stream, _)) = listener.accept().await else { return };
-                tokio::spawn(async move {
-                    let mut buf = [0u8; 2048];
-                    let _ = stream.read(&mut buf).await;
-                    tokio::time::sleep(delay).await;
-                    let resp = format!(
-                        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                        body.len()
-                    );
-                    let _ = stream.write_all(resp.as_bytes()).await;
-                });
-            }
-        });
-        format!("127.0.0.1:{}", addr.port())
-    }
-
-    fn peer_at(addr: &str) -> LanInstance {
-        let (host, port) = addr.rsplit_once(':').unwrap();
-        LanInstance {
-            instance_id: format!("peer-{port}"),
-            hostname: "test".into(),
-            version: "0".into(),
-            channel: String::new(),
-            os: String::new(),
-            address: host.to_string(),
-            port: port.parse().unwrap(),
-            auth_key: "k".into(),
-            agents: vec![],
-            agent_status: Default::default(),
-            agent_lines: Default::default(),
-            agent_providers: Default::default(),
-            first_seen: 0,
-            last_seen: 0,
-            last_polled_ok: 0,
-            other_ttl_secs: 4500,
-        }
-    }
-
-    /// The regression this fan-out exists to prevent: a slow peer listed BEFORE
-    /// the peer that actually has the agent must not delay the answer.
-    ///
-    /// Sequentially this took `LAN_PEER_QUERY_TIMEOUT_SECS` (2s) to time the
-    /// slow peer out before even trying the second one. Concurrently the fast
-    /// peer answers immediately. The 1500ms bound sits well clear of both the
-    /// ~0ms concurrent path and the ≥2000ms sequential one, so it discriminates
-    /// without being timing-fragile.
-    #[tokio::test]
-    async fn a_slow_peer_does_not_delay_a_fast_one() {
-        let slow = mock_peer(
-            std::time::Duration::from_secs(LAN_PEER_QUERY_TIMEOUT_SECS + 5),
-            "200 OK",
-            "{}",
-        )
-        .await;
-        let fast = mock_peer(std::time::Duration::from_millis(0), "200 OK", "{}").await;
-        // Slow first — the ordering that defeated the sequential loop.
-        let peers = vec![peer_at(&slow), peer_at(&fast)];
-        let http = reqwest::Client::new();
-
-        let started = std::time::Instant::now();
-        let mut inflight = query_peers_concurrently(&peers, "agent-x", &http);
-        let mut winner = None;
-        {
-            use futures_util::StreamExt as _;
-            while let Some((peer_url, _key, result)) = inflight.next().await {
-                if matches!(result, Ok(ref r) if r.status().is_success()) {
-                    winner = Some(peer_url);
-                    break;
-                }
-            }
-        }
-        let elapsed = started.elapsed();
-
-        assert_eq!(
-            winner.as_deref(),
-            Some(format!("http://{fast}").as_str()),
-            "the fast peer should win even though the slow peer was queried first"
-        );
-        assert!(
-            elapsed < std::time::Duration::from_millis(1500),
-            "fan-out should not wait on the slow peer; took {elapsed:?}"
-        );
-    }
-
-    /// Peers with no address or no scoped lan_key are not queryable and must be
-    /// skipped — same eligibility rule the sequential loops applied.
-    #[tokio::test]
-    async fn ineligible_peers_are_skipped() {
-        let mut no_addr = peer_at("127.0.0.1:1");
-        no_addr.address = String::new();
-        let mut no_key = peer_at("127.0.0.1:2");
-        no_key.auth_key = String::new();
-        let peers = vec![no_addr, no_key];
-        let http = reqwest::Client::new();
-        let inflight = query_peers_concurrently(&peers, "agent-x", &http);
-        assert_eq!(inflight.len(), 0, "neither peer is eligible to be queried");
-    }
-}
+#[path = "lan_discovery_peer_fanout_tests.rs"]
+mod peer_fanout_tests;
 
 /// `is_self_resolution` — the guard that stops this instance inserting itself
 /// as a LAN peer.

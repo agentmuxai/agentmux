@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { heldRowsToRelease, type HeldReleaseInput } from "./held-release";
+import { AWAY_ARRIVALS_MAX, AwayArrivals, awayRowsToHold, heldRowsToRelease, type HeldReleaseInput } from "./held-release";
 
 const VIEW = { viewportTop: 100, viewportBottom: 500 };
 const rects: Record<string, { top: number; bottom: number } | null> = {
@@ -58,5 +58,60 @@ describe("heldRowsToRelease", () => {
         expect(heldRowsToRelease(input({ carried, carryExpired: true }))).toEqual(["above", "gone"]);
         // The one on screen was seen, and keeps its hold.
         expect(carried.size).toBe(0);
+    });
+});
+
+
+describe("AwayArrivals", () => {
+    it("keeps ids only, newest last, and forgets them when taken", () => {
+        const a = new AwayArrivals();
+        a.add("x");
+        a.add("y");
+        a.add("x"); // seen again: moves to the end, not duplicated
+        expect(a.size).toBe(2);
+        expect(a.take()).toEqual(["y", "x"]);
+        expect(a.size).toBe(0);
+    });
+
+    it("is capped: 300 rows finishing while away keep the newest AWAY_ARRIVALS_MAX", () => {
+        const a = new AwayArrivals();
+        for (let i = 0; i < 300; i++) a.add(`t${i}`);
+        expect(a.size).toBe(AWAY_ARRIVALS_MAX);
+        const ids = a.take();
+        expect(ids[0]).toBe(`t${300 - AWAY_ARRIVALS_MAX}`);
+        expect(ids[ids.length - 1]).toBe("t299");
+    });
+});
+
+describe("awayRowsToHold", () => {
+    const away = (over: Partial<Parameters<typeof awayRowsToHold>[0]>) =>
+        awayRowsToHold({
+            ids: ["above", "onScreen", "gone"],
+            held: new Set(),
+            pinned: new Set(),
+            ...VIEW,
+            rect: (id) => rects[id] ?? null,
+            ...over,
+        });
+
+    it("holds the rows on screen, not the ones above the viewport or not rendered", () => {
+        expect(away({})).toEqual(["onScreen"]);
+    });
+
+    it("skips a row already held or pinned", () => {
+        expect(away({ held: new Set(["onScreen"]) })).toEqual([]);
+        expect(away({ pinned: new Set(["onScreen"]) })).toEqual([]);
+    });
+
+    it("after 300 tools finished while away, holds at most the rows in view", () => {
+        const ids = Array.from({ length: 300 }, (_, i) => `t${i}`);
+        // 10px rows stacked from 0: only those intersecting [100, 500) are in view.
+        const rect = (id: string) => {
+            const i = Number(id.slice(1));
+            return { top: i * 10, bottom: i * 10 + 10 };
+        };
+        const held = awayRowsToHold({ ids, held: new Set(), pinned: new Set(), ...VIEW, rect });
+        expect(held.length).toBe(40);
+        expect(held[0]).toBe("t10");
     });
 });

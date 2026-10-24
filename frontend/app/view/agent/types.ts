@@ -358,9 +358,10 @@ export type JektTier = "info" | "coord" | "sensitive";
 /** `channel`: another AgentMux instance on the same machine. */
 export type JektDeliveryTier = "host" | "channel" | "lan" | "wan";
 
-/** Sender trust classification. Host-tier deliveries are agent-originated on
- *  this machine; lan/wan cross a network boundary and are only as
- *  trustworthy as the sender's token. Spec §5. */
+/** Sender trust classification: how the sender's identity was proven, if at
+ *  all. Only the `*-verified` labels mean a signature (or the caller's own
+ *  identity token) proved it; see
+ *  https://docs.agentmux.ai/internals/jekt-protocol/. */
 export type JektTrust =
     | "host-verified"
     | "channel-verified"
@@ -1081,7 +1082,9 @@ export type LogFn = (tag: string, text: string, level?: "info" | "error" | "warn
  * Applied as CLI flags on each turn (between --resume spawns).
  */
 export type PermissionMode = "bypass" | "auto" | "acceptEdits" | "plan" | "default";
-export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
+// "ultra": some Codex models' deepest level (their account's list says which
+// levels each model takes, runtime-capabilities.ts effortLevels).
+export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 
 export interface AgentRuntimeConfig {
     permissionMode: PermissionMode;

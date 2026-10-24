@@ -83,7 +83,6 @@ whoami = "1"
 # Codex, Gemini, etc.) still go through the plain-pipes path inside
 # run_cli_login. See SPEC_OPENCLAW_AGENT_2026_05_17.md §6.
 portable-pty = "0.9"
-json_comments = "0.2"
 # Talks only to srv at AGENTMUX_LOCAL_URL (http://127.0.0.1:<port>): no TLS feature on purpose (#4207).
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 # A window renderer's size, for recycling it (commands/recycle.rs).

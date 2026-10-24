@@ -234,6 +234,9 @@ pub(super) fn verify_jekt_signature(state: &AppState, req: &mut InjectionRequest
         req.sig_verified = Some(true); // identity M4d-4
         return;
     }
+    if former_slug::refuse_former_sender(state, req) {
+        return;
+    }
     let Ok(Some(key)) = state.mstore.agent_jekt_key_load(&claimed) else {
         return;
     };
@@ -277,8 +280,8 @@ const REAGENT_SIG_MAX_AGE_SECS: i64 = 600;
 /// partial set of the four fields (e.g. a sig but no key_id) is treated the
 /// same as "not signed" (`reagent_verified` stays `None`), not "signed but
 /// broken" — matches `cloud_subscriber.rs`'s identical policy: a legitimate
-/// sender always sends all four together, and this field never affects
-/// `TIER`/`TRUST` escalation either way, so a stripped signature can't buy
+/// sender always sends all four together, and a stripped signature reads
+/// exactly like an absent one (no `SIG=`, nothing forced), so it can't buy
 /// an attacker anything a fully-absent one couldn't already.
 ///
 /// Takes `now` explicitly (rather than calling `now_unix_secs()` itself),
@@ -354,6 +357,11 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
         // flag on its own (same treatment self-declared senders get
         // elsewhere).
         crate::backend::lan_discovery::LanPubkeyLookup::NotFound => return,
+        crate::backend::lan_discovery::LanPubkeyLookup::Renamed(current) => {
+            tracing::warn!(agent_id = %claimed, current = %current, "LAN jekt signed as a name its agent was renamed from, which never signs: counted as failed");
+            req.lan_verified = Some(false);
+            return;
+        }
         // reagentx P0 follow-up: the lookup was SKIPPED (rate-limited), not
         // genuinely absent — a lan_sig WAS presented (checked above), so
         // "we didn't check" must not collapse into the same benign outcome
@@ -411,7 +419,9 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
 }
 
 mod channel_v2;
+pub(crate) mod former_slug;
 mod lan_v2;
+pub(super) mod replay;
 
 /// Anti-replay window for cross-channel `channel_sig` —
 /// SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D6: host-tier's tighter
@@ -690,12 +700,10 @@ pub(crate) async fn deliver(
     mut req: InjectionRequest,
 ) -> serde_json::Value {
     req.delivery_tier = Some(resolve_delivery_tier(auth_via, req.delivery_tier.as_deref()));
-    // Identity M4c-2d: the sender's UID, for the audit entry only — never
-    // forwarded (`#[serde(skip)]`).
+    // Identity M4c-2d: the sender's UID, for the audit only (`#[serde(skip)]`).
     req.audit_source_uid = caller_uid.to_string();
     super::actor::source_from_token(&state.mstore, caller_uid, &mut req);
-    // Identity M4d-6: the signed source_uid is the sender's to set; this srv
-    // only counts one that isn't the UID its token named.
+    // Identity M4d-6: count a signed source_uid other than the token's UID.
     if !caller_uid.is_empty() && req.source_uid.as_deref().is_some_and(|s| s != caller_uid) {
         crate::backend::agent_resolve::record_uid_fallback("m4.source_uid_mismatch");
     }
@@ -704,12 +712,12 @@ pub(crate) async fn deliver(
     verify_reagent_signature(&mut req, now_unix_secs());
     verify_lan_signature(&state, &mut req).await;
     verify_cross_channel_signature(&state, &mut req);
+    let mut replay = replay::reserve(&mut req, now_unix_secs());
     req.route_unsigned_target();
     resolve_transcript_request_tier_fields(&state.mstore, &mut req);
 
-    // Files sent with it (SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §3.3, §6):
-    // refused outright unless the msgid binds them, then prepared for the
-    // agent here, since the handler does no I/O.
+    // Files (SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §3.3, §6): refused unless the
+    // msgid binds them, then prepared here, since the handler does no I/O.
     if let Err(error) = super::jekt_files::check(&req) {
         return super::jekt_files::refused(&req, error);
     }
@@ -718,6 +726,7 @@ pub(crate) async fn deliver(
     // 1. Try local ReactiveHandler first (fast path — same instance).
     let resp = super::jekt_files::inject_here(state, &req);
     if resp.success {
+        replay.delivered();
         echo_local_delivery(state, &req, &resp);
         return super::jekt_files::with_count(serde_json::to_value(&resp).unwrap_or_default(), &req);
     }
@@ -727,7 +736,7 @@ pub(crate) async fn deliver(
     // (SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md Phase 0 item 4).
     // No other tier can run it either: the agent lives on this instance.
     if resp.error.as_deref().is_some_and(super::jekt_held::is_spawn_gate_refusal) {
-        if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NeedsLogin).await {
+        if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NeedsLogin, &mut replay).await {
             return held;
         }
         return serde_json::to_value(&resp).unwrap_or_default();
@@ -784,9 +793,11 @@ pub(crate) async fn deliver(
     if is_not_found {
         // A candidate an older build registered can't take files (spec §3.4).
         let mut files_too_old = false;
+        // A former name's agent, or a display name's, runs as its slug (`former_slug`).
+        let alias = former_slug::delivery_alias(state, &req.target_agent);
         // Tier 2: same-host, different sidecar (file registry → HTTP loopback)
         let data_dir = base::get_mux_data_dir();
-        if let Some(entry) = agent_registry::lookup(&data_dir, &req.target_agent) {
+        if let Some((found_as, entry)) = former_slug::registry_entry(&data_dir, &req.target_agent, alias.as_deref()) {
             // Guard against self-forwarding loops.
             if entry.local_url != state.local_web_url && super::jekt_files::entry_takes(&req, &entry, &mut files_too_old) {
                 match forward_inject_to_peer(
@@ -832,13 +843,13 @@ pub(crate) async fn deliver(
                     // whenever the body parsed, regardless of success, so a
                     // stale same-channel entry never reached a later tier).
                     ForwardOutcome::Stale => {
-                        if agent_registry::should_evict_on_forward_failure(&entry) {
+                        if former_slug::may_evict(&found_as, &req) && agent_registry::should_evict_on_forward_failure(&entry) {
                             tracing::warn!(
                                 target = %req.target_agent,
                                 pid = entry.pid,
                                 "cross-instance forward: entry presumed dead — evicting and falling through"
                             );
-                            agent_registry::remove(&data_dir, &req.target_agent);
+                            agent_registry::remove(&data_dir, &found_as);
                         } else {
                             // Alive but did not take it: the target exists
                             // elsewhere, so it is not held here.
@@ -865,7 +876,7 @@ pub(crate) async fn deliver(
         // a failed forward evicts just that channel's entry and falls through
         // to the next candidate, same evict-on-fail shape Tier 3 already uses.
         if let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() {
-            let candidates = agent_registry::lookup_all_shared(&shared_dir, &req.target_agent);
+            let (found_as, candidates) = former_slug::shared_entries(&shared_dir, &req.target_agent, alias.as_deref());
             for entry in candidates {
                 // Self-forward guard, matching Tier 2a. Also loopback-only
                 // (§5 of the spec): a poisoned registry entry can't redirect
@@ -909,14 +920,14 @@ pub(crate) async fn deliver(
                     // Evicting only this channel's entry lets the loop try the
                     // next candidate.
                     ForwardOutcome::Stale => {
-                        if agent_registry::should_evict_on_forward_failure(&entry) {
+                        if former_slug::may_evict(&found_as, &req) && agent_registry::should_evict_on_forward_failure(&entry) {
                             tracing::warn!(
                                 target = %req.target_agent,
                                 channel = %entry.channel,
                                 pid = entry.pid,
                                 "cross-channel forward: entry presumed dead — evicting and trying next candidate"
                             );
-                            agent_registry::remove_shared(&shared_dir, &req.target_agent, &entry.channel);
+                            agent_registry::remove_shared(&shared_dir, &found_as, &entry.channel);
                         } else {
                             candidate_seen = true;
                             tracing::warn!(
@@ -987,8 +998,8 @@ pub(crate) async fn deliver(
         // same-host or LAN tier could place the message.
         //
         // This tier used to be a comment here delegating to a "muxbus-client"
-        // that the callers agents actually use are not — the MCP `SendMessage`
-        // tool POSTs to this very endpoint and bails on `success != true`, so
+        // that the callers agents actually use are not — the MCP `Message`
+        // tool's send action POSTs to this very endpoint and bails on `success != true`, so
         // the chain silently stopped at three while that tool's description
         // promised "local → LAN → cloud". Owning it here means every caller
         // inherits it. See `crate::muxbus::relay` and
@@ -1001,10 +1012,10 @@ pub(crate) async fn deliver(
         // the relay's 30 min expiry instead of the 24 h hold, and only a
         // sender NOT signed in to the cloud ever reached the hold.
         if req.files.is_some() {
-            return super::jekt_files::no_route(state, auth_via, caller_uid, &req, &resp, candidate_seen, files_too_old).await;
+            return super::jekt_files::no_route(state, auth_via, caller_uid, &req, &resp, candidate_seen, files_too_old, &mut replay).await;
         }
         if !candidate_seen && route_for_absent(state, auth_via, &req, &resp).await == AbsentRoute::HoldHere {
-            if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NotRunning).await {
+            if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NotRunning, &mut replay).await {
                 return held;
             }
         }
@@ -1014,7 +1025,7 @@ pub(crate) async fn deliver(
         // 5. No tier knew the target: hold it for the agent's return, when
         //    the durable jekt conditions hold.
         if !candidate_seen {
-            if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NotRunning).await {
+            if let Some(held) = hold_for_absent_target(state, auth_via, &req, &resp, HoldReason::NotRunning, &mut replay).await {
                 return held;
             }
         }
@@ -1026,7 +1037,7 @@ pub(crate) async fn deliver(
 
 /// Echo a locally delivered jekt into the sender's own pane, as every
 /// successful delivery path does.
-fn echo_local_delivery(
+pub(super) fn echo_local_delivery(
     state: &AppState,
     req: &InjectionRequest,
     resp: &crate::backend::reactive::types::InjectionResponse,
@@ -1039,17 +1050,10 @@ fn echo_local_delivery(
         &resp.request_id,
         resp.effective_tier.as_deref(),
         resp.requires_stop,
-        EchoTrust {
-            delivery_tier: req.delivery_tier.as_deref().unwrap_or("host"),
-            // Same `req` this call's own `effective_tier`/`requires_stop`
-            // were computed from (via `inject_message`) — not hardcoded, so
-            // the echoed marker's TRUST/SIG stays consistent with its own
-            // ESCALATE= (reagentx P1 on PR #2623).
-            sig_verified: req.sig_verified,
-            reagent_verified: req.reagent_verified,
-            lan_verified: req.lan_verified,
-            channel_verified: req.channel_verified,
-        },
+        // Same `req` this call's own `effective_tier`/`requires_stop` were
+        // computed from (via `inject_message`), so the echoed marker's
+        // TRUST/SIG stays consistent with its own ESCALATE=.
+        EchoTrust::of(req),
         req.priority.as_deref().unwrap_or("normal"),
         req.files_delivery.as_ref(),
     );
@@ -1064,13 +1068,15 @@ fn echo_local_delivery(
 ///
 /// The same rules hold a jekt the target's spawn gate refused
 /// ([`HoldReason::NeedsLogin`]); the replay then waits for sign-in
-/// (`jekt_held::still_needs_login`).
-pub(crate) async fn hold_for_absent_target(
+/// (`jekt_held::still_needs_login`). Delivered by UID or held, a message
+/// keeps its one-delivery `replay` reservation.
+pub(in crate::server) async fn hold_for_absent_target(
     state: &AppState,
     auth_via: super::ReactiveAuthVia,
     req: &InjectionRequest,
     resp: &crate::backend::reactive::types::InjectionResponse,
     reason: HoldReason,
+    replay: &mut replay::Reservation,
 ) -> Option<serde_json::Value> {
     use crate::backend::storage::jekt_held::{HeldJekt, HoldOutcome, HELD_TTL_MS};
     if !hold_applies(auth_via, req, resp) {
@@ -1128,6 +1134,7 @@ pub(crate) async fn hold_for_absent_target(
         by_uid.target_agent = outcome.target_uid.clone();
         let resp = state.reactive_handler.inject_message(by_uid);
         if resp.success {
+            replay.delivered();
             // As addressed, so the sender's echo names whom it wrote to
             // (ReAgent P1 on #3632: this path skipped the echo).
             echo_local_delivery(state, req, &resp);
@@ -1147,6 +1154,7 @@ pub(crate) async fn hold_for_absent_target(
     let target = &req.target_agent;
     match outcome {
         Ok(HoldOutcome::Held) | Ok(HoldOutcome::AlreadyHeld) => {
+            replay.delivered();
             crate::backend::agent_resolve::record_uid_fallback("jekt.held");
             let error = match reason {
                 HoldReason::NotRunning => format!(
@@ -1160,6 +1168,9 @@ pub(crate) async fn hold_for_absent_target(
                         "agent {target} is not signed in — held for delivery on this AgentMux instance for up to 24 h, delivered when it signs in"
                     )
                 }
+                HoldReason::Limited => format!(
+                    "agent {target}'s account is out of quota — held for delivery on this AgentMux instance for up to 24 h, delivered when it can work again (an account move or the reset)"
+                ),
             };
             Some(json!({
                 "success": false,
@@ -1285,24 +1296,8 @@ fn absent_route_for(answer: &crate::muxbus::wan_lease::Holder) -> AbsentRoute {
     }
 }
 
-/// Why a jekt is held (`held_reason` in the inject answer;
-/// SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md §5.1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum HoldReason {
-    /// A known agent with no process here.
-    NotRunning,
-    /// The agent is here but its spawn gate refused: not signed in.
-    NeedsLogin,
-}
-
-impl HoldReason {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            HoldReason::NotRunning => "not_running",
-            HoldReason::NeedsLogin => "needs_login",
-        }
-    }
-}
+/// Why a jekt is held (`server::hold_reason`).
+pub(crate) use super::hold_reason::HoldReason;
 
 /// Tier 4. `Some(body)` when the cloud accepted the injection (and the sender
 /// echo has been emitted); `None` when tier 4 doesn't apply or didn't take,
@@ -1366,7 +1361,7 @@ pub(super) async fn try_cloud_relay(state: &AppState, req: &InjectionRequest, ca
         &req.target_agent,
         &req.message,
         priority,
-        carried.as_ref(), req.cloud_files.as_deref(),
+        carried.as_ref(), req.cloud_files.as_deref(), req.jekt_tier.as_ref(),
     )
     .await;
 
@@ -1420,7 +1415,7 @@ pub(super) async fn try_cloud_relay(state: &AppState, req: &InjectionRequest, ca
                 channel_verified: None,
             };
             let mut body = serde_json::to_value(&body).unwrap_or_default();
-            // Passed through for `SendMessage`, which warns of a likely typo
+            // Passed through for the `Message` tool, which warns of a likely typo
             // on `false` (PLAN_JEKT_LOCAL_FIRST_ROUTING_2026_10_02.md R-3).
             if let (Some(in_account), Some(obj)) = (target_in_account, body.as_object_mut()) {
                 obj.insert("target_in_account".to_string(), serde_json::Value::Bool(in_account));
@@ -1487,7 +1482,7 @@ pub(super) async fn handle_reactive_agent(
     if let Some(sender) = crate::backend::swarm_lan_broadcast::sender_lookup(&state.mstore, &state.hostname, id) {
         return Json(sender).into_response();
     }
-    match state.reactive_handler.get_agent(id) {
+    match state.reactive_handler.get_delivery_target(id) {
         Some(agent) => {
             // Merged in, not part of AgentRegistration's own serialization —
             // this is the LAN pubkey-lookup half of
@@ -1517,6 +1512,8 @@ pub(super) async fn handle_reactive_agent(
                     obj.insert("uid_public_key".to_string(), json!(pubkey));
                 }
             }
+            // A former slug: its agent's current name and key (`former_slug`).
+            former_slug::renamed_lookup(&state, id, &mut value);
             Json(value).into_response()
         }
         None => (
@@ -1770,9 +1767,9 @@ pub(super) struct EnsureSigningKeyRequest {
 /// (`agent_handlers/input.rs`), so any agent already holds it. Returning
 /// another agent's raw signing key to any caller with that shared key is
 /// secret-key exfiltration enabling cryptographic impersonation — it
-/// directly breaks the invariant `agent_jekt_keys.rs` documents ("never
-/// returned over any RPC ... only the agent it claims to be from ever held
-/// the key") and the entire premise `TRUST=host-verified` depends on.
+/// directly breaks the invariant `agent_jekt_keys.rs` documents (a key is
+/// served only to its own agent, by that agent's identity token) and the
+/// entire premise `TRUST=host-verified` depends on.
 ///
 /// There is no way to additionally verify "the HTTP caller genuinely IS
 /// `agent_id`" from this request alone — that's the exact problem host-tier
@@ -1976,7 +1973,7 @@ pub(super) async fn handle_reactive_transcript(
             .into_response();
     }
 
-    let reg = match state.reactive_handler.lookup_by_name(&params.agent) {
+    let reg = match state.reactive_handler.lookup_delivery_target(&params.agent) {
         crate::backend::reactive::handler::LookupOutcome::One(reg) => reg,
         // Identity M2 (spec §4.4.3): a name several live blocks hold is a
         // purely LOCAL collision — refuse it with the candidates, never
@@ -2090,15 +2087,15 @@ async fn handle_reactive_transcript_cross_channel(
     // still caps this at one hop even in an exotic multi-instance cycle
     // this filter alone wouldn't catch — e.g. instance A's entry points to
     // B and B's own entry for the same agent points back to A).
-    let Some(entry) = crate::backend::reactive::registry::lookup_all_shared(&shared_dir, &params.agent)
-        .into_iter()
-        .find(|e| !is_self_registration(&e.local_url, &state.local_web_url))
-    else {
+    // A former slug's agent is registered, and asked for, under its current one.
+    let alias = former_slug::owner(state, &params.agent).map(|o| o.slug);
+    let (agent, entries) = former_slug::shared_entries(&shared_dir, &params.agent, alias.as_deref());
+    let Some(entry) = entries.into_iter().find(|e| !is_self_registration(&e.local_url, &state.local_web_url)) else {
         return not_found();
     };
 
     let query: Vec<(&str, String)> = vec![
-        ("agent", params.agent.clone()),
+        ("agent", agent),
         ("max_lines", params.max_lines.to_string()),
         ("forwarded", "true".to_string()),
     ];
@@ -2508,22 +2505,8 @@ mod forward_inject_tests;
 /// answer as a route. Holding here is the default; only "another install
 /// runs it" or an answer the relay cannot give plainly sends it to the relay.
 #[cfg(test)]
-mod absent_route_tests {
-    use super::*;
-    use crate::muxbus::wan_lease::Holder;
-
-    #[test]
-    fn the_lease_answer_picks_the_route() {
-        assert_eq!(absent_route_for(&Holder::Free), AbsentRoute::HoldHere);
-        assert_eq!(absent_route_for(&Holder::Yours), AbsentRoute::HoldHere);
-        // No relay to send through: keep it here.
-        assert_eq!(absent_route_for(&Holder::Unreachable), AbsentRoute::HoldHere);
-        assert_eq!(absent_route_for(&Holder::Other(crate::muxbus::wan_lease::HeldBy { desc: "computer area54".into(), ..Default::default() })), AbsentRoute::Relay);
-        // An older relay, or one that won't say: the order before this plan.
-        assert_eq!(absent_route_for(&Holder::Unsupported), AbsentRoute::Relay);
-        assert_eq!(absent_route_for(&Holder::Unknown), AbsentRoute::Relay);
-    }
-}
+#[path = "tests/reactive/absent_route_tests.rs"]
+mod absent_route_tests;
 
 /// Tier-4 (cloud relay) gating tests.
 ///

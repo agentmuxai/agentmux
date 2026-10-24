@@ -15,8 +15,10 @@
 //!   answer or link.
 //!
 //! And the transitions the board adds to the queue's own (`work_queue.rs`):
-//! hold and unhold, assign, ask and answer, submit, accept and send back,
-//! retry, and start (a claim made for an agent by the operator). Each is one
+//! hold and unhold (by the operator or an agent), a holder pausing its own
+//! task, claiming one named task, assign, ask and answer, submit, accept and
+//! send back, retry, and start (a claim made for an agent by the operator).
+//! Each is one
 //! conditional UPDATE, like the queue's, so it can't race another.
 
 use rusqlite::{params, OptionalExtension, Row};
@@ -24,7 +26,7 @@ use serde::{Deserialize, Serialize};
 
 use super::store::Store;
 use super::work_deps::{attach_after, AfterTask, WAITS_ON_UNFINISHED};
-use super::work_queue::{holder_update, row_to_item, work_state, HolderMatch, WorkItem, COLS};
+use super::work_queue::{holder_update, row_to_item, work_state, ClaimFilter, HolderMatch, WorkItem, COLS};
 use super::StoreError;
 
 /// The tables, created on every open of the identity store, with no schema
@@ -116,6 +118,13 @@ pub struct WorkCard {
     /// The tasks this one starts after (`work_deps.rs`), finished or not.
     #[serde(default)]
     pub after: Vec<AfterTask>,
+    /// The tasks that start after this one, finished or not.
+    #[serde(default)]
+    pub followers: Vec<AfterTask>,
+    /// What GitHub said about its PR: merged when, released in which
+    /// release (`work_prs.rs`). `None` until srv has looked.
+    #[serde(default)]
+    pub pr: Option<super::work_prs::WorkPr>,
 }
 
 /// A task as the board shows it: the queue row and its card.
@@ -191,6 +200,8 @@ fn row_to_card(row: &Row) -> rusqlite::Result<WorkCard> {
         last_reminded_at: row.get("last_reminded_at")?,
         updated_at: row.get("updated_at")?,
         after: Vec::new(),
+        followers: Vec::new(),
+        pr: None,
     })
 }
 
@@ -279,6 +290,7 @@ impl Store {
         };
         let mut one = [t];
         attach_after(&conn, &mut one)?;
+        super::work_prs::attach_prs(&conn, &mut one)?;
         let [t] = one;
         Ok(Some(t))
     }
@@ -312,6 +324,7 @@ impl Store {
             out.push(r?);
         }
         attach_after(&conn, &mut out)?;
+        super::work_prs::attach_prs(&conn, &mut out)?;
         Ok(out)
     }
 
@@ -399,8 +412,18 @@ impl Store {
     /// Set the card fields an agent's `update` or `submit` carries.
     pub fn work_card_update(&self, work_id: &str, u: &CardUpdate, now_ms: i64) -> Result<(), StoreError> {
         let checklist = u.checklist.as_ref().map(|c| serde_json::to_string(c).unwrap_or_default());
-        let conn = self.conn().lock().unwrap();
-        conn.execute(
+        let mut conn = self.conn().lock().unwrap();
+        let tx = conn.transaction()?;
+        // A different PR: what was learned about the old one (its merge, its
+        // release) isn't this one's.
+        if let Some(pr) = &u.pr_url {
+            tx.execute(
+                "DELETE FROM db_work_prs WHERE work_id = ?1
+                   AND EXISTS (SELECT 1 FROM db_work_cards WHERE work_id = ?1 AND pr_url <> ?2)",
+                params![work_id, pr],
+            )?;
+        }
+        tx.execute(
             "UPDATE db_work_cards
                 SET note = COALESCE(?2, note),
                     checklist = COALESCE(?3, checklist),
@@ -410,6 +433,7 @@ impl Store {
               WHERE work_id = ?1",
             params![work_id, u.note, checklist, u.branch, u.pr_url, now_ms],
         )?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -515,6 +539,101 @@ impl Store {
     /// Release a held task to whoever it is for.
     pub fn work_unhold(&self, work_id: &str, now_ms: i64) -> Result<Option<Moved>, StoreError> {
         self.work_move(work_id, &[work_state::HELD], work_state::OPEN, "", &[], now_ms)
+    }
+
+    /// The holder pauses its task (`Tasks` `hold` on its own claim,
+    /// SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md §3.2): `claimed` to
+    /// `held`, the claim given up. Pausing isn't failing, so the attempt
+    /// doesn't count against the task: its limit grows by one. `attempts`
+    /// itself never goes down, since it is the fence: the next claim gets a
+    /// new number, and a late call from this one is refused. A task it took
+    /// from anyone or from a group becomes its own, so the pause comes back to
+    /// it. Fenced like the queue's holder transitions.
+    pub fn work_hold_own(
+        &self,
+        id: &str,
+        agent_id: &str,
+        caller_uid: &str,
+        attempt: i64,
+        now_ms: i64,
+    ) -> Result<Option<HolderMatch>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        // Every right-hand side reads the row as it was, so the targets are
+        // decided from the old (empty) ones and the old holder.
+        holder_update(
+            &conn,
+            |holder| {
+                format!(
+                    "UPDATE db_work_queue
+                        SET state = '{h}', max_attempts = max_attempts + 1,
+                            target_agent = CASE WHEN target_agent = '' AND target_agent_uid = ''
+                                                THEN claimed_by ELSE target_agent END,
+                            target_agent_uid = CASE WHEN target_agent = '' AND target_agent_uid = ''
+                                                    THEN claimed_by_uid ELSE target_agent_uid END,
+                            target_group = '',
+                            claimed_by = '', claimed_by_uid = '', claim_expires = NULL, updated_at = ?4
+                      WHERE id = ?1 AND {holder} AND attempts = ?3 AND state = '{c}'",
+                    h = work_state::HELD,
+                    c = work_state::CLAIMED,
+                )
+            },
+            params![id, agent_id, attempt, now_ms, "", caller_uid],
+        )
+    }
+
+    /// An agent claims one named task (`Tasks` `claim` with `id`, §3.3 of the
+    /// same spec): open, or held (claiming it lifts the hold), and only when
+    /// [`Store::work_queue_claim`] would let this claimer take it: for it, for
+    /// anyone or for one of its groups, of the asked-for kind if any,
+    /// attempts left, not before its time, and not waiting on an unfinished
+    /// task. One conditional UPDATE, so a
+    /// task that moved meanwhile is never taken. Returns the claimed row and
+    /// the state it was in.
+    pub fn work_claim_one(
+        &self,
+        id: &str,
+        filter: &ClaimFilter,
+        now_ms: i64,
+        lease_ms: i64,
+    ) -> Result<Option<(WorkItem, String)>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let before: Option<String> = conn
+            .query_row("SELECT state FROM db_work_queue WHERE id = ?1", params![id], |r| r.get(0))
+            .optional()?;
+        let Some(before) = before.filter(|s| s == work_state::OPEN || s == work_state::HELD) else {
+            return Ok(None);
+        };
+        // Bound, never interpolated, as in the queue's own claim.
+        let groups: String = if filter.groups.is_empty() {
+            String::new()
+        } else {
+            let marks: Vec<String> = (0..filter.groups.len()).map(|i| format!("?{}", i + 8)).collect();
+            format!(" OR q.target_group IN ({})", marks.join(","))
+        };
+        let sql = format!(
+            "UPDATE db_work_queue AS q
+                SET state = '{claimed}', claimed_by = ?1, claimed_by_uid = ?5, claim_expires = ?2,
+                    attempts = attempts + 1, updated_at = ?3
+              WHERE q.id = ?4 AND q.state = ?6
+                AND q.attempts < q.max_attempts
+                AND (q.not_before IS NULL OR q.not_before <= ?3)
+                AND ((q.target_agent_uid <> '' AND q.target_agent_uid = ?5)
+                     OR (q.target_agent_uid = '' AND (q.target_agent = '' OR q.target_agent = ?1)))
+                AND (q.target_group = ''{groups})
+                AND (?7 = '' OR q.kind = ?7)
+                AND NOT {waits}
+              RETURNING {COLS}",
+            claimed = work_state::CLAIMED,
+            waits = WAITS_ON_UNFINISHED,
+        );
+        let expires = now_ms + lease_ms;
+        let kind = filter.kind.clone().unwrap_or_default();
+        let mut binds: Vec<&dyn rusqlite::ToSql> =
+            vec![&filter.agent_id, &expires, &now_ms, &id, &filter.agent_uid, &before, &kind];
+        for g in &filter.groups {
+            binds.push(g);
+        }
+        Ok(conn.query_row(&sql, binds.as_slice(), row_to_item).optional()?.map(|item| (item, before)))
     }
 
     /// Give a waiting task to an agent (`agent`, its UID when known), or to

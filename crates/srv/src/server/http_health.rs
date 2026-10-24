@@ -112,6 +112,9 @@ pub(super) async fn handle_discovery(State(state): State<AppState>) -> Json<serd
     // live block_id come from the reachable set above. `block_id` is null for a
     // known-but-unreachable agent; the always-empty `status` is omitted.
     let instances = state.mstore.instance_list(None, None).unwrap_or_default();
+    // Each agent's seat, by its definition (SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md
+    // §4): `null` when it has none.
+    let defs = state.mstore.agent_def_list().unwrap_or_default();
     let agents: Vec<serde_json::Value> = instances
         .into_iter()
         .map(|i| {
@@ -120,6 +123,7 @@ pub(super) async fn handle_discovery(State(state): State<AppState>) -> Json<serd
             } else {
                 reachable_block.get(&i.instance_name.to_lowercase()).cloned()
             };
+            let seat = crate::backend::agent_seat::summary_in(&state.mstore, &defs, &i.definition_id);
             json!({
                 "name": i.instance_name,
                 "id": i.id,
@@ -127,6 +131,7 @@ pub(super) async fn handle_discovery(State(state): State<AppState>) -> Json<serd
                 "working_directory": i.working_directory,
                 "addressable": live_block.is_some(),
                 "block_id": live_block,
+                "seat": seat,
             })
         })
         .collect();

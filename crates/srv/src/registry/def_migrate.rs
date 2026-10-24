@@ -96,6 +96,8 @@ pub struct DefMigrateStats {
     pub rows_seen: usize,
     pub records_written: usize,
     pub records_skipped_existing: usize,
+    /// Agents whose slug another agent already held: not published.
+    pub records_skipped_slug_taken: usize,
 }
 
 /// Scan every channel AND dev-branch `objects.db` under `home` for user agents
@@ -144,7 +146,43 @@ pub fn migrate_definitions_global_once(
             }
         }
     }
-    for (id, (rec, freshness)) in best {
+    // One slug, one published agent: two channels can each hold a different
+    // agent under one slug (`claude-2` beside the `claude` template). The
+    // oldest keeps it; a later one stays its channel's alone, and the plan
+    // reports it.
+    let _allocating = match store.lock_slug_allocation() {
+        Ok(lock) => Some(lock),
+        Err(e) => {
+            tracing::warn!(error = %e, "def migrate: slug allocation lock not taken; checking slugs without it");
+            None
+        }
+    };
+    // The strict index, as every allocation reads: a newer-schema record's
+    // slugs count. When a record can't be read, no slug is known to be free,
+    // so this pass publishes none (`None`); the agents it holds back go global
+    // on their next edit, through the live allocation. A failed migration
+    // stops srv starting, so one bad file mustn't fail it.
+    let mut holders: Option<HashMap<String, String>> = match store.slug_index_strict() {
+        Ok(index) => {
+            let mut held = HashMap::new();
+            for (uid, names) in index {
+                for s in std::iter::once(&names.slug).chain(&names.former) {
+                    let folded = s.trim().to_lowercase();
+                    if !folded.is_empty() {
+                        held.entry(folded).or_insert_with(|| uid.clone());
+                    }
+                }
+            }
+            Some(held)
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "def migrate: a definition can't be read; publishing no new slug this pass");
+            None
+        }
+    };
+    let mut ordered: Vec<(String, (DefinitionRecord, i64))> = best.into_iter().collect();
+    ordered.sort_by(|(a_id, (a, _)), (b_id, (b, _))| a.data.created_at.cmp(&b.data.created_at).then_with(|| a_id.cmp(b_id)));
+    for (id, (mut rec, freshness)) in ordered {
         // Decide whether to write based on freshness vs any existing global
         // record:
         //   - absent              → backfill (new agent).
@@ -164,22 +202,48 @@ pub fn migrate_definitions_global_once(
         // that. The asymmetry biases toward refreshing on a recovery run, which
         // is the safe direction, and still never downgrades a genuinely-newer
         // global `updated_at`.
-        match store.get(&id) {
+        let existing_slug = match store.get(&id) {
             Ok(Some(existing)) => {
                 if freshness <= existing.data.updated_at {
                     stats.records_skipped_existing += 1;
                     continue;
                 }
                 // else: scanned copy is strictly fresher → fall through to upsert.
+                Some(existing.data.slug)
             }
-            Ok(None) => {}
+            Ok(None) => None,
             Err(e) => {
                 tracing::warn!(def_id = %id, error = %e, "def migrate: get failed; skipping");
                 continue;
             }
+        };
+        // `upsert` keeps a record's slug; only one without a slug takes this.
+        let folded = rec.data.slug.trim().to_lowercase();
+        let publishes = existing_slug.as_ref().is_none_or(|s| s.trim().is_empty()) && !folded.is_empty();
+        let holder = match &holders {
+            Some(held) => held.get(&folded).filter(|h| h.as_str() != id).cloned(),
+            None => Some("(unknown: a definition can't be read)".to_string()),
+        };
+        if let Some(holder) = holder.filter(|_| publishes) {
+            tracing::warn!(
+                def_id = %id,
+                slug = %rec.data.slug,
+                holder = %holder,
+                "def migrate: another agent holds this slug; not publishing it"
+            );
+            stats.records_skipped_slug_taken += 1;
+            if existing_slug.is_none() {
+                continue;
+            }
+            rec.data.slug.clear();
         }
         match store.upsert(&rec) {
-            Ok(()) => stats.records_written += 1,
+            Ok(()) => {
+                stats.records_written += 1;
+                if let Some(held) = holders.as_mut().filter(|_| publishes && !rec.data.slug.is_empty()) {
+                    held.entry(folded).or_insert_with(|| id.clone());
+                }
+            }
             Err(e) => {
                 tracing::warn!(error = %e, "def migrate: upsert into global store failed")
             }
@@ -295,6 +359,8 @@ fn read_user_definitions(db: &Path) -> Result<Vec<(DefinitionRecord, i64)>, rusq
                 container_volumes: row.get(23)?,
                 container_name: row.get(24)?,
                 use_ambient_login: row.get(25)?,
+                former_slugs: Vec::new(),
+                seat: None,
                 content: Vec::new(),
                 skills: Vec::new(),
             })
@@ -686,6 +752,83 @@ mod tests {
         let stats = migrate_definitions_global_once(home, &store).unwrap();
         assert_eq!(stats.records_written, 1, "dev-branch agent migrated");
         assert_eq!(store.get("dev-1").unwrap().unwrap().data.name, "DevAgent");
+    }
+
+    /// A user agent row with its own slug and creation time.
+    fn insert_slugged(db: &Path, id: &str, slug: &str, created_at: i64) {
+        insert_user_agent(db, id, "Claude", created_at);
+        Connection::open(db)
+            .unwrap()
+            .execute("UPDATE db_agent_definitions SET slug = ?2, created_at = ?3 WHERE id = ?1", params![id, slug, created_at])
+            .unwrap();
+    }
+
+    /// Two channels each holding a different agent under one slug (each
+    /// unique in its own database): the oldest is published with it, the
+    /// later isn't published at all, and neither is a slug an existing
+    /// record holds as its slug or a former slug. Case doesn't make a slug
+    /// another.
+    #[test]
+    fn a_slug_two_channels_hold_is_published_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        let db_a = make_channel_db(home, "ch-a", "0.44.1");
+        let db_b = make_channel_db(home, "ch-b", "0.44.1");
+        insert_slugged(&db_b, "u-later", "Claude-2", 200);
+        insert_slugged(&db_a, "u-oldest", "claude-2", 100);
+        insert_slugged(&db_a, "u-taken", "kept", 50);
+        insert_slugged(&db_b, "u-retired-name", "old-name", 60);
+        let store = store_at(home);
+        store
+            .upsert(&DefinitionRecord {
+                schema_version: DEF_MAX_SUPPORTED_SCHEMA,
+                data: DefinitionRecordV1 {
+                    id: "u-holder".to_string(),
+                    slug: "kept".to_string(),
+                    name: "Holder".to_string(),
+                    provider: "claude".to_string(),
+                    former_slugs: vec![crate::registry::FormerSlug { slug: "old-name".to_string(), retired_at: 1 }],
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+
+        let stats = migrate_definitions_global_once(home, &store).unwrap();
+        assert_eq!(store.get("u-oldest").unwrap().unwrap().data.slug, "claude-2");
+        for id in ["u-later", "u-taken", "u-retired-name"] {
+            assert!(store.get(id).unwrap().is_none(), "{id} isn't published");
+        }
+        assert_eq!(store.get("u-holder").unwrap().unwrap().data.slug, "kept");
+        assert_eq!((stats.records_written, stats.records_skipped_slug_taken), (1, 3));
+    }
+
+    /// A slug a newer version's record holds is taken, and a definition that
+    /// can't be read stops the pass publishing any slug without failing it
+    /// (a failed migration stops srv starting).
+    #[test]
+    fn newer_and_unreadable_records_keep_slugs_from_the_backfill() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        let db = make_channel_db(home, "ch-a", "0.44.1");
+        insert_slugged(&db, "u-new", "future-held", 100);
+        let store = store_at(home);
+        let future = r#"{"schema_version":99,"data":{"id":"u-future","slug":"future-held"}}"#;
+        std::fs::write(store.root().join("u-future.json"), future).unwrap();
+
+        let stats = migrate_definitions_global_once(home, &store).unwrap();
+        assert!(store.get("u-new").unwrap().is_none(), "a newer record's slug is held");
+        assert_eq!((stats.records_written, stats.records_skipped_slug_taken), (0, 1));
+
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        let db = make_channel_db(home, "ch-a", "0.44.1");
+        insert_slugged(&db, "u-free", "free-slug", 100);
+        let store = store_at(home);
+        std::fs::write(store.root().join("u-broken.json"), "{").unwrap();
+
+        let stats = migrate_definitions_global_once(home, &store).unwrap();
+        assert!(store.get("u-free").unwrap().is_none(), "no slug is known free");
+        assert_eq!((stats.records_written, stats.records_skipped_slug_taken), (0, 1));
     }
 
     #[test]

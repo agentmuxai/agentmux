@@ -5,4 +5,14 @@
  * CLI accepts (e.g. `claude-sonnet-5`); `display_name` is the label to show
  * (e.g. "Claude Sonnet 5"), taken verbatim from the API.
  */
-export type CatalogModel = { id: string, display_name: string, };
+export type CatalogModel = { id: string, display_name: string, 
+/**
+ * The reasoning efforts this model takes, in the CLI's order (Codex:
+ * `low` … `ultra`, different per model). Empty when the source doesn't
+ * say (Claude's catalog), and the frontend keeps its own levels.
+ */
+efforts?: Array<string>, 
+/**
+ * The effort the CLI uses when none is passed.
+ */
+default_effort?: string, };

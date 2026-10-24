@@ -763,3 +763,37 @@ fn a_restored_sysinfo_pane_keeps_its_view_buttons_shown_or_hidden() {
     let plan = plan_from_doc(&store, &one_pane(view), &opts(home.path(), false));
     assert!(block_meta(&plan, 0, 0).get("sysinfo:showcontrols").is_none());
 }
+
+#[test]
+fn an_agent_pane_that_showed_the_picker_opens_it_again_without_a_note() {
+    let home = tempfile::tempdir().unwrap();
+    let plan = plan_from_doc(&Store::open_in_memory().unwrap(), &one_pane(json!({ "type": "agent" })), &opts(home.path(), false));
+    assert_eq!(block_meta(&plan, 0, 0).get("view"), Some(&json!("agent")));
+    assert!(block_meta(&plan, 0, 0).get(META_LAYOUT_AGENT).is_none());
+    assert!(plan.notes.is_empty(), "{:?}", plan.notes);
+    assert_eq!(plan.tabs[0].summary, ["Agent picker"]);
+}
+
+#[test]
+fn a_workspace_plans_every_window_with_its_name_and_state() {
+    let doc = parse_layout(
+        &json!({
+            "format": "agentmux.layout", "version": 1, "name": "W", "scope": "workspace",
+            "windows": [
+                { "name": "Main", "state": "open", "tabs": [{ "name": "a", "root": { "pane": "p1" }, "panes": { "p1": { "views": [{ "type": "sysinfo" }] } } }] },
+                { "tabs": [{ "name": "empty", "panes": {} }] },
+                { "state": "closed", "tabs": [{ "name": "b", "root": { "pane": "p1" }, "panes": { "p1": { "views": [{ "type": "swarm" }] } } }] }
+            ]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let plan = plan_workspace(&Store::open_in_memory().unwrap(), &doc, &opts(home.path(), false));
+    let windows: Vec<(Option<&str>, bool, usize)> =
+        plan.windows.iter().map(|w| (w.name.as_deref(), w.closed, w.tabs.len())).collect();
+    assert_eq!(windows, [(Some("Main"), false, 1), (None, true, 1)]);
+    assert!(plan.notes.iter().any(|n| n.contains("Window 2 has no panes")), "{:?}", plan.notes);
+    // A layout reader still opens the first window alone.
+    assert_eq!(plan_from_doc(&Store::open_in_memory().unwrap(), &doc, &opts(home.path(), false)).tabs.len(), 1);
+}

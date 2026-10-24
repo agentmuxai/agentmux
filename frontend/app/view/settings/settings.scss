@@ -400,6 +400,79 @@
     margin-top: var(--space-1);
 }
 
+// Outdated agent ids (sections/fork-slug-migration.tsx): the status line and
+// "Update them", the plan's list, what blocks it, and the report.
+.setting-fork-slugs-description,
+.setting-fork-slugs-note,
+.setting-fork-slugs-place {
+    color: var(--secondary-text-color);
+}
+
+.setting-fork-slugs {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+}
+
+.setting-fork-slugs-line {
+    overflow-wrap: anywhere;
+}
+
+.setting-fork-slugs-list,
+.setting-fork-slugs-blockers,
+.setting-fork-slugs-where {
+    margin: var(--space-2) 0 0;
+    padding-left: var(--space-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    overflow-wrap: anywhere;
+
+    .mono {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+    }
+}
+
+.setting-fork-slugs-name {
+    font-weight: 600;
+}
+
+.setting-fork-slugs-blockers {
+    color: var(--error-color);
+}
+
+.setting-fork-slugs-report {
+    margin-top: var(--space-2);
+    padding-top: var(--space-2);
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+
+    .mono {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+    }
+}
+
+.setting-fork-slugs-commands {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    user-select: text;
+}
+
+.setting-fork-slugs-actions {
+    display: flex;
+    gap: var(--space-2);
+    margin-top: var(--space-1);
+}
+
 // Widgets (sections/widgets-section.tsx): the install toolbar, one block per
 // package, and the install prompt inside the package it's for.
 .widgets-toolbar,

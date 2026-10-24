@@ -206,6 +206,20 @@ async fn a_token_caller_under_its_own_slug_is_verified_by_the_token() {
     assert_eq!(req.sig_verified, Some(true), "the stale key is not consulted");
 }
 
+/// `muxsh agent send` sends no message id and no signature: its token is the
+/// proof, and with nothing to replay the one-delivery check leaves it verified.
+#[tokio::test]
+async fn a_token_caller_with_no_message_id_stays_verified() {
+    let state = test_state();
+    row(&state, "uid-m4d4-sh", "m4d4-sh", "M4d4Sh");
+    let mut req = base_req("m4d4-sh", "agenty", "hello");
+    req.audit_source_uid = "uid-m4d4-sh".to_string();
+    verify_jekt_signature(&state, &mut req);
+    assert_eq!(req.sig_verified, Some(true));
+    let _ = crate::server::reactive::replay::reserve(&mut req, now());
+    assert_eq!(req.sig_verified, Some(true), "nothing to replay, so not failed");
+}
+
 #[tokio::test]
 async fn any_other_name_or_tier_keeps_the_hmac_check() {
     let state = test_state();

@@ -263,7 +263,7 @@ impl Handler {
     /// The block a system note for `target_agent` goes to.
     pub(super) fn note_target(&mut self, target_agent: &str) -> Result<String, String> {
         match self.resolve_target(target_agent) {
-            TargetResolution::Uid(b) | TargetResolution::Name(b) => Ok(b),
+            TargetResolution::Uid(b) | TargetResolution::Name(b) | TargetResolution::FormerSlug { block: b, .. } => Ok(b),
             TargetResolution::Ambiguous(candidates) => {
                 Err(format!("ambiguous agent name: '{target_agent}' is held by {} live agents", candidates.len()))
             }

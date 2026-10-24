@@ -2,16 +2,17 @@
 
 **Date:** 2026-09-24
 **Status:** active — the pure primitives (identifiers, certificate,
-revocation, envelope and freshness checks; §2.7) shipped in PR #3727; C1
-shipped in the cloud repo (merged, not yet deployed); D1a (`wan.db`,
-instance key, agent keys, purge) shipped in PR #3734; D1b (certify, publish,
-carry gate) shipped in PR #3771; D2 (verifier, marker, tier rules, audit, `wan`
-grants off; `muxbus/wan_verify.rs`) ships in the PR that changes this line —
-see §2.8 for what it does not include. Remaining: the host-gated approval
-window, instance retirement, the agent
-CLAUDE.md jekt section, the C1 deploy, and the §5 end-to-end run. Verified
-2026-09-25. Measured against `agentmux`
-`main` @ `d01833859` and `agentmux-cloud` `main`, both read on 2026-09-24.
+revocation, envelope and freshness checks; §2.7) shipped in #3727; C1
+shipped and was deployed in the cloud repo; D1a (`wan.db`, instance key, agent
+keys, purge) in #3734; D1b (certify, publish, carry gate) in #3771; D2
+(verifier, marker, tier rules, audit, `wan` grants off; `muxbus/wan_verify.rs`)
+in #3775; the §2.6 amendment (a verified `approved` or `new` install gets
+`ESCALATE=none`) in #3885, after agents stopped holding the account login
+(#3881); srv signs WAN jekts at the origin in #4902, so agents never hold a
+WAN key. Remaining: the host-gated approval window (held; `approved` today
+means only the receiving install itself), instance retirement, and the §5
+end-to-end run. Verified 2026-09-25; restamped 2026-10-22.
+**Current rules:** the jekt protocol specification, https://docs.agentmux.ai/internals/jekt-protocol/. This document is a design record; where it differs from that page, the page and the code are right.
 **Superseded in part (2026-10-14):** who makes the signature. srv now signs
 at the origin, for the agent the request's token names, and no agent holds a
 WAN key; the carry gate became `relay::wan_sign_at_origin`. Everything a

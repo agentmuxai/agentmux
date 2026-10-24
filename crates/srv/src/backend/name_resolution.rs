@@ -22,7 +22,10 @@
 //! name matches, with its UID when it has one. (3) The store, by slug and by
 //! display name (`name`, `instance_name`, case-insensitively) over
 //! non-template, non-hidden rows — the agents that exist but are not running
-//! right now. Live and stored candidates that share a UID are one candidate.
+//! right now — and, when none of those match, by a slug an agent was renamed
+//! from (`Store::agents_matching_name`; `SPEC_FORK_SLUG_MIGRATION_2026_10_22.md`
+//! Phase 1), so a task or cron job addressed to an old id still reaches its
+//! agent. Live and stored candidates that share a UID are one candidate.
 //!
 //! Spec §1.1 measured that a display name never resolves through the
 //! exact-case slug tier. That finding is about a resolver that has to *pick*;
@@ -121,9 +124,9 @@ pub(crate) fn resolve_name_to_uid(
 
     let mut candidates: Vec<AgentCandidate> = Vec::new();
 
-    // (2) Live registry, by name.
+    // (2) Live registry, by name (a former slug too: this picks a target).
     let live: Vec<crate::backend::reactive::AgentRegistration> =
-        match registry.lookup_by_name(typed) {
+        match registry.lookup_delivery_target(typed) {
             LookupOutcome::One(reg) => vec![reg],
             LookupOutcome::Ambiguous(regs) => regs,
             LookupOutcome::NotFound => Vec::new(),
@@ -174,6 +177,25 @@ pub(crate) fn resolve_name_to_uid(
         });
     }
 
+    // (4) Nothing here by that name: every channel's definitions, by slug,
+    // by the route form of the title an agent goes by ("Naki-2" for
+    // "Naki #2", the form agents sign with), or by a former name. An agent
+    // defined or running in another channel on this computer has no row in
+    // this channel's store until it is opened here, and the task queue is
+    // shared by every channel, so a task filed for it by name alone could
+    // never be claimed (#1257).
+    if candidates.is_empty() {
+        for def in shared_defs_answering_to(store, typed).map_err(|e| store_fault(typed, e))? {
+            candidates.push(AgentCandidate {
+                uid: Some(def.id.clone()),
+                name: current_title(&def).to_string(),
+                slug: def.slug,
+                block_id: None,
+                live: false,
+            });
+        }
+    }
+
     match candidates.len() {
         // Only the outcomes that leave a row on the name path are counted
         // (§9.2 reads these as "must reach zero"); `One`, `None` and
@@ -190,6 +212,52 @@ pub(crate) fn resolve_name_to_uid(
             }
         }
         _ => Ok(NameResolution::Ambiguous { candidates }),
+    }
+}
+
+/// The definitions, in any channel, that `typed` names: the one whose slug
+/// it is, else every one whose current title routes to it, else the one it
+/// is a former name of. Only agents a name may mean: never a template, never
+/// one the user forgot (`user_hidden`), as `agents_matching_name` holds; they
+/// are left out before matching, so a template's slug can't shadow an
+/// agent's title.
+fn shared_defs_answering_to(
+    store: &Store,
+    typed: &str,
+) -> Result<Vec<crate::backend::storage::agents::AgentDefinition>, crate::backend::storage::StoreError> {
+    let fold = |s: &str| s.trim().to_lowercase();
+    let target = fold(typed);
+    let route = fold(&agentmux_common::slug::agent_route_name(typed));
+    let defs: Vec<_> = store
+        .agent_def_list()?
+        .into_iter()
+        .filter(|d| d.is_seeded == 0 && d.user_hidden == 0)
+        .collect();
+    if let Some(def) = defs.iter().find(|d| fold(&d.slug) == target) {
+        return Ok(vec![def.clone()]);
+    }
+    let by_title: Vec<_> = defs
+        .iter()
+        .filter(|d| fold(&agentmux_common::slug::agent_route_name(current_title(d))) == route)
+        .cloned()
+        .collect();
+    if !by_title.is_empty() {
+        return Ok(by_title);
+    }
+    let Some(owner) = store.former_name_owner(typed)? else {
+        return Ok(Vec::new());
+    };
+    Ok(defs.into_iter().filter(|d| d.id == owner.uid).collect())
+}
+
+/// The title an agent goes by now: a fork's is its `branch_label`, which a
+/// rename updates while `name` keeps the title it was forked with; a root's
+/// is its `name`.
+fn current_title(d: &crate::backend::storage::agents::AgentDefinition) -> &str {
+    if d.parent_id.trim().is_empty() || d.branch_label.trim().is_empty() {
+        if d.name.is_empty() { &d.slug } else { &d.name }
+    } else {
+        &d.branch_label
     }
 }
 
@@ -399,6 +467,93 @@ mod tests {
         store.set_def_registry(std::sync::Arc::new(defs));
         let r = resolve_name_to_uid(&store, &registry(), UID_UP);
         assert!(r.is_err(), "{r:?}");
+    }
+
+    /// A slug an agent was renamed from resolves to it, stored or live: the
+    /// endpoint `WorkEnqueue` and `CronCreate` call, so a task or a cron job
+    /// addressed to the old id stores the agent's UID (fork slug migration
+    /// Phase 1). Live and stored are one candidate.
+    #[test]
+    fn a_former_slug_resolves_to_its_agent_stored_or_live() {
+        let store = std::sync::Arc::new(store_with(&[(UID_Y, "Loap #2", "loap-loap-2")]));
+        store.test_rename_slug(UID_Y, "loap-2", 1);
+        let r = resolve_name_to_uid(&store, &registry(), "loap-loap-2").unwrap();
+        let NameResolution::One { uid, candidate } = r else {
+            panic!("expected One, got {r:?}");
+        };
+        assert_eq!((uid.as_str(), candidate.slug.as_str(), candidate.live), (UID_Y, "loap-2", false));
+
+        let reg = registry();
+        let resolver_store = store.clone();
+        reg.set_former_slug_resolver(std::sync::Arc::new(move |n: &str| {
+            resolver_store.former_slug_owner(n).ok().flatten().map(|o| o.uid)
+        }));
+        reg.register_agent_full("Loap-2", "block-l", None, 0, Some("loap-2"), Some(UID_Y), "test.m3").unwrap();
+        let r = resolve_name_to_uid(&store, &reg, "loap-loap-2").unwrap();
+        assert!(
+            matches!(&r, NameResolution::One { uid, candidate } if uid == UID_Y && candidate.live),
+            "{r:?}"
+        );
+    }
+
+    #[test]
+    fn a_display_names_route_form_resolves_to_its_agent() {
+        // "Naki #2" signs and is addressed as "Naki-2" (#1257).
+        let store = store_with(&[(UID_Y, "Naki #2", "naki-naki-2")]);
+        for typed in ["Naki-2", "naki-2", " NAKI-2 "] {
+            let r = resolve_name_to_uid(&store, &registry(), typed).unwrap();
+            assert!(matches!(r, NameResolution::One { ref uid, .. } if uid == UID_Y), "{typed}: {r:?}");
+        }
+    }
+
+    #[test]
+    fn two_display_names_with_one_route_form_are_ambiguous() {
+        let store = store_with(&[(UID_Y, "Naki #2", "naki-naki-2"), (UID_UP, "Naki 2", "naki-2-b")]);
+        let r = resolve_name_to_uid(&store, &registry(), "Naki-2").unwrap();
+        let NameResolution::Ambiguous { candidates } = r else { panic!("{r:?}") };
+        let mut uids: Vec<_> = candidates.iter().filter_map(|c| c.uid.clone()).collect();
+        uids.sort();
+        assert_eq!(uids, vec![UID_Y.to_string(), UID_UP.to_string()]);
+    }
+
+    #[test]
+    fn a_route_form_of_nothing_is_still_none() {
+        let store = store_with(&[(UID_Y, "Naki #2", "naki-naki-2")]);
+        assert_eq!(resolve_name_to_uid(&store, &registry(), "Naki-3").unwrap(), NameResolution::None);
+    }
+
+    /// A local template's slug doesn't shadow an agent whose
+    /// title routes to the same name; a forgotten agent is never a target; a
+    /// renamed fork is found by its current title.
+    #[test]
+    fn templates_and_forgotten_agents_never_shadow_or_answer() {
+        let store = store_with(&[]);
+        let mut tpl = test_agent_def("tpl-claude", "Claude", "claude", "agent", 1, "");
+        tpl.slug = "claude".into();
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        let mut root = test_agent_def(UID_Y, "Claude", "claude", "agent", 2, "");
+        root.slug = "claude-2".into();
+        store.agent_def_insert(&mut root).unwrap();
+        // "claude" is the template's slug, and the user agent's title.
+        let r = resolve_name_to_uid(&store, &registry(), "claude").unwrap();
+        assert!(matches!(r, NameResolution::One { ref uid, .. } if uid == UID_Y), "{r:?}");
+
+        let mut gone = test_agent_def(UID_UP, "Gone #1", "claude", "agent", 3, "");
+        gone.slug = "gone-gone-1".into();
+        gone.user_hidden = 1;
+        store.agent_def_insert(&mut gone).unwrap();
+        for typed in ["Gone-1", "gone-gone-1"] {
+            assert_eq!(resolve_name_to_uid(&store, &registry(), typed).unwrap(), NameResolution::None, "{typed}");
+        }
+
+        let mut fork = test_agent_def("uid-fork-1257", "Loap", "claude", "agent", 4, "");
+        fork.slug = "loap-loap-3".into();
+        fork.parent_id = "uid-root".into();
+        fork.branch_label = "Loap Renamed".into();
+        store.agent_def_insert(&mut fork).unwrap();
+        let r = resolve_name_to_uid(&store, &registry(), "Loap-Renamed").unwrap();
+        assert!(matches!(r, NameResolution::One { ref uid, .. } if uid == "uid-fork-1257"), "{r:?}");
     }
 
     /// Templates are prototypes, never targets (spec §1.2): a provider key
