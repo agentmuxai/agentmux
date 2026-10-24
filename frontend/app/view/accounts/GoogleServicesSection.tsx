@@ -17,6 +17,7 @@ import {
     serviceState,
     SERVICES,
     setGoogleGrant,
+    type GooglePanel,
     type GoogleService,
     type PanelAgent,
     type ServiceInfo,
@@ -28,10 +29,18 @@ const CALLS_SHOWN = 10;
 
 export function GoogleServicesSection(props: { account: Account }): JSX.Element {
     const a = () => props.account;
-    const [panel, { refetch }] = createResource(
+    // The fetcher never rejects: a rejected resource throws on every read.
+    // A failed load is data here, shown in place of the lists.
+    const [loaded, { refetch }] = createResource(
         () => (canManageGrants() ? a().id : null),
-        (id) => loadGooglePanel(id)
+        (id): Promise<{ panel: GooglePanel | null; error: string | null }> =>
+            loadGooglePanel(id).then(
+                (panel) => ({ panel, error: null }),
+                (e) => ({ panel: null, error: e instanceof Error ? e.message : String(e) })
+            )
     );
+    const panel = () => loaded()?.panel ?? null;
+    const loadError = () => loaded()?.error ?? null;
     const [error, setError] = createSignal<string | null>(null);
     const [allCalls, setAllCalls] = createSignal(false);
 
@@ -45,6 +54,7 @@ export function GoogleServicesSection(props: { account: Account }): JSX.Element 
         }
     };
     const calls = () => panel()?.calls ?? [];
+    const agents = () => panel()?.agents ?? [];
 
     return (
         <>
@@ -57,14 +67,16 @@ export function GoogleServicesSection(props: { account: Account }): JSX.Element 
                 fallback={<div class="identity-detail-hint">Open AgentMux's desktop app to choose which agents use this account.</div>}
             >
                 <Show
-                    when={(panel()?.agents.length ?? 0) > 0}
+                    when={agents().length > 0}
                     fallback={
-                        <div class="identity-detail-hint">
-                            No agent is bound to this account. Bind one to an agent, then choose what it may use here.
-                        </div>
+                        <Show when={panel()}>
+                            <div class="identity-detail-hint">
+                                No agent is bound to this account. Bind one to an agent, then choose what it may use here.
+                            </div>
+                        </Show>
                     }
                 >
-                    <For each={panel()?.agents}>
+                    <For each={agents()}>
                         {(agent) => (
                             <For each={SERVICES}>
                                 {(info) => (
@@ -88,7 +100,7 @@ export function GoogleServicesSection(props: { account: Account }): JSX.Element 
                         )}
                     </For>
                 </Show>
-                <Show when={error() ?? (panel.error ? String(panel.error) : null)}>
+                <Show when={error() ?? loadError()}>
                     {(e) => (
                         <div class="identity-form-error" role="alert">
                             {e()}
