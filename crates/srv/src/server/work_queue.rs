@@ -218,6 +218,15 @@ pub(super) async fn handle_work_enqueue(
     )
 }
 
+/// The answer to a claim: the attempt (the fence), the card's number and the
+/// item, and `after`, the tasks it starts after with their documents. A build
+/// claimed by an agent no unlock note reached (it was filed for anyone) finds
+/// its spec's path here.
+fn claimed_body(state: &AppState, item: &WorkItem, num: Option<i64>) -> Value {
+    let after = state.identity_store.work_deps_of(&item.id).unwrap_or_default();
+    json!({ "claimed": true, "attempt": item.attempts, "num": num, "item": item, "after": after })
+}
+
 /// Whether a filing is held for the operator's Accept: what the filer said, else
 /// (a spec-and-build pair) no, as in the operator's "Spec first". Left to the
 /// provenance default, a spec an operator asked for would wait for an Accept
@@ -379,10 +388,7 @@ pub(super) async fn handle_work_claim(
                 }
                 super::work_tasks::record(&state, &item.id, &item.claimed_by, "agent", "claimed", "open", "claimed", "");
                 publish_changed(&state);
-                (
-                    StatusCode::OK,
-                    Json(json!({ "claimed": true, "attempt": item.attempts, "num": num, "item": item })),
-                )
+                (StatusCode::OK, Json(claimed_body(&state, &item, num)))
             }
             Ok(None) => {
                 let why = super::work_tasks::why_not_claimed(&state, &id, &filter, now);
@@ -403,10 +409,7 @@ pub(super) async fn handle_work_claim(
             // it prominent here is the difference between a caller that
             // fences correctly and one that discovers the requirement from a
             // 404-shaped "not the holder" response.
-            (
-                StatusCode::OK,
-                Json(json!({ "claimed": true, "attempt": item.attempts, "num": num, "item": item })),
-            )
+            (StatusCode::OK, Json(claimed_body(&state, &item, num)))
         }
         Ok(None) => (StatusCode::OK, Json(json!({ "claimed": false }))),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("claim failed: {e}")),

@@ -185,10 +185,11 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 String::new()
             };
             let short = v.get("num").and_then(|n| n.as_i64()).map(|n| n.to_string()).unwrap_or_else(|| id.to_string());
+            let after = starts_after_text(v.get("after"));
             Ok(format!(
                 "Claimed {name} (attempt {attempt}): pass id={short} and attempt={attempt} to \
                  Tasks update, ask, submit, complete and release for this task.\n\n\
-                 Title: {title}\n\n{payload}{handback}"
+                 Title: {title}\n\n{payload}{after}{handback}"
             ))
         }
         "WorkUpdate" | "WorkAsk" | "WorkSubmit" => {
@@ -431,6 +432,29 @@ fn task_name(v: &Value, id: &str) -> String {
     }
 }
 
+/// What a claimed task starts after, with each one's document: a build's agent
+/// reads its spec there, however the build reached it. Empty when it starts
+/// after nothing.
+fn starts_after_text(after: Option<&Value>) -> String {
+    let lines: Vec<String> = after
+        .and_then(|a| a.as_array())
+        .map(|a| {
+            a.iter()
+                .map(|t| {
+                    let s = |k: &str| t.get(k).and_then(|x| x.as_str()).unwrap_or("");
+                    let num = t.get("num").and_then(|n| n.as_i64()).map(|n| format!("#{n} ")).unwrap_or_default();
+                    let doc = Some(s("doc")).filter(|d| !d.is_empty()).map(|d| format!(", document: {d}")).unwrap_or_default();
+                    format!("- {num}\"{}\" ({}{doc})", s("title"), s("state"))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if lines.is_empty() {
+        return String::new();
+    }
+    format!("\n\nThis task starts after:\n{}\nThe document is what to build; read it first.", lines.join("\n"))
+}
+
 /// The answer to `hold` or `unhold`: where the task is now.
 fn hold_text(id: &str, segment: &str, v: &Value) -> String {
     let name = v.get("name").and_then(|n| n.as_str()).filter(|n| !n.is_empty()).unwrap_or(id);
@@ -500,6 +524,17 @@ mod tests {
         assert_eq!(task_id(&serde_json::json!({"id": "7f3a-b2"})).unwrap(), "7f3a-b2");
         assert!(task_id(&serde_json::json!({"id": "12/../x"})).is_err());
         assert!(task_id(&serde_json::json!({"id": "#"})).is_err());
+    }
+
+    #[test]
+    fn a_claimed_build_is_shown_its_specs_document() {
+        let after = serde_json::json!([{ "id": "w1", "num": 12, "title": "Spec: Kanban", "state": "done", "kind": "spec", "doc": "C:/work/SPEC_KANBAN.md" }]);
+        let text = starts_after_text(Some(&after));
+        assert!(text.contains("- #12 \"Spec: Kanban\" (done, document: C:/work/SPEC_KANBAN.md)"), "{text}");
+        let no_doc = serde_json::json!([{ "num": 3, "title": "Fix first", "state": "done" }]);
+        assert!(starts_after_text(Some(&no_doc)).contains("- #3 \"Fix first\" (done)"));
+        assert_eq!(starts_after_text(Some(&serde_json::json!([]))), "");
+        assert_eq!(starts_after_text(None), "", "an older srv sends none");
     }
 
     #[test]
