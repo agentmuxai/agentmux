@@ -9,6 +9,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { createGitHubClient } from "./lib/github-rest.mjs";
 import {
+    AGE_REFRESH_MS,
+    ageText,
     changedFiles,
     CODEX_LOGIN,
     evaluateCodexGate,
@@ -19,9 +21,11 @@ import {
     reviewedCommit,
     SKIP_AUTHORS,
     skipNote,
+    STALE_REQUEST_MS,
     sweep,
     sweepReason,
     TRIGGER_AUTHOR,
+    unansweredRequest,
     WORKFLOW_FILE,
 } from "./ci-codex-review-gate.mjs";
 
@@ -667,6 +671,109 @@ describe("the workflow that runs the gate", () => {
     it("runs on comments from every login the gate reads", () => {
         for (const login of [CODEX_LOGIN, ...SKIP_AUTHORS]) expect(workflow).toContain(`'${login}'`);
         expect(workflow).toContain("'reagent:codex-skipped'");
+    });
+});
+
+// #5400: Codex accepted the request at 08:56 and never finished; the next request, at 17:24,
+// was answered in 3 minutes. The status said nothing about how long it had waited.
+describe("a request Codex has left unanswered", () => {
+    const ASKED = "2026-10-24T08:56:08Z";
+    const at = (minutesAfter) => new Date(Date.parse(ASKED) + minutesAfter * 60_000).toISOString();
+    const runningSummary = (t) => ({
+        // Codex's "running" summary names no commit: it is not an answer.
+        user: { login: CODEX_LOGIN },
+        created_at: t,
+        body: "<!-- codex-pull-request-review-summary -->\n## Codex Review Summary\n\n| Code Review | Running |",
+    });
+
+    it("is the latest request for the head with no verdict after it", () => {
+        const comments = [trigger(HEAD, ASKED), runningSummary("2026-10-24T08:56:22Z")];
+        expect(unansweredRequest({ headSha: HEAD, comments })).toEqual({ at: ASKED });
+    });
+
+    it("is answered by a verdict, a findings review or a usage notice for the head, posted after it", () => {
+        for (const extra of [{ comments: [okComment(HEAD, at(3))] }, { reviews: [findingsReview(HEAD, at(3))] }]) {
+            const comments = [trigger(HEAD, ASKED), ...(extra.comments ?? [])];
+            expect(unansweredRequest({ headSha: HEAD, comments, reviews: extra.reviews ?? [] })).toBeNull();
+        }
+        // A notice with exactly one request outstanding answers that head.
+        expect(unansweredRequest({ headSha: HEAD, comments: [trigger(HEAD, ASKED), quotaComment(at(1))] })).toBeNull();
+    });
+
+    it("is not answered by a verdict about another commit, or one posted before the request", () => {
+        expect(unansweredRequest({ headSha: HEAD, comments: [trigger(HEAD, ASKED), okComment(OLD, at(3))] })).toEqual({ at: ASKED });
+        expect(unansweredRequest({ headSha: HEAD, comments: [okComment(HEAD, at(-5)), trigger(HEAD, ASKED)] })).toEqual({ at: ASKED });
+    });
+
+    it("ignores requests for another head, and requests not from muxreview's a5af", () => {
+        expect(unansweredRequest({ headSha: HEAD, comments: [trigger(OLD, ASKED)] })).toBeNull();
+        expect(unansweredRequest({ headSha: HEAD, comments: [trigger(HEAD, ASKED, "someone-else")] })).toBeNull();
+        expect(unansweredRequest({ headSha: HEAD })).toBeNull();
+    });
+
+    it("counts from the newest request when it is asked again", () => {
+        const comments = [trigger(HEAD, ASKED), okComment(HEAD, at(3)), trigger(HEAD, at(120))];
+        // The OK answered the first request, not the second: a later verdict is what answers it.
+        expect(unansweredRequest({ headSha: HEAD, comments })).toEqual({ at: at(120) });
+    });
+
+    it("makes the pending status say how long, and what to do, once past muxreview's window", () => {
+        const comments = [trigger(HEAD, ASKED)];
+        const r = evaluateCodexGate({ headSha: HEAD, comments, now: Date.parse(at(8 * 60 + 28)) });
+        expect(r.state).toBe("pending");
+        expect(r.description).toBe(
+            `Codex has not answered the request for ${HEAD.slice(0, 10)} in 8 h 28 min; comment '@muxreview codex re-review'`
+        );
+        expect(r.description.length).toBeLessThanOrEqual(140);
+    });
+
+    it("keeps today's wording while the request is younger than the window, or when there is none", () => {
+        const comments = [trigger(HEAD, ASKED)];
+        const young = evaluateCodexGate({ headSha: HEAD, comments, now: Date.parse(at(29)) });
+        expect(young.description).toMatch(/^Waiting for Codex on/);
+        expect(evaluateCodexGate({ headSha: HEAD, now: Date.parse(at(600)) }).description).toMatch(/^Waiting for Codex on/);
+        const edge = evaluateCodexGate({ headSha: HEAD, comments, now: Date.parse(at(30)) });
+        expect(edge.description).toMatch(/has not answered the request .* in 30 min/);
+    });
+
+    it("also shows it where Codex's findings on an earlier head are waiting for the next round", () => {
+        const comments = [trigger(HEAD, ASKED)];
+        const reviews = [findingsReview(OLD, "2026-10-24T08:50:00Z")];
+        const r = evaluateCodexGate({ headSha: HEAD, comments, reviews, filesSinceLatest: ["crates/a.rs"], now: Date.parse(at(95)) });
+        expect(r.state).toBe("pending");
+        expect(r.description).toMatch(/has not answered the request for .* in 1 h 35 min/);
+    });
+
+    it("never turns a pass or a failure pending", () => {
+        const comments = [trigger(HEAD, ASKED), okComment(HEAD, at(3))];
+        expect(evaluateCodexGate({ headSha: HEAD, comments, now: Date.parse(at(900)) }).state).toBe("success");
+        const failing = evaluateCodexGate({ headSha: HEAD, comments: [trigger(HEAD, ASKED)], reviews: [findingsReview(HEAD, at(3))], now: Date.parse(at(900)) });
+        expect(failing.state).toBe("failure");
+    });
+
+    it("formats ages", () => {
+        expect(ageText(0)).toBe("0 min");
+        expect(ageText(59 * 60_000 + 59_000)).toBe("59 min");
+        expect(ageText(60 * 60_000)).toBe("1 h");
+        expect(ageText(125 * 60_000)).toBe("2 h 5 min");
+        expect(ageText(-5)).toBe("0 min");
+    });
+
+    it("is refreshed by the sweep as it ages, and only then", () => {
+        const pull = { number: 5400, draft: false, head: { sha: HEAD } };
+        const pending = (t) => ({ context: "Codex review", state: "pending", updated_at: t });
+        const comments = [trigger(HEAD, ASKED)];
+        const now = Date.parse(at(95));
+        // The status was set 40 minutes ago (older than the refresh step): set it again.
+        expect(sweepReason({ pull, status: pending(at(55)), comments, now })).toMatch(/refreshing the age/);
+        // Set 10 minutes ago: nothing to do yet.
+        expect(sweepReason({ pull, status: pending(at(85)), comments, now })).toBeNull();
+        // The request is younger than the window: the status has no age to show.
+        expect(sweepReason({ pull, status: pending(at(0)), comments, now: Date.parse(at(29)) })).toBeNull();
+        // Answered: the sweep's other rules decide, not this one.
+        expect(sweepReason({ pull, status: pending(at(55)), comments: [...comments, okComment(HEAD, at(60))], now })).toMatch(/newer than its pending status/);
+        expect(STALE_REQUEST_MS).toBe(30 * 60_000);
+        expect(AGE_REFRESH_MS).toBeLessThan(STALE_REQUEST_MS);
     });
 });
 

@@ -265,6 +265,53 @@ export function needsDiffSince(latest, headSha) {
     return (latest?.kind === "ok" || latest?.kind === "findings") && !namesCommit(headSha, latest.sha);
 }
 
+// How long a request may go unanswered before the status says so: muxreview's own window for
+// it (30 minutes). A Codex review that never finishes answers nothing, so without this the
+// status reads the same at 5 minutes and at 5 hours (#5400 sat 8.5 h). The gate stays
+// read-only: it never asks.
+export const STALE_REQUEST_MS = 30 * 60 * 1000;
+// The sweep runs every 30 minutes: a pending status older than this is set again so the age
+// it shows keeps up.
+export const AGE_REFRESH_MS = 25 * 60 * 1000;
+
+/**
+ * muxreview's latest request for `headSha` that Codex has not answered, as { at }, or null.
+ * An answer is a verdict or usage notice naming the head, posted after the request; Codex's
+ * "running" summary comment names no commit and is not one.
+ */
+export function unansweredRequest({ headSha, comments = [], reviews = [], reviewComments = [] }) {
+    const head = headSha.toLowerCase();
+    const asked = comments
+        .filter((c) => c.user?.login === TRIGGER_AUTHOR)
+        .flatMap((c) => {
+            const m = TRIGGER_HEAD.exec(c.body ?? "");
+            return m && namesCommit(head, m[1].toLowerCase()) ? [{ at: String(c.created_at) }] : [];
+        })
+        .sort(byAt)
+        .at(-1);
+    if (!asked) return null;
+    const answered = codexOutputs({ comments, reviews, reviewComments }).some(
+        (o) => String(o.at) > asked.at && namesCommit(head, o.sha),
+    );
+    return answered ? null : asked;
+}
+
+/** `95 min`, `2 h`, `8 h 28 min`. */
+export function ageText(ms) {
+    const minutes = Math.max(0, Math.floor(ms / 60_000));
+    if (minutes < 60) return `${minutes} min`;
+    const rest = minutes % 60;
+    return rest ? `${Math.floor(minutes / 60)} h ${rest} min` : `${Math.floor(minutes / 60)} h`;
+}
+
+/** The pending text for a request Codex has left unanswered past the window, or null. */
+function staleRequestDescription(short, asked, now) {
+    if (!asked) return null;
+    const age = now - Date.parse(asked.at);
+    if (!(age >= STALE_REQUEST_MS)) return null;
+    return `Codex has not answered the request for ${short} in ${ageText(age)}; comment '@muxreview codex re-review'`;
+}
+
 // How a quota-kind answer on the head passes, by the skip note's reason.
 // Codex's own out-of-quota notice carries no reason and reads as `quota`.
 const PASSES_WITHOUT_CODEX = {
@@ -293,6 +340,7 @@ export function evaluateCodexGate({
     reviewComments = [],
     filesSinceLatest = null,
     dependencyBot = false,
+    now = Date.now(),
 }) {
     const head = headSha.toLowerCase();
     const short = head.slice(0, 10);
@@ -344,12 +392,16 @@ export function evaluateCodexGate({
         }
         return {
             state: "pending",
-            description: `Codex's findings on ${latest.sha}: muxreview asks about ${short} once it approves, or comment '@muxreview codex re-review'`,
+            description:
+                staleRequestDescription(short, unansweredRequest({ headSha, comments, reviews, reviewComments }), now) ??
+                `Codex's findings on ${latest.sha}: muxreview asks about ${short} once it approves, or comment '@muxreview codex re-review'`,
         };
     }
     return {
         state: "pending",
-        description: `Waiting for Codex on ${short}: muxreview asks after approving, or comment '@muxreview codex re-review'`,
+        description:
+            staleRequestDescription(short, unansweredRequest({ headSha, comments, reviews, reviewComments }), now) ??
+            `Waiting for Codex on ${short}: muxreview asks after approving, or comment '@muxreview codex re-review'`,
     };
 }
 
@@ -366,10 +418,11 @@ export function isGateInput(comment) {
  * Why the sweep should re-evaluate a PR, or null when it shouldn't. `status`
  * is the head's latest `Codex review` status (null when it has none). Only a
  * missing status, or a pending one some gate input is newer than, means an
- * evaluation was lost; a PR still waiting on Codex or on muxreview's approval
- * has no such input, so it is left alone.
+ * evaluation was lost, or one whose request Codex has left unanswered past
+ * `STALE_REQUEST_MS` (its age is refreshed); a PR still waiting on muxreview's
+ * approval, or on a request younger than that, is left alone.
  */
-export function sweepReason({ pull, status, comments = [], reviews = [] }) {
+export function sweepReason({ pull, status, comments = [], reviews = [], now = Date.now() }) {
     if (pull?.draft) return null;
     if (!status) return "its head has no Codex review status";
     if (status.state !== "pending") return null;
@@ -380,6 +433,12 @@ export function sweepReason({ pull, status, comments = [], reviews = [] }) {
     }
     if (reviews.some((r) => isCodex(r) && newer(r.submitted_at))) {
         return "a Codex review is newer than its pending status";
+    }
+    // A request Codex has left unanswered past the window: the status shows its age, so set it
+    // again now and then (nothing else changes on a quiet PR).
+    const open = unansweredRequest({ headSha: pull?.head?.sha ?? "", comments, reviews });
+    if (open && now - Date.parse(open.at) >= STALE_REQUEST_MS && now - since >= AGE_REFRESH_MS) {
+        return "Codex has left the request unanswered; refreshing the age on its pending status";
     }
     return null;
 }
