@@ -32,6 +32,9 @@ use crate::backend::work_facts::overlap_notes::NewPr;
 /// The setting that turns reminders on for this install (default off;
 /// SPEC_KANBAN_REMINDER_OFF_BY_DEFAULT_2026_10_22.md).
 pub const SETTING_REMINDERS: &str = "kanban:reminders";
+/// How long finished tasks stay on the board after they last changed (a
+/// release counts as a change): the board's list, and the PR watcher's.
+pub const FINISHED_WINDOW_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 /// Block meta: `false` stops this agent going on through its backlog: no
 /// reminder, and finishing a task names no next one.
 pub const META_CONTINUE: &str = "kanban:continue";

@@ -364,9 +364,16 @@ fn awaiting_release(tasks: &[BoardTask], checked: &Checked, now_ms: i64) -> Hash
     out
 }
 
-/// The merge loop: every minute, ask GitHub about the PRs of the tasks in
-/// Review that are due a look, and accept those that merged. Started once,
-/// after [`super::install`].
+/// The tasks the merge loop looks at: every one not finished, and those
+/// finished within the board's window, so a task its agent completed when
+/// its PR merged is still followed to its release.
+fn watch_list(identity: &Store, now_ms: i64) -> Result<Vec<BoardTask>, crate::backend::storage::StoreError> {
+    identity.work_board_list(now_ms - super::FINISHED_WINDOW_MS, 500, now_ms)
+}
+
+/// The merge loop: every minute, ask GitHub about the PRs of the tasks
+/// that are due a look; record merges and releases, and accept a task in
+/// Review whose PR merged. Started once, after [`super::install`].
 pub async fn run_merge_loop() {
     let mut checked = Checked::default();
     loop {
@@ -377,7 +384,7 @@ pub async fn run_merge_loop() {
         let close_on_merge = close_on_merge_enabled(&ctx.config.get_settings().extra);
         let now = agentmux_common::time::now_ms();
         let identity = ctx.identity.clone();
-        let tasks = tokio::task::spawn_blocking(move || identity.work_board_list(now, 500, now)).await;
+        let tasks = tokio::task::spawn_blocking(move || watch_list(&identity, now)).await;
         let Ok(Ok(tasks)) = tasks else { continue };
         let live: std::collections::HashSet<&str> = tasks.iter().map(|t| t.item.id.as_str()).collect();
         checked.at.retain(|id, _| live.contains(id.as_str()));

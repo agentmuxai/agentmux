@@ -235,3 +235,29 @@ fn a_just_opened_pr_is_the_one_created_since_the_command_not_an_older_one() {
     assert_eq!(pick_opened(&newest, Some("x"), seen), Some(129), "a fork's PR found by its branch among the newest");
     assert_eq!(pick_opened(&json!({"message": "x"}), None, seen), None);
 }
+
+/// The loop's own list holds a task its agent completed (done) within the
+/// board's window, so its merge and release are still followed; not one
+/// finished before it.
+#[test]
+fn the_watch_list_follows_finished_tasks_for_the_boards_window() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = Store::open_identity_store(&dir.path().join("identity-store.db")).unwrap();
+    let now = 10 * super::super::FINISHED_WINDOW_MS;
+    for (id, updated) in [("recent", now - 1000), ("old", now - super::super::FINISHED_WINDOW_MS - 1000)] {
+        let mut w = item(id);
+        w.created_at = updated;
+        w.updated_at = updated;
+        s.work_queue_enqueue(&w).unwrap();
+        s.work_card_ensure(id, updated).unwrap();
+        s.work_card_update(id, &CardUpdate { pr_url: Some("https://github.com/o/r/pull/1".into()), ..Default::default() }, updated)
+            .unwrap();
+        let conn = s.conn().lock().unwrap();
+        conn.execute("UPDATE db_work_queue SET state = 'done', updated_at = ?2 WHERE id = ?1", rusqlite::params![id, updated])
+            .unwrap();
+    }
+    let ids: Vec<String> = watch_list(&s, now).unwrap().into_iter().map(|t| t.item.id).collect();
+    assert_eq!(ids, ["recent"]);
+    let tasks = watch_list(&s, now).unwrap();
+    assert!(watched(&tasks[0]), "a finished task whose merge isn't known yet is watched");
+}
