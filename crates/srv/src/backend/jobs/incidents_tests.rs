@@ -179,6 +179,51 @@ fn a_run_walked_again_is_not_counted_twice() {
     assert_eq!(rig.store.job_incident_open_for("j").unwrap().unwrap().failures, 2);
 }
 
+/// A success walked again after a report moved the cursor back recovers
+/// nothing a later failure keeps open.
+#[test]
+fn an_older_success_walked_again_leaves_a_later_failure_open() {
+    let rig = rig();
+    rig.run("j", "finished", "ok", "ok", "");
+    assert_eq!(rig.keeper.assess("j"), NONE);
+    rig.run("j", "finished", "error", "unknown", "");
+    let Step::Opened { incident, .. } = one(rig.keeper.assess("j")) else { panic!() };
+    // A success that ended between the two failures, but wasn't recorded as
+    // ended until the second had been walked.
+    let between = rig.next.get();
+    rig.next.set(between + 60_000);
+    rig.run("j", "finished", "error", "unknown", "");
+    assert_eq!(rig.keeper.assess("j"), [Step::FailedAgain { count: 2 }]);
+    let mut success = JobRun::new("r-between", "j", crate::backend::jobs::SOURCE_CRON, "Nightly build", "schedule", "finished", between);
+    success.infra = "ok".into();
+    success.ended_at_ms = Some(between + 1_000);
+    rig.store.job_run_insert(&success).unwrap();
+    assert!(rig.store.job_run_report(&success.id, "ok", "fine", &serde_json::Value::Null).unwrap());
+    assert_eq!(rig.keeper.assess("j"), NONE, "the later failure keeps it failing");
+    let open = rig.store.job_incident_open_for("j").unwrap().unwrap();
+    assert_eq!((open.id.as_str(), open.failures, open.notified), (incident.id.as_str(), 2, true));
+    assert!(!rig.history(&incident.work_id).iter().any(|l| l.starts_with("recovered")), "no false recovery");
+    rig.run("j", "finished", "ok", "ok", "");
+    assert_eq!(rig.keeper.assess("j"), [Step::Recovered], "a success after the last failure still recovers");
+}
+
+/// A late report turning an old failure into a success drops no count of
+/// the failures after it.
+#[test]
+fn an_old_failure_reported_ok_keeps_the_later_counts() {
+    let rig = rig();
+    rig.run("j", "finished", "ok", "ok", "");
+    assert_eq!(rig.keeper.assess("j"), NONE);
+    let first = rig.run("j", "finished", "ok", "unknown", "");
+    rig.store.job_run_report(&first.id, "failed", "", &serde_json::Value::Null).unwrap();
+    rig.run("j", "finished", "error", "unknown", "");
+    assert_eq!(rig.keeper.assess("j").len(), 2);
+    assert!(rig.store.job_run_report(&first.id, "ok", "fine after all", &serde_json::Value::Null).unwrap());
+    assert_eq!(rig.keeper.assess("j"), NONE);
+    let open = rig.store.job_incident_open_for("j").unwrap().unwrap();
+    assert_eq!((open.failures, open.notified), (2, true));
+}
+
 fn rig_with_incident_recovered_by_a_success() -> (Rig, (JobIncident, JobRun)) {
     let rig = rig();
     rig.run("j", "finished", "error", "unknown", "");

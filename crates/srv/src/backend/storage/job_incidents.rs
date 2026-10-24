@@ -58,7 +58,8 @@ pub(crate) const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS db_job_incident_runs (
         run_id        TEXT PRIMARY KEY,
         incident_id   TEXT NOT NULL,
-        counted_at_ms INTEGER NOT NULL
+        counted_at_ms INTEGER NOT NULL,
+        run_ended_ms  INTEGER NOT NULL DEFAULT 0
     );";
 
 /// How an incident ended (`end_reason`).
@@ -145,10 +146,13 @@ fn counted(conn: &rusqlite::Connection, run_id: &str) -> Result<bool, StoreError
         .is_some())
 }
 
-/// Record run `run_id` as counted into incident `incident_id`.
+/// Record run `run_id` as counted into incident `incident_id`, with when the
+/// run ended (from the ledger, in the same database), so a success can tell
+/// whether a failure came after it.
 fn count_run(conn: &rusqlite::Connection, run_id: &str, incident_id: &str, now_ms: i64) -> Result<(), StoreError> {
     conn.execute(
-        "INSERT OR REPLACE INTO db_job_incident_runs (run_id, incident_id, counted_at_ms) VALUES (?1, ?2, ?3)",
+        "INSERT OR REPLACE INTO db_job_incident_runs (run_id, incident_id, counted_at_ms, run_ended_ms)
+         VALUES (?1, ?2, ?3, COALESCE((SELECT ended_at_ms FROM db_job_runs WHERE id = ?1), 0))",
         params![run_id, incident_id, now_ms],
     )?;
     Ok(())
@@ -332,30 +336,48 @@ impl Store {
         Ok(n > 0)
     }
 
-    /// Run `run_id`, a success, recovers every incident of the job not yet
-    /// recovered: the open one ends (`recovered`), one whose task was closed
-    /// keeps its end, and each notification is marked down. Returns them as
-    /// they were before.
+    /// Run `run_id`, a success, recovers the job's incidents not yet
+    /// recovered whose failures all ended before it (by `ended_at_ms`, then
+    /// id): the open one ends (`recovered`), one whose task was closed keeps
+    /// its end, and each notification is marked down. An incident with a
+    /// failure counted after the success (an older success walked again
+    /// after a report moved the cursor back) is left as it is. Returns the
+    /// recovered ones as they were before.
     pub fn job_incidents_recover(&self, job_id: &str, run_id: &str, now_ms: i64) -> Result<Vec<JobIncident>, StoreError> {
         let mut conn = self.conn().lock().unwrap();
         let tx = conn.transaction()?;
+        let ended: i64 = tx
+            .query_row("SELECT COALESCE(ended_at_ms, 0) FROM db_job_runs WHERE id = ?1", params![run_id], |r| r.get(0))
+            .optional()?
+            .unwrap_or(0);
         let before = {
             let mut stmt = tx.prepare(&format!(
-                "SELECT {COLS} FROM db_job_incidents WHERE job_id = ?1 AND recovered_at_ms IS NULL ORDER BY opened_at_ms"
+                "SELECT {COLS} FROM db_job_incidents i
+                  WHERE job_id = ?1 AND recovered_at_ms IS NULL
+                    AND NOT EXISTS (SELECT 1 FROM db_job_incident_runs c
+                                     WHERE c.incident_id = i.id
+                                       AND (c.run_ended_ms > ?2 OR (c.run_ended_ms = ?2 AND c.run_id > ?3)))
+                  ORDER BY opened_at_ms"
             ))?;
-            let rows = stmt.query_map(params![job_id], row_to_incident)?;
+            let rows = stmt.query_map(params![job_id, ended, run_id], row_to_incident)?;
             rows.collect::<Result<Vec<_>, _>>()?
         };
-        tx.execute(
-            "UPDATE db_job_incidents
-                SET recovered_at_ms = ?3, ended_by_run = ?2, notified = 0,
-                    end_reason = CASE WHEN ended_at_ms IS NULL THEN ?4 ELSE end_reason END,
-                    ended_at_ms = COALESCE(ended_at_ms, ?3)
-              WHERE job_id = ?1 AND recovered_at_ms IS NULL",
-            params![job_id, run_id, now_ms, ended::RECOVERED],
-        )?;
-        // A run counted as a failure that a report turned into a success.
-        tx.execute("DELETE FROM db_job_incident_runs WHERE run_id = ?1", params![run_id])?;
+        for inc in &before {
+            tx.execute(
+                "UPDATE db_job_incidents
+                    SET recovered_at_ms = ?3, ended_by_run = ?2, notified = 0,
+                        end_reason = CASE WHEN ended_at_ms IS NULL THEN ?4 ELSE end_reason END,
+                        ended_at_ms = COALESCE(ended_at_ms, ?3)
+                  WHERE id = ?1 AND recovered_at_ms IS NULL",
+                params![inc.id, run_id, now_ms, ended::RECOVERED],
+            )?;
+        }
+        if !before.is_empty() {
+            // A run counted as a failure that a report turned into the
+            // success that recovered it: should it be reported failed again,
+            // it reopens what it recovered.
+            tx.execute("DELETE FROM db_job_incident_runs WHERE run_id = ?1", params![run_id])?;
+        }
         tx.commit()?;
         Ok(before)
     }
