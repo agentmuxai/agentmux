@@ -724,7 +724,7 @@ pub(crate) async fn deliver(
     super::jekt_files::prepare(&mut req).await;
 
     // 1. Try local ReactiveHandler first (fast path — same instance).
-    let resp = super::jekt_files::inject_here(state, &req);
+    let resp = super::cron::inject_here_following_runs(state, &req).await;
     if resp.success {
         replay.delivered();
         echo_local_delivery(state, &req, &resp);

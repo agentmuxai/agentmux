@@ -335,6 +335,24 @@ fn ledger_or_503(state: &AppState) -> Result<std::sync::Arc<jobs::RunLedger>, An
         .ok_or_else(|| (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "run ledger unavailable"}))))
 }
 
+/// Deliver on this instance (`jekt_files::inject_here`). A delivery another
+/// instance forwarded here whose `request_id` is a run another channel
+/// fired is followed here, before the answer goes back (#1988).
+pub(super) async fn inject_here_following_runs(
+    state: &AppState,
+    req: &crate::backend::reactive::types::InjectionRequest,
+) -> crate::backend::reactive::types::InjectionResponse {
+    let resp = super::jekt_files::inject_here(state, req);
+    let run_id = req.request_id.clone().unwrap_or_default();
+    let block_id = resp.block_id.clone().unwrap_or_default();
+    if resp.success && req.forward_hops > 0 && !run_id.is_empty() && !block_id.is_empty() {
+        if let Some(ledger) = state.cron_scheduler.runs().cloned() {
+            let _ = tokio::task::spawn_blocking(move || ledger.follow_forwarded(&run_id, &block_id)).await;
+        }
+    }
+    resp
+}
+
 pub(super) async fn handle_cron_runs(
     State(state): State<AppState>,
     Path(id): Path<String>,

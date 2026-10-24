@@ -565,6 +565,20 @@ impl Store {
         let rows = stmt.query_map(params![job_source, channel], row_to_run)?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
+
+    /// Every open run `channel` follows for the channel that fired it
+    /// (`links.followed_by_channel`, #1988).
+    pub fn job_runs_open_followed_by(&self, channel: &str) -> Result<Vec<JobRun>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {COLS} FROM db_job_runs
+              WHERE {OPEN_NOT_ENDED}
+                AND CASE WHEN json_valid(links) THEN json_extract(links, '$.followed_by_channel') END = ?1
+              ORDER BY started_at_ms"
+        ))?;
+        let rows = stmt.query_map(params![channel], row_to_run)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
 }
 
 #[cfg(test)]
