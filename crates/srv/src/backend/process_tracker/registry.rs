@@ -102,6 +102,31 @@ pub fn place_spawn(block_id: &str, cmd: &mut tokio::process::Command, create: bo
     let _ = (block_id, cmd, create);
 }
 
+/// An agent CLI srv runs outside any block's tracker (the Drone runner, the
+/// ambient side call): it too leads its own process group on Unix, like
+/// [`place_spawn`]'s, so its kill takes its helpers and a signal to its group
+/// can't reach srv. Call [`record_untracked_cli`] once it is spawned.
+pub fn own_process_group(cmd: &mut tokio::process::Command) {
+    #[cfg(unix)]
+    cmd.process_group(0);
+    #[cfg(not(unix))]
+    let _ = cmd;
+}
+
+/// Record a CLI spawned with [`own_process_group`] for the launcher
+/// (`roots_file`), which ends it if srv dies first.
+pub fn record_untracked_cli(pid: Option<u32>) {
+    #[cfg(unix)]
+    if let Some(pid) = pid {
+        debug_assert!(agentmux_common::process::leads_own_group(pid), "{pid} should lead its own process group");
+        if global().is_some() {
+            super::roots_file::record(pid);
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = pid;
+}
+
 /// How a spawn joins its block's tracker (see [`spawn_tracked`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Join {

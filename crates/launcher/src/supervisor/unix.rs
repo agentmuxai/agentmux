@@ -378,6 +378,10 @@ pub(crate) async fn run_unix(
     // the Child so tokio's wait() can't close it and trip srv's
     // parent-watch EOF. Held until launcher exit.
     let _srv_stdin_keepalive = srv_child.stdin.take();
+    // srv's pid, taken now: tokio's `Child::id()` is `None` once the child has
+    // been waited on, which is exactly when the cleanup below needs it (srv
+    // died first, or `quiesce_srv` reaped it).
+    let srv_pid = srv_child.id();
 
     // 3. Spawn the host with srv endpoints in env.
     // dir_hash was computed once above for socket_path; reuse it here
@@ -803,7 +807,6 @@ pub(crate) async fn run_unix(
     //    path (`quiesce_srv`), which lets it close every agent gracefully
     //    first (`agent_teardown::app_exit`) before any force-kill.
     log("stopping children (host: SIGTERM → grace → SIGKILL; srv: quiesce)");
-    let srv_pgid = srv_child.id();
     let stop_host = async {
         terminate_child_gracefully(&host_child);
         let _ = tokio::time::timeout(std::time::Duration::from_millis(1500), host_child.wait()).await;
@@ -817,13 +820,10 @@ pub(crate) async fn run_unix(
     let ((), srv_stopped) = tokio::join!(stop_host, stop_srv);
     let srv_gone = match srv_stopped {
         Ok((_, crate::upgrade::QuiesceOutcome::ExitedAfterForceKill)) => {
-            // Killed mid-teardown: whatever else is in its process group
-            // would outlive it. Its agent CLIs lead their own groups; they
-            // are ended just below.
-            log("WARN: srv didn't exit in time — killed it and its process group");
-            if let Some(pgid) = srv_pgid {
-                crate::host_spawn::kill_group_forcefully(pgid);
-            }
+            // Killed mid-teardown. Its agent CLIs lead their own process
+            // groups and are ended just below. Its own group isn't signalled
+            // here: srv is already reaped, so its pid may have been reused.
+            log("WARN: srv didn't exit in time — killed it");
             true
         }
         Ok((_, outcome)) => {
@@ -835,17 +835,7 @@ pub(crate) async fn run_unix(
             false
         }
     };
-    // srv is gone. An agent CLI it didn't close (srv was killed, crashed, or
-    // ran out of time) still runs in its own process group: end it and what
-    // it started. srv deletes the file when it closed every agent itself.
-    if let Some(srv_pid) = srv_pgid.filter(|_| srv_gone) {
-        if let Some(done) = agentmux_common::agent_roots::kill_orphans(&paths.data_dir, srv_pid) {
-            log(&format!(
-                "srv left agent CLIs running: killed {} agent cgroup(s) and {} CLI process group(s); {} had already exited",
-                done.cgroups, done.groups, done.gone
-            ));
-        }
-    }
+    end_agents_left_by_srv(&paths.data_dir, srv_pid.filter(|_| srv_gone));
     // srv has stopped, so the new version copies complete data on its first
     // start. Only after a clean quit the user confirmed recently.
     if let Some((staged, at)) = relaunch.filter(|(_, at)| exit_code == 0 && crate::upgrade_restart::still_confirmed(*at)) {
@@ -856,6 +846,21 @@ pub(crate) async fn run_unix(
     }
     log(&format!("launcher exiting with code {}", exit_code));
     std::process::exit(exit_code);
+}
+
+/// srv is gone. An agent CLI it didn't close (srv was killed, crashed, or ran
+/// out of time) still runs in its own process group: end it and what it
+/// started. srv deletes `agent-roots.json` when it closed every agent itself.
+/// `srv_pid` is the pid taken when srv was spawned: tokio's `Child::id()` is
+/// `None` once the child has been waited on, which is the case here.
+fn end_agents_left_by_srv(data_dir: &std::path::Path, srv_pid: Option<u32>) {
+    let Some(srv_pid) = srv_pid else { return };
+    if let Some(done) = agentmux_common::agent_roots::kill_orphans(data_dir, srv_pid) {
+        log(&format!(
+            "srv left agent CLIs running: killed {} agent cgroup(s) and {} CLI process group(s); {} had already exited",
+            done.cgroups, done.groups, done.gone
+        ));
+    }
 }
 
 /// How srv ended, for the log: "with code 3", or "killed by signal 9
@@ -938,5 +943,39 @@ mod tests {
             super::srv_exit_text(&status),
             "killed by signal 9 (SIGKILL)"
         );
+    }
+
+    /// The case the cleanup exists for: srv is killed and reaped before the
+    /// teardown runs. tokio has then forgotten its pid, so the launcher uses
+    /// the one it took at spawn; the CLI srv recorded dies, a pid whose start
+    /// time doesn't match is left alone.
+    #[tokio::test]
+    async fn a_cli_left_by_a_reaped_srv_is_ended() {
+        let dir = std::env::temp_dir().join(format!("launcher-orphans-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut srv = tokio::process::Command::new("sleep").arg("30").process_group(0).spawn().unwrap();
+        let srv_pid = srv.id();
+        let mut cli = tokio::process::Command::new("sleep").arg("30").process_group(0).spawn().unwrap();
+        let cli_pid = cli.id().unwrap();
+        let roots = agentmux_common::agent_roots::AgentRoots {
+            srv_pid: srv_pid.unwrap(),
+            cgroup: None,
+            roots: vec![agentmux_common::agent_roots::Root {
+                pid: cli_pid,
+                start: agentmux_common::process::process_start_time(cli_pid).unwrap(),
+            }],
+        };
+        agentmux_common::agent_roots::write(&dir, &roots).unwrap();
+
+        srv.kill().await.unwrap();
+        assert_eq!(srv.id(), None, "tokio forgets the pid once srv is reaped");
+        super::end_agents_left_by_srv(&dir, None);
+        assert!(cli.try_wait().unwrap().is_none(), "no pid, no signal");
+
+        super::end_agents_left_by_srv(&dir, srv_pid);
+        let status = tokio::time::timeout(std::time::Duration::from_secs(5), cli.wait()).await.unwrap().unwrap();
+        assert!(!status.success());
+        assert_eq!(agentmux_common::agent_roots::read(&dir), None, "the file is deleted");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
