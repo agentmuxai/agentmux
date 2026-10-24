@@ -7,10 +7,14 @@
 //!
 //! The work queue has no dedupe key, so the job keeps its incident's task
 //! here, beside the run ledger in the identity store. At most one incident
-//! per job is open (`ended_at_ms` unset): a partial unique index, so two
-//! instances sharing the ledger can't both open one. Every change is a
-//! conditional UPDATE on what the caller last read, so a failure is counted,
-//! and a recovery noted, once.
+//! per job is open (`ended_at_ms` unset): a partial unique index. An
+//! incident whose task was closed while the job still failed has ended, but
+//! is not recovered yet (`recovered_at_ms` unset), and still remembers its
+//! notification is up (`notified`), so the next success takes it down.
+//!
+//! `db_job_incident_cursors` is how far the keeper has walked each job's
+//! decisive runs (`jobs::incidents`): advancing it is a conditional UPDATE
+//! on where it was, so each run is taken by one keeper, once.
 
 use rusqlite::{params, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
@@ -18,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use super::store::Store;
 use super::StoreError;
 
-/// The table, created with the run ledger's (`job_runs::apply_schema`) on
+/// The tables, created with the run ledger's (`job_runs::apply_schema`) on
 /// every open, with no schema version bump.
 pub(crate) const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS db_job_incidents (
@@ -36,11 +40,18 @@ pub(crate) const SCHEMA: &str = "
         last_failed_at_ms INTEGER NOT NULL,
         ended_at_ms       INTEGER,
         end_reason        TEXT NOT NULL DEFAULT '',
-        ended_by_run      TEXT NOT NULL DEFAULT ''
+        ended_by_run      TEXT NOT NULL DEFAULT '',
+        recovered_at_ms   INTEGER,
+        notified          INTEGER NOT NULL DEFAULT 0
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_ids_job_incidents_open ON db_job_incidents(job_id)
         WHERE ended_at_ms IS NULL;
-    CREATE INDEX IF NOT EXISTS idx_ids_job_incidents_job ON db_job_incidents(job_id, opened_at_ms);";
+    CREATE INDEX IF NOT EXISTS idx_ids_job_incidents_job ON db_job_incidents(job_id, opened_at_ms);
+    CREATE TABLE IF NOT EXISTS db_job_incident_cursors (
+        job_id      TEXT PRIMARY KEY,
+        ended_at_ms INTEGER NOT NULL,
+        run_id      TEXT NOT NULL
+    );";
 
 /// How an incident ended (`end_reason`).
 pub mod ended {
@@ -48,7 +59,8 @@ pub mod ended {
     /// its owner (§10, decision 6).
     pub const RECOVERED: &str = "recovered";
     /// Its task was finished or cancelled while the job still failed: the
-    /// next failure opens a new incident.
+    /// next failure opens a new incident, and the next success still
+    /// recovers this one (its notification).
     pub const TASK_CLOSED: &str = "task_closed";
 }
 
@@ -82,10 +94,18 @@ pub struct JobIncident {
     pub end_reason: String,
     /// The run that recovered it.
     pub ended_by_run: String,
+    /// When the job succeeded again; unset while it still fails, even after
+    /// its task was closed.
+    #[ts(type = "number | null")]
+    pub recovered_at_ms: Option<i64>,
+    /// Its notification is up: raised when it opened, taken down when it
+    /// recovers.
+    pub notified: bool,
 }
 
 const COLS: &str = "id, job_id, job_source, job_name, work_id, task_num, owner_uid, first_run_id, last_run_id, \
-                    failures, opened_at_ms, last_failed_at_ms, ended_at_ms, end_reason, ended_by_run";
+                    failures, opened_at_ms, last_failed_at_ms, ended_at_ms, end_reason, ended_by_run, \
+                    recovered_at_ms, notified";
 
 fn row_to_incident(row: &Row) -> rusqlite::Result<JobIncident> {
     Ok(JobIncident {
@@ -104,18 +124,28 @@ fn row_to_incident(row: &Row) -> rusqlite::Result<JobIncident> {
         ended_at_ms: row.get("ended_at_ms")?,
         end_reason: row.get("end_reason")?,
         ended_by_run: row.get("ended_by_run")?,
+        recovered_at_ms: row.get("recovered_at_ms")?,
+        notified: row.get::<_, i64>("notified")? != 0,
     })
+}
+
+/// How far the keeper has walked a job's decisive runs: the last one it
+/// took, by when it ended and its id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IncidentCursor {
+    pub ended_at_ms: i64,
+    pub run_id: String,
 }
 
 impl Store {
     /// Open `incident` (its first failure) unless the job already has an open
-    /// one. `false` when it has: the caller counts the failure into that one.
+    /// one. `false` when it has.
     pub fn job_incident_open(&self, incident: &JobIncident) -> Result<bool, StoreError> {
         let conn = self.conn().lock().unwrap();
         let n = conn.execute(
             &format!(
                 "INSERT OR IGNORE INTO db_job_incidents ({COLS}) VALUES
-                 (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, NULL, '', '')"
+                 (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, NULL, '', '', NULL, ?13)"
             ),
             params![
                 incident.id,
@@ -130,6 +160,7 @@ impl Store {
                 incident.failures,
                 incident.opened_at_ms,
                 incident.last_failed_at_ms,
+                incident.notified as i64,
             ],
         )?;
         Ok(n > 0)
@@ -148,6 +179,7 @@ impl Store {
     }
 
     /// The job's newest incident, open or ended.
+    #[cfg(test)]
     pub fn job_incident_latest(&self, job_id: &str) -> Result<Option<JobIncident>, StoreError> {
         let conn = self.conn().lock().unwrap();
         Ok(conn
@@ -195,15 +227,77 @@ impl Store {
             .optional()?)
     }
 
-    /// End open incident `id` (`why`, one of [`ended`]; `by_run` the run that
-    /// recovered it). `false` when it had already ended.
-    pub fn job_incident_end(&self, id: &str, why: &str, by_run: &str, now_ms: i64) -> Result<bool, StoreError> {
+    /// End open incident `id` because its task was closed while the job
+    /// still failed. It stays unrecovered. `false` when it had already ended.
+    pub fn job_incident_end_task_closed(&self, id: &str, now_ms: i64) -> Result<bool, StoreError> {
         let conn = self.conn().lock().unwrap();
         let n = conn.execute(
-            "UPDATE db_job_incidents SET ended_at_ms = ?2, end_reason = ?3, ended_by_run = ?4
+            "UPDATE db_job_incidents SET ended_at_ms = ?2, end_reason = ?3
               WHERE id = ?1 AND ended_at_ms IS NULL",
-            params![id, now_ms, why, by_run],
+            params![id, now_ms, ended::TASK_CLOSED],
         )?;
+        Ok(n > 0)
+    }
+
+    /// Run `run_id`, a success, recovers every incident of the job not yet
+    /// recovered: the open one ends (`recovered`), one whose task was closed
+    /// keeps its end, and each notification is marked down. Returns them as
+    /// they were before.
+    pub fn job_incidents_recover(&self, job_id: &str, run_id: &str, now_ms: i64) -> Result<Vec<JobIncident>, StoreError> {
+        let mut conn = self.conn().lock().unwrap();
+        let tx = conn.transaction()?;
+        let before = {
+            let mut stmt = tx.prepare(&format!(
+                "SELECT {COLS} FROM db_job_incidents WHERE job_id = ?1 AND recovered_at_ms IS NULL ORDER BY opened_at_ms"
+            ))?;
+            let rows = stmt.query_map(params![job_id], row_to_incident)?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        tx.execute(
+            "UPDATE db_job_incidents
+                SET recovered_at_ms = ?3, ended_by_run = ?2, notified = 0,
+                    end_reason = CASE WHEN ended_at_ms IS NULL THEN ?4 ELSE end_reason END,
+                    ended_at_ms = COALESCE(ended_at_ms, ?3)
+              WHERE job_id = ?1 AND recovered_at_ms IS NULL",
+            params![job_id, run_id, now_ms, ended::RECOVERED],
+        )?;
+        tx.commit()?;
+        Ok(before)
+    }
+
+    /// How far the keeper has walked job `job_id`'s decisive runs.
+    pub fn job_incident_cursor(&self, job_id: &str) -> Result<Option<IncidentCursor>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        Ok(conn
+            .query_row(
+                "SELECT ended_at_ms, run_id FROM db_job_incident_cursors WHERE job_id = ?1",
+                params![job_id],
+                |r| Ok(IncidentCursor { ended_at_ms: r.get(0)?, run_id: r.get(1)? }),
+            )
+            .optional()?)
+    }
+
+    /// Take the next run: move job `job_id`'s cursor from `from` (`None`:
+    /// it has none yet) to `to`. `false` when it isn't at `from` any more:
+    /// another keeper took the run.
+    pub fn job_incident_cursor_advance(
+        &self,
+        job_id: &str,
+        from: Option<&IncidentCursor>,
+        to: &IncidentCursor,
+    ) -> Result<bool, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let n = match from {
+            None => conn.execute(
+                "INSERT OR IGNORE INTO db_job_incident_cursors (job_id, ended_at_ms, run_id) VALUES (?1, ?2, ?3)",
+                params![job_id, to.ended_at_ms, to.run_id],
+            )?,
+            Some(from) => conn.execute(
+                "UPDATE db_job_incident_cursors SET ended_at_ms = ?2, run_id = ?3
+                  WHERE job_id = ?1 AND ended_at_ms = ?4 AND run_id = ?5",
+                params![job_id, to.ended_at_ms, to.run_id, from.ended_at_ms, from.run_id],
+            )?,
+        };
         Ok(n > 0)
     }
 }
@@ -219,6 +313,7 @@ mod tests {
             first_run_id: run.into(),
             last_run_id: run.into(),
             failures: 1,
+            notified: true,
             ..Default::default()
         }
     }
@@ -231,11 +326,28 @@ mod tests {
         assert!(!store.job_incident_open(&incident("i2", "j", "r2")).unwrap(), "j already has one open");
         assert_eq!(store.job_incident_fail_again("i1", "r1", "r2", 5).unwrap(), Some(2));
         assert_eq!(store.job_incident_fail_again("i1", "r1", "r2", 5).unwrap(), None, "counted already");
-        assert!(store.job_incident_end("i1", ended::RECOVERED, "r3", 9).unwrap());
-        assert!(!store.job_incident_end("i1", ended::RECOVERED, "r3", 9).unwrap());
+        assert!(store.job_incident_end_task_closed("i1", 9).unwrap());
+        assert!(!store.job_incident_end_task_closed("i1", 9).unwrap());
         assert_eq!(store.job_incident_fail_again("i1", "r2", "r4", 10).unwrap(), None, "ended");
         assert!(store.job_incident_open_for("j").unwrap().is_none());
         assert!(store.job_incident_open(&incident("i3", "j", "r4")).unwrap(), "a new one after the end");
-        assert_eq!(store.job_incident_latest("j").unwrap().unwrap().id, "i3");
+
+        let recovered = store.job_incidents_recover("j", "r5", 20).unwrap();
+        assert_eq!(recovered.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["i1", "i3"], "the closed one too");
+        let i3 = store.job_incident_latest("j").unwrap().unwrap();
+        assert_eq!((i3.end_reason.as_str(), i3.recovered_at_ms, i3.notified), (ended::RECOVERED, Some(20), false));
+        assert!(store.job_incidents_recover("j", "r6", 30).unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_cursor_moves_only_from_where_it_was() {
+        let store = Store::open_in_memory().unwrap();
+        store.job_runs_ensure_schema().unwrap();
+        let at = |ms: i64, id: &str| IncidentCursor { ended_at_ms: ms, run_id: id.into() };
+        assert!(store.job_incident_cursor_advance("j", None, &at(1, "a")).unwrap());
+        assert!(!store.job_incident_cursor_advance("j", None, &at(1, "a")).unwrap(), "taken");
+        assert!(store.job_incident_cursor_advance("j", Some(&at(1, "a")), &at(2, "b")).unwrap());
+        assert!(!store.job_incident_cursor_advance("j", Some(&at(1, "a")), &at(3, "c")).unwrap(), "moved on");
+        assert_eq!(store.job_incident_cursor("j").unwrap(), Some(at(2, "b")));
     }
 }

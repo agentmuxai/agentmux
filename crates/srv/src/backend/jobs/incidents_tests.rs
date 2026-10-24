@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::*;
+use crate::backend::storage::job_incidents::ended;
 use crate::backend::cron::test_job;
 use crate::backend::notify::policy::{title_for, Action, Family, Input, NotifyKind, PolicyState, Request, Settings};
 use crate::backend::storage::store::AgentContent;
@@ -59,14 +60,23 @@ impl Rig {
     }
 }
 
+/// A look that changed nothing.
+const NONE: [Step; 0] = [];
+
+/// The one step a look took.
+fn one(steps: Vec<Step>) -> Step {
+    assert_eq!(steps.len(), 1, "{steps:?}");
+    steps.into_iter().next().unwrap()
+}
+
 #[test]
 fn a_failure_opens_one_incident_and_later_failures_only_add_to_its_task() {
     let rig = rig();
     rig.run("j", "finished", "ok", "ok", "");
-    assert_eq!(rig.keeper.assess("j"), Step::Nothing, "a success with no incident");
+    assert_eq!(rig.keeper.assess("j"), NONE, "a success with no incident");
 
     let first = rig.run("j", "missed", "", "unknown", "target_stopped");
-    let Step::Opened { incident, leader, note, notify_body } = rig.keeper.assess("j") else { panic!("no incident") };
+    let Step::Opened { incident, leader, note, notify_body } = one(rig.keeper.assess("j")) else { panic!("no incident") };
     assert_eq!(leader, Some(Leader { uid: "uid-owner".into(), name: "Owner".into() }));
     let num = incident.task_num.unwrap();
     assert!(note.starts_with("[AgentMux] Job \"Nightly build\" failed at "), "{note}");
@@ -83,32 +93,53 @@ fn a_failure_opens_one_incident_and_later_failures_only_add_to_its_task() {
     let linked = rig.store.job_run_get(&first.id).unwrap().unwrap();
     assert_eq!(linked.links["kanban_task"]["num"], num);
 
-    assert_eq!(rig.keeper.assess("j"), Step::Nothing, "the same failure is counted once");
+    assert_eq!(rig.keeper.assess("j"), NONE, "the same failure is counted once");
     let again = rig.run("j", "finished", "error", "unknown", "");
-    assert_eq!(rig.keeper.assess("j"), Step::FailedAgain { count: 2 });
+    assert_eq!(rig.keeper.assess("j"), [Step::FailedAgain { count: 2 }]);
     rig.run("j", "skipped", "", "unknown", "paused");
-    assert_eq!(rig.keeper.assess("j"), Step::Nothing, "a skip the operator caused neither fails nor recovers");
+    assert_eq!(rig.keeper.assess("j"), NONE, "a skip the operator caused neither fails nor recovers");
     assert_eq!(rig.failure_tasks().len(), 1, "one task per incident, not per run");
     assert!(rig.history(&incident.work_id).iter().any(|l| l.contains("2 in a row")));
     assert_eq!(rig.store.job_run_get(&again.id).unwrap().unwrap().links["kanban_task"]["num"], num);
+}
+
+/// Runs that end between two looks are each taken, in order.
+#[test]
+fn every_run_between_two_looks_counts() {
+    let rig = rig();
+    rig.run("j", "finished", "ok", "ok", "");
+    assert_eq!(rig.keeper.assess("j"), NONE);
+    let (a, b) = (rig.run("j", "missed", "", "unknown", "target_stopped"), rig.run("j", "finished", "error", "unknown", ""));
+    let steps = rig.keeper.assess("j");
+    assert!(matches!(steps.as_slice(), [Step::Opened { .. }, Step::FailedAgain { count: 2 }]), "{steps:?}");
+    for run in [&a, &b] {
+        assert!(rig.store.job_run_get(&run.id).unwrap().unwrap().links["kanban_task"]["num"].is_number(), "{} linked", run.id);
+    }
+
+    // Recovered, then failing again: a recovery and a new incident.
+    rig.run("j", "finished", "ok", "ok", "");
+    rig.run("j", "finished", "timeout", "unknown", "");
+    let steps = rig.keeper.assess("j");
+    assert!(matches!(steps.as_slice(), [Step::Recovered, Step::Opened { .. }]), "{steps:?}");
+    assert_eq!(rig.failure_tasks().len(), 2);
 }
 
 #[test]
 fn a_success_notes_recovered_and_leaves_the_task_open_and_the_next_failure_is_a_new_incident() {
     let rig = rig();
     rig.run("j", "finished", "timeout", "unknown", "");
-    let Step::Opened { incident, .. } = rig.keeper.assess("j") else { panic!() };
+    let Step::Opened { incident, .. } = one(rig.keeper.assess("j")) else { panic!() };
     rig.run("j", "finished", "ok", "findings", "");
-    assert_eq!(rig.keeper.assess("j"), Step::Recovered);
-    assert_eq!(rig.keeper.assess("j"), Step::Nothing);
+    assert_eq!(rig.keeper.assess("j"), [Step::Recovered]);
+    assert_eq!(rig.keeper.assess("j"), NONE);
     assert!(rig.history(&incident.work_id).iter().any(|l| l.starts_with("recovered at ") && l.ends_with("after 1 failure")));
     let task = rig.store.work_queue_get(&incident.work_id).unwrap().unwrap();
     assert_eq!(task.state, work_state::OPEN, "decision 6: open for its owner");
-    let ended = rig.store.job_incident_latest("j").unwrap().unwrap();
-    assert_eq!(ended.end_reason, ended::RECOVERED);
+    let done = rig.store.job_incident_latest("j").unwrap().unwrap();
+    assert_eq!((done.end_reason.as_str(), done.notified), (ended::RECOVERED, false));
 
     rig.run("j", "finished", "ok", "failed", "");
-    let Step::Opened { incident: second, notify_body, .. } = rig.keeper.assess("j") else { panic!() };
+    let Step::Opened { incident: second, notify_body, .. } = one(rig.keeper.assess("j")) else { panic!() };
     assert_ne!(second.work_id, incident.work_id);
     assert!(notify_body.starts_with("Its agent reported it failed."), "{notify_body}");
 }
@@ -117,13 +148,49 @@ fn a_success_notes_recovered_and_leaves_the_task_open_and_the_next_failure_is_a_
 fn a_task_closed_while_the_job_still_fails_waits_for_the_next_failure() {
     let rig = rig();
     rig.run("j", "finished", "interrupted", "unknown", "");
-    let Step::Opened { incident, .. } = rig.keeper.assess("j") else { panic!() };
+    let Step::Opened { incident, .. } = one(rig.keeper.assess("j")) else { panic!() };
     rig.store.work_queue_cancel(&incident.work_id, "not now", 5).unwrap();
-    assert_eq!(rig.keeper.assess("j"), Step::Nothing, "the failure it stood for is not filed again");
+    assert_eq!(rig.keeper.assess("j"), NONE, "the failure it stood for is not filed again");
     assert_eq!(rig.store.job_incident_latest("j").unwrap().unwrap().end_reason, ended::TASK_CLOSED);
     rig.run("j", "missed", "", "unknown", "target_stopped");
-    assert!(matches!(rig.keeper.assess("j"), Step::Opened { .. }));
+    assert!(matches!(one(rig.keeper.assess("j")), Step::Opened { .. }));
     assert_eq!(rig.failure_tasks().len(), 2);
+}
+
+/// The owner closed the task, the job still failing; its next success still
+/// takes the notification down and records the recovery.
+#[test]
+fn a_success_after_the_task_was_closed_still_recovers_it() {
+    let rig = rig();
+    rig.run("j", "missed", "", "unknown", "target_stopped");
+    let Step::Opened { incident, .. } = one(rig.keeper.assess("j")) else { panic!() };
+    rig.store.work_queue_cancel(&incident.work_id, "looked into it", 5).unwrap();
+    assert_eq!(rig.keeper.assess("j"), NONE);
+    let closed = rig.store.job_incident_latest("j").unwrap().unwrap();
+    assert_eq!((closed.end_reason.as_str(), closed.notified, closed.recovered_at_ms), (ended::TASK_CLOSED, true, None));
+
+    rig.run("j", "finished", "ok", "ok", "");
+    assert_eq!(rig.keeper.assess("j"), [Step::Recovered], "the notification comes down");
+    let after = rig.store.job_incident_latest("j").unwrap().unwrap();
+    assert_eq!(after.end_reason, ended::TASK_CLOSED, "it keeps how it ended");
+    assert!(after.recovered_at_ms.is_some() && !after.notified, "{after:?}");
+    assert!(rig.history(&incident.work_id).iter().any(|l| l.starts_with("recovered at ")));
+}
+
+/// Two instances share the ledger; only the one that has the cron job moves
+/// its incident, whichever closed the run.
+#[test]
+fn only_the_instance_that_has_the_job_moves_its_incident() {
+    let rig = rig();
+    let jobs_elsewhere = Arc::new(Store::open_in_memory().unwrap());
+    let other = Incidents::new(rig.store.clone(), Some(rig.mstore.clone()), Some(jobs_elsewhere), Arc::new(Broker::new()));
+    rig.run("j", "missed", "", "unknown", "target_stopped");
+    assert_eq!(other.assess("j"), NONE, "not its job: it opens nothing");
+    assert!(matches!(one(rig.keeper.assess("j")), Step::Opened { .. }));
+    rig.run("j", "finished", "ok", "ok", "");
+    assert_eq!(other.assess("j"), NONE, "nor recovers it");
+    assert!(rig.store.job_incident_open_for("j").unwrap().is_some());
+    assert_eq!(rig.keeper.assess("j"), [Step::Recovered]);
 }
 
 #[test]
@@ -139,28 +206,29 @@ fn the_task_goes_to_the_owners_leader_or_to_anyone() {
         })
         .unwrap();
     rig.run("j", "missed", "", "unknown", "target_stopped");
-    let Step::Opened { leader, .. } = rig.keeper.assess("j") else { panic!() };
+    let Step::Opened { leader, .. } = one(rig.keeper.assess("j")) else { panic!() };
     assert_eq!(leader.map(|l| l.name), Some("Lead".to_string()), "a spawned worker's leader");
 
     let mut orphan = test_job("j-orphan", "p", "AgentY", "uid-y", "uid-deleted");
     orphan.name = "Orphan".into();
     rig.store.cron_create(&orphan).unwrap();
     rig.run("j-orphan", "missed", "", "unknown", "target_stopped");
-    let Step::Opened { incident, leader, .. } = rig.keeper.assess("j-orphan") else { panic!() };
+    let Step::Opened { incident, leader, .. } = one(rig.keeper.assess("j-orphan")) else { panic!() };
     assert_eq!(leader, None, "the operator alone is told");
     let task = rig.store.work_queue_get(&incident.work_id).unwrap().unwrap();
     assert_eq!((task.target_agent.as_str(), task.target_agent_uid.as_str()), ("", ""), "in the backlog for anyone");
 }
 
 #[test]
-fn only_an_instance_that_has_the_cron_job_opens_its_incident() {
+fn a_job_this_instance_lacks_and_a_drone_run_open_nothing() {
     let rig = rig();
     rig.run("j-elsewhere", "missed", "", "unknown", "target_stopped");
-    assert_eq!(rig.keeper.assess("j-elsewhere"), Step::Nothing, "another channel's job");
+    assert_eq!(rig.keeper.assess("j-elsewhere"), NONE, "another channel's job");
     let mut drone = JobRun::new("d1", "j", crate::backend::jobs::SOURCE_DRONE, "Graph", "manual", "finished", 999_999_999);
     drone.infra = "error".into();
+    drone.ended_at_ms = Some(999_999_999);
     rig.store.job_run_insert(&drone).unwrap();
-    assert_eq!(rig.keeper.assess("j"), Step::Nothing, "a Drone graph run by hand");
+    assert_eq!(rig.keeper.assess("j"), NONE, "a Drone graph run by hand");
 }
 
 #[test]

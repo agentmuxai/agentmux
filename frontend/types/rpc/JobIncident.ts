@@ -27,4 +27,14 @@ end_reason: string,
 /**
  * The run that recovered it.
  */
-ended_by_run: string, };
+ended_by_run: string, 
+/**
+ * When the job succeeded again; unset while it still fails, even after
+ * its task was closed.
+ */
+recovered_at_ms: number | null, 
+/**
+ * Its notification is up: raised when it opened, taken down when it
+ * recovers.
+ */
+notified: boolean, };

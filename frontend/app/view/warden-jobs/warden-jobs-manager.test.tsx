@@ -110,7 +110,7 @@ describe("WardenJobsManager", () => {
         const incident = {
             id: "i1", job_id: "j1", job_source: "cron", job_name: "Nightly build", work_id: "w1", task_num: 12, owner_uid: "uid-b",
             first_run_id: "r0", last_run_id: "r0", failures: 2, opened_at_ms: NOW - 60_000, last_failed_at_ms: NOW, ended_at_ms: null,
-            end_reason: "", ended_by_run: "",
+            end_reason: "", ended_by_run: "", recovered_at_ms: null, notified: true,
         };
         rpc.list.mockResolvedValue(listOf([mkJob({ failing: true, incident })]));
         rpc.runs.mockResolvedValue({

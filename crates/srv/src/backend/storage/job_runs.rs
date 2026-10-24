@@ -280,6 +280,14 @@ pub struct RunCost {
 /// list is [`state::OPEN`] (a test holds them equal).
 const OPEN_NOT_ENDED: &str = "state IN ('scheduled','pending','running') AND ended_at_ms IS NULL";
 
+/// A decisive run: one that finished, or failed (a miss, a lost run, an
+/// expired pending fire, a failing infrastructure status or outcome). The
+/// same rule as `jobs::verdict::decisive`, whose test checks the two agree.
+const DECISIVE: &str = "(state IN ('finished','missed','lost')
+                             OR (state = 'pending' AND reason = 'expired')
+                             OR infra IN ('error','timeout','over_budget','interrupted')
+                             OR outcome = 'failed')";
+
 impl Store {
     /// Create the table if this store doesn't have it yet (a test store, or
     /// one opened before this build). Idempotent.
@@ -370,17 +378,45 @@ impl Store {
             .query_row(
                 &format!(
                     "SELECT {COLS} FROM db_job_runs
-                      WHERE job_id = ?1 AND collapsed_into = ''
-                        AND (state IN ('finished','missed','lost')
-                             OR (state = 'pending' AND reason = 'expired')
-                             OR infra IN ('error','timeout','over_budget','interrupted')
-                             OR outcome = 'failed')
+                      WHERE job_id = ?1 AND collapsed_into = '' AND {DECISIVE}
                       ORDER BY started_at_ms DESC, rowid DESC LIMIT 1"
                 ),
                 params![job_id],
                 row_to_run,
             )
             .optional()?)
+    }
+
+    /// The job's decisive runs that have ended, in the order they ended
+    /// (`ended_at_ms`, then `id`): the ones after `after` (an ended time and
+    /// a run id), at most `limit`; with no `after`, only the newest. What
+    /// the incident keeper walks (`jobs::incidents`).
+    pub fn job_runs_decisive_after(
+        &self,
+        job_id: &str,
+        after: Option<(i64, &str)>,
+        limit: i64,
+    ) -> Result<Vec<JobRun>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let base = format!(
+            "SELECT {COLS} FROM db_job_runs
+              WHERE job_id = ?1 AND collapsed_into = '' AND ended_at_ms IS NOT NULL AND {DECISIVE}"
+        );
+        let rows = match after {
+            Some((ended, id)) => {
+                let mut stmt = conn.prepare(&format!(
+                    "{base} AND (ended_at_ms > ?2 OR (ended_at_ms = ?2 AND id > ?3)) ORDER BY ended_at_ms, id LIMIT ?4"
+                ))?;
+                let rows = stmt.query_map(params![job_id, ended, id, limit.max(0)], row_to_run)?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            }
+            None => {
+                let mut stmt = conn.prepare(&format!("{base} ORDER BY ended_at_ms DESC, id DESC LIMIT 1"))?;
+                let rows = stmt.query_map(params![job_id], row_to_run)?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            }
+        };
+        Ok(rows)
     }
 
     /// Turn the just-inserted placeholder `id` into a skip for `reason`, or,
