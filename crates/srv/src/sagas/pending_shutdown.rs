@@ -144,9 +144,11 @@ struct Entry {
     finished_at_ms: Option<i64>,
     /// Taken when the window runs out and the shutdown begins.
     action: Option<Action>,
-    /// Everyone who asked, as (by, via): later requests for the same block
-    /// join this one rather than open a second window.
-    requesters: Vec<(String, String)>,
+    /// Everyone who asked, as (by, via, reason as sent): later requests for the
+    /// same block join this one rather than open a second window. The audit
+    /// keeps each reason exactly as its caller sent it; only `view.reason`, which
+    /// the user is shown, is cleaned (`clean_reason`).
+    requesters: Vec<(String, String, String)>,
     /// Every block it shuts down (`Action::covers`). A request naming any of
     /// them joins this one, Keep running works from any of their banners,
     /// and the banner shows on each — a pane's close covers all its tabs
@@ -294,8 +296,8 @@ fn request_within(
                     grew = true;
                 }
             }
-            if !existing.requesters.iter().any(|(b, v)| b == by && v == via) {
-                existing.requesters.push((by.to_string(), via.to_string()));
+            if !existing.requesters.iter().any(|(b, v, _)| b == by && v == via) {
+                existing.requesters.push((by.to_string(), via.to_string(), reason.trim().to_string()));
             }
             let pending = existing.view.status == "pending";
             let stronger = pending && existing.action.as_ref().is_some_and(|cur| action.rank() > cur.rank());
@@ -351,7 +353,7 @@ fn request_within(
                 kept: Arc::new(tokio::sync::Notify::new()),
                 finished_at_ms: None,
                 action: Some(action),
-                requesters: vec![(by.to_string(), via.to_string())],
+                requesters: vec![(by.to_string(), via.to_string(), reason.trim().to_string())],
                 covers: new_covers.clone(),
             },
         );
@@ -464,8 +466,7 @@ fn audit(state: &AppState, request_id: &str, outcome: &str, error: Option<&str>)
     let Some((v, requesters)) = entries().get(request_id).map(|e| (e.view.clone(), e.requesters.clone())) else {
         return;
     };
-    for (by, via) in requesters {
-        let ran = if via == v.via { String::new() } else { format!(" (ran as {} by {})", v.via, v.by) };
+    for (by, via, reason) in requesters {
         state.reactive_handler.log_fleet_action_audit(
             Some(&by),
             &v.target,
@@ -474,9 +475,16 @@ fn audit(state: &AppState, request_id: &str, outcome: &str, error: Option<&str>)
             error.is_none(),
             error,
             &v.request_id,
-            Some(&format!("{outcome} | via {via}{ran} | {}", v.reason)),
+            Some(&settled_note(outcome, &v, &via, &reason)),
         );
     }
+}
+
+/// One requester's audit note when the request settles: the outcome, how it
+/// asked, and its reason exactly as sent (never the cleaned text the user saw).
+fn settled_note(outcome: &str, v: &PendingView, via: &str, reason: &str) -> String {
+    let ran = if via == v.via { String::new() } else { format!(" (ran as {} by {})", v.via, v.by) };
+    format!("{outcome} | via {via}{ran} | {reason}")
 }
 
 /// The request-time audit note: whether this caller opened the window or
@@ -818,6 +826,21 @@ mod tests {
         assert!(!toast_body(&plain).contains("task finished"));
         keep(&state, "ct-reason", &v.request_id);
         keep(&state, "ct-reason-2", &plain.request_id);
+    }
+
+    /// The user is shown a cleaned reason; the audit keeps what was sent.
+    #[tokio::test]
+    async fn the_audit_keeps_the_reason_as_sent_while_the_user_sees_it_cleaned() {
+        let state = test_state();
+        let sent = "deploy with api_key=sk-test-0123456789abcdef";
+        let v = request(&state, "ct-audit", "AgentY", "FleetBulkStop", sent, close_tab());
+        assert_eq!(v.reason, REASON_HIDDEN);
+        let (_, via, raw) = entries().get(&v.request_id).unwrap().requesters[0].clone();
+        assert_eq!(raw, sent, "kept as sent");
+        let note = settled_note("shut_down", &v, &via, &raw);
+        assert_eq!(note, format!("shut_down | via FleetBulkStop | {sent}"));
+        assert!(!note.contains(REASON_HIDDEN));
+        keep(&state, "ct-audit", &v.request_id);
     }
 
     #[tokio::test]
