@@ -6974,6 +6974,19 @@ async fn a_message_to_an_agent_out_of_quota_is_held_until_it_can_work() {
     crate::backend::blockcontroller::delete_controller(&block.oid);
 }
 
+/// A peer that has the agent and refuses it (out of quota, or its files)
+/// answers for itself: the forward returns that answer instead of evicting the
+/// route and trying the relay.
+#[test]
+fn a_peers_unavailable_refusal_is_its_answer_not_a_stale_route() {
+    use super::jekt_hold::peer_refused;
+    let refused = |error: &str| serde_json::json!({"success": false, "error": error});
+    assert!(peer_refused(&refused("agent unavailable: Camper's account is out of quota until Sun 7:00 PM")));
+    assert!(peer_refused(&serde_json::json!({"success": false, "files_refused": true, "error": "files refused: x"})));
+    assert!(!peer_refused(&refused("agent not found: Camper")));
+    assert!(!peer_refused(&refused("rate limit exceeded")));
+}
+
 /// PLAN_JEKT_LOCAL_FIRST_ROUTING_2026_10_02.md §5: an agent defined in this
 /// channel that no tier found live is held here by default, so messaging
 /// works without the relay. A `test_state()` has no muxbus login, which is

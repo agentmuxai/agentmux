@@ -128,7 +128,7 @@ async fn forward_inject_to_peer(
                 );
                 return ForwardOutcome::Inconclusive;
             };
-            if body.get("files_refused").and_then(|v| v.as_bool()) == Some(true) {
+            if super::jekt_hold::peer_refused(&body) {
                 return ForwardOutcome::Refused(body);
             }
             if body.get("success").and_then(|v| v.as_bool()) != Some(true) {

@@ -54,6 +54,14 @@ pub(in crate::server) fn holding_unavailable(
         .filter(|u| u.state == crate::backend::agent_state::AgentState::Limited && u.resets_at_ms.is_some())
 }
 
+/// Whether a peer's answer to a forwarded jekt is a refusal by an instance
+/// that has the agent (its files refused, or the agent out of quota), to be
+/// returned as is: not a stale route to evict and route around.
+pub(super) fn peer_refused(body: &serde_json::Value) -> bool {
+    body.get("files_refused").and_then(|v| v.as_bool()) == Some(true)
+        || body.get("error").and_then(|v| v.as_str()).is_some_and(crate::backend::reactive::is_unavailable_refusal)
+}
+
 /// [`holding_unavailable`] for the agent of this instance that `target`
 /// names. `None` for an agent that can work, and for a target that isn't
 /// registered here (an absent or remote one: the tiers below decide, and the
