@@ -17,7 +17,6 @@ pub(crate) enum HoldReason {
     /// The agent is here but its account is out of quota
     /// (`AgentState::Limited`). Held from step 2c of
     /// `docs/specs/SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md` §5.
-    #[allow(dead_code)]
     Limited,
 }
 
@@ -32,7 +31,6 @@ impl HoldReason {
 
     /// The reason a message to an agent in `state` is held, or `None` when
     /// that state doesn't hold messages.
-    #[allow(dead_code)]
     pub(crate) fn for_state(state: AgentState) -> Option<Self> {
         match state {
             AgentState::Limited => Some(HoldReason::Limited),

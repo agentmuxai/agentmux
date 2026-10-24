@@ -6887,6 +6887,106 @@ async fn a_jekt_refused_by_the_spawn_gate_is_held_for_sign_in() {
     .is_none());
 }
 
+/// SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5 (step 2c): a message to an agent
+/// here whose account is out of quota is held with `held_reason: usage_limit`
+/// and the reset time, never injected into a turn that would fail and lose
+/// it. The replay leaves it alone while the agent is limited, with no attempt
+/// counted, and tries it once the agent can work. A caller the hold never
+/// serves (LAN) gets the refusal, not a delivery.
+#[tokio::test]
+async fn a_message_to_an_agent_out_of_quota_is_held_until_it_can_work() {
+    use crate::backend::agent_state::test_support::register_stub;
+    use crate::backend::blockcontroller::{core::META_LAST_FAILURE, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING};
+    use crate::backend::reactive::types::InjectionRequest;
+    use crate::backend::storage::agents::test_agent_def;
+    let state = test_state();
+    let slug = format!("quota-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+    let uid = format!("uid-{slug}");
+    let mut def = test_agent_def(&uid, "Quota Y", "claude", "agent", 1, "");
+    def.slug = slug.clone();
+    state.mstore.agent_def_insert(&mut def).unwrap();
+    // Its pane's last run hit the weekly limit, which resets in an hour.
+    let resets_at = agentmux_common::time::now_ms_u64() + 3_600_000;
+    let mut block = crate::backend::obj::Block { oid: uuid::Uuid::new_v4().to_string(), ..Default::default() };
+    block.meta.insert(
+        META_LAST_FAILURE.to_string(),
+        serde_json::json!({"code": "usage_limit", "title": "Usage limit reached", "detail": "", "retryable": false, "resetsAtMs": resets_at}),
+    );
+    state.mstore.insert(&mut block).unwrap();
+    register_stub(&block.oid, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
+    state
+        .reactive_handler
+        .register_agent_full(&slug, &block.oid, None, 0, None, Some(&uid), "test")
+        .unwrap();
+    let req = |id: &str| InjectionRequest {
+        target_agent: slug.clone(),
+        message: "hi".to_string(),
+        source_agent: Some("sender".to_string()),
+        request_id: Some(id.to_string()),
+        ..Default::default()
+    };
+
+    let v = super::reactive::deliver(&state, super::ReactiveAuthVia::FullAuthKey, "", req("req-quota")).await;
+    assert_eq!(v["held"], true, "{v}");
+    assert_eq!(v["held_reason"], "usage_limit", "{v}");
+    assert_eq!(v["held_until_ms"], resets_at, "{v}");
+    assert!(v["held_until"].is_string(), "{v}");
+    assert!(v["error"].as_str().unwrap().contains("out of quota"), "{v}");
+    let rows = state.mstore.jekt_held_for_target(&uid, 10).unwrap();
+    assert_eq!(rows.len(), 1, "held, not delivered");
+
+    // Registered but limited: the replay skips it and counts nothing.
+    let outcomes = crate::server::jekt_held::replay_pass(&state).await;
+    assert!(outcomes.iter().all(|(r, _)| r != "req-quota"), "{outcomes:?}");
+    assert_eq!(state.mstore.jekt_held_for_target(&uid, 10).unwrap()[0].attempts, 0);
+
+    // A LAN caller is never held: refused with the reason instead.
+    let v = super::reactive::deliver(&state, super::ReactiveAuthVia::LanKey, "", req("req-quota-lan")).await;
+    assert_eq!(v["success"], false, "{v}");
+    assert!(v.get("held").is_none(), "{v}");
+    let error = v["error"].as_str().unwrap();
+    assert!(crate::backend::reactive::is_unavailable_refusal(error), "{v}");
+    assert!(error.contains("out of quota until "), "{v}");
+    assert_eq!(state.mstore.jekt_held_for_target(&uid, 10).unwrap().len(), 1);
+
+    // The account moved (the failure cleared): the replay takes it up.
+    let mut block = state.mstore.get::<crate::backend::obj::Block>(&block.oid).unwrap().unwrap();
+    block.meta.remove(META_LAST_FAILURE);
+    state.mstore.update(&mut block).unwrap();
+    let outcomes = crate::server::jekt_held::replay_pass(&state).await;
+    assert!(outcomes.iter().any(|(r, _)| r == "req-quota"), "{outcomes:?}");
+
+    // Signed out is not held yet: its state lasts until a clean turn, which
+    // holding every message would never let run (#5419).
+    block.meta.insert(
+        META_LAST_FAILURE.to_string(),
+        serde_json::json!({"code": "auth", "title": "Sign-in refused", "detail": "", "retryable": false}),
+    );
+    state.mstore.update(&mut block).unwrap();
+    assert!(super::jekt_hold::local_target_unavailable(&state, &slug).await.is_none());
+    // Nor a usage limit with no known reset: nothing would end it but a turn.
+    block.meta.insert(
+        META_LAST_FAILURE.to_string(),
+        serde_json::json!({"code": "usage_limit", "title": "Usage limit reached", "detail": "", "retryable": false}),
+    );
+    state.mstore.update(&mut block).unwrap();
+    assert!(super::jekt_hold::local_target_unavailable(&state, &slug).await.is_none());
+    crate::backend::blockcontroller::delete_controller(&block.oid);
+}
+
+/// A peer that has the agent and refuses it (out of quota, or its files)
+/// answers for itself: the forward returns that answer instead of evicting the
+/// route and trying the relay.
+#[test]
+fn a_peers_unavailable_refusal_is_its_answer_not_a_stale_route() {
+    use super::jekt_hold::peer_refused;
+    let refused = |error: &str| serde_json::json!({"success": false, "error": error});
+    assert!(peer_refused(&refused("agent unavailable: Camper's account is out of quota until Sun 7:00 PM")));
+    assert!(peer_refused(&serde_json::json!({"success": false, "files_refused": true, "error": "files refused: x"})));
+    assert!(!peer_refused(&refused("agent not found: Camper")));
+    assert!(!peer_refused(&refused("rate limit exceeded")));
+}
+
 /// PLAN_JEKT_LOCAL_FIRST_ROUTING_2026_10_02.md §5: an agent defined in this
 /// channel that no tier found live is held here by default, so messaging
 /// works without the relay. A `test_state()` has no muxbus login, which is

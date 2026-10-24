@@ -288,6 +288,20 @@ pub(crate) fn send_message_outcome(to: &str, result: &Value) -> Result<String> {
         // agent that is not running anywhere srv can reach, so srv kept the
         // message and delivers it when the agent starts. Since Phase 0 item 4
         // it also holds for a receiver that is here but not signed in.
+        // SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5: the agent is here but
+        // its account is out of quota.
+        if result.get("held_reason").and_then(|v| v.as_str()) == Some("usage_limit") {
+            let until = match result.get("held_until").and_then(|v| v.as_str()) {
+                Some(t) => format!(", until {t}"),
+                None => String::new(),
+            };
+            return Ok(format!(
+                "HELD for {to} (usage_limit{until}) — not delivered yet. {to}'s account is out of \
+                 quota; this AgentMux instance (channel) keeps the message and delivers it when \
+                 {to} can work again (an account move or the reset), for up to 24 hours. Do not \
+                 resend it.{id}"
+            ));
+        }
         if result.get("held_reason").and_then(|v| v.as_str()) == Some("needs_login") {
             return Ok(format!(
                 "HELD for {to} (needs_login) — not delivered yet. {to}'s agent cannot start \
@@ -315,6 +329,14 @@ pub(crate) fn send_message_outcome(to: &str, result: &Value) -> Result<String> {
     }
     if err.starts_with("agent not found") {
         anyhow::bail!("Message delivery failed (not_found): {err}")
+    }
+    // An agent out of quota, where the message can't be held (a LAN or
+    // cross-channel hop): srv's `UNAVAILABLE_PREFIX`.
+    if let Some(why) = err.strip_prefix("agent unavailable: ") {
+        anyhow::bail!(
+            "Message delivery failed (unavailable): {why}, and the message was NOT kept. Send it \
+             again when {to} can work (an account move or the reset)."
+        )
     }
     anyhow::bail!("Message delivery failed: {err}")
 }

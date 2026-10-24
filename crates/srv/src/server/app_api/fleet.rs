@@ -195,6 +195,20 @@ pub(crate) async fn deliver_broadcast_turn(
     text: String,
     origin: TurnOrigin,
 ) -> Result<(), String> {
+    // An agent out of quota would fail the turn at once: say so
+    // in the broadcast's result, where the operator sees it, rather than lose
+    // their words in a failed turn (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5).
+    let mstore = deps.mstore.clone();
+    let id = block_id.clone();
+    let unavailable = tokio::task::spawn_blocking(move || {
+        crate::server::jekt_hold::holding_unavailable(&mstore, &id)
+    })
+    .await
+    .ok()
+    .flatten();
+    if let Some(u) = unavailable {
+        return Err(format!("{}{}: not sent", crate::backend::reactive::UNAVAILABLE_PREFIX, u.reason()));
+    }
     let input = crate::backend::blockcontroller::health::TurnInput { origin, text: text.clone(), joins_turn: None };
     match broadcast_action(crate::bootstrap::route_agent_message_from(&block_id, &text, Some(input), &[])) {
         BroadcastAction::Done => Ok(()),

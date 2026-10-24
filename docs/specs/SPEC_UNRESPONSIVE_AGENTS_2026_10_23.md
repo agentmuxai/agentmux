@@ -1,7 +1,7 @@
 # SPEC: unresponsive agents — out-of-quota and signed-out states, the reset time, held messages, the per-account notice
 
 **Date:** 2026-10-23
-**Status:** active — approved by the operator on 2026-10-23. Step 1 (§3, §4.1, §4.2, §4.5) shipped in #5389; step 2b (§4.4 and the R8 display) is in #5398; step 2d (§6) in #5402; step 2a (§4.3 and R5) in #5410; steps 2c and 2e (§4.6, §5) and step 3 (§7, §8) remain. Implements R1–R4, R6 and R7 of `docs/reports/REPORT_UNRESPONSIVE_AGENTS_2026_10_23.md` (Kanban #1255, operator: "yes proceed with all"); R5 and R8 are scoped here only as far as they read this spec's state. Ships with the first build PR (§9, step 1).
+**Status:** active — approved by the operator on 2026-10-23. Step 1 (§3, §4.1, §4.2, §4.5) shipped in #5389; step 2b (§4.4 and the R8 display) is in #5398; step 2d (§6) in #5402; step 2a (§4.3 and R5) in #5410; step 2c (§5) in the PR that adds this line; step 2e (§4.6) and step 3 (§7, §8) remain. Implements R1–R4, R6 and R7 of `docs/reports/REPORT_UNRESPONSIVE_AGENTS_2026_10_23.md` (Kanban #1255, operator: "yes proceed with all"); R5 and R8 are scoped here only as far as they read this spec's state. Ships with the first build PR (§9, step 1).
 **Author:** Loap-3 (loap-loap-2-loap-3). Build order and owners agreed with AgentX and AgentY.
 **Task:** Kanban #1787.
 
@@ -178,6 +178,14 @@ Each of the following has to be checked, and is listed in the step-1 PR:
 - AgentMux's own `[AgentMux]` notes, which already wait for the next turn.
 
 A Swarm broadcast that goes through the inject path is held like any jekt, because the operator's words would otherwise be lost the same way. AgentY confirms the path in step 2c.
+
+**As built (step 2c, AgentY):**
+- The check runs in `reactive::deliver` before the local fast path (and before attachments are charged), and in the file receiver: a target registered here that is `limited` with a known reset is held (`usage_limit`), with `held_until_ms` and `held_until` ("Sun 7:00 PM") in the answer.
+- **`signed_out` is not held yet.** That state lasts until a clean turn, and a sign-in to the same account doesn't clear it, so holding every message would keep that turn from ever running (muxreview P1 on #5419). It joins once a confirmed sign-in clears the failure (Kanban #2237); until then a message to a signed-out agent is delivered as before. The same goes for a usage limit with no known reset time: nothing but a turn or an account move ends it.
+- Where the hold doesn't apply (a LAN or cross-channel hop, a file transfer, a cron fire), the message is **refused**, not injected: the error begins `agent unavailable: ` (`reactive::UNAVAILABLE_PREFIX`), and the Message tool answers "Message delivery failed (unavailable)". The jobs' pending fires retry it like a spawn-gate refusal.
+- **A Swarm broadcast doesn't go through the inject path**: it starts a turn directly (`deliver_broadcast_turn`). An unavailable target is therefore not held but refused in the broadcast's result ("agent unavailable: Out of quota until Sun 7:00 PM: not sent"), which the operator, its sender, sees. Holding it would replay the operator's words as a jekt, with another sender and trust.
+- The replay skips a target whose block is still unavailable, counting no attempt. The account move, rebind and episode close already wake it (`held_jekt_wake`, step 2d); the reset is picked up by the next 30 s pass until step 3's wake.
+- The note to the requester or leader (§6.2) was built in step 2d.
 
 **Replay** (`server/jekt_held.rs`):
 - A target whose block is still unavailable is skipped. That is a cheap read each 30 s pass, with no gate check.

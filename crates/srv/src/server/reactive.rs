@@ -128,7 +128,7 @@ async fn forward_inject_to_peer(
                 );
                 return ForwardOutcome::Inconclusive;
             };
-            if body.get("files_refused").and_then(|v| v.as_bool()) == Some(true) {
+            if super::jekt_hold::peer_refused(&body) {
                 return ForwardOutcome::Refused(body);
             }
             if body.get("success").and_then(|v| v.as_bool()) != Some(true) {
@@ -721,6 +721,14 @@ pub(crate) async fn deliver(
     if let Err(error) = super::jekt_files::check(&req) {
         return super::jekt_files::refused(&req, error);
     }
+    // An agent here out of quota (`holding_unavailable`) would lose it in a turn that
+    // fails at once: hold it, or refuse it where it can't be held (spec
+    // SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5). Before `prepare`, which
+    // charges inline attachments to the session: the replay prepares again.
+    if let Some(unavailable) = local_target_unavailable(state, &req.target_agent).await {
+        return hold_for_unavailable(state, auth_via, &req, &unavailable, &mut replay).await;
+    }
+
     super::jekt_files::prepare(&mut req).await;
 
     // 1. Try local ReactiveHandler first (fast path — same instance).
@@ -1059,160 +1067,10 @@ pub(super) fn echo_local_delivery(
     );
 }
 
-/// Hold a jekt no tier could take, when every condition of
-/// `SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md` §2.1 holds: a full-key,
-/// host-tier request (a LAN caller never fills the hold); not a periodic
-/// `cron` fire; and a target that is a known agent of this channel —
-/// resolved to its row's UID, so a typo or a name registered later by
-/// another block never receives the backlog. `None` keeps today's error.
-///
-/// The same rules hold a jekt the target's spawn gate refused
-/// ([`HoldReason::NeedsLogin`]); the replay then waits for sign-in
-/// (`jekt_held::still_needs_login`). Delivered by UID or held, a message
-/// keeps its one-delivery `replay` reservation.
-pub(in crate::server) async fn hold_for_absent_target(
-    state: &AppState,
-    auth_via: super::ReactiveAuthVia,
-    req: &InjectionRequest,
-    resp: &crate::backend::reactive::types::InjectionResponse,
-    reason: HoldReason,
-    replay: &mut replay::Reservation,
-) -> Option<serde_json::Value> {
-    use crate::backend::storage::jekt_held::{HeldJekt, HoldOutcome, HELD_TTL_MS};
-    if !hold_applies(auth_via, req, resp) {
-        return None;
-    }
-    let now = agentmux_common::time::now_ms();
-    let mut held = HeldJekt {
-        request_id: resp.request_id.clone(),
-        target_uid: String::new(),
-        target_agent: req.target_agent.clone(),
-        source_agent: req.source_agent.clone().unwrap_or_default(),
-        audit_source_uid: req.audit_source_uid.clone(),
-        // What the recipient would receive — sanitized and truncated to the
-        // delivery limit — never the unbounded body (Codex P2 on #3632).
-        message: crate::backend::reactive::sanitize::sanitize_message(&req.message),
-        priority: req.priority.clone().unwrap_or_default(),
-        jekt_tier: req
-            .jekt_tier
-            .as_ref()
-            .and_then(|t| serde_json::to_value(t).ok())
-            .and_then(|v| v.as_str().map(str::to_string))
-            .unwrap_or_default(),
-        delivery_tier: "host".to_string(),
-        sig_verified: req.sig_verified,
-        reagent_verified: req.reagent_verified,
-        lan_verified: req.lan_verified,
-        channel_verified: req.channel_verified,
-        is_transcript_request: req.is_transcript_request,
-        transcript_request_escalate_forced: req.transcript_request_escalate_forced,
-        files_json: req
-            .files
-            .as_ref()
-            .and_then(|f| serde_json::to_string(f).ok())
-            .unwrap_or_default(),
-        sent_at_ms: now,
-        expires_at_ms: now + HELD_TTL_MS,
-        attempts: 0,
-        last_error: String::new(),
-    };
-    let mstore = state.mstore.clone();
-    let outcome = tokio::task::spawn_blocking(move || {
-        let (uid, _slug) = defined_here(&mstore, &held.target_agent)?;
-        held.target_uid = uid;
-        Some(held)
-    })
-    .await
-    .ok()
-    .flatten()?;
-    // Registered under another of its names (the handler binds only the
-    // display and stable ones): it is running, so deliver by UID now rather
-    // than tell the sender it is not. Not for a spawn-gate refusal: that
-    // target is registered, and a retry now would only be refused again.
-    if reason == HoldReason::NotRunning && state.reactive_handler.has_uid_registration(&outcome.target_uid) {
-        let mut by_uid = req.clone();
-        by_uid.target_agent = outcome.target_uid.clone();
-        let resp = state.reactive_handler.inject_message(by_uid);
-        if resp.success {
-            replay.delivered();
-            // As addressed, so the sender's echo names whom it wrote to
-            // (ReAgent P1 on #3632: this path skipped the echo).
-            echo_local_delivery(state, req, &resp);
-        }
-        // A refusal is the target's answer; but if it unregistered between
-        // the check and the delivery, fall through and hold it (Codex P2).
-        let raced_away = resp.error.as_deref().is_some_and(|e| e.starts_with("agent not found"));
-        if !raced_away {
-            return Some(serde_json::to_value(&resp).unwrap_or_default());
-        }
-    }
-    let target_uid = outcome.target_uid.clone();
-    let mstore = state.mstore.clone();
-    let outcome = tokio::task::spawn_blocking(move || mstore.jekt_held_insert(&outcome))
-        .await
-        .ok()?;
-    let target = &req.target_agent;
-    match outcome {
-        Ok(HoldOutcome::Held) | Ok(HoldOutcome::AlreadyHeld) => {
-            replay.delivered();
-            crate::backend::agent_resolve::record_uid_fallback("jekt.held");
-            let error = match reason {
-                HoldReason::NotRunning => format!(
-                    "agent {target} is not running — held for delivery on this AgentMux instance for up to 24 h"
-                ),
-                HoldReason::NeedsLogin => {
-                    // The send itself was refused just now: the replay waits
-                    // for sign-in rather than retrying at once.
-                    super::jekt_held::mark_needs_login(&target_uid);
-                    format!(
-                        "agent {target} is not signed in — held for delivery on this AgentMux instance for up to 24 h, delivered when it signs in"
-                    )
-                }
-                HoldReason::Limited => format!(
-                    "agent {target}'s account is out of quota — held for delivery on this AgentMux instance for up to 24 h, delivered when it can work again (an account move or the reset)"
-                ),
-            };
-            Some(json!({
-                "success": false,
-                "held": true,
-                "held_reason": reason.as_str(),
-                "request_id": resp.request_id,
-                "error": error,
-            }))
-        }
-        Ok(HoldOutcome::Full) => Some(json!({
-            "success": false,
-            "request_id": resp.request_id,
-            "error": format!(
-                "{} (hold full: too many messages already held for {target})",
-                resp.error.clone().unwrap_or_default()
-            ),
-        })),
-        Err(e) => {
-            tracing::warn!(error = %e, target = %target, "durable jekt: hold failed");
-            None
-        }
-    }
-}
-
-/// The conditions under which this instance may hold a jekt at all (durable
-/// jekt spec §2.1): a full-key, host-tier request (a LAN caller never fills
-/// the hold); not a periodic `cron` fire; and an id to key the row by.
-fn hold_applies(
-    auth_via: super::ReactiveAuthVia,
-    req: &InjectionRequest,
-    resp: &crate::backend::reactive::types::InjectionResponse,
-) -> bool {
-    auth_via == super::ReactiveAuthVia::FullAuthKey
-        && req.delivery_tier.as_deref() == Some("host")
-        && req.source_agent.as_deref() != Some("cron")
-        && !resp.request_id.is_empty()
-}
-
 /// The UID and slug of the agent defined in this channel that `target`
 /// names, as the hold resolves it (`hold_for_absent_target`). The slug is
 /// the agent's `AGENTMUX_AGENT_ID`, which its relay lease is keyed by.
-fn defined_here(mstore: &crate::backend::storage::store::Store, target: &str) -> Option<(String, String)> {
+pub(super) fn defined_here(mstore: &crate::backend::storage::store::Store, target: &str) -> Option<(String, String)> {
     let target = target.trim();
     let uid = match mstore.instance_get(target) {
         Ok(Some(row)) => row.id,
@@ -1298,6 +1156,8 @@ fn absent_route_for(answer: &crate::muxbus::wan_lease::Holder) -> AbsentRoute {
 
 /// Why a jekt is held (`server::hold_reason`).
 pub(crate) use super::hold_reason::HoldReason;
+pub(in crate::server) use super::jekt_hold::hold_for_absent_target;
+use super::jekt_hold::{hold_applies, hold_for_unavailable, local_target_unavailable};
 
 /// Tier 4. `Some(body)` when the cloud accepted the injection (and the sender
 /// echo has been emitted); `None` when tier 4 doesn't apply or didn't take,

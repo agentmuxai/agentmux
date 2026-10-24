@@ -94,6 +94,23 @@ async fn still_needs_login(state: &AppState, uid: &str) -> bool {
     true
 }
 
+/// Whether the agent of `uid` is out of quota (`jekt_hold::holding_unavailable`):
+/// a delivery now would start a turn that fails at once and loses the
+/// message. A read of its block, no gate check; it ends at the reset or an
+/// account move, which wakes the replay (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5).
+async fn target_unavailable(state: &AppState, uid: &str) -> bool {
+    let Some(block_id) = state.reactive_handler.block_for_uid(uid) else {
+        return false;
+    };
+    let mstore = state.mstore.clone();
+    tokio::task::spawn_blocking(move || {
+        super::jekt_hold::holding_unavailable(&mstore, &block_id).is_some()
+    })
+    .await
+    // A panicked read never delivers into a turn that may fail.
+    .unwrap_or(true)
+}
+
 /// Replay held jekts: once now, then whenever an agent registers and every
 /// 30 s. Installed after `AppState` exists.
 pub(crate) fn install(state: &AppState) {
@@ -162,6 +179,9 @@ pub(crate) async fn replay_pass(state: &AppState) -> Vec<(String, ReplayOutcome)
             continue;
         }
         if still_needs_login(state, &uid).await {
+            continue;
+        }
+        if target_unavailable(state, &uid).await {
             continue;
         }
         let mstore = state.mstore.clone();
