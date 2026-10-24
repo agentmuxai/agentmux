@@ -97,6 +97,16 @@ describe("GoogleServicesSection", () => {
         expect((await screen.findByRole("alert")).textContent).toContain("bind it first");
     });
 
+    it("shows a failed load instead of throwing", async () => {
+        google.mockImplementation(async () => {
+            throw new Error("srv refused: only the AgentMux host can change who uses a Google account");
+        });
+        render(() => <GoogleServicesSection account={account(READ)} />);
+        expect((await screen.findByRole("alert")).textContent).toContain("only the AgentMux host");
+        expect(screen.queryByText(/No agent is bound/)).toBeNull();
+        expect(screen.getByText("Services")).toBeTruthy();
+    });
+
     it("asks for the desktop app where there is no host", async () => {
         api.value = {};
         render(() => <GoogleServicesSection account={account(READ)} />);
