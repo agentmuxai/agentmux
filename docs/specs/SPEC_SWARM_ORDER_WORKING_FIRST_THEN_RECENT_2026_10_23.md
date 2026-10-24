@@ -3,7 +3,7 @@
 **Date:** 2026-10-23
 **Author:** Camper@narko
 **Type:** Spec
-**Status:** implemented (the Swarm order, in the PR that adds this file); approved by the operator in conversation, 2026-10-23
+**Status:** implemented — shipped in PR #5376; approved by the operator in conversation, 2026-10-23.
 **Requested by:** the operator, 2026-10-23: *"lets also refine the swarm so working agents always leap atop. Also, the agents idle agents should be sorted by time from last active, with most recent higher"*
 
 ## 1. Today
