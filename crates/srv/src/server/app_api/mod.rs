@@ -68,7 +68,8 @@ mod global_memory;
 // MuxAPI bodies live with the submodule that registers them; these
 // re-exports keep every `app_api::…` path unchanged.
 pub use pane::{open_pane};
-pub(crate) use pane::{move_tab, move_tabs};
+mod pane_tabs;
+pub(crate) use pane_tabs::{activate_tab, move_tab, move_tabs, remove_tab};
 pub use agent_define::{allocate_agent_workdir};
 pub(crate) use agent_define::{agent_define_core};
 pub(crate) use identity::{identity_self_accounts_impl, identity_account_validate_stored_impl};
