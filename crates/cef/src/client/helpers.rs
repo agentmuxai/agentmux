@@ -252,7 +252,31 @@ pub(crate) fn backend_vault(
     ipc_token: &str,
     body: &serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let raw = post_as_host_within(web_endpoint, auth_key, ipc_token, "/api/v1/host/vault", body, std::time::Duration::from_secs(60))
+    host_data_op(web_endpoint, auth_key, ipc_token, "/api/v1/host/vault", body)
+}
+
+/// Relay one of a Google account panel's operations (who may use which
+/// service) to srv, as the host: srv takes them only with this host's IPC
+/// token, so an agent can't grant itself access (connectors spec D4).
+/// Blocking: run it off the UI thread.
+pub(crate) fn backend_google(
+    web_endpoint: &str,
+    auth_key: &str,
+    ipc_token: &str,
+    body: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    host_data_op(web_endpoint, auth_key, ipc_token, "/api/v1/host/google", body)
+}
+
+/// POST `body` to a host route that answers `{ data }` or `{ error }`.
+fn host_data_op(
+    web_endpoint: &str,
+    auth_key: &str,
+    ipc_token: &str,
+    path: &str,
+    body: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let raw = post_as_host_within(web_endpoint, auth_key, ipc_token, path, body, std::time::Duration::from_secs(60))
         .map_err(|e| {
             e.find('{')
                 .and_then(|i| serde_json::from_str::<serde_json::Value>(&e[i..]).ok())

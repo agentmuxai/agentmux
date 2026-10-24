@@ -309,6 +309,10 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/vault/on_screen", get(super::vault_handlers::handle_vault_on_screen))
         // An agent's `Browser` `fill` with `vault`: the person says where it may go.
         .route("/api/v1/ui/browser/vault_fill", post(super::browser_vault_fill::handle_vault_fill))
+        // Google connectors for agents: srv makes the call with the account's
+        // token, for an agent with a grant (Calendar, then Drive and Gmail).
+        .route("/api/v1/google/self/services", get(super::google_handlers::handle_google_self_services))
+        .route("/api/v1/google/calendar", post(super::google_handlers::handle_google_calendar))
         // Open (launch) an agent into a pane from an agent tool call —
         // agentmux-mcp's OpenAgent tool POSTs `{agent_id, tab_id?, …}` here.
         // Shares the exact agent.open logic (incl. its AGENT_OPEN_LOCKS
@@ -525,6 +529,8 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/host/jobs", post(super::cron::handle_host_jobs))
         // Everything the Vault pane does, relayed by the host.
         .route("/api/v1/host/vault", post(super::vault_handlers::handle_host_vault))
+        // The Google account panel (who may use which service), relayed by the host.
+        .route("/api/v1/host/google", post(super::google_handlers::handle_host_google))
         // The user's clicks in the version panel (Download, Upgrade & restart,
         // Cancel), and their answer to an agent's upgrade request, relayed by the host.
         .route("/api/v1/host/app_update", post(app_api::app_update::handle_host_app_update))

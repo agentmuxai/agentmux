@@ -166,6 +166,23 @@ async fn run() {
         heartbeat::start(Arc::clone(&health), local_url.clone(), auth_key.clone());
     }
 
+    // Which Google services this agent has a grant on, for `tools/list`: asked of srv now and again every
+    // minute, because `tools/list` is answered at once and never waits on srv.
+    let granted = Arc::new(std::sync::RwLock::new(
+        tools::google_tool::granted_services(&client, &local_url, &auth_key).await,
+    ));
+    {
+        let (granted, client, local_url, auth_key) =
+            (Arc::clone(&granted), client.clone(), local_url.clone(), auth_key.clone());
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(60)).await;
+                let services = tools::google_tool::granted_services(&client, &local_url, &auth_key).await;
+                *granted.write().unwrap_or_else(|e| e.into_inner()) = services;
+            }
+        });
+    }
+
     let runner_client = client.clone();
     let (runner_url, runner_key, runner_block) =
         (local_url.clone(), auth_key.clone(), block_id.clone());
@@ -194,7 +211,7 @@ async fn run() {
         BufReader::new(tokio::io::stdin()),
         tokio::io::stdout(),
         runner,
-        Arc::new(|| json!(advertised_tools())),
+        Arc::new(move || json!(tools_for(&granted.read().unwrap_or_else(|e| e.into_inner())))),
         health,
         serve::call_deadline,
     )

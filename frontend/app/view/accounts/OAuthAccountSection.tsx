@@ -5,7 +5,8 @@
 // connected with, what was granted, why it stopped, and Reconnect, which
 // re-runs the consent for what the account had
 // (docs/specs/SPEC_GOOGLE_CONNECTORS_GMAIL_CALENDAR_DRIVE_2026_10_14.md §7
-// "Status on the card"). Per-service switches come with G1.
+// "Status on the card"). A Google account's services and who may use them
+// follow (GoogleServicesSection).
 
 import { createEffect, createSignal, on, Show, type JSX } from "solid-js";
 
@@ -27,6 +28,7 @@ import {
     scopeLabel,
     takeReconnectRequest,
 } from "./oauth-account-state";
+import { GoogleServicesSection } from "./GoogleServicesSection";
 import { OAuthConnectPanel } from "./OAuthConnectPanel";
 
 export function OAuthAccountSection(props: { account: Account }): JSX.Element {
@@ -113,6 +115,9 @@ function SignInDetails(props: { account: Account }): JSX.Element {
                     onConnected={() => setReconnecting(false)}
                     onCancel={() => setReconnecting(false)}
                 />
+            </Show>
+            <Show when={a().provider === "google"}>
+                <GoogleServicesSection account={a()} />
             </Show>
         </>
     );

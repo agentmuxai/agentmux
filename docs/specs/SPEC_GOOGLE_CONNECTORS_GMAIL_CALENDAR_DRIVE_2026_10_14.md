@@ -1,6 +1,6 @@
 # SPEC: Google in Connectors: Gmail, Calendar and Drive for every agent
 
-**Status:** active — G0's srv half is built in #5310 (G0a, 2026-10-21): the Google authorization parameters, incremental scopes on an existing account, granted-scope read-back, the email from the ID token, refresh in srv (`needs_reauth` on `invalid_grant`), revoke on delete, the Google validator, token-blob parsing (§2.3's GitHub bug) and the BYO client saved in the keychain (`identity/oauth_client.rs`, `identity/oauth_tokens.rs`). G0's frontend half is built too (G0b, 2026-10-21): the Connect panel uses the saved client or shows the BYO fields once with the console steps (`OAuthClientSection.tsx`), and the card shows the email, its client tag, `Connected` / `Reconnect needed` / `Blocked by your organization`, a partial grant, Reconnect, and Disconnect's retry (`account-card.tsx`, `OAuthAccountSection.tsx`). Registering AgentMux's own client, and G1–G4, follow.
+**Status:** active — G0's srv half is built in #5310 (G0a, 2026-10-21): the Google authorization parameters, incremental scopes on an existing account, granted-scope read-back, the email from the ID token, refresh in srv (`needs_reauth` on `invalid_grant`), revoke on delete, the Google validator, token-blob parsing (§2.3's GitHub bug) and the BYO client saved in the keychain (`identity/oauth_client.rs`, `identity/oauth_tokens.rs`). G0's frontend half is built too (G0b, 2026-10-21): the Connect panel uses the saved client or shows the BYO fields once with the console steps (`OAuthClientSection.tsx`), and the card shows the email, its client tag, `Connected` / `Reconnect needed` / `Blocked by your organization`, a partial grant, Reconnect, and Disconnect's retry (`account-card.tsx`, `OAuthAccountSection.tsx`). G1a, Calendar reads, is built (2026-10-24, §8). Registering AgentMux's own client, G1b and G2–G4 follow. **Refreshed 2026-10-24** (Naki-2, at the operator's request, "lets get naki back on google cloud, the work along the gmail/drive/calendar connectors"): the tools are three action-style tools (D3, §5), the Vault's place is settled (D2, D8), approvals reuse the shipped host window (§6), and §8 says where each stage stands; see §1.1.
 **Author:** Korp@narko, 2026-10-14, at the operator's request
 **Trigger (operator, 2026-10-14):** "for agentmux users without claude's special gmail connector, how could any agentmux harness access a user's gmail? is that something we can add to connectors?" then "can we do all google services at once? Gmail, Calendar, and Drive .. spec them at once, but we can build them in stages. research best practices. Ideally in connectors we have the best practice 'connect...' we did some work with github before".
 **Written against:** `main` @ `7b2448f87`.
@@ -11,10 +11,17 @@
 ## 1. Summary
 
 1. **One "Connect Google" in Connectors → Accounts.** It signs in to a Google account and offers **Gmail, Calendar and Drive** as switches on that one connection. Each switch asks Google only for its own permissions, when it is turned on. Several Google accounts (personal and work) can be connected side by side.
-2. **Agents get tools, never tokens.** srv keeps the tokens in the OS keychain and makes the Google API calls. Agents call AgentMux MCP tools (`GmailSearchThreads`, `CalendarListEvents`, `DriveReadFile` …). That works the same for every harness that speaks MCP (Claude Code, Codex, Gemini, …), in containers and over SSH, and no agent can copy a mail token out. This deliberately differs from GitHub, whose token is put in the agent's environment (§2.3).
+2. **Agents get tools, never tokens.** srv keeps the tokens in the OS keychain and makes the Google API calls. Agents call three AgentMux MCP tools, `Calendar`, `Drive` and `Gmail`, each with actions (`Gmail` `search_threads`, `Calendar` `list_events`, `Drive` `read_file_content` …). That works the same for every harness that speaks MCP (Claude Code, Codex, Gemini, …), in containers and over SSH, and no agent can copy a mail token out. This deliberately differs from GitHub, whose token is put in the agent's environment (§2.3).
 3. **The human decides who and what.** An agent reaches a Google service only if the account is bound to it and that service is allowed for it. Actions that can't be taken back, or that reach other people, wait for the human to approve them in an AgentMux window the agent can't click: sending mail, inviting people, sharing a file, deleting anything (§6).
 4. **Built in stages ordered by Google's own rules.** Google ranks permissions as non-sensitive, sensitive and restricted (§4), and the higher tiers cost app review and, for restricted ones, a yearly paid security assessment. So: the OAuth core first (G0), then **Calendar** (sensitive, G1), then **Drive** through Google's file picker (non-sensitive, G2), then **Gmail** (restricted, G3), with the user's own OAuth client until AgentMux's is assessed.
 5. **Compatible with Google's official MCP servers.** Google now hosts MCP servers for Gmail, Drive and Calendar, in developer preview (§3.4). The tools here use the stable REST APIs and mirror Google's tool names, so srv can later forward to Google's servers without agents noticing (G4).
+
+### 1.1 What changed since this was written (2026-10-24)
+
+- **G0 is built** (#5310, #5313). What is left of it is on the Google side: AgentMux's own Desktop client (W5) and its consent-screen scopes (Kanban #168), both console steps with the operator signed in. Creating OAuth clients and consent-screen entries is a console step, because Google has no public API for them.
+- **MuxAPI tools are action-style** (since 2026-10-15: one tool per area with an `action`). The Google tools are three tools, `Calendar`, `Drive` and `Gmail`, whose actions are named after Google's own MCP tools, not about twenty separate tools (D3, §5).
+- **The Vault exists** (`SPEC_VAULT_PANE_AGENTS_USE_SECRETS_UNSEEN_2026_10_19.md`). It holds secrets agents may *use* with the person's approval. Connector tokens are not that: agents must never hold them. So tokens and the BYO client stay in the OS keychain, srv-only (D2, D8).
+- **The host approval window is shipped and shared**: SSH host consent, `Agents spawn`, and the browser panes' attention and auto-approve (`browser_attention.rs`, `browser_bypass.rs`) all answer only through the host with the host token. G1's approvals reuse that path (§6).
 
 ## 2. What exists (verified on `main`)
 
@@ -96,43 +103,45 @@ Exemptions that matter here:
 ## 4. Decisions
 
 - **D1. One connection, three services.** A Google account is one card. Gmail, Calendar and Drive are switches on it, each with a read level and a write level, not three accounts. A second Google account is a second card.
-- **D2. srv holds the tokens and makes the calls.** The refresh token stays in the keychain. Access tokens live only in srv's memory, refreshed when they near expiry. No token goes into an agent's environment, `.mcp.json`, an ADC file, a log or a tool result. `provider_class` keeps returning nothing to inject for `google`. *Why not GitHub's way:* a mail token is the highest-value credential a user has, mail content is the main prompt-injection channel, and an agent holding the raw token can't be limited, audited or asked to wait for approval.
-- **D3. AgentMux MCP tools, named after Google's.** `Gmail*`, `Calendar*` and `Drive*` families in `agentmux-mcp`, each a thin call to an srv route, named so each maps one-to-one to Google's MCP tool (§5). They reach every harness and every agent location (host, container, SSH) that already reaches `agentmux-mcp`.
-- **D4. Per-agent grants, default none.** An agent sees a Google tool only if the account is bound to it ("Bind to agent", existing) **and** that service is allowed for it at a level: `off`, `read`, or `read + write`. Grants live in srv, keyed by verified agent identity. A tool call from an agent without the grant fails with a sentence saying who can grant it.
+- **D2. srv holds the tokens and makes the calls; not the Vault.** (The Vault is for secrets an agent uses, with the person's say-so; a connector token is one no agent ever holds, so it stays in the keychain, srv-only.) The refresh token stays in the keychain. Access tokens live only in srv's memory, refreshed when they near expiry. No token goes into an agent's environment, `.mcp.json`, an ADC file, a log or a tool result. `provider_class` keeps returning nothing to inject for `google`. *Why not GitHub's way:* a mail token is the highest-value credential a user has, mail content is the main prompt-injection channel, and an agent holding the raw token can't be limited, audited or asked to wait for approval.
+- **D3. Three AgentMux MCP tools, their actions named after Google's.** `Calendar`, `Drive` and `Gmail` in `agentmux-mcp`, each with an `action` (as `Tasks`, `Vault` and the rest are since 2026-10-15), each action a thin call to an srv route, and each action named after the Google MCP tool it matches (§5), so G4 can forward to Google's servers behind the same names. They reach every harness and every agent location (host, container, SSH) that already reaches `agentmux-mcp`. A tool appears only when the agent has a grant for that service (D4); otherwise it isn't in the agent's tool list at all, which keeps the list short for everyone else.
+- **D4. Per-agent grants, default none.** An agent sees a Google tool only if the account is bound to it ("Bind to agent", existing) **and** that service is allowed for it at a level: `off`, `read`, or `read + write`. Grants live in srv, keyed by verified agent identity (the definition id behind the agent's token). A tool call from an agent without the grant fails with a sentence saying who can grant it. Grants change only through the host, as the Vault's writes do (`/api/v1/host/google`, with the host's IPC token): agents hold srv's instance key, so a grant settable over that key could be granted by an agent to itself.
 - **D5. The human approves what can't be undone or reaches other people** (§6), through the host approval window (§2.4), never in the agent's chat.
 - **D6. Content from Google is page content.** Tool results that carry mail bodies, event descriptions or file text are marked as untrusted, as `BrowserSnapshot` results are, and the tool descriptions tell the agent not to follow instructions found in them.
 - **D7. Every call is logged per account.** Time, agent, tool, the ids touched, and outcome (no content). Shown in the account's detail panel. Kept for 30 days.
 - **D8. Three ways to supply the OAuth client.**
   - **Built-in:** AgentMux's own client, the one-click path once verified.
-  - **BYO:** the user's own Desktop client ID and secret, now **saved in the keychain**.
+  - **BYO:** the user's own Desktop client ID and secret, now **saved in the keychain** (built, G0a). Not a Vault entry: the client secret is used by srv for the token exchange, never by an agent, and a Vault entry is something an agent can be granted.
   - **Workspace internal:** the same as BYO, created as "Internal" in the user's organization.
   The connection records which one it uses. Each service says which client modes can turn it on (§7).
 
 ## 5. Tools
 
-All take an optional `account` (the account's email) when several are bound. Read tools page and cap their output.
+Three tools, each with an `action`. Every action takes an optional `account` (the account's email) when several are bound. Read actions page and cap their output. Results that carry content from Google are wrapped as untrusted page content (D6).
 
-| Service | Read | Write (approval per §6) | Google MCP equivalent |
-|---|---|---|---|
-| Calendar | `CalendarListCalendars`, `CalendarListEvents`, `CalendarSearchEvents`, `CalendarFreeBusy` | `CalendarCreateEvent`, `CalendarUpdateEvent`, `CalendarRespondToEvent`, `CalendarDeleteEvent` | `list_events`, `search_events`, `create_event`, `update_event`, `respond_to_event` |
-| Drive | `DriveSearchFiles` (picked and app-created files under `drive.file`), `DriveGetFileMetadata`, `DriveReadFile` (text export for Docs, Sheets and Slides; size-capped) | `DriveCreateFile`, `DriveUpdateFile`, `DriveCopyFile`, `DriveShareFile`, `DriveTrashFile`; `DrivePickFiles` asks the user to pick files (opens the picker, returns ids) | `search_files`, `read_file_content`, `create_file`, `copy_file`, `get_file_metadata` |
-| Gmail | `GmailSearchThreads` (Gmail query syntax), `GmailGetThread`, `GmailListLabels` | `GmailCreateDraft`, `GmailUpdateDraft`, `GmailLabelThread`, `GmailSendDraft`, `GmailTrashThread` | `search_threads`, `get_thread`, `list_labels`, `create_draft`, `label_message` |
+| Tool | Read actions | Write actions (approval per §6) |
+|---|---|---|
+| `Calendar` | `list_calendars`, `list_events`, `search_events`, `free_busy` | `create_event`, `update_event`, `respond_to_event`, `delete_event` |
+| `Drive` | `search_files` (picked and app-created files under `drive.file`), `get_file_metadata`, `read_file_content` (text export for Docs, Sheets and Slides; size-capped) | `create_file`, `update_file`, `copy_file`, `share_file`, `trash_file`; `pick_files` asks the person to pick files (opens the picker for them, returns ids) |
+| `Gmail` | `search_threads` (Gmail query syntax), `get_thread`, `list_labels` | `create_draft`, `update_draft`, `label_thread`, `send_draft`, `trash_thread` |
 
-- **No `GmailSend` of raw text.** An agent writes a draft. Sending is `GmailSendDraft`, which always asks (§6), and the approval window shows the draft exactly as it will be sent. A draft also lets the human fix it in Gmail first.
-- **Attachments:** `DriveReadFile` and `GmailGetThread` return attachment metadata. Downloading an attachment saves it into the calling agent's workspace (size-capped) and returns the path, never into the tool result.
+The action names are Google's own MCP tool names where Google has one (`list_events`, `search_events`, `create_event`, `update_event`, `respond_to_event`; `search_files`, `read_file_content`, `create_file`, `copy_file`, `get_file_metadata`; `search_threads`, `get_thread`, `list_labels`, `create_draft`, `label_message` → `label_thread`).
+
+- **No raw send.** An agent writes a draft. Sending is `Gmail` `send_draft`, which always asks (§6), and the approval window shows the draft exactly as it will be sent. A draft also lets the human fix it in Gmail first.
+- **Attachments:** `Drive` `read_file_content` and `Gmail` `get_thread` return attachment metadata. Downloading an attachment saves it into the calling agent's workspace (size-capped) and returns the path, never into the tool result.
 
 ## 6. What waits for the human
 
-The approval window names the agent, the account and the action in words, with the exact payload (recipients, subject and body for mail; attendees and time for events; file and new access for sharing). Answers are **Allow once** and **Deny**. There is also **Always allow for this agent**, offered only for the low-risk rows. A request nobody answers fails after 10 minutes. Agents never see or click the window. Its answer reaches srv only from the host (§2.4).
+The approval reuses the shipped host path (§1.1): srv asks the host, the host shows the window, and the answer reaches srv only with the host token; no agent route, `UI` click or `Browser` action can answer it. The window names the agent, the account and the action in words, with the exact payload (recipients, subject and body for mail; attendees and time for events; file and new access for sharing). Answers are **Allow once** and **Deny**. There is also **Always allow for this agent**, offered only for the low-risk rows. A request nobody answers fails after 10 minutes. Agents never see or click the window. Its answer reaches srv only from the host (§2.4).
 
 | Action | Asks |
 |---|---|
-| `GmailSendDraft` | always |
-| `GmailTrashThread`, `DriveTrashFile`, `CalendarDeleteEvent` | always |
-| `DriveShareFile` (any new access), or creating a public link | always |
-| `CalendarCreateEvent` / `UpdateEvent` / `RespondToEvent` that **notifies other people** (attendees, invitations, replies to the organizer) | always |
-| `CalendarCreateEvent` / `UpdateEvent` on the user's own calendar with no other attendees | first time per agent, then "Always allow" may be chosen |
-| `GmailCreateDraft`, `GmailUpdateDraft`, `GmailLabelThread`, `DriveCreateFile`, `DriveUpdateFile`, `DriveCopyFile` | no, if the agent has `read + write` |
+| `Gmail` `send_draft` | always |
+| `Gmail` `trash_thread`, `Drive` `trash_file`, `Calendar` `delete_event` | always |
+| `Drive` `share_file` (any new access), or creating a public link | always |
+| `Calendar` `create_event` / `update_event` / `respond_to_event` that **notifies other people** (attendees, invitations, replies to the organizer) | always |
+| `Calendar` `create_event` / `update_event` on the user's own calendar with no other attendees | first time per agent, then "Always allow" may be chosen |
+| `Gmail` `create_draft`, `update_draft`, `label_thread`; `Drive` `create_file`, `update_file`, `copy_file` | no, if the agent has `read + write` |
 | All reads | no, if the agent has `read` |
 
 Rate limits per agent and account (for example, at most 20 sends a day) are a backstop in case a tricked agent asks over and over.
@@ -153,7 +162,7 @@ Rate limits per agent and account (for example, at most 20 sends a day) are a ba
 
 **Give agents access**
 - The details list the agents bound to the account, each with a per-service level (D4). "Bind to agent" stays the way to add one.
-- Changes reach a running agent without a restart, because tools are checked per call. The tool *list* an agent saw at launch doesn't change: a tool it may not use fails with a sentence.
+- Grants are checked on every call, so removing one stops a running agent at once, with a sentence. The tool *list* is read when the agent's MCP starts (`/api/v1/google/self/services`): a service granted to a running agent shows its tool from the agent's next launch.
 
 **Status on the card**
 - `Connected` (green): token refreshes.
@@ -166,16 +175,18 @@ Rate limits per agent and account (for example, at most 20 sends a day) are a ba
 
 **Pick Drive files**
 - **"Give agents files from Drive…"** in the Drive section opens the desktop picker (§3.3) in the system browser. Picked ids join the account's file list, which agents with Drive `read` can see.
-- `DrivePickFiles` lets an agent ask for this. It opens the same picker for the human, never for the agent.
+- `Drive` `pick_files` lets an agent ask for this. It opens the same picker for the human, never for the agent.
 
 ## 8. Stages
+
+Where each stands, 2026-10-24: **G0 built** in code (#5310, #5313); its Google side (W5's Desktop client, the consent-screen scopes, #168) is open. **G1a is built** (Calendar reads: grants and their panel, the `Calendar` tool's four read actions, the per-account log); **G1b** (Calendar writes with approvals) is next. Until W5 exists, every stage is built and tested with a BYO client in a test project, created there by the operator (§11 Q6).
 
 | Stage | Ships | Google requirements |
 |---|---|---|
 | **G0. OAuth core and the Google account** | `access_type=offline`, `prompt=consent`, `include_granted_scopes`; refresh in srv; revoke on delete; granted-scope read-back; account email; Google validator; BYO credentials saved in the keychain; token-blob parsing (fixes §2.3's GitHub bug); the Connect panel and card states of §7; register AgentMux's Desktop client and its consent screen (`agentmux.ai` homepage, privacy policy, domain verified). | Brand verification (non-sensitive scopes only) |
-| **G1. Calendar** | Calendar tools; grants; the approval window wiring (§6) and the per-account log, which every later stage reuses. Read first, then write. | Sensitive-scope verification for the built-in client (consent screen, scope justification, demo video); BYO meanwhile |
-| **G2. Drive** | `drive.file` tools; the desktop picker spike and then `DrivePickFiles` and "Give agents files…"; Docs/Sheets/Slides text export. | None beyond G0 for `drive.file` |
-| **G3. Gmail** | Gmail tools with drafts-then-send; attachments to the workspace; rate limits. **BYO and Workspace-internal clients only** at first. | For the built-in client: restricted-scope verification plus CASA, per the owner's decision (§11 Q1) |
+| **G1. Calendar** | The `Calendar` tool; grants (D4) and the per-agent tool list; the approval wiring (§6) and the per-account log, which every later stage reuses. Read first (G1a), then write (G1b). | Sensitive-scope verification for the built-in client (consent screen, scope justification, demo video); BYO meanwhile |
+| **G2. Drive** | The `Drive` tool on `drive.file`; the desktop picker spike and then `pick_files` and "Give agents files…"; Docs/Sheets/Slides text export. | None beyond G0 for `drive.file` |
+| **G3. Gmail** | The `Gmail` tool with drafts-then-send; attachments to the workspace; rate limits. **BYO and Workspace-internal clients only** at first. | For the built-in client: restricted-scope verification plus CASA, per the owner's decision (§11 Q1) |
 | **G4. Later** | Forward to Google's official MCP servers once they leave preview, behind the same tools, grants and approvals. Full-Drive search (`drive.readonly`, restricted). DPoP for refresh tokens. | Restricted for `drive.readonly` |
 
 Each stage is one or two PRs, tested against a real Google account on a test project before review.
@@ -226,3 +237,4 @@ Each stage is one or two PRs, tested against a real Google account on a test pro
 3. **Microsoft 365 next?** `oauth_client.rs` already has a Microsoft entry. Outlook mail, calendar and OneDrive fit the same shape. Out of scope here.
 4. **Picker client:** does the desktop picker's "only `drive.file`, not combined" rule need a separate OAuth client, or just a separate request? G2's spike answers it.
 5. **Defaults:** should "read" on a service be offered to every bound agent automatically, or stay off until set per agent? Proposal: off (D4).
+6. **A test client until W5:** the operator creates a Desktop OAuth client in a test project (console, a few minutes), with a test user, so G1–G3 can be built and tested against a real Google account before AgentMux's own client and its verification exist. Its id and secret go into the BYO fields (the keychain), never into a repository.
