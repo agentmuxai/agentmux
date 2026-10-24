@@ -4,7 +4,7 @@
 import { UnseenTurnsDot } from "@/app/block/UnseenTurnsDot";
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-holds";
-import { createComputed, createMemo, createSignal, createEffect, onCleanup, onMount, untrack, For, Show, type Accessor, type JSX } from "solid-js";
+import { createMemo, createSignal, createEffect, onCleanup, onMount, untrack, For, Show, type Accessor, type JSX } from "solid-js";
 import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, ActiveShell, ActiveCron, WorkflowDispatch, SubagentEvent, DispatchActivityEntry, TodoItem } from "./swarm-model";
 import { collectClearableRows, subagentDisplayLabel, subagentRowKey, subagentToolDetail, workflowRetireSignal, AUTO_RETIRE_DELAY_MS } from "./swarm-model";
 import { LOCAL_PROVIDER_UNKNOWN, REMOTE_PROVIDER_UNKNOWN, SwarmProviderIcon } from "./swarm-provider-icon";
@@ -17,7 +17,6 @@ import { isLightThemeActive } from "@/app/block/pane-identity";
 import { showCopyContextMenu } from "@/app/store/contextmenu";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
-import { getBlockTurnPhase } from "@/app/store/agentActivity";
 import { requestSubagentName } from "./subagent-naming";
 import { useTick } from "@/app/hook/useTick";
 import { longRunningToolRows, type LongRunningToolRow } from "./swarm-longrunning";
@@ -26,8 +25,9 @@ import { formatElapsedClock, formatTimeLeft } from "@/util/format-time";
 import { HeldTaskChip } from "@/app/view/warden-kanban/kanban-held";
 import { revealBlock } from "@/app/util/reveal-block";
 import { selectTrace } from "@/app/util/select-trace";
-import { SwarmOrderController, type SwarmOrderItem } from "./swarm-order";
-import { captureRowTops, playRowMoves } from "./swarm-order-motion";
+import type { SwarmOrderItem } from "./swarm-order";
+import { useSwarmOrder } from "./swarm-order-hold";
+import { phaseToDisplayStatus, type AgentDisplayStatus } from "./swarm-display-status";
 import { BackgroundTaskBucket, SubagentBackgroundTasks, visibleBackgroundTasks } from "./swarm-background-tasks";
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 import { swarmRowColors } from "./swarm-row-colors";
@@ -119,18 +119,12 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
     const remoteByKey = createMemo(() => new Map(remote().map((r) => [remoteAgentKey(r.section, r.agent), r] as const)));
     // The order the rows are shown in: working agents first, the rest by last activity
     // (swarm-order.ts). A change waits, and waits longer while the list is in use, so a
-    // row never moves under the cursor.
+    // row never moves under the cursor (swarm-order-hold.ts).
     let treeRef: HTMLDivElement | undefined;
-    let rowTops = new Map<string, number>();
-    const orderControl = new SwarmOrderController(undefined, undefined, {
-        beforeMove: () => {
-            rowTops = captureRowTops(treeRef);
-        },
-        afterMove: () => playRowMoves(treeRef, rowTops, zoomFactor()),
-    });
-    onCleanup(() => orderControl.dispose());
-    createComputed(() =>
-        orderControl.update([
+    const swarmOrder = useSwarmOrder({
+        list: () => treeRef,
+        zoom: zoomFactor,
+        items: () => [
             ...keyedRows().map(([key, n]): SwarmOrderItem => {
                 const meta = n.blockId ? MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", n.blockId))()?.meta : undefined;
                 const status = phaseToDisplayStatus(n.blockId, n.agentStatus);
@@ -151,25 +145,7 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
                     name: r.agent.name,
                 })
             ),
-        ])
-    );
-    // What keeps the list where it is: the pointer over it, a button down in it, a
-    // right-click menu, focus in a row. Which pane has focus, and the ticked checkboxes, do not.
-    onMount(() => {
-        const release = () => orderControl.setHold("press", false);
-        const closeMenu = () => orderControl.setHold("menu", false);
-        window.addEventListener("pointerup", release, true);
-        window.addEventListener("pointercancel", release, true);
-        window.addEventListener("dragend", release, true);
-        window.addEventListener("pointerdown", closeMenu, true);
-        window.addEventListener("keydown", closeMenu, true);
-        onCleanup(() => {
-            window.removeEventListener("pointerup", release, true);
-            window.removeEventListener("pointercancel", release, true);
-            window.removeEventListener("dragend", release, true);
-            window.removeEventListener("pointerdown", closeMenu, true);
-            window.removeEventListener("keydown", closeMenu, true);
-        });
+        ],
     });
     const localKeys = createMemo(() => tree().flatMap((n) => (n.blockId ? [n.blockId] : [])));
     // Everything a checkbox can select: this instance's agents, then the remote
@@ -242,16 +218,9 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
                     <div
                         class="swarm-tree"
                         ref={treeRef}
-                        onPointerEnter={() => orderControl.setHold("pointer", true)}
-                        onPointerLeave={() => orderControl.setHold("pointer", false)}
-                        onPointerDown={() => orderControl.setHold("press", true)}
-                        onContextMenu={() => orderControl.setHold("menu", true)}
-                        onFocusIn={() => orderControl.setHold("focus", true)}
-                        onFocusOut={(e) => {
-                            if (!treeRef?.contains(e.relatedTarget as Node | null)) orderControl.setHold("focus", false);
-                        }}
+                        {...swarmOrder.listHandlers}
                     >
-                        <For each={orderControl.order()}>
+                        <For each={swarmOrder.order()}>
                             {(key) =>
                                 remoteByKey().has(key) ? (
                                     <RemoteAgentRowHost rowKey={key} rows={remoteByKey} model={model} />
@@ -344,38 +313,7 @@ export function RemoteAgentRow(props: { model: SwarmViewModel; row: RemoteRow })
 
 // ── Status derived from TurnPhase ────────────────────────────────────────
 
-export type AgentDisplayStatus = "working" | "tools" | "stopping" | "idle" | "error" | "disconnected" | "unknown" | "interrupted";
-
-function phaseToDisplayStatus(blockId: string, fallback: "running" | "idle"): AgentDisplayStatus {
-    const phaseAccessor = getBlockTurnPhase(blockId);
-    // A block only has a registered TurnPhase while its pane is mounted in
-    // THIS renderer (registerActivity() in agentActivity.ts runs from the
-    // mounted agent-pane component). A subagent running in an unmounted
-    // pane, a background tab, or another workspace has no entry here — that
-    // does NOT mean it's idle, it means we have no visibility into it from
-    // here. Conflating the two used to render active agents as flatly
-    // "idle" ("nothing in progress" when something clearly was) — see
-    // docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md §1.4/§3.5.
-    //
-    // `fallback` is `node.agentStatus` — backend-verified via
-    // `GetControllerStatus`/`ControllerStatus` (swarm-model.ts's
-    // `derivedRunningStatus`), independent of whether this renderer has a
-    // mounted pane for the block. For agent panes it's turn-precise (keyed
-    // off `turn_active`, not raw process-alive `shellprocstatus` — see
-    // docs/specs/REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md
-    // Finding 1), so it's safe to trust here instead of falling through to
-    // "unknown" for an unmounted/background agent.
-    if (!phaseAccessor) return fallback === "running" ? "working" : "idle";
-    const phase = phaseAccessor();
-    switch (phase.kind) {
-        case "Submitting":    return "working";
-        case "Streaming":     return phase.toolsActive > 0 ? "tools" : "working";
-        case "Interrupting":  return "stopping";
-        case "Done":          return phase.outcome === "errored" ? "error" : "idle";
-        case "Disconnected":  return "disconnected";
-        default:              return "idle";
-    }
-}
+export type { AgentDisplayStatus } from "./swarm-display-status";
 
 /**
  * A subagent runs inside its parent agent's own CLI process — a Task-tool

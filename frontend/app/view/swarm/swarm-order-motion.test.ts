@@ -48,13 +48,19 @@ describe("captureRowTops", () => {
 describe("playRowMoves", () => {
     it("slides a row that moved from where it was, and leaves the others", () => {
         const { el, animate } = list({ b: 10, a: 60, c: 110 });
-        playRowMoves(el, new Map([["a", 10], ["b", 60], ["c", 110]]));
-        expect(animate).toHaveBeenCalledTimes(2);
-        expect(animate).toHaveBeenCalledWith(
-            "b",
-            [{ transform: "translateY(50px)" }, { transform: "translateY(0)" }],
-            { duration: SWARM_SLIDE_MS, easing: "ease-out" }
+        playRowMoves(
+            el,
+            new Map([
+                ["a", 10],
+                ["b", 60],
+                ["c", 110],
+            ])
         );
+        expect(animate).toHaveBeenCalledTimes(2);
+        expect(animate).toHaveBeenCalledWith("b", [{ transform: "translateY(50px)" }, { transform: "translateY(0)" }], {
+            duration: SWARM_SLIDE_MS,
+            easing: "ease-out",
+        });
         expect(animate.mock.calls.map((c) => c[0])).toEqual(["b", "a"]);
     });
 

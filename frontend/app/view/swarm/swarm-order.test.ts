@@ -12,7 +12,13 @@ const local = (key: string, o: Partial<SwarmOrderItem> = {}): SwarmOrderItem => 
     name: key,
     ...o,
 });
-const remote = (key: string, working = false): SwarmOrderItem => ({ key, remote: true, working, lastActive: 0, name: key });
+const remote = (key: string, working = false): SwarmOrderItem => ({
+    key,
+    remote: true,
+    working,
+    lastActive: 0,
+    name: key,
+});
 
 describe("orderSwarmItems", () => {
     it("puts working agents above idle ones, and idle ones by most recent activity", () => {
@@ -163,7 +169,11 @@ describe("SwarmOrderController", () => {
         const { ctl } = make();
         ctl.update([local("a", { lastActive: 3 }), local("b", { lastActive: 2 }), local("c", { lastActive: 1 })]);
         ctl.setHold("pointer", true);
-        ctl.update([local("a", { lastActive: 3 }), local("c", { lastActive: 1 }), local("d", { working: true, lastActive: 9 })]);
+        ctl.update([
+            local("a", { lastActive: 3 }),
+            local("c", { lastActive: 1 }),
+            local("d", { working: true, lastActive: 9 }),
+        ]);
         expect(ctl.order()).toEqual(["a", "c", "d"]);
         ctl.setHold("pointer", false);
         vi.advanceTimersByTime(SWARM_SETTLE_MS);
@@ -177,12 +187,18 @@ describe("SwarmOrderController", () => {
         ctl.update([local("x", { working: true, lastActive: 500 }), local("y", { lastActive: 400 })]);
         now = 2_000;
         // y starts working now, so it leaps above x.
-        ctl.update([local("x", { working: true, lastActive: 1_900 }), local("y", { working: true, lastActive: 1_950 })]);
+        ctl.update([
+            local("x", { working: true, lastActive: 1_900 }),
+            local("y", { working: true, lastActive: 1_950 }),
+        ]);
         vi.advanceTimersByTime(SWARM_SETTLE_MS);
         expect(ctl.order()).toEqual(["y", "x"]);
         // Output from x does not move it back above y.
         now = 3_000;
-        ctl.update([local("x", { working: true, lastActive: 2_999 }), local("y", { working: true, lastActive: 2_000 })]);
+        ctl.update([
+            local("x", { working: true, lastActive: 2_999 }),
+            local("y", { working: true, lastActive: 2_000 }),
+        ]);
         vi.advanceTimersByTime(SWARM_SETTLE_MS);
         expect(ctl.order()).toEqual(["y", "x"]);
     });
@@ -199,7 +215,10 @@ describe("SwarmOrderController", () => {
         vi.advanceTimersByTime(SWARM_SETTLE_MS);
         expect(ctl.order()).toEqual(["y", "x"]);
         now = 4_000;
-        ctl.update([local("x", { working: true, lastActive: 4_000 }), local("y", { working: true, lastActive: 3_900 })]);
+        ctl.update([
+            local("x", { working: true, lastActive: 4_000 }),
+            local("y", { working: true, lastActive: 3_900 }),
+        ]);
         vi.advanceTimersByTime(SWARM_SETTLE_MS);
         // x started again after y, so it is first.
         expect(ctl.order()).toEqual(["x", "y"]);

@@ -20,8 +20,8 @@ vi.mock("@/app/store/pane-content-holds", () => ({
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import type { SwarmViewModel } from "./swarm-model";
-import type { RemoteAgentState, SwarmOtherInstances } from "./swarm-remote";
 import { SWARM_SETTLE_MS } from "./swarm-order";
+import type { RemoteAgentState, SwarmOtherInstances } from "./swarm-remote";
 import { SwarmView } from "./swarm-view";
 
 beforeEach(() => vi.useFakeTimers());
@@ -73,8 +73,7 @@ function setup(initial: Record<string, RemoteAgentState>) {
     } as unknown as SwarmViewModel;
     const ctx = { meta: () => ({}), setMeta: async () => {} } as unknown as PaneTabHostContext;
     const view = render(() => <SwarmView model={model} ctx={ctx} />);
-    const names = () =>
-        [...view.container.querySelectorAll(".swarm-remote-agent-name")].map((el) => el.textContent);
+    const names = () => [...view.container.querySelectorAll(".swarm-remote-agent-name")].map((el) => el.textContent);
     return { ...view, names, change: (states: Record<string, RemoteAgentState>) => setData(others(states)) };
 }
 
@@ -129,7 +128,9 @@ describe("Swarm order", () => {
         // Rows are keyed by agent, not by place: a move reorders the elements, it does not rebuild them.
         const { container, change } = setup({ A: "idle", B: "idle" });
         const rowOf = (name: string) =>
-            [...container.querySelectorAll<HTMLElement>(".swarm-remote-agent-group")].find((el) => el.textContent?.includes(name))!;
+            [...container.querySelectorAll<HTMLElement>(".swarm-remote-agent-group")].find((el) =>
+                el.textContent?.includes(name)
+            )!;
         const before = rowOf("B");
         change({ A: "idle", B: "working" });
         vi.advanceTimersByTime(SWARM_SETTLE_MS);

@@ -10,8 +10,8 @@
  * the list, so a row never jumps under the cursor.
  */
 
-import { createSignal, type Accessor } from "solid-js";
 import { sameList } from "@/app/util/select-trace";
+import { createSignal, type Accessor } from "solid-js";
 
 /** How long the order waits after the last change, and after the user lets go of the list. */
 export const SWARM_SETTLE_MS = 400;
@@ -177,7 +177,10 @@ export class SwarmOrderController {
             live.add(item.key);
             if (item.working) {
                 if (!this.workingSince.has(item.key)) {
-                    this.workingSince.set(item.key, this.wasSeen.has(item.key) ? this.now() : item.lastActive || this.now());
+                    this.workingSince.set(
+                        item.key,
+                        this.wasSeen.has(item.key) ? this.now() : item.lastActive || this.now()
+                    );
                 }
             } else {
                 this.workingSince.delete(item.key);
