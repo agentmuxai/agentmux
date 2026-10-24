@@ -117,6 +117,14 @@ pub fn resolve_paths(launcher_exe_dir: &Path, version: &str) -> Result<DataPaths
     })
 }
 
+/// This channel's `settings.json`, the file srv loads (#1903), resolved
+/// early and failure-tolerant for the launcher's own startup reads.
+pub fn settings_file() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let version = env!("CARGO_PKG_VERSION");
+    resolve_paths(exe.parent()?, version).ok().map(|p| p.common.settings_file())
+}
+
 /// Create every directory the launcher + srv expect to exist.
 /// Idempotent. Delegates to the common implementation.
 ///
