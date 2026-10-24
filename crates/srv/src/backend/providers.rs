@@ -806,6 +806,21 @@ fn write_json_atomically(path: &std::path::Path, value: &serde_json::Value) -> s
     std::fs::rename(&tmp, path)
 }
 
+/// Seeds every Claude setting AgentMux manages into `config_dir`'s
+/// `settings.json`: transcript retention and the auto-compact window. Each
+/// soft-fails on its own; returns what couldn't be written, and why.
+pub fn seed_managed_claude_settings(provider: &ProviderConfig, config_dir: &str) -> Vec<(&'static str, std::io::Error)> {
+    let mut failed = Vec::new();
+    if let Err(e) = seed_transcript_retention_if_missing(provider, config_dir) {
+        // Claude Code's 30-day default would sweep the account's shared history.
+        failed.push(("transcript retention", e));
+    }
+    if let Err(e) = seed_auto_compact_window(provider, config_dir, compact_at_setting()) {
+        failed.push(("the auto-compact window", e));
+    }
+    failed
+}
+
 /// `provider`'s DEFAULT auth/config dir: `~/.agentmux/shared/providers/<auth_dir_name>/`
 /// — account-wide and version/channel-independent, so one login is shared by
 /// every instance (the structural fix for the per-channel validate-spin
@@ -847,11 +862,8 @@ pub fn prepare_provider_auth_dir(
     }
     std::fs::create_dir_all(auth_dir)?;
     seed_claude_md_placeholder_if_missing(provider, auth_dir)?;
-    if let Err(e) = seed_transcript_retention_if_missing(provider, auth_dir) {
-        tracing::warn!(auth_dir, error = %e, "could not set Claude transcript retention");
-    }
-    if let Err(e) = seed_auto_compact_window(provider, auth_dir, compact_at_setting()) {
-        tracing::warn!(auth_dir, error = %e, "could not set Claude's auto-compact window");
+    for (what, e) in seed_managed_claude_settings(provider, auth_dir) {
+        tracing::warn!(auth_dir, error = %e, "could not set Claude's {what}");
     }
     Ok(())
 }
