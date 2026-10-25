@@ -1,7 +1,7 @@
 # SPEC: unresponsive agents — out-of-quota and signed-out states, the reset time, held messages, the per-account notice
 
 **Date:** 2026-10-23
-**Status:** active — approved by the operator on 2026-10-23. Step 1 (§3, §4.1, §4.2, §4.5) shipped in #5389; step 2b (§4.4 and the R8 display) is in #5398; step 2d (§6) in #5402; step 2a (§4.3 and R5) in #5410; step 2c (§5) in #5419; step 3a (§7, the wake) in #5433; step 3b (§8, the watchdog) in #5444; step 2e (§4.6) and R9 remain. Implements R1–R4, R6 and R7 of `docs/reports/REPORT_UNRESPONSIVE_AGENTS_2026_10_23.md` (Kanban #1255, operator: "yes proceed with all"); R5 and R8 are scoped here only as far as they read this spec's state. Ships with the first build PR (§9, step 1).
+**Status:** active — approved by the operator on 2026-10-23. Step 1 (§3, §4.1, §4.2, §4.5) shipped in #5389; step 2b (§4.4 and the R8 display) is in #5398; step 2d (§6) in #5402; step 2a (§4.3 and R5) in #5410; step 2c (§5) in #5419; step 3a (§7, the wake) in #5433; step 3b (§8, the watchdog) in #5444; step 3c (R9, Codex limit and reset) in #5520; step 2e (§4.6) remains. Implements R1–R4, R6 and R7 of `docs/reports/REPORT_UNRESPONSIVE_AGENTS_2026_10_23.md` (Kanban #1255, operator: "yes proceed with all"); R5 and R8 are scoped here only as far as they read this spec's state. Ships with the first build PR (§9, step 1).
 **Author:** Loap-3 (loap-loap-2-loap-3). Build order and owners agreed with AgentX and AgentY.
 **Task:** Kanban #1787.
 
@@ -30,7 +30,7 @@ On 2026-10-23 Naki-2 held two tasks this way for 6 h 12 m. This is the most comm
 **Non-goals**
 - Detecting hung turns from silence. The August removal stands (`SPEC_REMOVE_AGENT_UNRESPONSIVE_DETECTION_2026_08_25.md`); R8's long-tool display is information only.
 - Automatic account moves. An opt-in standing rule is a later spec; moves never cross providers.
-- Codex classification gaps (R9). Codex gets these states only through what `classify()` already sees from `exec`'s exit and stderr.
+- Codex classification beyond `codex exec` (R9). The `exec` panes are covered (§3.4, item 3); the app-server controller stores no failure yet.
 - Remote agents' failures (LAN or cloud): §4.5 says what a peer sees.
 
 ## 3. Definitions
@@ -89,7 +89,10 @@ Where `resets_at_ms` comes from, in order:
 2. **The message text**, as a fallback, e.g. `resets Oct 26, 7pm (America/Los_Angeles)` or `resets 7pm (…)`:
    - parse it only when the named zone is the machine's local zone (`chrono::Local`), because srv has no tz database and this spec doesn't add one;
    - a time with no date is the next occurrence; a date with no year is the next occurrence of that date.
-3. **Codex:** `resetsAt` from its rate-limit snapshot, when R9 classifies Codex events. Until then, none.
+3. **Codex** (`codex exec --json`, R9): a limit arrives as an `error` frame and a `turn.failed` frame on stdout, both carrying `You've hit your usage limit. Upgrade to Pro (…), visit … to purchase more credits or try again at 9:44 PM.` (seen in a real Codex pane's stream, 2026-10-25).
+   - The stdout reader keeps the failing frame (a `Reconnecting...` retry notice is not one; a later `turn.completed` clears it) and hands its message to `classify()`, which already reads "usage limit".
+   - The reset is parsed from `try again at <time>`: a time alone is its next occurrence; a date and year (`Nov 3rd, 2025 9:44 PM`) is exact. It is in the machine's own zone, like Codex's.
+   - Codex's rate-limit snapshots (`account/rateLimits/updated`, a rollout's `token_count`) carry `resetsAt` too, but only the app-server protocol delivers them live, so they wait for that controller.
 
 A value is kept only if it lies in `(now, now + 8 days]`; otherwise it is `None`. A `None` reset still means Limited, just with no time shown.
 

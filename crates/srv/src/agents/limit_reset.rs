@@ -15,7 +15,11 @@
 //!    is never read.
 //! 2. The error text, `resets Oct 26, 7pm (America/Los_Angeles)` or
 //!    `resets 7pm`, parsed only in this machine's own time zone: srv has no
-//!    time-zone database, so a time in any other zone is left unknown.
+//!    time-zone database, so a time in any other zone is left unknown. Codex
+//!    words it `... or try again at 9:44 PM.` (the machine's own zone, with the
+//!    date and year when it is not today: `Nov 3rd, 2025 9:44 PM`);
+//!    [`codex_failure_text`] picks that text out of Codex's `error` and
+//!    `turn.failed` frames.
 //!
 //! A reset outside `(now, now + 8 days]` is dropped: an unknown reset still
 //! leaves the agent limited, just with no time shown.
@@ -113,6 +117,59 @@ pub fn fill_reset(
 /// the machine's zone). A time with no date is its next occurrence after `now`;
 /// a date with no year, likewise.
 pub fn reset_from_text(text: &str, now: DateTime<Local>, local_zone: Option<&str>) -> Option<u64> {
+    claude_reset(text, now, local_zone).or_else(|| codex_reset(text, now))
+}
+
+/// The message of a Codex `error` or `turn.failed` frame, or `None` for any
+/// other frame and for the `Reconnecting...` retry notices, which are not
+/// failures.
+pub fn codex_failure_text(frame: &Value) -> Option<String> {
+    let message = match frame.get("type").and_then(Value::as_str)? {
+        "turn.failed" => frame.pointer("/error/message").and_then(Value::as_str),
+        "error" => frame.get("message").and_then(Value::as_str),
+        _ => None,
+    }?;
+    (!message.contains("Reconnecting...")).then(|| message.to_string())
+}
+
+/// What `classify` should read from a frame the stdout reader kept as the run's
+/// in-band error: a Claude synthetic assistant message, or a Codex failure.
+pub fn inband_error_text(frame: &Value) -> String {
+    if let Some(text) = codex_failure_text(frame) {
+        return text;
+    }
+    let error = frame.get("error").and_then(Value::as_str).unwrap_or("");
+    let content = frame.pointer("/message/content/0/text").and_then(Value::as_str).unwrap_or("");
+    format!("{error} {content}")
+}
+
+/// Codex's `try again at 9:44 PM.` / `try again at Nov 3rd, 2025 9:44 PM.`.
+/// A time with no date is its next occurrence after `now`: Codex leaves the
+/// date out only for today.
+fn codex_reset(text: &str, now: DateTime<Local>) -> Option<u64> {
+    const MARK: &str = "try again at ";
+    let rest = &text[text.find(MARK)? + MARK.len()..];
+    let line = rest.lines().next().unwrap_or_default().split('"').next().unwrap_or_default();
+    let when = line.trim().trim_end_matches('.');
+    let words: Vec<&str> = when.split(|c: char| c == ',' || c.is_whitespace()).filter(|w| !w.is_empty()).collect();
+    let clock = |time: &str, meridiem: &str| parse_clock(&format!("{time}{meridiem}"));
+    let today = now.date_naive();
+    let at = match words.as_slice() {
+        [time, meridiem] => {
+            let t = Local.from_local_datetime(&today.and_time(clock(time, meridiem)?)).earliest()?;
+            if t > now { t } else { Local.from_local_datetime(&today.succ_opt()?.and_time(clock(time, meridiem)?)).earliest()? }
+        }
+        [month, day, year, time, meridiem] => {
+            let digits = day.trim_end_matches(|c: char| c.is_ascii_alphabetic());
+            let date = NaiveDate::from_ymd_opt(year.parse().ok()?, month_number(month)?, digits.parse().ok()?)?;
+            Local.from_local_datetime(&date.and_time(clock(time, meridiem)?)).earliest()?
+        }
+        _ => return None,
+    };
+    u64::try_from(at.timestamp_millis()).ok()
+}
+
+fn claude_reset(text: &str, now: DateTime<Local>, local_zone: Option<&str>) -> Option<u64> {
     let start = text.find("resets ")? + "resets ".len();
     let rest = &text[start..];
     let line = rest.lines().next().unwrap_or_default();
@@ -229,6 +286,51 @@ mod tests {
         assert_eq!(LATEST.lock().get(&b).map(|i| (i.status.clone(), i.resets_at_s)), Some(("rejected".into(), Some(2))));
         forget(&b);
         assert!(LATEST.lock().get(&b).is_none());
+    }
+
+    const CODEX_LIMIT: &str = "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 9:44 PM.";
+
+    #[test]
+    fn codex_wording_gives_the_reset() {
+        let now = at(2026, 10, 25, 9, 0);
+        assert_eq!(reset_from_text(CODEX_LIMIT, now, Some(ZONE)), Some(ms(at(2026, 10, 25, 21, 44))), "today");
+        assert_eq!(reset_from_text(CODEX_LIMIT, at(2026, 10, 25, 22, 0), Some(ZONE)), Some(ms(at(2026, 10, 26, 21, 44))), "a time already past is tomorrow's");
+        assert_eq!(reset_from_text("or try again at 8:19 AM.", now, None), Some(ms(at(2026, 10, 26, 8, 19))));
+        assert_eq!(reset_from_text("or try again at Oct 29th, 2026 9:44 PM.", now, None), Some(ms(at(2026, 10, 29, 21, 44))), "a date and year");
+        assert_eq!(reset_from_text("or try again at Nov 3rd, 2026 12:05 AM.", now, None), Some(ms(at(2026, 11, 3, 0, 5))));
+        assert_eq!(reset_from_text("or try again later.", now, None), None, "no time named");
+        assert_eq!(reset_from_text("or try again at soon.", now, None), None);
+    }
+
+    #[test]
+    fn codex_frames_carry_the_failure_text_and_retry_notices_do_not() {
+        let failed = json!({"type": "turn.failed", "error": {"message": CODEX_LIMIT}});
+        let error = json!({"type": "error", "message": CODEX_LIMIT});
+        assert_eq!(codex_failure_text(&failed).as_deref(), Some(CODEX_LIMIT));
+        assert_eq!(codex_failure_text(&error).as_deref(), Some(CODEX_LIMIT));
+        assert_eq!(codex_failure_text(&json!({"type": "error", "message": "Reconnecting... 2/5"})), None);
+        assert_eq!(codex_failure_text(&json!({"type": "turn.completed"})), None);
+        assert_eq!(inband_error_text(&failed), CODEX_LIMIT);
+        assert_eq!(inband_error_text(&json!({"error": "authentication_failed", "message": {"content": [{"text": "401"}]}})), "authentication_failed 401");
+    }
+
+    #[test]
+    fn a_codex_limit_failure_is_a_usage_limit_with_its_reset() {
+        let now = at(2026, 10, 25, 9, 0);
+        let f = classify(Some(1), None, CODEX_LIMIT, None);
+        assert_eq!(f.code, FailureClass::UsageLimit);
+        assert_eq!(fill_reset(&f, None, now, Some(ZONE)).resets_at_ms, Some(ms(at(2026, 10, 25, 21, 44))));
+    }
+
+    #[test]
+    fn a_codex_reset_outside_the_next_eight_days_is_dropped() {
+        let now = at(2026, 10, 25, 9, 0);
+        let far = classify(Some(1), None, "You've hit your usage limit. try again at Nov 20th, 2026 9:44 PM.", None);
+        assert_eq!(fill_reset(&far, None, now, Some(ZONE)).resets_at_ms, None, "more than 8 days ahead");
+        let past = classify(Some(1), None, "You've hit your usage limit. try again at Oct 20th, 2026 9:44 PM.", None);
+        assert_eq!(fill_reset(&past, None, now, Some(ZONE)).resets_at_ms, None, "already past");
+        let week = classify(Some(1), None, "You've hit your usage limit. try again at Nov 1st, 2026 9:44 PM.", None);
+        assert_eq!(fill_reset(&week, None, now, Some(ZONE)).resets_at_ms, Some(ms(at(2026, 11, 1, 21, 44))), "a week out is kept");
     }
 
     #[test]
