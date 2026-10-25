@@ -251,6 +251,8 @@ What shipped matches §4 to §7, with these differences. Each is the smaller cho
 | `kanban.act` carries Reopen | `kanban.act` `reopen`; with #5443 `kanban.act` as a whole needs the window's proof, so Reopen is the operator's | The leader path never goes through `kanban.act` |
 | Done cards show "by AgentY" | A pill "accepted by AgentY" with the quote in its tooltip, for the 7 days Reopen is open | Same window as Reopen |
 
+A leader's send-back reason reaches the holder quoted, with a first line saying it is the leader's text, because the holder gets it as the operator's turn; `relays_agent_text` refuses such a turn as the operator's word, so a reason can't be used to mint a quote.
+
 Also built: refusals `not_a_leader`, `not_in_review`, `own_work`, `reason_required` (send back needs a reason), `sensitive_quote`; one `fleet_action` audit entry per call (`kanban.accept` / `kanban.send_back`), refusals included.
 
 ## 13. Sources

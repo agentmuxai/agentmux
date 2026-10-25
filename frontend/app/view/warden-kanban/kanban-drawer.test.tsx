@@ -132,7 +132,8 @@ describe("KanbanDrawer: taking a task back", () => {
     it("offers nothing to take back on a task nobody holds", () => {
         mount(claimed({ state: "open", claimed_by: "", claimed_by_uid: "", holder: null, holder_unavailable: null }), []);
         expect(screen.queryByText("Take it back")).toBeNull();
-    });});
+    });
+});
 
 describe("KanbanDrawer: a leader's acceptance", () => {
     beforeEach(() => vi.clearAllMocks());

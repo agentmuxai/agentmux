@@ -101,11 +101,16 @@ const BROADCAST_WORDS: &str = "A broadcast to several agents isn't the operator'
 /// agent's, quoted (`app_api/kanban.rs` `start_text`).
 pub const RELAYED_START_MARK: &str = "wrote it down; here it is as they wrote it:";
 
-/// The operator's message is the Kanban starting an agent-written task, with
-/// that agent's words in it.
+/// What a send-back message says when the reason is a leader's, quoted
+/// (`app_api/kanban.rs` `send_back_task`). The holder gets it as the
+/// operator's message, so its words must never pass for the operator's own.
+pub const RELAYED_REASON_MARK: &str = "here is their reason as they wrote it:";
+
+/// The operator's message is the Kanban carrying an agent's words: starting an
+/// agent-written task, or sending a task back with a leader's reason.
 pub fn relays_agent_text(user_text: &str) -> bool {
     let first = user_text.trim_start().lines().next().unwrap_or("");
-    first.starts_with("Task #") && first.contains(RELAYED_START_MARK)
+    first.starts_with("Task #") && (first.contains(RELAYED_START_MARK) || first.contains(RELAYED_REASON_MARK))
 }
 
 /// Whether `text` names task number `num` ("#1102", "1102"), not as part of a
