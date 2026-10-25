@@ -6,7 +6,9 @@
 //!
 //! A task on the runtime beats every [`Config::beat_every`]; an OS thread
 //! outside the runtime looks at the beat every [`Config::poll_every`]. A beat
-//! that is [`Config::stall_after`] or more behind starts a stall, which ends
+//! that is [`Config::stall_after`] or more behind, or a look that itself comes
+//! that much late (the process was paused and the beat ran again before the
+//! look did), starts a stall, which ends
 //! when beats are on time again and stay so for [`Config::merge_gap`] (a stall
 //! that returns within that gap is the same stall). One line is written when it
 //! starts and one when it ends, whatever its length, each beginning with
@@ -99,6 +101,8 @@ struct Stall {
     began_ms: u64,
     worst_late_ms: u64,
     stalls: u32,
+    /// The last look that found it late.
+    last_late_look_ms: u64,
     /// When beats came back, and the beat that showed it: set while they stay
     /// on time, cleared by a new stall inside the merge gap.
     recovered: Option<(u64, u64)>,
@@ -116,18 +120,21 @@ impl Tracker {
         let beat_ms = self.cfg.beat_every.as_millis() as u64;
         let stall_ms = self.cfg.stall_after.as_millis() as u64;
         let gap_ms = self.cfg.merge_gap.as_millis() as u64;
-        let late_ms = now_ms.saturating_sub(last_beat_ms).saturating_sub(beat_ms);
+        // The beat's lateness, or the look's own if that is more: after a pause the
+        // beat may already have run again, and the look's lateness is what is left.
+        let late_ms = now_ms.saturating_sub(last_beat_ms).saturating_sub(beat_ms).max(watcher_late_ms);
         let stalled_now = late_ms >= stall_ms;
         let on_time = late_ms < stall_ms / 2;
         match &mut self.stall {
             None if stalled_now => {
-                self.stall = Some(Stall { began_ms: last_beat_ms + beat_ms, worst_late_ms: late_ms, stalls: 1, recovered: None });
+                self.stall = Some(Stall { began_ms: now_ms.saturating_sub(late_ms), worst_late_ms: late_ms, stalls: 1, last_late_look_ms: now_ms, recovered: None });
                 Some(Event::Start { late_ms, machine: watcher_late_ms >= stall_ms / 2, snapshot: snapshot() })
             }
             None => None,
             Some(s) => {
                 s.worst_late_ms = s.worst_late_ms.max(late_ms);
                 if stalled_now {
+                    s.last_late_look_ms = now_ms;
                     if s.recovered.take().is_some() {
                         s.stalls += 1;
                     }
@@ -138,7 +145,9 @@ impl Tracker {
                 }
                 match s.recovered {
                     Some((at, beat)) if now_ms.saturating_sub(at) >= gap_ms => {
-                        let ev = Event::End { lasted_ms: beat.saturating_sub(s.began_ms), worst_late_ms: s.worst_late_ms, stalls: s.stalls };
+                        // It ended at the beat that showed it, or at the last late look.
+                        let ended = s.last_late_look_ms.max(if beat >= s.began_ms { beat } else { 0 });
+                        let ev = Event::End { lasted_ms: ended.saturating_sub(s.began_ms), worst_late_ms: s.worst_late_ms, stalls: s.stalls };
                         self.stall = None;
                         Some(ev)
                     }
@@ -291,6 +300,22 @@ mod tests {
         let mut t = tracker();
         let ev = t.look(5_000, 1_000, 2, Snapshot::default);
         assert!(matches!(ev, Some(Event::Start { machine: false, .. })), "{ev:?}");
+    }
+
+    /// A paused process whose beat ran again before the look did: the look's own
+    /// lateness is what shows it.
+    #[test]
+    fn a_pause_is_seen_even_when_the_beat_ran_again_first() {
+        let mut t = tracker();
+        let ev = t.look(5_000, 4_999, 3_750, Snapshot::default);
+        assert!(matches!(ev, Some(Event::Start { late_ms: 3_750, machine: true, .. })), "{ev:?}");
+        // Looks and beats on time after it: one end line once the gap has passed, and
+        // no second start.
+        let mut seen = Vec::new();
+        for now in (5_250..=12_000).step_by(250) {
+            seen.extend(t.look(now, now - 20, 1, Snapshot::default));
+        }
+        assert_eq!(seen, vec![Event::End { lasted_ms: 3_750, worst_late_ms: 3_750, stalls: 1 }]);
     }
 
     #[test]
