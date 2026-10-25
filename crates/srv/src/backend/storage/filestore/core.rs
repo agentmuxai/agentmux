@@ -177,8 +177,16 @@ impl FileStore {
     /// (`reclaim_free_pages`) and the one-time reclaim is never needed.
     fn open_at(path: &Path, accept: i64, stamp: i64, incremental_if_new: bool) -> Result<Self, StoreError> {
         let conn = Connection::open(path)?;
-        if incremental_if_new && conn.query_row("PRAGMA page_count", [], |r| r.get::<_, i64>(0))? == 0 {
-            conn.execute_batch("PRAGMA auto_vacuum=INCREMENTAL;")?;
+        if incremental_if_new {
+            // Other srvs open this store at the same moment: wait for a lock instead
+            // of failing, and treat a check that still fails as "not new" (the store
+            // then just isn't incremental; the open goes on).
+            conn.execute_batch("PRAGMA busy_timeout=5000;")?;
+            if matches!(conn.query_row("PRAGMA page_count", [], |r| r.get::<_, i64>(0)), Ok(0)) {
+                if let Err(e) = conn.execute_batch("PRAGMA auto_vacuum=INCREMENTAL;") {
+                    tracing::warn!(error = %e, "a new shared transcript store couldn't be made incremental");
+                }
+            }
         }
         let mut store = Self::configure_and_migrate(conn, accept, stamp)?;
         // Checkpoints off the write path: a thread with its own connection
