@@ -344,6 +344,52 @@ pub struct TowerMemoryPart {
     pub rows: Vec<TowerMemoryRow>,
 }
 
+/// One key's private bytes over the last hour, a point per `step_ms`
+/// (`backend::tower_memory_ledger::Ledger`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct TowerMemorySeries {
+    /// `total`, `part:<id>`, or a row's key.
+    pub key: String,
+    /// When the first point was taken, ms since the epoch. A row that
+    /// started later has a shorter series; one that ended stops early.
+    #[ts(type = "number")]
+    pub start_ms: u64,
+    /// Bytes, one per step from `start_ms`.
+    #[ts(type = "Array<number>")]
+    pub points: Vec<u64>,
+}
+
+/// The last hour of AgentMux's memory (`TowerSampleReq::memory_history`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct TowerMemoryHistory {
+    /// The step between points, ms.
+    pub step_ms: u32,
+    /// When srv began keeping it (it starts empty on a restart), ms since
+    /// the epoch: the UI says "since 14:20" before an hour exists.
+    #[ts(type = "number")]
+    pub since_ms: u64,
+    pub series: Vec<TowerMemorySeries>,
+}
+
+/// A part or row that grows unusually (`tower_memory_ledger::GROWTH`): over its
+/// last 30 minutes it is large, grew by half and by a lot, and is not already
+/// coming back.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct TowerMemoryGrowth {
+    /// `part:<id>` or a row's key.
+    pub key: String,
+    /// Bytes at its lowest in the window, and now.
+    #[ts(type = "number")]
+    pub from: u64,
+    #[ts(type = "number")]
+    pub to: u64,
+    /// How long ago the lowest point was, whole minutes.
+    pub minutes: u32,
+}
+
 /// AgentMux's memory and what it is made of (`TowerSampleReq::memory`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -363,6 +409,14 @@ pub struct TowerMemory {
     pub other_instances: Option<u64>,
     /// What each figure measures here (`TowerSnapshot::memory_metric`).
     pub metric: String,
+    /// What grows unusually now, on every sample (the ledger is srv's, so a
+    /// Tower opened later sees it too). Only in Tower: nothing else is told.
+    #[serde(default)]
+    pub growth: Vec<TowerMemoryGrowth>,
+    /// The last hour, when the request asked for it (`TowerSampleReq::memory_history`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub history: Option<TowerMemoryHistory>,
 }
 
 /// The Panes view: windows, tabs and panes (`TowerSampleReq::panes`).
@@ -432,6 +486,11 @@ pub struct TowerSampleReq {
     #[serde(default)]
     #[ts(optional)]
     pub memory: Option<bool>,
+    /// With `memory`, also send the last hour of it (a point every 10 s, about
+    /// 100 KB), which changes slowly: ask once in a while, not every sample.
+    #[serde(default)]
+    #[ts(optional)]
+    pub memory_history: Option<bool>,
     /// Another machine: an SSH connection or `wsl://<distro>`, as a pane's
     /// `connection` meta names it, or a paired AgentMux computer
     /// (`peer:<id>`). Absent or `local`: this computer.

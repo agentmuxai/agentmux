@@ -255,6 +255,8 @@ pub fn build(snap: &TowerSnapshot) -> TowerMemory {
         parts,
         other_instances: snap.machine.as_ref().and_then(|m| m.agentmux_elsewhere),
         metric: snap.memory_metric.clone(),
+        growth: Vec::new(),
+        history: None,
     }
 }
 

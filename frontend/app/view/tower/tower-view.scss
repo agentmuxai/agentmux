@@ -91,6 +91,22 @@
     text-overflow: ellipsis;
 }
 
+// The hour's change, and the amber dot for a line that grows unusually
+// (hover for which): the dot stays when the words have no room.
+.tower-headline-change {
+    flex-shrink: 0;
+    font-size: 0.92em;
+}
+
+.tower-headline-grow {
+    flex-shrink: 0;
+    align-self: center;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--warning-color);
+}
+
 .tower-muted {
     color: var(--secondary-text-color);
 }
@@ -1038,6 +1054,55 @@ th[aria-sort="descending"] .tower-sort {
     padding-left: 28px;
 }
 
+// The hour as a line per part and row, and the amber note on one that grows
+// unusually. Choosing a row charts it below.
+.tower-memory-trend-head,
+.tower-memory-trend {
+    width: 64px;
+    padding-left: var(--space-2);
+}
+
+.tower-memory-spark {
+    display: block;
+    width: 60px;
+    height: 16px;
+    color: var(--tower-memory-color, var(--secondary-text-color));
+}
+
+.tower-memory-grow {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 0 var(--space-1);
+    border-radius: var(--radius-sm);
+    background: var(--warning-bg);
+    color: var(--warning-color);
+    font-size: 0.85em;
+    font-weight: 600;
+}
+
+.tower-memory-pick {
+    cursor: pointer;
+}
+
+.tower-memory-picked > td {
+    background: var(--tint-4);
+}
+
+.tower-memory-chart {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin-top: var(--space-3);
+}
+
+.tower-memory-chart-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
 .tower-memory-note {
     display: flex;
     flex-direction: column;
@@ -1045,9 +1110,18 @@ th[aria-sort="descending"] .tower-sort {
     font-size: 0.9em;
 }
 
+// Under 420 px the sparkline column goes first; the figures stay.
+@container (max-width: 420px) {
+    .tower-memory-trend-head,
+    .tower-memory-trend {
+        display: none;
+    }
+}
+
 // Narrowest: the bar and its legend say it, and nothing opens.
 @container (max-width: 240px) {
-    .tower-memory-table {
+    .tower-memory-table,
+    .tower-memory-chart {
         display: none;
     }
 }
