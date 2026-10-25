@@ -145,13 +145,14 @@ A `widgets.json` entry with `module` and an `ext:<name>` view keeps working: srv
 The pane's host side (a pane tab manifest srv-backed for each sandboxed contribution) renders:
 
 ```html
-<iframe sandbox="allow-scripts allow-forms allow-modals allow-downloads"
+<iframe sandbox="allow-scripts allow-forms allow-downloads"
         src="/agentmux/widget-files/<id>/<hash>/<entry>?pane=<nonce>"
         allow="clipboard-write"></iframe>
 ```
 
 - **No `allow-same-origin`:** the document has an opaque origin. It can't read the app's DOM, `localStorage`, cookies, `window.api`, the srv auth key or the host IPC token, and every request it makes carries `Origin: null`, which srv's CORS refuses.
-- **No `allow-top-navigation` or `allow-popups`:** it can't navigate the app or open windows. Links go through `ui.openUrl` (§6.3).
+- **No `allow-top-navigation`, `allow-popups` or `allow-modals`:** it can't navigate the app, open windows or show `alert`, `confirm` and `prompt`. Links go through `ui.openUrl` (§6.3), which needs `links:open`.
+- **The frame stays on its package:** the host refuses a navigation of the frame to anything outside the package's own files (a link, `location`, a redirect, a refresh tag), so a widget with no `net:` permission can't send anything to a server by loading a page.
 - **CSP on every widget file:** `default-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'`. `'self'` is the widget files route. A widget loads code only from its own package and reaches the network only through `net.fetch`.
 - **Navigation is fatal:** the host counts the iframe's `load` events. A second one (the widget navigated itself, or was navigated) closes its bridge port at once and shows "This widget left its page and was stopped. Reload it." The port is never handed to a document it didn't load.
 
@@ -179,7 +180,7 @@ Methods marked "—" in the permission column need none.
 | `ui.setHeaderActions` | `{ actions: { id, icon, title }[] }` (at most 4) | `{}` | — |
 | `ui.setContextMenu` | `{ items: ({ id, label, disabled? } \| { separator: true })[] }` (at most 20) | `{}` | — |
 | `ui.toast` | `{ text: string, kind?: "info"\|"success"\|"warning"\|"error" }` | `{}` | — |
-| `ui.openUrl` | `{ url: string }` (`http:` or `https:`) | `{}`: opens a browser pane next to the widget | — |
+| `ui.openUrl` | `{ url: string }` (`http:` or `https:`) | `{}`: opens a browser pane next to the widget | `links:open` |
 | `ui.setStatusItem` | `{ id: string, text?: string, icon?: string, tooltip?: string, tone?: "info"\|"success"\|"warning"\|"error", hidden?: boolean }` | `{}` (§6.8) | — |
 | `theme.get` | `{}` | `Theme` | — |
 | `panes.open` | `{ view: string, meta?: object, split?: "right"\|"down"\|"tab" }` | `{ pane: string }` | — for the package's own views; `panes` for any other view. An own view's `meta` is namespaced like `meta.set`'s; another view takes only its section key or a browser's http(s) `url`, never a controller or command (amended 2026-10-21, `paneMetaForWidget`) |
@@ -213,6 +214,7 @@ Details:
 | `net:<origin>` | "Connect to `<origin>`" (one line per origin) |
 | `files` | "Open files you pick, and save files where you choose" |
 | `clipboard:write` | "Copy text to your clipboard" |
+| `links:open` | "Open web pages in a browser pane next to it" |
 | `panes` | "Open other kinds of panes" |
 | `agents:read` | "See your agents' names and whether they're working" |
 | `agents:send` | "**Send messages to your agents.** An agent acts on what it's told, so only allow this for a widget you trust." |

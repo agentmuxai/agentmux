@@ -74,6 +74,46 @@ pub(crate) fn app_window_navigation(url: &str, frontend_origins: &[String]) -> A
     AppWindowNavigation::Allow
 }
 
+/// The path srv serves a sandboxed widget's files under
+/// (`/agentmux/widget-files/<id>/<hash>/<key>/<file>`).
+const WIDGET_FILES_PATH: &str = "/agentmux/widget-files/";
+
+/// `<origin>/agentmux/widget-files/<id>/<hash>/<key>/` of a widget file URL:
+/// the folder one approved package is served from. None for any other URL,
+/// and for one whose rest could climb out of it.
+pub(crate) fn widget_package_root(url: &str) -> Option<String> {
+    let url = url.trim();
+    let origin = url_origin(url)?;
+    let rest = url[origin.len()..].strip_prefix(WIDGET_FILES_PATH)?;
+    let path = rest.split(['?', '#']).next().unwrap_or(rest);
+    let lower = path.to_ascii_lowercase();
+    if path.contains('\\') || lower.contains("%2e") || lower.contains("%2f") || lower.contains("%5c") {
+        return None;
+    }
+    let mut parts = path.splitn(4, '/');
+    let (id, hash, key, file) = (parts.next()?, parts.next()?, parts.next()?, parts.next()?);
+    if [id, hash, key].iter().any(|seg| seg.is_empty() || *seg == "." || *seg == "..") {
+        return None;
+    }
+    if file.split('/').any(|seg| seg == "." || seg == "..") {
+        return None;
+    }
+    Some(format!("{origin}{WIDGET_FILES_PATH}{id}/{hash}/{key}/"))
+}
+
+/// Whether a frame of an app window may navigate to `target`. A sandboxed
+/// widget's frame (one showing a widget file) may only move within its own
+/// package: a link, `location`, a form, a redirect or a refresh tag that
+/// points anywhere else would send a request to a server the widget never
+/// declared (`net:`), and its CSP can't stop a navigation. Any other frame is
+/// left alone.
+pub(crate) fn subframe_may_navigate(frame_url: &str, target: &str) -> bool {
+    let Some(root) = widget_package_root(frame_url) else {
+        return true;
+    };
+    widget_package_root(target).as_deref() == Some(root.as_str())
+}
+
 /// Whether a link an app window asked to open in a new tab (a middle-click)
 /// becomes an AgentMux browser pane: any web page other than the frontend
 /// itself. Anything else is just cancelled.
@@ -176,5 +216,59 @@ mod tests {
         assert_eq!(url_origin(" https://127.0.0.1:9/x#y ").as_deref(), Some("https://127.0.0.1:9"));
         assert_eq!(url_origin("http://"), None);
         assert_eq!(url_origin("data:text/html,x"), None);
+    }
+
+    const FILES: &str = "http://127.0.0.1:62876/agentmux/widget-files/acme.notes/abc123/k3y";
+
+    #[test]
+    fn a_widget_package_root_is_its_id_hash_and_key() {
+        assert_eq!(
+            widget_package_root(&format!("{FILES}/index.html?pane=1")).as_deref(),
+            Some("http://127.0.0.1:62876/agentmux/widget-files/acme.notes/abc123/k3y/")
+        );
+        assert_eq!(widget_package_root(&format!("{FILES}/sub/page.html#x")), widget_package_root(&format!("{FILES}/index.html")));
+        assert_eq!(widget_package_root("http://127.0.0.1:62876/agentmux/widget-sdk/v1.js"), None);
+        assert_eq!(widget_package_root("http://127.0.0.1:62876/agentmux/widget-files/acme.notes/abc123"), None);
+        assert_eq!(widget_package_root("http://127.0.0.1:62876/agentmux/widget-files//abc123/k3y/index.html"), None);
+        assert_eq!(widget_package_root("about:blank"), None);
+        assert_eq!(widget_package_root(""), None);
+    }
+
+    #[test]
+    fn a_widget_frame_stays_in_its_own_package() {
+        let frame = format!("{FILES}/index.html?pane=1");
+        assert!(subframe_may_navigate(&frame, &format!("{FILES}/index.html?pane=2")));
+        assert!(subframe_may_navigate(&frame, &format!("{FILES}/other/page.html#top")));
+    }
+
+    #[test]
+    fn a_widget_frame_can_go_nowhere_else() {
+        let frame = format!("{FILES}/index.html");
+        for target in [
+            "https://evil.example/?data=secret",
+            "http://127.0.0.1:62876/",
+            "http://127.0.0.1:62876/agentmux/wps/publish",
+            "http://127.0.0.1:62877/agentmux/widget-files/acme.notes/abc123/k3y/index.html",
+            "http://127.0.0.1:62876/agentmux/widget-files/acme.notes/abc123/other/index.html",
+            "http://127.0.0.1:62876/agentmux/widget-files/acme.other/abc123/k3y/index.html",
+            "http://127.0.0.1:62876/agentmux/widget-files/acme.notes/abc123/k3y/../../x/y/z/a.html",
+            "http://127.0.0.1:62876/agentmux/widget-files/acme.notes/abc123/k3y/%2e%2e/%2e%2e/x",
+            "http://127.0.0.1:62876/agentmux/widget-files/acme.notes/abc123/k3y/..%5c..%5cx",
+            "about:blank",
+            "data:text/html,<h1>x</h1>",
+            "blob:http://127.0.0.1:62876/0e1d",
+            "file:///etc/passwd",
+            "javascript:void(0)",
+            "",
+        ] {
+            assert!(!subframe_may_navigate(&frame, target), "{target}");
+        }
+    }
+
+    #[test]
+    fn a_frame_that_is_not_a_widgets_is_left_alone() {
+        assert!(subframe_may_navigate("", "http://127.0.0.1:62876/agentmux/widget-files/acme.notes/abc123/k3y/index.html"));
+        assert!(subframe_may_navigate("about:blank", "https://example.com/"));
+        assert!(subframe_may_navigate("blob:http://127.0.0.1:62876/0e1d", "blob:http://127.0.0.1:62876/9f"));
     }
 }

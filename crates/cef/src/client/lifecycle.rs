@@ -1043,15 +1043,30 @@ impl AgentMuxHandler {
 
     /// An app window's main frame shows only the frontend
     /// (`app_navigation.rs`): another website opens in the system browser
-    /// instead of replacing the app, a local file is refused. Subframes are
-    /// left alone. Returns 1 to cancel.
+    /// instead of replacing the app, a local file is refused. A subframe
+    /// showing a sandboxed widget's page may only move within that widget's
+    /// package; other subframes are left alone. Returns 1 to cancel.
     fn guard_app_window_navigation(
         &self,
         frame: Option<&mut Frame>,
         request: Option<&mut Request>,
     ) -> ::std::os::raw::c_int {
         if !frame.as_ref().is_some_and(|f| f.is_main() == 1) {
-            return 0;
+            let Some(frame) = frame else { return 0 };
+            let frame_url = CefString::from(&frame.url()).to_string();
+            let target = request
+                .as_ref()
+                .map(|r| CefString::from(&r.url()).to_string())
+                .unwrap_or_default();
+            if super::app_navigation::subframe_may_navigate(&frame_url, &target) {
+                return 0;
+            }
+            tracing::warn!(
+                from = %frame_url,
+                to = %target,
+                "app window: refused a sandboxed widget's frame navigating outside its package"
+            );
+            return 1;
         }
         let url = request
             .as_ref()

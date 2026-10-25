@@ -166,7 +166,7 @@ describe("ui", () => {
     });
 
     it("toasts under the widget's own name, and opens only http(s) links", async () => {
-        const h = host();
+        const h = host(pkg({ granted: ["links:open"] }));
         const state = await ready(h);
         await handleBridgeRequest(h, state, "ui.toast", { text: "Saved", kind: "success" });
         expect(h.toast).toHaveBeenCalledWith("Notes: Saved", "success");
@@ -174,6 +174,18 @@ describe("ui", () => {
         expect(errorOf(await handleBridgeRequest(h, state, "ui.openUrl", { url: "javascript:alert(1)" })).code).toBe(ERR.INVALID_PARAMS);
         await handleBridgeRequest(h, state, "ui.openUrl", { url: "https://example.com/x" });
         expect(h.openUrl).toHaveBeenCalledWith("https://example.com/x");
+    });
+
+    it("opens no web page for a widget that wasn't granted links:open, whatever the url", async () => {
+        const h = host(pkg({ granted: ["storage", "panes", "net:https://example.com"] }));
+        const state = await ready(h);
+        for (const url of ["https://example.com/x", "http://127.0.0.1:1/", "file:///etc/passwd"]) {
+            const e = errorOf(await handleBridgeRequest(h, state, "ui.openUrl", { url }));
+            expect(e.code, url).toBe(ERR.PERMISSION_DENIED);
+            expect(e.data).toEqual({ permission: "links:open" });
+        }
+        expect(errorOf(await handleBridgeRequest(h, state, "ui.openUrl", {})).code).toBe(ERR.PERMISSION_DENIED);
+        expect(h.openUrl).not.toHaveBeenCalled();
     });
 
     it("updates only a status item the manifest declares, within its limits", async () => {
@@ -279,6 +291,7 @@ describe("permissions", () => {
             ["storage.get", "storage"],
             ["files.pick", "files"],
             ["clipboard.writeText", "clipboard:write"],
+            ["ui.openUrl", "links:open"],
             ["agents.list", "agents:read"],
             ["agents.send", "agents:send"],
             ["tasks.list", "tasks:read"],
