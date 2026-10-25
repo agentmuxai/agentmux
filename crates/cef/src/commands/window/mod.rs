@@ -39,7 +39,10 @@ pub use chrome::*;
 
 // Per-key trailing debounce on one worker thread, shared by the srv
 // write-throughs for opacity (`transparency`) and position (`position_persist`).
-mod trailing_writer;
+pub(crate) mod trailing_writer;
+
+// Where the main window was last time, so it reopens there.
+pub(crate) mod main_window_state;
 
 mod transparency;
 // Transparency + per-window opacity command handlers, dispatched by ipc.rs.
