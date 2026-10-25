@@ -159,7 +159,6 @@ fn the_budget_stops_at_the_hourly_limit_and_while_github_says_wait() {
     assert!(!b.take(9_000_000));
 }
 
-
 fn item(id: &str) -> WorkItem {
     WorkItem {
         id: id.into(),
