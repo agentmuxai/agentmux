@@ -719,6 +719,12 @@ pub fn install_config(config: std::sync::Arc<crate::backend::wconfig::ConfigStat
     let _ = CONFIG.set(config);
 }
 
+/// A string setting now, when it is set and not empty.
+pub fn live_setting_str(key: &str) -> Option<String> {
+    let value = CONFIG.get()?.get_settings().extra.get(key)?.as_str()?.trim().to_string();
+    (!value.is_empty()).then_some(value)
+}
+
 /// [`SETTING_COMPACT_AT`] now, or its default.
 pub fn compact_at_setting() -> u64 {
     CONFIG.get().and_then(|c| c.extra_u64(SETTING_COMPACT_AT)).unwrap_or(DEFAULT_COMPACT_AT)
@@ -807,7 +813,8 @@ fn write_json_atomically(path: &std::path::Path, value: &serde_json::Value) -> s
 }
 
 /// Seeds every Claude setting AgentMux manages into `config_dir`'s
-/// `settings.json`: transcript retention and the auto-compact window. Each
+/// `settings.json`: transcript retention and the auto-compact window, and
+/// the Explore sub-agent's model. Each
 /// soft-fails on its own; returns what couldn't be written, and why.
 pub fn seed_managed_claude_settings(provider: &ProviderConfig, config_dir: &str) -> Vec<(&'static str, std::io::Error)> {
     let mut failed = Vec::new();
@@ -817,6 +824,9 @@ pub fn seed_managed_claude_settings(provider: &ProviderConfig, config_dir: &str)
     }
     if let Err(e) = seed_auto_compact_window(provider, config_dir, compact_at_setting()) {
         failed.push(("the auto-compact window", e));
+    }
+    if let Err(e) = crate::backend::subagent_model::seed_explore_agent(config_dir, crate::backend::subagent_model::explore_model().as_deref()) {
+        failed.push(("the Explore sub-agent's model", e));
     }
     failed
 }
