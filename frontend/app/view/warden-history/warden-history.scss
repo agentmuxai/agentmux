@@ -140,3 +140,16 @@ tr[data-deleted] td {
 .warden-history-typed-tags {
     font-size: var(--text-sm);
 }
+
+.warden-history-typed-trash {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+
+.warden-history-typed-trash-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    align-items: start;
+    gap: var(--space-2);
+}

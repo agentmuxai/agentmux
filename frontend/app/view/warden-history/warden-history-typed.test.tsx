@@ -8,20 +8,24 @@ import type { InputHistoryItem } from "@/types/rpc/InputHistoryItem";
 const ListAgentDefinitionsCommand = vi.fn();
 const AgentInputHistoryCommand = vi.fn();
 const AgentInputHistorySearchCommand = vi.fn();
+const AgentInputHistoryTrashCommand = vi.fn();
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         ListAgentDefinitionsCommand: (...a: unknown[]) => ListAgentDefinitionsCommand(...a),
         AgentInputHistoryCommand: (...a: unknown[]) => AgentInputHistoryCommand(...a),
         AgentInputHistorySearchCommand: (...a: unknown[]) => AgentInputHistorySearchCommand(...a),
+        AgentInputHistoryTrashCommand: (...a: unknown[]) => AgentInputHistoryTrashCommand(...a),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
-// Forgetting goes through the composers' shared cache, which also calls srv.
+// Forgetting and restoring go through the composers' shared cache, which also calls srv.
 const forgetInputHistoryEntry = vi.fn();
 const clearInputHistory = vi.fn();
+const restoreInputHistory = vi.fn();
 vi.mock("@/app/view/agent/agent-input-history", () => ({
     forgetInputHistoryEntry: (...a: unknown[]) => forgetInputHistoryEntry(...a),
     clearInputHistory: (...a: unknown[]) => clearInputHistory(...a),
+    restoreInputHistory: (...a: unknown[]) => restoreInputHistory(...a),
 }));
 
 import { WardenHistoryTyped } from "./warden-history-typed";
@@ -49,8 +53,31 @@ describe("Warden History → Typed", () => {
         AgentInputHistorySearchCommand.mockResolvedValue({ entries: [item(3, "merge on approval")] });
         forgetInputHistoryEntry.mockResolvedValue(undefined);
         clearInputHistory.mockResolvedValue(undefined);
+        restoreInputHistory.mockResolvedValue(1);
+        AgentInputHistoryTrashCommand.mockResolvedValue({ batches: [], retention_ms: 7 * 24 * 60 * 60 * 1000 });
     });
     afterEach(() => cleanup());
+
+    it("lists what was forgotten with who did it, and Restore brings it back", async () => {
+        const batch = { batch_id: "b-1", agent_id: "a1", deleted_at_ms: Date.UTC(2026, 9, 21, 9, 0, 0), deleted_by: "korp", count: 1, sample: "ship the fix" };
+        AgentInputHistoryTrashCommand.mockResolvedValueOnce({ batches: [batch], retention_ms: 7 * 24 * 60 * 60 * 1000 });
+        const { container } = render(() => <WardenHistoryTyped visible={true} />);
+        await waitFor(() => expect(screen.getByText("ship the fix")).toBeInTheDocument());
+        expect(AgentInputHistoryTrashCommand).toHaveBeenCalledWith({}, { agent_id: "a1" });
+        expect(screen.getByText("by korp")).toBeInTheDocument();
+        expect(screen.getByText(/restorable for 7 days/)).toBeInTheDocument();
+        AgentInputHistoryTrashCommand.mockResolvedValue({ batches: [], retention_ms: 7 * 24 * 60 * 60 * 1000 });
+        fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+        await waitFor(() => expect(restoreInputHistory).toHaveBeenCalledWith("b-1"));
+        await waitFor(() => expect(container.querySelector("[data-batch]")).toBeNull());
+    });
+
+    it("a cleared history shows as one restorable batch", async () => {
+        const batch = { batch_id: "b-2", agent_id: "a1", deleted_at_ms: Date.UTC(2026, 9, 21, 9, 0, 0), deleted_by: "armory-ui", count: 3, sample: "hello" };
+        AgentInputHistoryTrashCommand.mockResolvedValue({ batches: [batch], retention_ms: 7 * 24 * 60 * 60 * 1000 });
+        render(() => <WardenHistoryTyped visible={true} />);
+        await waitFor(() => expect(screen.getByText("3 entries, from “hello”")).toBeInTheDocument());
+    });
 
     it("loads nothing until it is shown", () => {
         render(() => <WardenHistoryTyped visible={false} />);

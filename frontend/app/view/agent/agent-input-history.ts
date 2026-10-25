@@ -116,6 +116,22 @@ function onBackfilled(agentId: string): void {
     void (c.loading ?? Promise.resolve()).then(() => load(agentId, c, oldest));
 }
 
+/**
+ * Forgotten entries came back, some of them among older ones: read the newest
+ * page again from scratch. The composers hear everything shown go, so no
+ * cursor points at an entry that moved.
+ */
+function onRestored(agentId: string): void {
+    const c = caches.get(agentId);
+    if (!c) return;
+    const n = c.entries.length;
+    c.entries.length = 0;
+    c.ids.length = 0;
+    c.complete = false;
+    tell(c, "removed", n, 0);
+    void (c.loading ?? Promise.resolve()).then(() => load(agentId, c));
+}
+
 function cacheFor(agentId: string): Cache {
     let c = caches.get(agentId);
     if (!c) {
@@ -128,6 +144,7 @@ function cacheFor(agentId: string): Cache {
         onMuxEvent(WpsEvent.AgentInputHistoryChanged, (data) => {
             if (data.what === "history") onChanged(data.agent_id);
             else if (data.what === "backfill") onBackfilled(data.agent_id);
+            else if (data.what === "restored") onRestored(data.agent_id);
         });
     }
     return c;
@@ -189,6 +206,14 @@ export async function forgetInputHistoryEntry(agentId: string, id: number): Prom
     c.entries.splice(at, 1);
     c.ids.splice(at, 1);
     tell(c, "removed", 1, at);
+}
+
+/**
+ * Bring a forgotten batch back; the composers of its agent read it again when
+ * srv says so (`restored`). How many entries came back.
+ */
+export async function restoreInputHistory(batchId: string): Promise<number> {
+    return (await RpcApi.AgentInputHistoryRestoreCommand(TabRpcClient, { batch_id: batchId })).restored;
 }
 
 /** Forget everything typed to the agent. */

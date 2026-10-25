@@ -7,6 +7,7 @@
 //! composer's ArrowUp recall and draft. No agent tool reads it.
 
 use super::*;
+use crate::backend::storage::agent_input_history::ForgottenBy;
 
 const DEFAULT_LIMIT: u32 = 200;
 const MAX_LIMIT: u32 = 500;
@@ -71,6 +72,13 @@ fn maybe_backfill(state: &AppState, agent_id: &str) {
             Err(e) => tracing::warn!(agent_id = %agent_id, error = %e, "input history: the fill stopped"),
         }
     });
+}
+
+/// Who forgot, from the connection: the agent's slug when it registered as
+/// one, else the window (`armory-ui`), as Global Memory writes are recorded.
+fn forgotten_by(ctx: &RpcContext) -> ForgottenBy<'_> {
+    let name = if ctx.agent_id.is_empty() { "armory-ui" } else { ctx.agent_id.as_str() };
+    ForgottenBy { name, uid: "" }
 }
 
 /// Tell every window `agent_id`'s history or draft changed.
@@ -179,29 +187,77 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     });
 
     let s = state.clone();
-    engine.register_typed(COMMAND_AGENT_INPUT_HISTORY_DELETE, move |cmd: CommandInputHistoryDeleteData, _ctx| {
+    engine.register_typed(COMMAND_AGENT_INPUT_HISTORY_DELETE, move |cmd: CommandInputHistoryDeleteData, ctx| {
         let s = s.clone();
         async move {
-            let agent = s.mstore.input_history_delete(cmd.id).map_err(|e| format!("agent.input-history-delete: {e}"))?;
-            if let Some(agent) = &agent {
-                // Forgetting is deliberate (the UI asks twice): the log says it happened, never what was typed.
-                tracing::info!(agent_id = %agent, entry_id = cmd.id, "input history: an entry was forgotten");
+            let by = forgotten_by(&ctx);
+            let forgotten = s
+                .mstore
+                .input_history_delete(cmd.id, by, agentmux_common::time::now_ms())
+                .map_err(|e| format!("agent.input-history-delete: {e}"))?;
+            if let Some((agent, _)) = &forgotten {
+                // Forgetting is deliberate (the UI asks twice): the log says it happened and who, never what was typed.
+                tracing::info!(agent_id = %agent, entry_id = cmd.id, by = by.name, "input history: an entry was forgotten");
                 changed(&s, agent, "history");
             }
-            Ok(InputHistoryRemovedResult { removed: u32::from(agent.is_some()) })
+            Ok(InputHistoryRemovedResult { removed: u32::from(forgotten.is_some()), batch_id: forgotten.map(|(_, batch)| batch) })
         }
     });
 
     let s = state.clone();
-    engine.register_typed(COMMAND_AGENT_INPUT_HISTORY_CLEAR, move |cmd: CommandInputHistoryClearData, _ctx| {
+    engine.register_typed(COMMAND_AGENT_INPUT_HISTORY_CLEAR, move |cmd: CommandInputHistoryClearData, ctx| {
         let s = s.clone();
         async move {
-            let removed = s.mstore.input_history_clear(&cmd.agent_id).map_err(|e| format!("agent.input-history-clear: {e}"))?;
+            let by = forgotten_by(&ctx);
+            let (batch_id, removed) = s
+                .mstore
+                .input_history_clear(&cmd.agent_id, by, agentmux_common::time::now_ms())
+                .map_err(|e| format!("agent.input-history-clear: {e}"))?;
             if removed > 0 {
-                tracing::info!(agent_id = %cmd.agent_id, entries = removed, "input history: an agent's history was cleared");
+                tracing::info!(agent_id = %cmd.agent_id, entries = removed, by = by.name, "input history: an agent's history was cleared");
                 changed(&s, &cmd.agent_id, "history");
             }
-            Ok(InputHistoryRemovedResult { removed: removed as u32 })
+            Ok(InputHistoryRemovedResult { removed: removed as u32, batch_id })
+        }
+    });
+
+    let s = state.clone();
+    engine.register_typed(COMMAND_AGENT_INPUT_HISTORY_TRASH, move |cmd: CommandInputHistoryTrashData, _ctx| {
+        let s = s.clone();
+        async move {
+            let batches = s
+                .mstore
+                .input_history_trash(cmd.agent_id.as_deref(), agentmux_common::time::now_ms())
+                .map_err(|e| format!("agent.input-history-trash: {e}"))?;
+            Ok(InputHistoryTrashResult {
+                batches: batches
+                    .into_iter()
+                    .map(|b| InputHistoryTrashItem {
+                        batch_id: b.batch_id,
+                        agent_id: b.agent_id,
+                        deleted_at_ms: b.deleted_at_ms,
+                        deleted_by: b.deleted_by,
+                        count: b.count as u32,
+                        sample: b.sample,
+                    })
+                    .collect(),
+                retention_ms: crate::backend::storage::agent_input_history::INPUT_HISTORY_TRASH_RETENTION_MS,
+            })
+        }
+    });
+
+    let s = state.clone();
+    engine.register_typed(COMMAND_AGENT_INPUT_HISTORY_RESTORE, move |cmd: CommandInputHistoryRestoreData, ctx| {
+        let s = s.clone();
+        async move {
+            let restored = s
+                .mstore
+                .input_history_restore(&cmd.batch_id, agentmux_common::time::now_ms())
+                .map_err(|e| format!("agent.input-history-restore: {e}"))?;
+            let Some((agent, count)) = restored else { return Ok(InputHistoryRestoredResult { restored: 0 }) };
+            tracing::info!(agent_id = %agent, entries = count, by = forgotten_by(&ctx).name, "input history: forgotten entries were restored");
+            changed(&s, &agent, "restored");
+            Ok(InputHistoryRestoredResult { restored: count as u32 })
         }
     });
 
@@ -227,6 +283,53 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn who_forgot_is_the_registered_agent_or_else_the_window() {
+        let window = RpcContext::default();
+        assert_eq!(forgotten_by(&window).name, "armory-ui");
+        let agent = RpcContext { agent_id: "korp".into(), ..Default::default() };
+        assert_eq!(forgotten_by(&agent).name, "korp");
+    }
+
+    #[tokio::test]
+    async fn forgetting_through_the_rpcs_is_recorded_and_restorable() {
+        let state = crate::server::tests::test_state();
+        let (engine, _rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        state
+            .mstore
+            .conn()
+            .lock()
+            .unwrap()
+            .execute("INSERT INTO db_agents (id, name, provider) VALUES ('uid-9', 'A', 'claude')", [])
+            .unwrap();
+        let entry = crate::backend::storage::agent_input_history::NewInputHistoryEntry {
+            agent_id: "uid-9",
+            sent_at_ms: agentmux_common::time::now_ms(),
+            text: "ship it",
+            kind: "message",
+            source: "composer",
+            ..Default::default()
+        };
+        state.mstore.input_history_append(&entry, 100).unwrap();
+        let schema = engine.schema_json();
+        let rows = schema.as_array().unwrap();
+        for (cmd, req, resp) in [
+            (COMMAND_AGENT_INPUT_HISTORY_TRASH, "CommandInputHistoryTrashData", "InputHistoryTrashResult"),
+            (COMMAND_AGENT_INPUT_HISTORY_RESTORE, "CommandInputHistoryRestoreData", "InputHistoryRestoredResult"),
+        ] {
+            let row = rows.iter().find(|r| r["command"] == cmd).unwrap_or_else(|| panic!("{cmd} missing from the schema"));
+            assert_eq!((row["requestName"].as_str(), row["responseName"].as_str()), (Some(req), Some(resp)));
+        }
+        let forgotten = state
+            .mstore
+            .input_history_clear("uid-9", forgotten_by(&RpcContext { agent_id: "korp".into(), ..Default::default() }), agentmux_common::time::now_ms())
+            .unwrap();
+        assert_eq!(forgotten.1, 1);
+        let trash = state.mstore.input_history_trash(Some("uid-9"), agentmux_common::time::now_ms()).unwrap();
+        assert_eq!((trash.len(), trash[0].deleted_by.as_str()), (1, "korp"));
+    }
 
     #[tokio::test]
     async fn a_swarm_broadcast_is_kept_in_the_recipient_agents_history() {

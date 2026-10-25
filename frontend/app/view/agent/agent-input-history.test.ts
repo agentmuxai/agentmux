@@ -140,6 +140,22 @@ describe("agent input history", () => {
         expect(pos, "still on the live draft").toBe(3);
     });
 
+    it("reads the history again from the newest when forgotten entries are restored", async () => {
+        history.mockResolvedValueOnce(page(["third", "first"], 3));
+        const entries = agentHistory("a1");
+        const heard: [string, number][] = [];
+        watchAgentHistory("a1", (where, n) => heard.push([where, n]));
+        await flush();
+        heard.length = 0;
+        // The entry between them came back under its own id.
+        history.mockResolvedValueOnce(page(["third", "second", "first"], 3));
+        handlers.get("agent:inputhistory")!({ agent_id: "a1", what: "restored" });
+        await flush();
+        await flush();
+        expect(entries).toEqual(["first", "second", "third"]);
+        expect(heard).toEqual([["removed", 2], ["older", 3]]);
+    });
+
     it("keeps the draft a moment after the last change, and reads it back", async () => {
         vi.useFakeTimers();
         draft.mockResolvedValue({});

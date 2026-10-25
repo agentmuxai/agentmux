@@ -41,7 +41,50 @@ CREATE TABLE IF NOT EXISTS db_agent_input_history_backfilled (
     agent_id TEXT PRIMARY KEY,
     at_ms    INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS db_agent_input_history_trash (
+    trash_id       INTEGER PRIMARY KEY,
+    batch_id       TEXT NOT NULL,
+    id             INTEGER NOT NULL,
+    agent_id       TEXT NOT NULL,
+    sent_at_ms     INTEGER NOT NULL,
+    text           TEXT NOT NULL,
+    kind           TEXT NOT NULL,
+    source         TEXT NOT NULL,
+    session_id     TEXT,
+    attachments    TEXT,
+    sends          INTEGER NOT NULL DEFAULT 1,
+    deleted_at_ms  INTEGER NOT NULL,
+    deleted_by     TEXT NOT NULL,
+    deleted_by_uid TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_agent_input_history_trash_agent
+    ON db_agent_input_history_trash (agent_id, deleted_at_ms);
+CREATE INDEX IF NOT EXISTS idx_agent_input_history_trash_batch
+    ON db_agent_input_history_trash (batch_id);
 ";
+
+/// How long a forgotten entry waits in the trash before it is gone for good.
+pub const INPUT_HISTORY_TRASH_RETENTION_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+
+/// Who forgot an entry: the agent's slug, or `armory-ui` for the AgentMux
+/// window, with the agent's UID when the connection proved one.
+#[derive(Debug, Clone, Copy)]
+pub struct ForgottenBy<'a> {
+    pub name: &'a str,
+    pub uid: &'a str,
+}
+
+/// One forgetting in the trash: a single entry, or everything cleared at once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrashedBatch {
+    pub batch_id: String,
+    pub agent_id: String,
+    pub deleted_at_ms: i64,
+    pub deleted_by: String,
+    pub count: i64,
+    /// The oldest entry's text, to say what it was.
+    pub sample: String,
+}
 
 /// The longest entry kept, in bytes (a pasted file is not history).
 pub const INPUT_HISTORY_MAX_TEXT: usize = 64 * 1024;
@@ -90,6 +133,38 @@ fn entry_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<InputHistoryEntry> {
         attachments: row.get(7)?,
         sends: row.get(8)?,
     })
+}
+
+/// Drop trash past the retention; how many entries went.
+fn purge_trash(tx: &rusqlite::Transaction<'_>, now_ms: i64) -> Result<usize, StoreError> {
+    Ok(tx.execute(
+        "DELETE FROM db_agent_input_history_trash WHERE deleted_at_ms < ?1",
+        params![now_ms - INPUT_HISTORY_TRASH_RETENTION_MS],
+    )?)
+}
+
+/// Move the history rows matching `condition` (which binds `?5` to `key`) into
+/// the trash as batch `batch`, recorded with who forgot them; how many moved.
+fn trash_rows(
+    tx: &rusqlite::Transaction<'_>,
+    condition: &str,
+    key: &dyn rusqlite::ToSql,
+    batch: &str,
+    by: ForgottenBy<'_>,
+    now_ms: i64,
+) -> Result<usize, StoreError> {
+    let moved = tx.execute(
+        &format!(
+            "INSERT INTO db_agent_input_history_trash \
+                 (batch_id, id, agent_id, sent_at_ms, text, kind, source, session_id, attachments, sends, \
+                  deleted_at_ms, deleted_by, deleted_by_uid) \
+             SELECT ?1, id, agent_id, sent_at_ms, text, kind, source, session_id, attachments, sends, ?2, ?3, ?4 \
+             FROM db_agent_input_history WHERE {condition}"
+        ),
+        params![batch, now_ms, by.name, by.uid, key],
+    )?;
+    tx.execute(&format!("DELETE FROM db_agent_input_history WHERE {}", condition.replace("?5", "?1")), params![key])?;
+    Ok(moved)
 }
 
 /// `query` for a `LIKE … ESCAPE '\'` substring match.
@@ -261,20 +336,108 @@ impl Store {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
-    /// Remove one entry; its agent, when there was one.
-    pub fn input_history_delete(&self, id: i64) -> Result<Option<String>, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let agent: Option<String> = conn
+    /// Forget one entry. It moves to the trash, recorded with who forgot it, and
+    /// can be restored until [`INPUT_HISTORY_TRASH_RETENTION_MS`] has passed.
+    /// Its agent and the trash batch holding it, when there was such an entry.
+    pub fn input_history_delete(&self, id: i64, by: ForgottenBy<'_>, now_ms: i64) -> Result<Option<(String, String)>, StoreError> {
+        let mut guard = self.conn.lock().unwrap();
+        let tx = guard.transaction()?;
+        purge_trash(&tx, now_ms)?;
+        let agent: Option<String> = tx
             .query_row("SELECT agent_id FROM db_agent_input_history WHERE id = ?1", params![id], |r| r.get(0))
             .optional()?;
-        conn.execute("DELETE FROM db_agent_input_history WHERE id = ?1", params![id])?;
-        Ok(agent)
+        let Some(agent) = agent else { return Ok(None) };
+        let batch = uuid::Uuid::new_v4().to_string();
+        trash_rows(&tx, "id = ?5", &id, &batch, by, now_ms)?;
+        tx.commit()?;
+        Ok(Some((agent, batch)))
     }
 
-    /// Remove an agent's whole history; how many entries went.
-    pub fn input_history_clear(&self, agent_id: &str) -> Result<usize, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        Ok(conn.execute("DELETE FROM db_agent_input_history WHERE agent_id = ?1", params![agent_id])?)
+    /// Forget an agent's whole history, as one trash batch. The batch and how
+    /// many entries went (`None` and 0 when it had none).
+    pub fn input_history_clear(&self, agent_id: &str, by: ForgottenBy<'_>, now_ms: i64) -> Result<(Option<String>, usize), StoreError> {
+        let mut guard = self.conn.lock().unwrap();
+        let tx = guard.transaction()?;
+        purge_trash(&tx, now_ms)?;
+        let batch = uuid::Uuid::new_v4().to_string();
+        let moved = trash_rows(&tx, "agent_id = ?5", &agent_id, &batch, by, now_ms)?;
+        tx.commit()?;
+        Ok(((moved > 0).then_some(batch), moved))
+    }
+
+    /// What was forgotten and can still be restored, most recently forgotten
+    /// first: every agent's, or one agent's. Entries past the retention are gone.
+    pub fn input_history_trash(&self, agent_id: Option<&str>, now_ms: i64) -> Result<Vec<TrashedBatch>, StoreError> {
+        let mut guard = self.conn.lock().unwrap();
+        let tx = guard.transaction()?;
+        purge_trash(&tx, now_ms)?;
+        let batches = {
+            let mut stmt = tx.prepare(
+                "SELECT batch_id, agent_id, MAX(deleted_at_ms), MIN(deleted_by), COUNT(*), \
+                        (SELECT t2.text FROM db_agent_input_history_trash t2 WHERE t2.batch_id = t.batch_id ORDER BY t2.id LIMIT 1) \
+                 FROM db_agent_input_history_trash t \
+                 WHERE (?1 IS NULL OR agent_id = ?1) \
+                 GROUP BY batch_id, agent_id ORDER BY MAX(deleted_at_ms) DESC, batch_id",
+            )?;
+            let rows = stmt.query_map(params![agent_id], |r| {
+                Ok(TrashedBatch {
+                    batch_id: r.get(0)?,
+                    agent_id: r.get(1)?,
+                    deleted_at_ms: r.get(2)?,
+                    deleted_by: r.get(3)?,
+                    count: r.get(4)?,
+                    sample: r.get(5)?,
+                })
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        tx.commit()?;
+        Ok(batches)
+    }
+
+    /// Bring a trash batch back: each entry returns under its own id when that
+    /// is free, else at the newest end (ids are reused once the newest entry is
+    /// forgotten and something is typed). The batch leaves the trash. The
+    /// agent and how many entries came back; `None` when there is no such batch
+    /// (restored, or past the retention).
+    pub fn input_history_restore(&self, batch_id: &str, now_ms: i64) -> Result<Option<(String, usize)>, StoreError> {
+        let mut guard = self.conn.lock().unwrap();
+        let tx = guard.transaction()?;
+        purge_trash(&tx, now_ms)?;
+        let rows: Vec<(i64, String, i64, String, String, String, Option<String>, Option<String>, i64)> = {
+            let mut stmt = tx.prepare(
+                "SELECT id, agent_id, sent_at_ms, text, kind, source, session_id, attachments, sends \
+                 FROM db_agent_input_history_trash WHERE batch_id = ?1 ORDER BY id",
+            )?;
+            let found = stmt.query_map(params![batch_id], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?))
+            })?;
+            found.collect::<Result<Vec<_>, _>>()?
+        };
+        let Some(agent) = rows.first().map(|r| r.1.clone()) else { return Ok(None) };
+        for (id, agent_id, sent_at_ms, text, kind, source, session_id, attachments, sends) in &rows {
+            let taken: Option<i64> =
+                tx.query_row("SELECT 1 FROM db_agent_input_history WHERE id = ?1", params![id], |r| r.get(0)).optional()?;
+            // A reused id goes to the newest end; its order among the restored ones stays.
+            let id = if taken.is_some() { None } else { Some(*id) };
+            tx.execute(
+                "INSERT INTO db_agent_input_history (id, agent_id, sent_at_ms, text, kind, source, session_id, attachments, sends) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![id, agent_id, sent_at_ms, text, kind, source, session_id, attachments, sends],
+            )?;
+        }
+        tx.execute("DELETE FROM db_agent_input_history_trash WHERE batch_id = ?1", params![batch_id])?;
+        tx.commit()?;
+        Ok(Some((agent, rows.len())))
+    }
+
+    /// Drop what has waited in the trash past the retention.
+    pub fn input_history_trash_purge(&self, now_ms: i64) -> Result<usize, StoreError> {
+        let mut guard = self.conn.lock().unwrap();
+        let tx = guard.transaction()?;
+        let gone = purge_trash(&tx, now_ms)?;
+        tx.commit()?;
+        Ok(gone)
     }
 
     /// The agent's unsent draft, if it has one.
