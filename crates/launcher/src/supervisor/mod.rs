@@ -20,9 +20,7 @@ pub(crate) const HOST_RESTART_WINDOW: std::time::Duration = std::time::Duration:
 /// restores the session), at most this many times per window. A wider
 /// window than the host's: each srv recycle also costs a host restart, so
 /// a crash-looping srv burns both budgets and gives up loudly either way.
-#[cfg(target_os = "windows")]
 pub(crate) const SRV_RESTART_BUDGET: usize = 3;
-#[cfg(target_os = "windows")]
 pub(crate) const SRV_RESTART_WINDOW: std::time::Duration = std::time::Duration::from_secs(120);
 
 #[cfg(target_os = "windows")]
@@ -30,6 +28,8 @@ mod windows;
 #[cfg(target_os = "windows")]
 pub(crate) use windows::run_windows;
 
+#[cfg(not(target_os = "windows"))]
+mod srv_exit;
 #[cfg(not(target_os = "windows"))]
 mod unix;
 #[cfg(not(target_os = "windows"))]

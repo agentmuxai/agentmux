@@ -5,6 +5,7 @@ use crate::host_spawn::{spawn_host_unix, terminate_child_gracefully};
 use crate::logging::log;
 use crate::second_instance::bind_socket_with_recovery;
 use crate::show_fatal_dialog;
+use crate::supervisor::srv_exit::{respawn_srv, signal_name, srv_exit_action, Srv, SrvAction};
 use crate::supervisor::{HOST_RESTART_BUDGET, HOST_RESTART_WINDOW};
 use crate::{
     data_dir, event_log, hash, host_pipe, ipc, mem_supervisor, other_instances, saga,
@@ -348,7 +349,7 @@ pub(crate) async fn run_unix(
     );
     let (saga_coord, _ipc_handle, host_pipe) = setup_result;
     crate::host_quit::install(std::sync::Arc::clone(&host_pipe), std::sync::Arc::clone(&state));
-    let (srv_result, mut srv_child) = match srv_spawn_result {
+    let (first_srv_result, first_srv_child) = match srv_spawn_result {
         Ok(pair) => pair,
         Err(e) => {
             log(&format!("FATAL: srv spawn failed: {}", e));
@@ -373,16 +374,14 @@ pub(crate) async fn run_unix(
     // §6.2) and gets the no-op presenter, but still needs the srv session: it
     // carries `app:startatlogin` to the menu-bar item and the LaunchAgent
     // (SPEC_START_WITH_OS_2026_09_25 §3.9).
-    crate::notify::start(&srv_result.ws_endpoint, &srv_result.auth_key, paths.data_dir.clone(), dir_hash.clone(), state.clone());
+    crate::notify::start(&first_srv_result.ws_endpoint, &first_srv_result.auth_key, paths.data_dir.clone(), dir_hash.clone(), state.clone());
 
-    // CRITICAL (same rationale as run_windows): take srv's stdin out of
-    // the Child so tokio's wait() can't close it and trip srv's
-    // parent-watch EOF. Held until launcher exit.
-    let _srv_stdin_keepalive = srv_child.stdin.take();
-    // srv's pid, taken now: tokio's `Child::id()` is `None` once the child has
-    // been waited on, which is exactly when the cleanup below needs it (srv
-    // died first, or `quiesce_srv` reaped it).
-    let srv_pid = srv_child.id();
+    // CRITICAL (same rationale as run_windows): `Srv::new` takes srv's stdin out
+    // of the Child so tokio's wait() can't close it and trip srv's parent-watch
+    // EOF, and holds it until launcher exit. It also takes srv's pid now: tokio's
+    // `Child::id()` is `None` once the child has been waited on, which is exactly
+    // when the cleanup needs it (srv died first, or `quiesce_srv` reaped it).
+    let mut srv = Srv::new(first_srv_result, first_srv_child);
 
     // 3. Spawn the host with srv endpoints in env.
     // dir_hash was computed once above for socket_path; reuse it here
@@ -421,7 +420,7 @@ pub(crate) async fn run_unix(
     // independently useful number.
     startup_sink.stage_begin("host", "Host startup");
     let host_spawn_t = std::time::Instant::now();
-    let mut host_child = match spawn_host_unix(real_exe, args, &srv_result, &host_env, false) {
+    let mut host_child = match spawn_host_unix(real_exe, args, &srv.result, &host_env, false) {
         Some(c) => {
             startup_sink.stage_end(
                 "host",
@@ -440,8 +439,8 @@ pub(crate) async fn run_unix(
             );
             log("FATAL: could not start CEF host — terminating");
             eprintln!("Failed to launch AgentMux.");
-            terminate_child_gracefully(&srv_child);
-            let _ = srv_child.start_kill();
+            terminate_child_gracefully(&srv.child);
+            let _ = srv.child.start_kill();
             std::process::exit(1);
         }
     };
@@ -464,6 +463,15 @@ pub(crate) async fn run_unix(
     let mut oom_restarts: Vec<std::time::Instant> = Vec::new();
     let mut last_abnormal_code: Option<i32> = None;
     let mut host_degraded = false;
+    // srv's own restart budgets (SPEC_UNIX_SRV_RESTART_BUDGET_2026_10_24): crashes, and exits while
+    // the computer was out of memory, which are waited out like the window process's.
+    let mut srv_restarts: Vec<std::time::Instant> = Vec::new();
+    let mut srv_oom_restarts: Vec<std::time::Instant> = Vec::new();
+    // Set when the launcher itself ends the host because srv was started again: that host is wired to
+    // the dead srv's endpoints. The host arm reads it first, so the exit is never taken for a crash.
+    let mut srv_recycle_kill = false;
+    // When the host's process group gets SIGKILL if it hasn't stopped by then (set with the SIGTERM).
+    let mut host_kill_at: Option<tokio::time::Instant> = None;
     // SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11 unix parity — same shape as
     // `run_windows`'s Phase 1/Phase 2 pair. Low-rate UI-thread liveness
     // prober (60s, first tick delayed a full interval so a booting host
@@ -510,6 +518,16 @@ pub(crate) async fn run_unix(
                 relaunch = Some((staged, std::time::Instant::now()));
                 let (data_dir, hash) = (paths.data_dir.clone(), dir_hash.clone());
                 tokio::task::spawn_blocking(move || crate::host_quit::quit_host(&data_dir, &hash));
+            }
+            _ = async {
+                match host_kill_at {
+                    Some(at) => tokio::time::sleep_until(at).await,
+                    None => std::future::pending::<()>().await,
+                }
+            } => {
+                host_kill_at = None;
+                log("host did not stop for the srv restart in time — killing its process group");
+                crate::host_spawn::kill_process_group_forcefully(&host_child);
             }
             _ = teardown_check_interval.tick() => {
                 let misses = crate::ui_liveness::consecutive_misses();
@@ -588,6 +606,24 @@ pub(crate) async fn run_unix(
                         break 1;
                     }
                 };
+                // The launcher stopped this host because srv was started again: start one against
+                // the new srv. It is srv's fault, counted in srv's budget, so it is not a host crash:
+                // no host budget, no GPU ladder, whatever code or signal the host ended with. Read
+                // before the exit is classified, or a SIGTERM would look like a group shutdown.
+                host_kill_at = None;
+                if std::mem::replace(&mut srv_recycle_kill, false) {
+                    log("CEF host stopped for the srv restart — relaunching it against the new srv");
+                    match spawn_host_unix(real_exe, args, &srv.result, &host_env, host_degraded) {
+                        Some(c) => {
+                            host_child = c;
+                            continue;
+                        }
+                        None => {
+                            log("host relaunch failed to spawn — giving up");
+                            break 1;
+                        }
+                    }
+                }
                 // Host killed by a signal. Originally written for the case
                 // where a terminal Ctrl+C reached the host DIRECTLY (it used
                 // to share our foreground process group) and host_child.wait()
@@ -656,28 +692,30 @@ pub(crate) async fn run_unix(
                         // (up to OOM_RELAUNCH_DEADLINE) wait — without this the
                         // SIGINT/SIGTERM + srv arms are starved for the whole
                         // wait (reagent P2). Mirrors the outer select! arms.
+                        // If srv dies meanwhile, the wait goes on (there is no
+                        // running host to restart), and srv is started again
+                        // once memory is back, before the host
+                        // (SPEC_UNIX_SRV_RESTART_BUDGET_2026_10_24 §3.3).
+                        let mut wait = Box::pin(mem_supervisor::await_commit_recovery("host", log));
+                        let mut srv_stopped_during_wait: Option<crate::incidents::SrvStop> = None;
                         let recovered = tokio::select! {
-                            r = mem_supervisor::await_commit_recovery("host", log) => r,
-                            srv_status = srv_child.wait() => {
-                                use std::os::unix::process::ExitStatusExt;
-                                match srv_status {
-                                    Ok(s) => {
-                                        let group_shutdown = matches!(
-                                            s.signal(),
-                                            Some(sig) if sig == libc::SIGINT || sig == libc::SIGTERM || sig == libc::SIGHUP
-                                        );
-                                        if s.success() || group_shutdown {
-                                            log("srv exited as part of shutdown (during OOM wait) — shutting down");
-                                            break 0;
-                                        }
-                                        log(&format!(
-                                            "srv exited UNEXPECTEDLY during OOM wait {} — terminating launcher",
-                                            srv_exit_text(&s)
-                                        ));
-                                    }
-                                    Err(e) => log(&format!("FATAL: srv wait failed during OOM wait: {}", e)),
+                            r = &mut wait => r,
+                            srv_status = srv.child.wait() => {
+                                match srv_exit_action(srv_status, &mut srv_restarts, &mut srv_oom_restarts) {
+                                    SrvAction::Stop(c) => break c,
+                                    SrvAction::Restart { why, .. } => srv_stopped_during_wait = Some(why),
                                 }
-                                break 1;
+                                tokio::select! {
+                                    r = &mut wait => r,
+                                    _ = next_signal(&mut sigint) => {
+                                        log("received SIGINT during OOM wait — shutting down");
+                                        break 0;
+                                    }
+                                    _ = next_signal(&mut sigterm) => {
+                                        log("received SIGTERM during OOM wait — shutting down");
+                                        break 0;
+                                    }
+                                }
                             }
                             _ = next_signal(&mut sigint) => {
                                 log("received SIGINT during OOM wait — shutting down");
@@ -696,8 +734,14 @@ pub(crate) async fn run_unix(
                             );
                             break code;
                         }
+                        if let Some(why) = srv_stopped_during_wait {
+                            if let Err(e) = respawn_srv(launcher_exe_dir, &paths, &startup_sink, why, &mut srv).await {
+                                log(&format!("FATAL: srv respawn failed: {e} — terminating launcher"));
+                                break 1;
+                            }
+                        }
                         crate::incidents::record(&crate::incidents::host_restarted_low_memory());
-                        match spawn_host_unix(real_exe, args, &srv_result, &host_env, true) {
+                        match spawn_host_unix(real_exe, args, &srv.result, &host_env, true) {
                             Some(c) => host_child = c,
                             None => {
                                 log("host relaunch failed to spawn — giving up");
@@ -738,7 +782,7 @@ pub(crate) async fn run_unix(
                             HOST_RESTART_BUDGET,
                             if host_degraded { ", degraded: --disable-gpu" } else { "" }
                         ));
-                        match spawn_host_unix(real_exe, args, &srv_result, &host_env, host_degraded) {
+                        match spawn_host_unix(real_exe, args, &srv.result, &host_env, host_degraded) {
                             Some(c) => host_child = c,
                             None => {
                                 log("host relaunch failed to spawn — giving up");
@@ -748,41 +792,60 @@ pub(crate) async fn run_unix(
                     }
                 }
             }
-            srv_status = srv_child.wait() => {
-                use std::os::unix::process::ExitStatusExt;
-                match srv_status {
-                    Ok(s) => {
-                        // Mirror the host arm's group-shutdown guard (see its
-                        // comment for the PR #2200 process-group caveat: a
-                        // terminal Ctrl+C no longer reaches srv directly,
-                        // since it now has its own process group). srv's own
-                        // signal handler (crates/srv/src/main.rs —
-                        // SIGINT/SIGTERM → cancel token → clean exit) still
-                        // turns an EXPLICIT SIGTERM — e.g. from our own
-                        // `terminate_child_gracefully` in the cleanup
-                        // epilogue, or a signal sent directly to srv's own
-                        // pid — into a clean `s.success()` exit; the
-                        // signal-death branch below is the narrower backstop
-                        // for a raw uncaught signal landing mid-loop. Either
-                        // way, a clean or signal-killed exit here is a
-                        // teardown, NOT an unexpected srv death — don't log a
-                        // scary message and break 1 (reagent #1193 P2).
-                        let group_shutdown = matches!(
-                            s.signal(),
-                            Some(sig) if sig == libc::SIGINT || sig == libc::SIGTERM || sig == libc::SIGHUP
-                        );
-                        if s.success() || group_shutdown {
-                            log("srv exited as part of shutdown — shutting down");
+            srv_status = srv.child.wait() => {
+                // srv exited with the host still running. A clean exit or a group-shutdown signal is
+                // the app stopping (see the host arm for why that still reaches here since PR #2200).
+                // Anything else is srv dying: start it again and restart the host, which is wired to
+                // the dead srv's endpoints, within srv's own budget — as run_windows does. Only a
+                // spent budget, or a srv that cannot start, ends the app.
+                let (why, wait_for_memory) = match srv_exit_action(srv_status, &mut srv_restarts, &mut srv_oom_restarts) {
+                    SrvAction::Stop(c) => break c,
+                    SrvAction::Restart { why, wait_for_memory } => (why, wait_for_memory),
+                };
+                if wait_for_memory {
+                    // Race the wait against the host dying and against shutdown, as the host arm does.
+                    let recovered = tokio::select! {
+                        r = mem_supervisor::await_commit_recovery("srv", log) => r,
+                        host_status = host_child.wait() => {
+                            use std::os::unix::process::ExitStatusExt;
+                            match host_status {
+                                Ok(s) if s.success() || matches!(s.signal(), Some(sig) if sig == libc::SIGINT || sig == libc::SIGTERM || sig == libc::SIGHUP) => {
+                                    log("CEF host exited as part of shutdown (during the srv memory wait) — shutting down");
+                                    break 0;
+                                }
+                                Ok(s) => log(&format!(
+                                    "CEF host exited UNEXPECTEDLY during the srv memory wait {} — terminating launcher",
+                                    srv_exit_text(&s)
+                                )),
+                                Err(e) => log(&format!("FATAL: host wait failed during the srv memory wait: {e}")),
+                            }
+                            break 1;
+                        }
+                        _ = next_signal(&mut sigint) => {
+                            log("received SIGINT during the srv memory wait — shutting down");
                             break 0;
                         }
-                        log(&format!(
-                            "srv exited UNEXPECTEDLY (host still running) {} — terminating launcher",
-                            srv_exit_text(&s)
-                        ));
+                        _ = next_signal(&mut sigterm) => {
+                            log("received SIGTERM during the srv memory wait — shutting down");
+                            break 0;
+                        }
+                    };
+                    if !recovered {
+                        crate::incidents::record(&crate::incidents::memory_give_up());
+                        show_fatal_dialog(mem_supervisor::OOM_GIVEUP_TITLE, mem_supervisor::OOM_GIVEUP_BODY);
+                        break 1;
                     }
-                    Err(e) => log(&format!("FATAL: srv wait failed: {}", e)),
                 }
-                break 1;
+                if let Err(e) = respawn_srv(launcher_exe_dir, &paths, &startup_sink, why, &mut srv).await {
+                    log(&format!("FATAL: srv respawn failed: {e} — terminating launcher"));
+                    break 1;
+                }
+                // The running host holds connections to the dead srv. End it (SIGTERM so CEF flushes
+                // its profile, SIGKILL if it hasn't stopped in time); the host arm starts the next
+                // one against `srv.result`.
+                srv_recycle_kill = true;
+                crate::host_spawn::kill_process_group_gracefully(&host_child);
+                host_kill_at = Some(tokio::time::Instant::now() + std::time::Duration::from_millis(1500));
             }
             _ = next_signal(&mut sigint) => {
                 log("received SIGINT — shutting down");
@@ -814,8 +877,8 @@ pub(crate) async fn run_unix(
         let _ = host_child.start_kill();
     };
     let stop_srv = crate::upgrade::quiesce_srv(
-        &mut srv_child,
-        _srv_stdin_keepalive,
+        &mut srv.child,
+        srv.stdin.take(),
         agentmux_common::process::SRV_EXIT_WAIT,
     );
     let ((), srv_stopped) = tokio::join!(stop_host, stop_srv);
@@ -836,7 +899,7 @@ pub(crate) async fn run_unix(
             false
         }
     };
-    end_agents_left_by_srv(&paths.data_dir, srv_pid.filter(|_| srv_gone));
+    end_agents_left_by_srv(&paths.data_dir, srv.pid.filter(|_| srv_gone));
     // srv has stopped, so the new version copies complete data on its first
     // start. Only after a clean quit the user confirmed recently.
     if let Some((staged, at)) = relaunch.filter(|(_, at)| exit_code == 0 && crate::upgrade_restart::still_confirmed(*at)) {
@@ -854,7 +917,7 @@ pub(crate) async fn run_unix(
 /// started. srv deletes `agent-roots.json` when it closed every agent itself.
 /// `srv_pid` is the pid taken when srv was spawned: tokio's `Child::id()` is
 /// `None` once the child has been waited on, which is the case here.
-fn end_agents_left_by_srv(data_dir: &std::path::Path, srv_pid: Option<u32>) {
+pub(super) fn end_agents_left_by_srv(data_dir: &std::path::Path, srv_pid: Option<u32>) {
     let Some(srv_pid) = srv_pid else { return };
     if let Some(done) = agentmux_common::agent_roots::kill_orphans(data_dir, srv_pid) {
         log(&format!(
@@ -871,21 +934,7 @@ fn describe_srv_exit(code: Option<i32>, signal: Option<i32>, core_dumped: bool) 
     match (code, signal) {
         (Some(code), _) => format!("with code {code}"),
         (None, Some(sig)) => {
-            let name = match sig {
-                libc::SIGHUP => "SIGHUP",
-                libc::SIGINT => "SIGINT",
-                libc::SIGQUIT => "SIGQUIT",
-                libc::SIGILL => "SIGILL",
-                libc::SIGTRAP => "SIGTRAP",
-                libc::SIGABRT => "SIGABRT",
-                libc::SIGBUS => "SIGBUS",
-                libc::SIGFPE => "SIGFPE",
-                libc::SIGKILL => "SIGKILL",
-                libc::SIGSEGV => "SIGSEGV",
-                libc::SIGPIPE => "SIGPIPE",
-                libc::SIGTERM => "SIGTERM",
-                _ => "",
-            };
+            let name = signal_name(sig);
             let core = if core_dumped { ", core dumped" } else { "" };
             if name.is_empty() {
                 format!("killed by signal {sig}{core}")
@@ -898,7 +947,7 @@ fn describe_srv_exit(code: Option<i32>, signal: Option<i32>, core_dumped: bool) 
 }
 
 /// [`describe_srv_exit`] for a real exit status.
-fn srv_exit_text(s: &std::process::ExitStatus) -> String {
+pub(super) fn srv_exit_text(s: &std::process::ExitStatus) -> String {
     use std::os::unix::process::ExitStatusExt;
     describe_srv_exit(s.code(), s.signal(), s.core_dumped())
 }
