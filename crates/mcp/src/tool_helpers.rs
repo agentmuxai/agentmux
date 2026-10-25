@@ -317,8 +317,8 @@ pub(crate) fn send_message_outcome(to: &str, result: &Value) -> Result<String> {
         }
         if result.get("held_reason").and_then(|v| v.as_str()) == Some("needs_login") {
             return Ok(format!(
-                "HELD for {to} (needs_login) — not delivered yet. {to}'s agent cannot start \
-                 because it is not signed in; this AgentMux instance (channel) keeps the message \
+                "HELD for {to} (needs_login) — not delivered yet. {to}'s agent needs to sign in \
+                 again; this AgentMux instance (channel) keeps the message \
                  and delivers it within about a minute of their signing in, for up to 24 hours. \
                  Do not resend it.{id}"
             ));

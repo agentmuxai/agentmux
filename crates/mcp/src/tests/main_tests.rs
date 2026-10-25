@@ -151,6 +151,7 @@ fn send_message_outcome_names_the_state_and_the_id() {
     let t = ok(json!({ "success": false, "held": true, "held_reason": "needs_login", "request_id": "1-2-3",
         "error": "agent Camper is not signed in — held" }));
     assert!(t.starts_with("HELD for Camper (needs_login)"), "{t}");
+    assert!(t.contains("needs to sign in again") && t.contains("24 hours") && t.contains("Do not resend"), "{t}");
     assert!(t.contains("signing in") && t.ends_with(" id=1-2-3"), "{t}");
     assert!(!t.contains("  "), "no runs of spaces: {t:?}");
 
