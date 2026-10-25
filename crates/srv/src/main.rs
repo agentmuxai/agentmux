@@ -142,6 +142,7 @@ async fn app_main() {
         &stores.filestore,
         &stores.id_store,
         &stores.identity_store,
+        &stores.work_store,
     );
 
     // Widget packages: scan ~/.agentmux/widgets, apply this instance's

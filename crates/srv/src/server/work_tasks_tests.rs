@@ -368,7 +368,7 @@ async fn a_task_goes_to_the_work_store_not_the_identity_store() {
     let own = Store::open_in_memory().unwrap();
     own.apply_identity_schema_for_tests().unwrap();
     state.work_store = std::sync::Arc::new(own);
-    let app = crate::server::build_router(state.clone());
+    let app = Api { router: crate::server::build_router(state.clone()), state: state.clone() };
 
     let (s, v) = post(&app, "/agentmux/work", json!({"title": "t", "payload": "p"})).await;
     assert_eq!(s, StatusCode::OK);
