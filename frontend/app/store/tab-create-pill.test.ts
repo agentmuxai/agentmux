@@ -48,16 +48,21 @@ vi.mock("@/app/tab/tab-content-settled", () => ({
 vi.mock("@/app/workspace/window-tab-visibility", () => ({ keepInactiveTabsLaidOut: () => true }));
 vi.mock("./focusManager", () => ({ focusManager: { refocusNode: () => {} } }));
 
+import "@/app/tab/tab-presets";
+import "@/app/tab/tab-content-settled";
 import { cancelTabCreation, createTab, creatingTabId, switchIntentTabId } from "./tab-actions";
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
 describe("new tab pill selection", () => {
-    // createTab imports these lazily; load them up front so two overlapping
-    // creations don't race vitest's resolution of the same mocked module.
-    beforeAll(async () => {
-        await import("@/app/tab/tab-presets");
-        await import("@/app/tab/tab-content-settled");
+    // createTab imports tab-presets and tab-content-settled lazily. Importing the
+    // mocked modules statically above settles their resolution before any test
+    // runs, so two overlapping creations cannot race it and fall through to the
+    // real modules (which pull in the UI kit and need a DOM). The node environment
+    // has no requestAnimationFrame either, which setActiveTab calls when it ends.
+    beforeAll(() => {
+        vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => setTimeout(() => cb(0), 0));
+        return () => vi.unstubAllGlobals();
     });
 
     beforeEach(async () => {
