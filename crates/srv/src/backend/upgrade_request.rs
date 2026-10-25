@@ -6,7 +6,8 @@
 //!
 //! A restart stops every agent and interrupts the user, and an agent can be
 //! prompt-injected, so an agent's word alone never starts one:
-//! - the user's own turn asked for it (`self_quit::gate`, as for `QuitSelf`):
+//! - the user's own turn asked for it (`self_quit::gate_upgrade`: as for
+//!   `QuitSelf`, but a Swarm broadcast doesn't count):
 //!   the upgrade starts — the release is downloaded if it isn't yet, then
 //!   AgentMux restarts once every agent has finished its turn;
 //! - anything else: every window asks the user ("QTest asks to upgrade
