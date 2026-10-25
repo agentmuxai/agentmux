@@ -376,6 +376,7 @@ partial list.
 | [`SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13`](SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md) | Spec: Completing the jekt sender-trust layer (host-tier signing + WAN binding enforcement) |
 | [`SPEC_LAN_DISCOVERY_TXT_CLOBBER_FIX_2026_08_16`](SPEC_LAN_DISCOVERY_TXT_CLOBBER_FIX_2026_08_16.md) | SPEC: LAN discovery peer metadata gets clobbered blank by TXT-less mDNS re-resolutions |
 | [`SPEC_LAN_FLEET_FEED_2026_10_03`](SPEC_LAN_FLEET_FEED_2026_10_03.md) | SPEC: A names-only fleet feed for LAN peers — snapshot, event stream, UDP siblings |
+| [`SPEC_LAN_JEKT_SIGNED_BY_SRV_2026_10_25`](SPEC_LAN_JEKT_SIGNED_BY_SRV_2026_10_25.md) | SPEC: srv signs LAN jekts for an agent that signed nothing |
 | [`SPEC_LAN_UDP_PEER_DISCOVERY_2026_10_02`](SPEC_LAN_UDP_PEER_DISCOVERY_2026_10_02.md) | SPEC: Desktops find each other without mDNS — UDP broadcast peer discovery |
 | [`SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19`](SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md) | SPEC: Launch Modal — State Machine Hardening |
 | [`SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16`](SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md) | Spec — Pane Minimize as a Locked State (redesign) |
