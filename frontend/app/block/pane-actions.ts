@@ -123,7 +123,7 @@ export function joinMenuGroups(groups: ContextMenuItem[][]): ContextMenuItem[] {
 export type PaneMenuSection =
     | "viewItems" // viewModel.getBodyContextMenuItems()
     | "clipboard" // Copy / Paste
-    | "split" // Split Up / Down / Left / Right
+    | "split" // Split Down / Right
     | "magnify" // Magnify / Un-Magnify Pane
     | "close" // Close Pane
     | "inspect"; // Inspect Element
@@ -198,9 +198,7 @@ export function buildPaneContextMenu(
 
     const split: ContextMenuItem[] = has("split")
         ? [
-              { label: "Split Up", sublabel: hint("split:up"), click: () => void handleSplitPane(blockData, "up") },
               { label: "Split Down", sublabel: hint("split:down"), click: () => void handleSplitPane(blockData, "down") },
-              { label: "Split Left", sublabel: hint("split:left"), click: () => void handleSplitPane(blockData, "left") },
               { label: "Split Right", sublabel: hint("split:right"), click: () => void handleSplitPane(blockData, "right") },
           ]
         : [];

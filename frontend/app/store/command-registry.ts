@@ -222,16 +222,6 @@ export function registerDefaultCommands(): void {
         },
     });
     commandRegistry.register({
-        id: "split:left",
-        label: "Split Left",
-        category: "Split",
-        icon: "table-columns",
-        execute: async () => {
-            const blockId = getFocusedBlockIdForSplit();
-            if (blockId) await createBlockSplitHorizontally(getSplitBlockDef(blockId), blockId, "before");
-        },
-    });
-    commandRegistry.register({
         id: "split:down",
         label: "Split Down",
         category: "Split",
@@ -239,16 +229,6 @@ export function registerDefaultCommands(): void {
         execute: async () => {
             const blockId = getFocusedBlockIdForSplit();
             if (blockId) await createBlockSplitVertically(getSplitBlockDef(blockId), blockId, "after");
-        },
-    });
-    commandRegistry.register({
-        id: "split:up",
-        label: "Split Up",
-        category: "Split",
-        icon: "table-list",
-        execute: async () => {
-            const blockId = getFocusedBlockIdForSplit();
-            if (blockId) await createBlockSplitVertically(getSplitBlockDef(blockId), blockId, "before");
         },
     });
 

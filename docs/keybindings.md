@@ -40,7 +40,7 @@ The same list is in the app: press F1, or open the Help pane. A terminal keeps e
 | New agent pane | ⇧⌘A | Ctrl+Shift+A |
 | Split right | ⌘D | Ctrl+Shift+D |
 | Split below | ⇧⌘D | Ctrl+Alt+Shift+D |
-| Split in a direction | ⌃⇧S then ↑/↓/←/→ | Ctrl+Shift+S then ↑/↓/←/→ |
+| Split in a direction | ⌃⇧S then ↓/→ | Ctrl+Shift+S then ↓/→ |
 | Close pane | ⌘W | Ctrl+Shift+W |
 | Maximize pane | ⌘M | Ctrl+Shift+M |
 | Focus pane by direction | ⌃⇧↑/↓/←/→ | Ctrl+Shift+↑/↓/←/→ |
