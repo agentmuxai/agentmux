@@ -752,7 +752,6 @@ pub fn post_create_floating_window(
     // frontend's cef-init detects `floatingPaneId` and routes to the
     // floating-pane shell instead of the main workspace.
     let ipc_port = *state.ipc_port.lock();
-    let ipc_token = &state.ipc_token;
     // pane_id is a UUID-ish identifier in current callers — no
     // percent-encoding needed today. Use a minimal escape that handles
     // a few special chars in case future callers pass arbitrary names.
@@ -767,11 +766,10 @@ pub fn post_create_floating_window(
         Ok(base_url) => {
             let separator = if base_url.contains('?') { "&" } else { "?" };
             let mut u = format!(
-                "{}{}ipc_port={}&ipc_token={}&windowLabel={}&floatingPaneId={}",
+                "{}{}ipc_port={}&windowLabel={}&floatingPaneId={}",
                 base_url,
                 separator,
                 ipc_port,
-                ipc_token,
                 window_label,
                 escape_query_value(&args.pane_id),
             );

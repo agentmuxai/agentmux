@@ -318,15 +318,14 @@ pub fn open_floating_pane_window(
         // Phase B adds owned-window lifecycle (follows/minimizes/closes with
         // the source window), JS header-drag, and redock — see the spec.
         let ipc_port = *state.ipc_port.lock();
-        let ipc_token = &state.ipc_token;
         let workspace_id = parsed.workspace_id.clone().unwrap_or_default();
 
         let url = match super::window::resolve_frontend_base_url(ipc_port) {
             Ok(base_url) => {
                 let separator = if base_url.contains('?') { "&" } else { "?" };
                 let mut u = format!(
-                    "{}{}ipc_port={}&ipc_token={}&windowLabel={}&floatingPaneId={}",
-                    base_url, separator, ipc_port, ipc_token, window_label, parsed.pane_id
+                    "{}{}ipc_port={}&windowLabel={}&floatingPaneId={}",
+                    base_url, separator, ipc_port, window_label, parsed.pane_id
                 );
                 if !workspace_id.is_empty() {
                     u.push_str(&format!("&workspaceId={}", workspace_id));

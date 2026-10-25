@@ -1238,19 +1238,20 @@ wrap_browser_process_handler! {
             };
             *self.state.main_frontend_origin.lock() = crate::client::app_navigation::url_origin(&base_url);
 
-            // Append IPC port, token, and transparency hint as URL query parameters
-            // so the frontend can detect CEF mode and set the initial --window-opacity
+            // Append IPC port and transparency hint as URL query parameters (the token is
+            // injected into the page by the host, ipc_credentials.rs, never put in the
+            // address) so the frontend can detect CEF mode and set the initial --window-opacity
             // CSS variable before first paint (avoiding the translucent-default flash
             // for window:transparent=false users).
             let separator = if base_url.contains('?') { "&" } else { "?" };
             let url_with_ipc = format!(
-                "{}{}ipc_port={}&ipc_token={}&window_transparent={}",
-                base_url, separator, self.ipc_port, self.state.ipc_token,
+                "{}{}ipc_port={}&window_transparent={}",
+                base_url, separator, self.ipc_port,
                 if is_transparent { "1" } else { "0" }
             );
             let url = CefString::from(url_with_ipc.as_str());
 
-            tracing::info!("Loading URL: {}{}ipc_port={}&ipc_token=<redacted>&window_transparent={}", base_url, separator, self.ipc_port, if is_transparent { "1" } else { "0" });
+            tracing::info!("Loading URL: {}", url_with_ipc);
 
             // CEF Views mode — window NOT shown until on_load_end.
             // No DwmExtendFrameIntoClientArea (causes white flash).

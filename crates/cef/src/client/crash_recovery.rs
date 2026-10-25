@@ -241,8 +241,7 @@ impl AgentMuxHandler {
         // itself. Matches the format used by
         // commands::window::resolve_frontend_base_url (window/creation.rs)
         // and its callers (see window/creation.rs's open_window_with_kind,
-        // drag.rs's open_window_at_position — all use the same ipc_port /
-        // ipc_token query params).
+        // drag.rs's open_window_at_position — all use the same ipc_port query param).
         //
         // If the resolver returns Err (frontend assets missing — the
         // 2026-05-28 incident pattern where an external `rm -rf` of a
@@ -259,12 +258,7 @@ impl AgentMuxHandler {
         let app_url = match crate::commands::window::resolve_frontend_base_url(self.resolved_ipc_port()) {
             Ok(base_url) => match recovery_owned.as_mut() {
                 Some(owned) => self.recovery_target_url(owned, &base_url),
-                None => recovery_navigation_url(
-                    &base_url,
-                    self.resolved_ipc_port(),
-                    &self.state.ipc_token,
-                    None,
-                ),
+                None => recovery_navigation_url(&base_url, self.resolved_ipc_port(), None),
             },
             Err(e) => {
                 tracing::error!(
@@ -296,13 +290,8 @@ impl AgentMuxHandler {
         // re-render the same data: URL). CEF will spawn a fresh renderer
         // subprocess for the navigation.
         //
-        // NOTE on ipc_token exposure: the token is already present in
-        // the live app URL that was loaded before the crash (it's in
-        // the location bar for the dead renderer's process). Embedding
-        // it in the recovery HTML that runs inside the same browser
-        // doesn't extend its reach — the HTML is ephemeral, not
-        // persisted to disk, and `window.close()` or the next crash
-        // clears it.
+        // The recovery page's URL carries no token: the host injects the
+        // credentials when the app page it navigates to starts loading.
         let html = format!(
             r#"<!DOCTYPE html>
 <html lang="en">
