@@ -159,19 +159,6 @@ fn the_budget_stops_at_the_hourly_limit_and_while_github_says_wait() {
     assert!(!b.take(9_000_000));
 }
 
-#[test]
-fn a_call_github_answered_with_304_is_given_back() {
-    let b = Budget { calls: Mutex::new(Vec::new()), wait_until: AtomicI64::new(0) };
-    for i in 0..HOURLY_BUDGET as i64 {
-        assert!(b.take(1000 + i));
-    }
-    assert!(!b.take(5000));
-    b.refund(1000 + 3);
-    assert!(b.take(5000), "the refunded call is free again");
-    assert!(!b.take(5001));
-    b.refund(424_242);
-    assert!(!b.take(5002), "refunding a call that was never taken changes nothing");
-}
 
 fn item(id: &str) -> WorkItem {
     WorkItem {

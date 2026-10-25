@@ -15,8 +15,9 @@
 //! redirect, which GitHub's 60-an-hour anonymous API limit (shared by
 //! everything on the computer) doesn't touch. The API is asked only for the
 //! release's files and notes, when the page names a release this srv hasn't
-//! got yet, and then with its ETag (a 304 costs nothing). When GitHub still
-//! refuses, the check says so and when it lifts, and a newer release is
+//! got yet (and, once held, with its ETag, which saves the download; an
+//! unauthenticated 304 still counts against the limit, as measured). When
+//! GitHub still refuses, the check says so and when it lifts, and a newer release is
 //! still reported, without a download until the API answers.
 //!
 //! The answer is kept here, sent to every window as the `app:updatestatus`
