@@ -1,0 +1,32 @@
+{
+  "templateVersion": 1,
+  "id": "agentmux.docs-drift",
+  "name": "Docs drift",
+  "version": "1.0.0",
+  "kind": "job",
+  "description": "Finds docs whose claims no longer match the code, and dead links. Files one task when something drifts, and none when an open task already lists the same findings. Pull requests and deletions need an approval step that arrives in a later version; until then this only reports and files tasks.",
+  "readsUntrusted": true,
+  "params": {
+    "type": "object",
+    "properties": {
+      "repo": { "type": "string", "title": "Repository", "description": "owner/repo." },
+      "doc_globs": { "type": "array", "items": { "type": "string" }, "title": "Docs", "description": "Globs of the docs to check.", "default": ["docs/**", "README.md"] },
+      "code_globs": { "type": "array", "items": { "type": "string" }, "title": "Code", "description": "Globs of the code to check them against; empty means everything outside the docs.", "default": [] },
+      "since": { "type": "string", "title": "Since", "description": "A date or commit to start from; empty checks everything.", "default": "" }
+    },
+    "required": ["repo"]
+  },
+  "trigger": { "kind": "cron", "cron": "0 6 * * 3" },
+  "action": { "kind": "message" },
+  "policy": {
+    "overlap": "skip",
+    "catch_up": "latest",
+    "timeout_minutes": 30,
+    "retries": 1,
+    "caps": { "run_usd": 1 },
+    "approval": "none",
+    "results": ["ledger", "task_on_failure"]
+  },
+  "outputs": ["kanban_task"],
+  "secrets": []
+}
