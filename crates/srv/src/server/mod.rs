@@ -46,6 +46,7 @@ pub(crate) mod mux_obj_bridge;
 mod websocket;
 mod drone_handlers;
 pub(crate) mod cron;
+pub(crate) mod job_actions;
 pub(crate) mod work_queue;
 mod work_tasks;
 mod messaging_handlers;

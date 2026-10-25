@@ -125,12 +125,26 @@ pub mod reason {
     pub const PAUSED: &str = "paused";
     /// Every job was paused by the operator (Pause all) when its slot came.
     pub const PAUSED_ALL: &str = "paused_all";
+    /// The job's previous run was still running (policy `overlap`): a skipped
+    /// slot, or the one buffered run waiting for it.
+    pub const OVERLAP: &str = "overlap";
+    /// A run of the job's concurrency group is running; this one waits.
+    pub const GROUP_BUSY: &str = "group_busy";
+    /// Three unattended agent runs are running already; this one waits.
+    pub const GLOBAL_LIMIT: &str = "global_limit";
+    /// An infrastructure failure's retry, waiting out its backoff.
+    pub const RETRY_WAIT: &str = "retry_wait";
+    /// The run was stopped at the job's `timeout_minutes`.
+    pub const TIMEOUT: &str = "timeout";
+    /// The reasons a `scheduled` run waits to start with.
+    pub const WAITING: [&str; 4] = [OVERLAP, GROUP_BUSY, GLOBAL_LIMIT, RETRY_WAIT];
 }
 
 /// Infrastructure status (§3.1; the ones P1 writes).
 pub mod infra {
     pub const OK: &str = "ok";
     pub const ERROR: &str = "error";
+    pub const TIMEOUT: &str = "timeout";
     pub const INTERRUPTED: &str = "interrupted";
 }
 
@@ -283,10 +297,11 @@ const OPEN_NOT_ENDED: &str = "state IN ('scheduled','pending','running') AND end
 /// A decisive run: one that finished, or failed (a miss, a lost run, an
 /// expired pending fire, a failing infrastructure status or outcome). The
 /// same rule as `jobs::verdict::decisive`, whose test checks the two agree.
-const DECISIVE: &str = "(state IN ('finished','missed','lost')
+const DECISIVE: &str = "((state IN ('finished','missed','lost')
                              OR (state = 'pending' AND reason = 'expired')
                              OR infra IN ('error','timeout','over_budget','interrupted')
-                             OR outcome = 'failed')";
+                             OR outcome = 'failed')
+                            AND NOT (json_valid(links) AND json_extract(links, '$.retried_by') IS NOT NULL))";
 
 impl Store {
     /// Create the table if this store doesn't have it yet (a test store, or
@@ -528,6 +543,88 @@ impl Store {
             "UPDATE db_job_runs SET reason = ?2, ended_at_ms = ?3
               WHERE id = ?1 AND state = 'pending' AND ended_at_ms IS NULL",
             params![id, why, now_ms],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// The cron runs that take a place: running, or admitted and being
+    /// delivered (`scheduled` with no waiting reason). Overlap, concurrency
+    /// groups and the global limit count these.
+    pub fn job_runs_occupying(&self) -> Result<Vec<JobRun>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {COLS} FROM db_job_runs
+              WHERE job_source = 'cron' AND ended_at_ms IS NULL
+                AND (state = 'running' OR (state = 'scheduled' AND reason = ''))
+              ORDER BY started_at_ms"
+        ))?;
+        let rows = stmt.query_map([], row_to_run)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// The cron runs waiting to start, oldest first: `scheduled` with a
+    /// waiting reason ([`reason::WAITING`]).
+    pub fn job_runs_waiting(&self) -> Result<Vec<JobRun>, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let list = reason::WAITING.iter().map(|r| format!("'{r}'")).collect::<Vec<_>>().join(",");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {COLS} FROM db_job_runs
+              WHERE job_source = 'cron' AND state = 'scheduled' AND ended_at_ms IS NULL AND reason IN ({list})
+              ORDER BY started_at_ms, rowid"
+        ))?;
+        let rows = stmt.query_map([], row_to_run)?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Make the just-inserted `scheduled` run wait for `why`.
+    pub fn job_run_set_wait(&self, id: &str, why: &str) -> Result<bool, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let n = conn.execute(
+            "UPDATE db_job_runs SET reason = ?2 WHERE id = ?1 AND state = 'scheduled' AND ended_at_ms IS NULL",
+            params![id, why],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// A waiting run starts: its reason is cleared if it still is `from`
+    /// (only one scheduler admits it), and its start is now.
+    pub fn job_run_admit(&self, id: &str, from: &str, now_ms: i64) -> Result<bool, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let n = conn.execute(
+            "UPDATE db_job_runs SET reason = '', started_at_ms = ?3
+              WHERE id = ?1 AND state = 'scheduled' AND reason = ?2 AND ended_at_ms IS NULL",
+            params![id, from, now_ms],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Close a still-open run that something stopped (the timeout, a
+    /// `cancel_other` overlap): `finished` with `infra`, `why` as its reason
+    /// and `summary`. `false` when it was already closed.
+    pub fn job_run_stop(&self, id: &str, infra_status: &str, why: &str, summary: &str, now_ms: i64) -> Result<bool, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let n = conn.execute(
+            &format!(
+                "UPDATE db_job_runs
+                    SET state = 'finished', infra = ?2, reason = ?3, summary = ?4, ended_at_ms = ?5
+                  WHERE id = ?1 AND {OPEN_NOT_ENDED}"
+            ),
+            params![id, infra_status, why, clip_summary(summary), now_ms],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Close an open run that did its work at once (a filed task): `finished`,
+    /// infra `ok`, with the outcome it concluded.
+    pub fn job_run_conclude(&self, id: &str, outcome: &str, summary: &str, now_ms: i64) -> Result<bool, StoreError> {
+        let conn = self.conn().lock().unwrap();
+        let n = conn.execute(
+            &format!(
+                "UPDATE db_job_runs
+                    SET state = 'finished', infra = 'ok', outcome = ?2, summary = ?3, ended_at_ms = ?4
+                  WHERE id = ?1 AND {OPEN_NOT_ENDED}"
+            ),
+            params![id, outcome, clip_summary(summary), now_ms],
         )?;
         Ok(n > 0)
     }

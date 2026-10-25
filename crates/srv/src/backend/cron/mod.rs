@@ -28,6 +28,9 @@
 
 pub mod expr;
 pub mod schedule;
+mod start;
+
+pub use start::{ActionOutcome, ActionRunner};
 
 use agentmux_common::AUTH_KEY_HEADER;
 use std::collections::HashMap;
@@ -36,7 +39,8 @@ use std::sync::{Arc, Mutex};
 use agentmux_common::api_types::InjectRequest;
 use chrono::{DateTime, Utc};
 
-use crate::backend::jobs::{self, Begin, RunLedger};
+use crate::backend::jobs::admission::Admission;
+use crate::backend::jobs::{self, RunLedger};
 use crate::backend::storage::store::Store;
 use crate::backend::storage::cron::CronJob;
 use crate::backend::mps::Broker;
@@ -158,6 +162,9 @@ pub(crate) struct Fired {
     /// `None` when the fire didn't happen: another scheduler had the slot,
     /// or there was no way to deliver.
     pub outcome: Option<FireOutcome>,
+    /// Why the run waits to start (policy), when it does: its row is
+    /// `scheduled` with this reason.
+    pub waiting: Option<&'static str>,
 }
 
 /// What `start` found for a job: the newest missed slot, and the earlier
@@ -179,6 +186,8 @@ pub struct CronScheduler {
     delivery: std::sync::OnceLock<FireDelivery>,
     presence: std::sync::OnceLock<AgentPresence>,
     runs: std::sync::OnceLock<Arc<RunLedger>>,
+    /// Runs the `task` and `spawn` actions ([`ActionRunner`]).
+    actions: std::sync::OnceLock<ActionRunner>,
     /// Jobs this scheduler disabled for their age bound (`max_age_secs`),
     /// not paused: their pending fire may still be delivered within that
     /// bound (`deliver_pending`). Cleared when the job is paused, deleted or
@@ -205,6 +214,7 @@ impl CronScheduler {
             delivery: std::sync::OnceLock::new(),
             presence: std::sync::OnceLock::new(),
             runs: std::sync::OnceLock::new(),
+            actions: std::sync::OnceLock::new(),
             aged_out: Mutex::default(),
         })
     }
@@ -464,47 +474,38 @@ impl CronScheduler {
         if let Some(fired) = self.paused_all_answer(job, scheduled_for).await {
             return fired;
         }
-        let run_id = match self.runs() {
+        let admitted = match self.runs() {
             Some(runs) => {
-                let (runs, owned) = (runs.clone(), job.clone());
-                let begun = tokio::task::spawn_blocking(move || runs.begin_cron(&owned, trigger, scheduled_for, &by))
+                let (runs, owned, by) = (runs.clone(), job.clone(), by);
+                tokio::task::spawn_blocking(move || runs.admit_cron(&owned, trigger, scheduled_for, &by))
                     .await
-                    .unwrap_or(Begin::Unrecorded);
-                match begun {
-                    Begin::Run(run_id) => Some(run_id),
-                    Begin::SlotTaken => {
-                        tracing::debug!(id, ?slot, "cron: another scheduler has this slot");
-                        return Fired { run_id: None, outcome: None };
-                    }
-                    Begin::Unrecorded => None,
-                }
+                    .unwrap_or(Admission::Unrecorded)
             }
-            None => None,
+            None => Admission::Unrecorded,
+        };
+        let run_id = match admitted {
+            Admission::Run(run_id) => Some(run_id),
+            Admission::Unrecorded => None,
+            Admission::Taken => {
+                tracing::debug!(id, ?slot, "cron: another scheduler has this slot");
+                return Fired { run_id: None, outcome: None, waiting: None };
+            }
+            Admission::Skipped => return Fired { run_id: None, outcome: None, waiting: None },
+            Admission::Refused => {
+                let error = jobs::OVERLAP_REFUSAL.to_string();
+                return Fired { run_id: None, outcome: Some(FireOutcome::Failed { error }), waiting: None };
+            }
+            Admission::Waiting(run_id, why) => {
+                self.publish_changed();
+                return Fired { run_id: Some(run_id), outcome: None, waiting: Some(why) };
+            }
         };
         let late_for = match slot {
             Slot::CatchUp(ms) => Some(ms),
             _ => None,
         };
-        let delivery_started = agentmux_common::time::now_ms();
-        let Some(outcome) = self.deliver(job, run_id.as_deref(), late_for).await else {
-            if let (Some(runs), Some(run_id)) = (self.runs(), &run_id) {
-                let failed = FireOutcome::Failed { error: "no way to deliver".to_string() };
-                runs.record_delivery(run_id, job, &failed, false, delivery_started);
-            }
-            return Fired { run_id, outcome: None };
-        };
         let scheduled = !matches!(slot, Slot::Manual { .. });
-        if let (Some(runs), Some(run_id)) = (self.runs(), &run_id) {
-            let (runs, run_id, job, o) = (runs.clone(), run_id.clone(), job.clone(), outcome.clone());
-            let _ = tokio::task::spawn_blocking(move || runs.record_delivery(&run_id, &job, &o, scheduled, delivery_started)).await;
-        }
-        // Run now (manual) is in the ledger only: it neither counts as a
-        // fire nor as a miss.
-        if scheduled {
-            self.record_result(id, &outcome);
-        }
-        self.publish_changed();
-        Fired { run_id, outcome: Some(outcome) }
+        self.start_run(job, run_id, scheduled, late_for).await
     }
 
     /// While the operator has Pause all on (jobs spec §3.3): a slot becomes
@@ -518,11 +519,12 @@ impl CronScheduler {
             Some(match scheduled_for {
                 Some(slot) => {
                     runs.record_skip_slot(&job, slot, crate::backend::storage::job_runs::reason::PAUSED_ALL);
-                    Fired { run_id: None, outcome: None }
+                    Fired { run_id: None, outcome: None, waiting: None }
                 }
                 None => Fired {
                     run_id: None,
                     outcome: Some(FireOutcome::Failed { error: jobs::PAUSED_ALL_REFUSAL.to_string() }),
+                    waiting: None,
                 },
             })
         });
@@ -638,6 +640,7 @@ impl CronScheduler {
         tokio::spawn(async move {
             loop {
                 sched.deliver_pending().await;
+                sched.run_policy_pass().await;
                 tokio::select! {
                     _ = jobs::pending_wake().notified() => {}
                     _ = tokio::time::sleep(PENDING_SWEEP_EVERY) => {}
