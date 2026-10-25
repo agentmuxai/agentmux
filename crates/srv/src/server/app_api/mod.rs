@@ -105,6 +105,7 @@ mod history_usage;
 mod shells;
 pub(crate) mod kanban;
 mod jobs;
+mod jobs_edit;
 mod connectivity;
 pub(crate) mod layout_intent;
 
@@ -145,6 +146,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     shells::register(engine, state);
     kanban::register(engine, state);
     jobs::register(engine, state);
+    jobs_edit::register(engine, state);
     crate::server::account_episodes::register(engine, state);
     connectivity::register(engine);
 }

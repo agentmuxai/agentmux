@@ -12,14 +12,18 @@ import { createEffect, createSignal, For, on, Show, type JSX } from "solid-js";
 import { Button, Pill } from "@/app/element/ui";
 import { openLink } from "@/app/store/global";
 import { revealBlock } from "@/app/util/reveal-block";
+import { useAgentList } from "@/app/view/agent/use-agent-list";
+import { vaultAvailable, vaultEntries } from "@/app/view/vault/vault-store";
 import { openWarden } from "@/app/view/warden/open-warden";
 import type { JobRunRow } from "@/types/rpc/JobRunRow";
+import type { JobsDryRunResult } from "@/types/rpc/JobsDryRunResult";
 import type { JobsActRequest } from "@/types/rpc/JobsActRequest";
 import type { JobsActResult } from "@/types/rpc/JobsActResult";
 import type { JobsRunsResult } from "@/types/rpc/JobsRunsResult";
 import type { JobView } from "@/types/rpc/JobView";
 import { formatDurationShort, formatTimeAgo } from "@/util/format-time";
 
+import { JobDryRun } from "./job-dry-run";
 import { costText, kanbanTask, reasonText, runBadge, stateText } from "./jobs-format";
 import { RUNS_MAX, RUNS_PAGE, type JobChange } from "./jobs-model";
 
@@ -124,6 +128,11 @@ export function JobHistory(props: {
     /** Counts the list's polls; each reloads the runs too. */
     polled: number;
     act: (req: JobsActRequest) => Promise<JobsActResult>;
+    /** What the stored job would do, starting nothing. */
+    dryRun: (jobId: string) => Promise<JobsDryRunResult>;
+    onEdit: () => void;
+    onClone: () => void;
+    onReviewUpdate: () => void;
     onClose: () => void;
 }): JSX.Element {
     const [runs, setRuns] = createSignal<JobRunRow[]>([]);
@@ -131,6 +140,8 @@ export function JobHistory(props: {
     const [busy, setBusy] = createSignal<string | null>(null);
     const [note, setNote] = createSignal<string | null>(null);
     const [confirmDelete, setConfirmDelete] = createSignal(false);
+    const [dry, setDry] = createSignal<JobsDryRunResult | null>(null);
+    const [agents] = useAgentList();
 
     // Every request remembers the job it was for and the generation it was made in; an answer that
     // comes back after another job was opened, or after a newer reload, is dropped, so it can't show
@@ -188,6 +199,7 @@ export function JobHistory(props: {
             () => props.job.id,
             () => {
                 setConfirmDelete(false);
+                setDry(null);
                 void loadFirst();
             }
         )
@@ -215,6 +227,18 @@ export function JobHistory(props: {
         } finally {
             setBusy(null);
             setConfirmDelete(false);
+        }
+    };
+
+    const doDryRun = async () => {
+        setBusy("dryrun");
+        setNote(null);
+        try {
+            setDry(await props.dryRun(props.job.id));
+        } catch (e) {
+            setNote(String(e));
+        } finally {
+            setBusy(null);
         }
     };
 
@@ -287,6 +311,24 @@ export function JobHistory(props: {
                             </Button>
                         </Show>
                     </Show>
+                    <Show when={props.job.actions}>
+                        <Button density="compact" icon="pen" disabled={busy() != null} onClick={() => props.onEdit()}>
+                            Edit
+                        </Button>
+                        <Button density="compact" icon="clone" disabled={busy() != null} onClick={() => props.onClone()}>
+                            Clone
+                        </Button>
+                        <Button density="compact" icon="vial" busy={busy() === "dryrun"} disabled={busy() != null} title="What it would do, starting nothing" onClick={() => void doDryRun()}>
+                            Dry run
+                        </Button>
+                    </Show>
+                    <Show when={props.job.template?.update}>
+                        {(u) => (
+                            <Button density="compact" tone="accent" icon="circle-up" onClick={() => props.onReviewUpdate()}>
+                                {u().approved ? `Update to ${u().version}` : `Review ${u().version}`}
+                            </Button>
+                        )}
+                    </Show>
                     <Show when={props.job.owner_block_id}>
                         {(b) => (
                             <Button density="compact" tone="quiet" icon="user" onClick={() => void revealBlock(b(), { source: "jobs" })}>
@@ -301,6 +343,15 @@ export function JobHistory(props: {
             </header>
             <Show when={note()}>
                 <div class="warden-manager-error">{note()}</div>
+            </Show>
+            <Show when={dry()}>
+                {(d) => (
+                    <JobDryRun
+                        result={d()}
+                        vault={vaultAvailable() ? (vaultEntries() ?? []) : null}
+                        nameOf={(id) => agents()?.find((a) => a.id === id)?.name ?? id}
+                    />
+                )}
             </Show>
             <Show when={runs().length > 0} fallback={<div class="warden-section-stub">No runs yet.</div>}>
                 <table class="warden-manager-table warden-jobs-runs">

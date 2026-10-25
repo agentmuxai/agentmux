@@ -227,6 +227,10 @@ fn jobs_sort_by_next_run_then_name() {
         owner_block_id: None,
         target: String::new(),
         expression: String::new(),
+        trigger_kind: "cron".into(),
+        tz: "UTC".into(),
+        every_secs: None,
+        once_at_ms: None,
         next_run_ms: next,
         state: "active".into(),
         catch_up: String::new(),
@@ -244,6 +248,7 @@ fn jobs_sort_by_next_run_then_name() {
         run_cap_usd: None,
         day_cap_usd: None,
         cost_not_reported: false,
+        template: None,
     };
     let mut jobs = vec![mk("b", None), mk("c", Some(5)), mk("a", None), mk("d", Some(1))];
     sort_jobs(&mut jobs);

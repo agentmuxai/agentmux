@@ -86,10 +86,14 @@ fn event_triggers_drone_actions_and_approvals_are_for_later() {
     assert!(e.contains("policy.approval") && e.contains(LATER), "{e}");
 }
 
+/// The definition reads a template pin; whether the template exists and is
+/// approved is checked where the job is made (`from_template`).
 #[test]
-fn templates_are_refused_until_they_land() {
-    let v = add(example(), "", "template", json!({ "id": "agentmux.docs-drift", "version": "1.0.0", "hash": "x" }));
-    assert_eq!(refused(v), NO_TEMPLATES_YET);
+fn a_template_pin_needs_an_id_and_a_version() {
+    let pinned = add(example(), "", "template", json!({ "id": "agentmux.docs-drift", "version": "1.0.0", "hash": "x" }));
+    assert!(JobDefinition::parse(&pinned, create()).is_ok());
+    let unversioned = add(example(), "", "template", json!({ "id": "agentmux.docs-drift", "version": " " }));
+    assert_eq!(refused(unversioned), "template: id and version are required");
 }
 
 /// An unattended agent job runs at most every 15 minutes, checked when its
