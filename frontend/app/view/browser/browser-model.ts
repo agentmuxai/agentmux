@@ -29,6 +29,7 @@ import { errorPageFailedUrl } from "./error-page-url";
 import { findTabHolding } from "@/app/util/reveal-block";
 import { getLayoutModelForStaticTab, getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import { closeBlockInStack, effectiveStack } from "@/layout/lib/layoutStack";
+import { MENU_ICON } from "@/app/util/menu-icons";
 import {
     KEEPAWAKE_META_KEY,
     LOADMS_META_KEY,
@@ -840,14 +841,16 @@ export class BrowserViewModel {
         canGoForward?: boolean;
     }): ContextMenuItem[] {
         const items: ContextMenuItem[] = [
-            { label: "Back", enabled: browserCtx?.canGoBack ?? this.canGoBackAtom(), click: () => this.goBack() },
+            { label: "Back", icon: MENU_ICON.back, enabled: browserCtx?.canGoBack ?? this.canGoBackAtom(), click: () => this.goBack() },
             {
                 label: "Forward",
+                icon: MENU_ICON.forward,
                 enabled: browserCtx?.canGoForward ?? this.canGoForwardAtom(),
                 click: () => this.goForward(),
             },
             {
                 label: "Reload",
+                icon: MENU_ICON.reload,
                 // NOT this.reload() -- that method only does local reducer
                 // state tricks (UrlCleared + re-Navigate) and never touches
                 // the real native CEF browser view, so it's a no-op against
@@ -870,18 +873,21 @@ export class BrowserViewModel {
             if (browserCtx.isEditable && browserCtx.selectionText) {
                 editItems.push({
                     label: "Cut",
+                    icon: MENU_ICON.cut,
                     click: () => { getApi().browserPanes.cut(this.blockId).catch(() => {}); },
                 });
             }
             if (browserCtx.selectionText) {
                 editItems.push({
                     label: "Copy",
+                    icon: MENU_ICON.copy,
                     click: () => { getApi().browserPanes.copy(this.blockId).catch(() => {}); },
                 });
             }
             if (browserCtx.isEditable) {
                 editItems.push({
                     label: "Paste",
+                    icon: MENU_ICON.paste,
                     click: () => { getApi().browserPanes.paste(this.blockId).catch(() => {}); },
                 });
             }
@@ -892,6 +898,7 @@ export class BrowserViewModel {
                 { type: "separator" },
                 {
                     label: "Copy Link Address",
+                    icon: MENU_ICON.copyLink,
                     click: () => { void clipboardWriteText(browserCtx.linkUrl!); },
                 },
             );
@@ -900,16 +907,19 @@ export class BrowserViewModel {
             { type: "separator" },
             {
                 label: "Print",
+                icon: MENU_ICON.print,
                 click: () => { getApi().browserPanes.print(this.blockId).catch(() => {}); },
             },
             {
                 label: "View Page Source",
+                icon: MENU_ICON.viewSource,
                 click: () => {
                     getApi().browserPanes.viewSource(this.blockId).catch(() => {});
                 },
             },
             {
                 label: "Inspect Element",
+                icon: MENU_ICON.inspect,
                 click: () => {
                     getApi()
                         .browserPanes.inspectElement(this.blockId, browserCtx?.x ?? 0, browserCtx?.y ?? 0)
