@@ -81,11 +81,12 @@ fn nonempty(s: &Option<String>) -> Option<&str> {
     s.as_deref().map(str::trim).filter(|s| !s.is_empty())
 }
 
-/// Who is asking: the name and UID of the caller's registration (found by
-/// token, block, then unique name, as `WhoIsWorkingOn` does). A caller with a
-/// token is that token's agent and nobody else: with no registration its name
-/// is its own slug, never one it sent. Without a token, the name it sent.
-/// `None` when there is no name at all.
+/// Who is asking. A caller with a token is that token's agent and nobody
+/// else: its registration is the one with its UID (never one a `block` or a
+/// name it sent points at), and with none its name is its own slug. Without a
+/// token: the registration found by block, then unique name (as
+/// `WhoIsWorkingOn` does), else the name it sent. `None` when there is no name
+/// at all.
 pub(super) fn claimer(
     state: &AppState,
     caller: Option<&Caller>,
@@ -94,13 +95,15 @@ pub(super) fn claimer(
 ) -> Option<(String, String, Option<String>)> {
     let regs = state.reactive_handler.list_agents();
     let token_uid = caller.and_then(|c| c.uid().map(str::to_string));
-    let block_id = caller_block(&regs, token_uid.as_deref(), block, agent);
+    let block_id = match token_uid.as_deref() {
+        Some(uid) => regs.iter().find(|r| r.uid.as_deref() == Some(uid)).map(|r| r.block_id.clone()),
+        None => caller_block(&regs, None, block, agent),
+    };
     let reg = block_id.as_deref().and_then(|b| regs.iter().find(|r| r.block_id == b));
-    let sent = || agent.map(str::trim).filter(|a| !a.is_empty()).map(str::to_string);
     let name = match (reg, token_uid.as_deref()) {
         (Some(r), _) => r.agent_id.clone(),
         (None, Some(uid)) => state.mstore.agent_names_by_id(uid).ok().flatten().map(|row| row.slug).filter(|s| !s.is_empty())?,
-        (None, None) => sent()?,
+        (None, None) => agent.map(str::trim).filter(|a| !a.is_empty()).map(str::to_string)?,
     };
     let uid = token_uid.or_else(|| reg.and_then(|r| r.uid.clone())).unwrap_or_default();
     Some((name, uid, block_id))
