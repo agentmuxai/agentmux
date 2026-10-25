@@ -43,7 +43,7 @@ export const BROWSER_SETTINGS = {
         id: "browser.hibernate",
         label: "Hibernate hidden browser panes",
         description:
-            "A browser pane out of sight for a while goes to sleep: its page closes to free its memory, often 100 to 200 MB, and loads again when you're about to look at it, with a note while it restores. Never a pane an agent is using, one playing or capturing media, one with something typed into it, or a local dev server. Its back/forward history and scroll position don't come back yet.",
+            "A browser pane out of sight for a while goes to sleep: its page is put away to free its memory, often 100 to 200 MB, and loads again when you're about to look at it, with a note while it restores. It comes back with its back/forward history, scroll position and anything typed into it, on browser engines that support it; on older ones it loads fresh. Never a pane an agent is using, one playing or capturing media, one with something typed into it, or a local dev server.",
         section: "browser",
         keywords: ["hibernate", "sleep", "sleeping", "memory", "discard", "tabs", "browser:hibernate"],
     },

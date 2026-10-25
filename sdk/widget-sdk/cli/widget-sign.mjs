@@ -2,28 +2,42 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Signing AgentMux widget packages (docs/specs/SPEC_WIDGET_SHARING_2026_10_10.md §2):
+ * Signing AgentMux widget packages (docs/specs/SPEC_WIDGET_SHARING_2026_10_10.md §2)
+ * and job templates (docs/specs/SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §5.4):
  * what the `agentmux-widget` command (agentmux-widget.mjs) runs.
  *
  * The content hash is AgentMux's own (SPEC_USER_WIDGETS_AND_WIDGET_API §8.2):
  * each file's SHA-256, then SHA-256 over "path\0hash\n" in path order, with
- * widget.sig itself left out. Node's own crypto; no dependencies.
+ * the signature file itself left out. A folder with a template.json is a job
+ * template, signed into template.sig under the template prefix, so its
+ * signature can't pass as a widget's. Node's own crypto; no dependencies.
  */
 
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify } from "node:crypto";
-import { lstatSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const SIG_FILE = "widget.sig";
-const CONTEXT = "agentmux-widget-sig-v1\0";
+const SIG_FILE = "widget.sig";
+const WIDGET = { manifest: "widget.json", sigFile: SIG_FILE, prefix: "agentmux-widget-sig-v1\0" };
+const TEMPLATE = { manifest: "template.json", sigFile: "template.sig", prefix: "agentmux-job-template-sig-v1\0" };
 const MAX_BYTES = 50 * 1024 * 1024;
 const MAX_FILES = 2000;
 // DER prefixes that wrap a raw 32-byte Ed25519 seed / public key.
 const PKCS8_PREFIX = Buffer.from("302e020100300506032b657004220420", "hex");
 const SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 
+/** What `dir` holds: a job template when it has a template.json, otherwise a widget. */
+function domainOf(dir) {
+    return existsSync(join(dir, TEMPLATE.manifest)) ? TEMPLATE : WIDGET;
+}
+
+/** The file `dir`'s signature goes in: template.sig or widget.sig. */
+export function sigFileOf(dir) {
+    return domainOf(dir).sigFile;
+}
+
 /** relative path → SHA-256 hex of every file in `dir`, as AgentMux hashes it. */
-export function hashFiles(dir) {
+export function hashFiles(dir, sigFile = sigFileOf(dir)) {
     const out = new Map();
     let total = 0;
     const walk = (abs, rel) => {
@@ -36,7 +50,7 @@ export function hashFiles(dir) {
                 walk(p, r);
                 continue;
             }
-            if (r === SIG_FILE) continue;
+            if (r === sigFile) continue;
             const bytes = readFileSync(p);
             total += bytes.length;
             if (total > MAX_BYTES) throw new Error("the package is over 50 MB");
@@ -56,8 +70,8 @@ export function packageHash(dir) {
     return h.digest("hex");
 }
 
-export function signedMessage(id, version, hash) {
-    return Buffer.from(`${CONTEXT}${id}\0${version}\0${hash}`);
+export function signedMessage(id, version, hash, prefix = WIDGET.prefix) {
+    return Buffer.from(`${prefix}${id}\0${version}\0${hash}`);
 }
 
 /** `K7Q2-MZ4D-PX3A-9TWE`: the first 10 bytes of the key's SHA-256, base32. */
@@ -80,8 +94,9 @@ export function fingerprint(publicKeyB64) {
 }
 
 function readManifest(dir) {
-    const m = JSON.parse(readFileSync(join(dir, "widget.json"), "utf8"));
-    if (typeof m.id !== "string" || typeof m.version !== "string") throw new Error("widget.json needs an id and a version");
+    const { manifest } = domainOf(dir);
+    const m = JSON.parse(readFileSync(join(dir, manifest), "utf8"));
+    if (typeof m.id !== "string" || typeof m.version !== "string") throw new Error(`${manifest} needs an id and a version`);
     return m;
 }
 
@@ -92,21 +107,22 @@ export function keyFromSeed(seedB64) {
     return { privateKey, publicKey };
 }
 
-/** The widget.sig text for the package in `dir`. */
+/** The signature file's text (widget.sig or template.sig) for the package in `dir`. */
 export function signPackage(dir, seedB64) {
     const m = readManifest(dir);
     const { privateKey, publicKey } = keyFromSeed(seedB64);
-    const signature = sign(null, signedMessage(m.id, m.version, packageHash(dir)), privateKey).toString("base64");
+    const signature = sign(null, signedMessage(m.id, m.version, packageHash(dir), domainOf(dir).prefix), privateKey).toString("base64");
     return JSON.stringify({ sigVersion: 1, algorithm: "ed25519", publicKey, signature }, null, 2) + "\n";
 }
 
 /** The fingerprint of the key that signed the package in `dir`; throws if it doesn't verify. */
 export function verifyPackage(dir) {
     const m = readManifest(dir);
-    const sig = JSON.parse(readFileSync(join(dir, SIG_FILE), "utf8"));
-    if (sig.sigVersion !== 1 || sig.algorithm !== "ed25519") throw new Error(`${SIG_FILE} isn't a version 1 ed25519 signature`);
+    const { sigFile, prefix } = domainOf(dir);
+    const sig = JSON.parse(readFileSync(join(dir, sigFile), "utf8"));
+    if (sig.sigVersion !== 1 || sig.algorithm !== "ed25519") throw new Error(`${sigFile} isn't a version 1 ed25519 signature`);
     const key = createPublicKey({ key: Buffer.concat([SPKI_PREFIX, Buffer.from(sig.publicKey, "base64")]), format: "der", type: "spki" });
-    if (!verify(null, signedMessage(m.id, m.version, packageHash(dir)), key, Buffer.from(sig.signature, "base64"))) {
+    if (!verify(null, signedMessage(m.id, m.version, packageHash(dir), prefix), key, Buffer.from(sig.signature, "base64"))) {
         throw new Error("its signature doesn't match its files: sign it again after the last edit");
     }
     return fingerprint(sig.publicKey);
@@ -119,7 +135,7 @@ export function newKey() {
     return { seed, publicKey: keyFromSeed(seed).publicKey };
 }
 
-/** The `id` and `version` in the package's widget.json. */
+/** The `id` and `version` in the package's widget.json or template.json. */
 export function manifestOf(dir) {
     return readManifest(dir);
 }

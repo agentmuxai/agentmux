@@ -168,7 +168,7 @@ fn valid_icon(icon: &Option<String>) -> bool {
     icon.as_deref().is_none_or(|i| i.len() <= 60 && is_slug(i))
 }
 
-fn valid_semver(v: &str) -> bool {
+pub(crate) fn valid_semver(v: &str) -> bool {
     let core = v.split(['-', '+']).next().unwrap_or("");
     let parts: Vec<&str> = core.split('.').collect();
     parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
@@ -334,6 +334,12 @@ fn validate_contributions(m: &Manifest) -> Result<(), String> {
 /// no symlinks. `widget.sig` at the root is left out: it signs the hash of
 /// the rest (SPEC_WIDGET_SHARING_2026_10_10.md §2.1).
 pub fn hash_files(dir: &Path) -> Result<BTreeMap<String, String>, String> {
+    hash_files_except(dir, sig::WIDGET.sig_file)
+}
+
+/// [`hash_files`], leaving out `sig_file` at the root instead: another
+/// signing domain's signature file.
+pub fn hash_files_except(dir: &Path, sig_file: &str) -> Result<BTreeMap<String, String>, String> {
     let mut out = BTreeMap::new();
     let mut total: u64 = 0;
     let mut stack = vec![dir.to_path_buf()];
@@ -357,7 +363,7 @@ pub fn hash_files(dir: &Path) -> Result<BTreeMap<String, String>, String> {
                 .map(|c| c.as_os_str().to_string_lossy().into_owned())
                 .collect::<Vec<_>>()
                 .join("/");
-            if rel == sig::SIG_FILE {
+            if rel == sig_file {
                 continue;
             }
             let bytes = std::fs::read(&path).map_err(|e| format!("can't read {rel}: {e}"))?;
@@ -656,7 +662,7 @@ pub fn describe(found: &Found, approvals: &Approvals, pins: &Pins, secret: &str,
         return invalid(format!("its entry {entry:?} isn't in the package"));
     }
     let hash = package_hash(files);
-    let signer = match sig::check(&found.dir, &m.id, &m.version, &hash) {
+    let signer = match sig::check(&sig::WIDGET, &found.dir, &m.id, &m.version, &hash) {
         None => None,
         Some(Ok(key)) => Some(key),
         Some(Err(e)) => return invalid(e),
@@ -862,7 +868,7 @@ impl WidgetPackages {
         if package_hash(files) != hash {
             return Err("the widget changed since you were asked; review it again".to_string());
         }
-        let signer = match sig::check(&found.dir, &m.id, &m.version, hash) {
+        let signer = match sig::check(&sig::WIDGET, &found.dir, &m.id, &m.version, hash) {
             None => None,
             Some(Ok(key)) => Some(key),
             Some(Err(e)) => return Err(e),
@@ -922,7 +928,7 @@ impl WidgetPackages {
         if let Some(signer) = &approval.signer {
             let text = std::fs::read(dir.join(sig::SIG_FILE)).map_err(|_| format!("{id} lost its signature since you approved it"))?;
             let manifest: Manifest = serde_json::from_slice(files.get(MANIFEST_FILE).ok_or("no widget.json")?).map_err(|e| e.to_string())?;
-            if sig::check(&dir, id, &manifest.version, &approval.hash) != Some(Ok(signer.clone())) {
+            if sig::check(&sig::WIDGET, &dir, id, &manifest.version, &approval.hash) != Some(Ok(signer.clone())) {
                 return Err(format!("{id}'s signature changed since you approved it"));
             }
             files.insert(sig::SIG_FILE.to_string(), text);
@@ -1120,42 +1126,64 @@ connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'";
 /// `.zip`) into the widgets folder; returns its id. Validates first; refuses
 /// to replace an existing package unless `replace`.
 pub fn install(widgets_dir: &Path, source: &Path, replace: bool) -> Result<String, String> {
+    install_package(widgets_dir, source, replace, MANIFEST_FILE, |root| {
+        let manifest: Manifest = serde_json::from_str(
+            &std::fs::read_to_string(root.join(MANIFEST_FILE)).map_err(|e| format!("can't read widget.json: {e}"))?,
+        )
+        .map_err(|e| format!("widget.json: {e}"))?;
+        validate(&manifest, &manifest.id)?;
+        hash_files(root)?;
+        Ok(manifest.id)
+    })
+}
+
+/// The package folder in an unpacked zip or a copied folder: `stage`
+/// itself, or its one top folder, whichever holds `manifest_file`.
+pub(crate) fn package_root(stage: &Path, manifest_file: &str) -> Result<PathBuf, String> {
+    if stage.join(manifest_file).exists() {
+        return Ok(stage.to_path_buf());
+    }
+    let mut dirs = std::fs::read_dir(stage).map_err(|e| e.to_string())?.flatten().filter(|e| e.path().is_dir());
+    match (dirs.next(), dirs.next()) {
+        (Some(d), None) if d.path().join(manifest_file).exists() => Ok(d.path()),
+        _ => Err(format!("no {manifest_file} at the package's top level")),
+    }
+}
+
+/// Copy the package at `source` (a folder, its `manifest_file`, or a
+/// `.zip`) into `packages_dir`, in a folder named by the id `check` returns
+/// once it has validated the staged copy. Shared by widgets and job
+/// templates (docs/specs/SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §5.4).
+pub(crate) fn install_package(
+    packages_dir: &Path,
+    source: &Path,
+    replace: bool,
+    manifest_file: &str,
+    check: impl FnOnce(&Path) -> Result<String, String>,
+) -> Result<String, String> {
     let is_zip = source.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip"));
-    let staging = tempfile::tempdir_in(widgets_dir.parent().unwrap_or(widgets_dir))
+    let staging = tempfile::tempdir_in(packages_dir.parent().unwrap_or(packages_dir))
         .or_else(|_| tempfile::tempdir())
         .map_err(|e| format!("can't make a staging folder: {e}"))?;
     let stage = staging.path().join("pkg");
     if is_zip {
         unzip(source, &stage)?;
     } else {
-        let folder = if source.file_name().is_some_and(|n| n == MANIFEST_FILE) { source.parent().unwrap_or(source) } else { source };
+        let folder = if source.file_name().is_some_and(|n| n == manifest_file) { source.parent().unwrap_or(source) } else { source };
         copy_tree(folder, &stage, &mut Budget::default())?;
     }
     // A zip may hold the package at its root or in one top-level folder.
-    let root = if stage.join(MANIFEST_FILE).exists() {
-        stage.clone()
-    } else {
-        let mut dirs = std::fs::read_dir(&stage).map_err(|e| e.to_string())?.flatten().filter(|e| e.path().is_dir());
-        match (dirs.next(), dirs.next()) {
-            (Some(d), None) if d.path().join(MANIFEST_FILE).exists() => d.path(),
-            _ => return Err("no widget.json at the package's top level".to_string()),
-        }
-    };
-    let manifest: Manifest = serde_json::from_str(
-        &std::fs::read_to_string(root.join(MANIFEST_FILE)).map_err(|e| format!("can't read widget.json: {e}"))?,
-    )
-    .map_err(|e| format!("widget.json: {e}"))?;
-    validate(&manifest, &manifest.id)?;
-    hash_files(&root)?;
-    std::fs::create_dir_all(widgets_dir).map_err(|e| e.to_string())?;
-    let dest = widgets_dir.join(&manifest.id);
+    let root = package_root(&stage, manifest_file)?;
+    let id = check(&root)?;
+    std::fs::create_dir_all(packages_dir).map_err(|e| e.to_string())?;
+    let dest = packages_dir.join(&id);
     // A replaced version moves aside first and comes back if the new one
     // can't be put in place, so a failed install never leaves nothing.
     let old = staging.path().join("old");
     let replacing = dest.exists();
     if replacing {
         if !replace {
-            return Err(format!("{} is already installed", manifest.id));
+            return Err(format!("{id} is already installed"));
         }
         std::fs::rename(&dest, &old).map_err(|e| format!("can't replace the installed version: {e}"))?;
     }
@@ -1166,7 +1194,7 @@ pub fn install(widgets_dir: &Path, source: &Path, replace: bool) -> Result<Strin
         }
         return Err(e);
     }
-    Ok(manifest.id)
+    Ok(id)
 }
 
 /// Moves the staged package to `dest`, or copies it when they're on

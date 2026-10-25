@@ -39,6 +39,7 @@ import {
     sleepName,
     sleepReasonText,
     WAKE_META_KEY,
+    wakeEndsNow,
     type BrowserSleep,
     type PaneFacts,
     type SleepReason,
@@ -177,7 +178,9 @@ function BrowserSleepCard(props: { sleep: BrowserSleep; startedAt: () => number;
                     <span>{eta()}</span>
                 </div>
                 <p class="browser-sleep-card-why">{sleepReasonText(props.sleep.reason)}</p>
-                <p class="browser-sleep-card-lost">{NOT_KEPT_TEXT}</p>
+                <Show when={!props.sleep.kept}>
+                    <p class="browser-sleep-card-lost">{NOT_KEPT_TEXT}</p>
+                </Show>
                 <div class="browser-sleep-card-actions">
                     <Button density="compact" onClick={props.onKeepAwake}>
                         Keep this pane awake
@@ -253,6 +256,9 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
         void model.hibernate("launch").catch(() => setLaunchAsleep(false));
     }
     const sleeping = () => model.sleepAtom() != null || launchAsleep();
+    // A pane that mounts asleep has no page yet: a "kept" record is from a page
+    // discarded before a restart or reload, which is gone.
+    if (model.sleepAtom()?.kept) void model.clearSleepKept().catch(() => {});
     createEffect(() => {
         if (model.sleepAtom() != null && launchAsleep()) setLaunchAsleep(false);
     });
@@ -263,12 +269,28 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
     // with no switch puts it back to sleep instead of leaving it awake.
     const [wakeLoadedMs, setWakeLoadedMs] = createSignal(0);
     let wakeWhy = "";
+    // The wake finished without a load (a page that was alive): its "loaded" time is not a measurement.
+    let wakeNoLoad = false;
     let wakeGiveUp: ReturnType<typeof setTimeout> | undefined;
     onCleanup(() => clearTimeout(wakeGiveUp));
     const backToSleep = () => {
+        wakeNoLoad = false;
         setWakeRequested(false);
         setWakeStartedAt(0);
         setWakeLoadedMs(0);
+    };
+    // A wake that needs no load (the page was alive: woken during the discard park, or
+    // its discard didn't happen) is done at once. It follows the policy of a loaded wake:
+    // awake now if the pane is shown or the wake was asked for; otherwise ready, and back
+    // to sleep if no switch follows a hover.
+    const wakeWithoutLoad = () => {
+        if (!sleeping()) return;
+        if (wakeEndsNow(visible(), wakeWhy)) {
+            void model.endSleep(undefined).catch(() => {});
+            return;
+        }
+        wakeNoLoad = true;
+        setWakeLoadedMs(1);
     };
     const wake = (why: string) => {
         if (!sleeping()) return;
@@ -279,7 +301,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                 wakeWhy = why;
                 clearTimeout(wakeGiveUp);
                 diag(`[hibernate] wake-upgraded why=${why}`);
-                if (wakeLoadedMs() > 0) void model.endSleep(wakeLoadedMs()).catch(() => {});
+                if (wakeLoadedMs() > 0) void model.endSleep(wakeNoLoad ? undefined : wakeLoadedMs()).catch(() => {});
             }
             return;
         }
@@ -311,7 +333,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             // Loaded while hidden, now shown: awake, with no card.
             clearTimeout(wakeGiveUp);
             diag(`[hibernate] wake-shown-ready ms=${Math.round(wakeLoadedMs())}`);
-            void model.endSleep(wakeLoadedMs()).catch(() => {});
+            void model.endSleep(wakeNoLoad ? undefined : wakeLoadedMs()).catch(() => {});
         }
     });
     // Only a new hover or press wakes: a wake abandoned after 10 s with the
@@ -382,6 +404,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
         windowLabel,
         diag,
         asleep: () => sleeping() && !wakeRequested(),
+        onWakeWithoutLoad: () => wakeWithoutLoad(),
     });
     const freeze = useFreezeFrame({
         model,
@@ -471,6 +494,18 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             sawLoading = model.loadingAtom();
         }),
     );
+    // A page discarded in place still exists: its wake is a load of that page,
+    // timed from the wake's start like a new one.
+    createEffect(
+        on(wakeRequested, (requested) => {
+            // A wake that ended without a load (woken during the park before a discard)
+            // must not time a later, unrelated navigation from its start.
+            if (!requested) loadClockFrom = 0;
+            if (!requested || !rectSync.paneCreated()) return;
+            loadClockFrom = wakeStartedAt();
+            sawLoading = false;
+        }),
+    );
     createEffect(
         on(model.loadingAtom, (loading) => {
             if (!loadClockFrom) return;
@@ -483,7 +518,7 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
             loadClockFrom = 0;
             if (sleeping()) {
                 diag(`[hibernate] wake-loaded ms=${Math.round(ms)} why=${wakeWhy} visible=${visible()}`);
-                if (visible() || wakeWhy === "command" || wakeWhy === "agent") void model.endSleep(ms).catch(() => {});
+                if (wakeEndsNow(visible(), wakeWhy)) void model.endSleep(ms).catch(() => {});
                 else setWakeLoadedMs(ms);
             } else {
                 void model.recordLoadMs(ms).catch(() => {});

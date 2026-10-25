@@ -663,9 +663,9 @@ declare global {
         /** The person paused the driving agent: its calls on this pane are
          *  refused until they resume it. Written by srv only. */
         "browser:paused"?: boolean | null;
-        /** The pane is asleep or waking: its page was closed to free memory,
-         *  with what it needs to come back. Written by the window
-         *  (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md §4). */
+        /** The pane is asleep or waking: its page was discarded in place or
+         *  closed to free memory, with what it needs to come back. Written by
+         *  the window (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md §4). */
         "browser:sleep"?: {
             since: number;
             reason: "hidden" | "pressure" | "launch" | "manual";
@@ -673,6 +673,8 @@ declare global {
             title: string;
             favicon: string;
             loadMs?: number;
+            /** Discarded in place: its history, scroll and form contents come back. */
+            kept?: boolean;
         } | null;
         /** srv asks the pane's view to wake it, for an agent's Browser call (ms timestamp). */
         "browser:wake"?: number | null;

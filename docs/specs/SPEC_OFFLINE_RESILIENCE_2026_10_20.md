@@ -60,7 +60,7 @@ A `connectivity` module in srv holds the reachability of each service AgentMux d
 
 - srv translates `api_retry` frames into a block state `agent:retrying {attempt, max, next_at, cause}`, cleared by the next content frame or the turn's end.
 - The working row shows: "Can't reach the Anthropic API (connection refused). Retrying, attempt 3 of 10, next in 18 s." with **Stop** and **Retry now** (Retry now interrupts and resends the same prompt).
-- `agents/failure.rs` classifies `ECONNREFUSED`, "connection refused", `ENOTFOUND`, `ENETUNREACH`, `EHOSTUNREACH`, `ETIMEDOUT` and the CLI's `isNetworkDown: true` as `Network` (retryable), and the turn's end is shown with the Network recovery: "The turn stopped because the API was unreachable. [Retry] (retries by itself when you're back online)".
+- `agents/failure.rs` classifies `ECONNREFUSED`, "connection refused", `ENOTFOUND`, `ENETUNREACH`, `EHOSTUNREACH`, `ETIMEDOUT`, and the "Unable to connect to API (…)" text, as `Network` (retryable). It matches text only: Claude Code's `isNetworkDown` flag is internal to the CLI (checked in 2.1.288: its `api_retry` frame carries `error` and `error_status`, not the flag), so only the message it produces reaches AgentMux, and the turn's end is shown with the Network recovery: "The turn stopped because the API was unreachable. [Retry] (retries by itself when you're back online)".
 
 ### 4.3 Recovery of failed turns
 
@@ -159,7 +159,7 @@ Each runs in an isolated `task dev` instance with three agents mid-conversation;
 
 ### 7.3 Unit tests
 
-Broker: five transport errors stay `Offline`; an `invalid_grant` goes to needs-reauth. Classifier: the exact `API Error: Connection refused … (ECONNREFUSED)` string and `isNetworkDown: true` are `Network`. Notes: a pause note never starts a turn; pause+resume collapse to one. Translator: `api_retry` frames set and clear `agent:retrying`. Window close keeps the workspace. Slug migration moves the `gh-` folder and keys.
+Broker: five transport errors stay `Offline`; an `invalid_grant` goes to needs-reauth. Classifier: the exact `API Error: Connection refused … (ECONNREFUSED)` string, as stderr and as a result frame, and the `Unable to connect to API (…)` strings are `Network` (`agents/failure.rs`). Notes: a pause note never starts a turn; pause+resume collapse to one. Translator: `api_retry` frames set and clear `agent:retrying`. Window close keeps the workspace. Slug migration moves the `gh-` folder and keys.
 
 ## 8. Plan
 
