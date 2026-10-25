@@ -164,7 +164,7 @@ fn the_spec_figures_are_where_the_policy_accepts_them() {
     assert_eq!(timeout("pr-review")["timeout_minutes"], 15);
     assert_eq!(timeout("dependency-scan")["timeout_minutes"], 55);
     assert_eq!(timeout("docs-drift")["timeout_minutes"], 30);
-    assert!(timeout("on-event")["caps"]["messages_per_day"].is_u64(), "on-event has a cap on what it sends");
+    assert!(timeout("on-event")["caps"]["run_usd"].is_number(), "on-event has a cap on each run");
 }
 
 #[test]
