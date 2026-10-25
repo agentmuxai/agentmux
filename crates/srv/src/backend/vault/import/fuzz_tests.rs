@@ -153,6 +153,15 @@ fn seeds() -> Vec<(&'static str, Vec<u8>)> {
         s.push(("db.kdbx", std::fs::read(fixtures.join(f)).unwrap()));
     }
     s.push(("lastpass_export.csv", super::tests::LASTPASS.as_bytes().to_vec()));
+    s.push(("dashlane_credentials.csv", super::second_wave_tests::DASHLANE_CREDENTIALS.as_bytes().to_vec()));
+    s.push(("dashlane_payments.csv", super::second_wave_tests::DASHLANE_PAYMENTS.as_bytes().to_vec()));
+    s.push(("dashlane_ids.csv", super::second_wave_tests::DASHLANE_IDS.as_bytes().to_vec()));
+    s.push(("dashlane_personal.csv", super::second_wave_tests::DASHLANE_PERSONAL.as_bytes().to_vec()));
+    s.push(("dashlane_notes.csv", super::second_wave_tests::DASHLANE_NOTES.as_bytes().to_vec()));
+    s.push(("nordpass.csv", super::second_wave_tests::NORDPASS.as_bytes().to_vec()));
+    s.push(("roboform.csv", super::second_wave_tests::ROBOFORM.as_bytes().to_vec()));
+    s.push(("zoho.csv", super::second_wave_tests::ZOHO.as_bytes().to_vec()));
+    s.push(("keeper.csv", super::second_wave_tests::KEEPER.as_bytes().to_vec()));
     s.push(("bitwarden.json", super::tests::BITWARDEN.as_bytes().to_vec()));
     s.push(("bitwarden.csv", b"folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp\nWork,0,login,GitHub,\"two\nlines\",,0,https://github.com,alex,\"pw, \"\"quoted\"\"\",JBSWY3DPEHPK3PXP\n,0,note,Wifi,ssid: home,,0,,,,\n".to_vec()));
     s.push(("chrome.csv", b"name,url,username,password,note\nExample,https://example.com/login,alex,hunter2,\nSecond,https://b.example,bob,\"p\"\"w\",hi\n".to_vec()));
