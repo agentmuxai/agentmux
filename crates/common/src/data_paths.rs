@@ -867,7 +867,8 @@ pub use crate::muxbus_reconnect::{
 /// the wild and silently dropping either would move where a live install
 /// finds its data:
 ///
-/// - `AGENTMUX_HOME_OVERRIDE` — this module's own, used by tests.
+/// - `AGENTMUX_HOME_OVERRIDE` — this module's own, used by tests. It wins over
+///   `AGENTMUX_DATA_HOME`, except for a data home inside it (`data_home.rs`).
 /// - `AGENTMUX_DATA_HOME` — srv's own, read at startup and relied on by the
 ///   MSIX packaging path (`blockcontroller/shell/lifecycle.rs`). It is
 ///   deliberately **stripped** from pane environments, not exported into them:
@@ -880,6 +881,10 @@ pub use crate::muxbus_reconnect::{
 /// (`<root>/channels/<channel>/data`), not the root. The similar names are
 /// exactly why srv ended up with a second resolver.
 pub fn agentmux_root() -> Result<PathBuf, String> {
+    // An isolated instance keeps the versioned layout (data_home.rs, task #3569).
+    if let Some(data) = crate::data_home::inside_override() {
+        return Ok(data);
+    }
     // `var_os`: a root that isn't valid UTF-8 must not read as unset.
     for var in ["AGENTMUX_HOME_OVERRIDE", "AGENTMUX_DATA_HOME"] {
         if let Some(s) = std::env::var_os(var) {

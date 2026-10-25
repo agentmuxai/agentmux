@@ -59,10 +59,11 @@ pub fn load_config() -> config::Config {
 /// The data folder `migrate` works on: the one the daemon opens given the same
 /// environment. The daemon turns its data folder into `AGENTMUX_DATA_HOME` and
 /// opens `base::get_mux_db_dir()`, which resolves through `agentmux_root()`,
-/// where `AGENTMUX_HOME_OVERRIDE` comes first. Without the same resolution, the
-/// launcher's `migrate --prepare` under a home override migrated the version's
-/// folder while srv's boot check read `<override>/db`, and srv never started
-/// (Korp@narko, after #5252).
+/// where `AGENTMUX_HOME_OVERRIDE` comes first, except for a data folder inside
+/// it (an isolated instance's version folder, task #3569). Without the same
+/// resolution, the launcher's `migrate --prepare` under a home override
+/// migrated the version's folder while srv's boot check read `<override>/db`,
+/// and srv never started (Korp@narko, after #5252).
 fn migrate_data_dir(requested: std::path::PathBuf) -> std::path::PathBuf {
     if !requested.as_os_str().is_empty() {
         std::env::set_var("AGENTMUX_DATA_HOME", &requested);
@@ -796,9 +797,42 @@ mod tests {
         assert_eq!(migrate_data_dir(version_dir.clone()), version_dir);
         assert_eq!(base::get_mux_db_dir(), version_dir.join("db"), "the daemon's db folder");
 
-        // A home override: the daemon opens <override>/db, so migrate must too.
+        // A home override and a version folder inside it (an isolated
+        // instance): the versioned layout, as without an override.
         let _env = EnvRestore::set(&[("AGENTMUX_HOME_OVERRIDE", Some(root.path())), ("AGENTMUX_DATA_HOME", None)]);
-        assert_eq!(migrate_data_dir(version_dir.clone()), root.path());
-        assert_eq!(migrate_data_dir(version_dir).join("db"), base::get_mux_db_dir());
+        assert_eq!(migrate_data_dir(version_dir.clone()), version_dir);
+        assert_eq!(base::get_mux_db_dir(), version_dir.join("db"));
+
+        // A folder outside the override isn't the instance's: the override's own, as before.
+        let elsewhere = tempfile::tempdir().unwrap();
+        let _env = EnvRestore::set(&[("AGENTMUX_HOME_OVERRIDE", Some(root.path())), ("AGENTMUX_DATA_HOME", None)]);
+        assert_eq!(migrate_data_dir(elsewhere.path().to_path_buf()), root.path());
+        assert_eq!(migrate_data_dir(elsewhere.path().to_path_buf()).join("db"), base::get_mux_db_dir());
+    }
+
+    /// Task #3569: under a root override each version gets its own folder and
+    /// the next one starts from the previous one's data, so an upgrade's data
+    /// can be tested in isolation.
+    #[test]
+    fn an_isolated_instance_carries_its_data_forward_between_versions() {
+        let _guard = crate::test_support::ISOLATED_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let root = tempfile::tempdir().unwrap();
+        let versions = root.path().join("channels").join("x").join("versions");
+        let (old, new) = (versions.join("1.0.0").join("data"), versions.join("1.1.0").join("data"));
+        std::fs::create_dir_all(old.join("db")).unwrap();
+        let conn = rusqlite::Connection::open(old.join("db").join("objects.db")).unwrap();
+        conn.execute_batch("CREATE TABLE t(v TEXT); INSERT INTO t VALUES ('from 1.0.0');").unwrap();
+        drop(conn);
+
+        let _env = EnvRestore::set(&[("AGENTMUX_HOME_OVERRIDE", Some(root.path())), ("AGENTMUX_DATA_HOME", None)]);
+        std::env::set_var("AGENTMUX_DATA_HOME", &new); // what open_stores_and_migrate does with the launcher's folder
+        let db_dir = base::get_mux_db_dir();
+        assert_eq!(db_dir, new.join("db"), "not <override>/db, which every version would share");
+        std::fs::create_dir_all(&db_dir).unwrap();
+        let from = super::carry_forward::from_previous_version(&db_dir, "1.1.0").expect("carried from 1.0.0");
+        assert!(from.starts_with(&versions.join("1.0.0")), "carried from {from:?}");
+        let conn = rusqlite::Connection::open(db_dir.join("objects.db")).unwrap();
+        let v: String = conn.query_row("SELECT v FROM t", [], |r| r.get(0)).unwrap();
+        assert_eq!(v, "from 1.0.0");
     }
 }

@@ -10,6 +10,7 @@ pub mod client_events;
 mod cli;
 pub mod copy_into_dir;
 pub mod data_paths;
+mod data_home;
 pub mod disk_space;
 pub mod errors;
 pub mod event_log;
