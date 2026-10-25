@@ -12,20 +12,19 @@
 
 use super::*;
 use crate::backend::process_tracker::registry::AgentProcessRegistry;
-use crate::backend::{tower_peers, tower_remote};
+use crate::backend::{tower_memory_ledger, tower_peers, tower_remote};
 use crate::backend::tower_agentmux::{own_view_pid, parse_renderer_map, renderer_serves, RendererEntry};
 use crate::backend::tower_sampler::{block_label, Inputs, Tower};
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_peers(engine, state);
-    let (mstore, hostname, tracker) = (state.mstore.clone(), state.hostname.clone(), state.process_tracker.clone());
     let auth_key = state.auth_key.clone();
     let lan = state.lan_discovery.clone();
-    let (http_client, host_ipc) = (state.http_client.clone(), state.host_ipc.clone());
+    let local = state.clone();
+    spawn_ledger_timer(&local);
     engine.register_typed(COMMAND_TOWER_SAMPLE, move |req: TowerSampleReq, ctx| {
-        let (mstore, hostname, tracker, auth_key) = (mstore.clone(), hostname.clone(), tracker.clone(), auth_key.clone());
+        let (local, auth_key) = (local.clone(), auth_key.clone());
         let lan = lan.clone();
-        let (http_client, host_ipc) = (http_client.clone(), host_ipc.clone());
         async move {
             not_an_agent_api(&ctx)?;
             // A paired AgentMux computer: its viewer listener (`tower_peers`).
@@ -55,36 +54,80 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 crate::backend::tower_kind::fill_missing(&mut snap);
                 return Ok(snap);
             }
-            let renderers = renderer_map(&http_client, &host_ipc).await;
-            // The process table, and a store read per pane: off the async workers.
-            tokio::task::spawn_blocking(move || {
-                let page = |id: &str| browser_page(&mstore, id);
-                let workspace = |id: &str| window_workspace(&mstore, id);
-                let mut snap = Tower::global()
-                    .sample(
-                        req.host.unwrap_or(false),
-                        &hostname,
-                        || inputs(&tracker),
-                        |id| block_label(&mstore, id),
-                        // A renderer reported the PID it sees for itself (namespaced on Linux).
-                        |pid| renderer_serves(&renderers, own_view_pid(pid), &page, &workspace),
-                    )
-                    .map_err(|e| format!("tower.sample: {e}"))?;
-                // The Panes view: windows, tabs and panes (SPEC_TOWER_PANES_VIEW_2026_10_21.md).
-                if req.panes.unwrap_or(false) {
-                    let layout = crate::backend::tower_panes::read_layout(&mstore);
-                    snap.panes = Some(crate::backend::tower_panes::build(&layout, &snap, &renderers, &own_view_pid));
-                }
-                // The Memory view: AgentMux's total and its parts
-                // (SPEC_TOWER_MEMORY_FIRST_AND_AGENTMUX_BREAKDOWN_2026_10_25.md).
-                if req.memory.unwrap_or(false) {
-                    snap.memory = Some(crate::backend::tower_memory::build(&snap));
-                }
-                Ok(snap)
-            })
-            .await
-            .map_err(|e| format!("tower.sample: {e}"))?
+            sample_local(&local, &req).await
         }
+    });
+}
+
+/// This computer's sample, with the views the request asked for. Also what
+/// keeps the memory ledger: every sample that carries memory goes in it.
+async fn sample_local(state: &AppState, req: &TowerSampleReq) -> Result<TowerSnapshot, String> {
+    let renderers = renderer_map(&state.http_client, &state.host_ipc).await;
+    let (mstore, hostname, tracker) = (state.mstore.clone(), state.hostname.clone(), state.process_tracker.clone());
+    let (want_host, want_panes, want_memory, want_history) = (
+        req.host.unwrap_or(false),
+        req.panes.unwrap_or(false),
+        req.memory.unwrap_or(false),
+        req.memory_history.unwrap_or(false),
+    );
+    // The process table, and a store read per pane: off the async workers.
+    tokio::task::spawn_blocking(move || {
+        let page = |id: &str| browser_page(&mstore, id);
+        let workspace = |id: &str| window_workspace(&mstore, id);
+        let mut snap = Tower::global()
+            .sample(
+                want_host,
+                &hostname,
+                || inputs(&tracker),
+                |id| block_label(&mstore, id),
+                // A renderer reported the PID it sees for itself (namespaced on Linux).
+                |pid| renderer_serves(&renderers, own_view_pid(pid), &page, &workspace),
+            )
+            .map_err(|e| format!("tower.sample: {e}"))?;
+        // The Panes view: windows, tabs and panes (SPEC_TOWER_PANES_VIEW_2026_10_21.md).
+        if want_panes {
+            let layout = crate::backend::tower_panes::read_layout(&mstore);
+            snap.panes = Some(crate::backend::tower_panes::build(&layout, &snap, &renderers, &own_view_pid));
+        }
+        // The Memory view: AgentMux's total and its parts, and the ledger's hour
+        // (SPEC_TOWER_MEMORY_FIRST_AND_AGENTMUX_BREAKDOWN_2026_10_25.md).
+        if want_memory {
+            let mut memory = crate::backend::tower_memory::build(&snap);
+            tower_memory_ledger::feed(&mut memory, snap.ts_ms, want_history);
+            snap.memory = Some(memory);
+        }
+        Ok(snap)
+    })
+    .await
+    .map_err(|e| format!("tower.sample: {e}"))?
+}
+
+/// The ledger keeps its hour with no Tower open (spec D7): every 30 s it
+/// samples if no Tower did. One timer per process.
+fn spawn_ledger_timer(state: &AppState) {
+    static STARTED: std::sync::Once = std::sync::Once::new();
+    let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+        return;
+    };
+    let state = state.clone();
+    STARTED.call_once(|| {
+        runtime.spawn(async move {
+            let step = std::time::Duration::from_millis(tower_memory_ledger::STEP_MS * tower_memory_ledger::IDLE_EVERY_STEPS);
+            let mut tick = tokio::time::interval(step);
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            // The first tick is now, with nothing to read yet: skip it.
+            tick.tick().await;
+            loop {
+                tick.tick().await;
+                if tower_memory_ledger::fed_within(step * 4 / 5) {
+                    continue;
+                }
+                let req = TowerSampleReq { memory: Some(true), ..Default::default() };
+                if let Err(e) = sample_local(&state, &req).await {
+                    tracing::debug!(error = %e, "[tower] the memory ledger couldn't sample");
+                }
+            }
+        });
     });
 }
 

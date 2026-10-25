@@ -8,7 +8,13 @@
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { remotesList } from "@/app/store/remotes-store";
-import { RpcApi, type TowerPeerInfo, type TowerProcessKind, type TowerSnapshot } from "@/app/store/rpc-api";
+import {
+    RpcApi,
+    type TowerMemoryHistory,
+    type TowerPeerInfo,
+    type TowerProcessKind,
+    type TowerSnapshot,
+} from "@/app/store/rpc-api";
 import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { readZoom } from "@/app/store/zoom-factor";
@@ -31,6 +37,9 @@ import {
 /** A sample with no CPU rates yet (the first one) is followed up this soon,
  *  instead of a whole interval of dashes. */
 const FIRST_RATE_DELAY_MS = 1000;
+/** The last hour of memory moves slowly (a point every 10 s) and is large:
+ *  ask for it this often, not with every sample. */
+const MEMORY_HISTORY_EVERY_MS = 10_000;
 const RETRY_DELAY_MS = 5000;
 /** Another machine's first answer may wait on ssh asking the user something,
  *  or on installing the helper there. */
@@ -104,6 +113,18 @@ export class TowerViewModel {
     kindsOpened = false;
     /** The Memory view has opened its busiest part once. */
     memoryOpened = false;
+    /** The last hour of AgentMux's memory, from srv's ledger, refreshed every
+     *  10 s; `null` before the first answer. */
+    memoryHistory: Accessor<TowerMemoryHistory | null>;
+    private setMemoryHistory: Setter<TowerMemoryHistory | null>;
+    /** When it was last asked for, ms. */
+    private memoryHistoryAt = 0;
+    /** What the Memory view charts: `total`, `part:<id>` or a row's key. */
+    memoryChart: Accessor<string>;
+    setMemoryChart: Setter<string>;
+    /** How much of the hour the chart shows. */
+    memoryWindow: Accessor<"10m" | "1h">;
+    setMemoryWindow: Setter<"10m" | "1h">;
     /** The Agents view's tree shows CPU time and peak memory too. */
     moreColumns: Accessor<boolean>;
     viewName: Accessor<string>;
@@ -177,6 +198,9 @@ export class TowerViewModel {
             return RAIL_SORTS.includes(v as RailSort) ? (v as RailSort) : "pane";
         });
         [this.history, this.setHistory] = createSignal<ReadonlyMap<string, readonly HistoryPoint[]>>(new Map());
+        [this.memoryHistory, this.setMemoryHistory] = createSignal<TowerMemoryHistory | null>(null);
+        [this.memoryChart, this.setMemoryChart] = createSignal("total");
+        [this.memoryWindow, this.setMemoryWindow] = createSignal<"10m" | "1h">("1h");
         this.remotes = remotesList();
         [this.peers, this.setPeers] = createSignal<TowerPeerInfo[]>([]);
         void this.refreshPeers();
@@ -442,6 +466,7 @@ export class TowerViewModel {
     private start(host: boolean, connection: string, filter: string, panes = false, memory = false): void {
         const gen = ++this.generation;
         this.lastStart = [host, connection, filter, panes, memory];
+        this.memoryHistoryAt = 0;
         this.setStalled(false);
         // At most one request in flight: a new one (another filter, say)
         // waits for the last to answer. Another machine's helper measures CPU
@@ -468,6 +493,9 @@ export class TowerViewModel {
         panes = false,
         memory = false
     ): void {
+        // The hour comes with the first Memory sample, then every 10 s.
+        const wantHistory = memory && !connection && Date.now() - this.memoryHistoryAt >= MEMORY_HISTORY_EVERY_MS;
+        if (wantHistory) this.memoryHistoryAt = Date.now();
         const request = connection
             ? RpcApi.TowerSampleCommand(
                   TabRpcClient,
@@ -478,6 +506,7 @@ export class TowerViewModel {
                   host,
                   ...(panes ? { panes } : {}),
                   ...(memory ? { memory } : {}),
+                  ...(wantHistory ? { memory_history: true } : {}),
               });
         this.inFlightFor = connection;
         this.inFlight = request.then(
@@ -492,6 +521,13 @@ export class TowerViewModel {
         request.then(
             (snap) => {
                 if (gen !== this.generation) return;
+                // The hour is kept apart from the snapshot, which is merged on every
+                // sample: it changes every 10 s and is large.
+                const hour = snap.memory?.history;
+                if (hour && snap.memory) {
+                    this.setMemoryHistory(hour);
+                    snap = { ...snap, memory: { ...snap.memory, history: undefined } };
+                }
                 this.setSnapshot(snap);
                 this.setError(null);
                 again(hasNoRatesYet(snap) ? FIRST_RATE_DELAY_MS : snap.interval_ms);

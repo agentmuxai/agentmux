@@ -16,10 +16,21 @@ import { formatAgo, formatMem } from "./tower-util";
 
 /** The window the charts show, ending at the latest sample. */
 const WINDOW_MS = 10 * 60 * 1000;
+
+/** "10 min", "1 hour". */
+function windowWords(ms: number): string {
+    const min = Math.round(ms / 60_000);
+    return min === 60 ? "hour" : `${min} minutes`;
+}
+
+function windowLabel(ms: number): string {
+    const min = Math.round(ms / 60_000);
+    return min === 60 ? "1 hour" : `${min} min`;
+}
 const W = 600;
 const H = 48;
 
-interface Series {
+export interface Series {
     label: string;
     /** The value plotted, in the chart's own unit; absent where not known. */
     value: (p: HistoryPoint) => number | undefined;
@@ -63,15 +74,22 @@ export function HistoryCharts(props: {
     );
 }
 
-function Chart(props: { points: readonly HistoryPoint[]; series: Series }) {
+export function Chart(props: {
+    points: readonly HistoryPoint[];
+    series: Series;
+    /** How much of the points to draw, ending at the latest; the default is
+     *  the Agents view's 10 minutes. */
+    windowMs?: number;
+}) {
+    const windowMs = () => props.windowMs ?? WINDOW_MS;
     const end = () => props.points[props.points.length - 1]?.t ?? 0;
     const known = createMemo(() =>
         props.points
             .map((p) => ({ t: p.t, v: props.series.value(p) }))
-            .filter((p): p is { t: number; v: number } => p.v != null && p.t >= end() - WINDOW_MS)
+            .filter((p): p is { t: number; v: number } => p.v != null && p.t >= end() - windowMs())
     );
     const top = createMemo(() => Math.max(props.series.floor, ...known().map((p) => p.v)) * 1.1);
-    const x = (t: number) => ((t - (end() - WINDOW_MS)) / WINDOW_MS) * W;
+    const x = (t: number) => ((t - (end() - windowMs())) / windowMs()) * W;
     const y = (v: number) => H - (v / top()) * (H - 2);
     const line = () =>
         known()
@@ -88,7 +106,7 @@ function Chart(props: { points: readonly HistoryPoint[]; series: Series }) {
     const [hover, setHover] = createSignal<{ t: number; v: number } | null>(null);
     const onMove = (e: PointerEvent) => {
         const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
-        const t = end() - WINDOW_MS + ((e.clientX - box.left) / Math.max(1, box.width)) * WINDOW_MS;
+        const t = end() - windowMs() + ((e.clientX - box.left) / Math.max(1, box.width)) * windowMs();
         let best: { t: number; v: number } | null = null;
         for (const p of known()) if (!best || Math.abs(p.t - t) < Math.abs(best.t - t)) best = p;
         setHover(best);
@@ -103,7 +121,7 @@ function Chart(props: { points: readonly HistoryPoint[]; series: Series }) {
             <div
                 class="tower-chart-plot"
                 role="img"
-                aria-label={`${props.series.label} over the last 10 minutes: now ${props.series.format(latest())}, peak ${props.series.format(peak())}`}
+                aria-label={`${props.series.label} over the last ${windowWords(windowMs())}: now ${props.series.format(latest())}, peak ${props.series.format(peak())}`}
                 onPointerMove={onMove}
                 onPointerLeave={() => setHover(null)}
             >
@@ -141,7 +159,7 @@ function Chart(props: { points: readonly HistoryPoint[]; series: Series }) {
                 </Show>
             </div>
             <div class="tower-chart-axis tower-muted">
-                <span>10 min ago</span>
+                <span>{windowLabel(windowMs())} ago</span>
                 <span>now</span>
             </div>
         </div>
