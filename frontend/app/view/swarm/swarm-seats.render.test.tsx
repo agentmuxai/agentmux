@@ -106,7 +106,7 @@ const OTHERS: SwarmOtherInstances = {
     ],
 };
 
-function setup(groupBy: "lead" | null) {
+function setup(groupBy: "lead" | null, others: SwarmOtherInstances = OTHERS) {
     const [meta, setMetaSignal] = createSignal<Record<string, unknown>>(groupBy ? { "swarm:groupby": groupBy } : {});
     const setMeta = vi.fn(async (patch: Record<string, unknown>) => {
         const next = { ...meta(), ...patch };
@@ -117,7 +117,7 @@ function setup(groupBy: "lead" | null) {
         blockId: "swarm-1",
         loadingAtom: () => false,
         buildTree: () => [node("w1", "W1"), node("free", "Free"), node("camper", "Camper"), node("opaz", "Opaz")],
-        otherInstancesAtom: () => OTHERS,
+        otherInstancesAtom: () => others,
         pruneSelection: () => {},
         selectedBlockIdsAtom: () => new Set<string>(),
         isSelected: () => false,
@@ -161,6 +161,39 @@ describe("Swarm seats", () => {
         expect(badge.getAttribute("title")).toBe("Leader · product — reports to the operator — agent pane, identity");
         expect(badge.previousElementSibling?.classList.contains("swarm-agent-label")).toBe(true);
         expect(container.querySelector('[data-swarm-key="b-free"] .swarm-seat-badge')).toBeNull();
+    });
+
+    it("shows the seat another instance reports on its row, and groups the row by it", () => {
+        seedAgents();
+        const seated: SwarmOtherInstances = {
+            ...OTHERS,
+            hosts: [
+                {
+                    ...OTHERS.hosts[0],
+                    channels: [
+                        {
+                            ...OTHERS.hosts[0].channels[0],
+                            agents: [
+                                { name: "Far", block_id: "", status: "idle", seat: { ...LEADER, area: "builds" } },
+                                {
+                                    name: "Near",
+                                    block_id: "",
+                                    seat: { role: "worker", qualifier: null, lead: { id: "u", name: "Far" }, area: null },
+                                },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        };
+        const { container, children } = setup("lead", seated);
+        const far = container.querySelector<HTMLElement>('[data-swarm-key*="Far"]')!;
+        expect(far.querySelector(".swarm-seat-badge")!.textContent).toBe("Leader · product");
+        expect(far.querySelector(".swarm-seat-badge")!.getAttribute("title")).toBe(
+            "Leader · product — reports to the operator — builds"
+        );
+        expect(children()).not.toContain("# Other instances");
+        expect(children().slice(0, 5)).toEqual(["# The operator", "b-camper", "b-w1", "b-opaz", far.dataset.swarmKey]);
     });
 
     it("lists the rows in one list when not grouped", () => {
