@@ -137,11 +137,21 @@ fn retire_untouched_starters(mstore: &Store, identity: Option<&Store>, siblings:
         if siblings.iter().any(|path| sibling_may_hold_a_ref(path, &id, name)) {
             continue;
         }
+        // The refs are this channel's (the identity store holds none), so the
+        // channel store deletes, naming the identity store as the catalog.
+        // A failure keeps the skill: it reaches no agent now, and a migration
+        // that errors would stop the app from starting.
         if let (Some(s), Some(row)) = (identity, in_catalog.as_ref()) {
-            s.skill_delete(s, &row.id).map_err(|e| format!("delete catalog skill {name}: {e}"))?;
+            if let Err(e) = mstore.skill_delete(s, &row.id) {
+                tracing::warn!(skill = name, error = %e, "retire_untouched_starter_skills: couldn't delete the catalog skill, keeping it");
+                continue;
+            }
         }
         if let Some(row) = in_channel.as_ref().filter(|row| is_untouched(row, hash)) {
-            mstore.skill_delete(mstore, &row.id).map_err(|e| format!("delete channel skill {name}: {e}"))?;
+            if let Err(e) = mstore.skill_delete(mstore, &row.id) {
+                tracing::warn!(skill = name, error = %e, "retire_untouched_starter_skills: couldn't delete the channel copy, keeping it");
+                continue;
+            }
         }
         removed += 1;
     }
@@ -174,10 +184,13 @@ impl Migration for M0041RetireUntouchedStarterSkills {
             ),
             None => None,
         };
-        let siblings: Vec<PathBuf> = registry::enumerate_objects_dbs(&ctx.home)
-            .into_iter()
-            .filter(|p| p != &ctx.channel_store_path)
-            .collect();
+        // Every channel's store must be listed to know no other channel binds a
+        // starter skill; if one couldn't be, keep them all (they reach no agent now).
+        let Some(all) = registry::enumerate_objects_dbs_complete(&ctx.home) else {
+            tracing::warn!("retire_untouched_starter_skills: couldn't list every channel's store, keeping the starter skills");
+            return Ok(());
+        };
+        let siblings: Vec<PathBuf> = all.into_iter().filter(|p| p != &ctx.channel_store_path).collect();
         let removed = retire_untouched_starters(&mstore, identity.as_ref(), &siblings).map_err(MigrationError)?;
         if removed > 0 {
             tracing::info!(removed, "retire_untouched_starter_skills: removed unused starter skills");

@@ -36,7 +36,7 @@ mod store;
 mod tests;
 
 pub use migrate::{
-    backfill_source_bases_once, enumerate_objects_dbs, migrate_from_sqlite_once, MigrateStats,
+    backfill_source_bases_once, enumerate_objects_dbs, enumerate_objects_dbs_complete, migrate_from_sqlite_once, MigrateStats,
     SourceBackfillStats,
 };
 pub use paths::{

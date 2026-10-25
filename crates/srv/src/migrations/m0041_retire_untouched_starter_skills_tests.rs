@@ -32,6 +32,15 @@ fn store() -> Store {
     Store::open_in_memory().unwrap()
 }
 
+/// The shared catalog as it really is: the identity-store schema, which holds
+/// the skills and none of the ref tables.
+fn identity_store() -> Store {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open_identity_store(&dir.path().join("identity-store.db")).unwrap();
+    std::mem::forget(dir);
+    store
+}
+
 fn put(store: &Store, skill: &Skill) {
     store.skill_insert_raw(skill).unwrap();
 }
@@ -65,7 +74,7 @@ fn the_frozen_id_and_hash_match_the_shipped_skill() {
 
 #[test]
 fn removes_an_untouched_unbound_starter_from_the_catalog_and_the_channel_copy() {
-    let (mstore, identity) = (store(), store());
+    let (mstore, identity) = (store(), identity_store());
     put(&identity, &shipped_tdd());
     put(&mstore, &shipped_tdd());
 
@@ -86,7 +95,7 @@ fn removes_a_channel_copy_when_there_is_no_catalog_yet() {
 
 #[test]
 fn keeps_one_whose_content_was_edited() {
-    let (mstore, identity) = (store(), store());
+    let (mstore, identity) = (store(), identity_store());
     let mut edited = shipped_tdd();
     edited.content.push_str("\nAlso: run the formatter.");
     put(&identity, &edited);
@@ -97,7 +106,7 @@ fn keeps_one_whose_content_was_edited() {
 
 #[test]
 fn keeps_one_that_was_renamed() {
-    let (mstore, identity) = (store(), store());
+    let (mstore, identity) = (store(), identity_store());
     let mut renamed = shipped_tdd();
     renamed.name = "How we test".to_string();
     put(&identity, &renamed);
@@ -108,7 +117,7 @@ fn keeps_one_that_was_renamed() {
 
 #[test]
 fn keeps_one_bound_to_an_agent() {
-    let (mstore, identity) = (store(), store());
+    let (mstore, identity) = (store(), identity_store());
     put(&identity, &shipped_tdd());
     put(&mstore, &shipped_tdd());
     bind_agent(&mstore, TDD_ID);
@@ -120,7 +129,7 @@ fn keeps_one_bound_to_an_agent() {
 
 #[test]
 fn keeps_one_bound_to_a_bundle() {
-    let (mstore, identity) = (store(), store());
+    let (mstore, identity) = (store(), identity_store());
     put(&identity, &shipped_tdd());
     bind_bundle(&mstore, TDD_ID);
 
@@ -130,7 +139,7 @@ fn keeps_one_bound_to_a_bundle() {
 
 #[test]
 fn keeps_one_bound_under_the_random_id_an_older_channel_still_has() {
-    let (mstore, identity) = (store(), store());
+    let (mstore, identity) = (store(), identity_store());
     put(&identity, &shipped_tdd());
     let mut legacy = shipped_tdd();
     legacy.id = "random-legacy-id".to_string();
@@ -143,7 +152,7 @@ fn keeps_one_bound_under_the_random_id_an_older_channel_still_has() {
 
 #[test]
 fn leaves_a_skill_the_user_made_with_a_starter_name() {
-    let (mstore, identity) = (store(), store());
+    let (mstore, identity) = (store(), identity_store());
     let mut theirs = shipped_tdd();
     theirs.id = "user-made".to_string();
     put(&identity, &theirs);
@@ -154,7 +163,7 @@ fn leaves_a_skill_the_user_made_with_a_starter_name() {
 
 #[test]
 fn running_twice_changes_nothing_more() {
-    let (mstore, identity) = (store(), store());
+    let (mstore, identity) = (store(), identity_store());
     put(&identity, &shipped_tdd());
     put(&mstore, &shipped_tdd());
     let mut kept = shipped_tdd();
@@ -182,7 +191,7 @@ fn sibling_db(dir: &Path, bound: bool) -> PathBuf {
 fn keeps_one_another_channel_binds() {
     let dir = tempfile::tempdir().unwrap();
     let sibling = sibling_db(dir.path(), true);
-    let (mstore, identity) = (store(), store());
+    let (mstore, identity) = (store(), identity_store());
     put(&identity, &shipped_tdd());
 
     assert_eq!(retire_untouched_starters(&mstore, Some(&identity), &[sibling]).unwrap(), 0);
@@ -193,7 +202,7 @@ fn keeps_one_another_channel_binds() {
 fn removes_one_when_another_channel_binds_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let sibling = sibling_db(dir.path(), false);
-    let (mstore, identity) = (store(), store());
+    let (mstore, identity) = (store(), identity_store());
     put(&identity, &shipped_tdd());
 
     assert_eq!(retire_untouched_starters(&mstore, Some(&identity), &[sibling]).unwrap(), 1);
@@ -203,7 +212,7 @@ fn removes_one_when_another_channel_binds_nothing() {
 fn keeps_one_when_another_channel_cannot_be_read() {
     let dir = tempfile::tempdir().unwrap();
     let missing = dir.path().join("gone.db");
-    let (mstore, identity) = (store(), store());
+    let (mstore, identity) = (store(), identity_store());
     put(&identity, &shipped_tdd());
 
     assert_eq!(retire_untouched_starters(&mstore, Some(&identity), &[missing]).unwrap(), 0);

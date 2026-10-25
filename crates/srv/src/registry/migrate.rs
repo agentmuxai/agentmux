@@ -372,6 +372,14 @@ pub fn enumerate_objects_dbs(home: &Path) -> Vec<PathBuf> {
     sources.into_iter().map(|s| s.db_path).collect()
 }
 
+/// [`enumerate_objects_dbs`], or `None` when a directory that should have been
+/// listed could not be read: a caller that must see EVERY channel's store (to
+/// know nothing elsewhere still uses a thing) can't trust a partial list.
+pub fn enumerate_objects_dbs_complete(home: &Path) -> Option<Vec<PathBuf>> {
+    let (sources, incomplete) = enumerate_sources(home);
+    (!incomplete).then(|| sources.into_iter().map(|s| s.db_path).collect())
+}
+
 /// Enumerate every per-(channel,version) and per-dev-branch `objects.db` under
 /// `home`, pairing each with its own agents dir (the per-source fallback anchor;
 /// the primary anchor in `row_to_record` is the global `<home>/agents`).
