@@ -1,5 +1,5 @@
 @echo off
-rem agentmux-build-slot-shim v2: written by AgentMux; edits here are overwritten.
+rem agentmux-build-slot-shim v3: written by AgentMux; edits here are overwritten.
 rem cmd.exe and PowerShell reach the same build-slot shim as Git Bash: the sibling file with
 rem this file's name and no extension (cargo, task, npm, npx, docker) does the work. Without
 rem Git for Windows, or with AGENTMUX_BUILD_SLOT_OFF set, this runs the real tool directly.

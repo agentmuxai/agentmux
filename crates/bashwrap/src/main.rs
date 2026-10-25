@@ -60,6 +60,7 @@ mod hook;
 mod precompact;
 mod prefix;
 mod sessionstart;
+mod shim_functions;
 #[cfg(test)]
 mod test_env_lock;
 mod mps_client;
@@ -93,6 +94,8 @@ enum Command {
 
 fn main() -> Result<()> {
     init_tracing();
+    // Before any bash is started, by the prefix or exec path alike (shim_functions.rs).
+    shim_functions::export();
 
     // ssh's askpass for an agent's SSH command: the prompt is the only
     // argument, so this is decided before clap sees it (askpass.rs).
