@@ -729,8 +729,8 @@
         },
         "agent:transcriptframes": {
           "type": "boolean",
-          "default": false,
-          "description": "Compress the finished parts of agent transcripts in the global transcript store, 1 MiB at a time (about 6x smaller). Only parts at least 8 MiB from a transcript's end and received over a day ago; nothing a reader sees changes. Waits while an AgentMux build that can't read compressed history runs on this machine. See docs/specs/SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21.md."
+          "default": true,
+          "description": "On by default; set false to turn it off. Compress the finished parts of agent transcripts in the global transcript store, 1 MiB at a time (about 6x smaller). Only parts at least 8 MiB from a transcript's end and received over a day ago; nothing a reader sees changes. Waits while an AgentMux build that can't read compressed history runs on this machine. See docs/specs/SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21.md."
         },
         "agent:transcriptdeltas": {
           "type": "boolean",

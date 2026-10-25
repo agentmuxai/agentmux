@@ -46,6 +46,9 @@ pub struct Occupancy {
     pub job_started: usize,
     /// This job's runs waiting on its own previous run (`overlap`).
     pub job_buffered: usize,
+    /// This job's runs that wait for a place (`group_busy`, `global_limit`):
+    /// the job's next run is already queued, so another slot isn't.
+    pub job_blocked: usize,
     /// Runs of the same concurrency group, in any job.
     pub group_running: usize,
     /// Unattended agent runs in all jobs.
@@ -82,6 +85,11 @@ pub fn decide(job: &CronJob, occ: &Occupancy, waiting: bool) -> Decision {
             Overlap::CancelOther if occ.job_running > occ.job_started => return Decision::SkipOverlap,
             Overlap::CancelOther => cancel = true,
         }
+    }
+    // A run of this job already waits for a place: a further slot is the same
+    // overlap as one behind a running run, whatever the policy keeps.
+    if !waiting && occ.job_running == 0 && occ.job_blocked > 0 {
+        return Decision::SkipOverlap;
     }
     if group_of(job).is_some() && occ.group_running > 0 {
         return Decision::Wait(reason::GROUP_BUSY);
