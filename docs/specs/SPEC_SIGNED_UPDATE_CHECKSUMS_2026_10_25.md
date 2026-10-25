@@ -59,7 +59,6 @@ one release's for another's:
   "format": 1,
   "version": "0.60.1",
   "tag": "v0.60.1",
-  "key": "k1",
   "files": [
     { "name": "AgentMux-0.60.1-x64-setup.exe", "size": 151460383, "sha256": "…" },
     { "name": "agentmux-0.60.1-x64-portable.7z", "size": 129471877, "sha256": "…" }
@@ -80,8 +79,7 @@ The signature file is one line per signature, `<key id> <base64 Ed25519 signatur
 over the **exact bytes** of the envelope file. There is no canonical form to get
 wrong: the app verifies the bytes it downloaded and only then parses them. The
 manifest is then accepted only if the SHA-256 of its exact bytes equals
-`manifest_sha256`. The `key` field of the manifest above is informational (the
-signature line names the key that counts).
+`manifest_sha256`.
 
 Signing an envelope rather than the manifest keeps the signed message fixed in size
 (about 200 bytes, small enough for any signing service) however many files a
@@ -101,20 +99,21 @@ verify time.
 
 ## 4. Release workflow
 
-In the `Publish release` job, after the files are gathered (`dist-flat/`) and before
-`gh release create`/`upload`:
+A separate `sign-release` job runs after the builds and before `Publish release`; it
+gathers the same files (`dist-flat/`) that `publish` will, and does:
 
 1. Build the manifest from `dist-flat/*` (name, size, SHA-256), with the version and
    tag the job already has, and the envelope that names it by hash.
 2. Sign the envelope with the release signing key.
-3. Upload manifest, envelope and signature with the other files, in the same
-   `gh release` command, so no moment exists where the files are public and the
-   signature isn't.
+3. Hand manifest, envelope and signature to `Publish release` as an artifact. That job
+   checks again that the files it is about to publish are exactly the ones the
+   manifest lists, then uploads all of them in the same `gh release` command, so no
+   moment exists where the files are public and the signature isn't.
 4. Verify what was made: the same verification code path the app uses, run against
    the files in `dist-flat/`, with the public key from the repository. The job fails
    on any mismatch, so a signing mistake can't ship.
 
-The key is held by a managed signing service and **never leaves it**: the publish job
+The key is held by a managed signing service and **never leaves it**: the signing job
 may ask it to sign a manifest, once per release, and can't read the key, so a stolen
 token or a compromised runner can't take it away (it can only ask for signatures while
 the job's own identity is valid, which the service logs). The job authenticates to the
@@ -258,7 +257,7 @@ Anyone on a version before step 2 upgrades as today, then is covered.
 
 Taken by the platform lead on 2026-10-25, pending the operator's OK:
 
-1. **Key custody:** a managed signing service the publish job can call but never read,
+1. **Key custody:** a managed signing service the signing job can call but never read,
    reached with the workflow's identity token (no stored secret). Creating it is a
    production change that needs the operator's OK; the design is in the private
    infrastructure docs. If the service didn't offer Ed25519, the fallback would be

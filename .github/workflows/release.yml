@@ -307,32 +307,6 @@ jobs:
       cef-runtime-tag: ${{ needs.cef-runtime-pins.outputs.macos-tag }}
     secrets: inherit
 
-  # ── Phase 3: Publish GitHub Release ───────────────────────────────────────
-  # GitHub Releases is the single source of truth for distribution. The landing
-  # page reads this release, mirrors the assets into its own storage, and
-  # serves them from agentmux.ai — so this job must NOT touch S3 or AWS. Its only handoff is the
-  # GitHub Release plus a repository_dispatch to redeploy the landing page.
-  #
-  # `if: !failure() && !cancelled()` rather than plain `success()` is
-  # deliberate: build-macos is legitimately SKIPPED (not failed) whenever
-  # APPLE_CEF_AVAILABLE isn't set, and `success()` would treat that skip as
-  # not-a-success and block publish even though a Windows/Linux-only release
-  # is fine. `failure()`/`cancelled()` only inspect jobs THIS job directly
-  # `needs` — they do not look at the whole transitive graph (GitHub Actions'
-  # documented behaviour: an `if:` that references one of these functions
-  # gets no implicit "all needs succeeded" check at all, unlike a plain
-  # output-only `if:` such as build-macos's own) — so cef-runtime-pins MUST
-  # be listed here explicitly, or its failure (a milestone mismatch) would
-  # cascade to skip every build job (invisible to failure()) while publish's
-  # condition stayed true, ran anyway, downloaded zero artifacts, and failed
-  # confusingly later instead of being cleanly blocked at the real point of
-  # failure.
-  #
-  # build-macos is checked by its result as well: a job killed by a time limit
-  # ends as `cancelled`, which `failure()` doesn't count, and `cancelled()`
-  # only covers the whole run. v0.59.37 shipped without macOS that way. So
-  # publish needs build-macos to have succeeded, or to have been skipped
-  # because macOS signing isn't set up (check-macos), never anything else.
   # ── Phase 2b: Sign the release's manifest ───────────────────────────────
   # docs/specs/SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25.md. The app downloads
   # nothing a signed manifest doesn't list, so this runs between the builds and
@@ -412,6 +386,32 @@ jobs:
           path: release-manifest/
           if-no-files-found: error
 
+  # ── Phase 3: Publish GitHub Release ───────────────────────────────────────
+  # GitHub Releases is the single source of truth for distribution. The landing
+  # page reads this release, mirrors the assets into its own storage, and
+  # serves them from agentmux.ai — so this job must NOT touch S3 or AWS. Its only handoff is the
+  # GitHub Release plus a repository_dispatch to redeploy the landing page.
+  #
+  # `if: !failure() && !cancelled()` rather than plain `success()` is
+  # deliberate: build-macos is legitimately SKIPPED (not failed) whenever
+  # APPLE_CEF_AVAILABLE isn't set, and `success()` would treat that skip as
+  # not-a-success and block publish even though a Windows/Linux-only release
+  # is fine. `failure()`/`cancelled()` only inspect jobs THIS job directly
+  # `needs` — they do not look at the whole transitive graph (GitHub Actions'
+  # documented behaviour: an `if:` that references one of these functions
+  # gets no implicit "all needs succeeded" check at all, unlike a plain
+  # output-only `if:` such as build-macos's own) — so cef-runtime-pins MUST
+  # be listed here explicitly, or its failure (a milestone mismatch) would
+  # cascade to skip every build job (invisible to failure()) while publish's
+  # condition stayed true, ran anyway, downloaded zero artifacts, and failed
+  # confusingly later instead of being cleanly blocked at the real point of
+  # failure.
+  #
+  # build-macos is checked by its result as well: a job killed by a time limit
+  # ends as `cancelled`, which `failure()` doesn't count, and `cancelled()`
+  # only covers the whole run. v0.59.37 shipped without macOS that way. So
+  # publish needs build-macos to have succeeded, or to have been skipped
+  # because macOS signing isn't set up (check-macos), never anything else.
   publish:
     name: Publish release
     needs: [verify, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos, sign-release]
