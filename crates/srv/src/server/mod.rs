@@ -9,6 +9,7 @@ pub(crate) mod account_episodes;
 // to start a turn outside the RPC path.
 pub mod agent_resources;
 pub mod agent_handlers;
+mod agent_only;
 mod agent_takeover;
 mod editor_handlers;
 mod fs_handlers;

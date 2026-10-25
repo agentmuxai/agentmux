@@ -272,5 +272,67 @@ async fn a_global_memory_save_over_the_socket_is_recorded_as_whoever_made_it() {
         let versions = state.id_store.bundle_version_list(id).unwrap();
         assert_eq!(versions.len(), 1, "{id}");
         assert_eq!((versions[0].written_by.as_str(), versions[0].source.as_str()), (writer, source), "{id}");
+
+/// The work queue and jobs act for an agent: each route refuses a request with no token, and a token is
+/// enough to get past the guard (what the handler then says is its own business).
+#[tokio::test]
+async fn the_work_and_jobs_routes_refuse_a_request_with_no_token() {
+    let _counters = M4_ACTOR_COUNTERS.lock().await;
+    let (state, token) = state_with_alpha();
+    let routes = [
+        ("POST", "/agentmux/work"),
+        ("POST", "/agentmux/work/claim"),
+        ("POST", "/agentmux/work/w1/heartbeat"),
+        ("POST", "/agentmux/work/w1/complete"),
+        ("POST", "/agentmux/work/w1/release"),
+        ("POST", "/agentmux/work/w1/update"),
+        ("POST", "/agentmux/work/w1/ask"),
+        ("POST", "/agentmux/work/w1/submit"),
+        ("POST", "/agentmux/work/w1/hold"),
+        ("POST", "/agentmux/work/w1/unhold"),
+        ("DELETE", "/agentmux/work/w1"),
+        ("POST", "/agentmux/jobs"),
+        ("DELETE", "/agentmux/jobs/j1"),
+        ("PATCH", "/agentmux/jobs/j1"),
+        ("POST", "/agentmux/jobs/j1/run"),
+        ("POST", "/agentmux/jobs/runs/r1/report"),
+        ("POST", "/agentmux/cron"),
+        ("DELETE", "/agentmux/cron/j1"),
+        ("PATCH", "/agentmux/cron/j1"),
+        ("POST", "/agentmux/cron/j1/run"),
+        ("POST", "/agentmux/cron/runs/r1/report"),
+    ];
+    for (method, uri) in routes {
+        for (token, guarded) in [(None, true), (Some(token.as_str()), false)] {
+            let mut req = Request::builder().method(method).uri(uri).header("X-AuthKey", "test-secret-key").header("Content-Type", "application/json");
+            if let Some(t) = token {
+                req = req.header("X-Agent-Token", t);
+            }
+            let resp = build_router(state.clone()).oneshot(req.body(Body::from("{}")).unwrap()).await.unwrap();
+            let status = resp.status();
+            let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+            let said_no_token = String::from_utf8_lossy(&bytes).contains("must carry that agent's token");
+            assert_eq!(said_no_token, guarded, "{method} {uri} (token: {}): {status}", token.is_some());
+        }
+    }
+}
+
+/// A token acts as its own agent on the work and jobs routes: the agent a body names has to be it.
+#[tokio::test]
+async fn the_work_and_jobs_routes_refuse_a_body_that_names_another_agent() {
+    let _counters = M4_ACTOR_COUNTERS.lock().await;
+    let (state, token) = state_with_alpha();
+    let names_another = |v: &Value| v["error"].as_str().is_some_and(|e| e.contains("the request names another"));
+    for (uri, key) in [
+        ("/agentmux/work/claim", "agent_id"),
+        ("/agentmux/work/w1/complete", "agent_id"),
+        ("/agentmux/work/w1/hold", "agent_id"),
+        ("/agentmux/work", "created_by"),
+        ("/agentmux/jobs", "created_by"),
+    ] {
+        let (_, v) = post(&state, Some(&token), uri, json!({ key: "sc-beta", "title": "t", "attempt": 1 })).await;
+        assert!(names_another(&v), "{uri}: {v}");
+        let (_, v) = post(&state, Some(&token), uri, json!({ key: "sc-alpha", "title": "t", "attempt": 1 })).await;
+        assert!(!names_another(&v), "{uri} as itself: {v}");
     }
 }
