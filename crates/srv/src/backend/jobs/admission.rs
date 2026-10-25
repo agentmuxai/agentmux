@@ -111,13 +111,10 @@ impl RunLedger {
                 occ.agents_running += 1;
             }
         }
-        occ.job_buffered = self
-            .store
-            .job_runs_waiting()
-            .unwrap_or_default()
-            .iter()
-            .filter(|r| r.job_id == job.id && r.reason == reason::OVERLAP)
-            .count();
+        let waiting = self.store.job_runs_waiting().unwrap_or_default();
+        let own = || waiting.iter().filter(|r| r.job_id == job.id);
+        occ.job_buffered = own().filter(|r| r.reason == reason::OVERLAP).count();
+        occ.job_blocked = own().filter(|r| r.reason == reason::GROUP_BUSY || r.reason == reason::GLOBAL_LIMIT).count();
         occ
     }
 
@@ -226,7 +223,9 @@ impl RunLedger {
                 self.run_changed(&run.id);
                 continue;
             };
-            if !job.enabled && !schedule_finished(&job, now) {
+            // A paused job's scheduled runs end; a Run now, asked for by a person, and
+            // the last run of a job whose schedule is done still get their place.
+            if !job.enabled && run.trigger != super::TRIGGER_MANUAL && !schedule_finished(&job, now) {
                 let _ = self.store.job_run_skip(&run.id, reason::PAUSED, 1, now);
                 self.changed(&job.id);
                 continue;

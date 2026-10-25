@@ -156,6 +156,42 @@ async fn a_waiting_run_of_a_finished_one_time_job_still_starts() {
     assert_eq!(run.state, state::RUNNING, "it started: {:?}", states(&rig, "j-once-w2"));
 }
 
+/// A job whose run waits for its group doesn't queue a second one for the next
+/// slot: skip skips it, buffer_one keeps the one it has.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_further_slot_of_a_job_already_waiting_for_a_place_is_skipped() {
+    let rig = rig();
+    let blocker = make(&rig, "j-block-a", |j| j.policy.group = Some("g".into()));
+    let a = make(&rig, "j-block-b", |j| j.policy.group = Some("g".into()));
+    let buf = make(&rig, "j-block-c", |j| {
+        j.policy.group = Some("g".into());
+        j.policy.overlap = Overlap::BufferOne;
+    });
+    rig.sched.fire(&blocker, slot(0)).await;
+    for job in [&a, &buf] {
+        rig.sched.fire(job, slot(0)).await.run_id.unwrap();
+        let again = rig.sched.fire(job, slot(1)).await;
+        assert_eq!((again.run_id, again.waiting), (None, None), "{}: the second slot is skipped", job.id);
+        assert_eq!(rig.runs(&job.id).len(), 2, "{}: one waiting run and one skipped row", job.id);
+    }
+}
+
+/// Run now on a paused job still gets its place when it has to wait.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_now_waiting_for_a_place_on_a_paused_job_still_starts() {
+    let rig = rig();
+    let busy = make(&rig, "j-rn-a", |j| j.policy.group = Some("g".into()));
+    let paused = make(&rig, "j-rn-b", |j| {
+        j.policy.group = Some("g".into());
+        j.enabled = false;
+    });
+    let first = rig.sched.fire(&busy, slot(0)).await.run_id.unwrap();
+    let waits = rig.sched.run_now(&paused, "operator").await.run_id.unwrap();
+    end(&rig, &first);
+    rig.sched.run_policy_pass().await;
+    assert_eq!(rig.store.job_run_get(&waits).unwrap().unwrap().state, state::RUNNING, "{:?}", states(&rig, "j-rn-b"));
+}
+
 // ── groups and the global limit ─────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread")]
