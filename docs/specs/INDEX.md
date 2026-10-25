@@ -490,6 +490,7 @@ partial list.
 | [`SPEC_STATUSBAR_HOST_POPOVER_INSTANCE_AND_OPEN_DATA_DIR_2026_09_25`](SPEC_STATUSBAR_HOST_POPOVER_INSTANCE_AND_OPEN_DATA_DIR_2026_09_25.md) | SPEC: status bar host popover — drop the "Instance" row, add "open in file manager" |
 | [`SPEC_STATUSBAR_TOKEN_PANEL_BY_AGENT_2026_08_30`](SPEC_STATUSBAR_TOKEN_PANEL_BY_AGENT_2026_08_30.md) | Spec: Token stats panel — break out by agent + value-add details |
 | [`SPEC_STATUSBAR_TOKEN_USAGE_2026_04_24`](SPEC_STATUSBAR_TOKEN_USAGE_2026_04_24.md) | Spec: Status-Bar Token Usage Indicator + Per-Service Breakdown |
+| [`SPEC_STOP_AN_AGENT_ONE_WAY_AND_SHUTDOWN_TOAST_2026_10_23`](SPEC_STOP_AN_AGENT_ONE_WAY_AND_SHUTDOWN_TOAST_2026_10_23.md) | SPEC: One way to stop an agent (close it), and a shutdown toast with a countdown and a Keep running button |
 | [`SPEC_STORE_MODULARIZATION_2026_05_27`](SPEC_STORE_MODULARIZATION_2026_05_27.md) | SPEC: `wstore` → `store` rename + modularization |
 | [`SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30`](SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md) | SPEC — Strong Reducer-Authority for Layout (Intent-Driven srv Reducer) |
 | [`SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12`](SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md) | SPEC — subagent lifecycle: no reducer, no liveness, "working" forever |
@@ -757,7 +758,6 @@ partial list.
 | [`SPEC_SRV_MALLOC_ARENA_CAP_2026_10_18`](SPEC_SRV_MALLOC_ARENA_CAP_2026_10_18.md) | Spec: srv caps glibc's malloc arenas at two (Linux only) |
 | [`SPEC_SRV_PROCESS_LISTING_WITHOUT_THREADS_2026_10_18`](SPEC_SRV_PROCESS_LISTING_WITHOUT_THREADS_2026_10_18.md) | Spec: srv's process listings stop reading every thread (Linux CPU) |
 | [`SPEC_START_WITH_OS_2026_09_25`](SPEC_START_WITH_OS_2026_09_25.md) | SPEC: Start with OS — AgentMux starts quietly at login, on every platform, and keeps working after updates |
-| [`SPEC_STOP_AN_AGENT_ONE_WAY_AND_SHUTDOWN_TOAST_2026_10_23`](SPEC_STOP_AN_AGENT_ONE_WAY_AND_SHUTDOWN_TOAST_2026_10_23.md) | SPEC: One way to stop an agent (close it), and a shutdown toast with a countdown and a Keep running button |
 | [`SPEC_STREAMING_BASH_RUNNER_2026_05_11`](SPEC_STREAMING_BASH_RUNNER_2026_05_11.md) | Streaming bash runner — PreToolUse command rewrite |
 | [`SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20`](SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20.md) | SPEC — live subagent reconciliation + Retire action (best-practices plan) |
 | [`SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02`](SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md) | SPEC: The Swarm shows the agents of every other instance this one knows about |
@@ -1117,6 +1117,7 @@ partial list.
 | [`SPEC_MAGNIFY_ZOOM_REGRESSION_AND_DEFAULTS_2026-05-21`](SPEC_MAGNIFY_ZOOM_REGRESSION_AND_DEFAULTS_2026-05-21.md) | SPEC: Magnify zoom regression + magnified-pane defaults |
 | [`SPEC_MAXIMIZE_ZOOM_ARCHITECTURE_2026-05-21`](SPEC_MAXIMIZE_ZOOM_ARCHITECTURE_2026-05-21.md) | SPEC: Maximize & Zoom — Architecture Analysis |
 | [`SPEC_MENU_PAINTABLE_AREA_GUARD_2026_05_20`](SPEC_MENU_PAINTABLE_AREA_GUARD_2026_05_20.md) | SPEC: Menu positioning framework — offset every menu into the paintable area |
+| [`SPEC_MESSAGE_ORIGIN_AND_ONE_CONTAINER_2026_10_25`](SPEC_MESSAGE_ORIGIN_AND_ONE_CONTAINER_2026_10_25.md) | SPEC: Only the human's own words look like the human: one message origin, set by srv, and one container for everything else |
 | [`SPEC_MESSAGING_INTEGRATIONS_PLAN_2026_06_24`](SPEC_MESSAGING_INTEGRATIONS_PLAN_2026_06_24.md) | Spec: Messaging App Integrations — Unified Plan |
 | [`SPEC_MESSAGING_INTEGRATION_DISCORD_POC_2026_06_24`](SPEC_MESSAGING_INTEGRATION_DISCORD_POC_2026_06_24.md) | Spec: Messaging App Integration — Discord POC |
 | [`SPEC_MESSAGING_INTEGRATION_SLACK_2026_07_07`](SPEC_MESSAGING_INTEGRATION_SLACK_2026_07_07.md) | Spec: Messaging App Integration — Slack |
