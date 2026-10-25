@@ -99,8 +99,8 @@
     text-overflow: ellipsis;
 }
 
-// Under about 160 px the figure is set smaller and the rail row gives up its
-// swatch, so "752.9 MB" still fits whole.
+// Under about 160 px the figure is set smaller and the pane's side padding goes
+// (the rail row's own rule is with the rail's).
 @container (max-width: 160px) {
     .tower-headline {
         padding-inline: var(--space-1);
@@ -113,17 +113,6 @@
 
     .tower-body {
         padding-inline: var(--space-1);
-    }
-
-    .tower-rail-row {
-        column-gap: 0;
-        grid-template-columns: minmax(0, 1fr) auto;
-        grid-template-areas: "name mem";
-        padding-inline: var(--space-1);
-
-        > .tower-swatch {
-            display: none;
-        }
     }
 }
 
@@ -397,6 +386,20 @@ th[aria-sort="descending"] .tower-sort {
 
         .tower-rail-cpu,
         .tower-spark {
+            display: none;
+        }
+    }
+
+    // Under about 160 px the swatch goes too, with its column, the gaps and
+    // most of the padding, so "752.9 MB" fits whole. After the base rule above,
+    // or the base would win.
+    @container (max-width: 160px) {
+        column-gap: 0;
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas: "name mem";
+        padding-inline: var(--space-1);
+
+        > .tower-swatch {
             display: none;
         }
     }
