@@ -1,6 +1,6 @@
 # Spec: Build-cache cleanup and a low-disk warning
 
-**Status:** active — built in #PR_NUMBER (Kanban #3664). Approved by the operator on 2026-10-25 ("use best recommendations"); defaults confirmed by the platform lead on 2026-10-26.
+**Status:** active — built in #5516 (Kanban #3664). Approved by the operator on 2026-10-25 ("use best recommendations"); defaults confirmed by the platform lead on 2026-10-26.
 **Date:** 2026-10-26
 **Author:** Loap-3
 **Verified against:** `agentmux` `main` @ `2d8b80ed1`, and a read-only survey of one host's agent workspaces on 2026-10-26.
