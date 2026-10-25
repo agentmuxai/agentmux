@@ -379,13 +379,16 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
     const tryHibernate = async (reason: SleepReason): Promise<string | null> => {
         if (sleeping()) return "already asleep";
         if (visible()) return "visible";
-        // Thaw first, and wait for the host: the checks below may not reach the page
-        // (a declined pane makes no CDP call), which would leave it frozen.
-        await freezer.thaw();
-        if (visible() || sleeping()) return visible() ? "visible" : "already asleep";
-        const declined =
-            awakeReason(facts(), Date.now(), getSettingsKeyAtom("browser:keepawakesites")()) ??
-            pageAwakeReason(await getApi().browserPanes.hibernationCheck?.(model.blockId).catch(() => null));
+        // What the window knows needs no page: a pane declined on it stays as it is
+        // (a frozen one stays frozen).
+        let declined = awakeReason(facts(), Date.now(), getSettingsKeyAtom("browser:keepawakesites")());
+        if (declined == null) {
+            // Looking at the page thaws it in the host. Wait for that before the check, so the
+            // flag and the host agree whatever the check answers.
+            await freezer.thaw();
+            if (visible() || sleeping()) return visible() ? "visible" : "already asleep";
+            declined = pageAwakeReason(await getApi().browserPanes.hibernationCheck?.(model.blockId).catch(() => null));
+        }
         if (declined != null) {
             diag(`[hibernate] stays awake reason=${JSON.stringify(declined)} asked=${reason}`);
             return declined;

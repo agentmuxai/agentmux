@@ -280,13 +280,29 @@ export function awakeReason(f: PaneFacts, now: number, keepAwakeSites?: unknown)
  *  freeze marks the page hidden and its thaw doesn't mark it shown, so only an
  *  engine with the AgentMux CEF fork's windowed WasHidden, which the pane's
  *  show calls, brings a thawed page back to full speed. That fork build is the
- *  one with the Discard API, so its presence answers. Asked once per window. */
+ *  one with the Discard API, so its presence answers. A yes is kept for the window.
+ *  A no is not final: the host also answers "unsupported" when the probed pane has no
+ *  live page or the UI thread was slow, so it is asked again after a while. */
+export const ENGINE_NO_RECHECK_MS = 5 * 60_000;
 let engineCanFreeze: Promise<boolean> | undefined;
-export function engineSupportsFreeze(ask: () => Promise<{ supported: boolean } | null | undefined>): Promise<boolean> {
+let engineNoAt = 0;
+export function resetEngineSupportsFreeze(): void {
+    engineCanFreeze = undefined;
+    engineNoAt = 0;
+}
+export function engineSupportsFreeze(
+    ask: () => Promise<{ supported: boolean } | null | undefined>,
+    now: number = Date.now(),
+): Promise<boolean> {
+    if (engineCanFreeze && engineNoAt > 0 && now - engineNoAt >= ENGINE_NO_RECHECK_MS) resetEngineSupportsFreeze();
     engineCanFreeze ??= ask()
-        .then((r) => r?.supported === true)
+        .then((r) => {
+            if (r?.supported === true) return true;
+            engineNoAt = now;
+            return false;
+        })
         .catch(() => {
-            engineCanFreeze = undefined; // ask again next time
+            resetEngineSupportsFreeze(); // ask again next time
             return false;
         });
     return engineCanFreeze;

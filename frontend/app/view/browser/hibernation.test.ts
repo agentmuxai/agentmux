@@ -10,7 +10,9 @@ import {
     afterDiscard,
     wakeEndsNow,
     awakeReason,
+    ENGINE_NO_RECHECK_MS,
     engineSupportsFreeze,
+    resetEngineSupportsFreeze,
     etaLabel,
     FREEZE_PER_TICK,
     freezeAwakeReason,
@@ -393,6 +395,17 @@ describe("freezing hidden panes", () => {
 });
 
 describe("engineSupportsFreeze", () => {
+    afterEach(() => resetEngineSupportsFreeze());
+    it("asks again after a while when the answer was no, and keeps a yes", async () => {
+        const answers = [{ supported: false }, { supported: true }];
+        const ask = vi.fn(async () => answers.shift()!);
+        expect(await engineSupportsFreeze(ask, 1000)).toBe(false);
+        expect(await engineSupportsFreeze(ask, 1000 + ENGINE_NO_RECHECK_MS - 1)).toBe(false);
+        expect(ask).toHaveBeenCalledTimes(1);
+        expect(await engineSupportsFreeze(ask, 1000 + ENGINE_NO_RECHECK_MS)).toBe(true);
+        expect(await engineSupportsFreeze(ask, 1000 + 10 * ENGINE_NO_RECHECK_MS)).toBe(true);
+        expect(ask).toHaveBeenCalledTimes(2);
+    });
     it("asks once, and says yes only for an engine with the Discard API", async () => {
         let asked = 0;
         const ask = async () => {
