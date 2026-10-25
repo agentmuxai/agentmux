@@ -18,6 +18,7 @@ mod cap_alert;
 pub mod caps;
 pub mod definition;
 pub mod follower;
+pub mod from_template;
 pub mod incidents;
 pub mod paused;
 pub mod policy;

@@ -1,0 +1,162 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// The Jobs section's editor, template approval, dry run and update diff (job-editor.tsx and its
+// neighbours). Controls come from element/ui/. At a narrow Warden width every grid is one column.
+
+.warden-jobs-editor,
+.warden-jobs-approval,
+.warden-jobs-dryrun,
+.warden-jobs-update {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    border: 1px solid var(--border-color);
+}
+
+.warden-jobs-heading {
+    margin: 0;
+    font-size: var(--text-base);
+    font-weight: 600;
+}
+
+.warden-jobs-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.warden-jobs-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+    gap: var(--space-3);
+}
+
+.warden-jobs-textarea {
+    width: 100%;
+    min-height: 4rem;
+    resize: vertical;
+    font-family: inherit;
+}
+
+.warden-jobs-facts {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: var(--space-1) var(--space-3);
+    margin: 0;
+
+    dt {
+        opacity: 0.6;
+    }
+
+    dd {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: var(--space-1);
+        min-width: 0;
+        margin: 0;
+        overflow-wrap: anywhere;
+    }
+}
+
+.warden-jobs-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.warden-jobs-brief {
+    margin: 0;
+    max-width: 100%;
+    font-family: monospace;
+    font-size: var(--text-sm);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.warden-jobs-brief-diff {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-2);
+
+    .warden-jobs-brief {
+        padding: var(--space-1) var(--space-2);
+        border: 1px solid var(--border-color);
+    }
+
+    .warden-jobs-brief[data-side="before"] {
+        border-color: var(--error-color);
+    }
+
+    .warden-jobs-brief[data-side="after"] {
+        border-color: var(--success-color);
+    }
+}
+
+.warden-jobs-before {
+    color: var(--error-color);
+}
+
+.warden-jobs-after {
+    color: var(--success-color);
+}
+
+.warden-jobs-note {
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--warning-line);
+    background: var(--warning-bg);
+    font-size: var(--text-sm);
+}
+
+.warden-jobs-problems {
+    margin: 0;
+    padding-left: var(--space-4);
+}
+
+.warden-jobs-templates {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.warden-jobs-template {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--border-color);
+}
+
+.warden-jobs-template-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+@container warden (max-width: 639px) {
+    .warden-jobs-toolbar {
+        flex-wrap: wrap;
+    }
+
+    .warden-jobs-grid,
+    .warden-jobs-brief-diff {
+        grid-template-columns: 1fr;
+    }
+
+    .warden-jobs-facts {
+        grid-template-columns: 1fr;
+
+        dt {
+            margin-top: var(--space-1);
+        }
+    }
+}

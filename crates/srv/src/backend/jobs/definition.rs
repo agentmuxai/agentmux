@@ -31,9 +31,6 @@ pub const MIN_EVERY_SECS: i64 = 60;
 /// What a kind reserved for a later phase answers (§6).
 pub const LATER: &str = "available in a later version";
 
-/// What a definition naming a template answers until templates land (§5.4).
-pub const NO_TEMPLATES_YET: &str = "templates are not available yet";
-
 /// Trigger kinds (`trigger.kind`).
 pub mod trigger_kind {
     pub const CRON: &str = "cron";
@@ -362,8 +359,10 @@ impl JobDefinition {
         if name.is_empty() || name.chars().count() > 200 {
             return Err("name is required, at most 200 characters".to_string());
         }
-        if self.template.is_some() {
-            return Err(NO_TEMPLATES_YET.to_string());
+        if let Some(t) = &self.template {
+            if t.id.trim().is_empty() || t.version.trim().is_empty() {
+                return Err("template: id and version are required".to_string());
+            }
         }
         if serde_json::to_string(&self.params).map_or(0, |s| s.len()) > 16 * 1024 {
             return Err("params are at most 16 KB".to_string());

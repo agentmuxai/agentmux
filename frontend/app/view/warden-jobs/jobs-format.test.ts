@@ -5,8 +5,17 @@ import { describe, expect, it } from "vitest";
 
 import type { JobView } from "@/types/rpc/JobView";
 
-import { costText, describeCron, failingCount, inWords, kanbanTask, runBadge, stateText } from "./jobs-format";
-import { mkRun } from "./jobs-fixtures";
+import { mkJob, mkRun } from "./jobs-fixtures";
+import {
+    costText,
+    describeCron,
+    describeTrigger,
+    failingCount,
+    inWords,
+    kanbanTask,
+    runBadge,
+    stateText,
+} from "./jobs-format";
 
 describe("describeCron", () => {
     it("says the common shapes in words, in UTC", () => {
@@ -45,7 +54,11 @@ describe("runBadge", () => {
         expect(runBadge(mkRun({ outcome: "findings" })).tone).toBe("warn");
         expect(runBadge(mkRun({ outcome: "unknown" }))).toMatchObject({ label: "unknown", tone: "neutral" });
         expect(runBadge(mkRun({ outcome: "failed", failed: true }))).toMatchObject({ label: "failed", tone: "error" });
-        expect(runBadge(mkRun({ infra: "interrupted", failed: true }))).toMatchObject({ label: "failed", tone: "error", detail: "failed: interrupted" });
+        expect(runBadge(mkRun({ infra: "interrupted", failed: true }))).toMatchObject({
+            label: "failed",
+            tone: "error",
+            detail: "failed: interrupted",
+        });
     });
 
     it("says what kept a run from running", () => {
@@ -55,8 +68,15 @@ describe("runBadge", () => {
             detail: "missed: agent not running",
         });
         const skipped = runBadge(mkRun({ state: "skipped", reason: "paused_all", skip_count: 3 }));
-        expect(skipped).toMatchObject({ label: "skipped", tone: "neutral", hollow: true, detail: "skipped: Pause all (×3)" });
-        expect(runBadge(mkRun({ state: "pending", reason: "target_stopped", ended_at_ms: null })).label).toBe("waiting");
+        expect(skipped).toMatchObject({
+            label: "skipped",
+            tone: "neutral",
+            hollow: true,
+            detail: "skipped: Pause all (×3)",
+        });
+        expect(runBadge(mkRun({ state: "pending", reason: "target_stopped", ended_at_ms: null })).label).toBe(
+            "waiting"
+        );
         expect(runBadge(mkRun({ state: "pending", reason: "expired", failed: true })).label).toBe("missed");
         expect(runBadge(mkRun({ state: "pending", reason: "superseded" })).label).toBe("replaced");
         expect(runBadge(mkRun({ state: "running" })).tone).toBe("accent");
@@ -87,5 +107,28 @@ describe("kanbanTask", () => {
         expect(kanbanTask(mkRun({ links: { kanban_task: { id: "w1", num: 12 } } }))).toEqual({ id: "w1", num: 12 });
         expect(kanbanTask(mkRun())).toBeNull();
         expect(kanbanTask(mkRun({ links: { kanban_task: { id: "w1", num: "12" } } }))).toBeNull();
+    });
+});
+
+describe("describeTrigger", () => {
+    it("reads a cron expression in the job's own zone", () => {
+        expect(describeCron("0 6 * * 1", "Europe/Berlin")).toBe("Mondays 06:00 Europe/Berlin");
+        expect(describeTrigger(mkJob({ expression: "0 6 * * *", tz: "America/New_York" }))).toBe(
+            "daily 06:00 America/New_York"
+        );
+        expect(describeTrigger(mkJob())).toBe("daily 06:00 UTC");
+    });
+
+    it("says an interval, a single time and a job run by hand", () => {
+        const every = (every_secs: number) =>
+            describeTrigger(mkJob({ trigger_kind: "every", expression: "", every_secs }));
+        expect(every(1800)).toBe("every 30 min");
+        expect(every(7200)).toBe("every 2 h");
+        expect(every(90)).toBe("every 90 s");
+        expect(describeTrigger(mkJob({ trigger_kind: "once", expression: "", once_at_ms: 1_800_000_000_000 }))).toMatch(
+            /^once, /
+        );
+        expect(describeTrigger(mkJob({ trigger_kind: "manual", expression: "" }))).toBe("by hand");
+        expect(describeTrigger(mkJob({ source: "drone", expression: "" }))).toBe("by hand");
     });
 });

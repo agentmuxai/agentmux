@@ -3712,6 +3712,44 @@
     }
   },
   {
+    "command": "jobs.dryrun",
+    "request": "agentmux_srv::server::app_api::jobs_edit::JobsDryRunRequest",
+    "requestName": "JobsDryRunRequest",
+    "requestTs": {
+      "imports": [
+        "JobsDryRunRequest"
+      ],
+      "name": "JobsDryRunRequest"
+    },
+    "response": "agentmux_srv::server::app_api::jobs_edit::JobsDryRunResult",
+    "responseName": "JobsDryRunResult",
+    "responseTs": {
+      "imports": [
+        "JobsDryRunResult"
+      ],
+      "name": "JobsDryRunResult"
+    }
+  },
+  {
+    "command": "jobs.get",
+    "request": "agentmux_srv::server::app_api::jobs_edit::JobsGetRequest",
+    "requestName": "JobsGetRequest",
+    "requestTs": {
+      "imports": [
+        "JobsGetRequest"
+      ],
+      "name": "JobsGetRequest"
+    },
+    "response": "agentmux_srv::server::app_api::jobs_edit::JobsGetResult",
+    "responseName": "JobsGetResult",
+    "responseTs": {
+      "imports": [
+        "JobsGetResult"
+      ],
+      "name": "JobsGetResult"
+    }
+  },
+  {
     "command": "jobs.list",
     "request": "serde_json::value::Value",
     "requestName": "Value",
@@ -3747,6 +3785,44 @@
         "JobsRunsResult"
       ],
       "name": "JobsRunsResult"
+    }
+  },
+  {
+    "command": "jobs.save",
+    "request": "agentmux_srv::server::app_api::jobs_edit::JobsSaveRequest",
+    "requestName": "JobsSaveRequest",
+    "requestTs": {
+      "imports": [
+        "JobsSaveRequest"
+      ],
+      "name": "JobsSaveRequest"
+    },
+    "response": "agentmux_srv::server::app_api::jobs_edit::JobsSaveResult",
+    "responseName": "JobsSaveResult",
+    "responseTs": {
+      "imports": [
+        "JobsSaveResult"
+      ],
+      "name": "JobsSaveResult"
+    }
+  },
+  {
+    "command": "jobs.templates.approve",
+    "request": "agentmux_srv::server::job_template_handlers::JobTemplateApproveReq",
+    "requestName": "JobTemplateApproveReq",
+    "requestTs": {
+      "imports": [
+        "JobTemplateApproveReq"
+      ],
+      "name": "JobTemplateApproveReq"
+    },
+    "response": "agentmux_srv::server::job_template_handlers::JobTemplatesResult",
+    "responseName": "JobTemplatesResult",
+    "responseTs": {
+      "imports": [
+        "JobTemplatesResult"
+      ],
+      "name": "JobTemplatesResult"
     }
   },
   {
@@ -3861,6 +3937,25 @@
         "JobTemplatesResult"
       ],
       "name": "JobTemplatesResult"
+    }
+  },
+  {
+    "command": "jobs.templates.update_diff",
+    "request": "agentmux_srv::server::app_api::jobs_edit::JobsUpdateDiffRequest",
+    "requestName": "JobsUpdateDiffRequest",
+    "requestTs": {
+      "imports": [
+        "JobsUpdateDiffRequest"
+      ],
+      "name": "JobsUpdateDiffRequest"
+    },
+    "response": "agentmux_srv::backend::jobs::from_template::TemplateUpdateDiff",
+    "responseName": "TemplateUpdateDiff",
+    "responseTs": {
+      "imports": [
+        "TemplateUpdateDiff"
+      ],
+      "name": "TemplateUpdateDiff"
     }
   },
   {

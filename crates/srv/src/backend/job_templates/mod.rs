@@ -119,7 +119,6 @@ struct Approval {
 
 /// A template the operator approved, exactly as approved: what a job is
 /// made from. A job records its id, version and hash.
-#[allow(dead_code, reason = "the job definition reads it when it makes a job from a template")]
 #[derive(Debug, Clone)]
 pub struct ApprovedTemplate {
     pub id: String,
@@ -127,11 +126,8 @@ pub struct ApprovedTemplate {
     pub hash: String,
     pub manifest: JobTemplateManifest,
     pub brief: Option<String>,
-    pub source: JobTemplateSource,
-    pub signer: Option<String>,
 }
 
-#[allow(dead_code, reason = "the job definition renders the brief when it makes a job")]
 impl ApprovedTemplate {
     /// Its brief with `params` filled in.
     pub fn render(&self, params: &Map<String, Value>) -> Result<RenderedBrief, String> {
@@ -357,7 +353,6 @@ impl JobTemplates {
     /// The approved template `id` at `version`, read from disk now: an
     /// error if it isn't installed at that version, isn't approved, or
     /// changed since the operator approved it.
-    #[allow(dead_code, reason = "the job definition resolves a template when it makes a job")]
     pub fn resolve_approved(&self, id: &str, version: &str) -> Result<ApprovedTemplate, String> {
         let f = self.find(id).ok_or_else(|| format!("no job template {id}"))?;
         let pkg = f.package.map_err(|e| format!("{id} isn't a valid template: {e}"))?;
@@ -377,8 +372,6 @@ impl JobTemplates {
             hash: pkg.hash,
             manifest: pkg.manifest,
             brief: pkg.brief,
-            source: f.source,
-            signer: pkg.signer,
         })
     }
 
