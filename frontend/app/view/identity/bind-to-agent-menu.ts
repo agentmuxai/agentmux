@@ -10,6 +10,7 @@
 // future surface share one implementation.
 
 import { RpcApi } from "@/app/store/rpc-api";
+import { MENU_ICON } from "@/app/util/menu-icons";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { MOS, workspace } from "@/app/store/global";
 import { getOpenDefinitionMap } from "@/app/store/agent-pane-state-store";
@@ -267,11 +268,13 @@ export async function buildAccountRowMenu(
                   // Disabled-with-reason beats disappearing (spec §3) —
                   // matches the generic pane menu's disabled-Copy precedent.
                   label: "Bind to Agent",
+                  icon: MENU_ICON.bind,
                   sublabel: "no compatible agents in this channel",
                   enabled: false,
               }
             : {
                   label: "Bind to Agent",
+                  icon: MENU_ICON.bind,
                   type: "submenu",
                   submenu: candidates.map((c) => ({
                       label: c.agentName,
@@ -295,6 +298,7 @@ export async function buildAccountRowMenu(
         { type: "separator" },
         {
             label: "Copy account ID",
+            icon: MENU_ICON.copy,
             click: () => {
                 void import("@/util/clipboard").then(({ writeText }) => writeText(account.id));
             },
@@ -302,7 +306,7 @@ export async function buildAccountRowMenu(
         // Last, after a separator, so it is never the item under the
         // pointer when the menu opens.
         ...(onDelete
-            ? ([{ type: "separator" }, { label: "Delete account…", click: onDelete }] as ContextMenuItem[])
+            ? ([{ type: "separator" }, { label: "Delete account…", icon: MENU_ICON.delete, click: onDelete }] as ContextMenuItem[])
             : []),
     ];
 }
