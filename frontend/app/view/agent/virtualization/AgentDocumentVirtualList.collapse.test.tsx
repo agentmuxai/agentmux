@@ -19,7 +19,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AgentDocumentVirtualList } from "./AgentDocumentVirtualList";
 import { AgentDormancyProvider } from "../agent-dormancy";
-import { AwayArrivals, RETURN_SETTLE_MS } from "./held-release";
+import { AwayArrivals, CARRY_MAX_MS } from "./held-release";
+import { SHOW_SETTLE_MAX_MS, SHOW_SETTLE_MIN_MS, SHOW_SETTLE_SAMPLE_MS } from "./show-settle";
 import { createAgentViewState } from "./state";
 import type { DocumentNode, DocumentState, ToolNode } from "../types";
 
@@ -77,7 +78,7 @@ const documentState = (heldOpenNodes: Set<string>): DocumentState => ({
 function setup(heldOpenNodes: Set<string>, dormant: () => boolean = () => false, away?: AwayArrivals) {
     const documentAtom = createSignal<DocumentNode[]>([toolNode]);
     const viewState = createAgentViewState(documentAtom[0]);
-    const [docState] = createSignal(documentState(heldOpenNodes));
+    const [docState, setDocState] = createSignal(documentState(heldOpenNodes));
     const onReleaseNodeHold = vi.fn();
     const onHoldNodeOpen = vi.fn();
 
@@ -97,7 +98,7 @@ function setup(heldOpenNodes: Set<string>, dormant: () => boolean = () => false,
 
     const scrollRef = utils.container.querySelector(".agent-document") as HTMLElement;
     makeScrollable(scrollRef, { scrollTop: 0, scrollHeight: 500, clientHeight: 200 });
-    return { scrollRef, onReleaseNodeHold, onHoldNodeOpen };
+    return { scrollRef, onReleaseNodeHold, onHoldNodeOpen, setDocState };
 }
 
 const rect = (top: number, bottom: number): DOMRect =>
@@ -177,7 +178,7 @@ describe("AgentDocumentVirtualList — hidden-pane scroll-off collapse guard", (
         setDormant(false); // shown again
         // Above the top on return (content arrived or was drawn while hidden): kept.
         place(scrollRef, rect(-50, -10));
-        now += RETURN_SETTLE_MS * 10;
+        now += SHOW_SETTLE_MIN_MS * 10;
         scroll(scrollRef);
         expect(onReleaseNodeHold).not.toHaveBeenCalled();
         // The reader scrolls it back into view: now seen in this visit...
@@ -215,8 +216,8 @@ describe("AgentDocumentVirtualList — hidden-pane scroll-off collapse guard", (
                 away,
                 show: () => {
                     setDormant(false);
-                    now += RETURN_SETTLE_MS + 100;
-                    vi.advanceTimersByTime(RETURN_SETTLE_MS + 100);
+                    now += SHOW_SETTLE_MIN_MS + 100;
+                    vi.advanceTimersByTime(SHOW_SETTLE_MIN_MS + 100);
                 },
                 hide: () => setDormant(true),
             };
@@ -228,6 +229,55 @@ describe("AgentDocumentVirtualList — hidden-pane scroll-off collapse guard", (
             t.show();
             expect(t.onHoldNodeOpen).toHaveBeenCalledExactlyOnceWith("tc-1");
             expect(t.away.size).toBe(0);
+        });
+
+        it("waits past the minimum while a slow return is still changing the content height, then holds", () => {
+            let now = 1_000;
+            vi.spyOn(performance, "now").mockImplementation(() => now);
+            const away = new AwayArrivals();
+            away.add("tc-1");
+            const [dormant, setDormant] = createSignal(true);
+            const s = setup(new Set(), dormant, away);
+            place(s.scrollRef, rect(50, 90));
+            let height = 1000;
+            Object.defineProperty(s.scrollRef, "scrollHeight", { configurable: true, get: () => height });
+            const advance = (ms: number, grow: boolean) => {
+                for (let t = 0; t < ms; t += SHOW_SETTLE_SAMPLE_MS) {
+                    now += SHOW_SETTLE_SAMPLE_MS;
+                    if (grow) height += 100;
+                    vi.advanceTimersByTime(SHOW_SETTLE_SAMPLE_MS);
+                }
+            };
+            setDormant(false);
+            advance(SHOW_SETTLE_MIN_MS * 3, true); // still drawing long after the old fixed 400 ms
+            expect(s.onHoldNodeOpen).not.toHaveBeenCalled();
+            advance(SHOW_SETTLE_SAMPLE_MS * 4, false); // it stops
+            expect(s.onHoldNodeOpen).toHaveBeenCalledExactlyOnceWith("tc-1");
+        });
+
+        it("judges the rows at the cap when the layout never stops", () => {
+            let now = 1_000;
+            vi.spyOn(performance, "now").mockImplementation(() => now);
+            const away = new AwayArrivals();
+            away.add("tc-1");
+            const [dormant, setDormant] = createSignal(true);
+            const s = setup(new Set(), dormant, away);
+            place(s.scrollRef, rect(50, 90));
+            let height = 1000;
+            Object.defineProperty(s.scrollRef, "scrollHeight", { configurable: true, get: () => height });
+            setDormant(false);
+            for (let t = 0; t < SHOW_SETTLE_MAX_MS - SHOW_SETTLE_SAMPLE_MS; t += SHOW_SETTLE_SAMPLE_MS) {
+                now += SHOW_SETTLE_SAMPLE_MS;
+                height += 100;
+                vi.advanceTimersByTime(SHOW_SETTLE_SAMPLE_MS);
+            }
+            expect(s.onHoldNodeOpen).not.toHaveBeenCalled();
+            for (let t = 0; t < 2 * SHOW_SETTLE_SAMPLE_MS; t += SHOW_SETTLE_SAMPLE_MS) {
+                now += SHOW_SETTLE_SAMPLE_MS;
+                height += 100;
+                vi.advanceTimersByTime(SHOW_SETTLE_SAMPLE_MS);
+            }
+            expect(s.onHoldNodeOpen).toHaveBeenCalledExactlyOnceWith("tc-1");
         });
 
         it("leaves one that is already above the viewport to collapse", () => {
@@ -262,6 +312,52 @@ describe("AgentDocumentVirtualList — hidden-pane scroll-off collapse guard", (
         });
     });
 
+    // After a restart or an upgrade the snapshot gives back the rows that were
+    // open (`restoredHeldNodes`): carried, so they aren't closed because the
+    // restored transcript is drawn above the viewport.
+    describe("rows a snapshot restored as held", () => {
+        afterEach(() => {
+            vi.restoreAllMocks();
+        });
+
+        it("stay open until seen on screen in this visit, then collapse when they scroll off", () => {
+            let now = 1_000;
+            vi.spyOn(performance, "now").mockImplementation(() => now);
+            const { scrollRef, onReleaseNodeHold, setDocState } = setup(new Set(["tc-1"]));
+            setDocState((prev) => ({ ...prev, restoredHeldNodes: new Set(["tc-1"]) }));
+            place(scrollRef, rect(-50, -10)); // the restored transcript put it above the viewport
+            now += SHOW_SETTLE_MAX_MS + 1; // the restore has settled
+            scroll(scrollRef);
+            expect(onReleaseNodeHold).not.toHaveBeenCalled();
+            place(scrollRef, rect(50, 90)); // the reader scrolls it into view: seen
+            scroll(scrollRef);
+            place(scrollRef, rect(-50, -10));
+            scroll(scrollRef);
+            expect(onReleaseNodeHold).toHaveBeenCalledWith("tc-1");
+        });
+
+        it("are released after CARRY_MAX_MS if never seen, like any carried row", () => {
+            let now = 1_000;
+            vi.spyOn(performance, "now").mockImplementation(() => now);
+            const { scrollRef, onReleaseNodeHold, setDocState } = setup(new Set(["tc-1"]));
+            setDocState((prev) => ({ ...prev, restoredHeldNodes: new Set(["tc-1"]) }));
+            place(scrollRef, rect(-50, -10));
+            now += CARRY_MAX_MS - 1;
+            scroll(scrollRef);
+            expect(onReleaseNodeHold).not.toHaveBeenCalled();
+            now += 2;
+            scroll(scrollRef);
+            expect(onReleaseNodeHold).toHaveBeenCalledWith("tc-1");
+        });
+
+        it("without the restore marker the same row is released at once (the baseline)", () => {
+            const { scrollRef, onReleaseNodeHold } = setup(new Set(["tc-1"]));
+            place(scrollRef, rect(-50, -10));
+            scroll(scrollRef);
+            expect(onReleaseNodeHold).toHaveBeenCalledWith("tc-1");
+        });
+    });
+
     it("doesn't count a row as seen while the return is still settling", () => {
         let now = 1_000;
         vi.spyOn(performance, "now").mockImplementation(() => now);
@@ -272,7 +368,7 @@ describe("AgentDocumentVirtualList — hidden-pane scroll-off collapse guard", (
         place(scrollRef, rect(50, 90));
         scroll(scrollRef);
         place(scrollRef, rect(-50, -10));
-        now += RETURN_SETTLE_MS * 10;
+        now += SHOW_SETTLE_MIN_MS * 10;
         scroll(scrollRef);
         expect(onReleaseNodeHold).not.toHaveBeenCalled();
     });

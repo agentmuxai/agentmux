@@ -76,6 +76,7 @@ export const cefBrowserPanes: BrowserPaneHostApi = {
         invokeCommand<{ supported: boolean; ok: boolean }>("browser_pane_discard", { block_id: blockId, op }),
     setFrozen: (blockId, frozen) => invokeCommand<boolean>("browser_pane_set_frozen", { block_id: blockId, frozen }),
     memoryPressure: () => invokeCommand<"normal" | "warn" | "critical">("memory_pressure_level", {}),
+    paneMemory: (blockIds) => invokeCommand<Record<string, number>>("browser_pane_memory", { block_ids: blockIds ?? [] }),
     focus: async (blockId) => {
         await selectInput(ownWindowLabel(), blockId);
     },

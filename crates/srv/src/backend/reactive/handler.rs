@@ -1236,7 +1236,7 @@ impl Handler {
         // ("actually verified") rather than collapsing both to the same
         // label — see `wrap_jekt_message`'s doc comment.
         let wrapped = wrap_jekt_message_with_files(
-            &sanitized,
+            &super::sanitize::with_wan_pin_note(&sanitized, delivery_tier, &req),
             req.source_agent.as_deref(),
             &req.target_agent,
             effective_tier,
@@ -1875,6 +1875,12 @@ impl ReactiveHandler {
     /// ambiguous one (identity M2).
     pub fn unregister_agent(&self, agent_id: &str) -> UnregisterOutcome {
         self.inner.lock().unwrap().unregister_agent(agent_id)
+    }
+
+    /// The live blocks `unregister_agent` would remove for `name`.
+    pub fn blocks_named(&self, name: &str) -> Vec<String> {
+        let key = super::sanitize::route_name(name).unwrap_or_default().to_lowercase();
+        self.inner.lock().unwrap().live_blocks_for_key(&key)
     }
 
     /// See the inner [`Handler::unregister_block`]. Returns the names the

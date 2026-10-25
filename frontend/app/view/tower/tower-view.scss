@@ -74,21 +74,66 @@
     overflow: hidden;
 }
 
+// In a very narrow pane the count gives way first, then the word, and the
+// number never does (a 110 px pane showed "AgentMux 1.4", a 70 px one
+// "AgentMu").
 .tower-headline-label {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
     font-weight: 600;
 }
 
 .tower-headline-mem {
+    flex: 0 0 auto;
     font-size: var(--text-lg);
     font-weight: 600;
     font-variant-numeric: tabular-nums;
 }
 
-// The count gives way first when there isn't room: the number stays.
 .tower-headline-note {
+    flex: 0 4 auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+// Under about 160 px the figure is set smaller and the pane's side padding goes
+// (the rail row's own rule is with the rail's).
+@container (max-width: 160px) {
+    .tower-headline {
+        padding-inline: var(--space-1);
+        gap: var(--space-1);
+    }
+
+    .tower-headline-mem {
+        font-size: var(--text-base);
+    }
+
+    .tower-body {
+        padding-inline: var(--space-1);
+    }
+}
+
+// The hour's change, and the amber dot for a line that grows unusually
+// (hover for which): the dot stays when the words have no room.
+// The hour's change gives way before the count does.
+.tower-headline-change {
+    flex: 0 8 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.92em;
+}
+
+.tower-headline-grow {
+    flex-shrink: 0;
+    align-self: center;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--warning-color);
 }
 
 .tower-muted {
@@ -327,6 +372,10 @@ th[aria-sort="descending"] .tower-sort {
     overflow-y: auto;
     outline: none;
 
+    @container (max-width: 100px) {
+        scrollbar-width: none;
+    }
+
     &:focus-visible {
         @include mixins.focus-ring;
     }
@@ -364,6 +413,20 @@ th[aria-sort="descending"] .tower-sort {
             display: none;
         }
     }
+
+    // Under about 160 px the swatch goes too, with its column, the gaps and
+    // most of the padding, so "752.9 MB" fits whole. After the base rule above,
+    // or the base would win.
+    @container (max-width: 160px) {
+        column-gap: 0;
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas: "name mem";
+        padding-inline: var(--space-1);
+
+        > .tower-swatch {
+            display: none;
+        }
+    }
 }
 
 .tower-rail-row--selected {
@@ -391,12 +454,20 @@ th[aria-sort="descending"] .tower-sort {
 .tower-rail-cpu {
     grid-area: cpu;
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
 }
 
+// The figure never wraps ("150.0 / MB" at 110 px): the name gives way.
 .tower-rail-mem {
     grid-area: mem;
-    font-size: 0.9em;
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+
+    // Under about 100 px the figure is a size smaller, and the list's scrollbar
+    // (see .tower-rail-list) is gone, so "121.5 MB" is still whole.
+    @container (max-width: 100px) {
+        font-size: var(--text-xs);
+    }
 }
 
 .tower-swatch {
@@ -1038,6 +1109,60 @@ th[aria-sort="descending"] .tower-sort {
     padding-left: 28px;
 }
 
+// The hour as a line per part and row, and the amber note on one that grows
+// unusually. Choosing a row charts it below.
+// Under .tower-memory-table so they outrank the table's own cell rules.
+.tower-memory-table .tower-memory-trend-head,
+.tower-memory-table .tower-memory-trend {
+    padding-left: var(--space-3);
+}
+
+.tower-memory-table .tower-memory-trend-head {
+    white-space: nowrap;
+}
+
+.tower-memory-spark {
+    display: block;
+    width: 100%;
+    max-width: 60px;
+    height: 16px;
+    color: var(--tower-memory-color, var(--secondary-text-color));
+}
+
+.tower-memory-grow {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 0 var(--space-1);
+    border-radius: var(--radius-sm);
+    background: var(--warning-bg);
+    color: var(--warning-color);
+    font-size: 0.85em;
+    font-weight: 600;
+}
+
+.tower-memory-pick {
+    cursor: pointer;
+}
+
+.tower-memory-picked > td {
+    background: var(--tint-4);
+}
+
+.tower-memory-chart {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin-top: var(--space-3);
+}
+
+.tower-memory-chart-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
 .tower-memory-note {
     display: flex;
     flex-direction: column;
@@ -1045,9 +1170,18 @@ th[aria-sort="descending"] .tower-sort {
     font-size: 0.9em;
 }
 
+// Under 420 px the sparkline column goes first; the figures stay.
+@container (max-width: 420px) {
+    .tower-memory-table .tower-memory-trend-head,
+    .tower-memory-table .tower-memory-trend {
+        display: none;
+    }
+}
+
 // Narrowest: the bar and its legend say it, and nothing opens.
 @container (max-width: 240px) {
-    .tower-memory-table {
+    .tower-memory-table,
+    .tower-memory-chart {
         display: none;
     }
 }

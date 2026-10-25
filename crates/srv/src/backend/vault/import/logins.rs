@@ -13,7 +13,7 @@ use super::{Imported, Incoming, Mapping, MappingNeeded, ReadError, Source, MAX_I
 use std::collections::BTreeMap;
 
 /// A column's lowercase name without spaces, dashes or underscores.
-fn norm(name: &str) -> String {
+pub(super) fn norm(name: &str) -> String {
     name.trim().trim_start_matches('\u{feff}').chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_lowercase()
 }
 
@@ -66,12 +66,12 @@ fn source_of(headers: &[String]) -> Source {
     }
 }
 
-fn cell<'a>(row: &'a csv::StringRecord, col: Option<usize>) -> &'a str {
+pub(super) fn cell<'a>(row: &'a csv::StringRecord, col: Option<usize>) -> &'a str {
     col.and_then(|i| row.get(i)).map(str::trim).unwrap_or("")
 }
 
 /// A host for a label when a row has no title.
-fn host_of(url: &str) -> String {
+pub(super) fn host_of(url: &str) -> String {
     let rest = url.split("://").nth(1).unwrap_or(url);
     rest.split(['/', '?', '#']).next().unwrap_or("").trim_start_matches("www.").to_string()
 }

@@ -767,7 +767,9 @@ async fn act(state: &AppState, data: Value) -> Result<Value, String> {
                 started.attempts
             );
             let target = if uid.is_empty() { reg.agent_id.clone() } else { uid };
-            if let Err(e) = crate::backend::reactive::get_global_handler().deliver_system_note(&target, &note) {
+            // Informational: a session gone cold gets it with its next turn rather than waking.
+            let extra = state.config_watcher.get_settings().extra;
+            if let Err(e) = crate::backend::cold_hold::note_or_wait_if_cold(&state.mstore, &extra, &reg.block_id, &target, &format!("track:{num}"), &note) {
                 tracing::info!(error = %e, "kanban: track note not delivered");
             }
             json!({ "ok": true, "num": num })

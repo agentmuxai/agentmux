@@ -88,7 +88,8 @@ pub struct CommandInputHistorySearchData {
     pub limit: Option<u32>,
 }
 
-/// `agent.input-history-delete`: remove one entry.
+/// `agent.input-history-delete`: forget one entry. It waits in the trash, and
+/// can be restored for a while.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandInputHistoryDeleteData {
@@ -96,18 +97,74 @@ pub struct CommandInputHistoryDeleteData {
     pub id: i64,
 }
 
-/// `agent.input-history-clear`: remove an agent's whole history.
+/// `agent.input-history-clear`: forget an agent's whole history, into the
+/// trash as one batch.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandInputHistoryClearData {
     pub agent_id: String,
 }
 
-/// How many entries a delete or clear removed.
+/// How many entries a delete or clear forgot, and the trash batch holding
+/// them (none when there was nothing to forget).
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct InputHistoryRemovedResult {
     pub removed: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub batch_id: Option<String>,
+}
+
+/// `agent.input-history-trash`: what was forgotten and can still be restored,
+/// one agent's or every agent's, most recently forgotten first.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandInputHistoryTrashData {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub agent_id: Option<String>,
+}
+
+/// One forgetting in the trash: a single entry, or an agent's whole history.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct InputHistoryTrashItem {
+    pub batch_id: String,
+    pub agent_id: String,
+    #[ts(type = "number")]
+    pub deleted_at_ms: i64,
+    /// The agent's slug when an agent forgot it, `armory-ui` for the AgentMux
+    /// window.
+    pub deleted_by: String,
+    pub count: u32,
+    /// The oldest entry's text, to say what it was.
+    pub sample: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct InputHistoryTrashResult {
+    pub batches: Vec<InputHistoryTrashItem>,
+    /// How long a forgotten entry stays restorable.
+    #[ts(type = "number")]
+    pub retention_ms: i64,
+}
+
+/// `agent.input-history-restore`: bring a trash batch back into its agent's
+/// history.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandInputHistoryRestoreData {
+    pub batch_id: String,
+}
+
+/// How many entries came back (0 when the batch was already restored or has
+/// aged out).
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct InputHistoryRestoredResult {
+    pub restored: u32,
 }
 
 /// `agent.input-draft`: the agent's unsent draft; with `text`, keep that one
@@ -135,7 +192,8 @@ pub struct InputDraftResult {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct InputHistoryChangedEvent {
     pub agent_id: String,
-    /// `history`, `draft`, or `backfill` (older entries came in, from the
-    /// agent's past conversations).
+    /// `history`, `draft`, `backfill` (older entries came in, from the
+    /// agent's past conversations) or `restored` (forgotten entries came back,
+    /// so a pane reloads rather than reading only the newer ones).
     pub what: String,
 }

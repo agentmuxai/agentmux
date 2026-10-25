@@ -100,6 +100,9 @@ pub fn host_restarted_low_memory() -> Incident {
 pub enum SrvStop {
     /// It exited, with this code.
     Exited(i32),
+    /// A signal ended it (Unix), with the signal's number and name ("" if it has none).
+    #[cfg_attr(windows, allow(dead_code))]
+    Signal(i32, &'static str),
     /// The computer ran out of memory; the launcher waited for it.
     LowMemory,
     /// It stopped answering, and the launcher ended it.
@@ -112,6 +115,8 @@ pub fn srv_restarted(why: SrvStop) -> Incident {
     let mut i = Incident::new("srv_restarted", "AgentMux's background service restarted", "launcher");
     i.cause = match why {
         SrvStop::Exited(code) => exit_cause(code),
+        SrvStop::Signal(sig, "") => Some(format!("Its process was ended by signal {sig}.")),
+        SrvStop::Signal(sig, name) => Some(format!("Its process was ended by signal {sig} ({name}).")),
         SrvStop::LowMemory => Some("The computer ran out of memory.".to_string()),
         SrvStop::Unresponsive => Some("It stopped answering, so AgentMux ended it.".to_string()),
     };
@@ -190,6 +195,11 @@ mod tests {
         assert_eq!(i.cause.as_deref(), Some("A fault in its process stopped it (a failed safety check, 0xC0000409)."));
         assert_eq!(i.lost.len(), 1);
         assert_eq!(srv_restarted(SrvStop::LowMemory).cause.as_deref(), Some("The computer ran out of memory."));
+        assert_eq!(
+            srv_restarted(SrvStop::Signal(9, "SIGKILL")).cause.as_deref(),
+            Some("Its process was ended by signal 9 (SIGKILL).")
+        );
+        assert_eq!(srv_restarted(SrvStop::Signal(31, "")).cause.as_deref(), Some("Its process was ended by signal 31."));
         assert_eq!(srv_restarted(SrvStop::Unresponsive).cause.as_deref(), Some("It stopped answering, so AgentMux ended it."));
     }
 

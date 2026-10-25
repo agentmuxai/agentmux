@@ -11,8 +11,9 @@ import { createEffect, createMemo, createSignal, For, on, onCleanup, Show, type 
 import { Button, FilterInput, Select } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { clearInputHistory, forgetInputHistoryEntry } from "@/app/view/agent/agent-input-history";
+import { clearInputHistory, forgetInputHistoryEntry, restoreInputHistory } from "@/app/view/agent/agent-input-history";
 import type { InputHistoryItem } from "@/types/rpc/InputHistoryItem";
+import type { InputHistoryTrashItem } from "@/types/rpc/InputHistoryTrashItem";
 import { formatWhen, typedAgents, typedTags, type TypedAgent } from "./warden-history-shared";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
@@ -34,8 +35,12 @@ export const WardenHistoryTyped = (props: { visible: boolean }): JSX.Element => 
     // The entry asked "forget this?", or the agent asked "forget everything?".
     const [confirmId, setConfirmId] = createSignal<number | null>(null);
     const [confirmClear, setConfirmClear] = createSignal(false);
+    // What was forgotten and can still come back, for the agent shown.
+    const [trash, setTrash] = createSignal<InputHistoryTrashItem[]>([]);
+    const [retentionDays, setRetentionDays] = createSignal(7);
     // A read overtaken by another (another agent, another search) must not land.
     let readSeq = 0;
+    let trashSeq = 0;
 
     const list = createMemo(() => agents() ?? []);
     const agentName = () => list().find((a) => a.id === agentId())?.name || agentId().slice(0, 8);
@@ -83,6 +88,23 @@ export const WardenHistoryTyped = (props: { visible: boolean }): JSX.Element => 
         }
     };
 
+    const readTrash = async () => {
+        const id = agentId();
+        const seq = ++trashSeq;
+        if (!id) {
+            setTrash([]);
+            return;
+        }
+        try {
+            const res = await RpcApi.AgentInputHistoryTrashCommand(TabRpcClient, { agent_id: id });
+            if (seq !== trashSeq) return;
+            setTrash(res.batches);
+            setRetentionDays(Math.round(res.retention_ms / (24 * 60 * 60 * 1000)));
+        } catch (e) {
+            if (seq === trashSeq) setError(String(e));
+        }
+    };
+
     // Loads the first time the section is shown; Refresh reads it again.
     createEffect(() => {
         if (props.visible && agents() === null) void loadAgents();
@@ -95,6 +117,12 @@ export const WardenHistoryTyped = (props: { visible: boolean }): JSX.Element => 
             if (!visible) return;
             const t = setTimeout(() => void read(false), query() ? SEARCH_DELAY_MS : 0);
             onCleanup(() => clearTimeout(t));
+        })
+    );
+    // The trash belongs to the agent, not to the search.
+    createEffect(
+        on([agentId, () => props.visible], ([, visible]) => {
+            if (visible) void readTrash();
         })
     );
 
@@ -110,6 +138,20 @@ export const WardenHistoryTyped = (props: { visible: boolean }): JSX.Element => 
             if (agentId() !== target) return;
             setEntries(entries().filter((e) => e.id !== item.id));
             setError(null);
+            void readTrash();
+        } catch (e) {
+            if (agentId() === target) setError(String(e));
+        }
+    };
+    // The composers read the restored entries again on srv's `restored` event.
+    const restore = async (batch: InputHistoryTrashItem) => {
+        const target = agentId();
+        try {
+            await restoreInputHistory(batch.batch_id);
+            if (agentId() !== target) return;
+            setError(null);
+            void read(false);
+            void readTrash();
         } catch (e) {
             if (agentId() === target) setError(String(e));
         }
@@ -123,6 +165,7 @@ export const WardenHistoryTyped = (props: { visible: boolean }): JSX.Element => 
             setEntries([]);
             setMore(false);
             setError(null);
+            void readTrash();
         } catch (e) {
             if (agentId() === target) setError(String(e));
         }
@@ -151,6 +194,7 @@ export const WardenHistoryTyped = (props: { visible: boolean }): JSX.Element => 
                     onClick={() => {
                         void loadAgents();
                         void read(false);
+                        void readTrash();
                     }}
                 >
                     Refresh
@@ -239,9 +283,28 @@ export const WardenHistoryTyped = (props: { visible: boolean }): JSX.Element => 
                     </Button>
                 </Show>
             </Show>
+            <Show when={trash().length > 0}>
+                <div class="warden-history-typed-trash">
+                    <div class="warden-manager-dim">{`Recently forgotten (restorable for ${retentionDays()} days)`}</div>
+                    <For each={trash()}>
+                        {(batch) => (
+                            <div class="warden-history-typed-trash-row" data-batch={batch.batch_id}>
+                                <span class="warden-history-typed-when">{formatWhen(batch.deleted_at_ms)}</span>
+                                <span class="warden-history-typed-text" title={batch.sample}>
+                                    {batch.count > 1 ? `${batch.count} entries, from “${batch.sample}”` : batch.sample}
+                                </span>
+                                <span class="warden-manager-dim">{`by ${batch.deleted_by}`}</span>
+                                <Button tone="quiet" density="compact" onClick={() => void restore(batch)}>
+                                    Restore
+                                </Button>
+                            </div>
+                        )}
+                    </For>
+                </div>
+            </Show>
             <div class="warden-manager-footnote">
                 What was typed to an agent is kept with the agent, up to its limit (the agent:inputhistory:max setting), and
-                goes when the agent is deleted. Forgetting is permanent.
+                goes when the agent is deleted. Forgotten entries can be restored for {retentionDays()} days, then they are gone.
             </div>
         </div>
     );

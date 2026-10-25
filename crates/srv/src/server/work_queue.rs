@@ -10,8 +10,6 @@
 //!   POST   /agentmux/work/:id/complete    — finish
 //!   POST   /agentmux/work/:id/release     — give back
 //!   GET    /agentmux/work                 — list
-//!   DELETE /agentmux/work/:id             — cancel (the operator's; refused
-//!                                            to an agent's token)
 //!
 //! The Kanban's additions (cards, history, update/ask/submit, the next task)
 //! are in `work_tasks.rs` (SPEC_WARDEN_KANBAN_2026_10_20.md). An `:id` may be
@@ -503,7 +501,12 @@ pub(super) async fn handle_work_complete(
     // A task that needs review goes to Review instead of done (the agent
     // can't accept its own work); either way the answer names the agent's
     // next waiting task (Kanban §6.5).
-    super::work_tasks::finish(&state, caller.as_deref(), &id, &req.agent_id, req.attempt, &req.result, None).await
+    let done = super::work_tasks::finish(&state, caller.as_deref(), &id, &req.agent_id, req.attempt, &req.result, None).await;
+    if done.0.is_success() {
+        // The agent's build caches are cleared in the background (SPEC_BUILD_CACHE_CLEANUP_2026_10_26.md).
+        crate::backend::build_cache_service::agent_task_done(state.mstore.clone(), state.config_watcher.clone(), req.agent_id.clone());
+    }
+    done
 }
 
 /// Returns the item's RESULTING state alongside `ok` (Codex P2 on PR #2902).
@@ -579,51 +582,6 @@ pub(super) async fn handle_work_list(
             (StatusCode::OK, Json(json!({ "items": items })))
         }
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("list failed: {e}")),
-    }
-}
-
-#[derive(Debug, Default, Deserialize)]
-pub(super) struct CancelRequest {
-    #[serde(default)]
-    pub reason: String,
-}
-
-/// The body is OPTIONAL (reagent P1 on PR #2902). The sibling DELETE route in
-/// the same router — `DELETE /agentmux/cron/:id` — takes no body at all, so a
-/// caller following that adjacent, established convention would otherwise get
-/// a 400/415 from axum's `Json` extractor rather than the intended
-/// "cancel with an empty reason". `CancelRequest::reason` is already
-/// `#[serde(default)]`; making the whole body optional is what actually lets
-/// that default be reached.
-pub(super) async fn handle_work_cancel(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    caller: Option<axum::Extension<super::caller::Caller>>,
-    body: Option<Json<CancelRequest>>,
-) -> (StatusCode, Json<Value>) {
-    // Cancelling is the operator's (Kanban §6.12): an agent hands a task back
-    // with release, it doesn't withdraw it.
-    if caller.as_deref().and_then(super::caller::Caller::uid).is_some() {
-        return err(StatusCode::FORBIDDEN, "cancelling a task is the operator's; hand it back with release");
-    }
-    let req = body.map(|Json(r)| r).unwrap_or_default();
-    let id = super::work_tasks::resolve_id(&state, &id);
-    let before = state.identity_store.work_queue_get(&id).ok().flatten().map(|i| i.state).unwrap_or_default();
-    match state.identity_store.work_queue_cancel(&id, &req.reason, now_ms()) {
-        Ok(true) => {
-            super::work_tasks::record(&state, &id, "operator", "operator", "cancelled", &before, "cancelled", &req.reason);
-            publish_changed(&state);
-            (StatusCode::OK, Json(json!({ "ok": true })))
-        }
-        // Distinct from the holder-conflict case: cancel is deliberately NOT
-        // holder-gated (it is an operator action), so a `false` here means the
-        // item is already terminal or absent, not that the caller lacks a
-        // claim.
-        Ok(false) => (
-            StatusCode::CONFLICT,
-            Json(json!({ "ok": false, "error": "no open or claimed item with that id" })),
-        ),
-        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("cancel failed: {e}")),
     }
 }
 

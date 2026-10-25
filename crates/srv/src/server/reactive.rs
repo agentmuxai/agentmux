@@ -392,10 +392,7 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
         return;
     };
     if pinned_key_b64 != observed_key_b64 {
-        tracing::warn!(
-            agent_id = %claimed,
-            "LAN pubkey mismatch against pinned key — possible identity spoofing attempt"
-        );
+        lan_refusals::pin_mismatch(&claimed, &observed_key_b64);
         req.lan_verified = Some(false);
         return;
     }
@@ -421,6 +418,7 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
 mod channel_v2;
 pub(crate) mod former_slug;
 mod lan_v2;
+pub(crate) mod lan_refusals;
 pub(super) mod replay;
 
 /// Anti-replay window for cross-channel `channel_sig` —
@@ -718,7 +716,7 @@ pub(crate) async fn deliver(
     if let Err(error) = super::jekt_files::check(&req) {
         return super::jekt_files::refused(&req, error);
     }
-    // An agent here out of quota would lose it in a turn that fails at once, and a Claude
+    // An agent here out of quota or signed out would lose it in a failed turn, and a Claude
     // session gone cold should not be woken by a routine one: hold it, or refuse it where it
     // can't be held (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5, SPEC_JEKT_HOLD_FOR_COLD_SESSIONS_
     // 2026_10_25.md). Before `prepare`, which charges inline attachments to the session.
@@ -1407,9 +1405,11 @@ pub(super) struct RegisterRequest {
 
 pub(super) async fn handle_reactive_register(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(mut req): Json<RegisterRequest>,
 ) -> Response {
-    req.agent_id = crate::backend::reactive::sanitize::route_name(&req.agent_id).unwrap_or_default();
+    let sent_name = req.agent_id.clone();
+    req.agent_id = crate::backend::reactive::sanitize::route_name(&sent_name).unwrap_or_default();
     tracing::info!(agent_id = %req.agent_id, block_id = %req.block_id, "reactive register request");
     // Identity M2 (spec §4.4.1 row 3): this is a presence signal keyed by
     // block. The name the frontend sends, as its route name (above), becomes
@@ -1428,6 +1428,9 @@ pub(super) async fn handle_reactive_register(
                 None
             })
     };
+    if let Some(refusal) = super::pane_binding::register_refusal(&state, caller.as_deref(), uid.as_deref(), &sent_name, &req.agent_id).await {
+        return refusal;
+    }
     // One live instance per agent (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24
     // Phase 1, I9): a pane whose agent runs in another AgentMux instance on
     // this host must not register it — the cross-instance registries written
@@ -1676,9 +1679,13 @@ pub(super) struct UnregisterRequest {
 
 pub(super) async fn handle_reactive_unregister(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(req): Json<UnregisterRequest>,
 ) -> Response {
     use crate::backend::reactive::handler::UnregisterOutcome;
+    if let Some(refusal) = super::pane_binding::unregister_refusal(&state, caller.as_deref(), &req.block_id, &req.agent_id).await {
+        return refusal;
+    }
 
     let (block_id, names): (Option<String>, Vec<String>) = if !req.block_id.trim().is_empty() {
         let names = state.reactive_handler.unregister_block(req.block_id.trim());

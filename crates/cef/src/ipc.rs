@@ -135,7 +135,7 @@ async fn handle_ipc(
     Json(req): Json<IpcRequest>,
 ) -> (StatusCode, Json<IpcResponse>) {
     // The operator's token opens every command; the forwarding token only the
-    // launcher's (ipc_forward.rs).
+    // launcher's (ipc_forward/mod.rs).
     let presented = headers.get("authorization").and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Bearer "));
     let access = crate::ipc_forward::access_for(presented, &state.ipc_token, crate::ipc_forward::forward_token());
     if !crate::ipc_forward::allows(access, &req.cmd) {
@@ -599,6 +599,7 @@ async fn route_command(
             let frozen = args.get("frozen").and_then(|v| v.as_bool()).unwrap_or(false);
             crate::browser_api::hibernation::set_frozen(state, block_id, frozen).await
         }
+        "browser_pane_memory" => crate::browser_api::hibernation::pane_memory(state, args).await,
         "memory_pressure_level" => Ok(serde_json::json!(crate::memory_pressure::current_level().as_str())),
         "browser_pane_close" => {
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");

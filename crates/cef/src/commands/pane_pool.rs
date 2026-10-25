@@ -349,13 +349,12 @@ pub fn spawn_pane_pool_window(state: &Arc<AppState>) {
     }
 
     let ipc_port = *state.ipc_port.lock();
-    let ipc_token = &state.ipc_token;
     let url = match super::window::resolve_frontend_base_url(ipc_port) {
         Ok(base_url) => {
             let sep = if base_url.contains('?') { "&" } else { "?" };
             format!(
-                "{}{}ipc_port={}&ipc_token={}&windowLabel={}&pane-pool=1",
-                base_url, sep, ipc_port, ipc_token, label
+                "{}{}ipc_port={}&windowLabel={}&pane-pool=1",
+                base_url, sep, ipc_port, label
             )
         }
         Err(e) => {

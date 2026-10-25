@@ -652,7 +652,7 @@ pub struct UiRunCommandRequest {
     pub auth: UiAutomationAuth,
     /// A command id from `ListShortcuts` (`split:right`, `files:refresh`).
     pub command: String,
-    /// A pane in the active tab to focus first; absent = the focused pane.
+    /// Your own pane, or a browser pane you opened, to focus first; absent = your own pane.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
 }
@@ -665,7 +665,7 @@ pub struct UiPressKeysRequest {
     /// A key from `ListShortcuts`' `raw` list, in the table's syntax
     /// (`ctrl+shift+d`; a chord is two keys separated by a space).
     pub keys: String,
-    /// A pane in the active tab to focus first; absent = the focused pane.
+    /// Your own pane, or a browser pane you opened, to focus first; absent = your own pane.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
 }

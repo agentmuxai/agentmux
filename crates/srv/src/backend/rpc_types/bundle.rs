@@ -292,6 +292,34 @@ pub struct GlobalMemoryRevertResult {
     pub version: Option<GlobalMemoryVersionMeta>,
 }
 
+/// `globalmemory:removed` — no arguments.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandGlobalMemoryRemovedData {}
+
+/// One entry taken out of Global Memory and not restored since.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct GlobalMemoryRemovedEntry {
+    pub id: String,
+    pub name: String,
+    /// The `remove` version recording the removal: restore by reverting the
+    /// entry to it (`globalmemory:revert`).
+    pub version_id: String,
+    /// When it was removed, in milliseconds since the epoch.
+    #[ts(type = "number")]
+    pub removed_at: i64,
+    /// Who removed it: the agent's slug, or `armory-ui` for the window.
+    pub removed_by: String,
+}
+
+/// Result of `globalmemory:removed`, most recently removed first.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct GlobalMemoryRemovedResult {
+    pub entries: Vec<GlobalMemoryRemovedEntry>,
+}
+
 /// Result of `reorderglobalbrain`. Was an inline `json!({"updated": n})`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]

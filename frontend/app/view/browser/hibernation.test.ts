@@ -32,6 +32,8 @@ import {
     siteKeptAwake,
     sleepName,
     sleepReasonText,
+    memoryLabel,
+    bySizeThenAge,
     wakeAllBrowserPanes,
     type HibernatablePane,
     type PaneFacts,
@@ -96,6 +98,33 @@ describe("the card's words", () => {
     it("says why it slept, and says so when it was memory pressure", () => {
         expect(sleepReasonText("manual")).toMatch(/^AgentMux put this browser pane to sleep to save memory/);
         expect(sleepReasonText("pressure")).toMatch(/^Your computer was low on memory/);
+    });
+
+    it("says what the page held when that was measured, else the usual range", () => {
+        expect(sleepReasonText("manual")).toContain("usually 100 to 200 MB");
+        expect(sleepReasonText("manual", undefined)).toContain("usually 100 to 200 MB");
+        expect(sleepReasonText("manual", 0)).toContain("usually 100 to 200 MB");
+        expect(sleepReasonText("manual", 183 * 1024 * 1024)).toContain("about 180 MB");
+        expect(sleepReasonText("manual", 183 * 1024 * 1024)).not.toContain("usually");
+    });
+
+    it("rounds a measured size for a sentence", () => {
+        const mb = 1024 * 1024;
+        expect(memoryLabel(0.2 * mb)).toBe("1 MB");
+        expect(memoryLabel(47.4 * mb)).toBe("47 MB");
+        expect(memoryLabel(99.6 * mb)).toBe("100 MB");
+        expect(memoryLabel(183 * mb)).toBe("180 MB");
+        expect(memoryLabel(999 * mb)).toBe("1000 MB");
+        expect(memoryLabel(1024 * mb)).toBe("1.0 GB");
+        expect(memoryLabel(1300 * mb)).toBe("1.3 GB");
+    });
+
+    it("keeps a measured size in a sleep record and drops a bad one", () => {
+        const rec = { since: 1, url: "https://a.test/", reason: "hidden" };
+        expect(readSleep({ ...rec, memoryBytes: 1234 })?.memoryBytes).toBe(1234);
+        expect(readSleep({ ...rec, memoryBytes: -5 })?.memoryBytes).toBeUndefined();
+        expect(readSleep({ ...rec, memoryBytes: "big" })?.memoryBytes).toBeUndefined();
+        expect(readSleep(rec)?.memoryBytes).toBeUndefined();
     });
 });
 
@@ -251,6 +280,84 @@ describe("when a hidden pane sleeps", () => {
         expect(await policyTick(now, async () => "critical")).toEqual(["b", "a", "c", "d"]);
         settings["browser:hibernate"] = false;
         expect(await policyTick(now, async () => "critical")).toEqual([]);
+        offs.forEach((off) => off());
+    });
+});
+
+describe("bySizeThenAge", () => {
+    const pane = (blockId: string, hidden: number) => ({ blockId, hiddenSince: () => hidden });
+    it("puts the biggest pages first, then those with no figure, each longest-hidden first", () => {
+        const due = [pane("old-small", 1), pane("new-big", 9), pane("unknown-new", 8), pane("unknown-old", 2), pane("mid", 5)];
+        const order = bySizeThenAge(due, { "old-small": 100, "new-big": 900, mid: 400 }).map((p) => p.blockId);
+        expect(order).toEqual(["new-big", "mid", "old-small", "unknown-old", "unknown-new"]);
+    });
+    it("is longest-hidden first when nothing is known", () => {
+        const due = [pane("b", 5), pane("a", 1), pane("c", 3)];
+        expect(bySizeThenAge(due, {}).map((p) => p.blockId)).toEqual(["a", "c", "b"]);
+    });
+    it("does not change the list it was given", () => {
+        const due = [pane("b", 5), pane("a", 1)];
+        bySizeThenAge(due, { b: 1 });
+        expect(due.map((p) => p.blockId)).toEqual(["b", "a"]);
+    });
+});
+
+describe("policyTick under memory pressure", () => {
+    const now = 10 * 60 * 60_000;
+    const hidden = (id: string, minutesAgo: number, made: string[]) => ({
+        blockId: id,
+        isVisible: () => false,
+        isAsleep: () => false,
+        hiddenSince: () => now - minutesAgo * 60_000,
+        tryHibernate: async (r: string) => {
+            made.push(`${id}:${r}`);
+            return null;
+        },
+        wake: () => {},
+    });
+
+    it("sleeps the biggest pages first when more are due than may sleep, and asks only about the due ones", async () => {
+        const made: string[] = [];
+        const asked: string[][] = [];
+        // Warn lets three sleep a tick; five are due (hidden 6 minutes or more).
+        const offs = [
+            hidden("a", 60, made),
+            hidden("b", 50, made),
+            hidden("c", 40, made),
+            hidden("d", 30, made),
+            hidden("e", 20, made),
+            hidden("young", 1, made),
+        ].map(registerHibernatablePane);
+        const memory = async (ids: string[]) => {
+            asked.push(ids);
+            return { a: 10, b: 20, c: 30, d: 400, e: 300, young: 9999 } as Record<string, number>;
+        };
+        expect(await policyTick(now, async () => "warn", memory)).toEqual(["d", "e", "c"]);
+        expect(asked).toHaveLength(1);
+        expect(asked[0].sort()).toEqual(["a", "b", "c", "d", "e"]);
+        offs.forEach((off) => off());
+    });
+
+    it("keeps longest-hidden first when the host can't say, and never asks when few are due or the pressure is normal", async () => {
+        const made: string[] = [];
+        let asks = 0;
+        const memory = async () => {
+            asks++;
+            return {};
+        };
+        const offs = [hidden("a", 60, made), hidden("b", 50, made), hidden("c", 40, made), hidden("d", 30, made)].map(
+            registerHibernatablePane
+        );
+        expect(await policyTick(now, async () => "warn", memory)).toEqual(["a", "b", "c"]);
+        expect(asks).toBe(1);
+        expect(await policyTick(now, async () => "normal", memory)).toEqual(["a"]);
+        expect(asks).toBe(1);
+        // Three or fewer due under warn: all sleep, so the order is moot.
+        offs.pop()?.();
+        offs.shift()?.();
+        asks = 0;
+        expect(await policyTick(now, async () => "warn", memory)).toEqual(["b", "c"]);
+        expect(asks).toBe(0);
         offs.forEach((off) => off());
     });
 });

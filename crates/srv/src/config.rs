@@ -158,15 +158,14 @@ impl Config {
     /// Build config from env vars + CLI args.
     /// Removes AGENTMUX_AUTH_KEY from the environment after reading (matching Go behavior).
     pub fn from_env_and_args(args: &CliArgs) -> Result<Self, String> {
-        let auth_key = std::env::var("AGENTMUX_AUTH_KEY")
-            .map_err(|_| "AGENTMUX_AUTH_KEY environment variable is required".to_string())?;
+        // `take` also wipes the value from the environment block that
+        // /proc/<pid>/environ (and `ps eww`) read, which remove_var alone does not.
+        let auth_key = agentmux_common::secret_env::take("AGENTMUX_AUTH_KEY")
+            .ok_or_else(|| "AGENTMUX_AUTH_KEY environment variable is required".to_string())?;
 
         if auth_key.is_empty() {
             return Err("AGENTMUX_AUTH_KEY must not be empty".to_string());
         }
-
-        // Remove from env after read (matching Go authkey.go:50)
-        std::env::remove_var("AGENTMUX_AUTH_KEY");
 
         // CLI flag wins over env. The launcher sets the canonical
         // `AGENTMUX_DATA_DIR` and `AGENTMUX_CONFIG_DIR` via
@@ -208,12 +207,7 @@ impl Config {
         // process's own environment later (e.g. by a shell tool an agent
         // asks this process to run — not applicable to srv itself, but
         // matching the auth_key precedent costs nothing).
-        let host_reg_secret = std::env::var("AGENTMUX_HOST_REG_SECRET")
-            .ok()
-            .filter(|s| !s.is_empty());
-        if host_reg_secret.is_some() {
-            std::env::remove_var("AGENTMUX_HOST_REG_SECRET");
-        }
+        let host_reg_secret = agentmux_common::secret_env::take("AGENTMUX_HOST_REG_SECRET").filter(|s| !s.is_empty());
 
         Ok(Config {
             auth_key,

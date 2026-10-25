@@ -799,13 +799,12 @@ pub fn on_pool_window_destroyed(state: &Arc<AppState>, label: &str) {
 /// (reloading a previously-promoted window back to its pool boot state).
 fn pool_frontend_url(state: &Arc<AppState>, label: &str) -> String {
     let ipc_port = *state.ipc_port.lock();
-    let ipc_token = &state.ipc_token;
     match super::window::resolve_frontend_base_url(ipc_port) {
         Ok(base_url) => {
             let separator = if base_url.contains('?') { "&" } else { "?" };
             format!(
-                "{}{}ipc_port={}&ipc_token={}&windowLabel={}&pool=1",
-                base_url, separator, ipc_port, ipc_token, label
+                "{}{}ipc_port={}&windowLabel={}&pool=1",
+                base_url, separator, ipc_port, label
             )
         }
         Err(e) => {

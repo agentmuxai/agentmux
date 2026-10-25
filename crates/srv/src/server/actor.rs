@@ -30,6 +30,7 @@
 //! disagree before anything relies on the token. Unattributed requests are not
 //! checked — there is no row to compare with, and most are the UI (§6.5.1).
 
+use crate::backend::rpc_types::RpcContext;
 use crate::backend::storage::agents::AgentNameMatch;
 use crate::backend::storage::error::StoreError;
 use crate::backend::storage::store::Store;
@@ -274,6 +275,25 @@ pub(crate) async fn require_token_naming(
     }
 }
 
+/// A WebSocket write to one agent's transcript or session state. A connection
+/// that registered as an agent (with its token) may write only its own agent's;
+/// any other connection must be the AgentMux window, proven by the host.
+/// Holding the instance auth key proves nothing, because every agent holds it.
+/// `target` is the agent's definition id or its slug; `what` completes
+/// "FORBIDDEN: …" when a connection that isn't the window is refused.
+pub(crate) fn require_own_transcript(ctx: &RpcContext, store: &Store, target: &str, what: &str) -> Result<(), String> {
+    if ctx.agent_id.is_empty() {
+        return ctx.operator_only(&format!("{what} is written by its own agent or by the AgentMux window"));
+    }
+    let target = target.trim();
+    let slug = store.agent_def_get(target).ok().flatten().map_or_else(|| target.to_string(), |def| def.slug);
+    if slug.eq_ignore_ascii_case(&ctx.agent_id) {
+        Ok(())
+    } else {
+        Err(format!("FORBIDDEN: {what} is written by its own agent or by the AgentMux window, not by another agent"))
+    }
+}
+
 /// For a route that records who acted: the agent the request's token names, as
 /// `(slug, uid)`. `claimed` is the name the request gives for itself, and an
 /// empty one leaves the token to decide alone. Refused without a token, and
@@ -332,6 +352,17 @@ pub(crate) fn require_token(state: &AppState, caller: Option<&Caller>, site: Act
     match caller.and_then(Caller::uid) {
         Some(_) => Ok(()),
         None => Err("FORBIDDEN: this acts for an agent, so the request must carry that agent's token (AGENTMUX_AGENT_TOKEN)".to_string()),
+    }
+}
+
+/// An agent acts on its own panes only: a request that carries an agent's token
+/// is refused when the pane (or agent) it acts on belongs to another. A request
+/// with no token (the window, a peer srv) is not compared, nor is a target that
+/// has no agent.
+pub(crate) fn own_agent_only(caller: Option<&Caller>, target_uid: Option<&str>) -> Result<(), String> {
+    match (caller.and_then(Caller::uid), target_uid) {
+        (Some(me), Some(target)) if me != target => Err("FORBIDDEN: an agent acts on its own panes only".to_string()),
+        _ => Ok(()),
     }
 }
 

@@ -66,7 +66,7 @@ function setup() {
         clearSelection: () => setSelected(new Set<string>()),
         selectAll: (keys: string[]) => setSelected(new Set(keys)),
     } as unknown as SwarmViewModel;
-    const ctx = { meta: () => ({}), setMeta: async () => {} } as unknown as PaneTabHostContext;
+    const ctx = { meta: () => ({}), setMeta: async () => {}, visibility: () => "active" } as unknown as PaneTabHostContext;
     return { ...render(() => <SwarmView model={model} ctx={ctx} />), model, pruneSelection };
 }
 

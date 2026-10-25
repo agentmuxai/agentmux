@@ -25,7 +25,7 @@ vi.mock("@/layout/index", () => ({
 vi.mock("@/app/util/reveal-block", () => ({ revealBlockLocally: h.reveal }));
 vi.mock("@/app/store/command-registry", () => ({ commandRegistry: { run: vi.fn(() => false) } }));
 
-import { caretInBlock, focusPaneForApi, installShortcutApi } from "./keymodel-dispatch";
+import { caretInBlock, focusPaneForApi, installShortcutApi, OPERATOR_PROMPT_OPEN, operatorPromptOpen } from "./keymodel-dispatch";
 
 /** A pane element for `blockId` with a focusable input inside. */
 function pane(blockId: string): HTMLInputElement {
@@ -90,5 +90,21 @@ describe("plan()", () => {
         pane("stuck");
         installShortcutApi();
         expect((await api().plan("ctrl+shift+code:Digit1", "stuck")).reason).toMatch(/didn't take keyboard focus/);
+    });
+});
+
+describe("a prompt for the person", () => {
+    it("holds back a command and a key press while one is on screen", async () => {
+        installShortcutApi();
+        const api = (window as unknown as { __agentmux_shortcuts: { run: (c: string) => unknown; plan: (k: string) => Promise<unknown> } }).__agentmux_shortcuts;
+        const prompt = document.createElement("div");
+        prompt.setAttribute("data-operator-only", "");
+        document.body.appendChild(prompt);
+        expect(operatorPromptOpen()).toBe(true);
+        expect(await api.run("split:right")).toEqual({ ran: false, reason: OPERATOR_PROMPT_OPEN });
+        expect(await api.plan("Enter")).toEqual({ reason: OPERATOR_PROMPT_OPEN });
+        prompt.remove();
+        expect(operatorPromptOpen()).toBe(false);
+        expect(await api.plan("Enter")).not.toEqual({ reason: OPERATOR_PROMPT_OPEN });
     });
 });

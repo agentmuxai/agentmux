@@ -42,6 +42,9 @@ use std::sync::Arc;
 use server::build_routers;
 
 fn main() {
+    // Before anything is spawned or any thread exists: the launcher's secrets leave
+    // the environment, so no child inherits them and /proc/<pid>/environ shows none.
+    agentmux_common::secret_env::stash_startup_secrets();
     // Linux (glibc): cap malloc arenas before any thread exists, so the runtime's
     // workers below share them (malloc_arenas.rs).
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
@@ -388,12 +391,16 @@ async fn app_main() {
     // One notice per account its agents are out of quota or signed out on
     // (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §6).
     server::account_episodes::install(state.clone());
+    // Agents' cargo caches are cleared as tasks finish, and the disk is watched
+    // (SPEC_BUILD_CACHE_CLEANUP_2026_10_26.md).
+    backend::build_cache_service::install(Arc::clone(&state.mstore), Arc::clone(&state.config_watcher));
     // A leader hears from its workers (SPEC_AGENT_WORKERS_2026_10_15.md §3.3).
     backend::worker_notes::install(
         Arc::clone(&state.broker),
         state.srv_events_tx.subscribe(),
         Arc::clone(&state.mstore),
         Arc::clone(&state.filestore),
+        Arc::clone(&state.config_watcher),
     );
     let routers = build_routers(state);
     let router = routers.full;

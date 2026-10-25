@@ -5,6 +5,7 @@
 //! Split out of server/mod.rs unchanged (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §4.1).
 
 use super::*;
+use super::agent_only;
 use agentmux_common::AUTH_KEY_HEADER;
 
 /// The two routers srv serves. `full` is every route and is bound on
@@ -180,6 +181,41 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
             "/agentmux/reactive/history/search",
             get(reactive::handle_reactive_history_search),
         );
+
+    // Routes that act for an agent: each needs the agent's token (`agent_only`).
+    // Jobs (SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §5.1) and the cron scheduler
+    // under them (`/agentmux/cron` is kept as an alias for one release), and
+    // Muxqueue, the universal agent work queue
+    // (docs/reports/REPORT_UNIVERSAL_AGENT_WORK_QUEUE_2026_09_01.md), with the
+    // Kanban's holder routes (SPEC_WARDEN_KANBAN_2026_10_20.md) and an agent's
+    // hold and unhold (SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md).
+    let agent_routes = Router::new()
+        .route("/agentmux/jobs", post(cron::handle_cron_create))
+        .route("/agentmux/jobs/:id", delete(cron::handle_cron_delete))
+        .route("/agentmux/jobs/:id", patch(cron::handle_cron_patch))
+        .route("/agentmux/jobs/:id/run", post(cron::handle_cron_run_now))
+        .route("/agentmux/jobs/runs/:run_id/report", post(cron::handle_cron_report))
+        .route("/agentmux/cron", post(cron::handle_cron_create))
+        .route("/agentmux/cron/:id", delete(cron::handle_cron_delete))
+        .route("/agentmux/cron/:id", patch(cron::handle_cron_patch))
+        .route("/agentmux/cron/:id/run", post(cron::handle_cron_run_now))
+        .route("/agentmux/cron/runs/:run_id/report", post(cron::handle_cron_report))
+        .route("/agentmux/work", post(work_queue::handle_work_enqueue))
+        .route("/agentmux/work/claim", post(work_queue::handle_work_claim))
+        .route("/agentmux/work/:id/heartbeat", post(work_queue::handle_work_heartbeat))
+        .route("/agentmux/work/:id/complete", post(work_queue::handle_work_complete))
+        .route("/agentmux/work/:id/release", post(work_queue::handle_work_release))
+        .route("/agentmux/work/:id/update", post(work_tasks::handle_work_update))
+        .route("/agentmux/work/:id/ask", post(work_tasks::handle_work_ask))
+        .route("/agentmux/work/:id/submit", post(work_tasks::handle_work_submit))
+        .route("/agentmux/work/:id/hold", post(work_tasks::handle_work_hold))
+        .route("/agentmux/work/:id/unhold", post(work_tasks::handle_work_unhold))
+        // Presence claims and posts to a repository's coordination channel
+        // (SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15.md); reading is open.
+        .route("/api/v1/work-claims", post(work_claims_handlers::handle_claim_work))
+        .route("/api/v1/work-claims/release", post(work_claims_handlers::handle_release_work))
+        .route("/api/v1/coord/posts", post(coord_channel_handlers::handle_post_to_channel))
+        .route_layer(middleware::from_fn_with_state(state.clone(), agent_only::require_agent_token));
 
     // MessageBus routes (authed, localhost-only)
     let bus_routes = Router::new()
@@ -364,14 +400,9 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/work-facts/who", get(work_facts_handlers::handle_who_is_working_on))
         // ClaimWork / ReleaseWork (same spec, §3.4): informational claims,
         // never a lock.
-        .route("/api/v1/work-claims", post(work_claims_handlers::handle_claim_work))
-        .route("/api/v1/work-claims/release", post(work_claims_handlers::handle_release_work))
         // PostToChannel / ReadChannel: a repository's coordination channel
         // (SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15.md).
-        .route(
-            "/api/v1/coord/posts",
-            post(coord_channel_handlers::handle_post_to_channel).get(coord_channel_handlers::handle_read_channel),
-        )
+        .route("/api/v1/coord/posts", get(coord_channel_handlers::handle_read_channel))
         // MuxAPI — identity / preset / memory namespaces, the MCP-facing
         // slice of the app-API RPC surface (SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28).
         // The agent identity (`agent_id`) is supplied by agentmux-mcp from its
@@ -556,27 +587,11 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/messaging/telegram/send", post(messaging_handlers::handle_telegram_send))
         .route("/api/messaging/slack/send", post(messaging_handlers::handle_slack_send))
         .route("/api/messaging/whatsapp/send", post(messaging_handlers::handle_whatsapp_send))
-        // Jobs (SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §5.1) and the cron
-        // scheduler under them; `/agentmux/cron` is kept as an alias for one
-        // release. Auth-gated like reactive routes.
-        .route("/agentmux/jobs", post(cron::handle_cron_create))
+        // Reading jobs; changing them is in `agent_routes`. Auth-gated like reactive routes.
         .route("/agentmux/jobs", get(cron::handle_cron_list))
-        .route("/agentmux/jobs/:id", delete(cron::handle_cron_delete))
-        .route("/agentmux/jobs/:id", patch(cron::handle_cron_patch))
         .route("/agentmux/jobs/:id/runs", get(cron::handle_cron_runs))
-        .route("/agentmux/jobs/:id/run", post(cron::handle_cron_run_now))
-        .route("/agentmux/jobs/runs/:run_id/report", post(cron::handle_cron_report))
-        .route("/agentmux/cron", post(cron::handle_cron_create))
         .route("/agentmux/cron", get(cron::handle_cron_list))
-        .route("/agentmux/cron/:id", delete(cron::handle_cron_delete))
-        .route("/agentmux/cron/:id", patch(cron::handle_cron_patch))
         .route("/agentmux/cron/:id/runs", get(cron::handle_cron_runs))
-        .route("/agentmux/cron/:id/run", post(cron::handle_cron_run_now))
-        .route("/agentmux/cron/runs/:run_id/report", post(cron::handle_cron_report))
-        // Muxqueue — the universal agent work queue, cron's readiness-triggered
-        // sibling (docs/reports/REPORT_UNIVERSAL_AGENT_WORK_QUEUE_2026_09_01.md).
-        // Same auth gate as the cron routes above.
-        .route("/agentmux/work", post(work_queue::handle_work_enqueue))
         .route(
             "/agentmux/identity/fallbacks",
             get(caller::handle_identity_fallbacks),
@@ -586,21 +601,11 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
             get(agent_self_keys::handle_agent_self_keys),
         )
         .route("/agentmux/work", get(work_queue::handle_work_list))
-        .route("/agentmux/work/claim", post(work_queue::handle_work_claim))
-        .route("/agentmux/work/:id/heartbeat", post(work_queue::handle_work_heartbeat))
-        .route("/agentmux/work/:id/complete", post(work_queue::handle_work_complete))
-        .route("/agentmux/work/:id/release", post(work_queue::handle_work_release))
-        // Kanban (SPEC_WARDEN_KANBAN_2026_10_20.md): a holder's progress, question and hand-in;
-        // any agent's hold and unhold (SPEC_KANBAN_AGENTS_HOLD_AND_UNHOLD_2026_10_22.md).
-        .route("/agentmux/work/:id/update", post(work_tasks::handle_work_update))
-        .route("/agentmux/work/:id/ask", post(work_tasks::handle_work_ask))
-        .route("/agentmux/work/:id/submit", post(work_tasks::handle_work_submit))
+        // Kanban: a leader's decision on a task in review (signed, not a token).
         .route("/agentmux/work/:id/accept", post(work_delegate::handle_work_accept))
         .route("/agentmux/work/:id/send_back", post(work_delegate::handle_work_send_back))
-        .route("/agentmux/work/:id/hold", post(work_tasks::handle_work_hold))
-        .route("/agentmux/work/:id/unhold", post(work_tasks::handle_work_unhold))
-        .route("/agentmux/work/:id", delete(work_queue::handle_work_cancel))
         .merge(bus_routes)
+        .merge(agent_routes)
         .merge(reactive_routes)
         // Identity M4a: attribute the (already authenticated) request.
         .route_layer(middleware::from_fn_with_state(

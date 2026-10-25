@@ -436,6 +436,7 @@ pub(crate) async fn run_windows(
         srv_spawner::spawn_srv(launcher_exe_dir, &paths, &srv_pipe_path, job_handle, &startup_sink, None)
     );
     let (saga_coord, _ipc_handle, host_pipe) = setup_result;
+    crate::host_quit::install(std::sync::Arc::clone(&host_pipe), std::sync::Arc::clone(&state));
     // `mut`: SPEC_SRV_SUPERVISION_RECYCLE — an srv respawn rebinds this to
     // the new endpoints; the subsequent (deliberate) host restart then picks
     // them up through the existing `spawn_host_supervised(..., &srv_result,
@@ -717,7 +718,7 @@ pub(crate) async fn run_windows(
                 log(&format!("upgrade: the user said yes; quitting to restart into {staged}"));
                 relaunch = Some((staged, std::time::Instant::now()));
                 let (data_dir, hash) = (paths.data_dir.clone(), dir_hash.clone());
-                tokio::task::spawn_blocking(move || crate::tray::forward_tray_cmd(&data_dir, &hash, "quit_app"));
+                tokio::task::spawn_blocking(move || crate::host_quit::quit_host(&data_dir, &hash));
             }
             _ = teardown_check_interval.tick() => {
                 let misses = crate::ui_liveness::consecutive_misses();

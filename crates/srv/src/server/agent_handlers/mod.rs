@@ -22,6 +22,8 @@ mod identity;
 mod instance;
 mod session;
 mod seat;
+#[cfg(test)]
+mod transcript_write_tests;
 pub(crate) mod bundle;
 mod bash_prefix;
 pub(crate) mod container_turn;

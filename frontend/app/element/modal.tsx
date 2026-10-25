@@ -184,6 +184,11 @@ export interface ModalProps {
     /** Element (or accessor) to focus on open. Defaults to the panel's
      *  `[data-modal-initial-focus]` element, then the first focusable. */
     initialFocus?: HTMLElement | (() => HTMLElement | null);
+    /** A prompt addressed to the person at the keyboard (an approval, a grant, a
+     *  "use this secret"): its answer is recorded as theirs. Marks the root
+     *  `data-operator-only`, which agents' UI query and click leave out and
+     *  refuse, whoever has focus (`crates/cef/.../scripts/query.js`). */
+    operatorOnly?: boolean;
     /** Called with the mounted `.modal-root` element (and `null` on unmount).
      *  For a caller that needs to observe/query the modal's own rendered
      *  content directly — e.g. ModalLayer's backdrop-dismissibility check —
@@ -400,6 +405,7 @@ export const Modal: Component<ModalProps> = (props) => {
                             class="modal-root"
                             data-scope={resolvedScope()}
                             data-placement={props.placement ?? "center"}
+                            data-operator-only={props.operatorOnly ? "" : undefined}
                             role="dialog"
                             aria-modal="true"
                             aria-label={props.ariaLabelledBy ? undefined : props.ariaLabel}

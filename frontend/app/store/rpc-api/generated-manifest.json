@@ -619,6 +619,11 @@
             "send": "{}"
         },
         {
+            "command": "globalmemory:removed",
+            "method": "GlobalMemoryRemovedCommand",
+            "send": "{}"
+        },
+        {
             "command": "globalmemory:revert",
             "method": "GlobalMemoryRevertCommand"
         },
@@ -1051,6 +1056,19 @@
         {
             "command": "presence.status",
             "method": "PresenceStatusCommand"
+        },
+        {
+            "command": "pins.adopt",
+            "method": "PinsAdoptCommand"
+        },
+        {
+            "command": "pins.forget",
+            "method": "PinsForgetCommand"
+        },
+        {
+            "command": "pins.list",
+            "method": "PinsListCommand",
+            "send": "data ?? {}"
         },
         {
             "command": "layout.preview",
@@ -1502,6 +1520,14 @@
         {
             "command": "agent.input-history-clear",
             "method": "AgentInputHistoryClearCommand"
+        },
+        {
+            "command": "agent.input-history-trash",
+            "method": "AgentInputHistoryTrashCommand"
+        },
+        {
+            "command": "agent.input-history-restore",
+            "method": "AgentInputHistoryRestoreCommand"
         },
         {
             "command": "agent.input-draft",

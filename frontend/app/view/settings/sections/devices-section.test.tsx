@@ -16,6 +16,7 @@ vi.mock("@/app/store/rpc-api", () => ({
         ViewerCanSendCommand: (...args: unknown[]) => canSend(...args),
         SetConfigCommand: (...args: unknown[]) => setConfig(...args),
         PresenceStatusCommand: () => Promise.resolve({ state: "signed_out", since_ms: 0, record_version: 2 }),
+        PinsListCommand: () => Promise.resolve({ lan: [], wan: [] }),
         MuxBusStatusCommand: () => Promise.reject(new Error("no srv")),
         MuxBusCloudConfigCommand: () => Promise.reject(new Error("no srv")),
     },

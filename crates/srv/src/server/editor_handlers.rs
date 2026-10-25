@@ -237,10 +237,13 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // writeagentconfig → write config files atomically to agent working directory
     engine.register_typed(
         COMMAND_WRITE_AGENT_CONFIG,
-        move |mut cmd: CommandWriteAgentConfigData, _ctx| {
+        move |mut cmd: CommandWriteAgentConfigData, ctx| {
             let id_store = id_store.clone();
             let mstore = mstore.clone();
             let identity_store = identity_store.clone();
+            // Only the AgentMux window, proven by its host, is handed an agent's signing keys:
+            // the file lands where the caller says, and the keys it carries sign as that agent.
+            let hands_out_keys = ctx.operator_only("only the AgentMux window writes an agent's signing keys").is_ok();
             async move {
                 tracing::info!(
                     working_dir = %cmd.working_dir,
@@ -268,42 +271,9 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let container = agent_mode == "container";
                 crate::backend::mcp_launch::add_to_files(&mut cmd.files, &mstore, &identity_store, cmd.agent_id.as_deref(), container);
 
-                // Host-tier + LAN-tier jekt sender signing keys — see
-                // `agent_config::inject_jekt_signing_keys_into_mcp_json`'s doc
-                // comment. This is the actual "click Launch" path (per this
-                // handler's own doc below); `agent.open`'s equivalent
-                // injection alone left every normally-launched agent's
-                // jekts rendering TRUST=self-declared, since the frontend's
-                // `agent-config-builder.ts` only ever sets AGENTMUX_AGENT_ID.
-                // Best-effort — a missing/unresolvable agent slug or a
-                // key-ensure failure just means this config carries no key; the
-                // MCP still fetches its keys from srv (`/agentmux/agents/self/keys`).
-                if let Some(pos) = cmd.files.iter().position(|f| f.path == ".mcp.json") {
-                    // The definition's slug, over one the launch computed (P0.3).
-                    let agent_slug = crate::backend::mcp_json_identity::launch_agent_id(
-                        &mut cmd.files[pos].content, &mstore, cmd.agent_id.as_deref());
-                    if let Some(agent_slug) = agent_slug {
-                        crate::server::agent_self_keys::record_config_id_drift(
-                            "m4d.config_id_drift.write_agent_config",
-                            &agent_slug,
-                            crate::server::agent_self_keys::single_row_slug_folded(&mstore, &agent_slug).as_deref(),
-                        );
-                        if let Some(rewritten) = crate::backend::agent_config::inject_jekt_signing_keys_into_mcp_json(
-                            &cmd.files[pos].content,
-                            &mstore,
-                            &agent_slug,
-                        ) {
-                            cmd.files[pos].content = rewritten;
-                        } else {
-                            tracing::warn!(
-                                agent_slug = %agent_slug,
-                                "WriteAgentConfig: jekt/LAN signing keys not injected into .mcp.json — \
-                                 this agent's jekts will render TRUST=self-declared / TRUST=network-claimed \
-                                 instead of verified"
-                            );
-                        }
-                    }
-                }
+                // The launch's .mcp.json signs as the definition's agent; the window's launch also
+                // carries that agent's signing keys (`mcp_json_identity::finish_launch`).
+                crate::backend::mcp_json_identity::finish_launch(&mut cmd.files, &mstore, cmd.agent_id.as_deref(), hands_out_keys);
 
                 // Resolve to a final on-disk path. For auto-generated
                 // instance paths (`auto_allocate: true`), use the
@@ -1556,3 +1526,7 @@ mod tests {
 
     }
 }
+
+#[cfg(test)]
+#[path = "editor_handlers_keys_tests.rs"]
+mod write_agent_config_keys_tests;

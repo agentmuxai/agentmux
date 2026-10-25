@@ -1,7 +1,7 @@
 # Spec: browser panes hibernate when hidden, and say so when they wake
 
 **Date:** 2026-10-20
-**Status:** active. Phase 0 (the spike, §9) done: `docs/reports/REPORT_BROWSER_PANE_HIBERNATION_SPIKE_2026_10_20.md` (about 550 MB freed for seven pages, wakes 0.35–2.3 s). Phase 1: #5290. Phase 2 (hidden panes marked hidden): #5302 with agentmuxai/cef#13. Phase 3 (in-place discard keeps history, scroll and form contents): #5327 with agentmuxai/cef#14 and agentmuxai/cef-rs#3. Phases 2 and 3 take effect with CEF 154 r4 (published for Windows, macOS and Linux, pinned by #5362). The operator decided on 2026-10-21: on by default after 30 minutes hidden, and panes in hidden tabs start asleep at launch (§12). Phase 4 (a pane hidden 5 minutes while awake is frozen until shown, and an agent's call thaws it; Settings → Browser edits the sites that never sleep): #5437; freezing runs only on r4.
+**Status:** active. Phase 0 (the spike, §9) done: `docs/reports/REPORT_BROWSER_PANE_HIBERNATION_SPIKE_2026_10_20.md` (about 550 MB freed for seven pages, wakes 0.35–2.3 s). Phase 1: #5290. Phase 2 (hidden panes marked hidden): #5302 with agentmuxai/cef#13. Phase 3 (in-place discard keeps history, scroll and form contents): #5327 with agentmuxai/cef#14 and agentmuxai/cef-rs#3. Phases 2 and 3 take effect with CEF 154 r4 (published for Windows, macOS and Linux, pinned by #5362). The operator decided on 2026-10-21: on by default after 30 minutes hidden, and panes in hidden tabs start asleep at launch (§12). Phase 4 (a pane hidden 5 minutes while awake is frozen until shown, and an agent's call thaws it; Settings → Browser edits the sites that never sleep): #5437; freezing runs only on r4. Follow-ups: the card's estimate falls back to the median of the site's last five loads (§7.2).
 **Author:** korp (lead, per the operator, 2026-10-20)
 **Trigger:** Operator, 2026-10-20: *"We need smart Hibernation, especially for browser panes, which we should start first."* and *"during restore, can you add a note to the user saying restoring, with est eta, and also the reason, explain that to save memory agentmux hibernates browser panes."*
 **Builds on:**
@@ -63,7 +63,7 @@ A browser pane is in one of three states. The state is block meta, so every wind
 **The window decides, with two answers from the host.** (An earlier draft had the host propose candidates, as the recycle governor does. Built, the window already held everything but two facts, so it asks for those instead.)
 - **The window** (`frontend/app/view/browser/hibernation.ts` `policyTick`, every 30 s) knows how long each browser pane has been hidden (the pane-tab visibility signal: a hidden window tab, an inactive pane tab, a minimized window), what agents and the person are doing with it, and its settings.
 - **The host** answers `memory_pressure_level` (Normal, Warn, Critical) and, per candidate, `browser_pane_hibernation_check`: whether its page plays media, has a changed form field, has a `beforeunload` listener, or has DevTools open (`crates/cef/src/browser_api/hibernation.rs`, read in an isolated world). A check that can't run keeps the pane awake.
-- **Order:** the longest-hidden first, as Chrome orders its discards. Ordering by renderer size, as the first draft had, needs a pane-to-process map the window doesn't have; it is a later refinement if memory pressure shows it matters.
+- **Order:** the longest-hidden first, as Chrome orders its discards. Under memory pressure, when more panes are due than may sleep in a tick, the biggest pages go first (the host answers `browser_pane_memory` from the renderer map: the private memory of the renderers that serve that pane alone; panes with no figure follow, longest-hidden first). Not on Linux, where the host can't read renderer sizes: there it stays longest-hidden first.
 - A pane that declines says why in the log (`[hibernate] stays awake reason=…`) and is asked again next tick.
 
 ### 5.2 Thresholds
@@ -131,7 +131,7 @@ Shown in place of the page from the moment the pane is visible until its page ha
 
 - The **first line** names the page by its saved title and icon (the address when there's no title).
 - The **estimate** (§7.2), or "Still loading…" once the estimate has passed by more than half.
-- The **reason**, in one sentence, with the typical saving. Under pressure it says so: "Your computer was low on memory, so AgentMux put this browser pane to sleep…"
+- The **reason**, in one sentence, with the saving: what the pane's own renderers held when it went to sleep ("about 180 MB"), or "usually 100 to 200 MB" where that wasn't measured. Under pressure it says so: "Your computer was low on memory, so AgentMux put this browser pane to sleep…"
 - **What isn't kept**, only while it isn't: Phase 3 (§10) removes the line.
 - **Keep this pane awake** sets `browser:keepawake`. **Settings** opens `browser:hibernate`.
 - The card shows only the first time the user sees each pane after it slept. A pane that wakes on hover and finishes before it is shown never shows one.
@@ -139,7 +139,8 @@ Shown in place of the page from the moment the pane is visible until its page ha
 ### 7.2 The estimate
 
 - From the pane's own `loadMs`, the time its last load took.
-- With none, 2 s (the spike's measurements, report §4.1). A per-site history (the last loads of each origin) is a later refinement.
+- With none, the median of the last five loads of the page's origin (kept in the window's local storage, shared by the instance's windows and kept across restarts; a load outside 20 ms to 2 min is ignored).
+- With neither, 2 s (the spike's measurements, report §4.1).
 - Rounded to "About 1 second", "About 2 seconds", "A few seconds" (over 3.5 s).
 
 ### 7.3 Layout and access

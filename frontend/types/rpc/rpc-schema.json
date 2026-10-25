@@ -228,6 +228,25 @@
     }
   },
   {
+    "command": "agent.input-history-restore",
+    "request": "agentmux_srv::backend::rpc_types::input_history::CommandInputHistoryRestoreData",
+    "requestName": "CommandInputHistoryRestoreData",
+    "requestTs": {
+      "imports": [
+        "CommandInputHistoryRestoreData"
+      ],
+      "name": "CommandInputHistoryRestoreData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::input_history::InputHistoryRestoredResult",
+    "responseName": "InputHistoryRestoredResult",
+    "responseTs": {
+      "imports": [
+        "InputHistoryRestoredResult"
+      ],
+      "name": "InputHistoryRestoredResult"
+    }
+  },
+  {
     "command": "agent.input-history-search",
     "request": "agentmux_srv::backend::rpc_types::input_history::CommandInputHistorySearchData",
     "requestName": "CommandInputHistorySearchData",
@@ -244,6 +263,25 @@
         "InputHistoryResult"
       ],
       "name": "InputHistoryResult"
+    }
+  },
+  {
+    "command": "agent.input-history-trash",
+    "request": "agentmux_srv::backend::rpc_types::input_history::CommandInputHistoryTrashData",
+    "requestName": "CommandInputHistoryTrashData",
+    "requestTs": {
+      "imports": [
+        "CommandInputHistoryTrashData"
+      ],
+      "name": "CommandInputHistoryTrashData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::input_history::InputHistoryTrashResult",
+    "responseName": "InputHistoryTrashResult",
+    "responseTs": {
+      "imports": [
+        "InputHistoryTrashResult"
+      ],
+      "name": "InputHistoryTrashResult"
     }
   },
   {
@@ -3275,6 +3313,25 @@
     }
   },
   {
+    "command": "globalmemory:removed",
+    "request": "agentmux_srv::backend::rpc_types::bundle::CommandGlobalMemoryRemovedData",
+    "requestName": "CommandGlobalMemoryRemovedData",
+    "requestTs": {
+      "imports": [
+        "CommandGlobalMemoryRemovedData"
+      ],
+      "name": "CommandGlobalMemoryRemovedData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::bundle::GlobalMemoryRemovedResult",
+    "responseName": "GlobalMemoryRemovedResult",
+    "responseTs": {
+      "imports": [
+        "GlobalMemoryRemovedResult"
+      ],
+      "name": "GlobalMemoryRemovedResult"
+    }
+  },
+  {
     "command": "globalmemory:revert",
     "request": "agentmux_srv::backend::rpc_types::bundle::CommandGlobalMemoryRevertData",
     "requestName": "CommandGlobalMemoryRevertData",
@@ -5238,6 +5295,63 @@
         "PaneTabEditResult"
       ],
       "name": "PaneTabEditResult"
+    }
+  },
+  {
+    "command": "pins.adopt",
+    "request": "agentmux_srv::backend::rpc_types::pins::CommandPinsChangeData",
+    "requestName": "CommandPinsChangeData",
+    "requestTs": {
+      "imports": [
+        "CommandPinsChangeData"
+      ],
+      "name": "CommandPinsChangeData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::pins::PinnedSendersResult",
+    "responseName": "PinnedSendersResult",
+    "responseTs": {
+      "imports": [
+        "PinnedSendersResult"
+      ],
+      "name": "PinnedSendersResult"
+    }
+  },
+  {
+    "command": "pins.forget",
+    "request": "agentmux_srv::backend::rpc_types::pins::CommandPinsChangeData",
+    "requestName": "CommandPinsChangeData",
+    "requestTs": {
+      "imports": [
+        "CommandPinsChangeData"
+      ],
+      "name": "CommandPinsChangeData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::pins::PinnedSendersResult",
+    "responseName": "PinnedSendersResult",
+    "responseTs": {
+      "imports": [
+        "PinnedSendersResult"
+      ],
+      "name": "PinnedSendersResult"
+    }
+  },
+  {
+    "command": "pins.list",
+    "request": "agentmux_srv::backend::rpc_types::pins::CommandPinsListData",
+    "requestName": "CommandPinsListData",
+    "requestTs": {
+      "imports": [
+        "CommandPinsListData"
+      ],
+      "name": "CommandPinsListData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::pins::PinnedSendersResult",
+    "responseName": "PinnedSendersResult",
+    "responseTs": {
+      "imports": [
+        "PinnedSendersResult"
+      ],
+      "name": "PinnedSendersResult"
     }
   },
   {

@@ -200,7 +200,7 @@ pub(crate) async fn deliver_broadcast_turn(
     text: String,
     origin: TurnOrigin,
 ) -> Result<(), String> {
-    // An agent out of quota would fail the turn at once: say so
+    // An agent out of quota or signed out would fail the turn at once: say so
     // in the broadcast's result, where the operator sees it, rather than lose
     // their words in a failed turn (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §5).
     let mstore = deps.mstore.clone();

@@ -26,6 +26,7 @@ import type { SupervisorMode } from "@/types/rpc/SupervisorMode";
 import { remoteSections, type SwarmOtherInstances } from "./swarm-remote";
 import { createSignal, untrack, type Accessor, type Setter } from "solid-js";
 import { sameList, traced } from "@/app/util/select-trace";
+import { countdownCandidates, withRetiredEntry } from "./swarm-retire";
 import { groupBackgroundTasks, type AgentBackgroundTasks } from "./swarm-background";
 import { toolDetail } from "@/app/view/agent/tool-meta/tool-descriptors";
 import { onSubagentNamed, withSubagentName } from "./subagent-naming";
@@ -1055,7 +1056,7 @@ export class SwarmViewModel {
     private setRetiredRowKeys(updater: (prev: Map<string, number>) => Map<string, number>): void {
         this.rawSetRetiredRowKeys((prev) => {
             const next = updater(prev);
-            saveRetiredRowKeysToStorage(next);
+            if (next !== prev) saveRetiredRowKeysToStorage(next);
             return next;
         });
     }
@@ -1683,11 +1684,7 @@ export class SwarmViewModel {
      *  fires later against an already-retired key — harmless since
      *  retireRow is idempotent, but pointless to leave running). */
     retireRow(rowKey: string, lastEventAt: number): void {
-        this.setRetiredRowKeys((prev) => {
-            const next = new Map(prev);
-            next.set(rowKey, lastEventAt);
-            return next;
-        });
+        this.setRetiredRowKeys((prev) => withRetiredEntry(prev, rowKey, lastEventAt));
         this.clearCountdown(rowKey);
     }
 
@@ -1854,7 +1851,7 @@ export class SwarmViewModel {
                 this.clearCountdown(rowKey);
             }
         }
-        for (const [rowKey, lastEventAt] of liveTerminal) {
+        for (const [rowKey, lastEventAt] of countdownCandidates(liveTerminal, this.retiredRowKeysAtom())) {
             this.armCountdown(rowKey, lastEventAt);
         }
     }

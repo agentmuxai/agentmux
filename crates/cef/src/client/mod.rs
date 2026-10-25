@@ -52,6 +52,8 @@ const MEMORY_PAUSE_WINDOW: Duration = Duration::from_secs(30);
 pub(crate) mod creation_labels;
 pub(crate) mod app_navigation;
 pub(crate) mod allowed_origins;
+mod pane_frontend_guard;
+mod ipc_credentials;
 pub(crate) mod downloads;
 pub(crate) mod jsdialog;
 mod handlers;
@@ -317,9 +319,9 @@ impl AgentMuxHandler {
     /// window's OWN pre-crash URL (read from its main frame before we load any
     /// recovery page over it): it already carries every creation-time param —
     /// `windowLabel` and, for tear-off / floating-pane windows, `workspaceId`
-    /// / `floatingPaneId` — plus the still-valid in-process `ipc_port` /
-    /// `ipc_token`, so reusing it verbatim re-projects the exact window. Falls
-    /// back to a reconstructed `?ipc_port&ipc_token&windowLabel` URL only when
+    /// / `floatingPaneId` — plus the still-valid in-process `ipc_port`, so
+    /// reusing it verbatim re-projects the exact window. Falls
+    /// back to a reconstructed `?ipc_port&windowLabel` URL only when
     /// the frame URL isn't a live app URL (renderer died before committing one,
     /// or it's a prior data: recovery page). codex P2 #1229.
     fn recovery_target_url(&self, owned: &mut Browser, base_url: &str) -> String {
@@ -336,7 +338,7 @@ impl AgentMuxHandler {
             return u;
         }
         let label = self.window_label_for(owned);
-        recovery_pages::recovery_navigation_url(base_url, self.resolved_ipc_port(), &self.state.ipc_token, label.as_deref())
+        recovery_pages::recovery_navigation_url(base_url, self.resolved_ipc_port(), label.as_deref())
     }
 }
 

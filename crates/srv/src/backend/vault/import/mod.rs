@@ -16,11 +16,17 @@
 
 mod bitwarden;
 mod bitwarden_encrypted;
+mod dashlane;
 mod env;
 mod kdbx;
+mod keeper;
 pub use kdbx::{MAX_ARGON_ITERATIONS, MAX_ARGON_MEMORY, MAX_ARGON_PARALLELISM, MAX_KEY_FILE};
 mod logins;
+mod nordpass;
 mod onepux;
+mod roboform;
+mod shared;
+mod zoho;
 
 use std::collections::BTreeMap;
 
@@ -41,6 +47,11 @@ pub enum Source {
     KeePass,
     Env,
     Csv,
+    Dashlane,
+    Keeper,
+    NordPass,
+    RoboForm,
+    ZohoVault,
 }
 
 impl Source {
@@ -56,6 +67,11 @@ impl Source {
             Source::KeePass => "a KeePass database",
             Source::Env => "a .env file",
             Source::Csv => "a CSV file",
+            Source::Dashlane => "Dashlane",
+            Source::Keeper => "Keeper",
+            Source::NordPass => "NordPass",
+            Source::RoboForm => "RoboForm",
+            Source::ZohoVault => "Zoho Vault",
         }
     }
 }
@@ -194,7 +210,31 @@ pub fn read_keyed(bytes: &[u8], file_name: &str, mapping: Option<&Mapping>, pass
     if file_name.to_ascii_lowercase().ends_with(".env") || env::looks_like_env(text) {
         return env::read(text);
     }
-    logins::read(text, mapping)
+    if mapping.is_none() {
+        if let Some(read) = read_service_csv(text) {
+            return read;
+        }
+    }
+    match logins::read(text, mapping) {
+        // A table with no header row and no column the generic reader knows: Keeper writes those.
+        Err(ReadError::NeedsMapping(needed)) if mapping.is_none() => keeper::read(text).unwrap_or(Err(ReadError::NeedsMapping(needed))),
+        other => other,
+    }
+}
+
+/// A CSV that one of the second-wave services wrote, found by its column names; `None` for any other.
+fn read_service_csv(text: &str) -> Option<Result<Imported, ReadError>> {
+    let names = shared::header_names(text);
+    if nordpass::looks_like(&names) {
+        return Some(nordpass::read(text));
+    }
+    if roboform::looks_like(&names) {
+        return Some(roboform::read(text));
+    }
+    if zoho::looks_like(&names) {
+        return Some(zoho::read(text));
+    }
+    dashlane::read(text)
 }
 
 /// AgentMux's own plain JSON export (a `.vault` file's contents, unencrypted), or `None` when the
@@ -232,3 +272,5 @@ fn read_own_json(text: &str) -> Option<Result<Imported, ReadError>> {
 mod tests;
 #[cfg(test)]
 mod fuzz_tests;
+#[cfg(test)]
+mod second_wave_tests;

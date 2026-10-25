@@ -64,7 +64,7 @@ export function UsePrompt(props: { use: UseRequest } & ModalCloseProps): JSX.Ele
         }
     };
     return (
-        <Modal open={true} scope="window" onClose={() => void decide("deny")} size="sm" closeOnBackdropClick={false} closeOnEscape={!busy()}>
+        <Modal open={true} scope="window" operatorOnly onClose={() => void decide("deny")} size="sm" closeOnBackdropClick={false} closeOnEscape={!busy()}>
             <ModalHeader
                 title={u.command ? `${u.agent} wants to run a command with your ${u.what}` : u.needs_value ? `${u.agent} needs your ${u.what}` : `${u.agent} wants to fill your ${u.what}`}
             />

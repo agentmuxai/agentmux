@@ -95,6 +95,41 @@ pub fn read_holder(root: &Path, now_secs: u64) -> Option<SlotHolder> {
     Some(SlotHolder { agent, since_ms: start.saturating_mul(1000), reason, command })
 }
 
+/// Environment variables that make a bash started with them define `cargo`, `task`, `npm`, `npx`
+/// and `docker` as functions calling the shims under `home` (`BASH_FUNC_cargo%%` and so on: bash
+/// imports an exported function from its environment).
+///
+/// A function wins over any PATH lookup, so the shim is reached whatever order a shell profile
+/// left the PATH in. On Windows, Git Bash's profile puts `~/bin` first, and a `cargo.exe` there
+/// (a rustup proxy) made every agent's `cargo` skip the slot: five srv compiles ran at once
+/// (2026-10-25). The shims put their own directory back first for the tools they run, which
+/// covers what those start (`task` -> `cargo`).
+///
+/// Nothing for a tool whose shim is not installed (or is somebody's own), nor when the slot is
+/// switched off (`off`, from `AGENTMUX_BUILD_SLOT_OFF`).
+pub fn shim_function_env(home: &Path, off: bool) -> Vec<(String, String)> {
+    if off {
+        return Vec::new();
+    }
+    let dir = shim_dir(home).to_string_lossy().replace('\\', "/");
+    // The path goes between double quotes in the function body.
+    if dir.chars().any(|c| matches!(c, '"' | '$' | '`' | '\\' | '\n' | '\r')) {
+        return Vec::new();
+    }
+    SHIMMED_TOOLS
+        .iter()
+        .filter(|tool| std::fs::read_to_string(shim_dir(home).join(tool)).is_ok_and(|t| t.contains(SHIM_MARKER)))
+        .map(|tool| (format!("BASH_FUNC_{tool}%%"), format!("() {{  \"{dir}/{tool}\" \"$@\"\n}}")))
+        .collect()
+}
+
+/// [`shim_function_env`] for the current user's home, with the slot's off switch read from the
+/// environment.
+pub fn shim_function_env_for_current_user() -> Vec<(String, String)> {
+    let off = std::env::var_os("AGENTMUX_BUILD_SLOT_OFF").is_some_and(|v| !v.is_empty());
+    dirs::home_dir().map(|h| shim_function_env(&h, off)).unwrap_or_default()
+}
+
 /// What one `install` call did.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Installed {
@@ -547,6 +582,221 @@ mod tests {
         assert!(!root.join("history.log").exists(), "and the next append starts a new file");
         let summary = String::from_utf8_lossy(&run(&["history"]).stdout).to_string();
         assert!(summary.starts_with("runs: 2002,"), "history reads both generations: {summary:?}");
+    }
+
+    #[test]
+    fn shim_functions_are_offered_for_every_installed_shim_and_nothing_else() {
+        let h = home();
+        assert!(shim_function_env(h.path(), false).is_empty(), "no shims installed: no functions");
+        install(h.path()).unwrap();
+        let env = shim_function_env(h.path(), false);
+        let names: Vec<&str> = env.iter().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(names, ["BASH_FUNC_cargo%%", "BASH_FUNC_task%%", "BASH_FUNC_npm%%", "BASH_FUNC_npx%%", "BASH_FUNC_docker%%"]);
+        let dir = shim_dir(h.path()).to_string_lossy().replace('\\', "/");
+        assert_eq!(env[0].1, format!("() {{  \"{dir}/cargo\" \"$@\"\n}}"));
+        assert!(shim_function_env(h.path(), true).is_empty(), "the opt-out switches them off");
+        // A `cargo` that is somebody's own is not ours to put a function in front of.
+        std::fs::write(shim_dir(h.path()).join("cargo"), "#!/bin/sh\necho mine\n").unwrap();
+        let env = shim_function_env(h.path(), false);
+        assert!(env.iter().all(|(k, _)| k != "BASH_FUNC_cargo%%") && env.len() == 4);
+    }
+
+    /// The bug of 2026-10-25: a `cargo` earlier on the PATH than the shims' directory (Git Bash's
+    /// profile puts `~/bin` first) skipped the slot. With the functions in the environment the shim
+    /// is reached anyway; without them it is not.
+    #[test]
+    fn a_cargo_earlier_on_the_path_still_goes_through_the_slot_with_the_functions() {
+        let Some(bash) = bash() else { return };
+        let h = home();
+        install(h.path()).unwrap();
+        // Stand-ins: a lock script that says it ran, a "user bin" cargo that is first on the PATH,
+        // and the real cargo after the shims.
+        std::fs::write(script_path(h.path()), "#!/usr/bin/env bash\necho \"SLOT $*\"\n").unwrap();
+        let (user_bin, real_dir) = (h.path().join("userbin"), h.path().join("real"));
+        for (dir, text) in [(&user_bin, "BYPASS"), (&real_dir, "REAL")] {
+            std::fs::create_dir_all(dir).unwrap();
+            std::fs::write(dir.join("cargo"), format!("#!/usr/bin/env bash\necho {text}\n")).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(dir.join("cargo"), std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+        }
+        let sep = if cfg!(windows) { ";" } else { ":" };
+        let path = format!("{}{sep}{}{sep}{}{sep}{}", user_bin.display(), shim_dir(h.path()).display(), real_dir.display(), std::env::var("PATH").unwrap_or_default());
+        let run = |with_functions: bool| {
+            let mut cmd = std::process::Command::new(&bash);
+            cmd.args(["-c", "cargo test -p x"]).env("PATH", &path).env("HOME", h.path()).env_remove("BUILD_SLOT_HELD").env_remove("AGENTMUX_BUILD_SLOT_OFF");
+            if with_functions {
+                cmd.envs(shim_function_env(h.path(), false));
+            }
+            #[cfg(windows)]
+            {
+                use crate::win32::NoWindow;
+                cmd.no_window();
+            }
+            String::from_utf8_lossy(&cmd.output().unwrap().stdout).replace("\r\n", "\n").trim().to_string()
+        };
+        assert_eq!(run(false), "BYPASS", "without the functions the earlier cargo wins, which is the bug");
+        let out = run(true);
+        assert!(out.starts_with("SLOT --reason cargo test -- "), "got {out:?}");
+        assert!(out.contains("userbin") && out.ends_with("cargo test -p x"), "the slot runs the cargo the shell would have found, the one in the user's bin: {out:?}");
+    }
+
+    /// What the shim runs starts with the shims' directory first on the PATH, so `task` ->
+    /// `cargo` and `npm run build` -> `cargo` are slotted too.
+    #[test]
+    fn the_tool_a_shim_runs_finds_the_shims_first() {
+        let Some(bash) = bash() else { return };
+        let h = home();
+        let (shim, real_dir) = (shim_dir(h.path()), h.path().join("real"));
+        std::fs::create_dir_all(&shim).unwrap();
+        std::fs::create_dir_all(&real_dir).unwrap();
+        std::fs::write(shim.join("task"), lf(SHIM_SH)).unwrap();
+        std::fs::write(real_dir.join("task"), "#!/usr/bin/env bash\necho \"FIRST ${PATH%%:*}\"\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(real_dir.join("task"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let sep = if cfg!(windows) { ";" } else { ":" };
+        // The shims' directory is NOT first.
+        let path = format!("{}{sep}{}{sep}{}", real_dir.display(), shim.display(), std::env::var("PATH").unwrap_or_default());
+        let mut cmd = std::process::Command::new(bash);
+        cmd.arg(shim.join("task")).arg("dev").env("PATH", path).env("HOME", h.path()).env("AGENTMUX_BUILD_SLOT_OFF", "1");
+        #[cfg(windows)]
+        {
+            use crate::win32::NoWindow;
+            cmd.no_window();
+        }
+        let out = String::from_utf8_lossy(&cmd.output().unwrap().stdout).replace("\r\n", "\n").trim().to_string();
+        assert!(out.starts_with("FIRST ") && out.ends_with(".agentmux/tools/bin"), "got {out:?}");
+    }
+
+    fn spawn_slot(bash: &Path, script: &Path, root: &Path, limit: Option<&str>, args: &[&str]) -> std::process::Child {
+        let mut cmd = std::process::Command::new(bash);
+        cmd.arg(script)
+            .args(args)
+            .env("AGENTMUX_BUILD_SLOT_DIR", root)
+            .env_remove("BUILD_SLOT_HELD")
+            .env_remove("BUILD_SLOT_MAX")
+            .env("BUILD_SLOT_POLL", "1")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        if let Some(n) = limit {
+            cmd.env("BUILD_SLOT_MAX", n);
+        }
+        #[cfg(windows)]
+        {
+            use crate::win32::NoWindow;
+            cmd.no_window();
+        }
+        cmd.spawn().unwrap()
+    }
+
+    /// One run at a time by default; with a limit of two, two hold a slot at once and a third waits,
+    /// saying how long it has waited and who holds the slot.
+    #[test]
+    fn a_limit_of_two_lets_two_runs_hold_a_slot_and_a_third_waits() {
+        let Some(bash) = bash() else { return };
+        let h = home();
+        let script = h.path().join("build-slot.sh");
+        std::fs::write(&script, lf(SCRIPT)).unwrap();
+        let root = h.path().join("locks");
+        let status = |limit: Option<&str>| {
+            let out = spawn_slot(&bash, &script, &root, limit, &["status"]).wait_with_output().unwrap();
+            String::from_utf8_lossy(&out.stdout).replace("\r\n", "\n")
+        };
+
+        // Waits (up to 30 s) for the status to say `want`: process start-up is slow under load.
+        let until = |limit: Option<&str>, want: &[&str]| {
+            let mut last = String::new();
+            for _ in 0..60 {
+                last = status(limit);
+                if contains_all(&last, want) {
+                    return last;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+            panic!("never saw {want:?} in the status; the last was {last:?}");
+        };
+
+        // Default limit: the second run queues behind the first.
+        let first = spawn_slot(&bash, &script, &root, None, &["--", "sleep", "10"]);
+        until(None, &["slot: HELD"]);
+        let second = spawn_slot(&bash, &script, &root, None, &["--", "true"]);
+        let s = until(None, &["slot: HELD", "queued #1"]);
+        assert!(!s.contains("slot-2"), "one slot: the second waits, it does not take another: {s:?}");
+        let second = second.wait_with_output().unwrap();
+        assert_eq!(second.status.code(), Some(0));
+        let waited = String::from_utf8_lossy(&second.stderr).to_string();
+        assert!(contains_all(&waited, &["waiting for the build slot", "has waited", "slot: HELD by"]), "got {waited:?}");
+        first.wait_with_output().unwrap();
+
+        // A limit of two, from the limit file: two hold at once, the third waits.
+        std::fs::write(root.join("limit"), "2\n").unwrap();
+        let a = spawn_slot(&bash, &script, &root, None, &["--", "sleep", "10"]);
+        until(None, &["slots: 1 of 2 in use"]);
+        let b = spawn_slot(&bash, &script, &root, None, &["--", "sleep", "10"]);
+        until(None, &["slot: HELD", "slot-2: HELD", "slots: 2 of 2 in use"]);
+        let c = spawn_slot(&bash, &script, &root, None, &["--", "true"]);
+        until(None, &["slots: 2 of 2 in use", "queued #1"]);
+        assert_eq!(c.wait_with_output().unwrap().status.code(), Some(0), "the third runs once one is released");
+        a.wait_with_output().unwrap();
+        b.wait_with_output().unwrap();
+    }
+
+    /// A call from a process that already holds a slot (task -> cargo, a build script running
+    /// cargo) goes straight through: it never waits for the slot it is inside.
+    #[test]
+    fn a_nested_call_inside_a_held_slot_does_not_wait_for_itself() {
+        let Some(bash) = bash() else { return };
+        let h = home();
+        let script = h.path().join("build-slot.sh");
+        std::fs::write(&script, lf(SCRIPT)).unwrap();
+        let root = h.path().join("locks");
+        let outer = format!("bash '{}' -- echo inner", script.to_string_lossy().replace('\\', "/"));
+        let out = spawn_slot(&bash, &script, &root, None, &["--", "bash", "-c", &outer]);
+        let started = std::time::Instant::now();
+        let out = out.wait_with_output().unwrap();
+        assert!(started.elapsed() < std::time::Duration::from_secs(20), "the nested call waited for its own slot");
+        assert_eq!(out.status.code(), Some(0));
+        assert!(String::from_utf8_lossy(&out.stdout).contains("inner"));
+        // And it passes straight through even while somebody else holds the only slot.
+        let holder = spawn_slot(&bash, &script, &root, None, &["--", "sleep", "4"]);
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        let mut nested = std::process::Command::new(&bash);
+        nested.arg(&script).args(["--", "echo", "ran"]).env("AGENTMUX_BUILD_SLOT_DIR", &root).env("BUILD_SLOT_HELD", "1");
+        #[cfg(windows)]
+        {
+            use crate::win32::NoWindow;
+            nested.no_window();
+        }
+        let started = std::time::Instant::now();
+        let out = nested.output().unwrap();
+        assert!(started.elapsed() < std::time::Duration::from_secs(3), "a nested call queued behind another holder");
+        assert!(String::from_utf8_lossy(&out.stdout).contains("ran"));
+        holder.wait_with_output().unwrap();
+    }
+
+    /// A lock folder that can't be made or written never stops the build: the command runs, with a warning.
+    #[test]
+    fn an_unusable_lock_folder_runs_the_command_with_a_warning() {
+        let Some(bash) = bash() else { return };
+        let h = home();
+        let script = h.path().join("build-slot.sh");
+        std::fs::write(&script, lf(SCRIPT)).unwrap();
+        // A file where the folder's parent should be: mkdir -p can't succeed.
+        let blocker = h.path().join("not-a-folder");
+        std::fs::write(&blocker, "x").unwrap();
+        let root = blocker.join("locks");
+        let started = std::time::Instant::now();
+        let out = spawn_slot(&bash, &script, &root, None, &["--", "sh", "-c", "echo ran; exit 7"]).wait_with_output().unwrap();
+        assert!(started.elapsed() < std::time::Duration::from_secs(10), "it must not wait for a lock it can't take");
+        assert_eq!(out.status.code(), Some(7), "the command's own exit code");
+        assert!(String::from_utf8_lossy(&out.stdout).contains("ran"));
+        assert!(String::from_utf8_lossy(&out.stderr).contains("running without the build slot"), "{:?}", String::from_utf8_lossy(&out.stderr));
     }
 
     #[test]

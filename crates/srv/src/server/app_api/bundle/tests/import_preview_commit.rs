@@ -51,6 +51,102 @@ async fn preview_returns_parsed_bundle_with_digest() {
     assert_eq!(resp.name_collision, false);
 }
 
+async fn preview_of(files: Vec<FileEntry>) -> crate::backend::rpc_types::BundleImportPreviewResponse {
+    let state = test_state();
+    let req = PreviewReq { file_path: None, zip_base64: None, files: Some(files) };
+    bundle_import_preview_impl(&state.id_store, &state.identity_store, &state.mstore, req).await.unwrap()
+}
+
+/// A skill is text an agent is told to follow, so the preview carries it whole.
+#[tokio::test]
+async fn preview_shows_each_skills_full_text() {
+    let resp = preview_of(vec![
+        entry("armory.json", &manifest(serde_json::json!({ "skills": ["skills/deploy", "skills/lint"] }))),
+        entry("skills/deploy/SKILL.md", &skill_md("deploy", "Runs the checklist", "1. Test\n2. Deploy")),
+        entry("skills/lint/SKILL.md", &skill_md("lint", "Lints", "Run the linter.\nThen stop.")),
+    ])
+    .await;
+
+    let by_dir = |dir: &str| resp.skills.iter().find(|s| s.source_dir == dir).unwrap();
+    assert_eq!(by_dir("skills/deploy").content, "1. Test\n2. Deploy");
+    assert_eq!(by_dir("skills/lint").content, "Run the linter.\nThen stop.");
+    assert!(resp.skills.iter().all(|s| !s.content_truncated));
+    assert_eq!(by_dir("skills/deploy").content_total_chars, "1. Test\n2. Deploy".chars().count());
+}
+
+/// A skill too long to show whole is cut and says so, with its real length, so
+/// the person is never told the text they saw is all there is.
+#[tokio::test]
+async fn preview_flags_a_skill_it_could_not_show_whole() {
+    use crate::backend::bundle_import_skill_text::MAX_SKILL_PREVIEW_CHARS;
+    let long = "a".repeat(MAX_SKILL_PREVIEW_CHARS + 123);
+    let resp = preview_of(vec![
+        entry("armory.json", &manifest(serde_json::json!({ "skills": ["skills/long"] }))),
+        entry("skills/long/SKILL.md", &skill_md("long", "d", &long)),
+    ])
+    .await;
+
+    let s = &resp.skills[0];
+    assert!(s.content_truncated);
+    assert_eq!(s.content.chars().count(), MAX_SKILL_PREVIEW_CHARS);
+    assert_eq!(s.content_total_chars, MAX_SKILL_PREVIEW_CHARS + 123);
+}
+
+/// The text the preview showed is the text the commit writes, and an imported
+/// skill reaches only agents on the bundle it was imported into: another
+/// agent's skills do not include it.
+#[tokio::test]
+async fn an_imported_skill_is_what_was_previewed_and_reaches_only_its_bundles_agents() {
+    use crate::backend::storage::agents::test_agent_def;
+    let state = test_state();
+    let files = vec![
+        entry("armory.json", &manifest(serde_json::json!({ "skills": ["skills/deploy"] }))),
+        entry("skills/deploy/SKILL.md", &skill_md("deploy", "Runs the checklist", "1. Test\n2. Deploy")),
+    ];
+    let preview = bundle_import_preview_impl(
+        &state.id_store,
+        &state.identity_store,
+        &state.mstore,
+        PreviewReq { file_path: None, zip_base64: None, files: Some(files.clone()) },
+    )
+    .await
+    .unwrap();
+    let digest = preview.content_digest.clone();
+
+    let req = CommitReq {
+        include_widgets: vec![],
+        file_path: None,
+        zip_base64: None,
+        files: Some(files),
+        expected_content_digest: digest,
+        bundle_name: None,
+        include_instructions: false,
+        include_context_files: vec![],
+        include_skills: vec![SkillSelection { source_dir: "skills/deploy".to_string(), import_as: None }],
+    };
+    let done = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.mstore, &state.broker, req).await.unwrap();
+    let skill = state.identity_store.skill_get(&done.imported_skill_ids[0]).unwrap().unwrap();
+    assert_eq!(skill.content, preview.skills[0].content, "what was shown is what was written");
+
+    let agent_on = |id: &str, bundle: &str| {
+        let mut def = test_agent_def(id, id, "claude", "host", 1, "");
+        def.memory_id = bundle.to_string();
+        state.mstore.agent_def_insert(&mut def).unwrap();
+    };
+    let other: crate::backend::storage::bundles::Bundle = serde_json::from_value(serde_json::json!({
+        "id": "other-bundle", "name": "Other", "mcp_servers": "[]", "skills": "[]",
+    }))
+    .unwrap();
+    state.id_store.bundle_upsert(&other).unwrap();
+    agent_on("agent-in-bundle", &done.bundle_id);
+    agent_on("agent-elsewhere", "other-bundle");
+    let names = |agent: &str| -> Vec<String> {
+        state.mstore.effective_skills(&state.identity_store, agent).into_iter().map(|s| s.name).collect()
+    };
+    assert!(names("agent-in-bundle").contains(&"deploy".to_string()), "{:?}", names("agent-in-bundle"));
+    assert!(!names("agent-elsewhere").contains(&"deploy".to_string()), "{:?}", names("agent-elsewhere"));
+}
+
 #[tokio::test]
 async fn preview_flags_name_conflict_against_existing_global_skill() {
     let state = test_state();

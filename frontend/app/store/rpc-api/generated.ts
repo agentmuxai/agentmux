@@ -144,7 +144,9 @@ import type { CommandInputHistoryAppendData } from "@/types/rpc/CommandInputHist
 import type { CommandInputHistoryClearData } from "@/types/rpc/CommandInputHistoryClearData";
 import type { CommandInputHistoryData } from "@/types/rpc/CommandInputHistoryData";
 import type { CommandInputHistoryDeleteData } from "@/types/rpc/CommandInputHistoryDeleteData";
+import type { CommandInputHistoryRestoreData } from "@/types/rpc/CommandInputHistoryRestoreData";
 import type { CommandInputHistorySearchData } from "@/types/rpc/CommandInputHistorySearchData";
+import type { CommandInputHistoryTrashData } from "@/types/rpc/CommandInputHistoryTrashData";
 import type { CommandInstallToolData } from "@/types/rpc/CommandInstallToolData";
 import type { CommandLayoutIntentData } from "@/types/rpc/CommandLayoutIntentData";
 import type { CommandLayoutOpenData } from "@/types/rpc/CommandLayoutOpenData";
@@ -180,6 +182,8 @@ import type { CommandPaneMoveTabData } from "@/types/rpc/CommandPaneMoveTabData"
 import type { CommandPaneMoveTabsData } from "@/types/rpc/CommandPaneMoveTabsData";
 import type { CommandPaneOpenData } from "@/types/rpc/CommandPaneOpenData";
 import type { CommandPaneTabData } from "@/types/rpc/CommandPaneTabData";
+import type { CommandPinsChangeData } from "@/types/rpc/CommandPinsChangeData";
+import type { CommandPinsListData } from "@/types/rpc/CommandPinsListData";
 import type { CommandReadEditorFileData } from "@/types/rpc/CommandReadEditorFileData";
 import type { CommandReadEditorFileResult } from "@/types/rpc/CommandReadEditorFileResult";
 import type { CommandRemoteAddData } from "@/types/rpc/CommandRemoteAddData";
@@ -284,6 +288,7 @@ import type { GlobalMemoryDiffResult } from "@/types/rpc/GlobalMemoryDiffResult"
 import type { GlobalMemoryHistoryResult } from "@/types/rpc/GlobalMemoryHistoryResult";
 import type { GlobalMemoryImportReport } from "@/types/rpc/GlobalMemoryImportReport";
 import type { GlobalMemoryImportSources } from "@/types/rpc/GlobalMemoryImportSources";
+import type { GlobalMemoryRemovedResult } from "@/types/rpc/GlobalMemoryRemovedResult";
 import type { GlobalMemoryRevertResult } from "@/types/rpc/GlobalMemoryRevertResult";
 import type { GlobalMemorySection } from "@/types/rpc/GlobalMemorySection";
 import type { HideNamedAgentResult } from "@/types/rpc/HideNamedAgentResult";
@@ -308,7 +313,9 @@ import type { ImportAgentDefinitionsResult } from "@/types/rpc/ImportAgentDefini
 import type { InputDraftResult } from "@/types/rpc/InputDraftResult";
 import type { InputHistoryAppendResult } from "@/types/rpc/InputHistoryAppendResult";
 import type { InputHistoryRemovedResult } from "@/types/rpc/InputHistoryRemovedResult";
+import type { InputHistoryRestoredResult } from "@/types/rpc/InputHistoryRestoredResult";
 import type { InputHistoryResult } from "@/types/rpc/InputHistoryResult";
+import type { InputHistoryTrashResult } from "@/types/rpc/InputHistoryTrashResult";
 import type { InstallCancelReq } from "@/types/rpc/InstallCancelReq";
 import type { InstallCancelResult } from "@/types/rpc/InstallCancelResult";
 import type { InstallCheckReq } from "@/types/rpc/InstallCheckReq";
@@ -402,6 +409,7 @@ import type { OperatorChallengeResult } from "@/types/rpc/OperatorChallengeResul
 import type { OtherBuildLayoutsResult } from "@/types/rpc/OtherBuildLayoutsResult";
 import type { PaneOpenResult } from "@/types/rpc/PaneOpenResult";
 import type { PaneTabEditResult } from "@/types/rpc/PaneTabEditResult";
+import type { PinnedSendersResult } from "@/types/rpc/PinnedSendersResult";
 import type { PollProviderAuthReq } from "@/types/rpc/PollProviderAuthReq";
 import type { PollSessionResult } from "@/types/rpc/PollSessionResult";
 import type { PresencePublishNowResult } from "@/types/rpc/PresencePublishNowResult";
@@ -1386,6 +1394,10 @@ export const GeneratedApi = {
   GlobalMemoryImportSourcesCommand(client: RpcClient, opts?: RpcOpts): Promise<GlobalMemoryImportSources> {
     return client.rpcCall("globalmemory:import_sources", {}, opts);
   },
+  // command "globalmemory:removed"
+  GlobalMemoryRemovedCommand(client: RpcClient, opts?: RpcOpts): Promise<GlobalMemoryRemovedResult> {
+    return client.rpcCall("globalmemory:removed", {}, opts);
+  },
   // command "globalmemory:revert"
   GlobalMemoryRevertCommand(
     client: RpcClient,
@@ -1959,6 +1971,18 @@ export const GeneratedApi = {
   // command "presence.status"
   PresenceStatusCommand(client: RpcClient, opts?: RpcOpts): Promise<PresenceStatusResult> {
     return client.rpcCall("presence.status", {}, opts);
+  },
+  // command "pins.adopt"
+  PinsAdoptCommand(client: RpcClient, data: CommandPinsChangeData, opts?: RpcOpts): Promise<PinnedSendersResult> {
+    return client.rpcCall("pins.adopt", data, opts);
+  },
+  // command "pins.forget"
+  PinsForgetCommand(client: RpcClient, data: CommandPinsChangeData, opts?: RpcOpts): Promise<PinnedSendersResult> {
+    return client.rpcCall("pins.forget", data, opts);
+  },
+  // command "pins.list"
+  PinsListCommand(client: RpcClient, data?: CommandPinsListData, opts?: RpcOpts): Promise<PinnedSendersResult> {
+    return client.rpcCall("pins.list", data ?? {}, opts);
   },
   // command "layout.preview"
   PreviewLayoutCommand(
@@ -2601,6 +2625,22 @@ export const GeneratedApi = {
     opts?: RpcOpts
   ): Promise<InputHistoryRemovedResult> {
     return client.rpcCall("agent.input-history-clear", data, opts);
+  },
+  // command "agent.input-history-trash"
+  AgentInputHistoryTrashCommand(
+    client: RpcClient,
+    data: CommandInputHistoryTrashData,
+    opts?: RpcOpts
+  ): Promise<InputHistoryTrashResult> {
+    return client.rpcCall("agent.input-history-trash", data, opts);
+  },
+  // command "agent.input-history-restore"
+  AgentInputHistoryRestoreCommand(
+    client: RpcClient,
+    data: CommandInputHistoryRestoreData,
+    opts?: RpcOpts
+  ): Promise<InputHistoryRestoredResult> {
+    return client.rpcCall("agent.input-history-restore", data, opts);
   },
   // command "agent.input-draft"
   AgentInputDraftCommand(client: RpcClient, data: CommandInputDraftData, opts?: RpcOpts): Promise<InputDraftResult> {

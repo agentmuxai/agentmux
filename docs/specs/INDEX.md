@@ -540,6 +540,7 @@ partial list.
 | [`SPEC_TYPED_EVENTS_EVERY_PATH_2026_10_13`](SPEC_TYPED_EVENTS_EVERY_PATH_2026_10_13.md) | Typed events on every path |
 | [`SPEC_TYPED_EVENT_PAYLOADS_2026_10_13`](SPEC_TYPED_EVENT_PAYLOADS_2026_10_13.md) | Typed event payloads |
 | [`SPEC_UI_MANUAL_SCREENSHOT_TOOLING_2026_09_19`](SPEC_UI_MANUAL_SCREENSHOT_TOOLING_2026_09_19.md) | SPEC: Reusable, cropped screenshot tooling for the user manual |
+| [`SPEC_UNIX_SRV_RESTART_BUDGET_2026_10_24`](SPEC_UNIX_SRV_RESTART_BUDGET_2026_10_24.md) | Unix srv restart budget: recycle srv instead of ending the app |
 | [`SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24`](SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md) | SPEC: User input visibility + startup-injection collapse |
 | [`SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14`](SPEC_WAN_JEKT_SIGNED_BY_SRV_2026_10_14.md) | SPEC: srv signs WAN jekts for the agent its token names |
 | [`SPEC_WEBFETCH_CONTENT_VIEW_2026_06_22`](SPEC_WEBFETCH_CONTENT_VIEW_2026_06_22.md) | SPEC: WebFetch content view |
@@ -647,6 +648,7 @@ partial list.
 | [`SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08`](SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md) | SPEC: Popups from a browser pane stay in AgentMux, and an agent can drive them |
 | [`SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09`](SPEC_BROWSER_PANE_PROFILES_MENU_2026_10_09.md) | SPEC: Home and Profile buttons in the browser pane's toolbar, with Incognito and named profiles |
 | [`SPEC_BROWSER_PANE_THIN_BAR_AND_MENUS_IN_PANE_2026_10_18`](SPEC_BROWSER_PANE_THIN_BAR_AND_MENUS_IN_PANE_2026_10_18.md) | SPEC: The browser pane's thin bar puts Bookmarks on the right with a line between its rows, and its menus stay inside the pane |
+| [`SPEC_BUILD_CACHE_CLEANUP_2026_10_26`](SPEC_BUILD_CACHE_CLEANUP_2026_10_26.md) | Spec: Build-cache cleanup and a low-disk warning |
 | [`SPEC_BUILD_SLOT_ENFORCEMENT_2026_10_20`](SPEC_BUILD_SLOT_ENFORCEMENT_2026_10_20.md) | Spec: The build slot — one heavy build or test at a time on a machine, enforced for agents' cargo |
 | [`SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07`](SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md) | SPEC: A bundle holds instructions, context, skills, Global Memory and Personal Memory — not MCP servers |
 | [`SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21`](SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md) | SPEC: retire the agent slug as a lookup key — `db_agents.id` becomes canonical |
@@ -747,6 +749,7 @@ partial list.
 | [`SPEC_RPC_BINDINGS_CODEGEN_2026_09_07`](SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md) | SPEC: Generate the Rust ↔ TypeScript RPC bindings from srv |
 | [`SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13`](SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md) | Spec: Restore-on-relaunch + named, reloadable "Layouts" |
 | [`SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03`](SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md) | SPEC: share authentication across channels — no re-login on every build |
+| [`SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25`](SPEC_SIGNED_UPDATE_CHECKSUMS_2026_10_25.md) | Signed checksums for update downloads |
 | [`SPEC_SRV_INFO_ON_CONNECT_2026_10_09`](SPEC_SRV_INFO_ON_CONNECT_2026_10_09.md) | SPEC: srv describes itself on every connect (`srvinfo`) |
 | [`SPEC_SRV_MALLOC_ARENA_CAP_2026_10_18`](SPEC_SRV_MALLOC_ARENA_CAP_2026_10_18.md) | Spec: srv caps glibc's malloc arenas at two (Linux only) |
 | [`SPEC_SRV_PROCESS_LISTING_WITHOUT_THREADS_2026_10_18`](SPEC_SRV_PROCESS_LISTING_WITHOUT_THREADS_2026_10_18.md) | Spec: srv's process listings stop reading every thread (Linux CPU) |

@@ -1,6 +1,6 @@
 # SPEC: Tower puts memory first, and shows what AgentMux's memory is made of
 
-**Status:** active — approved by the operator 2026-10-25 (all nine ◆ decisions in §10 as recommended); phase 1 (memory first, frontend only) built in #5445 and #5447; phase 2 (the Memory view and the total in four parts) built in #5451; remaining: phase 3 (trends and the growth warning, §7) and the later options in §9
+**Status:** active — approved by the operator 2026-10-25 (all nine ◆ decisions in §10 as recommended); phase 1 (memory first, frontend only) built in #5445 and #5447; phase 2 (the Memory view and the total in four parts) built in #5451; phase 3 (the hour's ledger, the growth warning, §7) built in #5503; remaining: the later options in §9
 **Date:** 2026-10-25
 **Author:** Loap@narko
 **Requested by:** the operator, 2026-10-25, through AgentY (Kanban #2858):
@@ -256,6 +256,7 @@ TypeScript bindings come from the same `ts_rs` export as the rest (`frontend/typ
 
 - No new process enumeration: the part and the totals are one pass over the rows the sampler has (O(processes), ~700 on a busy machine).
 - The ledger (§7) needs a sample when no Tower is open. It uses the same `snapshot` call at 10 s: one `NtQuerySystemInformation` on Windows, a `/proc` walk on Linux, a `proc_listpids` pass on macOS. The build measures the cost on all three (step 0) and records it in the PR. The target is under 0.1% of one core on average; if the measurement says otherwise, the ledger steps to 30 s.
+  - **Measured (phase 3, Windows 11 on narko, debug build, ~700 processes):** one full sample (process table, grouping, memory parts, ledger) takes 14 to 23 ms. Every 10 s that is 0.14 to 0.23% of a core, over the target, so with no Tower open the ledger samples every **30 s** (0.05 to 0.08%) and draws a straight line across the steps between. With a Tower open its own samples feed the ledger at the 10 s steps. A release build is faster; the macOS and Linux numbers are the platform testers' to add.
 - No command-line or environment reads are added for the default design (§2.2's environment read is optional, ◆ D3).
 
 ### 5.5 Edge cases
@@ -328,7 +329,8 @@ A row is flagged when **all** of these hold, over its last 30 minutes:
 
 1. it is at least **150 MB**;
 2. it grew by at least **50%** over its minimum in the window and by at least **100 MB**;
-3. it has not fallen by more than 10% from its maximum since (it is not already coming back).
+3. it has not fallen by more than 10% from its maximum since (it is not already coming back);
+4. it has at least **10 minutes** of points. A program starting up grows from nothing to its size in its first minutes, which is not a leak (found in the first dev build: Core "grew 100 MB in 1 min" at launch).
 
 A flagged row shows an amber badge and its text: "grew 310 MB in 20 min". The part above it carries the badge too, so it is visible with the table collapsed, and at narrow widths the headline carries a small amber dot with the same text in its hover.
 

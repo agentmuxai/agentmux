@@ -73,24 +73,19 @@ function writeRestoreTried(v: boolean): void {
 }
 
 /**
- * Build an app URL that carries the IPC port/token in its query string, read
- * from the globals the host re-injects on every load (`on_load_end`). Loading
- * THIS url lets `cef-init.ts setupCefApi` read the creds synchronously from the
- * URL instead of waiting for the post-load re-injection — closing the
- * `waitForIpcCreds` race that makes a plain `location.reload()` fail to
- * reconnect. Returns null when the creds aren't present (host never injected —
- * genuinely down), so callers can fall back.
+ * Build an app URL that carries the IPC port in its query string, once the host
+ * has injected the IPC creds into this page (`window.__AGENTMUX_IPC_*`). The
+ * token is never put in an address: the host injects it again as the new page
+ * starts loading. Returns null when the creds aren't present (host never
+ * injected — genuinely down), so callers can fall back to a plain reload.
  *
  * Built from the CURRENT URL so EVERY existing query param survives — only the
- * two IPC creds are (re)set. `windowLabel` (same-workspace rebind), but also
+ * port is (re)set. `windowLabel` (same-workspace rebind), but also
  * `workspaceId` (torn-off workspace reuse), `floatingPaneId` (floating-pane
  * layout), and `pool=1` (prewarmed pool windows) must be preserved, or a
  * restore in a tear-off / floating / pool window would come back as the wrong
- * window kind. cef-init.ts strips only ipc_port/ipc_token, so the rest persist
+ * window kind. cef-init.ts strips only ipc_port, so the rest persist
  * on `location.search` for us to carry forward.
- *
- * The token rides in the URL only until cef-init.ts strips it back into a global
- * (same handling, and same brief exposure, as the host's own new-window URLs).
  */
 function buildCredentialedUrl(): string | null {
     const port = window.__AGENTMUX_IPC_PORT__;
@@ -99,7 +94,7 @@ function buildCredentialedUrl(): string | null {
     try {
         const url = new URL(location.href);
         url.searchParams.set("ipc_port", String(port));
-        url.searchParams.set("ipc_token", token);
+        url.searchParams.delete("ipc_token");
         return url.toString();
     } catch {
         return null;

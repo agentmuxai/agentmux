@@ -14,7 +14,7 @@
  * docs/specs/SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md.
  */
 
-import { onMount, Show, createMemo, type Accessor, type JSX } from "solid-js";
+import { catchError, onMount, Show, createMemo, untrack, type Accessor, type JSX } from "solid-js";
 import type { AgentDispatch } from "../../swarm/swarm-model";
 import { AgentMessageBlock } from "../components/AgentMessageBlock";
 import { JektBubble } from "../components/JektBubble";
@@ -86,7 +86,48 @@ function flipRow(
     else if (t === "collapse") on.onToggleCollapse(node.id);
 }
 
+/** The last time each distinct row error was logged, so a row that throws on
+ *  every store write doesn't flood the log. */
+const rowErrorLoggedAt = new Map<string, number>();
+const ROW_ERROR_LOG_EVERY_MS = 10_000;
+
+/** Log a row's render error, naming the row, at most once per message per 10 s. */
+export function logRowError(kind: string, id: string, err: unknown): void {
+    const message = err instanceof Error ? err.message : String(err);
+    const key = `${kind}:${message}`;
+    const now = Date.now();
+    if (now - (rowErrorLoggedAt.get(key) ?? 0) < ROW_ERROR_LOG_EVERY_MS) return;
+    rowErrorLoggedAt.set(key, now);
+    console.error(`[agent-row] render error in a ${kind} row (${id}): ${message}`, err);
+}
+
+/**
+ * A row whose computations throw while the document store updates (Solid's
+ * "Stale read from <Show>." is one) must not take the rest of the update with
+ * it: an error nothing handles aborts the whole reactive flush, and every
+ * effect queued in it, in any pane of the window, is left stale and never
+ * runs again (a frozen window tab, a bound style that stops following).
+ * The handler scopes it to the row and says which row.
+ */
 export function DocumentRow(props: DocumentRowProps): JSX.Element {
+    return catchError(
+        () => DocumentRowBody(props),
+        (err) => {
+            let kind = "unknown";
+            let id = "?";
+            try {
+                const node = untrack(props.node);
+                kind = node.type;
+                id = node.id;
+            } catch {
+                // The row's own node accessor is what threw.
+            }
+            logRowError(kind, id, err);
+        }
+    );
+}
+
+function DocumentRowBody(props: DocumentRowProps): JSX.Element {
     // Phase 3: per-kind row mount perf probe. markRowMount returns a
     // closer that we invoke after onMount fires (i.e., after the row
     // is in the DOM and its initial paint has been queued).

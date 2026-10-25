@@ -851,6 +851,7 @@ async fn enforce_register_first(
         Command::NotifySrvLatency { .. } => {
             ("NotifySrvLatency before Register (wrong direction)".to_string(), false)
         }
+        Command::QuitApp => ("QuitApp before Register (wrong direction)".to_string(), false),
         Command::Goodbye => ("Goodbye before Register".to_string(), true),
         Command::ReportWindowOpened { .. } => {
             ("ReportWindowOpened before Register".to_string(), true)

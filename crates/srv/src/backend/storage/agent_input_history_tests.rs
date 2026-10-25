@@ -77,10 +77,95 @@ fn search_delete_and_clear() {
     assert_eq!(texts(&store.input_history_search(None, "100%", 10).unwrap()), ["100% done?"], "% is literal");
     assert!(store.input_history_search(None, "_", 10).unwrap().is_empty(), "_ is literal");
     let entry = store.input_history_search(Some("a"), "staging", 1).unwrap().remove(0);
-    assert_eq!(store.input_history_delete(entry.id).unwrap().as_deref(), Some("a"));
-    assert_eq!(store.input_history_delete(entry.id).unwrap(), None);
-    assert_eq!(store.input_history_clear("b").unwrap(), 1);
+    assert_eq!(store.input_history_delete(entry.id, WINDOW, 10).unwrap().map(|(agent, _)| agent).as_deref(), Some("a"));
+    assert_eq!(store.input_history_delete(entry.id, WINDOW, 10).unwrap(), None);
+    assert_eq!(store.input_history_clear("b", WINDOW, 10).unwrap().1, 1);
+    assert_eq!(store.input_history_clear("b", WINDOW, 10).unwrap(), (None, 0), "nothing left, so no empty batch");
     assert_eq!(texts(&store.input_history_list("a", None, 10).unwrap()), ["100% done?"]);
+}
+
+const WINDOW: ForgottenBy<'static> = ForgottenBy { name: "armory-ui", uid: "" };
+const DAY: i64 = 24 * 60 * 60 * 1000;
+
+#[test]
+fn a_forgotten_entry_waits_in_the_trash_with_who_and_comes_back_in_place() {
+    let store = store_with(&["a"]);
+    for (i, t) in ["one", "two", "three"].iter().enumerate() {
+        store.input_history_append(&send("a", t, i as i64), 100).unwrap();
+    }
+    let two = store.input_history_search(Some("a"), "two", 1).unwrap().remove(0);
+    let (_, batch) = store.input_history_delete(two.id, ForgottenBy { name: "korp", uid: "u-1" }, 1_000).unwrap().unwrap();
+    assert_eq!(texts(&store.input_history_list("a", None, 10).unwrap()), ["three", "one"]);
+    let trash = store.input_history_trash(Some("a"), 2_000).unwrap();
+    assert_eq!(
+        trash,
+        [TrashedBatch { batch_id: batch.clone(), agent_id: "a".into(), deleted_at_ms: 1_000, deleted_by: "korp".into(), count: 1, sample: "two".into() }]
+    );
+    assert!(store.input_history_trash(Some("b"), 2_000).unwrap().is_empty());
+    assert_eq!(store.input_history_restore(&batch, 3_000).unwrap(), Some(("a".to_string(), 1)));
+    let back = store.input_history_list("a", None, 10).unwrap();
+    assert_eq!(texts(&back), ["three", "two", "one"], "back between its neighbours, under its own id");
+    assert_eq!(back[1].id, two.id);
+    assert!(store.input_history_trash(None, 3_000).unwrap().is_empty());
+    assert_eq!(store.input_history_restore(&batch, 3_000).unwrap(), None, "a batch comes back once");
+}
+
+#[test]
+fn a_cleared_history_is_one_batch_and_a_taken_id_goes_to_the_newest_end() {
+    let store = store_with(&["a"]);
+    for (i, t) in ["one", "two", "three"].iter().enumerate() {
+        store.input_history_append(&send("a", t, i as i64), 100).unwrap();
+    }
+    let (batch, cleared) = store.input_history_clear("a", WINDOW, 1_000).unwrap();
+    assert_eq!(cleared, 3);
+    let batch = batch.unwrap();
+    // Something typed meanwhile reuses the newest id.
+    let typed = store.input_history_append(&send("a", "typed since", 5), 100).unwrap().unwrap();
+    let trash = store.input_history_trash(None, 1_500).unwrap();
+    assert_eq!((trash.len(), trash[0].count, trash[0].sample.as_str()), (1, 3, "one"));
+    assert_eq!(store.input_history_restore(&batch, 2_000).unwrap(), Some(("a".to_string(), 3)));
+    let all = store.input_history_list("a", None, 10).unwrap();
+    assert_eq!(all.len(), 4);
+    assert!(all.iter().any(|e| e.id == typed.id && e.text == "typed since"), "what was typed since is untouched");
+    assert_eq!(all.iter().filter(|e| ["one", "two", "three"].contains(&e.text.as_str())).count(), 3);
+}
+
+#[test]
+fn the_trash_is_emptied_after_the_retention() {
+    let store = store_with(&["a", "b"]);
+    store.input_history_append(&send("a", "old news", 1), 100).unwrap();
+    store.input_history_append(&send("b", "fresh", 2), 100).unwrap();
+    let (old, _) = store.input_history_clear("a", WINDOW, 0).unwrap();
+    store.input_history_clear("b", WINDOW, 5 * DAY).unwrap();
+    let just_in_time = INPUT_HISTORY_TRASH_RETENTION_MS;
+    assert_eq!(store.input_history_trash(None, just_in_time).unwrap().len(), 2, "still restorable at the limit");
+    let soon_after = INPUT_HISTORY_TRASH_RETENTION_MS + 1;
+    let left = store.input_history_trash(None, soon_after).unwrap();
+    assert_eq!(left.iter().map(|b| b.agent_id.as_str()).collect::<Vec<_>>(), ["b"]);
+    assert_eq!(store.input_history_restore(&old.unwrap(), soon_after).unwrap(), None, "past the retention it is gone");
+    assert_eq!(store.input_history_trash_purge(5 * DAY + INPUT_HISTORY_TRASH_RETENTION_MS + 1).unwrap(), 1);
+}
+
+#[test]
+fn typing_on_drops_what_has_aged_out_of_the_trash() {
+    let store = store_with(&["a"]);
+    store.input_history_append(&send("a", "forgotten once", 1), 100).unwrap();
+    store.input_history_clear("a", WINDOW, 5).unwrap();
+    store.input_history_append(&send("a", "typed within the week", 5 + DAY), 100).unwrap();
+    assert_eq!(store.conn().lock().unwrap().query_row("SELECT COUNT(*) FROM db_agent_input_history_trash", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+    store.input_history_append(&send("a", "typed after the week", 5 + INPUT_HISTORY_TRASH_RETENTION_MS + 1), 100).unwrap();
+    assert_eq!(store.conn().lock().unwrap().query_row("SELECT COUNT(*) FROM db_agent_input_history_trash", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+}
+
+#[test]
+fn deleting_the_agent_takes_its_trash_too() {
+    let store = store_with(&["a"]);
+    store.input_history_append(&send("a", "gone with it", 1), 100).unwrap();
+    store.input_history_clear("a", WINDOW, 5).unwrap();
+    let conn = store.conn().lock().unwrap();
+    super::super::agents::purge_agent_dependents_for_tests(&conn, "a", None).unwrap();
+    drop(conn);
+    assert!(store.input_history_trash(None, 6).unwrap().is_empty());
 }
 
 #[test]

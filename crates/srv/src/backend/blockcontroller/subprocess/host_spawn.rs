@@ -380,6 +380,13 @@ impl SubprocessController {
                                 // assistant message (exit 0, is_error:false on result frame) —
                                 // capture it so the process_waiter can trip the failure gate.
                                 *last_inband_error_read.lock().unwrap() = Some(parsed);
+                            } else if crate::agents::limit_reset::codex_failure_text(&parsed).is_some() {
+                                // Codex reports a failed turn (a usage limit
+                                // included) as `error` / `turn.failed` frames on
+                                // stdout, not on stderr.
+                                *last_inband_error_read.lock().unwrap() = Some(parsed);
+                            } else if parsed.get("type").and_then(|v| v.as_str()) == Some("turn.completed") {
+                                *last_inband_error_read.lock().unwrap() = None;
                             }
 
                             if let Some(sid_string) = sid {
@@ -669,13 +676,7 @@ impl SubprocessController {
                     // Merge the in-band error text so classify() sees the
                     // "authentication_failed" / "401" string even though it
                     // arrived on stdout, not stderr.
-                    let inband_text = inband_error_frame.as_ref().map(|f| {
-                        let err_str = f.get("error").and_then(|v| v.as_str()).unwrap_or("");
-                        let content_text = f.pointer("/message/content/0/text")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("");
-                        format!("{err_str} {content_text}")
-                    }).unwrap_or_default();
+                    let inband_text = inband_error_frame.as_ref().map(crate::agents::limit_reset::inband_error_text).unwrap_or_default();
                     let combined_tail = if inband_text.trim().is_empty() {
                         tail
                     } else {

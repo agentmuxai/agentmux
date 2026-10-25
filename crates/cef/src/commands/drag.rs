@@ -504,13 +504,12 @@ pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) 
 
     // Build URL with IPC credentials and tear-off params
     let ipc_port = *state.ipc_port.lock();
-    let ipc_token = &state.ipc_token;
     let url = match super::window::resolve_frontend_base_url(ipc_port) {
         Ok(base_url) => {
             let separator = if base_url.contains('?') { "&" } else { "?" };
             let mut u = format!(
-                "{}{}ipc_port={}&ipc_token={}&windowLabel={}",
-                base_url, separator, ipc_port, ipc_token, label
+                "{}{}ipc_port={}&windowLabel={}",
+                base_url, separator, ipc_port, label
             );
             if !workspace_id.is_empty() {
                 u.push_str(&format!("&workspaceId={}", workspace_id));

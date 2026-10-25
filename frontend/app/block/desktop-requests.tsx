@@ -52,7 +52,7 @@ function DesktopRequestPrompt(props: { request: DesktopRequest } & ModalClosePro
         }
     };
     return (
-        <Modal open={true} onClose={() => void decide("deny")} size="sm">
+        <Modal open={true} operatorOnly onClose={() => void decide("deny")} size="sm">
             <ModalHeader title={`${r.agent} wants to control ${r.app}`} />
             <ModalBody>
                 <p class="desktop-request-window">{r.title ? `Window: ${r.title}` : null}</p>

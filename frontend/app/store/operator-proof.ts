@@ -31,10 +31,14 @@ const OPERATOR_COMMANDS: ReadonlySet<string> = new Set([
     "jobs.templates.install",
     "jobs.templates.uninstall",
     "kanban.act",
+    "pins.adopt",
+    "pins.forget",
+    "pins.list",
     "tower.forget",
     "tower.pair",
     "tower.peers",
     "tower.sample",
+    "writeagentconfig",
 ]);
 
 /** How srv words a refusal for a connection it hasn't seen proven. */

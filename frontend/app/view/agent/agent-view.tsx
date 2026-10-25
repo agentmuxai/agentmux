@@ -490,7 +490,7 @@ export const AgentPresentationView = ({
         getDocument,
         getDetailsOpen: () => paneModel.state.detailsOpen,
         snapshotIsForeignBlock: () => history.snapshotIsForeignBlock(),
-        log,
+        hidden: renderDormant, log,
     });
 
     // Permission decision queue + decide handler. See hooks/useAgentDecisions.ts.

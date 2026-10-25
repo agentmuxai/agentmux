@@ -105,6 +105,12 @@ pub const COMMAND_BACKGROUND_TASK_PID: &str = "backgroundtaskpid";
 pub const COMMAND_LIST_BACKGROUND_TASKS: &str = "listbackgroundtasks";
 /// Who holds this machine's build slot (`agentmux_common::build_slot`), or null: the Swarm row note.
 pub const COMMAND_GET_BUILD_SLOT: &str = "getbuildslot";
+/// The keys and installs pinned to the names of agents that speak from elsewhere (operator only).
+pub const COMMAND_PINS_LIST: &str = "pins.list";
+/// Forget one pin, so the next key or install shown for the name is pinned (operator only).
+pub const COMMAND_PINS_FORGET: &str = "pins.forget";
+/// Pin the key or install that was last refused for a name (operator only).
+pub const COMMAND_PINS_ADOPT: &str = "pins.adopt";
 
 // Subprocess agent commands
 pub const COMMAND_SUBPROCESS_SPAWN: &str = "subprocessspawn";
@@ -298,6 +304,10 @@ pub const COMMAND_GET_CLAUDE_GLOBAL_CONFIG: &str = "getclaudeglobalconfig";
 pub const COMMAND_GLOBAL_MEMORY_HISTORY: &str = "globalmemory:history";
 pub const COMMAND_GLOBAL_MEMORY_DIFF: &str = "globalmemory:diff";
 pub const COMMAND_GLOBAL_MEMORY_REVERT: &str = "globalmemory:revert";
+/// The Global Memory entries taken out of Global Memory and not restored, with
+/// who removed each and when; `globalmemory:revert` to a removed entry's
+/// version restores it.
+pub const COMMAND_GLOBAL_MEMORY_REMOVED: &str = "globalmemory:removed";
 /// SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.6 (phase M4): bring
 /// Global Memory into an isolated channel from another scope's record.
 pub const COMMAND_GLOBAL_MEMORY_IMPORT_SOURCES: &str = "globalmemory:import_sources";
@@ -527,6 +537,8 @@ pub const COMMAND_AGENT_INPUT_HISTORY_APPEND: &str = "agent.input-history-append
 pub const COMMAND_AGENT_INPUT_HISTORY_SEARCH: &str = "agent.input-history-search";
 pub const COMMAND_AGENT_INPUT_HISTORY_DELETE: &str = "agent.input-history-delete";
 pub const COMMAND_AGENT_INPUT_HISTORY_CLEAR: &str = "agent.input-history-clear";
+pub const COMMAND_AGENT_INPUT_HISTORY_TRASH: &str = "agent.input-history-trash";
+pub const COMMAND_AGENT_INPUT_HISTORY_RESTORE: &str = "agent.input-history-restore";
 pub const COMMAND_AGENT_INPUT_DRAFT: &str = "agent.input-draft";
 // What srv knows about newer AgentMux releases (backend::update_check).
 pub const COMMAND_APP_UPDATE_STATUS: &str = "app.update-status";

@@ -166,7 +166,8 @@ async fn a_workers_question_mid_turn_notes_its_open_leader() {
     assert_eq!(note_for(&state.mstore, &state.filestore, &asked), None, "answered within the grace");
 
     dispatch_apply(&state, Command::UpdateBlockMeta { block_id: worker_pane.clone(), meta_patch: json!({ (META_AWAITING_USER): true }) }).await;
-    let (to, text) = note_for(&state.mstore, &state.filestore, &asked).expect("the leader is told");
+    let (to, text, wait) = note_for(&state.mstore, &state.filestore, &asked).expect("the leader is told");
+    assert_eq!(wait, None, "a worker waiting on the user is told at once");
     assert_eq!(to, lead_pane);
     assert_eq!(
         text,
@@ -198,7 +199,8 @@ async fn a_workers_unreported_turn_notes_its_open_leader() {
     assert_eq!(note_for(&state.mstore, &state.filestore, &ev), None, "its leader isn't open");
 
     let lead_pane = pane(&state, &tab, &lead_id).await;
-    let (to, text) = note_for(&state.mstore, &state.filestore, &ev).expect("the leader is told");
+    let (to, text, wait) = note_for(&state.mstore, &state.filestore, &ev).expect("the leader is told");
+    assert_eq!(wait, Some(format!("worker:{worker_id}")), "a silent turn may wait for a cold leader");
     assert_eq!(to, lead_pane);
     assert_eq!(text, format!("[AgentMux] Your worker {} finished a turn without reporting to you.", worker.name));
     let failed = WorkerEvent::Failed { block_id: worker_pane, title: "Usage limit reached".into() };

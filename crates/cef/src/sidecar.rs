@@ -105,14 +105,18 @@ pub fn use_launcher_endpoints(
         let pid: u32 = pid_str
             .parse()
             .map_err(|_| format!("AGENTMUX_BACKEND_PID not a u32: {}", pid_str))?;
-        let auth_key = try_get("AGENTMUX_AUTH_KEY")?;
+        // The two secrets are wiped from the environment as they are read: the
+        // CEF helpers start after this and inherit what is left, and
+        // /proc/<pid>/environ must not show them (agentmux_common::secret_env).
+        let take = |key: &str| agentmux_common::secret_env::take(key).ok_or_else(|| format!("launcher set AGENTMUX_BACKEND_WS but not {}", key));
+        let auth_key = take("AGENTMUX_AUTH_KEY")?;
         // Required, same as auth_key: the launcher mints this once (see
         // agentmux-launcher::srv_spawner::SrvSpawnResult::host_reg_secret)
         // and gives the identical value to both host and srv, so without it
         // this host's own host_ipc.Register call would be rejected by srv
         // as unauthenticated. Missing here means a launcher bug, exactly
         // like a missing auth_key above.
-        let host_reg_secret = try_get("AGENTMUX_HOST_REG_SECRET")?;
+        let host_reg_secret = take("AGENTMUX_HOST_REG_SECRET")?;
         let instance_id = try_get("AGENTMUX_INSTANCE_ID")?;
         let data_dir = try_get("AGENTMUX_DATA_DIR")?;
         let config_dir = try_get("AGENTMUX_CONFIG_DIR")?;
