@@ -218,6 +218,11 @@ impl RunLedger {
         let now = now_ms();
         let mut out = Vec::new();
         for run in self.store.job_runs_waiting().unwrap_or_default() {
+            // The ledger is shared by every instance, the jobs store is not: a
+            // run another instance recorded is its to start or end.
+            if !self.recorded_here(&run) {
+                continue;
+            }
             let Some(job) = self.job(&run.job_id) else {
                 let _ = self.store.job_run_skip(&run.id, reason::TARGET_MISSING, 1, now);
                 self.run_changed(&run.id);
@@ -247,6 +252,21 @@ impl RunLedger {
             }
         }
         out
+    }
+
+    /// Whether a pending catch-up delivery of `job` may start now: the same
+    /// answer a waiting run gets (overlap, group, the global limit). A job that
+    /// would cancel its own running run does so here, as a new slot would.
+    pub fn pending_may_start(&self, job: &CronJob) -> bool {
+        let _one_at_a_time = self.admission.lock().unwrap_or_else(|e| e.into_inner());
+        match policy::decide(job, &self.occupancy(job), true) {
+            Decision::Start => true,
+            Decision::CancelThenStart => {
+                self.cancel_started(job);
+                true
+            }
+            Decision::Wait(_) | Decision::SkipOverlap => false,
+        }
     }
 
     /// A run ended: if it failed in the infrastructure and its job has

@@ -699,6 +699,15 @@ impl CronScheduler {
             if !back {
                 continue;
             }
+            // It waits for its place like any other run: policy decides, and a
+            // pending fire that can't start yet stays pending.
+            let may_start = {
+                let (runs, job) = (runs.clone(), job.clone());
+                tokio::task::spawn_blocking(move || runs.pending_may_start(&job)).await.unwrap_or(false)
+            };
+            if !may_start {
+                continue;
+            }
             let delivery_started = agentmux_common::time::now_ms();
             let Some(outcome) = self.deliver(&job, Some(&run.id), run.scheduled_for_ms).await else { continue };
             runs.record_pending_delivery(&run, &outcome, delivery_started);

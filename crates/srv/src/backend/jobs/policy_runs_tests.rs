@@ -229,6 +229,45 @@ async fn cancel_other_works_inside_a_concurrency_group() {
     assert_eq!(rig.store.job_run_get(&second).unwrap().unwrap().state, state::RUNNING);
 }
 
+/// Pending catch-up deliveries wait for their place like any other run: two
+/// jobs of one group don't both start when their agents come back.
+#[tokio::test(flavor = "multi_thread")]
+async fn pending_deliveries_respect_the_concurrency_group() {
+    let rig = rig();
+    let a = make(&rig, "j-pend-a", |j| {
+        j.policy.group = Some("g".into());
+        j.catch_up = "latest".into();
+    });
+    let b = make(&rig, "j-pend-b", |j| {
+        j.policy.group = Some("g".into());
+        j.catch_up = "latest".into();
+    });
+    rig.answer(NOT_FOUND);
+    rig.sched.fire(&a, slot(0)).await;
+    rig.sched.fire(&b, slot(0)).await;
+
+    *rig.present.lock().unwrap() = true;
+    rig.answer(DELIVERED);
+    assert_eq!(rig.sched.deliver_pending().await, 1, "one of the two starts");
+    assert_eq!(rig.sched.deliver_pending().await, 0, "the other waits for the group");
+}
+
+/// The ledger is shared by every instance, the jobs store is not: a waiting
+/// run another instance recorded is left alone, not closed as a deleted job.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_waiting_run_another_instance_recorded_is_left_alone() {
+    let rig = rig();
+    let a = make(&rig, "j-foreign-a", |j| j.policy.group = Some("g".into()));
+    let b = make(&rig, "j-foreign-b", |j| j.policy.group = Some("g".into()));
+    rig.sched.fire(&a, slot(0)).await;
+    let waits = rig.sched.fire(&b, slot(0)).await.run_id.unwrap();
+    rig.store.conn().lock().unwrap().execute("UPDATE db_job_runs SET recorded_by = 'other@elsewhere' WHERE id = ?1", [&waits]).unwrap();
+    rig.store.cron_delete("j-foreign-b").unwrap();
+    rig.sched.run_policy_pass().await;
+    let run = rig.store.job_run_get(&waits).unwrap().unwrap();
+    assert_eq!((run.state.as_str(), run.reason.as_str()), (state::SCHEDULED, reason::GROUP_BUSY));
+}
+
 // ── groups and the global limit ─────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread")]
