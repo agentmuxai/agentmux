@@ -230,6 +230,8 @@ async fn memory_and_identity_routes_refuse_a_request_with_no_token() {
         assert_eq!(status, StatusCode::FORBIDDEN, "{uri}: {v}");
         let (_, v) = post(&state, Some(&token), uri, body).await;
         assert!(!no_token_refusal(&v), "{uri} with a token: {v}");
+    }
+}
 
 /// A Global Memory write over HTTP is recorded under the agent whose token made it; a request can't write as another.
 #[tokio::test]
