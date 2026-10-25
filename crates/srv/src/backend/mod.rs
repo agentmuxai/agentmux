@@ -75,7 +75,6 @@ pub mod eventbus;
 pub mod agent_seed;
 pub mod operator_config_seed;
 pub mod history;
-pub mod skill_seed;
 pub mod slug_migration;
 pub mod host_os;
 pub mod lan_discovery;
