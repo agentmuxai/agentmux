@@ -599,6 +599,7 @@ async fn route_command(
             let frozen = args.get("frozen").and_then(|v| v.as_bool()).unwrap_or(false);
             crate::browser_api::hibernation::set_frozen(state, block_id, frozen).await
         }
+        "browser_pane_memory" => crate::browser_api::hibernation::pane_memory(state, args).await,
         "memory_pressure_level" => Ok(serde_json::json!(crate::memory_pressure::current_level().as_str())),
         "browser_pane_close" => {
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");

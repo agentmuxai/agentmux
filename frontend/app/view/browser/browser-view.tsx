@@ -47,6 +47,7 @@ import {
     type PaneFacts,
     type SleepReason,
 } from "./hibernation";
+import { estimatedLoadMs } from "./load-history";
 import "./browser-view.scss";
 
 // Matches BrainSpinner.scss's `.is-fading` transition duration — the DOM
@@ -161,10 +162,12 @@ function BrowserSleepCard(props: { sleep: BrowserSleep; startedAt: () => number;
     const [now, setNow] = createSignal(performance.now());
     const tick = setInterval(() => setNow(performance.now()), 250);
     onCleanup(() => clearInterval(tick));
+    // The pane's own last load, else what its site usually takes (spec §7.2).
+    const expectedMs = () => props.sleep.loadMs ?? estimatedLoadMs(props.sleep.url);
     const eta = () =>
-        props.startedAt() > 0 && isOverdue(props.sleep.loadMs, now() - props.startedAt())
+        props.startedAt() > 0 && isOverdue(expectedMs(), now() - props.startedAt())
             ? "Still loading…"
-            : etaLabel(props.sleep.loadMs);
+            : etaLabel(expectedMs());
     return (
         <div class="browser-sleep-card" role="status" data-pane-overlay>
             <div class="browser-sleep-card-body">
@@ -180,7 +183,7 @@ function BrowserSleepCard(props: { sleep: BrowserSleep; startedAt: () => number;
                     <BrainSpinner class="browser-sleep-card-spinner" />
                     <span>{eta()}</span>
                 </div>
-                <p class="browser-sleep-card-why">{sleepReasonText(props.sleep.reason)}</p>
+                <p class="browser-sleep-card-why">{sleepReasonText(props.sleep.reason, props.sleep.memoryBytes)}</p>
                 <Show when={!props.sleep.kept}>
                     <p class="browser-sleep-card-lost">{NOT_KEPT_TEXT}</p>
                 </Show>
@@ -409,7 +412,10 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
         }
         // The check is async: the pane may have been shown meanwhile.
         if (visible() || sleeping()) return visible() ? "visible" : "already asleep";
-        await model.hibernate(reason);
+        // What it holds now, while it still has a page, for the card to say what sleeping freed.
+        const memory = await getApi().browserPanes.paneMemory?.([model.blockId]).catch(() => undefined);
+        if (visible() || sleeping()) return visible() ? "visible" : "already asleep";
+        await model.hibernate(reason, memory?.[model.blockId]);
         return null;
     };
     // A thaw the host failed leaves the page frozen: a shown pane would stay blank, so try again.

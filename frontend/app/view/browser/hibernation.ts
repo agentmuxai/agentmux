@@ -38,6 +38,8 @@ export interface BrowserSleep {
     favicon: string;
     /** The page's last load time, for the card's estimate. */
     loadMs?: number;
+    /** What its renderers held when it went to sleep, in bytes, for the card; none where the host can't tell. */
+    memoryBytes?: number;
     /** Discarded in place (the CEF Discard API): its history, scroll position
      *  and form contents come back with it. Otherwise its page was closed. */
     kept?: boolean;
@@ -57,6 +59,7 @@ export function readSleep(v: unknown): BrowserSleep | undefined {
         title: typeof s.title === "string" ? s.title : "",
         favicon: typeof s.favicon === "string" ? s.favicon : "",
         loadMs: typeof s.loadMs === "number" && s.loadMs > 0 ? s.loadMs : undefined,
+        memoryBytes: typeof s.memoryBytes === "number" && s.memoryBytes > 0 ? s.memoryBytes : undefined,
         kept: s.kept === true,
     };
 }
@@ -77,9 +80,18 @@ export function isOverdue(ms: number | undefined, elapsed: number): boolean {
     return elapsed > (ms ?? DEFAULT_WAKE_MS) * 1.5;
 }
 
+/** "180 MB", "1.2 GB": a measured size, rounded for a sentence (10 MB steps from 100 MB, whole MB below). */
+export function memoryLabel(bytes: number): string {
+    const mb = bytes / (1024 * 1024);
+    if (mb >= 1000) return `${(mb / 1024).toFixed(1)} GB`;
+    if (mb >= 100) return `${Math.round(mb / 10) * 10} MB`;
+    return `${Math.max(1, Math.round(mb))} MB`;
+}
+
 /** Why it slept, in one sentence (spec §7.1). */
-export function sleepReasonText(reason: SleepReason): string {
-    const why = "A sleeping pane frees its page's memory, usually 100 to 200 MB, and reloads when you come back to it.";
+export function sleepReasonText(reason: SleepReason, memoryBytes?: number): string {
+    const saved = memoryBytes != null && memoryBytes > 0 ? `about ${memoryLabel(memoryBytes)}` : "usually 100 to 200 MB";
+    const why = `A sleeping pane frees its page's memory, ${saved}, and reloads when you come back to it.`;
     if (reason === "pressure")
         return `Your computer was low on memory, so AgentMux put this browser pane to sleep. ${why}`;
     if (reason === "launch")
@@ -435,6 +447,24 @@ export function registerHibernatablePane(p: HibernatablePane): () => void {
     };
 }
 
+/** The memory each of these panes holds, by block id; empty when the host can't tell. */
+async function hostPaneMemory(blockIds: string[]): Promise<Record<string, number>> {
+    try {
+        return (await getApi()?.browserPanes?.paneMemory?.(blockIds)) ?? {};
+    } catch {
+        return {};
+    }
+}
+
+/** `due` with the biggest pages first, then the ones with no figure, each group longest-hidden first. */
+export function bySizeThenAge<T extends { blockId: string; hiddenSince(): number | null }>(
+    due: T[],
+    memory: Record<string, number>
+): T[] {
+    const size = (p: T) => (typeof memory[p.blockId] === "number" ? memory[p.blockId] : -1);
+    return [...due].sort((a, b) => size(b) - size(a) || (a.hiddenSince() ?? 0) - (b.hiddenSince() ?? 0));
+}
+
 async function hostPressure(): Promise<Pressure> {
     try {
         return (await getApi()?.browserPanes?.memoryPressure?.()) ?? "normal";
@@ -445,21 +475,27 @@ async function hostPressure(): Promise<Pressure> {
 
 /**
  * One pass of the policy: the hidden panes due to sleep at the host's memory
- * pressure, oldest-hidden first, at most PER_TICK of them. Each still checks
+ * pressure, at most PER_TICK of them: oldest-hidden first, or under pressure
+ * (when the few that sleep matter) the biggest pages first. Each still checks
  * what keeps it awake (`tryHibernate`). Resolves to the panes that slept.
  */
 export async function policyTick(
     now = Date.now(),
-    pressureOf: () => Promise<Pressure> = hostPressure
+    pressureOf: () => Promise<Pressure> = hostPressure,
+    memoryOf: (blockIds: string[]) => Promise<Record<string, number>> = hostPaneMemory
 ): Promise<string[]> {
     if (!hibernationEnabled()) return [];
     const candidates = [...panes].filter((p) => !p.isAsleep() && !p.isVisible() && p.hiddenSince() != null);
     if (candidates.length === 0) return [];
     const pressure = await pressureOf();
     const after = hibernateAfterMs(pressure, getSettingsKeyAtom("browser:hibernateafter")());
-    const due = candidates
+    let due = candidates
         .filter((p) => now - (p.hiddenSince() ?? now) >= after)
         .sort((a, b) => (a.hiddenSince() ?? 0) - (b.hiddenSince() ?? 0));
+    // Only more due panes than may sleep this tick make the order matter.
+    if (pressure !== "normal" && due.length > PER_TICK[pressure]) {
+        due = bySizeThenAge(due, await memoryOf(due.map((p) => p.blockId)));
+    }
     const slept: string[] = [];
     for (const p of due) {
         if (slept.length >= PER_TICK[pressure]) break;

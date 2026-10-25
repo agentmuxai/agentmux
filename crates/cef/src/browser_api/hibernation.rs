@@ -65,6 +65,31 @@ pub async fn check(state: &Arc<AppState>, block_id: &str) -> Result<Value, Strin
     }))
 }
 
+/// `browser_pane_memory { block_ids }`: the memory each of those browser panes
+/// holds in its own renderers, in bytes, by block id (all panes when none are
+/// named). A pane whose figure is unknown is left out. Not on Linux: the renderer
+/// map holds sandbox-namespace PIDs there, which only srv translates, so a match
+/// against host PIDs could name another process.
+#[cfg(not(target_os = "linux"))]
+pub async fn pane_memory(state: &Arc<AppState>, args: &Value) -> Result<Value, String> {
+    let only: Vec<String> = args
+        .get("block_ids")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .unwrap_or_default();
+    let entries = crate::renderer_map::snapshot(state);
+    let procs = tokio::task::spawn_blocking(agentmux_procstats::snapshot)
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+    Ok(json!(crate::renderer_map::pane_memory(&entries, &procs, &only)))
+}
+
+#[cfg(target_os = "linux")]
+pub async fn pane_memory(_state: &Arc<AppState>, _args: &Value) -> Result<Value, String> {
+    Ok(json!({}))
+}
+
 /// Freeze the pane's page (`Page.setWebLifecycleState` frozen: no script, no
 /// timers, its state kept) or let it run again. The window freezes a pane hidden
 /// for a while and thaws it when shown; any other CDP call thaws it too
