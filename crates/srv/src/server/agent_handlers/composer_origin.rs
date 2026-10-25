@@ -6,9 +6,7 @@
 //! (SPEC_MESSAGE_ORIGIN_AND_ONE_CONTAINER_2026_10_25.md §3.4).
 //!
 //! `TurnOrigin::User` is the human, the one thing nothing else may pass
-//! itself off as. The route used to give every caller that origin, so any
-//! connection holding the instance key could write a turn the pane showed as
-//! the human's own. Now:
+//! itself off as, so the `agentinput` route takes it from the caller:
 //!
 //! - a connection registered as an agent is refused: agents send with the
 //!   `Message` tool, which is delivered as a jekt;
@@ -16,11 +14,9 @@
 //!   is the human (`System` for a hidden memory reinjection the window sends on
 //!   its own behalf);
 //! - any other connection is refused when srv runs with a CEF host (every
-//!   desktop build), and keeps today's behaviour only in a headless srv, which
-//!   has no host to prove the window (the cloud web host), where it is logged
-//!   at warn until that host can attest (P1 of the spec closes it with a typed
-//!   "unknown" origin). The mode comes from how srv was started, never from
-//!   anything the connection says.
+//!   desktop build). A headless srv has no host to prove the window (the cloud
+//!   web host), so it accepts the call and logs it. The mode comes from how
+//!   srv was started, never from anything the connection says.
 
 use crate::backend::blockcontroller::health::TurnOrigin;
 use crate::backend::rpc_types::RpcContext;
@@ -44,7 +40,7 @@ fn composer_origin_in(ctx: &RpcContext, hidden: bool, headless: bool) -> Result<
         // No CEF host to attest the window: the cloud web host's own turns.
         tracing::warn!(
             client_type = %ctx.client_type,
-            "agentinput from a connection no host proved, in a headless srv: treated as the user until the host can attest"
+            "agentinput from a connection no host proved, in a headless srv"
         );
     }
     Ok(if hidden { TurnOrigin::System } else { TurnOrigin::User })
