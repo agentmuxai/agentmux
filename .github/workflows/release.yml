@@ -343,6 +343,22 @@ jobs:
         with:
           node-version: '24'
 
+      # Defence in depth: sign only a commit that is on main. Not the lock: a tag
+      # on a branch commit runs that branch's own copy of this file, which can drop
+      # this step. The locks are who can reach the signing role (the
+      # `release-signing` environment and the role's trust policy).
+      - name: The tagged commit is on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SHA=$(git rev-parse HEAD)
+          STATUS=$(gh api "repos/${{ github.repository }}/compare/main...${SHA}" --jq .status)
+          echo "compare main...${SHA}: ${STATUS}"
+          case "$STATUS" in
+            identical|behind) ;;
+            *) echo "::error::${TAG} is at ${SHA}, which is not on main (${STATUS}); refusing to sign"; exit 1 ;;
+          esac
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:

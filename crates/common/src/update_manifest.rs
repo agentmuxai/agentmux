@@ -45,12 +45,18 @@ pub struct UpdateKey {
 }
 
 /// The keys this build trusts: at most two (the current one and, once a
-/// rotation is prepared, the next; spec §6). Empty until the release signing
-/// key exists, so until then every release reads as unsigned.
+/// rotation is prepared, the next; spec §6). `k1` is the release signing key
+/// (plain Ed25519, raw 32-byte public key); the private half never leaves the
+/// signing service.
 ///
 /// `update-keys.json` (beside `src/`) lists the same keys in base64 for the
 /// release workflow, and a test keeps the two equal.
-pub const UPDATE_KEYS: &[UpdateKey] = &[];
+pub const UPDATE_KEYS: &[UpdateKey] = &[UpdateKey {
+    id: "k1",
+    public: [
+        0x9b, 0xd1, 0xd1, 0x67, 0x85, 0x0e, 0x88, 0x15, 0x36, 0xbf, 0x2a, 0xe3, 0x94, 0x75, 0xe3, 0xd4, 0x3d, 0x02, 0x8d, 0xf8, 0x40, 0x6b, 0x32, 0x36, 0x0c, 0x67, 0x48, 0x23, 0xd2, 0x52, 0x24, 0xb1,
+    ],
+}];
 
 /// What is signed: a release's tag and the hash of its manifest.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
