@@ -507,6 +507,16 @@ pub const COMMAND_AGENT_DEFINE: &str = "agent.define";
 /// `agents:changed`. SPEC_AGENT_SEATS_IN_THE_UI_2026_10_23.md §3.
 pub const COMMAND_AGENT_SET_SEAT: &str = "agent.setSeat";
 
+/// `agent.pane.unregister`: the window tears down an agent pane's registration
+/// (`CommandAgentPaneUnregisterData`, `AgentPaneUnregisterResult`). The operator's
+/// client only.
+pub const COMMAND_AGENT_PANE_UNREGISTER: &str = "agent.pane.unregister";
+
+/// `agent.takeover`: the window takes a pane's agent over from another AgentMux
+/// instance on this host (`CommandAgentTakeoverData`, `AgentTakeoverResult`).
+/// The operator's client only.
+pub const COMMAND_AGENT_TAKEOVER: &str = "agent.takeover";
+
 // Fleet control — select/broadcast/bulk-act on many agents at once. See
 // docs/specs/SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md. Both action
 // commands loop the existing single-target `agent.send`/`agent.stop`

@@ -42,14 +42,12 @@ const TAKEOVER_WAIT: std::time::Duration = std::time::Duration::from_secs(25);
 
 #[derive(Debug, Deserialize)]
 pub(super) struct TakeoverRequest {
-    block_id: String,
+    pub(super) block_id: String,
 }
 
-pub(super) async fn handle_agent_takeover(
-    State(state): State<AppState>,
-    caller: Option<axum::Extension<super::caller::Caller>>,
-    Json(req): Json<TakeoverRequest>,
-) -> Response {
+/// Take a pane's agent over. Reached from the window's own socket (`agent.takeover`, `caller` `None`)
+/// and, for an agent's own pane, from `pane_binding::handle_takeover`.
+pub(super) async fn take_over(state: &AppState, caller: Option<&super::caller::Caller>, req: TakeoverRequest) -> Response {
     let block = {
         let mstore = state.mstore.clone();
         let block_id = req.block_id.clone();
@@ -63,7 +61,7 @@ pub(super) async fn handle_agent_takeover(
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "this pane has no agent" }))).into_response();
     }
     let name = obj::meta_get_string(&block.meta, "agentName", "");
-    if let Err(error) = super::actor::own_agent_only(caller.as_deref(), Some(&uid)) {
+    if let Err(error) = super::actor::own_agent_only(caller, Some(&uid)) {
         return (StatusCode::FORBIDDEN, Json(json!({ "error": error }))).into_response();
     }
 

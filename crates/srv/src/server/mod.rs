@@ -12,6 +12,7 @@ pub mod agent_handlers;
 mod agent_only;
 mod agent_takeover;
 mod pane_binding;
+mod pane_commands;
 mod editor_handlers;
 mod fs_handlers;
 pub(crate) mod identity_auth_dirs;

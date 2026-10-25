@@ -144,7 +144,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/agentmux/agent/release", post(agent_takeover::handle_agent_release))
         .route(
             "/agentmux/reactive/unregister",
-            post(reactive::handle_reactive_unregister),
+            post(pane_binding::handle_unregister),
         )
         // Identity M3 (spec §5): the one place a typed agent name is
         // interpreted. Called by agentmux-mcp before WorkEnqueue/CronCreate.
@@ -304,7 +304,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // A leader's own workers and how each is doing (§3.4).
         .route("/api/v1/agent/workers", post(app_api::agent_spawn::handle_agent_workers))
         // One live instance per agent, Phase 2 (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 §4.6).
-        .route("/api/v1/agent/takeover", post(agent_takeover::handle_agent_takeover))
+        .route("/api/v1/agent/takeover", post(pane_binding::handle_takeover))
         // Voice speech-to-text: the renderer POSTs mic audio (one
         // silence-bounded utterance per request); we forward to a Whisper
         // backend and return the transcript. Key stays server-side.

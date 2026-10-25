@@ -3,16 +3,16 @@
 
 /**
  * takeover — ask the srv to take this pane's agent over from the other
- * AgentMux instance on this host that is running it
- * (`POST /api/v1/agent/takeover`). The srv finds that instance, asks it to
- * let go, and answers once the agent is free here.
+ * AgentMux instance on this host that is running it (`agent.takeover`, the
+ * window's own socket: srv answers only a connection the host has proven is
+ * the AgentMux window). The srv finds that instance, asks it to let go, and
+ * answers once the agent is free here.
  *
  * Spec: docs/specs/SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md §4.6.
  */
 
-import { getApi } from "@/store/global";
-import { getWebServerEndpoint } from "@/util/endpoints";
-import { AUTH_KEY_HEADER } from "@/util/sharedconst";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 
 export interface TakeoverResult {
     /** False when no other instance was running the agent any more. */
@@ -25,28 +25,13 @@ export interface TakeoverResult {
  * with the srv's own user-facing reason (too old to hand over, unreachable,
  * did not let go in time).
  *
- * `fetchImpl` / `endpoint` / `authKey` are injectable for tests.
+ * `call` is injectable for tests.
  */
 export async function requestAgentTakeover(
     blockId: string,
-    deps: { fetchImpl?: typeof fetch; endpoint?: string; authKey?: string } = {},
+    deps: { call?: (blockId: string) => Promise<{ released?: boolean; from_channel?: string | null }> } = {},
 ): Promise<TakeoverResult> {
-    const fetchImpl = deps.fetchImpl ?? fetch;
-    const endpoint = deps.endpoint ?? getWebServerEndpoint();
-    const authKey = deps.authKey ?? getApi()?.getAuthKey?.();
-    const resp = await fetchImpl(`${endpoint}/api/v1/agent/takeover`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...(authKey ? { [AUTH_KEY_HEADER]: authKey } : {}) },
-        body: JSON.stringify({ block_id: blockId }),
-    });
-    let data: any = {};
-    try {
-        data = await resp.json();
-    } catch {
-        // Non-JSON body: fall through to the status-based message.
-    }
-    if (!resp.ok) {
-        throw new Error(data?.error || `Take over failed (HTTP ${resp.status})`);
-    }
-    return { released: !!data?.released, fromChannel: data?.from_channel };
+    const call = deps.call ?? ((id: string) => RpcApi.AgentTakeoverCommand(TabRpcClient, { block_id: id }));
+    const data = await call(blockId);
+    return { released: !!data?.released, fromChannel: data?.from_channel ?? undefined };
 }
