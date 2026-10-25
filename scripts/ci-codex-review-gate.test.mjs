@@ -425,7 +425,7 @@ const skipComment = (sha, { login = SKIP_AUTHOR, created = "2026-09-30T10:00:00Z
     ...(updated ? { updated_at: updated } : {}),
     body:
         `Codex not asked about \`${sha.slice(0, 10)}\`: out of review quota until 11:00 UTC. Comment ` +
-        "`@reagentx-workflow codex re-review` to try sooner.\n" +
+        "`@muxreview codex re-review` to try sooner.\n" +
         `<!-- reagent:codex-skipped reason=quota head=${sha} -->`,
 });
 
@@ -443,11 +443,16 @@ describe("muxreview quota skip marker", () => {
         }
     });
 
-    // The App was renamed reagentx-workflow -> muxreview on 2026-10-07.
-    it("counts the marker from the renamed App and from its old login", () => {
-        for (const login of ["muxreview[bot]", "reagentx-workflow[bot]"]) {
+    it("counts the marker from the App's own login only", () => {
+        const r = evaluateCodexGate({ headSha: HEAD, comments: [skipComment(HEAD, { login: "muxreview[bot]" })] });
+        expect(r.state).toBe("success");
+    });
+
+    // A name the App used before a rename can be registered by anyone.
+    it("does not count the marker from the App's old names", () => {
+        for (const login of ["reagentx-workflow[bot]", "reagentx-workflow", "reagent-bot"]) {
             const r = evaluateCodexGate({ headSha: HEAD, comments: [skipComment(HEAD, { login })] });
-            expect(r.state).toBe("success");
+            expect(r.state).toBe("pending");
         }
     });
 
@@ -515,7 +520,7 @@ describe("muxreview quota skip marker", () => {
 // and on docs-only PRs, with the same note and a different reason.
 describe("muxreview skip reasons", () => {
     const note = (reason, sha = HEAD) => ({
-        user: { login: "reagentx-workflow[bot]" },
+        user: { login: "muxreview[bot]" },
         created_at: "2026-10-01T12:00:00Z",
         body: `Codex not asked about \`${sha.slice(0, 10)}\`: x.\n\n<!-- reagent:codex-skipped reason=${reason} head=${sha} -->`,
     });

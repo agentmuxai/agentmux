@@ -65,11 +65,11 @@ export const STATUS_CONTEXT = "Codex review";
 // same marker from the same author.
 export const TRIGGER_AUTHOR = "a5af";
 
-// muxreview's GitHub App, the only author whose quota-skip marker counts.
-// The App was renamed reagentx-workflow -> muxreview on 2026-10-07; markers
-// posted before the rename keep the old login. The `reagent:` prefix of the
-// markers is muxreview's wire format and stays.
-export const SKIP_AUTHORS = new Set(["muxreview[bot]", "reagentx-workflow[bot]"]);
+// muxreview's GitHub App, the only author whose quota-skip marker counts. Only
+// the App's own `[bot]` login belongs here: a name the App used before it was
+// renamed is free for anyone to register, so it must not be trusted. The
+// `reagent:` prefix of the markers is muxreview's wire format and stays.
+export const SKIP_AUTHORS = new Set(["muxreview[bot]"]);
 
 const isCodex = (x) => x?.user?.login === CODEX_LOGIN;
 // GitHub's ISO-8601 timestamps sort as strings.
