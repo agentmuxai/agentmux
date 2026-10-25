@@ -619,6 +619,7 @@
     --z-capture-indicator:  9998;  // the media-capture indicator
     --z-transient:          9999;  // the floating pane's drop preview, the "copied" note, the context menus and the tab colour panel
     --z-top:                10000; // the delete confirmation and the zoom level
+    --z-tooltip:            10001; // a tooltip, over every dialog, popover and menu it can be hovering inside
 
     // Over everything the app draws, its dialogs included. TypeScript sets
     // these inline (zindex.ts); index.html repeats the splash's number,

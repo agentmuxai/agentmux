@@ -533,7 +533,7 @@ function AnchoredTooltip(props: {
                         floatingEl = el;
                     }}
                     style={floatingStyle()}
-                    class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl z-50"
+                    class="bg-modalbg border border-border rounded-md px-2 py-1 text-xs text-foreground shadow-xl z-[var(--z-tooltip)]"
                     data-pane-overlay
                 >
                     {props.content}

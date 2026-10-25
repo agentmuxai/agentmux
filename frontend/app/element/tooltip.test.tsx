@@ -102,6 +102,24 @@ describe("Tooltip", () => {
     });
 });
 
+/** A tooltip is hovered inside dialogs, popovers and menus, so it takes the tooltip layer, not a number of its own. */
+describe("Tooltip layer", () => {
+    afterEach(cleanup);
+
+    it("stacks on the tooltip layer, over dialogs and menus", async () => {
+        render(() => (
+            <Tooltip content={<span>tip content</span>}>
+                <span>anchor</span>
+            </Tooltip>
+        ));
+        fireEvent.mouseEnter(screen.getByText("anchor").parentElement!);
+        await tick();
+        const panel = screen.getByText("tip content").parentElement!;
+        expect(panel.className).toContain("z-[var(--z-tooltip)]");
+        expect(panel.className).not.toMatch(/(^|\s)z-\d+(\s|$)/);
+    });
+});
+
 /**
  * `immediate`: no delay and no fade. The panel node mounts synchronously on hover
  * whatever the delay, so these assert on its own opacity and transition (reached
