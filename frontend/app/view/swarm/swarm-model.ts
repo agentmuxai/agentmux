@@ -34,6 +34,9 @@ import { withAgentProgress, withAgentStatus } from "./swarm-updates";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
+/** The longest a bulk stop may take: other AgentMux instances give their users a 15 s window per staged batch. */
+const BULK_STOP_TIMEOUT_MS = 600_000;
+
 // SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17: the backend now models
 // two levels — `AgentDispatch` (one per Agent-tool-or-Workflow-tool call)
 // containing N `SubAgent` members. The TS interface here keeps the
@@ -1633,7 +1636,10 @@ export class SwarmViewModel {
      *  longer a meaningful target set to keep checked. */
     async bulkStopSelection(opts?: { signal?: string; staged?: FleetStagePlan }): Promise<FleetActionResult> {
         try {
-            return await this.runFleetAction("bulk-stop", "stop", (targets) => RpcApi.FleetBulkStopCommand(TabRpcClient, { targets, ...opts }));
+            // An agent on another AgentMux waits for that AgentMux's user (15 s) and each staged batch waits again.
+            return await this.runFleetAction("bulk-stop", "stop", (targets) =>
+                RpcApi.FleetBulkStopCommand(TabRpcClient, { targets, ...opts }, { timeout: BULK_STOP_TIMEOUT_MS }),
+            );
         } finally {
             this.clearSelection();
         }

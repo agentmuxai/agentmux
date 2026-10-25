@@ -161,7 +161,7 @@ describe("stop on a mixed selection", () => {
 
         const result = await vm.bulkStopSelection({ staged });
 
-        expect(rpc.stop).toHaveBeenCalledWith({}, { targets: ["blk-a", LOAP], staged });
+        expect(rpc.stop).toHaveBeenCalledWith({}, { targets: ["blk-a", LOAP], staged }, { timeout: 600_000 });
         expect(result.failed.map((f) => f.id)).toEqual([MANOZ]);
         expect(result.failed[0].error).toMatch(/can't stop/);
     });
