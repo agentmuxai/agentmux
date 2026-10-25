@@ -152,6 +152,7 @@ pub mod tool_calls;
 pub mod tower_sampler;
 pub mod update_check;
 pub mod update_download;
+pub mod update_signature;
 pub mod update_install;
 pub mod update_restart;
 pub mod update_unpack;

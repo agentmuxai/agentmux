@@ -166,6 +166,9 @@ pub fn start() -> Result<AppUpdateStatus, String> {
         RUNNING.store(false, Ordering::SeqCst);
         return Err(format!("a newer release than {version} was found just now; download that one"));
     }
+    // Step 2 of signed checksums: check the release's signed manifest and log
+    // what it says; the download below goes on whatever it finds.
+    tokio::spawn(crate::backend::update_signature::check_and_log(version.clone(), asset.clone()));
     tokio::spawn(async move {
         let result = match &job {
             Job::Portable(root) => run(&asset, &version, root).await.map(|f| (f, true)),
