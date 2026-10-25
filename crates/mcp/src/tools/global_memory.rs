@@ -112,8 +112,9 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
             require_agent_env(local_url, auth_key, block_id)?;
+            let agent_id = agent_slug()?;
             let url = format!("{}/api/v1/agent/globalmemory/remove", local_url.trim_end_matches('/'));
-            let body = json!({ "id": id });
+            let body = json!({ "id": id, "agent_id": agent_id });
             let resp = client
                 .post(&url)
                 .header(AUTH_KEY_HEADER, auth_key)
@@ -126,7 +127,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 let text = resp.text().await.unwrap_or_default();
                 anyhow::bail!("globalmemory/remove failed: HTTP {status} — {text}");
             }
-            Ok(format!("Removed Global Memory entry {id}"))
+            Ok(format!("Removed Global Memory entry {id}. It is kept in history: list shows it under removed, and revert restores it."))
         }
         "GlobalMemoryHistory" => {
             let id = arguments

@@ -218,7 +218,7 @@ async fn list_includes_system_entries_flagged_and_first() {
     // still refuses a system id.
     assert!(entries[0].get("content").is_none() && entries[0].get("instructions").is_none());
     assert!(global_memory_read_impl(&state, "sys-2").is_err());
-    assert!(global_memory_remove_impl(&state, "sys-2").is_err());
+    assert!(global_memory_remove_impl(&state, "agent-1", "", "sys-2").is_err());
     assert!(global_memory_write_impl(&state, "agent-1", "", Some("sys-2"), "x", "y", None).is_err());
 }
 
@@ -238,10 +238,109 @@ async fn remove_demotes_but_does_not_delete() {
     let state = crate::server::tests::test_state();
     state.id_store.bundle_upsert(&ordinary_bundle("to-remove", true)).unwrap();
 
-    global_memory_remove_impl(&state, "to-remove").unwrap();
+    global_memory_remove_impl(&state, "agent-1", "", "to-remove").unwrap();
 
     let after = state.id_store.bundle_get("to-remove").unwrap().unwrap();
     assert!(!after.is_global);
+}
+
+fn write_entry(state: &AppState, agent: &str, name: &str, content: &str) -> String {
+    let wrote = global_memory_write_impl(state, agent, "", None, name, content, None).unwrap();
+    wrote["id"].as_str().unwrap().to_string()
+}
+
+/// A removal is a version: the content the entry held, written by whoever
+/// removed it, so the history shows who and a revert can undo it.
+#[tokio::test]
+async fn remove_records_a_tombstone_with_the_actor() {
+    let state = crate::server::tests::test_state();
+    let id = write_entry(&state, "agent-1", "Rules", "the rules");
+
+    let removed = global_memory_remove_impl(&state, "agent-2", "uid-agent-2", &id).unwrap();
+    assert_eq!(removed["version"]["source"], "remove");
+
+    let history = state.id_store.bundle_version_list(&id).unwrap();
+    assert_eq!(history.len(), 2);
+    assert_eq!((history[0].source.as_str(), history[0].written_by.as_str(), history[0].written_by_uid.as_str()), ("remove", "agent-2", "uid-agent-2"));
+    assert_eq!(history[0].parent_version_id.as_deref(), Some(history[1].id.as_str()));
+    let tombstone = state.id_store.bundle_version_get(&history[0].id).unwrap().unwrap();
+    assert_eq!((tombstone.name.as_str(), tombstone.instructions.as_str()), ("Rules", "the rules"));
+    assert!(!state.id_store.bundle_get(&id).unwrap().unwrap().is_global);
+}
+
+/// A removed entry is listed under `removed` with who removed it, its history
+/// and diff still answer, and a revert brings it back as Global Memory, last in
+/// the order, recorded under the agent that restored it.
+#[tokio::test]
+async fn a_removed_entry_can_be_inspected_and_restored() {
+    let state = crate::server::tests::test_state();
+    let id = write_entry(&state, "agent-1", "Rules", "the rules");
+    let other = write_entry(&state, "agent-1", "Other", "other rules");
+    let first = state.id_store.bundle_version_list(&id).unwrap()[0].id.clone();
+    global_memory_remove_impl(&state, "agent-2", "uid-agent-2", &id).unwrap();
+
+    let list = global_memory_list_impl(&state).unwrap();
+    let entry_ids: Vec<&str> = list["entries"].as_array().unwrap().iter().map(|e| e["id"].as_str().unwrap()).collect();
+    assert_eq!(entry_ids, [other.as_str()], "a removed entry is no longer Global Memory");
+    assert_eq!(list["removed"][0]["id"], id.as_str());
+    assert_eq!(list["removed"][0]["removed_by"], "agent-2");
+
+    let history = global_memory_history_impl(&state, &id).unwrap();
+    assert_eq!(history["versions"][0]["source"], "remove");
+    let tombstone = history["versions"][0]["id"].as_str().unwrap().to_string();
+    assert!(global_memory_diff_impl(&state, &id, &first, &tombstone).is_ok());
+
+    let restored = global_memory_revert_impl(&state, "agent-3", "uid-agent-3", &id, &first).unwrap();
+    assert_eq!(restored["version"]["source"], "revert");
+    assert_eq!(restored["version"]["written_by"], "agent-3");
+    let row = state.id_store.bundle_get(&id).unwrap().unwrap();
+    assert!(row.is_global);
+    assert_eq!(row.instructions, "the rules");
+    let after = global_memory_list_impl(&state).unwrap();
+    let order: Vec<&str> = after["entries"].as_array().unwrap().iter().map(|e| e["id"].as_str().unwrap()).collect();
+    assert_eq!(order, [other.as_str(), id.as_str()], "restored last");
+    assert_eq!(after["removed"], serde_json::json!([]));
+}
+
+/// Only an entry that was Global Memory can be reached after a removal: a
+/// private bundle (no history) stays out of `removed`, `history` and `revert`,
+/// and a restored entry leaves `removed`.
+#[tokio::test]
+async fn a_bundle_that_was_never_global_memory_stays_unreachable() {
+    let state = crate::server::tests::test_state();
+    state.id_store.bundle_upsert(&ordinary_bundle("private-preset", false)).unwrap();
+
+    assert_eq!(global_memory_list_impl(&state).unwrap()["removed"], serde_json::json!([]));
+    let err = global_memory_history_impl(&state, "private-preset").unwrap_err();
+    assert!(err.contains("not a Global Memory entry"), "{err}");
+    let err = global_memory_revert_impl(&state, "agent-1", "", "private-preset", "any").unwrap_err();
+    assert!(err.contains("not a Global Memory entry"), "{err}");
+    assert!(!state.id_store.bundle_get("private-preset").unwrap().unwrap().is_global);
+
+    // Restored entries leave `removed` and cannot be "restored" twice from it.
+    let id = write_entry(&state, "agent-1", "Rules", "v1");
+    let v1 = state.id_store.bundle_version_list(&id).unwrap()[0].id.clone();
+    global_memory_remove_impl(&state, "agent-1", "", &id).unwrap();
+    global_memory_revert_impl(&state, "agent-1", "", &id, &v1).unwrap();
+    assert_eq!(global_memory_list_impl(&state).unwrap()["removed"], serde_json::json!([]));
+}
+
+/// The Memory pane's Remove demotes through the versioned upsert; that is a
+/// removal too, written by the pane's own writer.
+#[tokio::test]
+async fn a_pane_removal_leaves_a_tombstone_too() {
+    let state = crate::server::tests::test_state();
+    let id = write_entry(&state, "agent-1", "Rules", "the rules");
+    let mut bundle = state.id_store.bundle_get(&id).unwrap().unwrap();
+    bundle.is_global = false;
+    state.id_store.bundle_upsert_with_version(&bundle, "armory-ui", "", "human", "{}").unwrap();
+
+    let newest = state.id_store.bundle_version_latest(&id).unwrap().unwrap();
+    assert_eq!((newest.source.as_str(), newest.written_by.as_str()), ("remove", "armory-ui"));
+    assert_eq!(global_memory_list_impl(&state).unwrap()["removed"][0]["id"], id.as_str());
+    // Saving a private bundle that was never global records nothing.
+    state.id_store.bundle_upsert_with_version(&ordinary_bundle("plain", false), "armory-ui", "", "human", "{}").unwrap();
+    assert!(state.id_store.bundle_version_latest("plain").unwrap().is_none());
 }
 
 /// reagent P1, PR #3237 (re-review): remove had the SAME missing-
@@ -251,7 +350,7 @@ async fn remove_refuses_to_hijack_the_blank_singleton() {
     let state = crate::server::tests::test_state();
     state.id_store.bundle_upsert(&ordinary_bundle("blank", false)).unwrap();
 
-    let err = global_memory_remove_impl(&state, "blank").unwrap_err();
+    let err = global_memory_remove_impl(&state, "agent-1", "", "blank").unwrap_err();
     assert!(err.contains("blank"), "error should mention the blank singleton: {err}");
 
     let unchanged = state.id_store.bundle_get("blank").unwrap().unwrap();
@@ -268,7 +367,7 @@ async fn remove_refuses_to_touch_a_non_global_bundle() {
     let state = crate::server::tests::test_state();
     state.id_store.bundle_upsert(&ordinary_bundle("someone-elses-preset", false)).unwrap();
 
-    let err = global_memory_remove_impl(&state, "someone-elses-preset").unwrap_err();
+    let err = global_memory_remove_impl(&state, "agent-1", "", "someone-elses-preset").unwrap_err();
     assert!(err.contains("not a Global Memory entry"), "unexpected error: {err}");
 
     let unchanged = state.id_store.bundle_get("someone-elses-preset").unwrap().unwrap();

@@ -443,16 +443,28 @@ pub(super) async fn handle_agent_globalmemory_read(
 #[derive(serde::Deserialize)]
 pub(super) struct AgentGlobalMemoryRemoveRequest {
     pub(super) id: String,
+    /// The name the caller gives for itself; the token decides who is recorded.
+    #[serde(default)]
+    pub(super) agent_id: String,
 }
 
 /// `POST /api/v1/agent/globalmemory/remove` — demote a Global Memory entry
 /// (clears `is_global`; the bundle row itself survives, same as Memory →
-/// Global's own "Remove" button). Backs the `GlobalMemoryRemove` MCP tool.
+/// Global's own "Remove" button), recorded as a `remove` version under the
+/// agent the request's token names so the removal can be seen and undone. A
+/// request without that token is refused. Backs the `GlobalMemoryRemove` MCP
+/// tool.
 pub(super) async fn handle_agent_globalmemory_remove(
     State(state): State<AppState>,
+    caller: Option<Extension<caller::Caller>>,
     Json(req): Json<AgentGlobalMemoryRemoveRequest>,
 ) -> impl IntoResponse {
-    app_api_response(app_api::global_memory_remove_impl(&state, &req.id))
+    let (agent_id, written_by_uid) =
+        match actor::require_token_actor(&state, caller.as_deref(), actor::ActorSite::GlobalMemoryRemove, &req.agent_id).await {
+            Ok(who) => who,
+            Err(e) => return app_api_response::<()>(Err(e)),
+        };
+    app_api_response(app_api::global_memory_remove_impl(&state, &agent_id, &written_by_uid, &req.id))
 }
 
 #[derive(serde::Deserialize)]

@@ -140,6 +140,14 @@ described).
   Armory UI's own "Remove" semantics — demotes rather than hard-deletes;
   the underlying bundle row survives, same as the human-facing path
   today).
+  **Revised 2026-10-25:** a removal is a version. The store records a
+  `remove` version (the name and text the entry held) written by the agent the
+  request's token names, in the same transaction as the flag, and the request
+  must carry that token; this covers the Memory pane's Remove too (written by
+  the pane). `history`, `diff` and `revert` still reach a removed entry (its
+  newest version is a `remove` one, which only a removal writes), and a revert
+  restores it as Global Memory, last in the order. `list` returns the removed
+  entries separately under `removed` (`{id, name, removed_at, removed_by}`).
 
 None of these routes accept or infer `is_system` from the caller under any
 circumstance. The system tier remains reachable only through
