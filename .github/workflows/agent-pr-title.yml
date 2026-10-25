@@ -4,6 +4,12 @@ name: PR title names the agent
 # genericagentx-workflow[bot] until 2026-10-07) can't
 # say which agent opened it, so its title must start with "<Agent>@<host>: ",
 # e.g. "Korp@narko: fix the toolbar". PRs from any other author pass.
+# That agent must also be the one the notices about the PR go to: the body's
+# last agent_id tag, which gh-agent writes. The
+# title's name matches the tag's id when they are the same name, or when the id
+# ends in "-<name>" (a fork: title "Loap-3", id "loap-loap-2-loap-3"). A renamed
+# agent whose title name is no longer part of its id starts the title with the
+# id, which gh-agent accepts as the agent's own. A body with no tag only warns.
 # Keep this file identical across agentmux, agentmux-docs, agentmux-landing and
 # agentmux-mobile. That includes the merge_group trigger and step: in a
 # repository without a merge queue the event never fires, so they're harmless
@@ -34,14 +40,31 @@ jobs:
         env:
           AUTHOR: ${{ github.event.pull_request.user.login }}
           TITLE: ${{ github.event.pull_request.title }}
+          BODY: ${{ github.event.pull_request.body }}
         run: |
           if [ "$AUTHOR" != "muxagent[bot]" ] && [ "$AUTHOR" != "genericagentx-workflow[bot]" ]; then
             echo "Opened by $AUTHOR, not the shared identity: nothing to check."
             exit 0
           fi
-          if printf '%s' "$TITLE" | grep -Eq '^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+: [^ ]'; then
+          if ! printf '%s' "$TITLE" | grep -Eq '^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+: [^ ]'; then
+            echo "::error title=PR title must name the agent::PRs opened as $AUTHOR must start the title with '<Agent>@<host>: ', for example 'Korp@narko: fix the toolbar'. Edit the title; this check re-runs."
+            exit 1
+          fi
+          # The last well-formed tag: the one that counts.
+          tag=$(printf '%s\n' "$BODY" \
+            | grep -oE '<!--[[:space:]]*agentmux:agent_id=[^[:space:]>]+[[:space:]]*-->' \
+            | sed -E 's/.*agent_id=([^[:space:]>]+).*/\1/' \
+            | grep -E '^[A-Za-z0-9_-]{1,64}$' | tail -n 1)
+          if [ -z "$tag" ]; then
+            echo "::warning title=PR body has no agent tag::No agent_id tag in the body, so notices about this PR have no agent to reach. gh-agent adds it when it opens the PR."
             echo "Title names the agent."
             exit 0
           fi
-          echo "::error title=PR title must name the agent::PRs opened as $AUTHOR must start the title with '<Agent>@<host>: ', for example 'Korp@narko: fix the toolbar'. Edit the title; this check re-runs."
+          name=$(printf '%s' "${TITLE%%@*}" | tr 'A-Z' 'a-z')
+          id=$(printf '%s' "$tag" | tr 'A-Z' 'a-z')
+          if [ "$name" = "$id" ] || [ "${id%-"$name"}" != "$id" ]; then
+            echo "Title names the agent, and the body's last agent tag is the same agent ($tag)."
+            exit 0
+          fi
+          echo "::error title=PR title and agent tag name different agents::The title is signed by '${TITLE%%@*}' but the last agent_id tag in the body is '$tag', which is where notices about this PR go. Make them the same agent: fix the title, or put the right tag last in the body (a tag quoted in prose or in a code block counts too, so write it in words). A renamed agent whose name is no longer part of its id starts the title with the id. This check re-runs on every edit."
           exit 1
