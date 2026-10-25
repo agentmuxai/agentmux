@@ -37,20 +37,18 @@ fn put(store: &Store, skill: &Skill) {
 }
 
 fn bind_agent(store: &Store, skill_id: &str) {
-    store
-        .conn()
-        .lock()
-        .unwrap()
-        .execute("INSERT INTO db_agent_skills_ref (agent_id, skill_id) VALUES ('agent-1', ?1)", params![skill_id])
+    let conn = store.conn().lock().unwrap();
+    // The ref tables key on agents and bundles this fixture does not create.
+    conn.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+    conn.execute("INSERT INTO db_agent_skills_ref (agent_id, skill_id) VALUES ('agent-1', ?1)", params![skill_id])
         .unwrap();
 }
 
 fn bind_bundle(store: &Store, skill_id: &str) {
-    store
-        .conn()
-        .lock()
-        .unwrap()
-        .execute("INSERT INTO db_bundle_skills_ref (bundle_id, skill_id) VALUES ('bundle-1', ?1)", params![skill_id])
+    let conn = store.conn().lock().unwrap();
+    // The ref tables key on agents and bundles this fixture does not create.
+    conn.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+    conn.execute("INSERT INTO db_bundle_skills_ref (bundle_id, skill_id) VALUES ('bundle-1', ?1)", params![skill_id])
         .unwrap();
 }
 
