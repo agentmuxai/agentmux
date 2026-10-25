@@ -11,9 +11,9 @@
 //!   `start`, `answer`, `accept`, `send_back`, `cancel`, `retry`, `track`,
 //!   `release`, `reassign`).
 //!
-//! These are the operator's by construction: they come from the app's own
-//! window over its websocket, never from an agent's MCP, which reaches the
-//! queue only through the HTTP routes (`work_queue.rs`, `work_tasks.rs`).
+//! `kanban.act` is the operator's alone: it needs the host's proof that the
+//! connection is the AgentMux window (`RpcContext::operator_only`). Agents
+//! reach the queue through the HTTP routes (`work_queue.rs`, `work_tasks.rs`).
 
 use std::sync::Arc;
 
@@ -54,9 +54,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         async move { task(&s, &data).await }
     });
     let s = state.clone();
-    engine.register_typed(COMMAND_KANBAN_ACT, move |data: Value, _ctx| {
+    engine.register_typed(COMMAND_KANBAN_ACT, move |data: Value, ctx: RpcContext| {
         let s = s.clone();
-        async move { act(&s, data).await }
+        async move {
+            ctx.operator_only("only the operator acts on Kanban tasks")?;
+            act(&s, data).await
+        }
     });
 }
 
@@ -1149,5 +1152,32 @@ mod tests {
         store.work_hold(&build_id, 1).unwrap();
         assert!(crate::backend::kanban::unlocked_by(&store, &spec_id).is_empty(), "a held build waits for its hold");
         assert!(crate::backend::kanban::unlocked_by(&store, &build_id).is_empty(), "a build frees nothing");
+    }
+
+    /// `kanban.act` over a connection: refused unless the host proved it is
+    /// the AgentMux window; the board's reads stay open.
+    #[tokio::test]
+    async fn only_the_proven_operator_window_acts_on_the_board() {
+        let state = crate::server::tests::test_state();
+        let call = |ctx: Option<RpcContext>, command: &'static str, data: Value| {
+            let state = state.clone();
+            async move {
+                let (engine, mut rx) = WshRpcEngine::new();
+                register(&engine, &state);
+                if let Some(ctx) = ctx {
+                    engine.set_rpc_context(ctx);
+                }
+                engine.handle_message(RpcMessage { command: command.into(), reqid: "r".into(), data: Some(data), ..Default::default() });
+                let resp = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv()).await.unwrap().unwrap();
+                resp.error
+            }
+        };
+        let create = json!({"action": "create", "title": "From a socket"});
+        let unproven = call(None, COMMAND_KANBAN_ACT, create.clone()).await;
+        assert!(unproven.starts_with("FORBIDDEN") && unproven.contains("isn't the AgentMux window"), "{unproven}");
+        let agent = RpcContext { agent_id: "AgentX".into(), ..Default::default() };
+        assert!(call(Some(agent), COMMAND_KANBAN_ACT, create.clone()).await.starts_with("FORBIDDEN"));
+        assert_eq!(call(Some(RpcContext::operator_for_tests()), COMMAND_KANBAN_ACT, create).await, "");
+        assert_eq!(call(None, COMMAND_KANBAN_LIST, json!({})).await, "");
     }
 }

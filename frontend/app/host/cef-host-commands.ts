@@ -255,6 +255,9 @@ export const cefApprovals: ApprovalHostApi = {
     stopDesktop: async (blockId) => {
         await invokeCommand("desktop_stop", { block_id: blockId });
     },
+    attestOperator: async (nonce) => {
+        await invokeCommand("operator_attest", { nonce });
+    },
     forgetWidgetKey: async (publisher) => {
         await invokeCommand("widget_approval_decide", { id: publisher, hash: "", decision: "forget_key" });
     },
