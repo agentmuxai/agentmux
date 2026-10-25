@@ -58,13 +58,20 @@ pub fn deny_memory_access(headless: bool) -> bool {
 }
 
 /// First thing in the host's `run()`: the launcher's secrets leave the environment
-/// ([`crate::secret_env`]), then the browser process (not a CEF helper, which has
-/// `--type=` and brings its own sandbox) is closed to other processes' reads.
+/// ([`crate::secret_env`]), then the browser process is closed to other processes'
+/// reads. Not a CEF helper (`--type=`, which brings its own sandbox), and not one of
+/// the host's own short-lived probes (`--internal-probe-*`): the user-namespace probe
+/// has to write its own `uid_map`, which a non-dumpable process cannot.
 pub fn stash_and_harden_host() {
     crate::secret_env::stash_startup_secrets();
-    if !std::env::args().any(|a| a.starts_with("--type=")) {
+    if is_browser_process(std::env::args()) {
         deny_memory_access(false);
     }
+}
+
+/// Whether a host started with these arguments is the browser process proper.
+fn is_browser_process<S: AsRef<str>>(args: impl IntoIterator<Item = S>) -> bool {
+    !args.into_iter().any(|a| a.as_ref().starts_with("--type=") || a.as_ref().starts_with("--internal-probe-"))
 }
 
 /// Applies the control, whatever the policy says (`deny_memory_access` decides first).
@@ -101,6 +108,15 @@ mod tests {
         assert_eq!(decide(true, false, false), Err(Skipped::OptedOut));
         assert_eq!(decide(false, true, false), Err(Skipped::DevBuild));
         assert_eq!(decide(false, false, true), Err(Skipped::Headless));
+    }
+
+    #[test]
+    fn only_the_browser_process_proper_is_hardened() {
+        assert!(is_browser_process(["agentmux-cef"]));
+        assert!(is_browser_process(["agentmux-cef", "--url=http://127.0.0.1:1/"]));
+        assert!(!is_browser_process(["agentmux-cef", "--type=renderer"]));
+        assert!(!is_browser_process(["agentmux-cef", "--internal-probe-userns"]));
+        assert!(!is_browser_process(["agentmux-cef", "--internal-probe-gl-renderer"]));
     }
 
     // fork, so the test process itself stays dumpable (the test harness reads its own /proc).
