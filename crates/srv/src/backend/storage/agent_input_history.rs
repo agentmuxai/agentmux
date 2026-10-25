@@ -61,6 +61,8 @@ CREATE INDEX IF NOT EXISTS idx_agent_input_history_trash_agent
     ON db_agent_input_history_trash (agent_id, deleted_at_ms);
 CREATE INDEX IF NOT EXISTS idx_agent_input_history_trash_batch
     ON db_agent_input_history_trash (batch_id);
+CREATE INDEX IF NOT EXISTS idx_agent_input_history_trash_age
+    ON db_agent_input_history_trash (deleted_at_ms);
 ";
 
 /// How long a forgotten entry waits in the trash before it is gone for good.
@@ -136,7 +138,7 @@ fn entry_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<InputHistoryEntry> {
 }
 
 /// Drop trash past the retention; how many entries went.
-fn purge_trash(tx: &rusqlite::Transaction<'_>, now_ms: i64) -> Result<usize, StoreError> {
+pub(crate) fn purge_trash(tx: &rusqlite::Connection, now_ms: i64) -> Result<usize, StoreError> {
     Ok(tx.execute(
         "DELETE FROM db_agent_input_history_trash WHERE deleted_at_ms < ?1",
         params![now_ms - INPUT_HISTORY_TRASH_RETENTION_MS],
@@ -193,6 +195,8 @@ impl Store {
         if known.is_none() {
             return Ok(None);
         }
+        // Whoever keeps typing still sees the retention honoured, without opening the trash.
+        purge_trash(&tx, entry.sent_at_ms)?;
         let newest: Option<InputHistoryEntry> = tx
             .query_row(
                 &format!("SELECT {COLUMNS} FROM db_agent_input_history WHERE agent_id = ?1 ORDER BY id DESC LIMIT 1"),

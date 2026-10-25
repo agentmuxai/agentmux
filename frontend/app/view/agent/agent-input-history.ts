@@ -45,6 +45,8 @@ type Cache = {
     /** Nothing older left in srv. */
     complete: boolean;
     loading: Promise<void> | null;
+    /** Bumped when the entries are thrown away, so a page still on its way is dropped. */
+    epoch: number;
     /** Sends whose answer hasn't come back. */
     pending: number;
     watchers: Set<(where: Arrival, n: number, at: number) => void>;
@@ -79,15 +81,18 @@ function prepend(c: Cache, newestFirst: { id: number; text: string }[]): number 
 }
 
 function load(agentId: string, c: Cache, beforeId?: number): Promise<void> {
-    c.loading ??= RpcApi.AgentInputHistoryCommand(TabRpcClient, { agent_id: agentId, before_id: beforeId, limit: PAGE })
+    const epoch = c.epoch;
+    const p: Promise<void> = RpcApi.AgentInputHistoryCommand(TabRpcClient, { agent_id: agentId, before_id: beforeId, limit: PAGE })
         .then((res) => {
+            if (epoch !== c.epoch) return;
             c.complete = res.entries.length < PAGE;
             tell(c, "older", prepend(c, res.entries));
         })
         .catch((e) => console.warn("[input-history] couldn't read", agentId, e))
         .finally(() => {
-            c.loading = null;
+            if (c.loading === p) c.loading = null;
         });
+    c.loading ??= p;
     return c.loading;
 }
 
@@ -128,14 +133,17 @@ function onRestored(agentId: string): void {
     c.entries.length = 0;
     c.ids.length = 0;
     c.complete = false;
+    // A page already asked for was read before the restore: drop it, and read afresh.
+    c.epoch++;
+    c.loading = null;
     tell(c, "removed", n, 0);
-    void (c.loading ?? Promise.resolve()).then(() => load(agentId, c));
+    void load(agentId, c);
 }
 
 function cacheFor(agentId: string): Cache {
     let c = caches.get(agentId);
     if (!c) {
-        c = { entries: [], ids: [], complete: false, loading: null, pending: 0, watchers: new Set() };
+        c = { entries: [], ids: [], complete: false, loading: null, epoch: 0, pending: 0, watchers: new Set() };
         caches.set(agentId, c);
         void load(agentId, c);
     }

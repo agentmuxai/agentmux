@@ -156,6 +156,21 @@ describe("agent input history", () => {
         expect(heard).toEqual([["removed", 2], ["older", 3]]);
     });
 
+    it("drops an older page still on its way when a restore rebuilds the cache", async () => {
+        history.mockResolvedValueOnce(page(Array.from({ length: 200 }, (_, i) => `m${200 - i}`), 400));
+        const entries = agentHistory("a1");
+        await flush();
+        let finishOlder!: (v: unknown) => void;
+        history.mockReturnValueOnce(new Promise((r) => (finishOlder = r)));
+        void loadOlderAgentHistory("a1");
+        history.mockResolvedValueOnce(page(["fresh 4", "fresh 3"], 4));
+        handlers.get("agent:inputhistory")!({ agent_id: "a1", what: "restored" });
+        await flush();
+        finishOlder(page(["stale 2", "stale 1"], 2));
+        await flush();
+        expect(entries, "only the page read after the restore, oldest first").toEqual(["fresh 3", "fresh 4"]);
+    });
+
     it("keeps the draft a moment after the last change, and reads it back", async () => {
         vi.useFakeTimers();
         draft.mockResolvedValue({});

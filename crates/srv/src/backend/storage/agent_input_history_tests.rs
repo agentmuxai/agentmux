@@ -147,6 +147,17 @@ fn the_trash_is_emptied_after_the_retention() {
 }
 
 #[test]
+fn typing_on_drops_what_has_aged_out_of_the_trash() {
+    let store = store_with(&["a"]);
+    store.input_history_append(&send("a", "forgotten once", 1), 100).unwrap();
+    store.input_history_clear("a", WINDOW, 5).unwrap();
+    store.input_history_append(&send("a", "typed within the week", 5 + DAY), 100).unwrap();
+    assert_eq!(store.conn().lock().unwrap().query_row("SELECT COUNT(*) FROM db_agent_input_history_trash", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+    store.input_history_append(&send("a", "typed after the week", 5 + INPUT_HISTORY_TRASH_RETENTION_MS + 1), 100).unwrap();
+    assert_eq!(store.conn().lock().unwrap().query_row("SELECT COUNT(*) FROM db_agent_input_history_trash", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+}
+
+#[test]
 fn deleting_the_agent_takes_its_trash_too() {
     let store = store_with(&["a"]);
     store.input_history_append(&send("a", "gone with it", 1), 100).unwrap();
