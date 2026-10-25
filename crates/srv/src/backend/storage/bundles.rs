@@ -152,6 +152,11 @@ pub enum BundleReseedOutcome {
 /// specifically — see that method's own doc comment.
 const RETIREMENT_TOMBSTONE_SOURCE: &str = "operator_config_seed_retired";
 
+/// The `source` of the version an entry gets when it leaves Global Memory: the
+/// content it held and the writer who removed it, so history can show the
+/// removal and a revert can bring the entry back.
+pub(crate) const REMOVE_SOURCE: &str = "remove";
+
 /// Extracts a `{"manifest_version": N}` field from a version row's
 /// `source_detail` JSON, defaulting to `0` when absent or unparseable — so a
 /// pre-existing row seeded before this field existed is always treated as
@@ -286,6 +291,36 @@ impl Store {
             out.push(r?);
         }
         Ok(out)
+    }
+
+    /// Ordinary entries that were removed from Global Memory and can be
+    /// restored: not global now, and their newest version is a
+    /// [`REMOVE_SOURCE`] one. A private bundle that was never Global Memory
+    /// has no versions and never appears. Most recently removed first.
+    pub fn bundle_list_removed_global(&self) -> Result<Vec<Bundle>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT b.id, b.name, b.description, b.is_blank, b.is_global, b.provider, b.model, b.instructions,
+                    b.context_files, b.mcp_servers, b.skills, b.sort_order, b.created_at, b.updated_at,
+                    b.instructions_by_provider, b.is_system
+             FROM db_bundles b
+             WHERE b.is_global = 0 AND b.is_system = 0 AND b.is_blank = 0 AND b.id != 'blank'
+               AND (SELECT v.source FROM db_bundle_versions v WHERE v.bundle_id = b.id
+                    ORDER BY v.created_at DESC, v.rowid DESC LIMIT 1) = ?1
+             ORDER BY b.updated_at DESC",
+        )?;
+        let iter = stmt.query_map(params![REMOVE_SOURCE], map_memory_row)?;
+        let mut out = Vec::new();
+        for r in iter {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Whether `id` was removed from Global Memory and not restored since: its
+    /// newest version is a [`REMOVE_SOURCE`] one.
+    pub fn bundle_is_removed_global(&self, id: &str) -> Result<bool, StoreError> {
+        Ok(self.bundle_version_latest(id)?.is_some_and(|v| v.source == REMOVE_SOURCE))
     }
 
     pub fn bundle_get(&self, id: &str) -> Result<Option<Bundle>, StoreError> {
@@ -463,19 +498,25 @@ impl Store {
             check_bundle_base_tx(&tx, &memory.id, base)?;
         }
 
-        let existing_is_system: Option<i64> = tx
+        let existing: Option<(i64, i64, String, String)> = tx
             .query_row(
-                "SELECT is_system FROM db_bundles WHERE id = ?1",
+                "SELECT is_system, is_global, name, instructions FROM db_bundles WHERE id = ?1",
                 params![memory.id],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
             .optional()?;
-        if existing_is_system == Some(1) {
+        if matches!(existing, Some((1, ..))) {
             return Err(StoreError::Other(
                 "cannot modify a system Global Memory entry via the generic bundle upsert path"
                     .to_string(),
             ));
         }
+        // An entry leaving Global Memory keeps a trail: the content it held and
+        // who removed it, so it can be restored (`Store::bundle_list_removed_global`).
+        let removed_content = match existing {
+            Some((_, 1, name, instructions)) if !memory.is_global => Some((name, instructions)),
+            _ => None,
+        };
 
         tx.execute(
             "INSERT INTO db_bundles
@@ -514,7 +555,18 @@ impl Store {
             ],
         )?;
 
-        let version = if memory.is_global {
+        let version = if let Some((name, instructions)) = removed_content {
+            Some(bundle_version_insert_tx(
+                &tx,
+                &memory.id,
+                &name,
+                &instructions,
+                REMOVE_SOURCE,
+                source_detail,
+                written_by,
+                written_by_uid,
+            )?)
+        } else if memory.is_global {
             Some(bundle_version_insert_tx(
                 &tx,
                 &memory.id,

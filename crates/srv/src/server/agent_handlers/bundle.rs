@@ -8,7 +8,7 @@ use serde_json::json;
 
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
-    COMMAND_LIST_MEMORIES, COMMAND_GET_MEMORY,
+    RpcContext, COMMAND_LIST_MEMORIES, COMMAND_GET_MEMORY,
     COMMAND_GET_AGENT_BUNDLES, COMMAND_SET_AGENT_BUNDLES,
     AgentBundlesResult, CommandGetAgentBundlesData, CommandSetAgentBundlesData,
     COMMAND_UPSERT_MEMORY, COMMAND_DELETE_MEMORY, COMMAND_REORDER_GLOBAL_BRAIN,
@@ -69,7 +69,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker = state.broker.clone();
     engine.register_typed(
         COMMAND_UPSERT_MEMORY,
-        move |req: CommandUpsertBundleData, _ctx| {
+        move |req: CommandUpsertBundleData, ctx| {
             let mstore = mstore.clone();
             let broker = broker.clone();
             async move {
@@ -100,21 +100,23 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // writes through GlobalMemoryWrite recorded a version, so a
                 // future history/diff view would present a false sequence
                 // with operator edits silently missing from it (codex P2,
-                // PR #3237). "armory-ui" as written_by: this handler runs
-                // over the frontend's authenticated WebSocket connection,
-                // which has no per-request trusted AGENT identity the way
-                // the REST/MCP path does (see BundleVersion::written_by's
-                // own doc comment) — a human via the UI is the only thing
-                // this code path can honestly claim. No writer UID either
-                // (identity M4c-1): the WebSocket is always Unattributed.
+                // PR #3237). "armory-ui" as written_by: a connection that did
+                // not register as an agent is the window, which has no
+                // per-request trusted AGENT identity the way the REST/MCP
+                // path does (see BundleVersion::written_by's own doc
+                // comment). No writer UID either (identity M4c-1): the
+                // WebSocket is always Unattributed.
                 // `base_sha256` (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md
                 // §2.4): the Memory editor says which content its draft
                 // started from, so a concurrent write (an agent's
                 // GlobalMemoryWrite, another window) becomes a `conflict:`
                 // refusal instead of being silently overwritten. Absent =
                 // the unconditional save every other caller still gets.
+                // A write made by a registered agent is recorded as that agent,
+                // never as the person at the window.
+                let (written_by, source) = writer_of(&ctx, "human");
                 mstore
-                    .bundle_upsert_with_version_based(&memory, "armory-ui", "", "human", "{}", base_sha256.as_deref())
+                    .bundle_upsert_with_version_based(&memory, written_by, "", source, "{}", base_sha256.as_deref())
                     .map_err(|e| format!("upsertmemory: {e}"))?;
                 broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
                 Ok(memory)
@@ -292,11 +294,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker = state.broker.clone();
     engine.register_typed(
         COMMAND_GLOBAL_MEMORY_REVERT,
-        move |cmd: CommandGlobalMemoryRevertData, _ctx| {
+        move |cmd: CommandGlobalMemoryRevertData, ctx| {
             let mstore = mstore.clone();
             let broker = broker.clone();
             async move {
-                let result = global_memory_ui_revert(&mstore, &cmd)?;
+                let result = global_memory_ui_revert(&mstore, &cmd, writer_of(&ctx, "revert").0)?;
                 broker.publish_event::<crate::backend::mps_events::MemoriesChanged>(&(), vec![], 0);
                 Ok(result)
             }
@@ -497,10 +499,22 @@ fn global_memory_ui_diff(store: &Store, cmd: &CommandGlobalMemoryDiffData) -> Re
     Ok(GlobalMemoryDiffResult { diff: crate::server::app_api::bundle_version_diff(&from, &to) })
 }
 
+/// Who a window-side Global Memory write is recorded as: the agent when the
+/// connection registered as one, otherwise the window (`armory-ui`, with
+/// `window_source`).
+fn writer_of<'a>(ctx: &'a RpcContext, window_source: &'a str) -> (&'a str, &'a str) {
+    if ctx.agent_id.is_empty() {
+        ("armory-ui", window_source)
+    } else {
+        (ctx.agent_id.as_str(), "agent")
+    }
+}
+
 /// Restores `name` + `instructions` from `target_version_id` as a NEW
-/// version (`source: "revert"`, `written_by: "armory-ui"`), through the same
-/// atomic upsert-plus-version primitive each tier's ordinary save uses.
-fn global_memory_ui_revert(store: &Store, cmd: &CommandGlobalMemoryRevertData) -> Result<GlobalMemoryRevertResult, String> {
+/// version (`source: "revert"`, `written_by`: `writer`, which is `armory-ui`
+/// for the window), through the same atomic upsert-plus-version primitive
+/// each tier's ordinary save uses.
+fn global_memory_ui_revert(store: &Store, cmd: &CommandGlobalMemoryRevertData, writer: &str) -> Result<GlobalMemoryRevertResult, String> {
     let mut bundle = load_global_bundle_for_ui(store, &cmd.id, "revert")?;
     let target = store
         .bundle_version_get(&cmd.target_version_id)
@@ -522,10 +536,10 @@ fn global_memory_ui_revert(store: &Store, cmd: &CommandGlobalMemoryRevertData) -
         // recording it as a human edit would opt it out of them for good
         // (`bundle_reseed_system_if_owned` skips any non-seeder last writer).
         let seeder = crate::backend::operator_config_seed::WRITTEN_BY;
-        let written_by = if target.written_by == seeder { seeder } else { "armory-ui" };
+        let written_by = if target.written_by == seeder { seeder } else { writer };
         store.bundle_upsert_system_if_changed(&bundle, written_by, "revert", &detail)
     } else {
-        store.bundle_upsert_with_version(&bundle, "armory-ui", "", "revert", &detail)
+        store.bundle_upsert_with_version(&bundle, writer, "", "revert", &detail)
     }
     .map_err(|e| format!("globalmemory:revert: {e}"))?;
     tracing::info!(bundle_id = %cmd.id, version_id = %cmd.target_version_id, "globalmemory:revert");

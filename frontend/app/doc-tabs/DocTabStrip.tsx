@@ -25,6 +25,7 @@ import { dropDocTab } from "./doc-tab-hosts";
 import { moveDocTabToNewPane } from "./doc-tab-new-pane";
 import "./doc-tabs.scss";
 import { keyLabel } from "@/app/keybindings";
+import { MENU_ICON } from "@/app/util/menu-icons";
 
 export function DocTabStrip<P>(props: {
     ctl: DocTabsModel<P>;
@@ -59,8 +60,8 @@ export function DocTabStrip<P>(props: {
         const id = rightClicked;
         if (!id || !ctl.tabs().some((t) => t.id === id)) return [];
         return [
-            { label: "Move to New Pane", click: () => void moveDocTabToNewPane(props.blockId, id, props.blockId, "right") },
-            { label: "Close Tab", click: () => void ctl.close(id) },
+            { label: "Move to New Pane", icon: MENU_ICON.open, click: () => void moveDocTabToNewPane(props.blockId, id, props.blockId, "right") },
+            { label: "Close Tab", icon: MENU_ICON.close, click: () => void ctl.close(id) },
         ];
     };
     const bindMenu = (el: HTMLDivElement) => {

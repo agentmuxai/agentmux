@@ -22,6 +22,8 @@ export function describePermission(permission: string): PermissionText {
             return { text: "Open files you pick, and save files where you choose" };
         case "clipboard:write":
             return { text: "Copy text to your clipboard" };
+        case "links:open":
+            return { text: "Open web pages in a browser pane next to it" };
         case "panes":
             return { text: "Open other kinds of panes" };
         case "agents:read":

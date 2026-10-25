@@ -18,6 +18,7 @@ import { BrowserProfileButton, openIncognitoTab } from "./browser-profile-menu";
 import { createAddressAutocomplete, inlineCompletion } from "./address-autocomplete";
 import { AddressSuggestions } from "./address-suggestions";
 import { createFirstClickSelectAll } from "./address-select-all";
+import { MENU_ICON } from "@/app/util/menu-icons";
 
 /**
  * A saved bookmark's favicon, falling back to the app's existing "no
@@ -528,6 +529,7 @@ export function BrowserNavBar(props: {
                                     [
                                         {
                                             label: "Set this page as Home",
+                                            icon: MENU_ICON.home,
                                             enabled: !!model.urlAtom() && model.urlAtom() !== browserStartPageAtom(),
                                             click: () => void setCurrentAsStartPage(),
                                         },
