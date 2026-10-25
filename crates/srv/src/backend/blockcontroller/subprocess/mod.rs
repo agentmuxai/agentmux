@@ -56,6 +56,7 @@ use crate::backend::mps;
 pub(crate) mod argv;
 mod codex_compact;
 mod codex_context;
+mod codex_fresh;
 mod container_spawn;
 mod host_spawn;
 mod session;
@@ -145,6 +146,10 @@ struct SubprocessControllerInner {
     /// Messages queued while a turn is in progress.
     /// Drained sequentially after the current turn exits.
     pending_messages: VecDeque<SubprocessSpawnConfig>,
+    /// Session ids the agent ended on purpose (`Agents fresh`, `codex_fresh`):
+    /// a queued message or a stale `agent:sessionid` that still names one must
+    /// not resume it.
+    retired_sessions: Vec<String>,
 }
 
 /// SubprocessController manages per-turn subprocess lifecycle for agent blocks.
@@ -227,6 +232,7 @@ impl SubprocessController {
                 current_pid: None,
                 kill_tx: None,
                 pending_messages: VecDeque::new(),
+                retired_sessions: Vec::new(),
             })),
             broker,
             event_bus,

@@ -140,8 +140,8 @@ pub(crate) async fn handle_fresh_self(
     };
     match (provider.as_str(), container) {
         (_, true) => return refused("unsupported in containers"),
-        ("claude", false) => {}
-        _ => return refused("unsupported: only Claude agents can start fresh for now; Codex agents can compact"),
+        ("claude" | "codex", false) => {}
+        _ => return refused("unsupported: only Claude and Codex agents can start fresh"),
     }
     if let Err(why) = context_reading::schedule_compact(&block_id, agentmux_common::time::now_ms_u64()) {
         return refused(why);
@@ -173,7 +173,12 @@ const STOP_PENDING: &str = "the agent's process is already stopping or restartin
 /// End `block_id`'s provider session, so the next message starts a new one.
 fn end_session(block_id: &str) -> Result<(), &'static str> {
     use crate::backend::blockcontroller::persistent::PersistentSubprocessController;
+    use crate::backend::blockcontroller::subprocess::SubprocessController;
     let ctrl = crate::backend::blockcontroller::get_controller(block_id).ok_or("no controller for the pane")?;
+    // A Codex pane: one `exec` per turn, so ending the thread is forgetting its id.
+    if let Some(codex) = ctrl.as_any().downcast_ref::<SubprocessController>() {
+        return codex.start_fresh_session().map(|_| ());
+    }
     let p = ctrl.as_any().downcast_ref::<PersistentSubprocessController>().ok_or("the agent's controller can't start fresh")?;
     context_reading::mark_fresh_by_choice(block_id);
     p.start_fresh_session().map(|_| ()).inspect_err(|_| {

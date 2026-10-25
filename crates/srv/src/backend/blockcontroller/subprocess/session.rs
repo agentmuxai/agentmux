@@ -97,6 +97,9 @@ impl SubprocessController {
         if inner.session_id.is_some() {
             return;
         }
+        if inner.retired_sessions.iter().any(|r| r == sid) {
+            return;
+        }
         tracing::info!(
             block_id = %self.block_id,
             session_id = %sid,
