@@ -112,6 +112,7 @@ export function rowDisclosure(node: DocumentNode, f: RowFlags): Disclosure {
         case "compaction_started":
         case "session_outcome":
         case "cli_notice":
+        case "system_note":
         case "day_divider":
         case "history_link":
         case "resume_preflight":

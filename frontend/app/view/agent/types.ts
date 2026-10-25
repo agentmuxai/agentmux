@@ -56,7 +56,7 @@ export type InitState = {
 /**
  * Document node types that make up the agent's markdown document
  */
-export type DocumentNode = MarkdownNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | MemoryReinjectionNode | ContextDeliveryNode | JektMessageNode | SessionOutcomeNode | CliNoticeNode | DayDividerNode | HistoryLinkNode | ResumePreflightNode | AmbientNarrationNode;
+export type DocumentNode = MarkdownNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | MemoryReinjectionNode | ContextDeliveryNode | JektMessageNode | SystemNoteNode | SessionOutcomeNode | CliNoticeNode | DayDividerNode | HistoryLinkNode | ResumePreflightNode | AmbientNarrationNode;
 
 /**
  * Raw markdown text block
@@ -409,6 +409,23 @@ export interface JektMessageNode {
      *  list (marker `FILES=`; SPEC_JEKT_FILE_TRANSFER_2026_10_05.md §6.2).
      *  Absent when none came. */
     attachments?: { id?: string; name: string }[];
+}
+
+/**
+ * One of AgentMux's own notes (`[AgentMux] ...`: an upgrade, cloud messages
+ * paused, an overlap) that srv delivered to the agent, alone or after another
+ * message. Rendered as a `SystemNoteBlock`, never as the human's turn
+ * (SPEC_MESSAGE_ORIGIN_AND_ONE_CONTAINER_2026_10_25.md, P0; P2 makes it the
+ * `system` variant of the one origin container).
+ */
+export interface SystemNoteNode {
+    type: "system_note";
+    id: string;
+    /** The note without its `[AgentMux]` marker. */
+    text: string;
+    /** "sent 14:30, delivered 14:41" when it arrived late. */
+    delay?: string;
+    timestamp?: number;
 }
 
 /**

@@ -68,6 +68,7 @@ function nodeSearchText(node: DocumentNode): string {
         case "tool":          return node.tool + " " + JSON.stringify(node.params ?? {});
         case "shell":         return node.cmd + " " + node.title;
         case "jekt_message":  return node.from + " " + node.to + " " + node.message;
+        case "system_note":   return node.text;
         default:              return "";
     }
 }

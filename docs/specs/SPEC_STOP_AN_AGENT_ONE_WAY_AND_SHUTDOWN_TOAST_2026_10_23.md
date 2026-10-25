@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-23
 **Author:** Agent1 (UI kit, theme), for Kanban #935; built in task #1705.
-**Status:** active. Approved by the operator on 2026-10-23 with D1 to D7 as written, plus one change (section 3.11: the requesting agent's reason stays out of the toast and is cleaned for the banner). macOS toasts are out of this build; the macOS contract in 3.8 stays for the platform task that will build that backend. The spec is committed in the first PR of build #1705 (the contract); the toast follows in a second.
+**Status:** done: built in #5375 (the Stop tool) and #5397 (the shutdown toast; macOS toasts are #1267). Approved by the operator on 2026-10-23 with D1 to D7 as written, plus one change (section 3.11: the requesting agent's reason stays out of the toast and is cleaned for the banner). macOS toasts are out of this build; the macOS contract in 3.8 stays for the platform task that will build that backend. The spec is committed in the first PR of build #1705 (the contract); the toast follows in a second.
 **Grounded in:** `origin/main` at `9dfcbfac6`. Everything below was read from that commit; the paths are in section 8.
 **Related:** `SPEC_AGENT_SELF_QUIT_2026_09_24.md` (section 6.5 is the 15 s window; section 12.4 is how srv closes one tab), `SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md`, `SPEC_OS_NOTIFICATIONS_RICH_CONTENT_AND_CLICK_TO_PANE_2026_09_25.md`.
 

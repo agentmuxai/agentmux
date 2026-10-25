@@ -70,6 +70,8 @@ function renderSnapshotLine(node: DocumentNode): string | null {
             const who = node.direction === "incoming" ? `from ${node.from}` : `to ${node.to}`;
             return `Jekt (${who}): ${truncateLine(node.message, MAX_LINE_CHARS)}`;
         }
+        case "system_note":
+            return `AgentMux note: ${truncateLine(node.text, MAX_LINE_CHARS)}`;
         case "shell":
             return `Shell (${node.status}): ${truncateLine(node.title || node.cmd, MAX_LINE_CHARS)}`;
         case "agent_error":
