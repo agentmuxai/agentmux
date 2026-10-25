@@ -187,11 +187,11 @@ fn an_edit_cannot_touch_a_refused_name_either_way() {
 
 #[test]
 fn the_diff_names_what_was_added_changed_and_removed() {
-    let change = diff("TZ=1\nLANG=2\nC=3\n", "TZ=1\nLANG=20\nD=4\n");
-    assert_eq!(change.added, map(&[("D", "4")]));
+    let change = diff("TZ=1\nLANG=2\nNO_COLOR=3\n", "TZ=1\nLANG=20\nFORCE_COLOR=4\n");
+    assert_eq!(change.added, map(&[("FORCE_COLOR", "4")]));
     assert_eq!(change.changed.get("LANG"), Some(&ValueChange { from: "2".into(), to: "20".into() }));
-    assert_eq!(change.removed, vec!["C".to_string()]);
-    assert_eq!(change.summary(), "added [D] changed [LANG] removed [C]");
+    assert_eq!(change.removed, vec!["NO_COLOR".to_string()]);
+    assert_eq!(change.summary(), "added [FORCE_COLOR] changed [LANG] removed [NO_COLOR]");
     assert!(diff("TZ=1\n# c\n", "# other\nTZ=1\n").is_empty());
 }
 

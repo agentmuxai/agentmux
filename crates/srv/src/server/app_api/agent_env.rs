@@ -162,7 +162,7 @@ fn run(state: &AppState, caller: Option<&Caller>, req: AgentEnvRequest) -> Resul
         "get" => Ok(json!({
             "agent": agent,
             "lines": agent_env::redacted(&current),
-            "note": "values of credential-looking names are shown as [hidden]; a change applies at the agent's next launch",
+            "note": "values of names an agent may not set are shown as [hidden]; a change applies at the agent's next launch",
         })),
         "set" => {
             let new = match proposed(&current, &req) {

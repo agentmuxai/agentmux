@@ -12,7 +12,7 @@
 //! what it may write: no name AgentMux itself sets or that points a provider
 //! at another home, endpoint or credential, no value that looks like a secret,
 //! and a small size. Everything an agent reads back has the values of
-//! credential-looking names hidden.
+//! names it may not set hidden.
 
 use std::collections::BTreeMap;
 
@@ -347,9 +347,13 @@ impl Change {
     }
 }
 
-/// What a value is shown as to an agent.
+/// What a value is shown as to an agent: only the value of a name an agent may
+/// set, and not one that looks like a secret. Anything else is the operator's,
+/// and a secret can sit under a name no pattern recognises (`PGPASSWORD`,
+/// `DB_PASS`), so the name decides, not a guess at what the value is.
 fn shown(name: &str, value: &str) -> String {
-    if is_credential_name(name) || looks_like_secret(value) { HIDDEN.to_string() } else { value.to_string() }
+    let readable = ALLOWED_NAMES.contains(&name.to_ascii_uppercase().as_str()) && !is_credential_name(name) && !looks_like_secret(value);
+    if readable { value.to_string() } else { HIDDEN.to_string() }
 }
 
 /// What changed in the variables the launch gets from `old` to `new`.
