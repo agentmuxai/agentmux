@@ -1,6 +1,6 @@
 # Spec: upgrading a .deb or .rpm install from the app, and an apt/dnf repository
 
-**Status:** active (#5528). The operator approved all five decisions of §7 as recommended (2026-10-25). Phase 3g-1 (§3.1–3.3, §3.5, the "Installs from before 3g" note of §3.4) is built; 3g-2 (go back), Repo-1 and Repo-2 are not.
+**Status:** active (#5528). The operator approved all five decisions of §7 as recommended (2026-10-25). Phase 3g-1 (§3.1–3.3, §3.5, the "Installs from before 3g" note of §3.4) is built; so is 3g-2 (go back, §3.4); Repo-1 and Repo-2 are not.
 **Date:** 2026-10-24
 **Author:** Maricon
 **Verified against:** `agentmux` `main` @ `0d73be7a0` (2026-10-24); Ubuntu 26.04 (GNOME 50.1) for what a desktop has installed.
@@ -58,7 +58,7 @@ An agent's `App upgrade` goes through the same prompt, so a person always types 
 ### 3.4 Rollback
 
 - **A failed install leaves the old version.** dpkg undoes a failed unpack, and an rpm transaction installs all or nothing. The packages have no maintainer scripts, so there's no half-configured state. The waiter restarts whatever is installed, and the panel says why the install failed.
-- **A new version that won't start.** If the launcher gives up on srv after an upgrade, it offers "Go back to <old version>". That downloads the old version's release file (verified the same way), and the helper installs it with an explicit downgrade (`apt-get install --allow-downgrades`, `dnf downgrade`, `rpm -U --oldpackage`). The helper accepts a downgrade only to the version its own record (§3.2) says it replaced, and only once. The old version starts with its own data folder (`versions/<old>/data`, still there), so whatever happened in the new version since is not carried back.
+- **A new version that won't start (built in 3g-2).** When the launcher gives up on a version that the helper itself installed (the helper's record says it replaced the one before: `/var/lib/agentmux/last-upgrade`, now world-readable, written by the helper only) within a week of the upgrade, it asks "Go back to <old version>?". The give-ups are: srv can't be started at launch, srv can't be started again after it stopped (past its restart budget), and the window crashing past its budget. A yes runs `pkexec agentmux-install-update --go-back <old version> <pid>`. With no file from the user at all, the helper downloads the old version's release file itself over HTTPS, checks it against GitHub's listing like any install, and installs it with an explicit downgrade (`apt-get install --allow-downgrades`, `dnf downgrade`, `zypper install --oldpackage`, `rpm -U --oldpackage`). It accepts a downgrade only to the version its record says it replaced, only while the version the record says it installed is still the installed one, and only once (it removes the record). The waiter then starts the old version. The old version starts with its own data folder (`versions/<old>/data`, still there), so whatever happened in the new version since is not carried back. If the install fails before it starts, the launcher says why in a dialog and exits as it would have; if the user says no, nothing changes. Not built: a "Go back" button in the version panel for a version that starts but isn't wanted.
 - **Installs from before 3g** have no helper. Their panel offers the release page (3g-1 shows no manual command for them); once installed, they can use the helper from then on.
 
 ### 3.5 Code
@@ -95,7 +95,7 @@ What they need, in the order they'd be built. Where they are hosted is decided e
 ## 6. Phases
 
 1. **3g-1:** detection by ownership, the helper and policy in both packages, the launcher's package kind, the result file, the headless fallback. The first release with them still has to be installed by hand once.
-2. **3g-2:** "Go back to <old version>" (§3.4).
+2. **3g-2:** "Go back to <old version>" (§3.4). Built.
 3. **Repo-1:** the key, signed `.rpm`, both repositories, the publishing and check jobs.
 4. **Repo-2:** the packages subscribe themselves, and the panel's repository mode.
 

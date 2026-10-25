@@ -28,10 +28,22 @@ pub const HELPER_NAME: &str = "agentmux-install-update";
 /// The command that starts the installed AgentMux (the package's wrapper).
 pub const START_COMMAND: &str = "/usr/bin/agentmux";
 
-/// A staged package that the user's password can install.
+/// The helper's record of the last upgrade it did (`from=` and `to=` lines), readable
+/// by anyone: what "go back" is offered from.
+pub const STATE_DIR: &str = "/var/lib/agentmux";
+/// How long after an upgrade going back is still offered: after that, what the new
+/// version did to its data is too much to leave behind.
+const GO_BACK_WITHIN: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 60 * 60);
+
+/// What to hand the helper in place of a file when it is to install the version
+/// the last upgrade replaced.
+const GO_BACK_ARG: &str = "--go-back";
+
+/// A package that the user's password can install.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageUpgrade {
-    /// The release's `.deb` or `.rpm` in `updates/<version>/` of the data folder.
+    /// The release's `.deb` or `.rpm` in `updates/<version>/` of the data folder;
+    /// for going back, [`GO_BACK_ARG`] (the helper downloads the package itself).
     pub installer: PathBuf,
     pub version: String,
     /// This version's data folder: where the result is left for srv.
@@ -68,7 +80,30 @@ pub fn check(installer: &Path, sha256: &str, version: &str, own_dir: &Path, data
     Ok(PackageUpgrade { installer: installer.to_path_buf(), version: version.to_string(), data_dir: data_dir.to_path_buf() })
 }
 
+/// Whether the last upgrade the helper did replaced `version` with `own_version` (the
+/// running one) not long before `now`: then going back to it is on offer.
+/// `record` is the helper's `last-upgrade` file: `from=` and `to=` lines.
+pub fn go_back_version(record: &Path, own_version: &str, now: std::time::SystemTime) -> Option<String> {
+    let age = now.duration_since(std::fs::metadata(record).and_then(|m| m.modified()).ok()?).unwrap_or_default();
+    let text = std::fs::read_to_string(record).ok()?;
+    let field = |key: &str| text.lines().find_map(|l| l.strip_prefix(key)).map(|v| v.trim().to_string());
+    let (from, to) = (field("from=")?, field("to=")?);
+    let plain = |v: &str| !v.is_empty() && v.bytes().all(|b| b.is_ascii_alphanumeric() || b"+~.-".contains(&b));
+    (to == own_version && plain(&from) && plain(&to) && from != to && age < GO_BACK_WITHIN).then_some(from)
+}
+
 impl PackageUpgrade {
+    /// Going back to `version`: the helper fetches and checks the package itself.
+    pub fn go_back(version: &str, data_dir: &Path) -> PackageUpgrade {
+        let up = PackageUpgrade { installer: PathBuf::from(GO_BACK_ARG), version: version.to_string(), data_dir: data_dir.to_path_buf() };
+        let _ = std::fs::create_dir_all(up.files().0.parent().unwrap_or(data_dir));
+        up
+    }
+
+    fn is_go_back(&self) -> bool {
+        self.installer.as_os_str() == GO_BACK_ARG
+    }
+
     fn deb(&self) -> bool {
         self.installer.extension().is_some_and(|e| e == "deb")
     }
@@ -82,8 +117,17 @@ impl PackageUpgrade {
     /// The command that installs this file by hand: what the panel offers when no
     /// password prompt can be shown.
     pub fn manual_command(&self) -> String {
+        if self.is_go_back() {
+            return format!("download AgentMux {} from https://github.com/agentmuxai/agentmux/releases and install it with your package manager", self.version);
+        }
         format!("sudo {} {}", if self.deb() { "apt install" } else { "dnf install" }, self.installer.display())
     }
+}
+
+/// The reason an earlier try left (see [`leave_result`]).
+fn read_result(up: &PackageUpgrade) -> Option<String> {
+    let text = std::fs::read_to_string(up.files().2).ok()?;
+    serde_json::from_str::<serde_json::Value>(&text).ok()?.get("error")?.as_str().map(String::from)
 }
 
 /// Leave `error` for srv, which shows it in the version panel.
@@ -111,8 +155,7 @@ const WAITER: &str = r#"pkexec="$1"; helper="$2"; file="$3"; ver="$4"; lpid="$5"
 rc=$?
 grep -qx READY "$out" 2>/dev/null || exit "$rc"
 if [ "$rc" -eq 0 ]; then
-    # An install that worked means the launcher was gone, so nobody reads READY any more.
-    rm -f "$out" "$result"
+    rm -f "$result"
 else
     reason=$(sed -n 's/^agentmux-install-update: //p' "$err" | tail -n 1 | tr -d '"\\' | cut -c1-300)
     [ -n "$reason" ] || reason="the installer stopped with status $rc"
@@ -149,6 +192,42 @@ pub fn question(up: &PackageUpgrade, stopping_paragraph: &str) -> String {
         up.version,
         if up.deb() { ".deb" } else { ".rpm" },
     )
+}
+
+/// What the dialog asks when the new version could not be kept running.
+pub fn go_back_question(from: &str, to: &str, why: &str) -> String {
+    format!(
+        "AgentMux {to} {why}.\n\n\
+         Go back to AgentMux {from}, the version before the last upgrade? Your computer asks for your password \
+         to install it, then AgentMux {from} opens. Your tabs from before the upgrade come back, but what you \
+         changed in {to} stays in {to}'s own data."
+    )
+}
+
+/// The new version could not be kept running (`why` finishes "AgentMux X ___"): offer to
+/// go back to the version the last upgrade replaced. `true` once the helper has
+/// accepted and is waiting for this launcher to exit: the caller exits, and the waiter
+/// starts the old version. Only for a `.deb`/`.rpm` install, one upgrade from the app
+/// ago (the helper's record), and the user's yes.
+pub fn offer_go_back(own_version: &str, own_dir: &Path, data_dir: &Path, why: &str) -> bool {
+    if own_dir != Path::new(INSTALL_BIN) || !own_dir.join(HELPER_NAME).is_file() {
+        return false;
+    }
+    let record = Path::new(STATE_DIR).join("last-upgrade");
+    let Some(from) = go_back_version(&record, own_version, std::time::SystemTime::now()) else { return false };
+    crate::log(&format!("upgrade: {own_version} {why}; offering to go back to {from}"));
+    if !crate::upgrade_linux::confirm_labelled("Go back to the previous AgentMux?", &go_back_question(&from, own_version, why), "Go back") {
+        return false;
+    }
+    let up = PackageUpgrade::go_back(&from, data_dir);
+    if authorize(&up, std::process::id(), std::time::Duration::from_secs(120)) {
+        return true;
+    }
+    // Nothing was installed: the reason is the result file's, if there is one (a cancelled prompt has none).
+    if let Some(error) = read_result(&up) {
+        crate::upgrade_linux::notify("AgentMux couldn't go back", &format!("The install didn't finish: {error}"));
+    }
+    false
 }
 
 /// Close the password prompt (and with it the waiter), as "Not now".
@@ -396,7 +475,42 @@ mod tests {
         assert!(status.success());
         assert!(marker.exists(), "AgentMux is started once the install is done");
         assert!(!result.exists(), "a successful install leaves no failure behind");
-        assert!(!out.exists());
+    }
+
+    #[test]
+    fn going_back_is_offered_only_for_the_version_the_last_upgrade_installed() {
+        let dir = tempfile::tempdir().unwrap();
+        let record = dir.path().join("last-upgrade");
+        let now = std::time::SystemTime::now();
+        assert_eq!(go_back_version(&record, "0.60.2", now), None, "no upgrade done from the app");
+        std::fs::write(&record, "from=0.60.1\nto=0.60.2\n").unwrap();
+        assert_eq!(go_back_version(&record, "0.60.2", now).as_deref(), Some("0.60.1"));
+        assert_eq!(go_back_version(&record, "0.60.3", now), None, "a version the upgrade didn't install");
+        assert_eq!(go_back_version(&record, "0.60.2", now + GO_BACK_WITHIN + Duration::from_secs(60)), None, "too long ago");
+        for bad in ["from=\nto=0.60.2\n", "from=0.60.1 x\nto=0.60.2\n", "from=../x\nto=0.60.2\n", "from=0.60.2\nto=0.60.2\n", "to=0.60.2\n"] {
+            std::fs::write(&record, bad).unwrap();
+            assert_eq!(go_back_version(&record, "0.60.2", now), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn going_back_hands_the_helper_no_file_and_restarts_the_old_version() {
+        let (dir, _installer, data, _bin) = layout("AgentMux_0.60.2_amd64.deb");
+        let up = PackageUpgrade::go_back("0.60.1", &data);
+        assert!(up.is_go_back());
+        let args = dir.path().join("args");
+        let pkexec = fake_pkexec(dir.path(), &format!("printf '%s\\n' \"$@\" > {}; echo READY; exit 0", args.display()));
+        let (start, marker) = start_script(dir.path());
+        // A process standing in for the launcher, which exits once the helper says READY.
+        let mut launcher = std::process::Command::new("sleep").arg("60").spawn().unwrap();
+        let pid = launcher.id();
+        assert!(authorize_with(&pkexec, Path::new("/opt/agentmux/bin/agentmux-install-update"), &start, &up, pid, Duration::from_secs(10)));
+        launcher.kill().unwrap();
+        launcher.wait().unwrap();
+        assert!(wait_for(|| marker.exists()), "the old version is started once the launcher is gone");
+        let got = std::fs::read_to_string(&args).unwrap();
+        assert_eq!(got, format!("/opt/agentmux/bin/agentmux-install-update\n--go-back\n0.60.1\n{pid}\n"));
+        assert!(up.manual_command().contains("0.60.1"));
     }
 
     #[test]

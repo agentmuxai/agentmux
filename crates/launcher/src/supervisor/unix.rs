@@ -365,6 +365,8 @@ pub(crate) async fn run_unix(
                     &srv_spawner::migration_failed_dialog_body(reason),
                 );
             }
+            // A new version from a package upgrade that can't start: offer the one before it.
+            offer_go_back(version, launcher_exe_dir, &paths.data_dir, "couldn't start its backend");
             std::process::exit(1);
         }
     };
@@ -498,6 +500,9 @@ pub(crate) async fn run_unix(
     let mut upgrade_requests = crate::upgrade_restart::requests();
     let (upgrade_yes_tx, mut upgrade_yes) = tokio::sync::mpsc::unbounded_channel::<crate::upgrade_restart::Staged>();
     let mut relaunch: Option<(crate::upgrade_restart::Staged, std::time::Instant)> = None;
+    // Set where the launcher gives up on this version for good (crashes past the budget, srv
+    // that can't be started again): a package upgrade then offers the version before it.
+    let mut gave_up: Option<&'static str> = None;
     let exit_code = loop {
         tokio::select! {
             Some(req) = upgrade_requests.recv() => {
@@ -737,6 +742,7 @@ pub(crate) async fn run_unix(
                         if let Some(why) = srv_stopped_during_wait {
                             if let Err(e) = respawn_srv(launcher_exe_dir, &paths, &startup_sink, why, &mut srv).await {
                                 log(&format!("FATAL: srv respawn failed: {e} — terminating launcher"));
+                                gave_up = Some("couldn't keep its backend running");
                                 break 1;
                             }
                         }
@@ -766,6 +772,7 @@ pub(crate) async fn run_unix(
                                 host_restarts.len(),
                                 HOST_RESTART_WINDOW.as_secs(),
                             ));
+                            gave_up = Some("keeps crashing");
                             break code;
                         }
                         host_restarts.push(now);
@@ -838,6 +845,7 @@ pub(crate) async fn run_unix(
                 }
                 if let Err(e) = respawn_srv(launcher_exe_dir, &paths, &startup_sink, why, &mut srv).await {
                     log(&format!("FATAL: srv respawn failed: {e} — terminating launcher"));
+                    gave_up = Some("couldn't keep its backend running");
                     break 1;
                 }
                 // The running host holds connections to the dead srv. End it (SIGTERM so CEF flushes
@@ -900,6 +908,12 @@ pub(crate) async fn run_unix(
         }
     };
     end_agents_left_by_srv(&paths.data_dir, srv.pid.filter(|_| srv_gone));
+    // Nothing of this install runs now but this launcher: the helper can replace it once it exits.
+    if let Some(why) = gave_up {
+        if offer_go_back(version, launcher_exe_dir, &paths.data_dir, why) {
+            log("upgrade: going back to the version before the last upgrade; exiting for the helper");
+        }
+    }
     // srv has stopped, so the new version copies complete data on its first
     // start. Only after a clean quit the user confirmed recently.
     if let Some((staged, at)) = relaunch.filter(|(_, at)| exit_code == 0 && crate::upgrade_restart::still_confirmed(*at)) {
@@ -910,6 +924,19 @@ pub(crate) async fn run_unix(
     }
     log(&format!("launcher exiting with code {}", exit_code));
     std::process::exit(exit_code);
+}
+
+/// A `.deb`/`.rpm` upgrade the app did that now can't be kept running: offer the version
+/// before it (`upgrade_package::offer_go_back`). `true` when the user said yes and the
+/// helper is waiting for this launcher to exit.
+#[cfg(target_os = "linux")]
+fn offer_go_back(version: &str, launcher_exe_dir: &std::path::Path, data_dir: &std::path::Path, why: &str) -> bool {
+    crate::upgrade_package::offer_go_back(version, launcher_exe_dir, data_dir, why)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn offer_go_back(_version: &str, _launcher_exe_dir: &std::path::Path, _data_dir: &std::path::Path, _why: &str) -> bool {
+    false
 }
 
 /// srv is gone. An agent CLI it didn't close (srv was killed, crashed, or ran

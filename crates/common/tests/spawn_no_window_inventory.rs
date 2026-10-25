@@ -194,7 +194,7 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/launcher/src/upgrade.rs", "if cfg!(windows", 1,
      "test: unit-test or fixture code, never on a user machine"),
-    ("crates/launcher/src/upgrade_linux.rs", "program", 1,
+    ("crates/launcher/src/upgrade_linux.rs", "program", 2,
      "not-windows: Linux-only (zenity/kdialog upgrade dialog)"),
     ("crates/launcher/src/upgrade_macos.rs", "\"/bin/sh\"", 2,
      "not-windows: macOS-only (the upgrade's app swap, and its syntax test)"),
