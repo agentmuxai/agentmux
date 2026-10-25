@@ -19,6 +19,13 @@ pub(super) fn session_outcome_line(
     session_outcome_line_with(outcome, attempted_sid, actual_sid, false, false)
 }
 
+/// The frame for a session the agent ended on purpose (`Agents fresh`), for a
+/// controller that doesn't spawn through `persistent`: `fresh`, nothing
+/// attempted, and a handoff on its way (not an idle start).
+pub(crate) fn fresh_by_choice_line() -> String {
+    session_outcome_line_with(persistent_resume::SessionOutcome::Fresh, String::new(), None, false, false)
+}
+
 /// [`session_outcome_line`], plus whether the fresh session was given
 /// AgentMux's record of the conversation (`continued`, SPEC_DURABLE_
 /// CONVERSATION_MEMORY_2026_09_23.md §4.8). The outcome stays `fresh`: the

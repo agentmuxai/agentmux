@@ -1657,7 +1657,7 @@ mod input;
 #[cfg(test)]
 use input::park_tool_permission_request;
 mod lifecycle;
-mod outcome_line;
+pub(crate) mod outcome_line;
 mod process_waiter;
 mod queue;
 mod resume_retry;
