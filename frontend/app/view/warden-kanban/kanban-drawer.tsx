@@ -32,6 +32,7 @@ const EVENT_WORDS: Record<string, string> = {
     submitted: "handed it in",
     completed: "finished it",
     accepted: "accepted it",
+    reopened: "took the acceptance back",
     sent_back: "sent it back",
     released: "handed it back",
     expired: "lost its lease",
@@ -341,6 +342,19 @@ export function KanbanDrawer(props: {
                         <Button density="compact" icon="rotate-left" disabled={busy()} onClick={() => void act({ action: "send_back", text: text() })}>
                             Send back
                         </Button>
+                    </Show>
+                    <Show when={t().accepted_by}>
+                        {(a) => (
+                            <Button
+                                density="compact"
+                                icon="rotate-left"
+                                disabled={busy()}
+                                title={`${a().name} accepted it on your word. This puts it back in Review.`}
+                                onClick={() => void act({ action: "reopen", text: text() })}
+                            >
+                                Reopen
+                            </Button>
+                        )}
                     </Show>
                     <Show when={t().state === "failed"}>
                         <Button density="compact" tone="accent" icon="rotate-right" disabled={busy()} onClick={() => void act({ action: "retry" })}>

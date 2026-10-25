@@ -125,7 +125,7 @@ describe("Warden History section", () => {
         expect(line.textContent).toMatch(/Compression waits: agentmux-srv\.exe \(pid 7\)/);
     });
 
-    it("Storage says when pane history isn't compressed", async () => {
+    it("Storage says when pane history compression is turned off", async () => {
         HistoryUsageCommand.mockResolvedValue({
             total_bytes: 4096,
             stores: [],
@@ -135,7 +135,7 @@ describe("Warden History section", () => {
         });
         render(() => <WardenHistoryManager wardenBlockId="warden-1" visible={true} />);
         fireEvent.click(screen.getByRole("radio", { name: "Storage" }));
-        expect((await screen.findByTestId("history-compression")).textContent).toBe("Pane history isn't compressed (setting agent:transcriptframes).");
+        expect((await screen.findByTestId("history-compression")).textContent).toBe("Pane history compression is turned off (agent:transcriptframes is false).");
     });
 
     const reclaimable = (reclaim: Record<string, unknown>, more: Record<string, unknown> = {}) => ({

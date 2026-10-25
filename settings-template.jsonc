@@ -194,9 +194,10 @@
     // agents run. Off until it has been through a soak.
     // "agent:transcriptsinglecopy": false,
     // Compress the finished parts of agent transcripts in the shared store
-    // (about 6x smaller); what a reader sees doesn't change. With it on,
-    // transcriptdeltas also stores each streamed reply's text once.
-    // "agent:transcriptframes":    false,
+    // (about 6x smaller); what a reader sees doesn't change. On by default;
+    // set false to turn it off. With it on, transcriptdeltas also stores each
+    // streamed reply's text once.
+    // "agent:transcriptframes":    true,
     // "agent:transcriptdeltas":    true,
 
     // -- Other --
