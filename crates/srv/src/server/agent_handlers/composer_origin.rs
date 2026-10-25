@@ -14,9 +14,9 @@
 //!   is the human (`System` for a hidden memory reinjection the window sends on
 //!   its own behalf);
 //! - any other connection is refused when srv runs with a CEF host (every
-//!   desktop build). A headless srv has no host to prove the window (the cloud
-//!   web host), so it accepts the call and logs it. The mode comes from how
-//!   srv was started, never from anything the connection says.
+//!   desktop build); a headless srv (the cloud web host) has no CEF host and logs
+//!   the call. The mode comes from how srv was started, never from anything
+//!   the connection says.
 
 use crate::backend::blockcontroller::health::TurnOrigin;
 use crate::backend::rpc_types::RpcContext;
@@ -37,7 +37,7 @@ fn composer_origin_in(ctx: &RpcContext, hidden: bool, headless: bool) -> Result<
         if !headless {
             return Err(refusal);
         }
-        // No CEF host to attest the window: the cloud web host's own turns.
+        // A headless srv has no CEF host: the cloud web host's own turns.
         tracing::warn!(
             client_type = %ctx.client_type,
             "agentinput from a connection no host proved, in a headless srv"
