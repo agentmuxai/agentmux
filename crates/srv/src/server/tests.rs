@@ -6633,7 +6633,7 @@ async fn m4c2d_the_senders_uid_is_audited_and_carried() {
     let entry = audited.iter().find(|e| e.request_id == request_id);
     assert_eq!(entry.map(|e| e.audit_source_uid.as_str()), Some("uid-m4c2d"), "{resp}");
 
-    m4c1_send(&state, None, "/api/bus/register", serde_json::json!({"agent_id": "m4c2d-inbox"})).await;
+    state.messagebus.register_http("m4c2d-inbox");
     let send = |payload: &str| {
         serde_json::json!({"from": "m4c2d-sender", "to": "m4c2d-inbox", "payload": payload})
     };
