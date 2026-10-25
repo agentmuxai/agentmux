@@ -34,6 +34,9 @@ fn read_all(fs: &FileStore, zone: &str) -> Vec<u8> {
 /// each kept transcript reads.
 fn store_with_free_pages(dir: &Path) -> (PathBuf, Vec<(String, Vec<u8>)>) {
     let path = dir.join("filestore.db");
+    // A store from before new ones were made incremental: written to once, so its
+    // `auto_vacuum` is fixed at NONE.
+    rusqlite::Connection::open(&path).unwrap().execute_batch("CREATE TABLE seed(x); DROP TABLE seed;").unwrap();
     let fs = FileStore::open_global_transcripts(&path).unwrap();
     let mut kept = Vec::new();
     for (i, zone) in ["agent:a:current", "agent:b:current", "agent:c:current", "agent:gone:current"].iter().enumerate() {
@@ -257,4 +260,16 @@ fn reclaim_a_real_copy() {
     println!("{outcome:?} in {:.1} s", started.elapsed().as_secs_f64());
     let fs = FileStore::open_global_transcripts(&path).unwrap();
     println!("after: page_stats {:?}", fs.page_stats().unwrap());
+}
+
+#[test]
+fn a_new_shared_store_gives_freed_pages_back_by_itself_and_an_existing_one_is_left_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let new = FileStore::open_global_transcripts(&dir.path().join("new.db")).unwrap();
+    assert_eq!(new.page_stats().unwrap().3, 2, "a store made now is auto_vacuum=INCREMENTAL");
+    drop(new);
+    assert_eq!(FileStore::open_global_transcripts(&dir.path().join("new.db")).unwrap().page_stats().unwrap().3, 2, "and stays so on reopening");
+
+    let (old, _) = store_with_free_pages(dir.path());
+    assert_eq!(FileStore::open_global_transcripts(&old).unwrap().page_stats().unwrap().3, 0, "an existing store is not changed by opening it");
 }

@@ -3,7 +3,7 @@
 **Date:** 2026-10-21
 **Author:** Agent5@narko
 **Type:** Spec (a storage change; what a reader sees does not change)
-**Status:** active. The operator approved both parts on 2026-10-22 ("lets get the compaction and also cleaning out the streaming deltas"). Merged: PRs 1 and 2 of §9 (the frame table, both codecs, every read and write path, the store accepting version 3) in #5324; PR 3 (the framer, `agent:transcriptframes`, off by default, and its checks) in #5328; PR 4 (the recovery tool's decoders) in #5330. PR 5 (the Storage numbers) is #5331. Remaining: the operator turns the setting on once these are in a release; `history.compact` and `decompress` (§5.3, §5.4) wait until dogfooding shows they are needed. Task #49.
+**Status:** active. The operator approved both parts on 2026-10-22 ("lets get the compaction and also cleaning out the streaming deltas"). Merged: PRs 1 and 2 of §9 (the frame table, both codecs, every read and write path, the store accepting version 3) in #5324; PR 3 (the framer, `agent:transcriptframes`, and its checks) in #5328; PR 4 (the recovery tool's decoders) in #5330. PR 5 (the Storage numbers) is #5331. **On by default since the operator's call of 2026-10-25** (it had run by hand on the operator's machine since 2026-10-23); `agent:transcriptframes` stays as the opt-out (`false` stops new frames). Remaining: `history.compact` and `decompress` (§5.3, §5.4) wait until dogfooding shows they are needed. Task #49.
 **Builds on:** `REPORT_AGENT_HISTORY_STORE_DEDUP_COMPRESSION_2026_10_17.md` (AgentY: §4.3 compression, §7.3 "shrink the pane store"), `SPEC_AGENT_TRANSCRIPT_SINGLE_COPY_2026_10_19.md` (Maricon: one copy of each transcript), `docs/analysis/RCA_UPGRADE_0_59_30_TO_0_59_34_ISSUES_2026_10_19.md` §6 (the damaged parts).
 **Platform:** all.
 
@@ -64,7 +64,7 @@ Every frame decoded to its exact bytes under both codecs. Codec 2 left out 28.2 
 2. **Never edit in place.** New rows are written, decoded, compared with the original, and only then do the old rows go, all in one SQLite transaction. (The 2026-10-20 finding: two agents' newest parts were damaged; see the damage report.)
 3. **Only finished data.** Never the part being written, and never anything within the safety margin of the end of the file (§5.2).
 4. **No older build may read a store it cannot decode.** The store is stamped with a higher `user_version` (3; the pattern of #5203), so a build without the decoder refuses it and runs from its own per-channel copy. The stamp is written **when the first frame is about to be written**, not when a new build opens the store: stamping on open would push every older instance on the machine onto its per-channel copy the moment one new build starts. So a build that reads every frame codec **accepts** 3 but an ordinary open **stamps** only 2, and never lowers a 3 already there (`GLOBAL_TRANSCRIPT_STORE_FRAMES_VERSION`). That is why codec 2 ships in the same PR as the frame table: a build that read codec 1 only and accepted 3 would read codec 2 frames as damaged. And because a build that opened the store before the stamp keeps its connection, the framer also waits until **every running srv on the machine has said it reads frames** (§5.1).
-5. **Not before the store is repaired and has been clean for a while.** A frame is a bigger loss when damaged (§6). The repair was done on 2026-10-22 (the recovery tool, #5206; see the RCA §6). The framer stays off by default, so the soak is the time between the code landing and the operator turning it on.
+5. **Not before the store is repaired and has been clean for a while.** A frame is a bigger loss when damaged (§6). The repair was done on 2026-10-22 (the recovery tool, #5206; see the RCA §6). The framer was off by default for the soak, the time between the code landing and the operator turning it on (2026-10-23); it has been on by default since 2026-10-25 (§10).
 6. **History is kept forever.** Nothing here deletes history.
 
 ## 4. The design: frames
@@ -117,7 +117,7 @@ Frames cover parts that are at least 8 MiB behind the end of the file **and** wh
 
 ### 5.3 Setting and rollout
 
-`agent:transcriptframes` (off by default). Off: no new frames; existing frames still decode. `agent:transcriptdeltas` (on by default once frames are on) chooses codec 2 where it applies; off, every frame is codec 1. A `history.compact` command, one pass on demand (a "Compress now" in Warden > History > Storage), is not built: the framer already runs a pass each minute.
+`agent:transcriptframes` (on by default since 2026-10-25; set `false` to opt out). Off: no new frames; existing frames still decode. `agent:transcriptdeltas` (on by default once frames are on) chooses codec 2 where it applies; off, every frame is codec 1. A `history.compact` command, one pass on demand (a "Compress now" in Warden > History > Storage), is not built: the framer already runs a pass each minute.
 
 ### 5.4 Rollback
 
@@ -128,7 +128,7 @@ Turning `agent:transcriptframes` off stops new frames; the frames already writte
 - A damaged 64 KiB part today loses at most 64 KiB of a conversation. A damaged frame loses up to 1 MiB (16 parts). That is the price of the larger window, and it is why: frames are verified when written and by a periodic scrub (one frame in 1,000 per day, decoded and checked against `check`); a failing frame is an incident like a corrupt zone (#5204); `recover.mjs` rebuilds the zone from the richest per-channel copy, as it does for a damaged part.
 - Frame size is capped at 1 MiB for the default so the worst case stays small; 4 MiB is a setting for cold data.
 - The recovery tool and the History damage handling treat a damaged frame as a gap of its whole range. `parts.rs` (the blank-part fallback) gets the same rule: a frame whose decode or check fails reads as blanks of its logical length.
-- **Do not turn this on before the store is repaired and soaked (Rule 5).** The repair rebuilt the database with `.recover`, which also rebuilt the index the damage report found two unexplained entries in; the rebuilt store passed its integrity check.
+- **Do not turn this on before the store is repaired and soaked (Rule 5).** (Met: repaired 2026-10-22, on by hand from 2026-10-23, on by default from 2026-10-25.) The repair rebuilt the database with `.recover`, which also rebuilt the index the damage report found two unexplained entries in; the rebuilt store passed its integrity check.
 
 ## 7. What each reader sees
 
@@ -166,17 +166,17 @@ Tool input streams the same way, as `input_json_delta` / `partial_json`.
 | PR | What | Changes behaviour? |
 |---|---|---|
 | 1 + 2 | `db_file_frame`, codec 1, every read and write path of §4; codec 2 (§8): the encoder, the decoder, the verification, tests on synthetic transcripts (real transcripts are private and never go in the repository); the store accepting `user_version` 3 without writing it. One PR (#5324), so the first build that accepts 3 reads every codec | no: nothing creates a frame yet |
-| 3 | The framer (§5), its settings (off), the readers file and the running-instance check, the version stamp | only once the operator turns it on |
+| 3 | The framer (§5), its settings (on by default since 2026-10-25), the readers file and the running-instance check, the version stamp | from 2026-10-25 for everyone, unless `agent:transcriptframes` is `false` |
 | 4 | The recovery tool's decoders for both codecs, with a test vector the Rust encoder writes (#5330). Lands before the operator turns frames on | no |
 | 5 | The Storage numbers (§7) | no |
 | — | Offline run on a copy of the real store: every frame encoded and decoded under both codecs, byte for byte; the real ratio and codec 2 rate. Done 2026-10-22, §2.1 | no (a copy) |
-| — | The operator turns `agent:transcriptframes` on | yes |
+| — | The operator turns `agent:transcriptframes` on (2026-10-23, by hand); on by default from 2026-10-25 | yes |
 
 **Tests:** (1) for random files and random frame boundaries, `read_at` over every offset and length returns the original bytes, framed or not, with appends, truncates, replaces, copies and moves interleaved; (2) the framing transaction rolled back at each step leaves the old parts; (3) a decoder fuzz (truncated, flipped, oversized frames: an error, never a panic, never wrong bytes); (4) the offline replay above; (5) a guard that fails the build if a new `db_file_data` query appears outside the known sites; (6) for codec 2, the byte-exact rebuild over synthetic transcripts with the awkward cases (escapes, non-ASCII, key order, numbers, a reply split across frames, an interrupted reply).
 
 ## 10. Decisions
 
-Taken on 2026-10-22: build both (compression and the delta clean-out). Defaults, changeable as settings: **1 MiB frames**; a margin of **8 MiB and 24 hours**; **no dictionary**; the framer **off** until the operator turns it on, which is also the soak after the repair.
+Taken on 2026-10-22: build both (compression and the delta clean-out). Defaults, changeable as settings: **1 MiB frames**; a margin of **8 MiB and 24 hours**; **no dictionary**; the framer **off** until the operator turns it on, which is also the soak after the repair. **Changed on 2026-10-25 (operator: "we want history compaction on by default"): the framer is on unless `agent:transcriptframes` is `false`.** The safety gate is unchanged: nothing is framed while a build that can't read frames runs (§5.1).
 
 ## 11. Not covered
 
