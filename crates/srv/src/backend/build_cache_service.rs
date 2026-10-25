@@ -27,6 +27,11 @@ const HOURLY_EVERY: Duration = Duration::from_secs(3600);
 const FIRST_HOURLY_AFTER: Duration = Duration::from_secs(10 * 60);
 /// At most one disk warning per host in this time.
 const WARN_EVERY: Duration = Duration::from_secs(3600);
+/// After a warning that nobody received, the next attempt (which walks every build folder) waits
+/// this long.
+const RETRY_AFTER: Duration = Duration::from_secs(30 * 60);
+/// Unix seconds before which no warning is tried.
+static NEXT_TRY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// How many agents with the largest build folders hear of a warning.
 const WARN_AGENTS: usize = 3;
 
@@ -213,9 +218,17 @@ fn disk_check(mstore: &Store, policy: &Policy) {
         return;
     }
     let Some(marker) = warn_marker() else { return };
-    if !warning_due(&marker, SystemTime::now()) {
+    let now = SystemTime::now();
+    if !warning_due(&marker, now) {
         return;
     }
+    // The walk below reads every build folder: on a full disk, do not repeat it every check when
+    // there was nobody to tell.
+    let now_s = now.duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    if now_s < NEXT_TRY.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    NEXT_TRY.store(now_s + RETRY_AFTER.as_secs(), std::sync::atomic::Ordering::Relaxed);
     let mut per_clone: Vec<bc::TargetSize> = Vec::new();
     let mut per_workspace: Vec<(PathBuf, u64)> = Vec::new();
     for ws in workspaces(&root) {
@@ -243,7 +256,7 @@ fn disk_check(mstore: &Store, policy: &Policy) {
     if delivered > 0 {
         mark_warned(&marker, SystemTime::now());
     } else {
-        tracing::warn!("build cache: the disk is low and no agent could be told; trying again at the next check");
+        tracing::warn!("build cache: the disk is low and no agent could be told; trying again in 30 minutes");
     }
 }
 
