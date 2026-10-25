@@ -11,6 +11,7 @@ use crate::backend::rpc_types::{
     CommandAppendAgentHistoryData, CommandListAgentHistoryData, CommandSearchAgentHistoryData,
 };
 
+use super::super::actor::require_own_transcript;
 use super::super::AppState;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -19,10 +20,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker_afh = state.broker.clone();
     engine.register_typed(
         COMMAND_APPEND_AGENT_HISTORY,
-        move |cmd: CommandAppendAgentHistoryData, _ctx| {
+        move |cmd: CommandAppendAgentHistoryData, ctx| {
             let mstore = mstore_afh.clone();
             let broker = broker_afh.clone();
             async move {
+                require_own_transcript(&ctx, &mstore, &cmd.agent_id, "an agent's history")?;
                 let entry = mstore.agent_history_append(&cmd.agent_id, &cmd.entry)
                     .map_err(|e| format!("appendagenthistory: {e}"))?;
                 broker.publish_event::<crate::backend::mps_events::AgentHistoryChanged>(&(), vec![], 0);

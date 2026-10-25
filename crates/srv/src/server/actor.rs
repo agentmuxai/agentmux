@@ -30,6 +30,7 @@
 //! disagree before anything relies on the token. Unattributed requests are not
 //! checked — there is no row to compare with, and most are the UI (§6.5.1).
 
+use crate::backend::rpc_types::RpcContext;
 use crate::backend::storage::agents::AgentNameMatch;
 use crate::backend::storage::error::StoreError;
 use crate::backend::storage::store::Store;
@@ -271,6 +272,25 @@ pub(crate) async fn require_token_naming(
     match tokio::task::spawn_blocking(move || proven_slug(&mstore, &uid, &name)).await {
         Ok(Some(_)) => Ok(()),
         _ => Err("FORBIDDEN: the request's token must name the agent this acts for, by a name only that agent answers to".to_string()),
+    }
+}
+
+/// A WebSocket write to one agent's transcript or session state. A connection
+/// that registered as an agent (with its token) may write only its own agent's;
+/// any other connection must be the AgentMux window, proven by the host.
+/// Holding the instance auth key proves nothing, because every agent holds it.
+/// `target` is the agent's definition id or its slug; `what` completes
+/// "FORBIDDEN: …" when a connection that isn't the window is refused.
+pub(crate) fn require_own_transcript(ctx: &RpcContext, store: &Store, target: &str, what: &str) -> Result<(), String> {
+    if ctx.agent_id.is_empty() {
+        return ctx.operator_only(&format!("{what} is written by its own agent or by the AgentMux window"));
+    }
+    let target = target.trim();
+    let slug = store.agent_def_get(target).ok().flatten().map_or_else(|| target.to_string(), |def| def.slug);
+    if slug.eq_ignore_ascii_case(&ctx.agent_id) {
+        Ok(())
+    } else {
+        Err(format!("FORBIDDEN: {what} is written by its own agent or by the AgentMux window, not by another agent"))
     }
 }
 
