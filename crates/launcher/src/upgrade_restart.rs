@@ -490,12 +490,41 @@ fn powershell_exe() -> PathBuf {
     PathBuf::from(root).join("System32").join("WindowsPowerShell").join("v1.0").join("powershell.exe")
 }
 
-/// Restart into `staged`, detached, without this AgentMux's own environment:
-/// `AGENTMUX` would make the next launcher think it was started from a pane,
-/// and the `AGENTMUX_*` this launcher set on itself (background service,
-/// tray) would override the next one's settings.
+/// The variables that say WHICH data the launcher uses: the root, the config
+/// folder and the channel. The restart keeps them: an instance a person pointed
+/// at a root of its own (a test, a second profile) must come back on that root,
+/// not on the machine's real channel, which the next version would then migrate.
+const KEPT_ENV: [&str; 4] = ["AGENTMUX_HOME_OVERRIDE", "AGENTMUX_DATA_HOME", "AGENTMUX_CONFIG_HOME", "AGENTMUX_CHANNEL"];
+
+/// The variables of `vars` the restart strips: `AGENTMUX` would make the next
+/// launcher think it was started from a pane, and the other `AGENTMUX_*` this
+/// launcher (or a parent) set (background service, tray) would override the next
+/// one's settings. [`KEPT_ENV`] stays.
+fn env_to_strip(vars: impl IntoIterator<Item = std::ffi::OsString>) -> Vec<std::ffi::OsString> {
+    vars.into_iter()
+        .filter(|key| {
+            let k = key.to_string_lossy();
+            (k == "AGENTMUX" || k.starts_with("AGENTMUX_")) && !KEPT_ENV.contains(&k.as_ref())
+        })
+        .collect()
+}
+
+/// Restart into `staged`, detached, without this AgentMux's own environment
+/// except where it keeps its data ([`KEPT_ENV`]).
+///
+/// Not on macOS: its swap script starts the new app with `open`, which gives it
+/// LaunchServices' environment, not the script's, so an isolated instance still
+/// comes back on the machine's real channel there. (Not tried on a Mac; `open
+/// --env` would carry them.)
 pub fn relaunch(staged: &Staged) -> std::io::Result<()> {
+    relaunch_with_env(staged, std::env::vars_os())
+}
+
+/// [`relaunch`] with the environment it was started in given, so a test can say
+/// what the old launcher had without changing this process's.
+fn relaunch_with_env(staged: &Staged, inherited: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>) -> std::io::Result<()> {
     use agentmux_common::win32::NoWindow;
+    let inherited: Vec<_> = inherited.into_iter().collect();
     let mut cmd = match staged {
         Staged::Launcher(launcher) => {
             let mut c = std::process::Command::new(launcher);
@@ -513,11 +542,11 @@ pub fn relaunch(staged: &Staged) -> std::io::Result<()> {
             c
         }
     };
-    for (key, _) in std::env::vars_os() {
-        let k = key.to_string_lossy();
-        if k == "AGENTMUX" || k.starts_with("AGENTMUX_") {
-            cmd.env_remove(&key);
-        }
+    // What the child starts with is this process's environment, less the
+    // stripped; setting the given variables first makes that explicit.
+    cmd.envs(inherited.iter().map(|(k, v)| (k, v)));
+    for key in env_to_strip(inherited.iter().map(|(k, _)| k.clone())) {
+        cmd.env_remove(key);
     }
     #[cfg(unix)]
     {
@@ -555,6 +584,87 @@ mod tests {
     #[cfg(windows)]
     fn req(version: &str, launcher: &Path) -> UpgradeRequest {
         UpgradeRequest { version: version.into(), target: UpgradeTarget::Launcher(launcher.to_path_buf()) }
+    }
+
+    #[test]
+    fn a_restart_keeps_where_the_data_is_and_strips_the_rest() {
+        let os = |s: &str| std::ffi::OsString::from(s);
+        let vars = [
+            "AGENTMUX_HOME_OVERRIDE",
+            "AGENTMUX_DATA_HOME",
+            "AGENTMUX_CONFIG_HOME",
+            "AGENTMUX_CHANNEL",
+            "AGENTMUX",
+            "AGENTMUX_BACKGROUND_SERVICE",
+            "AGENTMUX_TRAY",
+            "AGENTMUX_DATA_DIR",
+            "AGENTMUX_INSTANCE_DIR",
+            "PATH",
+            "AGENTMUXED",
+        ];
+        let stripped: Vec<String> =
+            env_to_strip(vars.iter().map(|v| os(v))).iter().map(|k| k.to_string_lossy().into_owned()).collect();
+        assert_eq!(
+            stripped,
+            ["AGENTMUX", "AGENTMUX_BACKGROUND_SERVICE", "AGENTMUX_TRAY", "AGENTMUX_DATA_DIR", "AGENTMUX_INSTANCE_DIR"],
+        );
+    }
+
+    // An instance run on a root of its own comes back on that root: the next
+    // launcher really receives the root variables and not the stripped ones.
+    #[test]
+    fn an_isolated_launcher_restarts_into_the_same_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("env.txt");
+        let (script, body) = if cfg!(windows) {
+            (
+                dir.path().join("agentmux.cmd"),
+                format!(
+                    "@echo off
+(echo ROOT=%AGENTMUX_HOME_OVERRIDE%& echo DATA=%AGENTMUX_DATA_HOME%& echo PROBE=%AGENTMUX_QTEST_PROBE%) > \"{}\"
+",
+                    out.display()
+                ),
+            )
+        } else {
+            (
+                dir.path().join("agentmux.sh"),
+                format!(
+                    "#!/bin/sh
+echo \"ROOT=$AGENTMUX_HOME_OVERRIDE\" > '{0}'
+echo \"DATA=$AGENTMUX_DATA_HOME\" >> '{0}'
+echo \"PROBE=$AGENTMUX_QTEST_PROBE\" >> '{0}'
+",
+                    out.display()
+                ),
+            )
+        };
+        std::fs::write(&script, body).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        // The old launcher had a root of its own, plus a variable the restart
+        // must strip.
+        let os = |s: &str| std::ffi::OsString::from(s);
+        let old = [
+            (os("AGENTMUX_HOME_OVERRIDE"), os("/iso/root")),
+            (os("AGENTMUX_DATA_HOME"), os("/iso/data")),
+            (os("AGENTMUX_QTEST_PROBE"), os("1")),
+        ];
+        relaunch_with_env(&Staged::Launcher(script), old).unwrap();
+        let mut seen = String::new();
+        for _ in 0..100 {
+            seen = std::fs::read_to_string(&out).unwrap_or_default();
+            if seen.lines().count() >= 3 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        assert!(seen.contains("ROOT=/iso/root"), "{seen}");
+        assert!(seen.contains("DATA=/iso/data"), "{seen}");
+        assert!(!seen.contains("PROBE=1"), "{seen}");
     }
 
     /// SHA-256 of the empty file, which the tests' installers are.
