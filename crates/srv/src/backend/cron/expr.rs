@@ -158,7 +158,8 @@ mod tests {
     #[test]
     fn a_saved_numeric_weekday_job_fires_on_the_documented_day() {
         let saturday = Utc.with_ymd_and_hms(2026, 1, 3, 12, 0, 0).unwrap().timestamp_millis();
-        let next = crate::backend::jobs::next_slot_after("0 6 * * 1", saturday).unwrap();
+        let schedule = crate::backend::cron::schedule::JobSchedule::cron("0 6 * * 1", "UTC").unwrap();
+        let next = schedule.next_after(saturday).unwrap();
         let next = Utc.timestamp_millis_opt(next).unwrap();
         assert_eq!((next.weekday(), next.format("%H:%M").to_string()), (Weekday::Mon, "06:00".to_string()));
         // What the old reading did: the crate's own 1, a Sunday.

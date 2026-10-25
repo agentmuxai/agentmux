@@ -108,8 +108,8 @@ pub struct Incidents {
     /// The channel's object store: agent definitions, to resolve the owning
     /// leader and name it.
     mstore: Option<Arc<Store>>,
-    /// Where cron jobs are (`db_cron_jobs`, the shared store): which jobs
-    /// this instance owns, and their owners.
+    /// Where jobs are (`db_jobs`, the shared store): which jobs this
+    /// instance has, and their owners.
     jobs: Option<Arc<Store>>,
     broker: Arc<Broker>,
     queue: std::sync::OnceLock<tokio::sync::mpsc::UnboundedSender<String>>,
@@ -386,7 +386,7 @@ impl Incidents {
     /// creator), that owner's lead when it has a seat with one or is a
     /// spawned worker, else the owner itself.
     fn leader(&self, job: &CronJob) -> Option<Leader> {
-        let owner = job.created_by_uid.trim();
+        let owner = job.owner_uid();
         if owner.is_empty() {
             return None;
         }

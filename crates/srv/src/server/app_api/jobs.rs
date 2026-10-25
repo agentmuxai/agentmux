@@ -33,7 +33,7 @@ use crate::backend::storage::job_incidents::JobIncident;
 use crate::backend::storage::job_runs::{JobFlag, JobRun};
 use crate::drone::storage::DroneStore;
 use crate::server::caller::Caller;
-use crate::server::cron::{handle_cron_delete, handle_cron_patch, handle_cron_run_now, CronPatchRequest};
+use crate::server::cron::{handle_cron_delete, handle_cron_patch, handle_cron_run_now};
 
 use super::AppState;
 
@@ -228,13 +228,13 @@ fn ledgered(ledger: &RunLedger, job_id: &str, midnight: i64, week: i64) -> Ledge
 }
 
 fn cron_view(job: &CronJob, l: Ledgered, paused_all: bool, owner_block_id: Option<String>, now: i64) -> JobView {
-    let next_run_ms = if job.enabled { jobs::next_slot_after(&job.expression, now) } else { None };
+    let next_run_ms = if job.enabled { jobs::next_slot_after(job, now) } else { None };
     JobView {
         id: job.id.clone(),
         source: jobs::SOURCE_CRON.to_string(),
         name: job.name.clone(),
         owner: job.created_by.clone(),
-        owner_uid: job.created_by_uid.clone(),
+        owner_uid: job.owner_uid().to_string(),
         owner_block_id,
         target: job.target.clone(),
         expression: job.expression.clone(),
@@ -290,21 +290,21 @@ fn sort_jobs(jobs: &mut [JobView]) {
 
 async fn list(state: &AppState) -> Result<JobsListResult, String> {
     let ledger = ledger(state)?;
-    let shared = state.shared_store.clone();
+    let jobs_store = crate::server::cron::jobs_store(state);
     let mstore = state.mstore.clone();
     let regs = state.reactive_handler.list_agents();
     tokio::task::spawn_blocking(move || {
         let now = now_ms();
         let (midnight, week) = (local_midnight_ms(), now - 7 * DAY_MS);
         let paused_all = ledger.paused_all();
-        let cron_jobs = match &shared {
+        let cron_jobs = match &jobs_store {
             Some(s) => s.cron_list().map_err(|e| e.to_string())?,
             None => Vec::new(),
         };
         let mut views: Vec<JobView> = cron_jobs
             .iter()
             .map(|job| {
-                let owner_block = block_of(&regs, &job.created_by_uid, &job.created_by);
+                let owner_block = block_of(&regs, job.owner_uid(), &job.created_by);
                 cron_view(job, ledgered(&ledger, &job.id, midnight, week), paused_all.is_some(), owner_block, now)
             })
             .collect();
@@ -384,7 +384,7 @@ async fn act(state: &AppState, req: JobsActRequest, ctx: &RpcContext) -> Result<
             let (status, Json(body)) = match req.action.as_str() {
                 "run_now" => handle_cron_run_now(st, caller, Path(id)).await,
                 "delete" => handle_cron_delete(st, caller, Path(id)).await,
-                action => handle_cron_patch(st, caller, Path(id), Json(CronPatchRequest { action: action.to_string() })).await,
+                action => handle_cron_patch(st, caller, Path(id), Json(serde_json::json!({ "action": action }))).await,
             };
             let out = answered(status, &body);
             if let Some(ledger) = state.cron_scheduler.runs() {

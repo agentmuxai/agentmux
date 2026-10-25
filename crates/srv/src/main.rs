@@ -210,19 +210,19 @@ async fn app_main() {
     // The run ledger (SPEC_JOBS_AND_TEMPLATES_2026_10_24.md §3): close the
     // runs a restart interrupted, then record every fire from here on.
     let run_ledger = backend::jobs::RunLedger::new(
-        state.identity_store.clone(),
+        server::cron::ledger_store(&state),
         Some(state.mstore.clone()),
         state.broker.clone(),
     );
     // A failing job opens one incident for its owner (jobs spec §3.4).
-    run_ledger.install_incidents(state.shared_store.clone());
+    run_ledger.install_incidents(server::cron::jobs_store(&state));
     {
         let ledger = run_ledger.clone();
         let _ = tokio::task::spawn_blocking(move || ledger.recover_after_restart()).await;
     }
     // A paused job's slots are counted as skips (jobs spec §3.3).
-    if let Some(shared) = state.shared_store.clone() {
-        backend::jobs::paused::spawn(shared, run_ledger.clone());
+    if let Some(jobs_store) = server::cron::jobs_store(&state) {
+        backend::jobs::paused::spawn(jobs_store, run_ledger.clone());
     }
     state.cron_scheduler.install_runs(run_ledger);
 

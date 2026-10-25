@@ -55,7 +55,7 @@ pub(crate) fn record_paused_slots(shared: &Store, ledger: &RunLedger, since_ms: 
     };
     let mut counted = 0;
     for job in jobs.iter().filter(|j| !j.enabled && !ended_by_limit(j, until_ms / 1000)) {
-        for slot in slots_between(&job.expression, since_ms, until_ms) {
+        for slot in slots_between(job, since_ms, until_ms) {
             ledger.record_skip_slot(job, slot, reason::PAUSED);
             counted += 1;
         }
@@ -63,17 +63,11 @@ pub(crate) fn record_paused_slots(shared: &Store, ledger: &RunLedger, since_ms: 
     counted
 }
 
-/// The slots of `expression` after `since_ms` and up to `until_ms`, at most
-/// [`SLOTS_CAP`].
-fn slots_between(expression: &str, since_ms: i64, until_ms: i64) -> Vec<i64> {
-    let Ok(schedule) = crate::backend::cron::expr::parse(expression) else { return Vec::new() };
-    let Some(since) = chrono::DateTime::from_timestamp_millis(since_ms) else { return Vec::new() };
-    schedule
-        .after(&since)
-        .map(|t| t.timestamp_millis())
-        .take_while(|&ms| ms <= until_ms)
-        .take(SLOTS_CAP)
-        .collect()
+/// The slots of `job`'s trigger after `since_ms` and up to `until_ms`, at
+/// most [`SLOTS_CAP`].
+fn slots_between(job: &crate::backend::storage::cron::CronJob, since_ms: i64, until_ms: i64) -> Vec<i64> {
+    let Ok(schedule) = crate::backend::cron::schedule::JobSchedule::of(job) else { return Vec::new() };
+    schedule.after(since_ms).take_while(|&ms| ms <= until_ms).take(SLOTS_CAP).collect()
 }
 
 #[cfg(test)]
@@ -94,8 +88,10 @@ mod tests {
     #[test]
     fn slots_are_those_after_since_up_to_until() {
         // 00:00:30 to 00:03:00: the slots at 1, 2 and 3 minutes.
-        assert_eq!(slots_between("* * * * *", 30_000, 180_000), vec![60_000, 120_000, 180_000]);
-        assert!(slots_between("not a cron", 0, 600_000).is_empty());
+        let mut job = crate::backend::cron::test_job("j", "p", "t", "", "");
+        assert_eq!(slots_between(&job, 30_000, 180_000), vec![60_000, 120_000, 180_000]);
+        job.expression = "not a cron".to_string();
+        assert!(slots_between(&job, 0, 600_000).is_empty());
     }
 
     #[tokio::test]
