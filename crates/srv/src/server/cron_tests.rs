@@ -35,6 +35,7 @@ fn state_delivering_to(block: &'static str) -> (AppState, String, String) {
     let owner = state.mstore.agent_token_ensure("uid-jobs-owner").unwrap();
     let other = state.mstore.agent_token_ensure("uid-jobs-other").unwrap();
     let ledger = RunLedger::new(state.identity_store.clone(), Some(state.mstore.clone()), state.broker.clone());
+    ledger.install_jobs(state.mstore.clone());
     state.cron_scheduler.install_runs(ledger);
     let sched = state.cron_scheduler.clone();
     sched.install_delivery(Arc::new(move |_req, _uid| Box::pin(async move { json!({"success": true, "block_id": block}) })));
@@ -99,8 +100,13 @@ async fn run_now_is_for_the_owner_or_the_operator_and_shows_in_history() {
 
     let (status, v) = send(&state, Method::POST, Some(&owner), &uri, Some(json!({}))).await;
     assert_eq!((status, v["outcome"].as_str()), (StatusCode::OK, Some("delivered")), "{v}");
+    // While the first runs, the default overlap policy (skip) refuses another.
+    let (_, busy) = send(&state, Method::POST, None, &uri, Some(json!({}))).await;
+    assert_eq!(busy["outcome"], "failed", "{busy}");
+    let first = v["run_id"].as_str().unwrap().to_string();
+    state.cron_scheduler.runs().unwrap().turn_finished(&first, crate::backend::storage::job_runs::infra::OK, None, "");
     let (status, v) = send(&state, Method::POST, None, &uri, Some(json!({}))).await;
-    assert_eq!(status, StatusCode::OK, "the operator: {v}");
+    assert_eq!((status, v["outcome"].as_str()), (StatusCode::OK, Some("delivered")), "the operator: {v}");
 
     let (status, v) = send(&state, Method::GET, None, &format!("/agentmux/cron/{id}/runs?limit=5"), None).await;
     assert_eq!(status, StatusCode::OK, "{v}");
@@ -261,8 +267,9 @@ async fn refused_definitions_say_why() {
         (definition(json!({ "policy": { "approval": "operator" } })), "policy.approval"),
         (definition(json!({ "trigger": { "kind": "cron", "cron": "*/5 * * * *" } })), "at most every 15 minutes"),
         (definition(json!({ "template": { "id": "agentmux.weekly-report", "version": "1.0.0" } })), "templates are not available yet"),
-        (definition(json!({ "action": { "kind": "task", "title": "triage" } })), "action kind task is available in a later version"),
-        (definition(json!({ "policy": { "retries": 2 } })), "policy.retries is available in a later version"),
+        (definition(json!({ "policy": { "caps": { "run_usd": 1 } } })), "policy.caps is available in a later version"),
+        (definition(json!({ "policy": { "max_turns": 50 } })), "policy.max_turns is available in a later version"),
+        (definition(json!({ "policy": { "retries": 4 } })), "policy.retries: at most 3"),
     ];
     for (body, why) in cases {
         let (status, v) = send(&state, Method::POST, None, "/agentmux/jobs", Some(body)).await;
@@ -384,4 +391,165 @@ async fn a_job_without_a_creator_is_rewritten_only_by_the_operator() {
     let (status, v) = send(&state, Method::PATCH, None, uri, Some(json!({ "name": "renamed" }))).await;
     assert_eq!(status, StatusCode::OK, "the operator may rewrite it: {v}");
     state.cron_scheduler.cancel_job("jobs-nobody");
+}
+
+// ── task and spawn jobs, and the other trigger kinds ────────────────────
+
+fn spawn_definition(leader: &str) -> Value {
+    definition(json!({ "action": { "kind": "spawn", "leader": leader, "brief": "work on the backlog" } }))
+}
+
+/// A request to the host route, with or without the host's token.
+async fn host(state: &AppState, token: Option<&str>, body: Value) -> (StatusCode, Value) {
+    let mut req = Request::builder()
+        .method(Method::POST)
+        .uri("/api/v1/host/jobs")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json");
+    if let Some(t) = token {
+        req = req.header("X-Host-Token", t);
+    }
+    let resp = crate::server::build_router(state.clone()).oneshot(req.body(Body::from(body.to_string())).unwrap()).await.unwrap();
+    let status = resp.status();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+}
+
+/// A spawn job starts workers that spend until stopped, so no connection
+/// of agent's or the app's ordinary one creates it, edits it into being, or
+/// runs it: only the host, with its own token.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_spawn_job_is_created_and_run_only_through_the_host() {
+    let (state, owner, _) = state();
+    *state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port: 1, token: "host-ipc-token".into() });
+
+    let (status, v) = send(&state, Method::POST, None, "/agentmux/jobs", Some(spawn_definition("uid-jobs-owner"))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "even the instance key without a token: {v}");
+    assert!(v["error"].as_str().unwrap().contains("Jobs tab"), "{v}");
+    let (status, _) = send(&state, Method::POST, Some(&owner), "/agentmux/jobs", Some(spawn_definition("uid-jobs-owner"))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(state.mstore.cron_list().unwrap().is_empty());
+
+    let create_body = json!({ "action": "create", "definition": spawn_definition("uid-jobs-owner") });
+    assert_eq!(host(&state, None, create_body.clone()).await.0, StatusCode::FORBIDDEN);
+    assert_eq!(host(&state, Some("guess"), create_body.clone()).await.0, StatusCode::FORBIDDEN);
+    assert!(state.mstore.cron_list().unwrap().is_empty());
+    let (status, v) = host(&state, Some("host-ipc-token"), create_body).await;
+    assert_eq!(status, StatusCode::CREATED, "{v}");
+    let id = v["job"]["id"].as_str().unwrap().to_string();
+    state.cron_scheduler.cancel_job(&id);
+    let job = state.mstore.cron_get(&id).unwrap().unwrap();
+    assert_eq!((job.action_kind.as_str(), job.created_by.as_str(), job.created_by_uid.as_str()), ("spawn", "operator", ""));
+    assert!(crate::server::job_actions::operator_made(&job));
+
+    // It can't be run, rewritten or turned into a different job from the ordinary routes.
+    let (status, _) = send(&state, Method::POST, None, &format!("/agentmux/jobs/{id}/run"), Some(json!({}))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = send(&state, Method::PATCH, None, &format!("/agentmux/jobs/{id}"), Some(json!({ "name": "x" }))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = send(&state, Method::PATCH, None, &format!("/agentmux/jobs/{id}"), Some(json!({ "action": "pause" }))).await;
+    assert_eq!(status, StatusCode::OK, "pausing and deleting stay open");
+    let (status, _) = send(&state, Method::DELETE, None, &format!("/agentmux/jobs/{id}"), None).await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Another job can't be edited into a spawn job.
+    let plain = create(&state, &owner, json!({})).await;
+    let edit = json!({ "action": { "kind": "spawn", "leader": "uid-jobs-owner", "brief": "go" } });
+    let (status, _) = send(&state, Method::PATCH, None, &format!("/agentmux/jobs/{plain}"), Some(edit)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(state.mstore.cron_get(&plain).unwrap().unwrap().action_kind, "message");
+
+    // The host runs one now, subject to the same policy.
+    let (status, v) = host(&state, Some("host-ipc-token"), json!({ "action": "create", "definition": spawn_definition("uid-jobs-owner") })).await;
+    assert_eq!(status, StatusCode::CREATED, "{v}");
+    let id = v["job"]["id"].as_str().unwrap().to_string();
+    state.cron_scheduler.cancel_job(&id);
+    let (status, v) = host(&state, Some("host-ipc-token"), json!({ "action": "run_now", "id": id })).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["outcome"], "failed", "no action runner in this state: nothing is spent");
+    assert_eq!(host(&state, None, json!({ "action": "run_now", "id": id })).await.0, StatusCode::FORBIDDEN);
+}
+
+/// A task job is an ordinary job: an agent may create its own.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_agent_creates_its_own_task_job_and_the_task_goes_on_the_board() {
+    let (state, owner, _) = state();
+    let task = definition(json!({
+        "trigger": { "kind": "cron", "cron": "0 6 * * 1" },
+        "action": { "kind": "task", "title": "Review the docs", "payload": "Look for drift.", "target": "uid-jobs-other" },
+    }));
+    let (status, v) = send(&state, Method::POST, Some(&owner), "/agentmux/jobs", Some(task)).await;
+    assert_eq!(status, StatusCode::CREATED, "{v}");
+    let id = v["job"]["id"].as_str().unwrap().to_string();
+    state.cron_scheduler.cancel_job(&id);
+    assert_eq!(v["job"]["action_kind"], "task");
+
+    crate::server::job_actions::install(&state);
+    let (status, v) = send(&state, Method::POST, Some(&owner), &format!("/agentmux/jobs/{id}/run"), Some(json!({}))).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["outcome"], "delivered", "{v}");
+    let run = state.identity_store.job_run_get(v["run_id"].as_str().unwrap()).unwrap().unwrap();
+    assert_eq!((run.state.as_str(), run.outcome.as_str()), ("finished", "ok"));
+    let num = run.links["kanban_task"].as_i64().unwrap();
+    let task = state.identity_store.work_board_get(&num.to_string()).unwrap().expect("the task is on the board");
+    assert_eq!((task.item.title.as_str(), task.item.target_agent_uid.as_str(), task.item.target_agent.as_str()), ("Review the docs", "uid-jobs-other", "jobs-other"));
+    assert_eq!((task.card.review_required, task.card.filed_by.as_str()), (false, "jobs"));
+    let history = state.identity_store.work_events(&task.item.id, 10).unwrap();
+    assert!(history[0].body.contains(&run.id) && history[0].body.contains(&id), "{}", history[0].body);
+}
+
+/// A spawn run never starts for a job an agent made, whatever put it in the
+/// store, and a leader that isn't running opens nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_spawn_action_runs_only_for_the_operators_job_with_a_running_leader() {
+    use crate::backend::cron::ActionOutcome;
+    let (state, _, _) = state();
+    let mut job = crate::backend::cron::test_job("j-sp", "p", "", "", "uid-jobs-owner");
+    job.action_kind = "spawn".into();
+    job.action = json!({ "kind": "spawn", "leader": "uid-jobs-owner", "brief": "go" });
+    let ActionOutcome::Failed(why) = crate::server::job_actions::run_action(&state, job.clone(), "r1").await else { panic!() };
+    assert!(why.contains("only when the operator created it"), "{why}");
+
+    (job.created_by, job.created_by_uid) = ("operator".into(), String::new());
+    let ActionOutcome::Failed(why) = crate::server::job_actions::run_action(&state, job, "r1").await else { panic!() };
+    assert!(why.contains("leader isn't running"), "{why}");
+}
+
+/// Manual, one-time and interval triggers.
+#[tokio::test(flavor = "multi_thread")]
+async fn manual_once_and_every_triggers() {
+    let (state, owner, _) = state();
+    let now = agentmux_common::time::now_ms();
+    let make = |trigger: Value| definition(json!({ "trigger": trigger }));
+
+    let (status, v) = send(&state, Method::POST, Some(&owner), "/agentmux/jobs", Some(make(json!({ "kind": "manual" })))).await;
+    assert_eq!(status, StatusCode::CREATED, "{v}");
+    let manual = v["job"]["id"].as_str().unwrap().to_string();
+    assert!(!state.cron_scheduler.is_scheduled(&manual), "a manual job has no timer");
+    assert!(v["job"]["next_fire"].is_null());
+    let (status, v) = send(&state, Method::POST, Some(&owner), &format!("/agentmux/jobs/{manual}/run"), Some(json!({}))).await;
+    assert_eq!((status, v["outcome"].as_str()), (StatusCode::OK, Some("delivered")), "Run now is how it runs: {v}");
+
+    let at = now + 3_600_000;
+    let (status, v) = send(&state, Method::POST, Some(&owner), "/agentmux/jobs", Some(make(json!({ "kind": "once", "at": at })))).await;
+    assert_eq!(status, StatusCode::CREATED, "{v}");
+    let once = v["job"]["id"].as_str().unwrap().to_string();
+    state.cron_scheduler.cancel_job(&once);
+    let next = chrono::DateTime::parse_from_rfc3339(v["job"]["next_fire"].as_str().unwrap()).unwrap();
+    assert_eq!(next.timestamp_millis(), at);
+    assert_eq!(state.mstore.cron_get(&once).unwrap().unwrap().once_at_ms, Some(at));
+    let (status, v) = send(&state, Method::POST, Some(&owner), "/agentmux/jobs", Some(make(json!({ "kind": "once", "at": now - 1000 })))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "a time that has passed: {v}");
+
+    let (status, v) = send(&state, Method::POST, Some(&owner), "/agentmux/jobs", Some(make(json!({ "kind": "every", "seconds": 3600 })))).await;
+    assert_eq!(status, StatusCode::CREATED, "{v}");
+    let every = v["job"]["id"].as_str().unwrap().to_string();
+    state.cron_scheduler.cancel_job(&every);
+    let next = chrono::DateTime::parse_from_rfc3339(v["job"]["next_fire"].as_str().unwrap()).unwrap().timestamp_millis();
+    assert!((now + 3_500_000..=now + 3_700_000).contains(&next), "one period after creation: {}", next - now);
+    let (status, v) = send(&state, Method::POST, Some(&owner), "/agentmux/jobs", Some(make(json!({ "kind": "every", "seconds": 600 })))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "10 minutes is under the agent minimum: {v}");
+    // The operator's own is the same rule: an agent runs unattended either way.
+    let (status, _) = send(&state, Method::POST, None, "/agentmux/jobs", Some(make(json!({ "kind": "every", "seconds": 600 })))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }

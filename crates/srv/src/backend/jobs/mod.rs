@@ -98,6 +98,9 @@ pub fn brief_line(run_id: &str, late_for_ms: Option<i64>, now_ms: i64) -> String
     )
 }
 
+/// Something done to a pane, by its block id: interrupting its turn, stopping a worker.
+pub type BlockHook = Arc<dyn Fn(&str) + Send + Sync>;
+
 /// What [`RunLedger::pane`] reads from a pane's meta.
 #[derive(Debug, Default)]
 struct Pane {
@@ -160,8 +163,8 @@ pub struct RunLedger {
     jobs: std::sync::OnceLock<Arc<Store>>,
     /// Held while a run's place is decided and its row written.
     admission: std::sync::Mutex<()>,
-    interrupt: std::sync::OnceLock<Arc<dyn Fn(&str) + Send + Sync>>,
-    worker_stop: std::sync::OnceLock<Arc<dyn Fn(&str) + Send + Sync>>,
+    interrupt: std::sync::OnceLock<BlockHook>,
+    worker_stop: std::sync::OnceLock<BlockHook>,
 }
 
 impl RunLedger {

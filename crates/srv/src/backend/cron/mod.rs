@@ -311,7 +311,8 @@ impl CronScheduler {
                 return;
             }
         };
-        let jitter = schedule::jitter_ms(&job.id);
+        // A one-time job fires at its time; the offset spreads recurring ones.
+        let jitter = if matches!(schedule, schedule::JobSchedule::Once { .. }) { 0 } else { schedule::jitter_ms(&job.id) };
 
         let sched = self.clone();
         let job = job.clone();
@@ -364,7 +365,13 @@ impl CronScheduler {
                 }
                 let now_ms = agentmux_common::time::now_ms();
                 let from = last_slot.map_or(now_ms, |l| l.max(now_ms - jitter));
-                let Some(next_ms) = schedule.next_after(from) else { break };
+                let Some(next_ms) = schedule.next_after(from) else {
+                    // A one-time job has had its time.
+                    if matches!(schedule, schedule::JobSchedule::Once { .. }) {
+                        sched.disable_job(&job.id, "once fired");
+                    }
+                    break;
+                };
                 let Some(next) = DateTime::from_timestamp_millis(next_ms) else { break };
                 // Reviewer-caught gap (P1, PR #2418): checking age only in "now"
                 // terms at the top of the loop lets one extra fire slip through

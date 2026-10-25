@@ -51,14 +51,15 @@ impl RunLedger {
         let _ = self.jobs.set(jobs);
     }
 
-    /// How to interrupt the turn in a pane (a timeout, `cancel_other`).
-    /// Without one, the pane's controller is asked as the Stop button does.
-    pub fn install_interrupt(&self, interrupt: Arc<dyn Fn(&str) + Send + Sync>) {
+    /// Tests: how to interrupt the turn in a pane (a timeout, `cancel_other`).
+    /// Otherwise the pane's controller is asked, as the Stop button does.
+    #[cfg(test)]
+    pub fn install_interrupt(&self, interrupt: super::BlockHook) {
         let _ = self.interrupt.set(interrupt);
     }
 
     /// How to stop a worker a `spawn` job started, once its run ended.
-    pub fn install_worker_stop(&self, stop: Arc<dyn Fn(&str) + Send + Sync>) {
+    pub fn install_worker_stop(&self, stop: super::BlockHook) {
         let _ = self.worker_stop.set(stop);
     }
 
