@@ -25,6 +25,12 @@ pub struct CommandPinsChangeData {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub channel: Option<String>,
+    /// Required for `pins.adopt`: what the screen showed as the refused key
+    /// (its fingerprint) or install (its label). The adoption is refused if
+    /// what srv has refused for the name is no longer that.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub expect: Option<String>,
 }
 
 /// Every pin, as the screen lists them.

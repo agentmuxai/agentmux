@@ -12,4 +12,10 @@ kind: string, agent_id: string,
 /**
  * Required for `wan`: the channel the pin is for.
  */
-channel?: string, };
+channel?: string, 
+/**
+ * Required for `pins.adopt`: what the screen showed as the refused key
+ * (its fingerprint) or install (its label). The adoption is refused if
+ * what srv has refused for the name is no longer that.
+ */
+expect?: string, };

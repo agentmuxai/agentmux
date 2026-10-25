@@ -27,7 +27,7 @@ export const PINNED_SENDERS_SETTING = {
 } satisfies SettingsIndexEntry;
 
 /** What one button press does to one pin. */
-export type PinChange = { kind: "lan" | "wan"; agentId: string; channel?: string; how: "adopt" | "forget" };
+export type PinChange = { kind: "lan" | "wan"; agentId: string; channel?: string; how: "adopt" | "forget"; expect?: string };
 
 /** "3 days ago", "just now": when a pin was set or a refusal last seen. */
 export function ago(epochSecs: number, nowSecs: number): string {
@@ -39,7 +39,7 @@ export function ago(epochSecs: number, nowSecs: number): string {
 }
 
 const same = (a: PinChange | null, b: PinChange) =>
-    a != null && a.kind === b.kind && a.agentId === b.agentId && a.channel === b.channel && a.how === b.how;
+    a != null && a.kind === b.kind && a.agentId === b.agentId && a.channel === b.channel && a.how === b.how && a.expect === b.expect;
 
 export function PinnedSenders(): JSX.Element {
     const [pins, setPins] = createSignal<PinnedSendersResult | null>(null);
@@ -67,7 +67,8 @@ export function PinnedSenders(): JSX.Element {
         }
         setAsking(null);
         setBusy(true);
-        const data = { kind: change.kind, agent_id: change.agentId, channel: change.channel };
+        // Adopt names what was on screen: srv refuses it if something else was refused since.
+        const data = { kind: change.kind, agent_id: change.agentId, channel: change.channel, expect: change.expect };
         try {
             setPins(
                 change.how === "adopt"
@@ -82,11 +83,12 @@ export function PinnedSenders(): JSX.Element {
         }
     };
 
-    const actions = (change: Omit<PinChange, "how">, canAdopt: boolean): JSX.Element => (
+    // `shown`: the refused key or install on screen beside the pin, if any.
+    const actions = (change: Omit<PinChange, "how" | "expect">, shown?: string): JSX.Element => (
         <span class="setting-pins-actions">
-            <Show when={canAdopt}>
-                <Button disabled={busy()} onClick={() => void press({ ...change, how: "adopt" })}>
-                    {same(asking(), { ...change, how: "adopt" }) ? "Press again to accept" : "Accept the new one"}
+            <Show when={shown}>
+                <Button disabled={busy()} onClick={() => void press({ ...change, how: "adopt", expect: shown })}>
+                    {same(asking(), { ...change, how: "adopt", expect: shown }) ? "Press again to accept" : "Accept the new one"}
                 </Button>
             </Show>
             <Button disabled={busy()} onClick={() => void press({ ...change, how: "forget" })}>
@@ -125,7 +127,7 @@ export function PinnedSenders(): JSX.Element {
                                                 </div>
                                             )}
                                         </Show>
-                                        {actions({ kind: "lan", agentId: pin.agent_id }, pin.refused != null)}
+                                        {actions({ kind: "lan", agentId: pin.agent_id }, pin.refused?.key_fp)}
                                     </li>
                                 )}
                             </For>
@@ -146,7 +148,7 @@ export function PinnedSenders(): JSX.Element {
                                                 </div>
                                             )}
                                         </Show>
-                                        {actions({ kind: "wan", agentId: pin.agent_id, channel: pin.channel }, pin.refused != null)}
+                                        {actions({ kind: "wan", agentId: pin.agent_id, channel: pin.channel }, pin.refused?.instance)}
                                     </li>
                                 )}
                             </For>

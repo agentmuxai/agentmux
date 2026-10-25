@@ -122,8 +122,8 @@ fn change(state: &AppState, req: &CommandPinsChangeData, how: Change) -> Result<
         return Err("pins: no agent named".to_string());
     }
     let done = match req.kind.as_str() {
-        "lan" => change_lan(state, &agent, how)?,
-        "wan" => change_wan(&agent, req.channel.as_deref().ok_or("pins: a WAN pin needs its channel")?, how)?,
+        "lan" => change_lan(state, &agent, how, req.expect.as_deref())?,
+        "wan" => change_wan(&agent, req.channel.as_deref().ok_or("pins: a WAN pin needs its channel")?, how, req.expect.as_deref())?,
         other => return Err(format!("pins: unknown kind {other:?} (lan or wan)")),
     };
     audit(&json!({ "action": how.as_str(), "kind": req.kind, "agent": agent, "channel": req.channel, "from": done.0, "to": done.1 }));
@@ -133,7 +133,17 @@ fn change(state: &AppState, req: &CommandPinsChangeData, how: Change) -> Result<
 /// What a change moved: the pin before and after, as screen labels.
 type Moved = (Option<String>, Option<String>);
 
-fn change_lan(state: &AppState, agent: &str, how: Change) -> Result<Moved, String> {
+/// An adoption is of what the screen showed: `shown` must be the refused key or
+/// install srv holds now, or something else was refused in between.
+fn confirm_shown(expect: Option<&str>, held: &str, agent: &str) -> Result<(), String> {
+    match expect {
+        Some(shown) if shown == held => Ok(()),
+        Some(_) => Err(format!("pins: what was refused for {agent} has changed since the list; look at it again")),
+        None => Err("pins: say which key or install is being accepted".to_string()),
+    }
+}
+
+fn change_lan(state: &AppState, agent: &str, how: Change, expect: Option<&str>) -> Result<Moved, String> {
     let store_err = |e: crate::backend::storage::error::StoreError| format!("pins: {e}");
     match how {
         Change::Forget => {
@@ -147,6 +157,7 @@ fn change_lan(state: &AppState, agent: &str, how: Change) -> Result<Moved, Strin
         }
         Change::Adopt => {
             let refused = lan_refusals::get(agent).ok_or_else(|| format!("pins: no other key has been shown for {agent} since AgentMux started"))?;
+            confirm_shown(expect, &fingerprint(&refused.key_b64), agent)?;
             let old = state.mstore.lan_peer_pubkey_pin_replace(agent, &refused.key_b64).map_err(store_err)?;
             lan_refusals::clear(agent);
             Ok((old.map(|k| fingerprint(&k)), Some(fingerprint(&refused.key_b64))))
@@ -154,7 +165,7 @@ fn change_lan(state: &AppState, agent: &str, how: Change) -> Result<Moved, Strin
     }
 }
 
-fn change_wan(agent: &str, channel: &str, how: Change) -> Result<Moved, String> {
+fn change_wan(agent: &str, channel: &str, how: Change, expect: Option<&str>) -> Result<Moved, String> {
     let wan = crate::backend::storage::wan_identity::global().ok_or("pins: this install has no WAN identity")?;
     let store_err = |e: crate::backend::storage::error::StoreError| format!("pins: {e}");
     let pin = wan
@@ -169,6 +180,7 @@ fn change_wan(agent: &str, channel: &str, how: Change) -> Result<Moved, String> 
         }
         Change::Adopt => {
             let c = pin.conflict.ok_or_else(|| format!("pins: no other install has spoken for {agent} on {channel}"))?;
+            confirm_shown(expect, &label(&c.host_hint, &c.instance_id), agent)?;
             wan.agent_instance_pin_replace(agent, channel, &c.instance_id, &c.host_hint, agentmux_common::time::now_secs())
                 .map_err(store_err)?;
             Ok((from, Some(label(&c.host_hint, &c.instance_id))))
@@ -236,7 +248,15 @@ mod tests {
         assert_eq!(row["refused"]["key_fp"], fingerprint("key-b"), "{row}");
         assert!(!row.to_string().contains("key-a"), "never the key itself: {row}");
 
-        let (err, _) = call(&state, op(), COMMAND_PINS_ADOPT, json!({ "kind": "lan", "agent_id": "PinOps" })).await;
+        // Adopt what the screen showed: nothing, or another key, is refused.
+        let (err, _) = call(&state, op(), COMMAND_PINS_ADOPT, json!({ "kind": "lan", "agent_id": "pinops" })).await;
+        assert!(err.contains("say which key"), "{err}");
+        lan_refusals::pin_mismatch("pinops", "key-c"); // something else is refused after the list was drawn
+        let (err, _) = call(&state, op(), COMMAND_PINS_ADOPT, json!({ "kind": "lan", "agent_id": "pinops", "expect": fingerprint("key-b") })).await;
+        assert!(err.contains("has changed since the list"), "{err}");
+        assert_eq!(state.mstore.lan_peer_pubkey_pin_load("pinops").unwrap().as_deref(), Some("key-a"), "nothing moved");
+        lan_refusals::pin_mismatch("pinops", "key-b");
+        let (err, _) = call(&state, op(), COMMAND_PINS_ADOPT, json!({ "kind": "lan", "agent_id": "PinOps", "expect": fingerprint("key-b") })).await;
         assert_eq!(err, "");
         assert_eq!(state.mstore.lan_peer_pubkey_pin_load("pinops").unwrap().as_deref(), Some("key-b"));
         let (err, _) = call(&state, op(), COMMAND_PINS_ADOPT, json!({ "kind": "lan", "agent_id": "pinops" })).await;

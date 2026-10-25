@@ -82,7 +82,7 @@ describe("PinnedSenders", () => {
         expect(forget).not.toHaveBeenCalled();
         fireEvent.click(await screen.findByText("Press again to forget"));
         await waitFor(() => expect(forget).toHaveBeenCalledTimes(1));
-        expect(forget.mock.calls[0][1]).toEqual({ kind: "lan", agent_id: "korp", channel: undefined });
+        expect(forget.mock.calls[0][1]).toEqual({ kind: "lan", agent_id: "korp", channel: undefined, expect: undefined });
         await screen.findByText(/Nothing is pinned yet/);
     });
 
@@ -93,7 +93,7 @@ describe("PinnedSenders", () => {
         fireEvent.click(accept[1]); // lazo
         fireEvent.click(await screen.findByText("Press again to accept"));
         await waitFor(() => expect(adopt).toHaveBeenCalledTimes(1));
-        expect(adopt.mock.calls[0][1]).toEqual({ kind: "wan", agent_id: "lazo", channel: "stable" });
+        expect(adopt.mock.calls[0][1]).toEqual({ kind: "wan", agent_id: "lazo", channel: "stable", expect: "area54~wxyz9876" });
     });
 
     it("says why when the list can't be read or a change is refused", async () => {
