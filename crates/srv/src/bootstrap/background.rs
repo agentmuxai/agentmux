@@ -129,6 +129,9 @@ pub fn spawn_background_subsystems(
         event_bus.clone(),
     );
 
+    // Say in the log when the runtime stops running tasks, and for how long.
+    backend::stall_watch::start();
+
     // Start sysinfo collection loop (interval configurable via telemetry:interval)
     let sysinfo_broker = broker.clone();
     let sysinfo_config = config_watcher.clone();
