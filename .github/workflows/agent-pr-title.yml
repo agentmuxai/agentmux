@@ -53,7 +53,7 @@ jobs:
           # The last well-formed tag: the one that counts.
           tag=$(printf '%s\n' "$BODY" \
             | grep -oE '<!--[[:space:]]*agentmux:agent_id=[^[:space:]>]+[[:space:]]*-->' \
-            | sed -E 's/.*agent_id=([^[:space:]>]+).*/\1/' \
+            | sed -E 's/.*agent_id=([^[:space:]>]+)[[:space:]]*-->.*/\1/' \
             | grep -E '^[A-Za-z0-9_-]{1,64}$' | tail -n 1)
           if [ -z "$tag" ]; then
             echo "::warning title=PR body has no agent tag::No agent_id tag in the body, so notices about this PR have no agent to reach. gh-agent adds it when it opens the PR."
