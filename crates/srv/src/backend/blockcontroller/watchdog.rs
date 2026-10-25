@@ -20,6 +20,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::interval;
 
+use crate::backend::mps::Broker;
+use crate::backend::notify::policy::NotifyKind;
 use crate::backend::storage::store::Store;
 use crate::backend::wconfig::ConfigState;
 use super::{get_all_controllers, STATUS_RUNNING};
@@ -102,8 +104,49 @@ fn awaiting_user(store: &Store, block_id: &str) -> bool {
         })
 }
 
+/// What the watchdog tells the claims' history and the notification: the
+/// limit that tripped, in the unit it was set in ("4 h", "30 min").
+pub(crate) fn limit_text(reason: StopReason, limits: Limits) -> String {
+    let hours = |h: f64| if h.fract() == 0.0 { format!("{h:.0} h") } else { format!("{h} h") };
+    match reason {
+        StopReason::MaxRuntime { .. } => hours(limits.max_runtime_hours),
+        StopReason::IdleOutput { .. } => {
+            let m = limits.idle_timeout_mins;
+            if m.fract() == 0.0 { format!("{m:.0} min without output") } else { format!("{m} min without output") }
+        }
+    }
+}
+
+/// After the watchdog stopped an agent pane (`stop_now` keeps the claims):
+/// release its claimed Kanban tasks with the reason, the attempt counting,
+/// and raise one `AgentCrashed` notification
+/// (`SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md` §8). Blocking.
+fn after_stop(identity: &Store, broker: &Arc<Broker>, block_id: &str, limit: &str, is_shell: bool) {
+    if is_shell {
+        return;
+    }
+    let reason = format!("stopped by the watchdog after {limit}");
+    let agent = crate::backend::reactive::get_global_handler().list_agents().into_iter().find(|r| r.block_id == block_id);
+    if let Some(agent) = agent {
+        let released = crate::sagas::agent_teardown::release_claims(
+            identity,
+            &agent.agent_id,
+            agent.uid.as_deref(),
+            &reason,
+            agentmux_common::time::now_ms(),
+        );
+        if released > 0 {
+            tracing::info!(block_id = %block_id, released, "watchdog: released the stopped agent's claimed tasks");
+            broker.publish_event::<crate::backend::mps_events::WorkQueueChanged>(&(), vec![], 0);
+        }
+    }
+    if let Some(router) = crate::backend::notify::router::get(broker) {
+        router.emit_fixed(NotifyKind::AgentCrashed, block_id, Some(format!("Stopped by the watchdog after {limit}.")));
+    }
+}
+
 /// Run the agent watchdog loop. Never returns.
-pub async fn run_watchdog_loop(config: Arc<ConfigState>, store: Arc<Store>) {
+pub async fn run_watchdog_loop(config: Arc<ConfigState>, store: Arc<Store>, identity: Arc<Store>, broker: Arc<Broker>) {
     let mut ticker = interval(Duration::from_secs(WATCHDOG_INTERVAL_SECS));
     // block_id → when a scan last saw the agent waiting for the user. Covers a
     // wait that ends without srv delivering an answer (an App Server request
@@ -162,7 +205,8 @@ pub async fn run_watchdog_loop(config: Arc<ConfigState>, store: Arc<Store>) {
                 is_shell: shell.is_some(),
             };
 
-            match verdict(limits, now_ms, &agent) {
+            let verdict = verdict(limits, now_ms, &agent);
+            match verdict {
                 Some(StopReason::MaxRuntime { elapsed_ms }) => {
                     tracing::warn!(
                         block_id = %block_id,
@@ -181,7 +225,13 @@ pub async fn run_watchdog_loop(config: Arc<ConfigState>, store: Arc<Store>) {
                 }
                 None => continue,
             }
-            let _ = crate::sagas::agent_teardown::stop_now(&block_id, true);
+            if crate::sagas::agent_teardown::stop_now(&block_id, true).is_ok() {
+                if let Some(reason) = verdict {
+                    let (identity, broker, block_id) = (identity.clone(), broker.clone(), block_id.clone());
+                    let (limit, is_shell) = (limit_text(reason, limits), agent.is_shell);
+                    let _ = tokio::task::spawn_blocking(move || after_stop(&identity, &broker, &block_id, &limit, is_shell)).await;
+                }
+            }
         }
     }
 }
@@ -208,6 +258,14 @@ mod tests {
             turn_active: true,
             ..AgentClock::default()
         }
+    }
+
+    #[test]
+    fn the_limit_is_named_in_the_unit_it_was_set_in() {
+        let l = limits(4.0, 30.0);
+        assert_eq!(limit_text(StopReason::MaxRuntime { elapsed_ms: 0 }, l), "4 h");
+        assert_eq!(limit_text(StopReason::IdleOutput { idle_ms: 0 }, l), "30 min without output");
+        assert_eq!(limit_text(StopReason::MaxRuntime { elapsed_ms: 0 }, limits(1.5, 0.0)), "1.5 h");
     }
 
     #[test]

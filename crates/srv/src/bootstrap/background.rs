@@ -142,8 +142,10 @@ pub fn spawn_background_subsystems(
     // Start agent process watchdog (kills panes that exceed max-runtime or idle-output limits)
     let watchdog_config = config_watcher.clone();
     let watchdog_store = Arc::clone(mstore);
+    let watchdog_identity = Arc::clone(identity_store);
+    let watchdog_broker = broker.clone();
     tokio::spawn(async move {
-        backend::blockcontroller::watchdog::run_watchdog_loop(watchdog_config, watchdog_store).await;
+        backend::blockcontroller::watchdog::run_watchdog_loop(watchdog_config, watchdog_store, watchdog_identity, watchdog_broker).await;
     });
 
     // Recover a missing session title for a running agent (the Swarm row and

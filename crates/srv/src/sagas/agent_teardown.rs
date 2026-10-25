@@ -13,7 +13,10 @@
 // |   (`close_pane`, `delete_block`, `delete_tab`,        |                   |
 // |   `delete_workspace`; the orphan reaper via close_pane)|                   |
 // | `/quit`, `QuitSelf`, no-arg `ClosePane` (`self_quit`)  | `Policy::quit()`  |
-// | Stop, `agent.stop`, `FleetBulkStop` Stop, the watchdog | `Policy::stop(..)`|
+// | Stop, `agent.stop`, `FleetBulkStop` Stop               | `Policy::stop(..)`|
+// | The pane's `AgentStop`, the watchdog (no `AppState`)   | `Policy::stop_cli_only(..)` |
+// |   (`stop_now`; the watchdog then releases the claims   |                   |
+// |   itself, `watchdog::after_stop`, since this keeps them)|                  |
 // | Controller replace (`resync_controller`)              | `Policy::replace()` |
 // | App exit (`main.rs`)                                  | `Policy::app_exit()` |
 // | A drawer closed, a `/btw` throwaway, a spawn rollback, | `discard`         |
@@ -667,6 +670,17 @@ async fn wait_gone(mut procs: Vec<agent_resources::ProcessEntry>) -> Vec<agent_r
     }
 }
 
+/// Release the agent's claimed work items with `reason` (each counts as an
+/// attempt), so they go back to the pool now rather than when the 120 s lease
+/// expires. How many went. Blocking.
+pub(crate) fn release_claims(identity_store: &crate::backend::storage::store::Store, a: &str, u: Option<&str>, reason: &str, now: i64) -> usize {
+    let items = identity_store.work_queue_claimed_by(a, u.unwrap_or("")).unwrap_or_default();
+    agent_resources::claims_held_by(&items, a, u)
+        .into_iter()
+        .filter(|w| matches!(identity_store.work_queue_release(&w.id, &w.claimed_by, &w.claimed_by_uid, w.attempts, reason, now), Ok(Some(_))))
+        .count()
+}
+
 /// Release the agent's work claims, so the items go back to the pool now
 /// rather than when the 120 s lease expires, and list the crons that target
 /// it (kept: a cron is a deliberate schedule that resumes when the agent is
@@ -675,17 +689,7 @@ async fn release_claims_and_list_crons(state: &AppState, who: &AgentIdentity, re
     let (identity_store, shared_store) = (state.identity_store.clone(), state.shared_store.clone());
     let (a, u) = (who.agent_id.clone(), who.uid.clone());
     let result = tokio::task::spawn_blocking(move || {
-        let now = agentmux_common::time::now_ms();
-        let items = identity_store.work_queue_claimed_by(&a, u.as_deref().unwrap_or("")).unwrap_or_default();
-        let released = agent_resources::claims_held_by(&items, &a, u.as_deref())
-            .into_iter()
-            .filter(|w| {
-                matches!(
-                    identity_store.work_queue_release(&w.id, &w.claimed_by, &w.claimed_by_uid, w.attempts, reason, now),
-                    Ok(Some(_))
-                )
-            })
-            .count();
+        let released = release_claims(&identity_store, &a, u.as_deref(), reason, agentmux_common::time::now_ms());
         let crons = shared_store
             .and_then(|s| s.cron_list().ok())
             .map(|jobs| agent_resources::crons_targeting(&jobs, &a, u.as_deref()))
@@ -703,6 +707,53 @@ async fn release_claims_and_list_crons(state: &AppState, who: &AgentIdentity, re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The watchdog's release: the agent's claims go back to the pool with the
+    /// reason, the attempt counted; another agent's claim is left alone.
+    #[test]
+    fn release_claims_returns_one_agents_tasks_with_the_reason_and_counts_the_attempt() {
+        use crate::backend::storage::work_queue::{work_state, ClaimFilter, WorkItem};
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::backend::storage::store::Store::open_identity_store(&dir.path().join("identity-store.db")).unwrap();
+        for id in ["w1", "w2"] {
+            let item = WorkItem {
+                id: id.into(),
+                title: "t".into(),
+                payload: "p".into(),
+                kind: String::new(),
+                target_agent: String::new(),
+                target_group: String::new(),
+                priority: 0,
+                state: work_state::OPEN.into(),
+                claimed_by: String::new(),
+                target_agent_uid: String::new(),
+                claimed_by_uid: String::new(),
+                claim_expires: None,
+                attempts: 0,
+                max_attempts: 3,
+                created_by: "tester".into(),
+                created_by_uid: String::new(),
+                created_at: 1000,
+                updated_at: 1000,
+                not_before: None,
+                result: String::new(),
+            };
+            store.work_queue_enqueue(&item).unwrap();
+        }
+        let claim_as = |agent: &str, uid: &str| {
+            let f = ClaimFilter { kind: None, agent_id: agent.into(), agent_uid: uid.into(), groups: vec![] };
+            store.work_queue_claim(&f, 2000, 120_000).unwrap().expect("an open item")
+        };
+        let lark = claim_as("Lark", "uid-lark");
+        let korp = claim_as("Korp", "uid-korp");
+
+        let reason = "stopped by the watchdog after 4 h";
+        assert_eq!(release_claims(&store, "Lark", Some("uid-lark"), reason, 3000), 1);
+        let back = store.work_queue_get(&lark.id).unwrap().unwrap();
+        assert_eq!((back.state.as_str(), back.attempts, back.result.as_str()), (work_state::OPEN, 1, reason));
+        assert_eq!(store.work_queue_get(&korp.id).unwrap().unwrap().state, work_state::CLAIMED, "another agent's claim stays");
+        assert_eq!(release_claims(&store, "Lark", Some("uid-lark"), reason, 3000), 0, "nothing left to release");
+    }
 
     #[test]
     fn policies_encode_todays_scopes() {
