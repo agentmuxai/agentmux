@@ -536,7 +536,7 @@ fn global_memory_ui_revert(store: &Store, cmd: &CommandGlobalMemoryRevertData, w
         // recording it as a human edit would opt it out of them for good
         // (`bundle_reseed_system_if_owned` skips any non-seeder last writer).
         let seeder = crate::backend::operator_config_seed::WRITTEN_BY;
-        let written_by = if target.written_by == seeder { seeder } else { "armory-ui" };
+        let written_by = if target.written_by == seeder { seeder } else { writer };
         store.bundle_upsert_system_if_changed(&bundle, written_by, "revert", &detail)
     } else {
         store.bundle_upsert_with_version(&bundle, writer, "", "revert", &detail)
