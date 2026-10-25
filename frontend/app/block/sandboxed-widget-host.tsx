@@ -32,6 +32,7 @@ import { getWebServerEndpoint } from "@/util/endpoints";
 import type { PaneTabHostContext, PaneTabInstance, PaneTabManifest } from "./pane-tab-registry";
 import { BridgeError, bridgeErrorOf, bridgeTheme, ERR, handleBridgeRequest, type BridgeHost, type BridgeState } from "./widget-bridge";
 import { setStatusLook, type CommandSource } from "./widget-panes";
+import { WIDGET_FRAME_SANDBOX } from "./widget-sandbox";
 
 import "./sandboxed-widget.scss";
 
@@ -40,8 +41,6 @@ const HELLO_TIMEOUT_MS = 10_000;
 const MAX_IN_FLIGHT = 64;
 /** Commands kept for a pane that hasn't connected yet. */
 const MAX_PENDING_COMMANDS = 20;
-
-const IFRAME_SANDBOX = "allow-scripts allow-forms allow-modals allow-downloads";
 
 export function makeSandboxedPaneManifest(pkg: WidgetPackageInfo, pane: WidgetPaneInfo): PaneTabManifest {
     return {
@@ -242,7 +241,7 @@ function createSandboxedInstance(pkg: WidgetPackageInfo, pane: WidgetPaneInfo, c
             const frame = () => {
                 const el = (
                     <iframe
-                        sandbox={IFRAME_SANDBOX}
+                        sandbox={WIDGET_FRAME_SANDBOX}
                         allow="clipboard-write"
                         referrerpolicy="no-referrer"
                         title={pane.label}

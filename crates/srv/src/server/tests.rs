@@ -5859,11 +5859,18 @@ async fn m4a2_every_actor_site_counts_a_name_that_is_not_plainly_the_callers() {
             );
             // M4a-2's counting changes no response. Since M4c-2 the owner of
             // a self-scoped site is the Caller when attributed (§6.5.9), so
-            // there the token — not the count — does change it, by design.
+            // there the token — not the count — does change it, by design. A
+            // global-memory writer or reverter is refused when the token names
+            // another agent, so those answer differently too.
             let owner_is_the_caller = site.starts_with("memory_")
                 || matches!(
                     site,
-                    "identity_accounts" | "identity_validate" | "preset_get" | "history_search"
+                    "identity_accounts"
+                        | "identity_validate"
+                        | "preset_get"
+                        | "history_search"
+                        | "globalmemory_write"
+                        | "globalmemory_revert"
                 );
             if !owner_is_the_caller {
                 assert_eq!(

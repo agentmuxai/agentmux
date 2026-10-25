@@ -147,6 +147,7 @@ export function permissionFor(method: string, params: Record<string, unknown>, p
     if (method.startsWith("storage.")) return "storage";
     if (method.startsWith("files.")) return "files";
     if (method === "clipboard.writeText") return "clipboard:write";
+    if (method === "ui.openUrl") return "links:open";
     if (method === "agents.list") return "agents:read";
     if (method === "agents.send") return "agents:send";
     if (method === "tasks.list") return "tasks:read";
