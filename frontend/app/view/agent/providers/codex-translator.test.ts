@@ -33,6 +33,17 @@ function translateCandidateFixture(raw: string): StreamEvent[] {
 }
 
 describe("CodexTranslator", () => {
+    it("shows a jekt live, and the user's own typed message not at all (the pane already has it)", () => {
+        const jekt = "[JEKT:FROM=agenty TO=coddy TIER=coord]\nhello\n[/JEKT]";
+        const injected = { type: "user", message: { role: "user", content: jekt }, amx: { via: "inject" } };
+        const typed = { type: "user", message: { role: "user", content: "hi" } };
+        expect(new CodexTranslator().translate(injected)).toEqual([
+            { type: "user_message", message: jekt, timestamp: expect.any(Number) },
+        ]);
+        expect(new CodexTranslator().translate(typed)).toEqual([]);
+        expect(new CodexTranslator({ replay: true }).translate(typed)).toEqual([{ type: "user_message", message: "hi" }]);
+    });
+
     it("translates the pinned normal-turn fixture", () => {
         expect(translateFixture(normalFixture)).toEqual([
             { type: "text", content: "fixture-ok" },
