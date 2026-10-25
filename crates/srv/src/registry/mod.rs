@@ -41,7 +41,7 @@ pub use migrate::{
     SourceBackfillStats,
 };
 pub use paths::{
-    resolve_identity_store_path, resolve_shared_definitions_dir, resolve_shared_lan_instances_dir,
+    resolve_identity_store_path, resolve_isolated_work_store_path, resolve_shared_definitions_dir, resolve_shared_lan_instances_dir,
     resolve_shared_reactive_dir, resolve_shared_registry_dir, resolve_shared_store_path,
     resolve_shared_transcripts_dir,
 };

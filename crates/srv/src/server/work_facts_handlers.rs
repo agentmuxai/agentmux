@@ -124,7 +124,7 @@ pub(crate) async fn handle_who_is_working_on(
     let regs = state.reactive_handler.list_agents();
     let uid = caller.as_ref().and_then(|c| c.0.uid().map(str::to_string));
     let me_block = caller_block(&regs, uid.as_deref(), p.block.as_deref(), p.agent.as_deref());
-    let store = state.identity_store.clone();
+    let store = state.work_store.clone();
     let now = agentmux_common::time::now_ms();
     let live_claims = tokio::task::spawn_blocking(move || store.work_claims_live(now).unwrap_or_default());
     let (local, (cross, unreachable), live_claims) =
@@ -147,7 +147,7 @@ pub(crate) async fn handle_who_is_working_on(
         .collect();
     claims::add_claim_matches(&mut agents, &target, &theirs, &others, now);
     // What agents posted about it (SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15 §3.4).
-    let store = state.identity_store.clone();
+    let store = state.work_store.clone();
     let asked = target.clone();
     let pr = p.pr.filter(|n| *n > 0);
     let recent_posts = tokio::task::spawn_blocking(move || super::coord_channel_handlers::recent_posts(&store, &asked, pr, now))

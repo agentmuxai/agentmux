@@ -489,6 +489,44 @@ pub struct SeatInput {
     pub lane: Option<String>,
 }
 
+/// Request for `agent.pane.unregister`: forget a pane's registration, by
+/// `block_id` (or by `agent_id` alone, which srv refuses when several panes
+/// hold the name). The operator's own client only.
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandAgentPaneUnregisterData {
+    pub agent_id: String,
+    #[serde(default)]
+    pub block_id: String,
+}
+
+/// Response for `agent.pane.unregister`.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AgentPaneUnregisterResult {
+    pub success: bool,
+}
+
+/// Request for `agent.takeover`: take the agent in `block_id` over from the
+/// other AgentMux instance on this host that runs it. The operator's own
+/// client only.
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandAgentTakeoverData {
+    pub block_id: String,
+}
+
+/// Response for `agent.takeover`: whether another instance let go, and which.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AgentTakeoverResult {
+    /// False when no other instance was running the agent any more.
+    pub released: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub from_channel: Option<String>,
+}
+
 /// Response for `agent.setSeat`: the seat as stored, `null` once cleared.
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]

@@ -399,6 +399,25 @@
     }
   },
   {
+    "command": "agent.pane.unregister",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandAgentPaneUnregisterData",
+    "requestName": "CommandAgentPaneUnregisterData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentPaneUnregisterData"
+      ],
+      "name": "CommandAgentPaneUnregisterData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::AgentPaneUnregisterResult",
+    "responseName": "AgentPaneUnregisterResult",
+    "responseTs": {
+      "imports": [
+        "AgentPaneUnregisterResult"
+      ],
+      "name": "AgentPaneUnregisterResult"
+    }
+  },
+  {
     "command": "agent.process-list",
     "request": "agentmux_srv::backend::rpc_types::agent::AgentProcessListCommand",
     "requestName": "AgentProcessListCommand",
@@ -510,6 +529,25 @@
         "AgentStopResult"
       ],
       "name": "AgentStopResult"
+    }
+  },
+  {
+    "command": "agent.takeover",
+    "request": "agentmux_srv::backend::rpc_types::agent::CommandAgentTakeoverData",
+    "requestName": "CommandAgentTakeoverData",
+    "requestTs": {
+      "imports": [
+        "CommandAgentTakeoverData"
+      ],
+      "name": "CommandAgentTakeoverData"
+    },
+    "response": "agentmux_srv::backend::rpc_types::agent::AgentTakeoverResult",
+    "responseName": "AgentTakeoverResult",
+    "responseTs": {
+      "imports": [
+        "AgentTakeoverResult"
+      ],
+      "name": "AgentTakeoverResult"
     }
   },
   {

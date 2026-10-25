@@ -134,6 +134,25 @@ pub fn resolve_identity_store_path() -> Option<std::path::PathBuf> {
     resolve_global_shared_root().map(|h| h.join("identity-store.db"))
 }
 
+/// Where this channel keeps its own work store (the Kanban queue, Presence
+/// claims, coordination posts, the Jobs ledger and scheduled jobs), or `None`
+/// when it shares the host's: any build but a `task dev` one, or a dev build with
+/// `AGENTMUX_ISOLATED_WORK=0`. See [`agentmux_common::work_store`].
+///
+/// The channel's instance dir, which outlives a version bump; `fallback_dir`
+/// (the version's db dir) only when a bare run has no instance dir, so an
+/// isolated channel never falls back to the shared files.
+pub fn resolve_isolated_work_store_path(fallback_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    if !agentmux_common::isolated_work_enabled() {
+        return None;
+    }
+    let dir = std::env::var_os("AGENTMUX_INSTANCE_DIR")
+        .filter(|d| !d.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| fallback_dir.to_path_buf());
+    Some(dir.join("work-store.db"))
+}
+
 /// The global, channel-independent `<home>/shared` root. Deliberately
 /// UNAFFECTED by `isolated_auth_enabled()` — callers that need the true
 /// `~/.agentmux` home (e.g. `migrations/runner.rs`'s `MigrationContext.home`)
@@ -180,8 +199,36 @@ mod tests {
         std::env::remove_var("AGENTMUX_DATA_DIR");
         std::env::remove_var("AGENTMUX_SHARED_DIR");
         std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+        std::env::remove_var("AGENTMUX_ISOLATED_WORK");
         std::env::remove_var("AGENTMUX_INSTANCE_DIR");
         std::env::remove_var("AGENTMUX_CHANNEL");
+    }
+
+    #[test]
+    fn a_build_with_its_own_work_store_keeps_it_in_the_instance_dir() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear();
+        std::env::set_var("AGENTMUX_ISOLATED_WORK", "1");
+        std::env::set_var("AGENTMUX_INSTANCE_DIR", "/tmp/test-home/dev/some-branch");
+        let fallback = PathBuf::from("/tmp/test-home/dev/some-branch/v/db");
+        assert_eq!(
+            resolve_isolated_work_store_path(&fallback),
+            Some(PathBuf::from("/tmp/test-home/dev/some-branch/work-store.db"))
+        );
+        // A bare run with no instance dir still never falls back to the host's files.
+        std::env::remove_var("AGENTMUX_INSTANCE_DIR");
+        assert_eq!(resolve_isolated_work_store_path(&fallback), Some(fallback.join("work-store.db")));
+        clear();
+    }
+
+    #[test]
+    fn opting_out_shares_the_hosts_work_store() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear();
+        std::env::set_var("AGENTMUX_ISOLATED_WORK", "0");
+        std::env::set_var("AGENTMUX_INSTANCE_DIR", "/tmp/test-home/dev/some-branch");
+        assert_eq!(resolve_isolated_work_store_path(&PathBuf::from("/x")), None);
+        clear();
     }
 
     #[test]

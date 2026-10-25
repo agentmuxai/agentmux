@@ -688,4 +688,32 @@ mod tests {
             blockcontroller::delete_controller(b);
         }
     }
+
+    /// The rows `frontend/app/store/pane-tab-progress.test.ts` reads too: the pill's rule in the
+    /// frontend follows `decide()` only as long as both pass on the same table.
+    #[test]
+    fn decide_matches_the_shared_fixture() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../../../test/fixtures/agent-state-decide.json")).unwrap();
+        let rows = fixture["rows"].as_array().unwrap();
+        assert!(rows.len() >= 20, "the fixture lost rows");
+        for row in rows {
+            let name = row["name"].as_str().unwrap();
+            let failure = row["failure"].as_object().map(|f| {
+                let code: FailureClass = serde_json::from_value(f["code"].clone()).unwrap();
+                (code, f["resets_at_ms"].as_u64())
+            });
+            let got = decide(&StateInputs {
+                controller_type: row["controller_type"].as_str().unwrap(),
+                turn_active: row["turn_active"].as_bool().unwrap(),
+                process_status: row["process_status"].as_str().unwrap(),
+                exit_code: row["exit_code"].as_i64().unwrap() as i32,
+                awaiting_user: row["awaiting_user"].as_bool().unwrap(),
+                failure,
+                now_ms: row["now_ms"].as_u64().unwrap(),
+            });
+            let expected = row["expected"].as_str().unwrap();
+            assert_eq!(got.map_or("none", AgentState::as_str), expected, "{name}");
+        }
+    }
 }

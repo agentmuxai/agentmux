@@ -131,7 +131,7 @@ async fn decide(state: &AppState, caller: Option<&Caller>, id: &str, req: Decisi
         return (StatusCode::UNAUTHORIZED, Json(json!({ "error": "your pane isn't registered with AgentMux" }))).into_response();
     };
     let task_id = resolve_id(state, id);
-    let task = match state.identity_store.work_board_get(&task_id) {
+    let task = match state.work_store.work_board_get(&task_id) {
         Ok(Some(t)) => t,
         Ok(None) => return (StatusCode::NOT_FOUND, Json(json!({ "error": "no such task" }))).into_response(),
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
@@ -207,7 +207,7 @@ async fn check(
         return Err(delegate::not_in_review(num, &task.item.state));
     }
     // 3. Not its own work.
-    let events = state.identity_store.work_events(&task.item.id, 200).unwrap_or_default();
+    let events = state.work_store.work_events(&task.item.id, 200).unwrap_or_default();
     if is_own_work(task, reg, &events) {
         return Err(delegate::own_work(num));
     }

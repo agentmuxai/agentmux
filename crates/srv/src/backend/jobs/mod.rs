@@ -185,7 +185,7 @@ pub struct RunLedger {
 }
 
 impl RunLedger {
-    /// A ledger over `store` (the identity store), following turns on
+    /// A ledger over `store` (the work store), following turns on
     /// `broker`. Needs a tokio runtime (the follower's task).
     pub fn new(store: Arc<Store>, mstore: Option<Arc<Store>>, broker: Arc<Broker>) -> Arc<Self> {
         Self::new_in(store, mstore, broker, &crate::backend::reactive::registry::local_channel_id())
