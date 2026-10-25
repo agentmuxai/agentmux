@@ -196,11 +196,10 @@ fn live_panes_of(mstore: &Store, def_id: &str) -> Vec<String> {
         .collect()
 }
 
-/// The note for `ev` and the leader pane it goes to, if `ev` is a worker's
-/// and its leader is open; `None` otherwise, or while the worker's gap runs.
-/// The note for `ev`: the leader's pane and the text, and a key when the note may wait for a
-/// cold leader's next turn (a worker that ended a turn silent), none when the leader must hear
-/// at once (it failed or stopped, or it is waiting for an answer).
+/// The note for `ev`: the leader's pane, the text, and a key when the note may wait for a cold
+/// leader's next turn (a worker that ended a turn silent); no key when the leader must hear at
+/// once (it failed or stopped, or is waiting for an answer). `None` when `ev` isn't a worker's,
+/// its leader isn't open, or the worker's gap runs.
 fn note_for(mstore: &Store, filestore: &FileStore, ev: &WorkerEvent) -> Option<(String, String, Option<String>)> {
     let block_id = match ev {
         WorkerEvent::TurnEnded { block_id, .. }
