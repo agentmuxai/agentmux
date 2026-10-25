@@ -77,6 +77,7 @@ actor_sites! {
     MemoryRevert => "memory_revert",
     GlobalMemoryWrite => "globalmemory_write",
     GlobalMemoryRevert => "globalmemory_revert",
+    GlobalMemoryRemove => "globalmemory_remove",
     IdentityAccounts => "identity_accounts",
     PresetGet => "preset_get",
     IdentityValidate => "identity_validate",
@@ -270,6 +271,39 @@ pub(crate) async fn require_token_naming(
     match tokio::task::spawn_blocking(move || proven_slug(&mstore, &uid, &name)).await {
         Ok(Some(_)) => Ok(()),
         _ => Err("FORBIDDEN: the request's token must name the agent this acts for, by a name only that agent answers to".to_string()),
+    }
+}
+
+/// For a route that records who acted: the agent the request's token names, as
+/// `(slug, uid)`. `claimed` is the name the request gives for itself, and an
+/// empty one leaves the token to decide alone. Refused without a token, and
+/// when `claimed` is not a name only that agent answers to, so what is recorded
+/// is what the server proved and never a body field.
+pub(crate) async fn require_token_actor(
+    state: &AppState,
+    caller: Option<&Caller>,
+    site: ActorSite,
+    claimed: &str,
+) -> Result<(String, String), String> {
+    check_actor(state, caller, site, Some(claimed));
+    let Some(uid) = caller.and_then(Caller::uid) else {
+        return Err("FORBIDDEN: this acts for an agent, so the request must carry that agent's token (AGENTMUX_AGENT_TOKEN)".to_string());
+    };
+    let (mstore, uid, claimed) = (state.mstore.clone(), uid.to_string(), claimed.trim().to_string());
+    let who = uid.clone();
+    let slug = tokio::task::spawn_blocking(move || {
+        if claimed.is_empty() {
+            mstore.agent_names_by_id(&who).ok().flatten().map(|row| row.slug)
+        } else {
+            proven_slug(&mstore, &who, &claimed)
+        }
+    })
+    .await
+    .ok()
+    .flatten();
+    match slug {
+        Some(slug) => Ok((slug, uid)),
+        None => Err("FORBIDDEN: the request's token must name the agent this acts for, by a name only that agent answers to".to_string()),
     }
 }
 

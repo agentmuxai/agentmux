@@ -207,7 +207,7 @@ pub(super) async fn handle_agent_broadcast_forward(
 ) -> impl IntoResponse {
     // The forwarding instance is a server, not an agent: a request that carries an agent's token is that agent asking.
     if caller.as_deref().and_then(super::caller::Caller::uid).is_some() {
-        return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "success": false, "error": "FORBIDDEN: a broadcast comes from the operator's window" }))).into_response();
+        return (StatusCode::FORBIDDEN, Json(serde_json::json!({ "success": false, "error": "FORBIDDEN: a Swarm broadcast arrives as the operator's own words and comes from the AgentMux window; an agent broadcasts as itself with the Message tool" }))).into_response();
     }
     match app_api::fleet::deliver_forwarded_broadcast(&state, &req.block_id, &req.body, &req.msg_id, req.recipients).await {
         Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "success": true }))).into_response(),
@@ -390,12 +390,9 @@ pub(super) async fn handle_agent_globalmemory_write(
     caller: Option<Extension<caller::Caller>>,
     Json(req): Json<AgentGlobalMemoryWriteRequest>,
 ) -> impl IntoResponse {
-    actor::check_actor(
-        &state,
-        caller.as_deref(),
-        actor::ActorSite::GlobalMemoryWrite,
-        Some(&req.agent_id),
-    );
+    if let Err(e) = actor::require_actor(&state, caller.as_deref(), actor::ActorSite::GlobalMemoryWrite, Some(&req.agent_id)).await {
+        return app_api_response::<()>(Err(e));
+    }
     let detail_str;
     let provenance = if let Some(p) = req.provenance.as_ref() {
         detail_str = p.detail.to_string();
@@ -443,16 +440,28 @@ pub(super) async fn handle_agent_globalmemory_read(
 #[derive(serde::Deserialize)]
 pub(super) struct AgentGlobalMemoryRemoveRequest {
     pub(super) id: String,
+    /// The name the caller gives for itself; the token decides who is recorded.
+    #[serde(default)]
+    pub(super) agent_id: String,
 }
 
 /// `POST /api/v1/agent/globalmemory/remove` — demote a Global Memory entry
 /// (clears `is_global`; the bundle row itself survives, same as Memory →
-/// Global's own "Remove" button). Backs the `GlobalMemoryRemove` MCP tool.
+/// Global's own "Remove" button), recorded as a `remove` version under the
+/// agent the request's token names so the removal can be seen and undone. A
+/// request without that token is refused. Backs the `GlobalMemoryRemove` MCP
+/// tool.
 pub(super) async fn handle_agent_globalmemory_remove(
     State(state): State<AppState>,
+    caller: Option<Extension<caller::Caller>>,
     Json(req): Json<AgentGlobalMemoryRemoveRequest>,
 ) -> impl IntoResponse {
-    app_api_response(app_api::global_memory_remove_impl(&state, &req.id))
+    let (agent_id, written_by_uid) =
+        match actor::require_token_actor(&state, caller.as_deref(), actor::ActorSite::GlobalMemoryRemove, &req.agent_id).await {
+            Ok(who) => who,
+            Err(e) => return app_api_response::<()>(Err(e)),
+        };
+    app_api_response(app_api::global_memory_remove_impl(&state, &agent_id, &written_by_uid, &req.id))
 }
 
 #[derive(serde::Deserialize)]
@@ -509,12 +518,9 @@ pub(super) async fn handle_agent_globalmemory_revert(
     caller: Option<Extension<caller::Caller>>,
     Json(req): Json<AgentGlobalMemoryRevertRequest>,
 ) -> impl IntoResponse {
-    actor::check_actor(
-        &state,
-        caller.as_deref(),
-        actor::ActorSite::GlobalMemoryRevert,
-        Some(&req.agent_id),
-    );
+    if let Err(e) = actor::require_actor(&state, caller.as_deref(), actor::ActorSite::GlobalMemoryRevert, Some(&req.agent_id)).await {
+        return app_api_response::<()>(Err(e));
+    }
     // Identity M4c-1: as for write, the writer's UID is the `Caller`'s.
     let written_by_uid = caller::attributed_uid(caller.as_deref());
     app_api_response(app_api::global_memory_revert_impl(

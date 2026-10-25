@@ -5859,11 +5859,18 @@ async fn m4a2_every_actor_site_counts_a_name_that_is_not_plainly_the_callers() {
             );
             // M4a-2's counting changes no response. Since M4c-2 the owner of
             // a self-scoped site is the Caller when attributed (§6.5.9), so
-            // there the token — not the count — does change it, by design.
+            // there the token — not the count — does change it, by design. A
+            // global-memory writer or reverter is refused when the token names
+            // another agent, so those answer differently too.
             let owner_is_the_caller = site.starts_with("memory_")
                 || matches!(
                     site,
-                    "identity_accounts" | "identity_validate" | "preset_get" | "history_search"
+                    "identity_accounts"
+                        | "identity_validate"
+                        | "preset_get"
+                        | "history_search"
+                        | "globalmemory_write"
+                        | "globalmemory_revert"
                 );
             if !owner_is_the_caller {
                 assert_eq!(
@@ -6290,6 +6297,37 @@ async fn m4c1_global_memory_write_and_revert_record_the_callers_uid() {
     let (status, v) = m4c1_send(&state, None, "/api/v1/agent/globalmemory/revert", revert).await;
     assert_eq!(status, StatusCode::OK, "{v}");
     assert_eq!(latest(&id).2, "", "Unattributed revert");
+}
+
+/// A Global Memory removal is recorded under the agent the request's token
+/// names, never a name in the body, and a request with no token (or with
+/// another agent's name) is refused and changes nothing.
+#[tokio::test]
+async fn global_memory_remove_is_attributed_to_the_tokens_agent() {
+    let (state, token) = m4c1_state();
+    let write = serde_json::json!({"agent_id": "m4c1-agent", "name": "Remove me", "content": "body"});
+    let (status, v) = m4c1_send(&state, Some(&token), "/api/v1/agent/globalmemory/write", write).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let id = v["id"].as_str().unwrap().to_string();
+    let still_global = || state.id_store.bundle_get(&id).unwrap().unwrap().is_global;
+    let remove = "/api/v1/agent/globalmemory/remove";
+
+    let (status, v) = m4c1_send(&state, None, remove, serde_json::json!({"id": id, "agent_id": "m4c1-agent"})).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "no token: {v}");
+    let (status, v) = m4c1_send(&state, Some(&token), remove, serde_json::json!({"id": id, "agent_id": "someone-else"})).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "another agent's name: {v}");
+    assert!(still_global(), "a refused removal changes nothing");
+
+    // The token alone names the actor.
+    let (status, v) = m4c1_send(&state, Some(&token), remove, serde_json::json!({"id": id})).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["version"]["source"], "remove", "{v}");
+    let newest = state.id_store.bundle_version_latest(&id).unwrap().unwrap();
+    assert_eq!(
+        (newest.source.as_str(), newest.written_by.as_str(), newest.written_by_uid.as_str()),
+        ("remove", "m4c1-agent", "uid-m4c1")
+    );
+    assert!(!still_global());
 }
 
 // ---- identity M4c-2: holder checks by UID ----

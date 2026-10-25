@@ -64,6 +64,30 @@ fn leaving_global_memory_is_a_tombstone_and_other_bundles_are_ignored() {
     assert_eq!(history(&fs, SCOPE, "g1").unwrap().len(), 2, "its history stays");
 }
 
+/// A removal through the versioned write puts its writer in the record's
+/// tombstone; one nothing attributed keeps the record's own marker.
+#[test]
+fn a_removal_is_recorded_under_the_writer_that_made_it() {
+    let fs = FileStore::open_in_memory().unwrap();
+    let store = Store::open_in_memory().unwrap();
+    store.bundle_upsert_with_version(&bundle("g1", "A", "a", true), "agent-1", "uid-1", "agent", "").unwrap();
+    store.bundle_upsert_with_version(&bundle("g2", "B", "b", true), "agent-1", "uid-1", "agent", "").unwrap();
+    for id in ["g1", "g2"] {
+        sync_entry(&fs, &store, SCOPE, id, None).unwrap();
+    }
+
+    store.bundle_upsert_with_version(&bundle("g1", "A", "a", false), "agent-2", "uid-2", "remove", "{}").unwrap();
+    store.bundle_upsert(&bundle("g2", "B", "b", false)).unwrap();
+    assert!(sync_entry(&fs, &store, SCOPE, "g1", None).unwrap());
+    assert!(sync_entry(&fs, &store, SCOPE, "g2", None).unwrap());
+
+    let tomb = history(&fs, SCOPE, "g1").unwrap().pop().unwrap();
+    assert!(tomb.sha256.is_none());
+    assert_eq!((tomb.source.as_str(), tomb.written_by.as_str(), tomb.written_by_uid.as_str()), ("remove", "agent-2", "uid-2"));
+    let plain = history(&fs, SCOPE, "g2").unwrap().pop().unwrap();
+    assert_eq!((plain.source.as_str(), plain.written_by.as_str()), ("agentmux", ""));
+}
+
 #[test]
 fn the_order_is_recorded_when_it_changes() {
     let fs = FileStore::open_in_memory().unwrap();
