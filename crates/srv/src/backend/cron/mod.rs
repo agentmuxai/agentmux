@@ -779,7 +779,7 @@ fn catch_up_base_secs(job: &CronJob) -> i64 {
 /// (the default for every job created before this field existed, and for
 /// any job that explicitly opts out). See
 /// docs/specs/SPEC_AGENT_POLLING_AND_WAKEUP_HARDENING_2026_08_04.md Phase 0.
-fn is_expired_by_age(created_at: i64, max_age_secs: Option<i64>, now: i64) -> bool {
+pub(crate) fn is_expired_by_age(created_at: i64, max_age_secs: Option<i64>, now: i64) -> bool {
     match max_age_secs {
         Some(max_age) => now - created_at >= max_age,
         None => false,

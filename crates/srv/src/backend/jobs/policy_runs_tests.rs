@@ -106,6 +106,56 @@ async fn overlap_cancel_other_interrupts_the_old_run_and_starts_the_new_one() {
     assert_eq!(rig.store.job_run_get(&second).unwrap().unwrap().state, state::RUNNING);
 }
 
+/// A run stopped on purpose is closed already: its turn ending later files no
+/// retry of it, however many retries the job has.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_cancelled_on_purpose_is_not_retried_when_its_turn_ends() {
+    let rig = rig();
+    let _stopped = interrupts(&rig);
+    let job = make(&rig, "j-cancel-retry", |j| {
+        j.policy.overlap = Overlap::CancelOther;
+        j.policy.retries = 2;
+    });
+    let first = rig.sched.fire(&job, slot(0)).await.run_id.unwrap();
+    rig.sched.fire(&job, slot(1)).await.run_id.unwrap();
+
+    rig.ledger.turn_finished(&first, infra::INTERRUPTED, None, "interrupted");
+    rig.ledger.turn_finished(&first, infra::INTERRUPTED, None, "interrupted");
+    let runs = rig.runs("j-cancel-retry");
+    assert_eq!(runs.len(), 2, "no retry row: {:?}", states(&rig, "j-cancel-retry"));
+    assert!(runs.iter().all(|r| r.links["retried_by"].is_null()));
+}
+
+/// The same retry is filed once, however often the end of its turn is seen.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_run_is_retried_once() {
+    let rig = rig();
+    let job = make(&rig, "j-once-retry", |j| j.policy.retries = 3);
+    let first = rig.sched.fire(&job, slot(0)).await.run_id.unwrap();
+    rig.ledger.turn_finished(&first, infra::INTERRUPTED, None, "process exited");
+    rig.ledger.maybe_retry(&first);
+    assert_eq!(rig.runs("j-once-retry").len(), 2, "{:?}", states(&rig, "j-once-retry"));
+}
+
+/// A job whose schedule is done (a one-time job after its time) is disabled,
+/// not paused: its last run, if it was waiting for a place, still starts.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_waiting_run_of_a_finished_one_time_job_still_starts() {
+    let rig = rig();
+    let a = make(&rig, "j-once-w1", |j| j.policy.group = Some("g".into()));
+    let b = make(&rig, "j-once-w2", |j| {
+        j.policy.group = Some("g".into());
+        j.trigger_kind = "once".into();
+    });
+    let busy = rig.sched.fire(&a, slot(0)).await.run_id.unwrap();
+    let waits = rig.sched.fire(&b, slot(0)).await.run_id.unwrap();
+    rig.store.cron_set_enabled("j-once-w2", false).unwrap();
+    end(&rig, &busy);
+    rig.sched.run_policy_pass().await;
+    let run = rig.store.job_run_get(&waits).unwrap().unwrap();
+    assert_eq!(run.state, state::RUNNING, "it started: {:?}", states(&rig, "j-once-w2"));
+}
+
 // ── groups and the global limit ─────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread")]
@@ -360,7 +410,7 @@ async fn a_spawn_job_briefs_the_worker_and_ends_with_its_first_turn() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_kept_worker_is_not_stopped_and_one_that_took_no_brief_fails_the_run() {
+async fn a_kept_worker_is_not_stopped() {
     let rig = rig();
     let stops = worker_stops(&rig);
     let job = make(&rig, "j-keep", |j| j.action_kind = "spawn".into());
@@ -369,7 +419,6 @@ async fn a_kept_worker_is_not_stopped_and_one_that_took_no_brief_fails_the_run()
     let kept = rig.sched.fire(&job, slot(0)).await.run_id.unwrap();
     rig.ledger.turn_finished(&kept, infra::OK, None, "");
     assert!(stops.lock().unwrap().is_empty(), "keep_worker");
-
 }
 
 /// The worker opened but nobody answers to its name: the run fails, with no
@@ -400,8 +449,7 @@ async fn a_spawn_that_cannot_open_fails_the_run() {
     assert!(rig.seen.lock().unwrap().is_empty());
 }
 
-/// A catch-up policy is the job's own, still read by the scheduler beside the
-/// new policy.
+/// A new job skips an overlapping slot and a missed one, and retries nothing.
 #[test]
 fn the_policy_defaults_are_skip_everywhere() {
     let job = test_job("j", "p", "t", "", "");
