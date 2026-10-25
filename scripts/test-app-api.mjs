@@ -37,7 +37,8 @@ ws.on("message", (buf) => {
     }
 });
 
-ws.on("open", () => ws.send(JSON.stringify({ type: "bus:register", agent_id: AGENT })));
+// bus:register is proven by the agent's own token.
+ws.on("open", () => ws.send(JSON.stringify({ type: "bus:register", agent_id: AGENT, token: process.env.AGENTMUX_AGENT_TOKEN })));
 ws.on("error", (e) => { console.error("WS error:", e.message); process.exit(1); });
 
 const show = (label, v) => console.log(`${label}:`, JSON.stringify(v, null, 2));

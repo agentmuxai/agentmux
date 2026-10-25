@@ -5,7 +5,8 @@
 //! as its sender. A frame carries no token, so the only identity a connection
 //! has is the one it registered with (`bus:register`); the frame's `from` has
 //! to be that agent. A frame that names no sender is sent as `unknown`, which
-//! claims nothing.
+//! claims nothing. A registration is itself proven: it carries the agent's
+//! token, and the agent it names must be the one that token was minted for.
 
 use crate::backend::messagebus::Priority;
 use crate::backend::storage::store::Store;
@@ -17,6 +18,37 @@ pub(super) fn priority(requested: Option<&str>) -> Priority {
         Some("urgent") => Priority::Urgent,
         _ => Priority::Normal,
     }
+}
+
+/// Whether a `bus:*` frame may be acted on: a `bus:register` is proven by its
+/// token, a send, inject or broadcast by the registration; other frames
+/// claim nothing.
+pub(super) fn frame_allowed(
+    store: &Store,
+    msg_type: &str,
+    registered: &str,
+    (agent_id, token, from): (Option<&str>, Option<&str>, Option<&str>),
+) -> Result<(), String> {
+    match (msg_type, agent_id) {
+        ("bus:register", Some(agent_id)) => proven_slug(store, token, agent_id).map(drop),
+        ("bus:send" | "bus:inject" | "bus:broadcast", _) => sender_allowed(store, registered, from),
+        _ => Ok(()),
+    }
+}
+
+/// The slug a `bus:register` frame carrying `token` may register as: the
+/// token has to be one this srv minted, and `agent_id` a name only that
+/// token's agent answers to.
+pub(super) fn proven_slug(store: &Store, token: Option<&str>, agent_id: &str) -> Result<String, String> {
+    let uid = token
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .and_then(|t| store.token_index()?.uid_for(t));
+    let Some(uid) = uid else {
+        return Err("FORBIDDEN: bus:register needs the agent's token (AGENTMUX_AGENT_TOKEN)".to_string());
+    };
+    super::actor::proven_slug(store, &uid, agent_id.trim())
+        .ok_or_else(|| "FORBIDDEN: bus:register may register only the agent its token names, by a name only that agent answers to".to_string())
 }
 
 /// Whether a frame from a connection registered as `registered` (empty: it
@@ -74,6 +106,38 @@ mod tests {
         let e = sender_allowed(store, "alpha", Some("beta")).unwrap_err();
         assert!(e.starts_with("FORBIDDEN"), "{e}");
         assert!(sender_allowed(store, "alpha", Some("nobody-at-all")).is_err(), "a name that is no agent");
+        });
+    }
+
+    #[test]
+    fn a_registration_is_proven_by_the_token_of_the_agent_it_names() {
+        with_store(|store| {
+            store.attach_token_index().unwrap();
+            let token = store.agent_token_ensure("uid-bf-a").unwrap();
+            assert_eq!(proven_slug(store, Some(&token), "alpha").unwrap(), "alpha");
+            assert_eq!(proven_slug(store, Some(&token), "Alpha").unwrap(), "alpha", "by display name, registered by slug");
+            let other = proven_slug(store, Some(&token), "beta").unwrap_err();
+            assert!(other.starts_with("FORBIDDEN"), "{other}");
+            for missing in [None, Some(""), Some("  "), Some("not-a-token")] {
+                let e = proven_slug(store, missing, "alpha").unwrap_err();
+                assert!(e.contains("needs the agent's token"), "{missing:?}: {e}");
+            }
+        });
+    }
+
+    /// A display name that is another agent's slug is not a way to register as that agent.
+    #[test]
+    fn a_name_another_agent_also_answers_to_proves_nothing() {
+        with_store(|store| {
+            let mut def = test_agent_def("uid-bf-c", "beta", "claude", "agent", 1, "");
+            def.slug = "gamma".to_string();
+            store.agent_def_insert(&mut def).unwrap();
+            store.attach_token_index().unwrap();
+            let token = store.agent_token_ensure("uid-bf-c").unwrap();
+            assert_eq!(proven_slug(store, Some(&token), "gamma").unwrap(), "gamma");
+            assert!(proven_slug(store, Some(&token), "beta").is_err());
+            let beta = store.agent_token_ensure("uid-bf-b").unwrap();
+            assert_eq!(proven_slug(store, Some(&beta), "beta").unwrap(), "beta");
         });
     }
 

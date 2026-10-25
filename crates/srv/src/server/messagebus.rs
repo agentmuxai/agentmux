@@ -87,8 +87,12 @@ fn parse_priority(s: &Option<String>) -> Priority {
 /// POST /api/bus/register
 pub(super) async fn handle_register(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(req): Json<RegisterRequest>,
 ) -> Json<Value> {
+    if let Err(error) = super::actor::require_token_naming(&state, caller.as_deref(), super::actor::ActorSite::BusRegister, &req.agent_id).await {
+        return Json(json!({ "status": "error", "error": error }));
+    }
     // HTTP-registered agents use polling via /api/bus/messages.
     // WebSocket agents get their push channel wired in the WS handler.
     state.messagebus.register_http(&req.agent_id);
@@ -214,8 +218,12 @@ pub(super) async fn handle_broadcast(
 /// GET /api/bus/messages?agent_id=...&limit=...
 pub(super) async fn handle_read_messages(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Query(query): Query<ReadMessagesQuery>,
 ) -> Json<Value> {
+    if let Err(error) = super::actor::require_token_naming(&state, caller.as_deref(), super::actor::ActorSite::BusRead, &query.agent_id).await {
+        return Json(json!({ "status": "error", "error": error }));
+    }
     let messages = state.messagebus.read_messages(&query.agent_id, query.limit);
     Json(json!({
         "agent_id": query.agent_id,
@@ -238,8 +246,12 @@ pub(super) async fn handle_list_agents(
 /// POST /api/bus/messages/delete
 pub(super) async fn handle_delete_messages(
     State(state): State<AppState>,
+    caller: Option<axum::Extension<super::caller::Caller>>,
     Json(req): Json<DeleteMessagesRequest>,
 ) -> Json<Value> {
+    if let Err(error) = super::actor::require_token_naming(&state, caller.as_deref(), super::actor::ActorSite::BusRead, &req.agent_id).await {
+        return Json(json!({ "status": "error", "error": error }));
+    }
     let deleted = state.messagebus.delete_messages(&req.agent_id, &req.message_ids);
     Json(json!({
         "status": "deleted",
