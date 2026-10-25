@@ -171,7 +171,7 @@ export interface AgentMux {
         /** Up to 20. A click comes back as the `action` event. */
         setContextMenu(items: MenuItem[]): Promise<void>;
         toast(text: string, kind?: "info" | "success" | "warning" | "error"): Promise<void>;
-        /** Opens an http(s) link in a browser pane next to the widget. */
+        /** Opens an http(s) link in a browser pane next to the widget. Needs `links:open`. */
         openUrl(url: string): Promise<void>;
         /** Updates one of the widget's status bar items while this pane is
          *  open; with no look, the manifest's is shown again. */

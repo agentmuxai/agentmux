@@ -37,7 +37,7 @@ That bundles a copy into your widget, which works with any AgentMux that speaks 
 | `am.info` | The widget's id, version and pane; AgentMux's version; granted permissions; theme; this pane's meta. |
 | `am.on(event, cb)` | `visibility`, `focus`, `theme`, `meta`, `action`, `command` (one of its palette commands or status items, below), `storage` (the widget's storage changed, in any of its panes), `dispose`. Returns an unsubscribe. |
 | `am.meta.get()`, `am.meta.set(patch)` | This pane's own state, kept with the pane. |
-| `am.ui.setTitle`, `setHeaderActions`, `setContextMenu`, `toast`, `openUrl` | The pane's chrome, drawn by AgentMux. |
+| `am.ui.setTitle`, `setHeaderActions`, `setContextMenu`, `toast`, `openUrl` | The pane's chrome, drawn by AgentMux. `openUrl` needs `links:open`. |
 | `am.ui.setStatusItem(id, { text, icon, tooltip, tone, hidden })` | Update one of the widget's status bar items while this pane is open. |
 | `am.theme.get()` | The current theme. |
 | `am.panes.open(view, meta?, split?)` | Open one of the widget's own panes, with `meta` as that pane's meta. Other views need `panes` and take only a section (`warden:section`, `vault:section`, `connectors:section`, `memory:section`, `settings:section`) or a browser's http(s) `url`; other keys are dropped. |
@@ -50,7 +50,7 @@ That bundles a copy into your widget, which works with any AgentMux that speaks 
 | `useVisibility(am, { onActive, onDormant })` | Pause work while the pane is hidden. |
 | `AgentMuxError` | `code`, `name` (`permission_denied`, …), `message`, `data`. |
 
-A method a widget wasn't granted rejects with `AgentMuxError` named `permission_denied`; `err.data.permission` names what it needs.
+`links:open` is new: an AgentMux older than this change refuses a manifest that lists it, and one that has it refuses `am.ui.openUrl` to a widget that doesn't list it. A method a widget wasn't granted rejects with `AgentMuxError` named `permission_denied`; `err.data.permission` names what it needs.
 
 ## Commands and status bar items
 
