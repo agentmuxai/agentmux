@@ -93,6 +93,9 @@ pub fn place_spawn(block_id: &str, cmd: &mut tokio::process::Command, create: bo
     #[cfg(unix)]
     if create {
         cmd.process_group(0);
+        if let Some(level) = spawn_nice() {
+            nice_before_exec(cmd, level);
+        }
     }
     #[cfg(target_os = "linux")]
     if let Some(target) = spawn_target(block_id, create) {
@@ -100,6 +103,51 @@ pub fn place_spawn(block_id: &str, cmd: &mut tokio::process::Command, create: bo
     }
     #[cfg(not(target_os = "linux"))]
     let _ = (block_id, cmd, create);
+}
+
+/// The nice level an agent's process tree runs at on Unix while
+/// `agent:belownormalpriority` is on. Measured on Linux (2026-10-24): with
+/// agent builds at normal priority the page's long tasks were 4x idle and an
+/// `AgentInput` took 2 s at the median; at nice 10 both were back within a
+/// third of idle, and 19 did no better.
+#[cfg(unix)]
+pub const AGENT_NICE_LEVEL: i32 = 10;
+
+/// The nice level for an agent spawn made now: [`AGENT_NICE_LEVEL`] when the
+/// live setting is on, `None` when it is off or no registry is attached
+/// (tests, early boot), like [`track_spawned_agent`].
+#[cfg(unix)]
+fn spawn_nice() -> Option<i32> {
+    global()?.agent_nice()
+}
+
+/// Make a child about to be spawned run at nice level `level` (never lower
+/// than it already has: an unprivileged `setpriority` can't reduce niceness,
+/// so a srv started niced keeps it). Everything the child forks inherits it
+/// and cannot lower it. Only `setpriority`, which is async-signal-safe, runs
+/// between fork and exec; a failure is not fatal.
+#[cfg(unix)]
+fn nice_before_exec(cmd: &mut tokio::process::Command, level: i32) {
+    // SAFETY: the hook calls only `setpriority`, on no allocated memory.
+    unsafe {
+        cmd.pre_exec(move || {
+            libc::setpriority(libc::PRIO_PROCESS, 0, level);
+            Ok(())
+        });
+    }
+}
+
+/// Wrap a PTY command's argv so it runs at `nice -n level` (`portable_pty`
+/// has no pre-exec hook). The wrapper `exec`s, so the PID is the agent's.
+/// Leaves an empty argv alone: that is the user's default shell, never an agent.
+#[cfg(unix)]
+fn nice_wrap_argv(argv: &mut Vec<std::ffi::OsString>, level: i32) {
+    if argv.is_empty() {
+        return;
+    }
+    let mut wrapped: Vec<std::ffi::OsString> = vec!["/usr/bin/env".into(), "nice".into(), "-n".into(), level.to_string().into()];
+    wrapped.append(argv);
+    *argv = wrapped;
 }
 
 /// An agent CLI srv runs outside any block's tracker (the Drone runner, the
@@ -193,6 +241,11 @@ fn start_suspended(block_id: &str, cmd: &mut tokio::process::Command, create: bo
 /// [`place_spawn`] for an agent's PTY spawn, which has no pre-exec hook: the
 /// command is wrapped to join first (`cgroup_linux::join_before_exec_pty`).
 pub fn place_pty_spawn(block_id: &str, cmd: &mut portable_pty::CommandBuilder) {
+    // Before the cgroup wrapper, so the wrapper stays the outermost command.
+    #[cfg(unix)]
+    if let Some(level) = spawn_nice() {
+        nice_wrap_argv(cmd.get_argv_mut(), level);
+    }
     #[cfg(target_os = "linux")]
     if let Some(target) = spawn_target(block_id, true) {
         super::cgroup_linux::join_before_exec_pty(cmd, target);
@@ -218,7 +271,9 @@ fn spawn_target(block_id: &str, create: bool) -> Option<std::path::PathBuf> {
 
 /// Settings key: run agents' process trees at below-normal CPU priority so
 /// their builds and tests yield to AgentMux (and the user's foreground apps)
-/// under contention, while still using every idle core. Default on.
+/// under contention, while still using every idle core. Default on. Windows:
+/// a Job Object priority class. Linux and macOS: nice [`AGENT_NICE_LEVEL`]
+/// set at spawn ([`place_spawn`], [`place_pty_spawn`]).
 pub const SETTING_AGENT_BELOW_NORMAL_PRIORITY: &str = "agent:belownormalpriority";
 
 /// [`track_spawned`] for an **agent** process: also applies the agent CPU
@@ -289,6 +344,13 @@ impl AgentProcessRegistry {
             .as_ref()
             .and_then(|c| c.get_settings().extra.get(SETTING_AGENT_BELOW_NORMAL_PRIORITY).and_then(|v| v.as_bool()))
             .unwrap_or(true)
+    }
+
+    /// The nice level an agent's process tree runs at on Unix: [`AGENT_NICE_LEVEL`]
+    /// while `agent:belownormalpriority` is on, `None` while it is off.
+    #[cfg(unix)]
+    pub fn agent_nice(&self) -> Option<i32> {
+        self.agent_below_normal_priority().then_some(AGENT_NICE_LEVEL)
     }
 
     /// Apply (or lift) the below-normal priority limit on `block_id`'s tree.
@@ -550,6 +612,88 @@ mod tests {
         settings.extra.insert(SETTING_AGENT_BELOW_NORMAL_PRIORITY.to_string(), serde_json::json!(true));
         config.update_settings(settings);
         assert!(reg.agent_below_normal_priority());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn agent_nice_follows_the_setting() {
+        let reg = AgentProcessRegistry::new(None);
+        assert_eq!(reg.agent_nice(), Some(AGENT_NICE_LEVEL), "on when no settings are attached");
+
+        let config = Arc::new(crate::backend::wconfig::ConfigState::with_config(
+            crate::backend::wconfig::build_default_config(),
+        ));
+        reg.set_config(Arc::clone(&config));
+        let mut settings = config.get_settings();
+        settings.extra.insert(SETTING_AGENT_BELOW_NORMAL_PRIORITY.to_string(), serde_json::json!(false));
+        config.update_settings(settings.clone());
+        assert_eq!(reg.agent_nice(), None, "off, read live");
+        settings.extra.insert(SETTING_AGENT_BELOW_NORMAL_PRIORITY.to_string(), serde_json::json!(true));
+        config.update_settings(settings);
+        assert_eq!(reg.agent_nice(), Some(AGENT_NICE_LEVEL));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pty_argv_is_wrapped_in_nice_and_an_empty_one_is_left_alone() {
+        let mut argv: Vec<std::ffi::OsString> = vec!["claude".into(), "--flag".into()];
+        nice_wrap_argv(&mut argv, 10);
+        assert_eq!(argv, ["/usr/bin/env", "nice", "-n", "10", "claude", "--flag"]);
+        let mut shell: Vec<std::ffi::OsString> = Vec::new();
+        nice_wrap_argv(&mut shell, 10);
+        assert!(shell.is_empty(), "the user's default shell is never wrapped");
+    }
+
+    /// Nice value (field 19 of /proc/<pid>/stat) from a stat line; the command
+    /// name in field 2 may hold spaces, so count from the closing parenthesis.
+    #[cfg(target_os = "linux")]
+    fn nice_of_stat(stat: &str) -> i32 {
+        let rest = &stat[stat.rfind(')').expect("stat has a command name") + 2..];
+        rest.split(' ').nth(16).expect("stat has a nice field").parse().expect("nice is a number")
+    }
+
+    #[cfg(target_os = "linux")]
+    fn own_nice() -> i32 {
+        nice_of_stat(&std::fs::read_to_string("/proc/self/stat").unwrap())
+    }
+
+    /// The nice value of a grandchild: `sh` starts `cut`, which reads its own stat.
+    #[cfg(target_os = "linux")]
+    const GRANDCHILD_NICE: &str = "cut -d' ' -f19 /proc/self/stat";
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn an_agent_spawn_runs_at_nice_10_and_its_children_inherit_it() {
+        let mut cmd = tokio::process::Command::new("sh");
+        cmd.arg("-c").arg(GRANDCHILD_NICE);
+        nice_before_exec(&mut cmd, AGENT_NICE_LEVEL);
+        let out = cmd.output().await.unwrap();
+        assert!(out.status.success());
+        let nice: i32 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
+        // Never lower than the test process's own (a niced CI runner keeps it).
+        assert_eq!(nice, own_nice().max(AGENT_NICE_LEVEL));
+    }
+
+    /// Negative control: the same spawn without the hook is at the parent's nice,
+    /// so the test above detects the hook, not a niced test runner.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn without_the_hook_a_spawn_keeps_the_parents_priority() {
+        let out = tokio::process::Command::new("sh").arg("-c").arg(GRANDCHILD_NICE).output().await.unwrap();
+        let nice: i32 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
+        assert_eq!(nice, own_nice());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_wrapped_pty_command_runs_at_nice() {
+        let mut argv: Vec<std::ffi::OsString> = vec!["sh".into(), "-c".into(), GRANDCHILD_NICE.into()];
+        nice_wrap_argv(&mut argv, AGENT_NICE_LEVEL);
+        let out = std::process::Command::new(&argv[0]).args(&argv[1..]).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let nice: i32 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
+        // `nice -n 10` adds 10, capped at 19.
+        assert_eq!(nice, (own_nice() + AGENT_NICE_LEVEL).min(19));
     }
 
     #[test]
