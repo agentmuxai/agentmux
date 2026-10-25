@@ -669,12 +669,9 @@ pub(super) async fn handle_reactive_inject(
     caller: Option<Extension<super::caller::Caller>>,
     Json(req): Json<InjectionRequest>,
 ) -> Json<serde_json::Value> {
-    super::actor::check_actor(
-        &state,
-        caller.as_deref(),
-        super::actor::ActorSite::Inject,
-        req.source_agent.as_deref(),
-    );
+    if let Err(error) = super::actor::require_actor(&state, caller.as_deref(), super::actor::ActorSite::Inject, req.source_agent.as_deref()).await {
+        return Json(serde_json::json!({ "success": false, "error": error }));
+    }
     tracing::info!(
         target_agent = %req.target_agent,
         source_agent = ?req.source_agent,

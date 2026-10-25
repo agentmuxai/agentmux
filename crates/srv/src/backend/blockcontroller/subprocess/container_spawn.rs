@@ -268,7 +268,7 @@ impl SubprocessController {
         // racing on the same path, including the `rm -f` that cleans it up.
         let turn_id = uuid::Uuid::new_v4().to_string();
         let turn_message = config.message.clone();
-        let user_record = self.user_record_sink();
+        let user_record = self.user_record_sink(config.message_id.is_some());
         let self_ref_done = self.self_ref.lock().unwrap().clone().unwrap_or_default();
 
         // Spawn all async work (exec + I/O) into a background task so this
