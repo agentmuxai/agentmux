@@ -179,6 +179,7 @@ async fn app_main() {
     // before `cron_scheduler.start()` below, so no fire takes the HTTP
     // fallback.
     bootstrap::install_cron_delivery(&state);
+    server::job_actions::install(&state);
 
     // Durable jekt: replay messages held for an agent that was not running
     // (SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md).
@@ -217,6 +218,19 @@ async fn app_main() {
         Some(state.mstore.clone()),
         state.broker.clone(),
     );
+    // A `spawn` job's worker is closed when its run ends: its tab goes, so it
+    // doesn't count against the leader's worker limit for the next run.
+    let worker_state = state.clone();
+    run_ledger.install_worker_stop(std::sync::Arc::new(move |block_id: &str| {
+        sagas::pending_shutdown::request(
+            &worker_state,
+            block_id,
+            "jobs",
+            "JobWorker",
+            "its run ended",
+            sagas::pending_shutdown::Action::CloseTab { detail: "a job's worker, its run ended".to_string() },
+        );
+    }));
     // A failing job opens one incident for its owner (jobs spec §3.4).
     run_ledger.install_incidents(server::cron::jobs_store(&state));
     {

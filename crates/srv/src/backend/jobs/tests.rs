@@ -193,6 +193,7 @@ fn rig() -> Rig {
 fn rig_on(dir: tempfile::TempDir, store: Arc<Store>) -> Rig {
     let broker = Arc::new(Broker::new());
     let ledger = RunLedger::new(store.clone(), None, broker.clone());
+    ledger.install_jobs(store.clone());
     let sched = CronScheduler::new(Some(store.clone()), reqwest::Client::new(), String::new(), String::new(), broker.clone());
     sched.install_runs(ledger.clone());
     let seen: Arc<Mutex<Vec<_>>> = Arc::default();
@@ -447,7 +448,10 @@ async fn run_now_is_a_manual_run_through_the_same_path() {
     assert_eq!((r.trigger.as_str(), r.triggered_by.as_str(), r.scheduled_for_ms), (TRIGGER_MANUAL, "uid-creator", None));
     assert_eq!(r.state, state::RUNNING);
     assert_eq!(rig.fire_count("j-now"), 0);
-    // A second Run now is its own run.
+    // While it runs, the default overlap policy (skip) refuses another.
+    assert!(rig.sched.run_now(&job, "operator").await.run_id.is_none());
+    // Once it ended, a second Run now is its own run.
+    rig.ledger.turn_finished(&r.id, infra::OK, None, "");
     rig.sched.run_now(&job, "operator").await;
     assert_eq!(rig.runs("j-now").len(), 2);
 }
@@ -516,6 +520,7 @@ async fn a_pending_fire_survives_a_try_again_answer() {
     assert_eq!(rig.store.job_run_get(&run).unwrap().unwrap().state, state::RUNNING);
 
     // A refusal that won't change by waiting closes the pending fire.
+    rig.ledger.turn_finished(&run, infra::OK, None, "");
     rig.answer(NOT_FOUND);
     let refused = rig.sched.fire(&job, Slot::Scheduled(now - now % HOUR + HOUR)).await.run_id.unwrap();
     rig.answer(r#"{"success": false, "error": "subprocess controller does not accept raw input"}"#);
@@ -765,3 +770,6 @@ async fn a_drone_run_is_written_to_the_ledger_with_its_cost() {
     assert_eq!((r.infra.as_str(), r.summary.as_str()), (infra::ERROR, "block t1: boom"));
     assert_eq!(rig.store.job_runs_for_job("d-9", 10, None).unwrap().len(), 2);
 }
+
+#[path = "policy_runs_tests.rs"]
+mod policy_runs;
