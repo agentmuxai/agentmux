@@ -45,6 +45,7 @@ import { keybindingsVersion } from "@/app/keybindings/registry";
 import { noteResolved, registerPaneCommandRunner } from "@/app/keybindings/app-api";
 import { OpenFromRemoteModal } from "./open-from-remote-modal";
 import { usePaneZoomWheel } from "@/app/store/zoom";
+import { MENU_ICON } from "@/app/util/menu-icons";
 
 // ── Language loader ─────────────────────────────────────────────────────────
 // Lazy-load language extensions to keep initial bundle small.
@@ -845,33 +846,34 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             const homeRoot = model.treeModel.rootsAtom().find((r) => r.isHome)?.path;
             if (!homeRoot) {
                 return [
-                    { type: "action", label: "Refresh", onSelect: () => void model.treeModel.refresh() },
+                    { type: "action", label: "Refresh", icon: MENU_ICON.refresh, onSelect: () => void model.treeModel.refresh() },
                 ];
             }
             return [
-                { type: "action", label: "New File…", onSelect: () => { void model.treeModel.expandFolder(homeRoot); setNewEntry({ parentPath: homeRoot, kind: "file" }); } },
-                { type: "action", label: "New Folder…", onSelect: () => { void model.treeModel.expandFolder(homeRoot); setNewEntry({ parentPath: homeRoot, kind: "dir" }); } },
+                { type: "action", label: "New File…", icon: MENU_ICON.newFile, onSelect: () => { void model.treeModel.expandFolder(homeRoot); setNewEntry({ parentPath: homeRoot, kind: "file" }); } },
+                { type: "action", label: "New Folder…", icon: MENU_ICON.newFolder, onSelect: () => { void model.treeModel.expandFolder(homeRoot); setNewEntry({ parentPath: homeRoot, kind: "dir" }); } },
                 { type: "separator" },
-                { type: "action", label: "Refresh", onSelect: () => void model.treeModel.refresh() },
+                { type: "action", label: "Refresh", icon: MENU_ICON.refresh, onSelect: () => void model.treeModel.refresh() },
             ];
         }
         const name = path.split(/[/\\]/).pop() ?? path;
         if (isDir) {
             const isRoot = model.treeModel.rootsAtom().some((r) => r.path === path);
             const items: ContextMenuItem[] = [
-                { type: "action", label: "New File…", onSelect: () => { void model.treeModel.expandFolder(path); setNewEntry({ parentPath: path, kind: "file" }); } },
-                { type: "action", label: "New Folder…", onSelect: () => { void model.treeModel.expandFolder(path); setNewEntry({ parentPath: path, kind: "dir" }); } },
+                { type: "action", label: "New File…", icon: MENU_ICON.newFile, onSelect: () => { void model.treeModel.expandFolder(path); setNewEntry({ parentPath: path, kind: "file" }); } },
+                { type: "action", label: "New Folder…", icon: MENU_ICON.newFolder, onSelect: () => { void model.treeModel.expandFolder(path); setNewEntry({ parentPath: path, kind: "dir" }); } },
                 { type: "separator" },
-                { type: "action", label: "Open in Terminal", onSelect: () => void model.openInTerminal(path) },
-                { type: "action", label: "Reveal in Explorer", onSelect: () => void model.revealInExplorer(path) },
+                { type: "action", label: "Open in Terminal", icon: MENU_ICON.openTerminal, onSelect: () => void model.openInTerminal(path) },
+                { type: "action", label: "Reveal in Explorer", icon: MENU_ICON.reveal, onSelect: () => void model.revealInExplorer(path) },
                 { type: "action", label: "Collapse Folder", onSelect: () => model.treeModel.collapseFolder(path) },
             ];
             if (!isRoot) {
                 items.push({ type: "separator" });
-                items.push({ type: "action", label: "Rename…", shortcut: "F2", onSelect: () => setRenamingPath(path) });
+                items.push({ type: "action", label: "Rename…", icon: MENU_ICON.rename, shortcut: "F2", onSelect: () => setRenamingPath(path) });
                 items.push({
                     type: "action",
                     label: "Delete",
+                    icon: MENU_ICON.delete,
                     danger: true,
                     onSelect: () => void model.deleteFile(path, true, (proceed) => {
                         setDeleteConfirm({
@@ -885,23 +887,24 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             return items;
         }
         return [
-            { type: "action", label: "Open", onSelect: () => void model.openFile(path) },
-            { type: "action", label: "Open to the Side", onSelect: () => void model.openToTheSide(path) },
-            { type: "action", label: "Open in New Tab", onSelect: () => void model.openInNewTab(path) },
+            { type: "action", label: "Open", icon: MENU_ICON.open, onSelect: () => void model.openFile(path) },
+            { type: "action", label: "Open to the Side", icon: MENU_ICON.open, onSelect: () => void model.openToTheSide(path) },
+            { type: "action", label: "Open in New Tab", icon: MENU_ICON.open, onSelect: () => void model.openInNewTab(path) },
             { type: "separator" },
-            { type: "action", label: "Copy Path", onSelect: () => void copyToClipboard(path) },
-            { type: "action", label: "Copy Relative Path", onSelect: () => {
+            { type: "action", label: "Copy Path", icon: MENU_ICON.copy, onSelect: () => void copyToClipboard(path) },
+            { type: "action", label: "Copy Relative Path", icon: MENU_ICON.copy, onSelect: () => {
                 const root = model.treeModel.rootsAtom().find((r) => path === r.path || path.startsWith(r.path + "/") || path.startsWith(r.path + "\\"));
                 const rel = root ? path.slice(root.path.length).replace(/^[/\\]/, "") : path;
                 void copyToClipboard(rel);
             }},
             { type: "separator" },
-            { type: "action", label: "Reveal in Explorer", onSelect: () => void model.revealInExplorer(path) },
+            { type: "action", label: "Reveal in Explorer", icon: MENU_ICON.reveal, onSelect: () => void model.revealInExplorer(path) },
             { type: "separator" },
-            { type: "action", label: "Rename…", shortcut: "F2", onSelect: () => setRenamingPath(path) },
+            { type: "action", label: "Rename…", icon: MENU_ICON.rename, shortcut: "F2", onSelect: () => setRenamingPath(path) },
             {
                 type: "action",
                 label: "Delete",
+                icon: MENU_ICON.delete,
                 danger: true,
                 onSelect: () => void model.deleteFile(path, false, (proceed) => {
                     setDeleteConfirm({
