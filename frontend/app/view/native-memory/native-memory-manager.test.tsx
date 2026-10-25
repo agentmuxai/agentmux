@@ -1204,6 +1204,19 @@ describe("NativeMemoryManager — create actions", () => {
         expect(screen.getByRole("button", { name: "New file" })).toBeDisabled();
         expect(screen.getByRole("button", { name: "Create MEMORY.md" })).toBeDisabled();
     });
+
+    test("New file waits while the folder's list is loading or failed, so a name can't replace a file it hasn't seen", async () => {
+        nativeMemoryListMock.mockImplementation(() => new Promise(() => {}));
+        await openManoz();
+        expect(screen.getByRole("button", { name: "New file" })).toBeDisabled();
+        cleanup();
+
+        nativeMemoryListMock.mockRejectedValue(new Error("list failed"));
+        await openManoz();
+        await screen.findByText(/list failed/);
+        expect(screen.getByRole("button", { name: "New file" })).toBeDisabled();
+        expect(nativeMemoryWriteMock).not.toHaveBeenCalled();
+    });
 });
 
 // `openMemory("personal", { agentId })` writes `memory:agent` into the pane's

@@ -176,7 +176,10 @@ export function NativeMemoryManager(props: { pane?: NativeMemoryPane }): JSX.Ele
         const id = props.pane?.meta()?.[MEMORY_AGENT_KEY];
         if (typeof id !== "string" || id === "") return;
         const wanted = agents().find((a) => a.id === id);
-        if (wanted && untrack(selectedAgent)?.id !== id) setSelectedAgentState(wanted);
+        if (!wanted || untrack(selectedAgent)?.id === id) return;
+        // Unsaved edits in the open file stay: the same confirm Back asks.
+        if (untrack(detailDirty) && !window.confirm("Discard your unsaved changes?")) return;
+        setSelectedAgentState(wanted);
     });
     const [files, setFiles] = createSignal<NativeMemoryFileMeta[]>([]);
     // The folder was found by a guess, not the agent's own launch
@@ -725,6 +728,7 @@ export function NativeMemoryManager(props: { pane?: NativeMemoryPane }): JSX.Ele
                                         filenames={files().map((f) => f.filename)}
                                         hasIndex={filesLoading() || filesError() !== null || files().some((f) => f.is_index)}
                                         readOnly={unverified()}
+                                        listUnknown={filesLoading() || filesError() !== null}
                                         onCreated={(filename) => {
                                             refetchSelectedAgentFiles(agent());
                                             setSelectedFilename(filename);

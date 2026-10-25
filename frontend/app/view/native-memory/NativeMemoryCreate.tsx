@@ -19,10 +19,14 @@ interface NativeMemoryCreateProps {
     hasIndex: boolean;
     /** srv refuses a write into a folder found by a guess; the actions wait for the agent's launch. */
     readOnly: boolean;
+    /** The folder's file list isn't known (loading, or it failed): a name can't be checked against
+     *  what is there, and a write replaces a file of the same name. */
+    listUnknown: boolean;
     /** The file is written: the caller refreshes its list and opens it. */
     onCreated: (filename: string) => void;
 }
 
+const LIST_UNKNOWN_TITLE = "Wait until this agent's files have loaded.";
 const READ_ONLY_TITLE = "This agent's memory folder isn't confirmed yet. You can add files after it launches.";
 
 export function NativeMemoryCreate(props: NativeMemoryCreateProps): JSX.Element {
@@ -42,6 +46,10 @@ export function NativeMemoryCreate(props: NativeMemoryCreateProps): JSX.Element 
     };
 
     const create = async (rawFilename: string, content: string): Promise<boolean> => {
+        if (props.listUnknown) {
+            setError(LIST_UNKNOWN_TITLE);
+            return false;
+        }
         setBusy(true);
         setError(null);
         const created = await createMemoryFile(props.agentId, rawFilename, content, props.filenames);
@@ -67,8 +75,8 @@ export function NativeMemoryCreate(props: NativeMemoryCreateProps): JSX.Element 
                         <Button
                             density="compact"
                             icon="plus"
-                            disabled={props.readOnly || busy()}
-                            title={props.readOnly ? READ_ONLY_TITLE : undefined}
+                            disabled={props.readOnly || props.listUnknown || busy()}
+                            title={props.readOnly ? READ_ONLY_TITLE : props.listUnknown ? LIST_UNKNOWN_TITLE : undefined}
                             onClick={startNaming}
                         >
                             New file
