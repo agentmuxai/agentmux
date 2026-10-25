@@ -37,6 +37,7 @@ pub(crate) mod jekt_seal;
 mod jekt_echo;
 pub(crate) mod jekt_entry;
 pub(crate) mod actor;
+mod bus_frames;
 pub(crate) mod service;
 mod shell_handlers;
 mod tool_handlers;
@@ -91,6 +92,9 @@ pub(crate) mod job_template_handlers;
 
 #[cfg(test)]
 pub(crate) mod tests;
+#[cfg(test)]
+#[path = "tests/sender_claims_tests.rs"]
+mod sender_claims_tests;
 #[cfg(test)]
 mod rpc_schema_export;
 

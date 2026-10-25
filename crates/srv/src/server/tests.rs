@@ -5819,15 +5819,15 @@ async fn m4a2_send(
 /// Serializes the tests that move the per-site `m4.actor_*` counters with a
 /// token: M4a-2's test asserts their exact values, so another test's
 /// attributed request to the same site in parallel would break it.
-static M4_ACTOR_COUNTERS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+pub(crate) static M4_ACTOR_COUNTERS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// The colliding-names fixture ("AgentY" agenty, "AGENTY" agenty-2) plus a
 /// third agent, "AgentZ"; the caller is the second agent. At every actor
 /// site: naming AgentZ is a mismatch; naming `agenty` or `AGENTY` — which
 /// select the caller's row by display name but also the first agent's — is
 /// ambiguous; naming its own slug counts nothing. An unattributed request is
-/// never checked, and nothing is refused on account of any of it: the same
-/// request is served the same with or without the token.
+/// never checked. Counting changes no status; the inject and bus sites also
+/// refuse a mismatch in their body (`sender_claims_tests`).
 #[tokio::test]
 async fn m4a2_every_actor_site_counts_a_name_that_is_not_plainly_the_callers() {
     let _counters = M4_ACTOR_COUNTERS.lock().await;

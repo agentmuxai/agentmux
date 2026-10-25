@@ -66,13 +66,38 @@ pub fn persist_user_line(
     filestore: Option<&Arc<FileStore>>,
     global_output_zone: Option<&str>,
 ) {
+    persist_user_line_as(broker, block_id, data, filestore, global_output_zone, true);
+}
+
+/// [`persist_user_line`] for a message no pane typed (a jekt, a broadcast, a
+/// schedule, the app API): the record is published as a plain one, which an
+/// open pane shows, because no `agent-message-accepted` node stands for it.
+pub fn persist_injected_user_line(
+    broker: Option<&mps::Broker>,
+    block_id: &str,
+    data: &[u8],
+    filestore: Option<&Arc<FileStore>>,
+    global_output_zone: Option<&str>,
+) {
+    persist_user_line_as(broker, block_id, data, filestore, global_output_zone, false);
+}
+
+fn persist_user_line_as(
+    broker: Option<&mps::Broker>,
+    block_id: &str,
+    data: &[u8],
+    filestore: Option<&Arc<FileStore>>,
+    global_output_zone: Option<&str>,
+    shown_by_pane: bool,
+) {
     let global = global_output_zone.and_then(|zone| {
         crate::backend::agent_session::global_transcript_store().map(|gfs| (gfs, zone))
     });
     let stamped = crate::backend::viewer::origin::stamp(block_id, data);
     let (data, echo) = match &stamped {
         Some(line) => (line.as_slice(), None),
-        None => (data, Some("stdin")),
+        None if shown_by_pane => (data, Some("stdin")),
+        None => (data, None),
     };
     append_transcript(broker, block_id, data, filestore, global, global_output_zone.is_some(), echo);
 }

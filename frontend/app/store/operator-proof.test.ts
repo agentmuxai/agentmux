@@ -156,6 +156,7 @@ describe("operator proof", () => {
             "jobs.templates.uninstall",
             "jobs.templates.catalog",
             "jobs.templates.catalog.install",
+            "fleet.broadcast",
         ]) {
             expect(isOperatorCommand(c)).toBe(true);
         }

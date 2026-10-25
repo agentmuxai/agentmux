@@ -356,6 +356,11 @@ impl WshRpcEngine {
         inner.rpc_context = Some(ctx);
     }
 
+    /// The context handlers get for this connection's next call.
+    pub fn rpc_context(&self) -> RpcContext {
+        self.lock_inner().rpc_context.clone().unwrap_or_default()
+    }
+
     /// Record that the CEF host vouched for this connection as the AgentMux
     /// window's (`server::operator_proof`). Refused, returning false, once the
     /// connection has registered as an agent. [`Self::set_rpc_context`]
