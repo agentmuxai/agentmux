@@ -152,6 +152,23 @@ fn a_whole_text_edit_keeps_the_lines_an_agent_cannot_write() {
 }
 
 #[test]
+fn a_commented_out_or_mistyped_credential_is_hidden_and_kept() {
+    let current = "# note about the build\n# GH_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789\nPGPASSWORD = hunter2\nTZ=UTC\n";
+    let shown = redacted(current);
+    assert_eq!(shown, "# note about the build\n# [hidden]\n# [hidden]\nTZ=UTC\n");
+    assert!(!shown.contains("ghp_") && !shown.contains("hunter2"));
+    // Written back as shown, the operator's lines return; the edit around them stands.
+    let edited = shown.replace("TZ=UTC", "TZ=Europe/Berlin");
+    assert_eq!(
+        resolve_lines(current, &edited),
+        Ok("# note about the build\n# GH_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789\nPGPASSWORD = hunter2\nTZ=Europe/Berlin\n".to_string())
+    );
+    // Dropped: kept at the end.
+    let dropped = resolve_lines(current, "TZ=UTC\n").unwrap();
+    assert!(dropped.contains("GH_TOKEN=ghp_") && dropped.contains("PGPASSWORD = hunter2"));
+}
+
+#[test]
 fn a_secret_looking_value_on_an_ordinary_name_is_kept_too() {
     let current = "LC_ALL=ghp_abcdefghijklmnopqrstuvwxyz0123456789\nRUST_BACKTRACE=vim\n";
     assert_eq!(redacted(current), "LC_ALL=[hidden]\nRUST_BACKTRACE=vim\n");

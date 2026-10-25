@@ -231,11 +231,29 @@ pub fn check_size(text: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// What an agent is shown for a line it may not read: a comment or a skipped
+/// line standing where it can't be told apart from a secret.
+const HIDDEN_LINE: &str = "# [hidden]";
+
+/// Whether an agent is shown `raw` as `[hidden]`: a value it may not read, a
+/// skipped line (a mistyped `NAME = value`), or a comment that holds a `=` or
+/// `:` or a secret, since a commented-out credential is still one.
+fn is_hidden_line(raw: &str) -> bool {
+    match classify(raw) {
+        Line::Blank => false,
+        Line::Comment => raw.contains('=') || raw.contains(':') || looks_like_secret(raw),
+        Line::Ignored => true,
+        Line::Pair { key, value } => shown(key, value) == HIDDEN,
+    }
+}
+
 /// The name of a line an agent can neither read nor write: its name is one an
-/// agent may not set, or its value is shown to an agent as `[hidden]`.
+/// agent may not set, or it is shown to an agent as hidden. A hidden comment
+/// or skipped line has the name "".
 fn is_kept_line(raw: &str) -> Option<&str> {
     match classify(raw) {
-        Line::Pair { key, value } if name_problem(key).is_some() || shown(key, value) == HIDDEN => Some(key),
+        Line::Pair { key, .. } if name_problem(key).is_some() || is_hidden_line(raw) => Some(key),
+        Line::Comment | Line::Ignored if is_hidden_line(raw) => Some(""),
         _ => None,
     }
 }
@@ -254,7 +272,16 @@ pub fn resolve_lines(current: &str, text: &str) -> Result<String, String> {
     let mut out: Vec<&str> = Vec::new();
     for (i, raw) in text.lines().enumerate() {
         match classify(raw) {
-            Line::Blank | Line::Comment => out.push(raw),
+            Line::Blank => out.push(raw),
+            Line::Comment => {
+                let operators = if raw.trim() == HIDDEN_LINE { kept.iter_mut().find(|(k, _, used)| k.is_empty() && !*used) } else { None };
+                if let Some((_, original, used)) = operators {
+                    *used = true;
+                    out.push(original);
+                } else {
+                    out.push(raw);
+                }
+            }
             Line::Ignored => return Err(format!("line {}: not a comment and not KEY=VALUE, so it would be ignored", i + 1)),
             Line::Pair { key, value } => {
                 let operators = kept.iter_mut().find(|(k, original, used)| *k == key && !*used && (value == HIDDEN || original.trim() == raw.trim()));
@@ -375,13 +402,15 @@ pub fn diff(old: &str, new: &str) -> Change {
     change
 }
 
-/// `text` as an agent is shown it: the values of credential-looking names
-/// hidden, every other line as written.
+/// `text` as an agent is shown it: the values of names it may not set hidden,
+/// a comment that may hold a secret and a skipped line as `# [hidden]`, every
+/// other line as written.
 pub fn redacted(text: &str) -> String {
     let mut out: Vec<String> = text
         .lines()
         .map(|raw| match classify(raw) {
-            Line::Pair { key, value } if shown(key, value) == HIDDEN => format!("{key}={HIDDEN}"),
+            Line::Pair { key, .. } if is_hidden_line(raw) => format!("{key}={HIDDEN}"),
+            Line::Comment | Line::Ignored if is_hidden_line(raw) => HIDDEN_LINE.to_string(),
             _ => raw.to_string(),
         })
         .collect();
