@@ -9,7 +9,8 @@
  * here.
  */
 
-import { onCleanup, For, Show, type JSX } from "solid-js";
+import { createResource, onCleanup, For, Show, type JSX } from "solid-js";
+import type { SkillCatalogItem } from "@/types/rpc/SkillCatalogItem";
 import { Markdown } from "@/app/element/markdown";
 import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
@@ -17,6 +18,36 @@ import { SkillCatalogModel } from "./skill-model";
 import "../agent/components/AgentPrimitiveModal.scss";
 import { Button } from "@/app/element/ui";
 import { focusOnOpen } from "@/util/focusutil";
+
+/** The agents a skill is bound to, each with Unbind. */
+function SkillBoundAgents(props: { model: SkillCatalogModel; skill: SkillCatalogItem }): JSX.Element {
+    // Asked again when the catalog or the agent list changes: a bind or
+    // unbind refreshes the catalog.
+    const [bound] = createResource(
+        () => ({ skill: props.skill, revision: props.model.revisionAtom(), agents: props.model.agentsAtom() }),
+        ({ skill }) => props.model.boundAgents(skill),
+    );
+    return (
+        <Show when={(bound() ?? []).length > 0}>
+            <ul class="agent-primitive-modal-bound" aria-label="Agents it is bound to">
+                <For each={bound()}>
+                    {(agent) => (
+                        <li class="agent-primitive-modal-bound-agent">
+                            <span>{agent.name}</span>
+                            <Button
+                                density="compact"
+                                aria-label={`Unbind ${agent.name}`}
+                                onClick={() => void props.model.unbindFromAgent(props.skill.id, agent.id)}
+                            >
+                                Unbind
+                            </Button>
+                        </li>
+                    )}
+                </For>
+            </ul>
+        </Show>
+    );
+}
 
 export const SkillManager = (): JSX.Element => {
     const model = new SkillCatalogModel();
@@ -76,6 +107,7 @@ export const SkillManager = (): JSX.Element => {
                                         <p class="agent-primitive-modal-global-note">
                                             Used by {skill().bound_count} {skill().bound_count === 1 ? "agent" : "agents"}
                                         </p>
+                                        <SkillBoundAgents model={model} skill={skill()} />
                                         <Show when={skill().description}>
                                             <span class="agent-primitive-modal-field-label">Description</span>
                                             <pre class="agent-primitive-modal-field-value">{skill().description}</pre>

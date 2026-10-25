@@ -5,7 +5,7 @@
 // they open below its card in Connectors → MCP servers
 // (SPEC_CONNECTORS_CARDS_2026_10_13.md §3.4, §3.5).
 
-import { createUniqueId, onCleanup, Show, type JSX } from "solid-js";
+import { createResource, createUniqueId, For, onCleanup, Show, type JSX } from "solid-js";
 
 import { Button, Field, Select, StatusDot, Switch, TextInput, type StatusTone } from "@/app/element/ui";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
@@ -82,6 +82,12 @@ export function McpServerDetail(props: {
             in_containers: server().in_containers,
             ...patch,
         });
+    // Asked again when the catalog or the agent list changes: a bind or
+    // unbind refreshes the catalog.
+    const [bound] = createResource(
+        () => ({ server: server(), revision: model.revisionAtom(), agents: model.agentsAtom() }),
+        ({ server }) => model.boundAgents(server),
+    );
     const agentOptions = () => [
         { value: "", label: "Select an agent…" },
         ...model.agentsAtom().map((a) => ({ value: a.id, label: a.name })),
@@ -109,6 +115,25 @@ export function McpServerDetail(props: {
             </Show>
             <Show when={props.uses.length > 0}>
                 <McpUsesList uses={props.uses} />
+            </Show>
+            <Show when={(bound() ?? []).length > 0}>
+                <span class="mcp-detail-label">Bound to</span>
+                <ul class="mcp-bound" aria-label="Agents it is bound to">
+                    <For each={bound()}>
+                        {(agent) => (
+                            <li class="mcp-bound-agent">
+                                <span class="mcp-use-agent">{agent.name}</span>
+                                <Button
+                                    density="compact"
+                                    aria-label={`Unbind ${agent.name}`}
+                                    onClick={() => void model.unbindFromAgent(server().id, agent.id)}
+                                >
+                                    Unbind
+                                </Button>
+                            </li>
+                        )}
+                    </For>
+                </ul>
             </Show>
             <span class="mcp-detail-label">Transport</span>
             <pre class="mcp-detail-value">{server().transport}</pre>

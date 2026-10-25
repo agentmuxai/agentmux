@@ -8,8 +8,8 @@
  * (crates/srv/src/server/app_api/skill.rs) — no `agent_id`/`check_s1`
  * context, since Memory's connection is never agent-authenticated.
  * Every row here is global by construction — the catalog only ever
- * lists/creates/edits is_global rows. Per-agent private skills, and
- * unbinding, live in the Agent-setup modal (AgentSkillModel), not here.
+ * lists/creates/edits is_global rows. Binding a skill to an agent and
+ * unbinding it are both here; per-agent private skills are not built.
  */
 
 import { createMemo, createSignal, type Accessor } from "solid-js";
@@ -80,6 +80,13 @@ export class SkillCatalogModel {
     bindAgentIdAtom: Accessor<string> = this._bindAgentId[0];
     setBindAgentId = this._bindAgentId[1];
 
+    // Bumped on every successful refresh, so a view derived from the catalog
+    // (who a skill is bound to) reloads when a bind or unbind lands, even one
+    // that leaves the count unchanged.
+    private _revision = createSignal(0);
+    revisionAtom: Accessor<number> = this._revision[0];
+    private setRevision = this._revision[1];
+
     selectedAtom: Accessor<SkillCatalogItem | null>;
 
     constructor() {
@@ -97,6 +104,7 @@ export class SkillCatalogModel {
         try {
             const list = await RpcApi.SkillCatalogListCommand(TabRpcClient, {});
             this.setSkills(list);
+            this.setRevision((n) => n + 1);
             this.setError(null);
         } catch (e) {
             this.setError(`Failed to load skills: ${(e as Error).message ?? e}`);
@@ -126,6 +134,35 @@ export class SkillCatalogModel {
         } catch (e) {
             this.setError(`Bind failed: ${(e as Error).message ?? e}`);
         }
+    }
+
+    async unbindFromAgent(skillId: string, agentId: string): Promise<void> {
+        this.setError(null);
+        try {
+            await RpcApi.SkillCatalogUnbindCommand(TabRpcClient, { agent_id: agentId, skill_id: skillId });
+            await this.refresh();
+        } catch (e) {
+            this.setError(`Unbind failed: ${(e as Error).message ?? e}`);
+        }
+    }
+
+    /** The agents a skill is bound to. The catalog only counts them, so each
+     *  agent is asked; one that can't be asked is left out. */
+    async boundAgents(skill: SkillCatalogItem): Promise<{ id: string; name: string }[]> {
+        if (skill.bound_count === 0) return [];
+        const bound = await Promise.all(
+            this.agentsAtom().map(async (agent) => {
+                try {
+                    const list = await RpcApi.SkillCatalogListForAgentCommand(TabRpcClient, { agent_id: agent.id });
+                    return list.some((s) => s.id === skill.id && s.bound_to_agent)
+                        ? { id: agent.id, name: agent.name }
+                        : null;
+                } catch {
+                    return null;
+                }
+            }),
+        );
+        return bound.filter((a) => a !== null).sort((a, b) => a.name.localeCompare(b.name));
     }
 
     handleSelect(skill: Skill): void {
