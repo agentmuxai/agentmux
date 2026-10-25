@@ -309,6 +309,21 @@ async fn a_pending_fire_being_delivered_holds_its_place() {
     assert!(rig.ledger.pending_may_start(&a, &pending), "released once the delivery is over");
 }
 
+/// A retry re-delivers a fire that was already counted: it doesn't count again,
+/// so a job with `max_fires` and retries isn't stopped early.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_retry_does_not_count_as_another_fire() {
+    let rig = rig();
+    let job = make(&rig, "j-retry-count", |j| j.policy.retries = 1);
+    let first = rig.sched.fire(&job, slot(0)).await.run_id.unwrap();
+    assert_eq!(rig.fire_count("j-retry-count"), 1);
+    rig.ledger.turn_finished(&first, infra::INTERRUPTED, None, "process exited");
+    let retry = rig.runs("j-retry-count").into_iter().find(|r| r.trigger == TRIGGER_RETRY).expect("a retry was filed");
+    make_due(&rig, &retry.id);
+    assert_eq!(rig.sched.run_policy_pass().await, 1);
+    assert_eq!(rig.fire_count("j-retry-count"), 1, "the retry is not a second fire");
+}
+
 // ── groups and the global limit ─────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread")]
