@@ -111,3 +111,22 @@ async fn a_release_joining_a_pending_stop_takes_it_over() {
     assert!(release.joined && release.request_id == stop.request_id);
     assert_eq!(ps::keep(&state, "blk-peer-rel-c", &stop.request_id), "kept_by_user");
 }
+
+/// A bulk-stop that forwarded to another instance reports the stop when that instance's user lets the window run
+/// out, and a refusal when they keep the agent running.
+#[tokio::test]
+async fn a_forward_waits_for_the_other_window_and_reports_its_outcome() {
+    use axum::routing::get;
+    let state = test_state();
+    for (status, expect_ok) in [("shut_down", true), ("kept_by_user", false), ("failed", false)] {
+        let app = axum::Router::new().route(
+            "/api/v1/agent/shutdown/:id",
+            get(move || async move { axum::Json(json!({ "status": status, "error": "boom" })) }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let r = crate::server::app_api::fleet::wait_for_remote_window(&state, &url, "k", "req-1").await;
+        assert_eq!(r.is_ok(), expect_ok, "{status}: {r:?}");
+    }
+}
