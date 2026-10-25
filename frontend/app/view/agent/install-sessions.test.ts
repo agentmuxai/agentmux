@@ -90,14 +90,9 @@ describe("install-sessions", () => {
         expect(agentInstallSession("codex")).not.toBe(agentInstallSession("vendor"));
     });
 
-    it("starts the install with the provider's package and pin", async () => {
+    it("asks srv to install the provider by id and sends no package", async () => {
         await startRun();
-        expect(vi.mocked(RpcApi.InstallStartCommand).mock.calls[0][1]).toEqual({
-            providerId: "codex",
-            cliCommand: "codex",
-            npmPackage: "@openai/codex",
-            pinnedVersion: "0.116.0",
-        });
+        expect(vi.mocked(RpcApi.InstallStartCommand).mock.calls[0][1]).toEqual({ providerId: "codex" });
     });
 
     it("refuses a CLI AgentMux doesn't install, without calling the backend", async () => {

@@ -53,6 +53,12 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "ResolveCli"
                 );
 
+                // Only AgentMux's own registry names a package to install: an id
+                // outside it that sends one is refused before anything is looked up.
+                if !cmd.npm_package.is_empty() && crate::backend::providers::get_provider(&cmd.provider_id).is_none() {
+                    return Err(format!("resolvecli: {:?} is not a known agent CLI", cmd.provider_id));
+                }
+
                 // Install location: shared across AgentMux versions, keyed
                 // by the provider's pinned CLI version, with the legacy
                 // per-version dir as a read-only fallback — see
@@ -144,9 +150,14 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .to_string());
                 }
 
+                // What gets installed is the registry's package for this id,
+                // whatever the request names; an id outside the registry is not
+                // installed.
+                let provider = crate::server::install_handlers::installable_provider(&cmd.provider_id)
+                    .map_err(|e| format!("resolvecli: {e}"))?;
                 tracing::info!(
-                    provider = %cmd.provider_id,
-                    npm_package = %cmd.npm_package,
+                    provider = %provider.id,
+                    npm_package = %provider.npm_package,
                     pinned_version = %pinned_version,
                     target_dir = %provider_dir,
                     "CLI not found locally, installing via npm"
@@ -183,10 +194,10 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // install another instance finished while we waited, and
                     // the completion marker only after the shim is verified.
                     let req = crate::backend::cli_install::NpmInstallRequest {
-                        provider_id: cmd.provider_id.clone(),
-                        npm_package: cmd.npm_package.clone(),
+                        provider_id: provider.id.to_string(),
+                        npm_package: provider.npm_package.to_string(),
                         pinned_version: pinned_version.clone(),
-                        cli_command: cmd.cli_command.clone(),
+                        cli_command: provider.cli_command.to_string(),
                         background: false,
                     };
                     let install_paths = paths.clone();
@@ -239,7 +250,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         Ok(InstallOutcome::AlreadyInstalled(bin)) => (bin, "local_install"),
                         Err(InstallError::NpmFailed { code }) => {
                             return Err(agentmux_common::AgentMuxError::NpmInstallFailed {
-                                package: format!("{}@{}", cmd.npm_package, pinned_version),
+                                package: format!("{}@{}", provider.npm_package, pinned_version),
                                 message: format!(
                                     "exit {}; check the output above",
                                     code.unwrap_or(-1)
@@ -1291,6 +1302,28 @@ mod tests {
             .unwrap();
         assert!(resp.data.is_none(), "{resp:?}");
         assert!(resp.error.contains("unknown provider"), "{resp:?}");
+    }
+
+    /// `resolvecli` installs the registry's package for an id; an id outside the
+    /// registry that names a package is refused, not installed.
+    #[tokio::test]
+    async fn resolvecli_does_not_install_a_package_for_an_unknown_provider() {
+        let state = crate::server::tests::test_state();
+        let (engine, mut out) = WshRpcEngine::new();
+        register_cli_handlers(&engine, &state);
+        let mut cmd = resolve_cmd("b1", None);
+        cmd.provider_id = "no-such-agent".to_string();
+        cmd.cli_command = "no-such-agent".to_string();
+        cmd.npm_package = "left-pad".to_string();
+        engine.handle_message(crate::backend::rpc_types::RpcMessage {
+            command: COMMAND_RESOLVE_CLI.to_string(),
+            reqid: "r1".to_string(),
+            data: Some(serde_json::to_value(&cmd).unwrap()),
+            ..Default::default()
+        });
+        let resp = tokio::time::timeout(std::time::Duration::from_secs(5), out.recv()).await.unwrap().unwrap();
+        assert!(resp.data.is_none(), "{resp:?}");
+        assert!(resp.error.contains("not a known agent CLI"), "{resp:?}");
     }
 
     /// All seven cli/toolchain/widget commands record their request and

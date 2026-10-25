@@ -91,16 +91,10 @@ pub enum InstallDoneOp {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct InstallStartReq {
+    /// The agent CLI to install. The package, its version and the command it
+    /// provides come from srv's own provider registry, never from the caller:
+    /// an older client that still sends them has them ignored.
     pub provider_id: String,
-    pub cli_command: String,
-    pub npm_package: String,
-    /// `#[serde(default)]`, so it is omittable on the wire — but the
-    /// hand-written stub declared it REQUIRED, and the generated type keeps it
-    /// required (ts-rs cannot express an optional non-`Option` property
-    /// anyway). Callers are stricter than the server here, which is the safe
-    /// direction; noting it so the asymmetry is deliberate rather than lost.
-    #[serde(default)]
-    pub pinned_version: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, ts_rs::TS)]
@@ -286,6 +280,24 @@ fn is_safe_cli_command(s: &str) -> bool {
         && !s.contains("..")
 }
 
+/// The registry entry an install of `provider_id` may use, or why there is none.
+/// What gets installed is decided here, from srv's own registry of known agent
+/// CLIs: a caller names an id and nothing else. Shared by `install.start` and
+/// `resolvecli`.
+pub(crate) fn installable_provider(
+    provider_id: &str,
+) -> Result<&'static crate::backend::providers::ProviderConfig, String> {
+    if !is_safe_provider_id(provider_id) {
+        return Err(format!("invalid provider id {provider_id:?} — must match [a-zA-Z0-9_-]+"));
+    }
+    let provider = crate::backend::providers::get_provider(provider_id)
+        .ok_or_else(|| format!("{provider_id:?} is not a known agent CLI"))?;
+    if provider.npm_package.is_empty() {
+        return Err(format!("provider {} is not installed by AgentMux (no npm package)", provider.id));
+    }
+    Ok(provider)
+}
+
 /// The pinned CLI version an install of `provider_id` uses: the backend
 /// provider registry's pin (the source of truth), else the caller's.
 fn effective_pin(provider_id: &str, requested: &str) -> String {
@@ -441,36 +453,20 @@ pub fn register_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let registry = registry.clone();
             let broker = broker.clone();
             async move {
-                if !is_safe_provider_id(&req.provider_id) {
-                    return Err(format!(
-                        "install.start: invalid provider id {:?} — must match [a-zA-Z0-9_-]+",
-                        req.provider_id
-                    ));
-                }
-                if !is_safe_cli_command(&req.cli_command) {
-                    return Err(format!(
-                        "install.start: invalid cli command {:?}",
-                        req.cli_command
-                    ));
-                }
-                if req.npm_package.is_empty() {
-                    return Err(format!(
-                        "install.start: provider {} has no npm_package — only npm-installable providers are supported in Phase α",
-                        req.provider_id
-                    ));
-                }
-                if !registry.try_claim_provider(&req.provider_id) {
+                let provider = installable_provider(&req.provider_id)
+                    .map_err(|e| format!("install.start: {e}"))?;
+                if !registry.try_claim_provider(provider.id) {
                     return Err(format!(
                         "install.start: provider {} is already being installed in another session",
-                        req.provider_id
+                        provider.id
                     ));
                 }
                 let session_id = format!("install-{}", uuid::Uuid::new_v4());
                 tracing::info!(
                     session_id = %session_id,
-                    provider_id = %req.provider_id,
-                    npm_package = %req.npm_package,
-                    pinned_version = %req.pinned_version,
+                    provider_id = %provider.id,
+                    npm_package = %provider.npm_package,
+                    pinned_version = %provider.pinned_version,
                     "install.start"
                 );
 
@@ -481,10 +477,10 @@ pub fn register_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     broker,
                     registry,
                     session_id.clone(),
-                    req.provider_id,
-                    req.cli_command,
-                    req.npm_package,
-                    req.pinned_version,
+                    provider.id.to_string(),
+                    provider.cli_command.to_string(),
+                    provider.npm_package.to_string(),
+                    provider.pinned_version.to_string(),
                     cancel_rx,
                 );
 
@@ -1038,25 +1034,18 @@ mod req_shape_tests {
     // generates -- it just silently stops parsing real payloads.
     #[test]
     fn the_requests_accept_the_camel_case_payloads_the_stub_sends() {
-        let start: InstallStartReq = serde_json::from_value(json!({
-            "providerId": "claude",
-            "cliCommand": "claude",
-            "npmPackage": "@anthropic-ai/claude-code",
-            "pinnedVersion": "1.2.3",
-        }))
-        .expect("install.start");
-        assert_eq!(start.pinned_version, "1.2.3");
+        let start: InstallStartReq = serde_json::from_value(json!({ "providerId": "claude" })).expect("install.start");
+        assert_eq!(start.provider_id, "claude");
 
-        // pinnedVersion is #[serde(default)], so the server accepts it missing
-        // even though the generated binding marks it required -- callers are
-        // stricter than the wire, which is the safe direction.
-        let no_version: InstallStartReq = serde_json::from_value(json!({
+        // A client that still sends the package fields is understood; they are not read.
+        let older: InstallStartReq = serde_json::from_value(json!({
             "providerId": "claude",
             "cliCommand": "claude",
-            "npmPackage": "p",
+            "npmPackage": "some-other-package",
+            "pinnedVersion": "9.9.9",
         }))
-        .expect("pinnedVersion is optional on the wire");
-        assert_eq!(no_version.pinned_version, "");
+        .expect("install.start from an older client");
+        assert_eq!(older.provider_id, "claude");
 
         serde_json::from_value::<InstallCancelReq>(json!({"sessionId": "s1"}))
             .expect("install.cancel");
@@ -1215,5 +1204,76 @@ mod installed_version_tests {
         // install's version.
         std::fs::write(manifest(&shared), "not json").unwrap();
         assert_eq!(installed_version_in(&shared, pkg), None);
+    }
+}
+
+#[cfg(test)]
+mod registry_only_tests {
+    use super::*;
+
+    async fn start(engine: &Arc<WshRpcEngine>, out: &mut tokio::sync::mpsc::UnboundedReceiver<crate::backend::rpc_types::RpcMessage>, data: serde_json::Value) -> crate::backend::rpc_types::RpcMessage {
+        engine.handle_message(crate::backend::rpc_types::RpcMessage {
+            command: COMMAND_INSTALL_START.to_string(),
+            reqid: "r1".to_string(),
+            data: Some(data),
+            ..Default::default()
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(2), out.recv()).await.unwrap().unwrap()
+    }
+
+    #[test]
+    fn every_installable_provider_is_installed_from_its_own_registry_entry() {
+        let mut seen = 0;
+        for p in crate::backend::providers::all_providers().filter(|p| !p.npm_package.is_empty()) {
+            let got = installable_provider(p.id).expect(p.id);
+            assert_eq!(got.id, p.id);
+            assert_eq!(got.npm_package, p.npm_package);
+            seen += 1;
+        }
+        assert!(seen > 0);
+    }
+
+    #[test]
+    fn an_id_outside_the_registry_or_without_a_package_is_refused() {
+        for id in ["", "no-such-agent", "left-pad", "../claude", "claude/../../x", "@scope/pkg", "claude ", "C:\\x"] {
+            assert!(installable_provider(id).is_err(), "{id:?}");
+        }
+        let path_only = crate::backend::providers::all_providers().find(|p| p.npm_package.is_empty()).expect("a provider AgentMux does not install");
+        let err = installable_provider(path_only.id).unwrap_err();
+        assert!(err.contains("not installed by AgentMux"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn install_start_refuses_an_unknown_provider_even_when_it_names_a_package() {
+        let state = crate::server::tests::test_state();
+        let (engine, mut out) = WshRpcEngine::new();
+        register_install_handlers(&engine, &state);
+        let resp = start(
+            &engine,
+            &mut out,
+            serde_json::json!({
+                "providerId": "no-such-agent",
+                "cliCommand": "no-such-agent",
+                "npmPackage": "left-pad",
+                "pinnedVersion": "1.0.0",
+            }),
+        )
+        .await;
+        assert!(resp.data.is_none(), "{resp:?}");
+        assert!(resp.error.contains("not a known agent CLI"), "{resp:?}");
+        assert!(state.install_sessions.sessions.lock().is_empty(), "no session was started");
+        assert!(state.install_sessions.active_providers.lock().is_empty(), "nothing was claimed");
+    }
+
+    #[tokio::test]
+    async fn install_start_refuses_a_provider_that_has_no_package_of_its_own() {
+        let state = crate::server::tests::test_state();
+        let (engine, mut out) = WshRpcEngine::new();
+        register_install_handlers(&engine, &state);
+        let path_only = crate::backend::providers::all_providers().find(|p| p.npm_package.is_empty()).expect("a path-only provider").id;
+        let resp = start(&engine, &mut out, serde_json::json!({ "providerId": path_only, "npmPackage": "left-pad" })).await;
+        assert!(resp.data.is_none(), "{resp:?}");
+        assert!(resp.error.contains("not installed by AgentMux"), "{resp:?}");
+        assert!(state.install_sessions.active_providers.lock().is_empty());
     }
 }
