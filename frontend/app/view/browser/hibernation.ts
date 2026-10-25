@@ -38,6 +38,9 @@ export interface BrowserSleep {
     favicon: string;
     /** The page's last load time, for the card's estimate. */
     loadMs?: number;
+    /** Discarded in place (the CEF Discard API): its history, scroll position
+     *  and form contents come back with it. Otherwise its page was closed. */
+    kept?: boolean;
 }
 
 /** The meta value, or undefined when it isn't a sleep record. */
@@ -54,6 +57,7 @@ export function readSleep(v: unknown): BrowserSleep | undefined {
         title: typeof s.title === "string" ? s.title : "",
         favicon: typeof s.favicon === "string" ? s.favicon : "",
         loadMs: typeof s.loadMs === "number" && s.loadMs > 0 ? s.loadMs : undefined,
+        kept: s.kept === true,
     };
 }
 
@@ -83,9 +87,30 @@ export function sleepReasonText(reason: SleepReason): string {
     return `AgentMux put this browser pane to sleep to save memory. ${why}`;
 }
 
-/** What a wake doesn't bring back yet (until the in-place discard, spec §10 Phase 3). */
+/** What a wake doesn't bring back when the page was closed rather than
+ *  discarded in place (a browser engine without the Discard API). */
 export const NOT_KEPT_TEXT =
-    "Back and forward history, scroll position and anything typed into the page aren't kept yet.";
+    "Back and forward history, scroll position and anything typed into the page aren't kept.";
+
+/** What to do once the host answered a discard of a pane going to sleep:
+ *  `kept` (discarded in place), `close` (no Discard API, or it refused), or,
+ *  when the pane was woken meanwhile, `load` (it was discarded: load it back)
+ *  or `nothing`. */
+export function afterDiscard(
+    answer: { supported: boolean; ok: boolean } | null | undefined,
+    stillAsleep: boolean
+): "kept" | "close" | "load" | "nothing" {
+    if (!stillAsleep) return answer?.ok ? "load" : "nothing";
+    return answer?.supported && answer.ok ? "kept" : "close";
+}
+
+/** Whether a wake that has finished (its page loaded, or needed no load) ends the sleep now:
+ *  the pane is shown, or the wake was asked for (a command, an agent's call). A hover's
+ *  speculative wake that finished while the pane is still hidden is held instead, and goes
+ *  back to sleep if no switch follows. */
+export function wakeEndsNow(visible: boolean, why: string): boolean {
+    return visible || why === "command" || why === "agent";
+}
 
 /** The name the card gives the page: its saved title, else its address. */
 export function sleepName(s: BrowserSleep): string {

@@ -5,7 +5,7 @@
 // before CreateTab replies — instead of ~150 ms later when the built tab is
 // activated. `creatingTabId` is what it shows.
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
     setActive: (() => {}) as (tabId: string) => void,
@@ -53,13 +53,12 @@ import { cancelTabCreation, createTab, creatingTabId, switchIntentTabId } from "
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
 describe("new tab pill selection", () => {
-    // node has no animation frames; setActiveTab waits two of them before
-    // it finishes, and a missing one made every activation end in an error.
+    // The node environment has no animation frames; setActiveTab waits two of
+    // them before it finishes, and a missing one made every activation end in
+    // an error that createTab logged as a failure.
     beforeAll(() => {
         vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => setTimeout(() => cb(0), 0));
-    });
-    afterAll(() => {
-        vi.unstubAllGlobals();
+        return () => vi.unstubAllGlobals();
     });
 
     beforeEach(async () => {

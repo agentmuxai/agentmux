@@ -261,6 +261,10 @@ declare global {
         /** What the pane's page is doing that a hibernation would lose
          *  (browser_api/hibernation.rs). Absent on hosts without it. */
         hibernationCheck?(blockId: string): Promise<BrowserHibernationCheck>;
+        /** Discard the pane's page in place, ask whether it is, or load it
+         *  again (browser_panes/discard.rs). `supported: false` on a libcef
+         *  without the Discard API: the caller closes and recreates instead. */
+        discard?(blockId: string, op: "discard" | "is_discarded" | "load"): Promise<{ supported: boolean; ok: boolean }>;
         /** The host's memory pressure level (memory_pressure.rs). */
         memoryPressure?(): Promise<"normal" | "warn" | "critical">;
         /** Bring a popup window a pane's page opened (`popup-…`) to the front. */

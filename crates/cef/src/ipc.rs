@@ -574,6 +574,16 @@ async fn route_command(
             state.browser_panes.resize(block_id, cef::Rect { x, y, width: w, height: h }, state);
             Ok(serde_json::json!(true))
         }
+        "browser_pane_discard" => {
+            // Discard the pane's page in place, ask whether it is, or load it
+            // again (browser_panes::discard). `supported: false`: this libcef
+            // has no Discard API, so the caller closes and recreates instead.
+            let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
+            let op = args.get("op").and_then(|v| v.as_str()).unwrap_or("");
+            let op = crate::browser_panes::discard::DiscardOp::parse(op).ok_or_else(|| format!("unknown op {op:?}"))?;
+            let answer = state.browser_panes.discard_op(state, block_id, op).await;
+            Ok(serde_json::json!({ "supported": answer.is_some(), "ok": answer.unwrap_or(false) }))
+        }
         "browser_panes_set_rects" => {
             // One batch per window per frame from the page's pane-rect-batcher;
             // answers once the panes have moved (browser_panes::bounds).

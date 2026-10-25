@@ -75,9 +75,14 @@ opt-level = 2       # Still optimized, but not as aggressive as "s"
 # targets. A stock libcef allocates the shorter struct, so the caller
 # (crates/cef/src/browser_panes/autocomplete.rs) checks its size first.
 #
+# And `discard`, `is_discarded` and `load_if_necessary` on `_cef_browser_host_t`
+# (agentmuxai/cef-rs#3) for agentmuxai/cef#14 (in-place discard of a browser
+# pane's page); crates/cef/src/browser_panes/discard.rs checks the size the
+# same way.
+#
 # See: docs/specs/SPEC_CEF_148_LINUX_FORWARD_PORT_2026_06_04.md §5,
 # docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md,
 # docs/specs/SPEC_CEF_MILESTONE_UPGRADE_152_TO_154_2026_09_27.md,
 # docs/specs/SPEC_CEF_RS_BINDING_FORK_UNDER_ORG_2026_09_22.md
 [patch.crates-io]
-cef-dll-sys = { git = "https://github.com/agentmuxai/cef-rs", rev = "87ed0accb0b3cf50f5bc8fe04a43ba47151dcd30" }
+cef-dll-sys = { git = "https://github.com/agentmuxai/cef-rs", rev = "c296f3e96cf8f56b277c2957a40e153ff4947853" }
