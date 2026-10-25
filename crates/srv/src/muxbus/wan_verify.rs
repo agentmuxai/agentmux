@@ -200,12 +200,30 @@ async fn fetch_record_for(dir: &Directory<'_>, agent: &str, instance: &str, chan
 #[derive(serde::Deserialize)]
 struct InstanceStatusResp {
     revoked: bool,
+    /// The signed record behind `revoked` (§2.2). The directory returns it
+    /// whenever it says an instance is revoked.
+    #[serde(default)]
+    revocation: Option<jekt_sign::WanRevocation>,
 }
 
+/// Whether `instance_id` is revoked, `None` when that can't be told.
+///
+/// A revocation is sticky and turns every later message from the install into
+/// a sensitive one, so a bare `revoked: true` is not enough: the directory has
+/// to hand over the revocation itself, and it has to be the one the instance
+/// signed with its own key for this id. An answer that says revoked without it
+/// is not acted on.
 async fn fetch_revoked(dir: &Directory<'_>, instance_id: &str) -> Option<bool> {
     let url = format!("{}/wan-instances/{}", dir.base_url.trim_end_matches('/'), instance_id);
     match get_json::<InstanceStatusResp>(dir, &url).await {
-        Fetched::Found(s) => Some(s.revoked),
+        Fetched::Found(s) if !s.revoked => Some(false),
+        Fetched::Found(s) => match s.revocation {
+            Some(r) if r.old_instance_id == instance_id && r.verify() => Some(true),
+            _ => {
+                tracing::warn!(instance_id, "wan verify: the directory says an instance is revoked without a revocation it signed: not acted on");
+                None
+            }
+        },
         // An older cloud with no such route: not known to be revoked.
         Fetched::NotFound => Some(false),
         // No verdict carries this one, so it is the only place to say it.

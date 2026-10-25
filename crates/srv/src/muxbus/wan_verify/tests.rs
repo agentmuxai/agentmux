@@ -28,6 +28,12 @@ enum Serve {
 }
 
 async fn stub(serve: Serve, revoked: bool) -> Stub {
+    // A bare `revoked: true` is what a forged answer looks like; a real one
+    // carries the instance's signed revocation (`stub_with_status`).
+    stub_with_status(serve, format!(r#"{{"instance_id":"x","revoked":{revoked}}}"#)).await
+}
+
+async fn stub_with_status(serve: Serve, instance_body: String) -> Stub {
     let record_hits = Arc::new(Mutex::new(0u32));
     let instance_hits = Arc::new(Mutex::new(0u32));
     let (rh, ih) = (record_hits.clone(), instance_hits.clone());
@@ -50,13 +56,10 @@ async fn stub(serve: Serve, revoked: bool) -> Stub {
             "/wan-instances/:instance_id",
             axum::routing::get(move || {
                 let ih = ih.clone();
+                let body = instance_body.clone();
                 async move {
                     *ih.lock().unwrap() += 1;
-                    (
-                        axum::http::StatusCode::OK,
-                        [(axum::http::header::CONTENT_TYPE, "application/json")],
-                        format!(r#"{{"instance_id":"x","revoked":{revoked}}}"#),
-                    )
+                    (axum::http::StatusCode::OK, [(axum::http::header::CONTENT_TYPE, "application/json")], body)
                 }
             }),
         );
@@ -77,6 +80,15 @@ struct World {
     receiver_instance: String,
     record: WanKeyRecord,
     private_key: Vec<u8>,
+    /// The sending install's own signed revocation of itself.
+    revocation: jekt_sign::WanRevocation,
+}
+
+impl World {
+    /// The directory's answer for the sender's instance when it is revoked.
+    fn revoked_body(&self) -> String {
+        serde_json::json!({ "instance_id": self.record.instance_id, "revoked": true, "revocation": self.revocation }).to_string()
+    }
 }
 
 fn world() -> World {
@@ -88,7 +100,8 @@ fn world() -> World {
     let key = sender.agent_key_ensure("camper", None).unwrap();
     let record = crate::muxbus::wan_publish::certify(&instance, "camper", "stable", &key).unwrap();
     let private_key = base64::engine::general_purpose::STANDARD.decode(&key.private_key).unwrap();
-    World { _dirs: (sd, rd), receiver, receiver_instance, record, private_key }
+    let revocation = jekt_sign::WanRevocation::sign(&instance.private_key, "successoraaaaaaaaaaaaaaaaaa", NOW - 60).unwrap();
+    World { _dirs: (sd, rd), receiver, receiver_instance, record, private_key, revocation }
 }
 
 impl World {
@@ -331,7 +344,7 @@ async fn a_delivered_signature_replayed_is_an_active_failure() {
 #[tokio::test]
 async fn a_revoked_instance_verifies_but_reads_revoked_and_stays_revoked() {
     let w = world();
-    let s = stub(Serve::Record(w.record.clone()), true).await;
+    let s = stub_with_status(Serve::Record(w.record.clone()), w.revoked_body()).await;
     let v = w.verify(&s, &w.row("msg-1", "hello"), "agent2", "hello", NOW).await;
     assert_eq!(v.verified, Some(true));
     assert_eq!(v.instance.unwrap().status, WanInstanceStatus::Revoked);
@@ -342,6 +355,37 @@ async fn a_revoked_instance_verifies_but_reads_revoked_and_stays_revoked() {
     let later = w.verify(&s2, &w.row_at("msg-2", "hi", t), "agent2", "hi", t).await;
     assert_eq!(later.instance.unwrap().status, WanInstanceStatus::Revoked);
     assert_eq!(*s2.instance_hits.lock().unwrap(), 0, "a revoked instance is never re-asked");
+}
+
+#[tokio::test]
+async fn a_bare_revoked_answer_is_not_acted_on() {
+    let w = world();
+    let s = stub(Serve::Record(w.record.clone()), true).await;
+    let v = w.verify(&s, &w.row("msg-1", "hello"), "agent2", "hello", NOW).await;
+    assert_eq!(v.verified, Some(true));
+    assert_eq!(v.instance.unwrap().status, WanInstanceStatus::New, "no signed revocation, no revocation");
+
+    // Nothing was recorded either, so the next message asks again.
+    let t = NOW + 1;
+    w.verify(&s, &w.row_at("msg-2", "hi", t), "agent2", "hi", t).await;
+    assert_eq!(*s.instance_hits.lock().unwrap(), 2);
+}
+
+#[tokio::test]
+async fn a_revocation_the_instance_did_not_sign_is_not_acted_on() {
+    let w = world();
+    // Another key's revocation, a revocation of another id, and a signature that was altered.
+    let (_other_public, other_private) = jekt_sign::generate_lan_keypair([9u8; 32]);
+    let foreign = jekt_sign::WanRevocation::sign(&other_private, "successoraaaaaaaaaaaaaaaaaa", NOW - 60).unwrap();
+    let mut altered = w.revocation.clone();
+    altered.revoked_at += 1;
+    for (n, revocation) in [foreign, altered].into_iter().enumerate() {
+        let body = serde_json::json!({ "instance_id": w.record.instance_id, "revoked": true, "revocation": revocation }).to_string();
+        let s = stub_with_status(Serve::Record(w.record.clone()), body).await;
+        let id = format!("msg-{n}");
+        let v = w.verify(&s, &w.row(&id, "hello"), "agent2", "hello", NOW).await;
+        assert_eq!(v.instance.unwrap().status, WanInstanceStatus::New, "case {n}");
+    }
 }
 
 #[tokio::test]
