@@ -17,7 +17,7 @@ import { shortcutFor } from "@/app/keybindings";
 /** A menu item's shortcut, from the shortcut table; undefined when it has none. */
 const hint = (command: string): string | undefined => shortcutFor(command) || undefined;
 
-type SplitDirection = "up" | "down" | "left" | "right";
+type SplitDirection = "down" | "right";
 
 // ─── Copy / Paste helpers ─────────────────────────────────────────────────────
 
@@ -78,14 +78,8 @@ async function handleSplitPane(blockData: Block, direction: SplitDirection): Pro
 
     try {
         switch (direction) {
-            case "up":
-                await createBlockSplitVertically(blockDef, blockData.oid, "before");
-                break;
             case "down":
                 await createBlockSplitVertically(blockDef, blockData.oid, "after");
-                break;
-            case "left":
-                await createBlockSplitHorizontally(blockDef, blockData.oid, "before");
                 break;
             case "right":
                 await createBlockSplitHorizontally(blockDef, blockData.oid, "after");
