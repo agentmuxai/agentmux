@@ -89,11 +89,12 @@ pub struct Stores {
     /// today's per-channel behavior instead of panicking.
     pub identity_store: Arc<Store>,
     /// Where the Kanban queue, Presence claims, coordination posts and the
-    /// Jobs run ledger live: `identity_store` on `stable`, the channel's own
-    /// `work-store.db` on every other channel (`agentmux_common::work_store`).
+    /// Jobs run ledger live: `identity_store`, unless this is a `task dev` build
+    /// (or `AGENTMUX_ISOLATED_WORK=1`), which has a `work-store.db` of its own
+    /// (`agentmux_common::work_store`).
     pub work_store: Arc<Store>,
-    /// Where scheduled jobs live: `shared_store` on `stable` (`None` when it
-    /// can't be resolved), `work_store` on a channel with its own.
+    /// Where scheduled jobs live: `shared_store` (`None` when it can't be
+    /// resolved), or `work_store` in a build that has its own.
     pub cron_store: Option<Arc<Store>>,
     pub saga_log: Arc<crate::sagas::log::SagaLog>,
     pub saga_id_seed: u64,
@@ -665,9 +666,9 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     }
 }
 
-/// The stores the work queue and scheduled jobs use. `stable` shares the
-/// host's (the identity store and the shared store, as before); any other
-/// channel gets a `work-store.db` of its own, so a `task dev` build never
+/// The stores the work queue and scheduled jobs use. Installed and `task
+/// package` builds share the host's (the identity store and the shared store,
+/// as before); a `task dev` build gets a `work-store.db` of its own, so it never
 /// reads or changes the operator's real queue or jobs. If that store can't be
 /// opened srv exits, as it does for `objects.db`: falling back to the host's
 /// files would be the leak this exists to close.
