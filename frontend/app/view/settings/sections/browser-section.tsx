@@ -266,7 +266,7 @@ export function BrowserSection(): JSX.Element {
                     id={BROWSER_SETTINGS.keepAwakeSites.id}
                     label={BROWSER_SETTINGS.keepAwakeSites.label}
                     description={BROWSER_SETTINGS.keepAwakeSites.description}
-                    control={<KeepAwakeSites sites={(s()["browser:keepawakesites"] ?? []).filter((x: unknown) => typeof x === "string")} />}
+                    control={<KeepAwakeSites sites={(Array.isArray(s()["browser:keepawakesites"]) ? s()["browser:keepawakesites"] : []).filter((x: unknown) => typeof x === "string")} />}
                 />
             </Show>
             <SectionHeader label={BROWSER_SETTINGS.profiles.label} />

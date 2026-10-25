@@ -33,6 +33,7 @@ import {
     wakeAllBrowserPanes,
     type HibernatablePane,
     type PaneFacts,
+    createFreezeState,
 } from "./hibernation";
 
 describe("readSleep", () => {
@@ -249,6 +250,43 @@ describe("when a hidden pane sleeps", () => {
         settings["browser:hibernate"] = false;
         expect(await policyTick(now, async () => "critical")).toEqual([]);
         offs.forEach((off) => off());
+    });
+});
+
+describe("createFreezeState", () => {
+    it("clears the flag only once the host has answered the thaw", async () => {
+        let answer!: (v: boolean) => void;
+        const host = vi.fn(() => new Promise<boolean>((r) => (answer = r)));
+        const f = createFreezeState(host);
+        f.markFrozen();
+        const done = f.thaw();
+        expect(host).toHaveBeenCalledWith(false);
+        expect(f.isFrozen()).toBe(true); // the host has not thawed it yet
+        answer(true);
+        await done;
+        expect(f.isFrozen()).toBe(false);
+    });
+    it("asks the host once for thaws that overlap", async () => {
+        const host = vi.fn(() => Promise.resolve(true));
+        const f = createFreezeState(host);
+        f.markFrozen();
+        await Promise.all([f.thaw(), f.thaw()]);
+        expect(host).toHaveBeenCalledTimes(1);
+    });
+    it("leaves a page frozen when the host's thaw failed, and tries again", async () => {
+        const host = vi.fn().mockRejectedValueOnce(new Error("no")).mockResolvedValue(true);
+        const f = createFreezeState(host);
+        f.markFrozen();
+        await f.thaw();
+        expect(f.isFrozen()).toBe(true);
+        await f.thaw();
+        expect(f.isFrozen()).toBe(false);
+        expect(host).toHaveBeenCalledTimes(2);
+    });
+    it("does not call the host for a page that is not frozen", async () => {
+        const host = vi.fn(() => Promise.resolve(true));
+        await createFreezeState(host).thaw();
+        expect(host).not.toHaveBeenCalled();
     });
 });
 

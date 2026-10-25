@@ -276,8 +276,6 @@ export function awakeReason(f: PaneFacts, now: number, keepAwakeSites?: unknown)
     return null;
 }
 
-/** Why the page keeps the pane awake, from the host's check; a check that
- *  couldn't run keeps it awake too. */
 /** Whether this browser engine can freeze a page and show it again. CDP's
  *  freeze marks the page hidden and its thaw doesn't mark it shown, so only an
  *  engine with the AgentMux CEF fork's windowed WasHidden, which the pane's
@@ -294,6 +292,34 @@ export function engineSupportsFreeze(ask: () => Promise<{ supported: boolean } |
     return engineCanFreeze;
 }
 
+/** Whether the window believes the host has this pane's page frozen. The host
+ *  thaws a page only when told to or on a CDP call, so the flag clears only once
+ *  the host's thaw has been answered; a thaw that failed leaves it set, and the
+ *  next one tries again. Callers that are about to look at the page `await thaw()`. */
+export function createFreezeState(setHostFrozen: (frozen: boolean) => Promise<unknown>) {
+    let frozen = false;
+    let thawing: Promise<void> | null = null;
+    return {
+        isFrozen: () => frozen,
+        markFrozen: () => {
+            frozen = true;
+        },
+        thaw(): Promise<void> {
+            if (!frozen) return thawing ?? Promise.resolve();
+            thawing ??= setHostFrozen(false).then(
+                () => {
+                    frozen = false;
+                    thawing = null;
+                },
+                () => {
+                    thawing = null;
+                },
+            );
+            return thawing;
+        },
+    };
+}
+
 /** What in the page keeps a hidden pane from being frozen: only what a frozen
  *  page would break while it waits (media playing, DevTools attached). A typed
  *  form or a leave-page prompt is fine: freezing keeps the page as it is. */
@@ -305,6 +331,8 @@ export function freezeAwakeReason(c: BrowserHibernationCheck | null | undefined)
     return null;
 }
 
+/** Why the page keeps the pane awake, from the host's check; a check that
+ *  couldn't run keeps it awake too. */
 export function pageAwakeReason(c: BrowserHibernationCheck | null | undefined): string | null {
     if (!c) return "page not checked";
     if (!c.live) return "no live page";
