@@ -720,6 +720,7 @@ partial list.
 | [`SPEC_MARKDOWN_CODE_ON_SHIKI_AND_REDUNDANT_LIBRARIES_2026_10_21`](SPEC_MARKDOWN_CODE_ON_SHIKI_AND_REDUNDANT_LIBRARIES_2026_10_21.md) | Spec: code in markdown on shiki, and the frontend libraries we can drop |
 | [`SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08`](SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08.md) | Spec: MCP integration parity with Claude Desktop / Cursor, piloted on Ableton MCP |
 | [`SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16`](SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md) | Memory-Pressure Supervision & Graceful Degradation (host / instance level) |
+| [`SPEC_MESSAGE_ORIGIN_AND_ONE_CONTAINER_2026_10_25`](SPEC_MESSAGE_ORIGIN_AND_ONE_CONTAINER_2026_10_25.md) | SPEC: Only the human's own words look like the human: one message origin, set by srv, and one container for everything else |
 | [`SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03`](SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md) | Migration System Audit & Hardening Plan |
 | [`SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15`](SPEC_MOTION_TIERS_AND_STYLESHEET_DRY_2026_10_15.md) | SPEC: two motion tiers, one motion policy, and a DRY pass over the stylesheets |
 | [`SPEC_MUXAPI_TOOL_CONSOLIDATION_2026_10_15`](SPEC_MUXAPI_TOOL_CONSOLIDATION_2026_10_15.md) | SPEC: MuxAPI in fourteen tools: one per family, with actions |
@@ -1117,7 +1118,6 @@ partial list.
 | [`SPEC_MAGNIFY_ZOOM_REGRESSION_AND_DEFAULTS_2026-05-21`](SPEC_MAGNIFY_ZOOM_REGRESSION_AND_DEFAULTS_2026-05-21.md) | SPEC: Magnify zoom regression + magnified-pane defaults |
 | [`SPEC_MAXIMIZE_ZOOM_ARCHITECTURE_2026-05-21`](SPEC_MAXIMIZE_ZOOM_ARCHITECTURE_2026-05-21.md) | SPEC: Maximize & Zoom — Architecture Analysis |
 | [`SPEC_MENU_PAINTABLE_AREA_GUARD_2026_05_20`](SPEC_MENU_PAINTABLE_AREA_GUARD_2026_05_20.md) | SPEC: Menu positioning framework — offset every menu into the paintable area |
-| [`SPEC_MESSAGE_ORIGIN_AND_ONE_CONTAINER_2026_10_25`](SPEC_MESSAGE_ORIGIN_AND_ONE_CONTAINER_2026_10_25.md) | SPEC: Only the human's own words look like the human: one message origin, set by srv, and one container for everything else |
 | [`SPEC_MESSAGING_INTEGRATIONS_PLAN_2026_06_24`](SPEC_MESSAGING_INTEGRATIONS_PLAN_2026_06_24.md) | Spec: Messaging App Integrations — Unified Plan |
 | [`SPEC_MESSAGING_INTEGRATION_DISCORD_POC_2026_06_24`](SPEC_MESSAGING_INTEGRATION_DISCORD_POC_2026_06_24.md) | Spec: Messaging App Integration — Discord POC |
 | [`SPEC_MESSAGING_INTEGRATION_SLACK_2026_07_07`](SPEC_MESSAGING_INTEGRATION_SLACK_2026_07_07.md) | Spec: Messaging App Integration — Slack |

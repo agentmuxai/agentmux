@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-25
 **Author:** Agent1 (UI kit, theme), for Kanban #4472; the build is #4473.
-**Status:** draft, for the operator. Nothing is built. Written against `origin/main` @ `1db5871a0`; file:line citations were read on that commit, spot-check them before relying on one.
+**Status:** active: operator-approved (D1–D9); P0 is built in #5553 (the AgentMux note and jekt-with-note split, and `agentinput` taking its origin from the caller); P1–P5 (typed signed origin, one container, Gemini/ACP/Codex App Server, mobile and history, deleting the text classifiers) are not built. Written against `origin/main` @ `1db5871a0`; file:line citations were read on that commit, spot-check them before relying on one.
 **Trigger:** The operator, 2026-10-25, with a screenshot of an agent pane on 0.60.1: a jekt (agent1 to agentx) and an "[AgentMux] AgentMux was upgraded…" note both render in the inverted "user turn" style. *"Only Human text looks like this: everything else should be encapsulated in a jekt-like container. This should be a standard across the entire framework. Only humans get the inverted color. Let's do an audit across how all messages (are handled), we need clear lines that are both DRY and set up styles efficiently."*
 **Related:** `SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md` (the jekt bubble, §3), `SPEC_SWARM_BROADCAST_AS_USER_MESSAGE_2026_10_01.md`, `SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md` (§5: `TurnOrigin`, `TriggerKind`), `SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md`, `SPEC_AGENT_INPUT_HISTORY_2026_10_18.md`. This is the same boundary as the rule that nothing may pass itself off as the operator (the jekt trust model, `crates/srv/src/backend/reactive/sanitize.rs`).
 
