@@ -63,6 +63,16 @@ pub struct AppState {
     /// `None`: falls back to `mstore` on the same best-effort terms as
     /// `id_store` if the shared root can't be resolved.
     pub identity_store: Arc<Store>,
+    /// The Kanban queue (cards, events, dependencies, PRs), Presence claims,
+    /// coordination posts and the Jobs run ledger. The identity store on
+    /// `stable`; a `work-store.db` of the channel's own on every other channel,
+    /// so a dev build never touches the operator's real queue
+    /// (`agentmux_common::work_store`). Use this, not `identity_store`, for those.
+    pub work_store: Arc<Store>,
+    /// Scheduled jobs (`db_cron_jobs`): `shared_store` on `stable`, `work_store`
+    /// on a channel with its own, so a dev build neither fires nor edits the
+    /// operator's real jobs.
+    pub cron_store: Option<Arc<Store>>,
     pub filestore: Arc<FileStore>,
     /// GLOBAL, channel-independent transcript store backing the
     /// `agent:<defId>:current` zone. `None` when the shared root can't be

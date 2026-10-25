@@ -357,3 +357,26 @@ mod lease_for_an_unavailable_holder {
         assert!(renews_lease(&task("", "uid-n", ""), Some(&long_gone), NOW));
     }
 }
+
+/// A build with a work store of its own (`task dev`) keeps the queue there: a task
+/// it creates and claims never reaches the host's identity store, where the
+/// operator's real queue is.
+#[tokio::test]
+async fn a_task_goes_to_the_work_store_not_the_identity_store() {
+    use crate::backend::storage::store::Store;
+    let mut state = crate::server::tests::test_state();
+    let own = Store::open_in_memory().unwrap();
+    own.apply_identity_schema_for_tests().unwrap();
+    state.work_store = std::sync::Arc::new(own);
+    let app = crate::server::build_router(state.clone());
+
+    let (s, v) = post(&app, "/agentmux/work", json!({"title": "t", "payload": "p"})).await;
+    assert_eq!(s, StatusCode::OK);
+    let id = v["id"].as_str().expect("an id").to_string();
+    let (_, c) = post(&app, "/agentmux/work/claim", json!({"agent_id": "a1"})).await;
+    assert_eq!(c["num"], v["num"], "claimed from the work store");
+
+    assert!(state.work_store.work_queue_get(&id).unwrap().is_some());
+    assert!(state.identity_store.work_queue_get(&id).unwrap().is_none(), "the host's queue is untouched");
+    assert!(state.identity_store.work_board_get(&id).unwrap().is_none(), "so is its board");
+}

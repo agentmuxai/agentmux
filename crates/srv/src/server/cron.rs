@@ -208,22 +208,24 @@ pub(crate) fn to_summary(job: &CronJob, block_id: String) -> CronSummary {
 }
 
 /// Where jobs are (`db_jobs`): the shared store, beside the `db_cron_jobs`
-/// it replaced. Every job read and write goes through here, so the store can
-/// move in one place.
+/// it replaced, or the work store of a `task dev` build, which keeps its own
+/// (`agentmux_common::work_store`). Every job read and write goes through here,
+/// so the store can move in one place.
 pub(crate) fn jobs_store(state: &AppState) -> Option<Arc<Store>> {
-    state.shared_store.clone()
+    state.cron_store.clone()
 }
 
-/// Where the run ledger is (`db_job_runs`): the identity store.
+/// Where the run ledger is (`db_job_runs`): the identity store, or the work store of
+/// a `task dev` build, which keeps its own (`agentmux_common::work_store`).
 pub(crate) fn ledger_store(state: &AppState) -> Arc<Store> {
-    state.identity_store.clone()
+    state.work_store.clone()
 }
 
 /// Tests: keep jobs in the test state's own store (which carries every
 /// schema), as [`jobs_store`] and [`ledger_store`] would find them.
 #[cfg(test)]
 pub(crate) fn use_test_store_for_jobs(state: &mut AppState) {
-    state.shared_store = Some(state.mstore.clone());
+    state.cron_store = Some(state.mstore.clone());
 }
 
 /// Where tasks are filed (the work queue and its cards): the identity store.

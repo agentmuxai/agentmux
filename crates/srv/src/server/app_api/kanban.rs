@@ -273,9 +273,9 @@ async fn list(state: &AppState) -> Result<Value, String> {
 async fn task(state: &AppState, data: &Value) -> Result<Value, String> {
     let id = data.get("id").and_then(Value::as_str).ok_or("kanban.task: id is required")?;
     let id = resolve_id(state, id);
-    let t = state.identity_store.work_board_get(&id).map_err(|e| e.to_string())?.ok_or("no such task")?;
-    let events = state.identity_store.work_events(&t.item.id, 200).map_err(|e| e.to_string())?;
-    let accepts = state.identity_store.work_delegate_accepts(now_ms() - crate::backend::kanban_delegate::REOPEN_WINDOW_MS).unwrap_or_default();
+    let t = state.work_store.work_board_get(&id).map_err(|e| e.to_string())?.ok_or("no such task")?;
+    let events = state.work_store.work_events(&t.item.id, 200).map_err(|e| e.to_string())?;
+    let accepts = state.work_store.work_delegate_accepts(now_ms() - crate::backend::kanban_delegate::REOPEN_WINDOW_MS).unwrap_or_default();
     Ok(json!({ "task": task_json(&t, None, None, &accepts), "events": events }))
 }
 
@@ -416,7 +416,7 @@ fn create_one(
     after: &[String],
     now: i64,
 ) -> Result<(String, i64), String> {
-    let store = &state.identity_store;
+    let store = &state.work_store;
     let (target, target_uid) = match req.agent.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
         Some(a) => match agent_named(regs, a) {
             Some(r) => (r.agent_id.clone(), r.uid.clone().unwrap_or_default()),
@@ -475,7 +475,7 @@ async fn act(state: &AppState, data: Value) -> Result<Value, String> {
     let req: ActRequest = serde_json::from_value(data).map_err(|e| format!("kanban.act: {e}"))?;
     let now = now_ms();
     let regs = state.reactive_handler.list_agents();
-    let store = &state.identity_store;
+    let store = &state.work_store;
     let get = |id: &Option<String>| -> Result<BoardTask, String> {
         let id = id.as_deref().ok_or("id is required")?;
         let id = resolve_id(state, id);

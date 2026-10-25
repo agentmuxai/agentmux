@@ -121,8 +121,8 @@ pub fn build_app_state(
     reducer: &ReducerPlumbing,
 ) -> AppState {
     // Clone before move into AppState for cron_scheduler construction: jobs
-    // (`db_jobs`) live in the shared store (`server::cron::jobs_store`).
-    let jobs_store = stores.shared_store.clone();
+    // (`db_jobs`) live in the cron store (`server::cron::jobs_store`).
+    let jobs_store = stores.cron_store.clone();
     // Live settings for the agent CPU-priority policy (process_tracker).
     net.process_tracker.set_config(bg.config_watcher.clone());
     let broker = bg.broker;
@@ -160,6 +160,8 @@ pub fn build_app_state(
         shared_store: stores.shared_store,
         id_store: stores.id_store,
         identity_store: stores.identity_store,
+        work_store: stores.work_store,
+        cron_store: stores.cron_store,
         filestore: stores.filestore,
         global_transcript_store: stores.global_transcript_store,
         event_bus: bg.event_bus,

@@ -76,6 +76,8 @@ pub(crate) fn test_state() -> AppState {
         // `apply_identity_schema_for_tests` call above for why that single
         // store now carries the identity schema too.
         identity_store: mstore.clone(),
+        work_store: mstore.clone(),
+        cron_store: None,
         filestore,
         global_transcript_store: None,
         event_bus: event_bus.clone(),
@@ -6194,7 +6196,7 @@ async fn m4c1_cron_create_records_the_callers_uid_as_created_by_uid() {
         "target": "m4c1-nobody", "created_by": "m4c1-agent",
         "created_by_uid": "uid-forged",
     });
-    let shared = state.shared_store.clone().unwrap();
+    let shared = state.cron_store.clone().unwrap();
 
     let (status, v) = m4c1_send(&state, Some(&token), "/agentmux/cron", body.clone()).await;
     assert_eq!(status, StatusCode::CREATED, "{v}");

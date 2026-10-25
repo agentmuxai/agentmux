@@ -88,6 +88,13 @@ pub struct Stores {
     /// `id_store`'s own fallback, so a resolution/open failure degrades to
     /// today's per-channel behavior instead of panicking.
     pub identity_store: Arc<Store>,
+    /// Where the Kanban queue, Presence claims, coordination posts and the
+    /// Jobs run ledger live: `identity_store` on `stable`, the channel's own
+    /// `work-store.db` on every other channel (`agentmux_common::work_store`).
+    pub work_store: Arc<Store>,
+    /// Where scheduled jobs live: `shared_store` on `stable` (`None` when it
+    /// can't be resolved), `work_store` on a channel with its own.
+    pub cron_store: Option<Arc<Store>>,
     pub saga_log: Arc<crate::sagas::log::SagaLog>,
     pub saga_id_seed: u64,
 }
@@ -471,6 +478,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
             mstore.clone()
         }
     };
+    let (work_store, cron_store) = open_work_store(&identity_store, shared_store.clone(), &db_dir);
     // #3603: memory resolution finds the account an agent is linked to (the
     // directory its spawn runs Claude in) through these, read-only.
     crate::server::native_memory_handlers::attach_identity_stores(id_store.clone(), identity_store.clone());
@@ -650,9 +658,39 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         shared_store,
         id_store,
         identity_store,
+        work_store,
+        cron_store,
         saga_log,
         saga_id_seed,
     }
+}
+
+/// The stores the work queue and scheduled jobs use. `stable` shares the
+/// host's (the identity store and the shared store, as before); any other
+/// channel gets a `work-store.db` of its own, so a `task dev` build never
+/// reads or changes the operator's real queue or jobs. If that store can't be
+/// opened srv exits, as it does for `objects.db`: falling back to the host's
+/// files would be the leak this exists to close.
+fn open_work_store(
+    identity_store: &Arc<Store>,
+    shared_store: Option<Arc<Store>>,
+    db_dir: &std::path::Path,
+) -> (Arc<Store>, Option<Arc<Store>>) {
+    let Some(path) = registry::resolve_isolated_work_store_path(db_dir) else {
+        return (identity_store.clone(), shared_store);
+    };
+    let opened = path
+        .parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .map_err(|e| e.to_string())
+        .and_then(|()| Store::open_identity_store(&path).map_err(|e| e.to_string()));
+    let store = Arc::new(opened.unwrap_or_else(|e| {
+        tracing::error!(path = %path.display(), "Failed to open the channel's work store: {}", e);
+        std::process::exit(1);
+    }));
+    let reason = agentmux_common::isolated_work_reason();
+    tracing::info!(path = %path.display(), reason = reason.as_str(), "work store: attached (channel-scoped)");
+    (store.clone(), Some(store))
 }
 
 /// What an unsupervised srv does before opening its stores: copy a previous
