@@ -40,7 +40,7 @@ function contrast(a: Rgb, b: Rgb): number {
 }
 
 /** A token's value in a block of SCSS (the first match). */
-const token = (scss: string, name: string) => scss.match(new RegExp(`--${name}:\s*([^;]+);`))?.[1];
+const token = (scss: string, name: string) => scss.match(new RegExp(`--${name}:\\s*([^;]+);`))?.[1];
 
 const base = read("../theme.scss");
 
