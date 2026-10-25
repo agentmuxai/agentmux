@@ -491,11 +491,17 @@ impl RunLedger {
 
     /// The followed turn ended (or never showed up).
     pub(crate) fn turn_finished(&self, run_id: &str, infra_status: &str, cost: Option<RunCost>, summary: &str) {
-        if let Err(e) = self.store.job_run_finish(run_id, infra_status, cost, summary, now_ms()) {
-            tracing::warn!(run_id, error = %e, "jobs: couldn't close a run");
+        // Only the call that closes the row retries and reaps: a run stopped on
+        // purpose (overlap, timeout) is already closed, and its turn ending later
+        // must not file a retry of a run nobody wants again.
+        match self.store.job_run_finish(run_id, infra_status, cost, summary, now_ms()) {
+            Ok(true) => {
+                self.maybe_retry(run_id);
+                self.reap_worker(run_id);
+            }
+            Ok(false) => {}
+            Err(e) => tracing::warn!(run_id, error = %e, "jobs: couldn't close a run"),
         }
-        self.maybe_retry(run_id);
-        self.reap_worker(run_id);
         self.run_changed(run_id);
         pending_wake().notify_one();
     }

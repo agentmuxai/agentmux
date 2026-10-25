@@ -593,6 +593,8 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/agentmux/work/:id/update", post(work_tasks::handle_work_update))
         .route("/agentmux/work/:id/ask", post(work_tasks::handle_work_ask))
         .route("/agentmux/work/:id/submit", post(work_tasks::handle_work_submit))
+        .route("/agentmux/work/:id/accept", post(work_delegate::handle_work_accept))
+        .route("/agentmux/work/:id/send_back", post(work_delegate::handle_work_send_back))
         .route("/agentmux/work/:id/hold", post(work_tasks::handle_work_hold))
         .route("/agentmux/work/:id/unhold", post(work_tasks::handle_work_unhold))
         .route("/agentmux/work/:id", delete(work_queue::handle_work_cancel))

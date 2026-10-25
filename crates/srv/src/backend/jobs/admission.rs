@@ -25,6 +25,15 @@ use crate::backend::storage::cron::CronJob;
 use crate::backend::storage::job_runs::{infra, reason, state, JobRun};
 use crate::backend::storage::store::Store;
 
+/// Whether a disabled job is done rather than paused: a one-time job after its
+/// time, or one that reached its fire count or age. Its last run may still be
+/// waiting for a place, and must get one.
+fn schedule_finished(job: &CronJob, now_ms: i64) -> bool {
+    job.trigger_kind == "once"
+        || job.max_fires.is_some_and(|max| job.fire_count >= max)
+        || crate::backend::cron::is_expired_by_age(job.created_at, job.max_age_secs, now_ms / 1000)
+}
+
 /// What admitting a fire did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Admission {
@@ -184,6 +193,7 @@ impl RunLedger {
         match self.store.job_run_stop(&run.id, infra_status, why, summary, now_ms()) {
             Ok(true) => {
                 self.interrupt_block(&run.block_id);
+                self.reap_worker(&run.id);
                 self.run_changed(&run.id);
                 super::pending_wake().notify_one();
                 true
@@ -236,7 +246,7 @@ impl RunLedger {
                 self.run_changed(&run.id);
                 continue;
             };
-            if !job.enabled {
+            if !job.enabled && !schedule_finished(&job, now) {
                 let _ = self.store.job_run_skip(&run.id, reason::PAUSED, 1, now);
                 self.changed(&job.id);
                 continue;
@@ -270,7 +280,7 @@ impl RunLedger {
     /// an incident of its own; the last attempt decides.
     pub(super) fn maybe_retry(&self, run_id: &str) {
         let Some(run) = self.store.job_run_get(run_id).ok().flatten() else { return };
-        if run.job_source != SOURCE_CRON || !policy::infra_retryable(&run) {
+        if run.job_source != SOURCE_CRON || !policy::infra_retryable(&run) || !run.links["retried_by"].is_null() {
             return;
         }
         let Some(job) = self.job(&run.job_id) else { return };

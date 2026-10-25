@@ -50,6 +50,7 @@ pub(crate) mod job_actions;
 pub(crate) mod job_caps;
 pub(crate) mod work_queue;
 mod work_tasks;
+mod work_delegate;
 mod messaging_handlers;
 mod muxbus_handlers;
 mod muxspect_handlers;
