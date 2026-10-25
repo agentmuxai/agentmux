@@ -1,6 +1,6 @@
 # Unix srv restart budget: recycle srv instead of ending the app
 
-**Status:** proposed — approved by the operator 2026-10-25 (via AgentY); built in the PR that carries this file
+**Status:** implemented (#5519) — approved by the operator 2026-10-25 (via AgentY); macOS check by Clare pending
 **Owner:** Maricon (launcher, Linux); macOS verification: Clare
 **Task:** Kanban #58
 **Related:** `SPEC_SRV_SUPERVISION_RECYCLE_2026_07_11` (#942 phase 2, the Windows recycle), `SPEC_RECOVERY_NOTICES_AND_TOASTS_2026_10_16` §4.4 (the restart notice), PR #5407 (agent CLIs in their own process group), PR #5404 (the signal is logged)
