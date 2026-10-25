@@ -1059,7 +1059,12 @@ th[aria-sort="descending"] .tower-sort {
 .tower-memory-trend-head,
 .tower-memory-trend {
     width: 64px;
-    padding-left: var(--space-2);
+    padding-left: var(--space-3);
+}
+
+.tower-memory-trend-head {
+    text-align: left;
+    white-space: nowrap;
 }
 
 .tower-memory-spark {

@@ -25,6 +25,11 @@ use crate::backend::rpc_types::{
 pub const STEP_MS: u64 = 10_000;
 /// An hour of points.
 pub const POINTS: usize = 360;
+/// With no Tower open the timer samples every this many steps (30 s): one
+/// sample costs about 15-25 ms on a busy Windows machine (debug build), which
+/// every 10 s is over the 0.1% of a core the spec allows, and every 30 s is
+/// under it (spec section 5.4).
+pub const IDLE_EVERY_STEPS: u64 = 3;
 /// The most series kept. About 30 are normal (four parts, a row each for the
 /// agents, panes and AgentMux programs); the cap keeps a runaway of rows
 /// (a build starting hundreds of differently named processes) from growing it.
@@ -38,6 +43,10 @@ pub struct GrowthRule {
     pub floor: u64,
     /// The points looked at: 30 minutes.
     pub window: usize,
+    /// The fewest points a line needs before it can be flagged: ten minutes.
+    /// A program starting up grows from nothing to its size in its first
+    /// minutes, which is not a leak.
+    pub min_points: usize,
     /// Grown by at least this share over its lowest point in the window…
     pub ratio: f64,
     /// …and by at least this many bytes.
@@ -48,22 +57,40 @@ pub struct GrowthRule {
 
 const MB: u64 = 1024 * 1024;
 
-pub const GROWTH: GrowthRule = GrowthRule { floor: 150 * MB, window: 180, ratio: 1.5, gain: 100 * MB, retreat: 0.9 };
+pub const GROWTH: GrowthRule = GrowthRule {
+    floor: 150 * MB,
+    window: 180,
+    min_points: 60,
+    ratio: 1.5,
+    gain: 100 * MB,
+    retreat: 0.9,
+};
 
 /// Whether `points` (one per step, newest last) grows unusually: from the
 /// lowest point in the window, to now, and how many whole minutes ago that
 /// lowest point was.
 pub fn grows_unusually(points: &[u64], rule: &GrowthRule) -> Option<(u64, u64, u32)> {
+    if points.len() < rule.min_points {
+        return None;
+    }
     let window = &points[points.len().saturating_sub(rule.window)..];
     let now = *window.last()?;
     if now < rule.floor {
         return None;
     }
     // The latest lowest point: when the growth began, not when it was flat.
-    let (at, low) = window.iter().enumerate().rev().min_by_key(|(_, v)| **v).map(|(i, v)| (i, *v))?;
+    let (at, low) = window
+        .iter()
+        .enumerate()
+        .rev()
+        .min_by_key(|(_, v)| **v)
+        .map(|(i, v)| (i, *v))?;
     let high = *window.iter().max()?;
     let grew = now.saturating_sub(low);
-    if grew < rule.gain || (now as f64) < (low as f64) * rule.ratio || (now as f64) < (high as f64) * rule.retreat {
+    if grew < rule.gain
+        || (now as f64) < (low as f64) * rule.ratio
+        || (now as f64) < (high as f64) * rule.retreat
+    {
         return None;
     }
     let minutes = ((window.len() - 1 - at) as u64 * STEP_MS / 60_000) as u32;
@@ -132,15 +159,22 @@ impl Ledger {
         let s = self
             .series
             .entry(key.to_string())
-            .or_insert_with(|| Series { start: step, points: VecDeque::with_capacity(POINTS) });
-        // Samples that were missed (the machine slept, a sample failed) carry
-        // the last value over rather than draw a cliff.
-        while !s.points.is_empty() && s.end() + 1 < step {
-            let carry = *s.points.back().expect("not empty");
-            s.points.push_back(carry);
-            if s.points.len() > POINTS {
-                s.points.pop_front();
-                s.start += 1;
+            .or_insert_with(|| Series {
+                start: step,
+                points: VecDeque::with_capacity(POINTS),
+            });
+        // Steps nobody sampled (no Tower is open and the timer runs every
+        // [`IDLE_EVERY_STEPS`], or the machine slept) are drawn as a straight
+        // line to the new point rather than a stair or a cliff.
+        if let Some(&from) = s.points.back() {
+            let missed = step.saturating_sub(s.end() + 1);
+            for k in 1..=missed {
+                let v = from as f64 + (bytes as f64 - from as f64) * k as f64 / (missed + 1) as f64;
+                s.points.push_back(v.round() as u64);
+                if s.points.len() > POINTS {
+                    s.points.pop_front();
+                    s.start += 1;
+                }
             }
         }
         s.points.push_back(bytes);
@@ -153,7 +187,9 @@ impl Ledger {
     /// What grows unusually now: the keys still being recorded whose
     /// last half hour passes [`GROWTH`]. Part keys are `part:<id>`.
     pub fn growth(&self) -> Vec<TowerMemoryGrowth> {
-        let Some(latest) = self.last else { return vec![] };
+        let Some(latest) = self.last else {
+            return vec![];
+        };
         let mut out: Vec<TowerMemoryGrowth> = self
             .series
             .iter()
@@ -161,10 +197,19 @@ impl Ledger {
             .filter_map(|(key, s)| {
                 let points: Vec<u64> = s.points.iter().copied().collect();
                 let (from, to, minutes) = grows_unusually(&points, &GROWTH)?;
-                Some(TowerMemoryGrowth { key: key.clone(), from, to, minutes })
+                Some(TowerMemoryGrowth {
+                    key: key.clone(),
+                    from,
+                    to,
+                    minutes,
+                })
             })
             .collect();
-        out.sort_by(|a, b| (b.to - b.from).cmp(&(a.to - a.from)).then_with(|| a.key.cmp(&b.key)));
+        out.sort_by(|a, b| {
+            (b.to - b.from)
+                .cmp(&(a.to - a.from))
+                .then_with(|| a.key.cmp(&b.key))
+        });
         out
     }
 
@@ -180,7 +225,11 @@ impl Ledger {
             })
             .collect();
         series.sort_by(|a, b| a.key.cmp(&b.key));
-        TowerMemoryHistory { step_ms: STEP_MS as u32, since_ms: self.since_ms, series }
+        TowerMemoryHistory {
+            step_ms: STEP_MS as u32,
+            since_ms: self.since_ms,
+            series,
+        }
     }
 }
 
@@ -193,7 +242,12 @@ struct Shared {
 fn shared() -> MutexGuard<'static, Shared> {
     static GLOBAL: OnceLock<Mutex<Shared>> = OnceLock::new();
     GLOBAL
-        .get_or_init(|| Mutex::new(Shared { ledger: Ledger::default(), fed: None }))
+        .get_or_init(|| {
+            Mutex::new(Shared {
+                ledger: Ledger::default(),
+                fed: None,
+            })
+        })
         .lock()
         .unwrap_or_else(|e| e.into_inner())
 }
@@ -242,9 +296,17 @@ mod tests {
         .into_iter()
         .map(|part| TowerMemoryPart {
             part,
-            mem: if part == TowerMemoryPartId::Core { core } else { 0 },
+            mem: if part == TowerMemoryPartId::Core {
+                core
+            } else {
+                0
+            },
             processes: 1,
-            rows: if part == TowerMemoryPartId::Core { rows.iter().map(|(k, m)| row(k, *m)).collect() } else { vec![] },
+            rows: if part == TowerMemoryPartId::Core {
+                rows.iter().map(|(k, m)| row(k, *m)).collect()
+            } else {
+                vec![]
+            },
         })
         .collect();
         TowerMemory {
@@ -260,7 +322,10 @@ mod tests {
     }
 
     fn get<'a>(h: &'a TowerMemoryHistory, key: &str) -> &'a TowerMemorySeries {
-        h.series.iter().find(|s| s.key == key).unwrap_or_else(|| panic!("no series {key}"))
+        h.series
+            .iter()
+            .find(|s| s.key == key)
+            .unwrap_or_else(|| panic!("no series {key}"))
     }
 
     fn mbs(v: &[u64]) -> Vec<u64> {
@@ -269,7 +334,9 @@ mod tests {
 
     /// `n` points ramping from `a` to `b` MB.
     fn ramp(a: u64, b: u64, n: usize) -> Vec<u64> {
-        (0..n).map(|i| ((a as i64 + (b as i64 - a as i64) * i as i64 / (n as i64 - 1)) as u64) * MB).collect()
+        (0..n)
+            .map(|i| ((a as i64 + (b as i64 - a as i64) * i as i64 / (n as i64 - 1)) as u64) * MB)
+            .collect()
     }
 
     // ── thinning, size, keys, restarts ─────────────────────────────────────
@@ -278,7 +345,10 @@ mod tests {
     fn two_second_samples_thin_to_ten_second_points() {
         let mut l = Ledger::default();
         for i in 0..30u64 {
-            l.record(1_000_000 + i * 2_000, &sample(100 + i, &[("core:srv", 100 + i)]));
+            l.record(
+                1_000_000 + i * 2_000,
+                &sample(100 + i, &[("core:srv", 100 + i)]),
+            );
         }
         // 60 s of 2 s samples: six steps (or seven if the first lands mid-step).
         let n = get(&l.history(), "total").points.len();
@@ -304,9 +374,16 @@ mod tests {
         let total = get(&h, "total");
         assert_eq!(total.points.len(), POINTS);
         assert_eq!(*total.points.last().unwrap(), POINTS as u64 + 39);
-        assert_eq!(total.start_ms, 40 * STEP_MS, "the oldest 40 points fell off");
+        assert_eq!(
+            total.start_ms,
+            40 * STEP_MS,
+            "the oldest 40 points fell off"
+        );
         assert_eq!(h.step_ms, 10_000);
-        assert_eq!(h.since_ms, 0, "since the first sample, not the first point kept");
+        assert_eq!(
+            h.since_ms, 0,
+            "since the first sample, not the first point kept"
+        );
     }
 
     #[test]
@@ -316,7 +393,11 @@ mod tests {
         let h = l.history();
         assert_eq!(get(&h, "total").points, vec![300]);
         assert_eq!(get(&h, "part:core").points, vec![300]);
-        assert_eq!(get(&h, "part:agents").points, vec![0], "a zero part is kept");
+        assert_eq!(
+            get(&h, "part:agents").points,
+            vec![0],
+            "a zero part is kept"
+        );
         assert_eq!(get(&h, "core:gpu").points, vec![100]);
         assert_eq!(get(&h, "core:srv").points, vec![200]);
     }
@@ -327,22 +408,32 @@ mod tests {
         l.record(0, &sample(10, &[("agent:a", 10)]));
         l.record(STEP_MS, &sample(0, &[]));
         let h = l.history();
-        assert_eq!(get(&h, "agent:a").points, vec![10], "the line ends where the process ended");
+        assert_eq!(
+            get(&h, "agent:a").points,
+            vec![10],
+            "the line ends where the process ended"
+        );
         assert_eq!(get(&h, "total").points.len(), 2);
         for i in 2..(POINTS as u64) {
             l.record(i * STEP_MS, &sample(0, &[]));
         }
-        assert!(l.history().series.iter().any(|s| s.key == "agent:a"), "still within the hour");
+        assert!(
+            l.history().series.iter().any(|s| s.key == "agent:a"),
+            "still within the hour"
+        );
         l.record(POINTS as u64 * STEP_MS, &sample(0, &[]));
-        assert!(!l.history().series.iter().any(|s| s.key == "agent:a"), "not seen for an hour: dropped");
+        assert!(
+            !l.history().series.iter().any(|s| s.key == "agent:a"),
+            "not seen for an hour: dropped"
+        );
     }
 
     #[test]
-    fn missed_steps_carry_the_last_value() {
+    fn missed_steps_are_drawn_as_a_straight_line() {
         let mut l = Ledger::default();
         l.record(0, &sample(5, &[]));
         l.record(4 * STEP_MS, &sample(9, &[]));
-        assert_eq!(get(&l.history(), "total").points, vec![5, 5, 5, 5, 9]);
+        assert_eq!(get(&l.history(), "total").points, vec![5, 6, 7, 8, 9]);
     }
 
     #[test]
@@ -359,7 +450,10 @@ mod tests {
         let rows: Vec<(&str, u64)> = names.iter().map(|n| (n.as_str(), 1)).collect();
         l.record(0, &sample(1, &rows));
         assert!(l.history().series.len() <= MAX_SERIES);
-        assert!(l.history().series.iter().any(|s| s.key == "total"), "the total is always kept");
+        assert!(
+            l.history().series.iter().any(|s| s.key == "total"),
+            "the total is always kept"
+        );
     }
 
     // ── the growth flag, the cases the spec pins ───────────────────────────
@@ -380,7 +474,10 @@ mod tests {
         p.extend(ramp(200, 400, 120));
         let (from, to, minutes) = grows_unusually(&p, &GROWTH).expect("flagged");
         assert_eq!((from / MB, to / MB), (200, 400));
-        assert!((19..=20).contains(&minutes), "counted from where it began to grow: {minutes}");
+        assert!(
+            (19..=20).contains(&minutes),
+            "counted from where it began to grow: {minutes}"
+        );
     }
 
     #[test]
@@ -420,6 +517,18 @@ mod tests {
     }
 
     #[test]
+    fn a_line_still_starting_up_is_not_flagged() {
+        assert!(
+            !flagged(&ramp(100, 400, 30)),
+            "five minutes of points: a program warming up"
+        );
+        assert!(
+            flagged(&ramp(100, 400, 60)),
+            "ten minutes of the same climb is"
+        );
+    }
+
+    #[test]
     fn only_the_last_half_hour_counts() {
         // Grew long ago, flat since: the last 30 minutes are flat.
         let mut p = ramp(100, 600, 120);
@@ -438,7 +547,10 @@ mod tests {
         }
         let g = l.growth();
         let keys: Vec<&str> = g.iter().map(|g| g.key.as_str()).collect();
-        assert!(keys.contains(&"core:srv") && keys.contains(&"part:core") && keys.contains(&"total"), "{keys:?}");
+        assert!(
+            keys.contains(&"core:srv") && keys.contains(&"part:core") && keys.contains(&"total"),
+            "{keys:?}"
+        );
         assert!(!keys.contains(&"part:agents"));
         assert_eq!(g[0].to, total);
         assert_eq!(g[0].from, 200 * MB);

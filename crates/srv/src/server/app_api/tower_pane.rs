@@ -102,7 +102,7 @@ async fn sample_local(state: &AppState, req: &TowerSampleReq) -> Result<TowerSna
     .map_err(|e| format!("tower.sample: {e}"))?
 }
 
-/// The ledger keeps its hour with no Tower open (spec D7): every step it
+/// The ledger keeps its hour with no Tower open (spec D7): every 30 s it
 /// samples if no Tower did. One timer per process.
 fn spawn_ledger_timer(state: &AppState) {
     static STARTED: std::sync::Once = std::sync::Once::new();
@@ -112,7 +112,7 @@ fn spawn_ledger_timer(state: &AppState) {
     let state = state.clone();
     STARTED.call_once(|| {
         runtime.spawn(async move {
-            let step = std::time::Duration::from_millis(tower_memory_ledger::STEP_MS);
+            let step = std::time::Duration::from_millis(tower_memory_ledger::STEP_MS * tower_memory_ledger::IDLE_EVERY_STEPS);
             let mut tick = tokio::time::interval(step);
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             // The first tick is now, with nothing to read yet: skip it.
