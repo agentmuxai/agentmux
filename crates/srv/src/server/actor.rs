@@ -88,6 +88,8 @@ actor_sites! {
     WorkRelease => "work_release",
     CronCreate => "cron_create",
     Inject => "inject",
+    BusRegister => "bus_register",
+    BusRead => "bus_read",
     BusSend => "bus_send",
     BusInject => "bus_inject",
     BusBroadcast => "bus_broadcast",
@@ -246,6 +248,56 @@ pub(crate) async fn require_actor(
         Ok(())
     } else {
         Err("FORBIDDEN: the sender must be the agent this request's token names".to_string())
+    }
+}
+
+/// Like [`require_actor`], but for a route that acts for an agent and has no
+/// meaning without one: the request must carry the token of the agent it
+/// names. A request with no token (or one this srv didn't mint) is refused
+/// instead of being taken at its word, and so is one whose token names another
+/// agent.
+pub(crate) async fn require_token_naming(
+    state: &AppState,
+    caller: Option<&Caller>,
+    site: ActorSite,
+    actor: &str,
+) -> Result<(), String> {
+    check_actor(state, caller, site, Some(actor));
+    let Some(uid) = caller.and_then(Caller::uid) else {
+        return Err("FORBIDDEN: this acts for an agent, so the request must carry that agent's token (AGENTMUX_AGENT_TOKEN)".to_string());
+    };
+    let (mstore, uid, name) = (state.mstore.clone(), uid.to_string(), actor.trim().to_string());
+    match tokio::task::spawn_blocking(move || proven_slug(&mstore, &uid, &name)).await {
+        Ok(Some(_)) => Ok(()),
+        _ => Err("FORBIDDEN: the request's token must name the agent this acts for, by a name only that agent answers to".to_string()),
+    }
+}
+
+/// The slug of the agent behind `uid` when `actor` is a name only that agent
+/// answers to: its slug, a display or instance name no other agent shares, or
+/// a name it was renamed from. A name another row also answers to, or a row
+/// that can't be read, proves nothing (unlike [`names_the_caller`], which
+/// gives them the benefit of the doubt).
+pub(crate) fn proven_slug(store: &Store, uid: &str, actor: &str) -> Option<String> {
+    let Ok(Some(row)) = store.agent_names_by_id(uid) else {
+        return None;
+    };
+    match classify(&row, actor, |name| store.rows_answering_to(name)) {
+        None => Some(row.slug),
+        Some(Outcome::Mismatch) => store.former_name_owner(actor).ok().flatten().filter(|owner| owner.uid == uid).map(|_| row.slug),
+        Some(_) => None,
+    }
+}
+
+/// For a route that acts for the agent its token names (its memory, accounts,
+/// presets): the request must carry a token this srv minted. Without one the
+/// route has no one to act for, and a body's `agent_id` is only a claim, so it
+/// is refused instead of being taken at its word.
+pub(crate) fn require_token(state: &AppState, caller: Option<&Caller>, site: ActorSite, actor: &str) -> Result<(), String> {
+    check_actor(state, caller, site, Some(actor));
+    match caller.and_then(Caller::uid) {
+        Some(_) => Ok(()),
+        None => Err("FORBIDDEN: this acts for an agent, so the request must carry that agent's token (AGENTMUX_AGENT_TOKEN)".to_string()),
     }
 }
 

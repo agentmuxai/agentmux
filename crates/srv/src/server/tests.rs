@@ -6394,11 +6394,8 @@ async fn m4c2b_an_attributed_memory_request_is_the_callers_own() {
 
     let (status, v) = m4c1_send(&state, Some(&y2), "/api/v1/agent/memory/write", write("y2's")).await;
     assert_eq!(status, StatusCode::OK, "{v}");
-    let counter = "m4c.memory_owner_by_name";
-    let before = m4a2_count(counter);
     let (status, v) = m4c1_send(&state, None, "/api/v1/agent/memory/write", write("y's")).await;
-    assert_eq!(status, StatusCode::OK, "{v}");
-    assert!(m4a2_count(counter) > before, "Unattributed: by slug, counted");
+    assert_eq!(status, StatusCode::FORBIDDEN, "no token, no owner: {v}");
 
     let versions = |uid: &str| {
         state
@@ -6410,7 +6407,7 @@ async fn m4c2b_an_attributed_memory_request_is_the_callers_own() {
             .collect::<Vec<_>>()
     };
     assert_eq!(versions("uid-m4c2b-y2").len(), 1, "the token's row");
-    assert_eq!(versions("uid-m4c2b-y").len(), 1, "the slug's row");
+    assert_eq!(versions("uid-m4c2b-y").len(), 0, "the slug's row: the tokenless write was refused");
 
     let uri = "/api/v1/agent/memory/read?agent_id=agenty&filename=MEMORY.md";
     let req = Request::builder()
@@ -6431,7 +6428,7 @@ async fn m4c2b_an_attributed_memory_request_is_the_callers_own() {
 
 /// Each handler takes its owner from the token, not from `agent_id`: a token
 /// whose row is gone is refused with the caller named, while the same
-/// request Unattributed resolves the slug as before and is counted.
+/// request Unattributed is refused.
 #[tokio::test]
 async fn m4c2c_self_handlers_take_the_owner_from_the_token() {
     let _counters = M4_ACTOR_COUNTERS.lock().await;
@@ -6462,23 +6459,17 @@ async fn m4c2c_self_handlers_take_the_owner_from_the_token() {
             (status, String::from_utf8_lossy(&body).into_owned())
         }
     };
-    for (uri, counter) in [
-        ("/api/v1/agent/identity/accounts?agent_id=m4c2c-nobody", "m4c.identity_owner_by_name"),
-        ("/api/v1/agent/preset/get?agent_id=m4c2c-nobody", "m4c.preset_owner_by_name"),
-        // History search no longer resolves a name at all: Unattributed, it's
-        // refused (see `history_search_without_an_identity_token_is_refused_not_guessed`).
-        (
-            "/agentmux/reactive/history/search?agent=m4c2c-nobody&query=x",
-            "history.search_refused_unattributed",
-        ),
+    for uri in [
+        "/api/v1/agent/identity/accounts?agent_id=m4c2c-nobody",
+        "/api/v1/agent/preset/get?agent_id=m4c2c-nobody",
+        "/agentmux/reactive/history/search?agent=m4c2c-nobody&query=x",
     ] {
         let (status, body) = get(uri, Some(gone.clone())).await;
         assert!(status.is_client_error(), "{uri}: {status} {body}");
         assert!(body.contains("calling agent uid-m4c2c-gone not found"), "{uri}: {body}");
-        let before = m4a2_count(counter);
-        let (_, body) = get(uri, None).await;
+        let (status, body) = get(uri, None).await;
+        assert!(status.is_client_error(), "{uri}: Unattributed is refused: {status} {body}");
         assert!(!body.contains("calling agent"), "{uri}: {body}");
-        assert!(m4a2_count(counter) > before, "{uri}: Unattributed is counted");
     }
 }
 
@@ -6633,7 +6624,7 @@ async fn m4c2d_the_senders_uid_is_audited_and_carried() {
     let entry = audited.iter().find(|e| e.request_id == request_id);
     assert_eq!(entry.map(|e| e.audit_source_uid.as_str()), Some("uid-m4c2d"), "{resp}");
 
-    m4c1_send(&state, None, "/api/bus/register", serde_json::json!({"agent_id": "m4c2d-inbox"})).await;
+    state.messagebus.register_http("m4c2d-inbox");
     let send = |payload: &str| {
         serde_json::json!({"from": "m4c2d-sender", "to": "m4c2d-inbox", "payload": payload})
     };

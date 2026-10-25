@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { assertMenuInPaintableArea } from "@/app/util/menu-position";
+import { menuIconClass } from "@/app/util/menu-icons";
 import { useHiddenTabMarker, usePaneOverlay } from "@/app/platform/pane-overlay";
 import clsx from "clsx";
 import { createSignal, For, JSX, onCleanup, onMount, Show } from "solid-js";
@@ -18,6 +19,9 @@ type PopoverMenuActionItem = {
     disabled?: boolean;
     /** When true, clicking this item does not close the popover. Default false. */
     keepOpen?: boolean;
+    /** A Font Awesome name drawn in the row's leading slot (not on a checkbox row, whose check
+     *  takes the slot); decoration only. See app/util/menu-icons.ts. */
+    icon?: string;
     click: () => void;
 };
 
@@ -142,7 +146,14 @@ const PopoverMenuItemRenderer = (props: {
             class={clsx("menu-item popover-menu-action", { disabled: item.disabled })}
             onClick={handleClick}
         >
-            <Show when={item.type === "checkbox"} fallback={<span class="menu-item-icon-spacer" />}>
+            <Show
+                when={item.type === "checkbox"}
+                fallback={
+                    <Show when={menuIconClass(item.icon)} fallback={<span class="menu-item-icon-spacer" />}>
+                        {(cls) => <i class={cls()} aria-hidden="true" />}
+                    </Show>
+                }
+            >
                 <i
                     class={clsx(
                         "fa-solid fa-fw menu-item-icon menu-item-check",

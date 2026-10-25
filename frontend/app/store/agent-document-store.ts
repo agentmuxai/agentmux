@@ -95,13 +95,78 @@ let eventSink: EventSink = (blockId, event) => {
         );
     } else if (event.type === "tool-chunk-dropped") {
         // Real signal — chunk arrived before the matching ToolNode
-        // existed in state (or the tool was already terminated).
-        // Indicates an ordering bug, not a transient — keep loud.
-        console.warn(
-            `[agent-document-store] dropped chunk for ${blockId.slice(0, 7)} toolId=${event.toolId.slice(0, 14)} reason=${event.reason}`,
-        );
+        // existed in state (or the tool was already terminated). Counted
+        // and logged once per burst: a pane that mounts has up to 1024
+        // persisted chunks replayed at it before its history has made the
+        // tool nodes, and one console.warn (one IPC log line) per chunk
+        // was ~1400 lines in 2 s on a tab tear-off.
+        noteChunkDropped(blockId, event.toolId, event.reason);
     }
 };
+
+/** A burst of dropped chunks ends after this long without another one. */
+const DROP_BURST_QUIET_MS = 1000;
+/** Distinct (tool, reason) pairs a burst names; the rest are counted as "other". */
+const DROP_BURST_MAX_TOOLS = 200;
+/** Tools named in the summary line, busiest first. */
+const DROP_SUMMARY_TOP = 3;
+
+interface DropBurst {
+    /** `${reason} ${toolId}` → chunks dropped. */
+    byTool: Map<string, number>;
+    total: number;
+    /** Drops past `DROP_BURST_MAX_TOOLS` distinct pairs. */
+    other: number;
+    timer: ReturnType<typeof setTimeout> | null;
+}
+
+const dropBursts = new Map<string, DropBurst>();
+
+function noteChunkDropped(blockId: string, toolId: string, reason: string): void {
+    let burst = dropBursts.get(blockId);
+    if (burst == null) {
+        burst = { byTool: new Map(), total: 0, other: 0, timer: null };
+        dropBursts.set(blockId, burst);
+    }
+    const key = `${reason} ${toolId}`;
+    const seen = burst.byTool.get(key);
+    if (seen != null) burst.byTool.set(key, seen + 1);
+    else if (burst.byTool.size < DROP_BURST_MAX_TOOLS) burst.byTool.set(key, 1);
+    else burst.other++;
+    burst.total++;
+    if (burst.timer != null) clearTimeout(burst.timer);
+    burst.timer = setTimeout(() => flushDropBurst(blockId), DROP_BURST_QUIET_MS);
+}
+
+/** Logs the pane's burst of dropped chunks as ONE line, and ends the burst. */
+function flushDropBurst(blockId: string): void {
+    const burst = dropBursts.get(blockId);
+    if (burst == null) return;
+    dropBursts.delete(blockId);
+    if (burst.timer != null) clearTimeout(burst.timer);
+    const pane = blockId.slice(0, 7);
+    if (burst.total === 1) {
+        const [reason, toolId] = [...burst.byTool.keys()][0].split(" ");
+        console.warn(`[agent-document-store] dropped chunk for ${pane} toolId=${toolId.slice(0, 14)} reason=${reason}`);
+        return;
+    }
+    const byReason = new Map<string, number>();
+    for (const [key, n] of burst.byTool) {
+        const reason = key.slice(0, key.indexOf(" "));
+        byReason.set(reason, (byReason.get(reason) ?? 0) + n);
+    }
+    if (burst.other > 0) byReason.set("other", burst.other);
+    const reasons = [...byReason].map(([r, n]) => `${r}=${n}`).join(" ");
+    const busiest = [...burst.byTool]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, DROP_SUMMARY_TOP)
+        .map(([key, n]) => `${key.slice(key.indexOf(" ") + 1, key.indexOf(" ") + 15)}x${n}`)
+        .join(" ");
+    const tools = burst.byTool.size + (burst.other > 0 ? "+" : "");
+    console.warn(
+        `[agent-document-store] dropped ${burst.total} chunks for ${tools} tool ids in ${pane} (${reasons}); busiest: ${busiest}`,
+    );
+}
 
 /**
  * Register a pane with the store. The slot owns the pane's reducer
@@ -141,6 +206,7 @@ export function documentNodes(blockId: string): Accessor<DocumentNode[]> | null 
  */
 export function unregisterPane(blockId: string): void {
     slots.delete(blockId);
+    flushDropBurst(blockId);
 }
 
 /**
@@ -252,6 +318,8 @@ export function getNodeIdSet(blockId: string): Set<string> {
 /** Test/dev helper — wipe all slots. Never call in production. */
 export function __resetAllSlots(): void {
     slots.clear();
+    for (const burst of dropBursts.values()) if (burst.timer != null) clearTimeout(burst.timer);
+    dropBursts.clear();
 }
 
 // Re-export types for ergonomic imports at the call site.
