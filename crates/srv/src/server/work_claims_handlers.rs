@@ -82,8 +82,10 @@ fn nonempty(s: &Option<String>) -> Option<&str> {
 }
 
 /// Who is asking: the name and UID of the caller's registration (found by
-/// token, block, then unique name, as `WhoIsWorkingOn` does), else the name
-/// it sent. `None` when there is no name at all.
+/// token, block, then unique name, as `WhoIsWorkingOn` does). A caller with a
+/// token is that token's agent and nobody else: with no registration its name
+/// is its own slug, never one it sent. Without a token, the name it sent.
+/// `None` when there is no name at all.
 pub(super) fn claimer(
     state: &AppState,
     caller: Option<&Caller>,
@@ -94,9 +96,12 @@ pub(super) fn claimer(
     let token_uid = caller.and_then(|c| c.uid().map(str::to_string));
     let block_id = caller_block(&regs, token_uid.as_deref(), block, agent);
     let reg = block_id.as_deref().and_then(|b| regs.iter().find(|r| r.block_id == b));
-    let name = reg
-        .map(|r| r.agent_id.clone())
-        .or_else(|| agent.map(str::trim).filter(|a| !a.is_empty()).map(str::to_string))?;
+    let sent = || agent.map(str::trim).filter(|a| !a.is_empty()).map(str::to_string);
+    let name = match (reg, token_uid.as_deref()) {
+        (Some(r), _) => r.agent_id.clone(),
+        (None, Some(uid)) => state.mstore.agent_names_by_id(uid).ok().flatten().map(|row| row.slug).filter(|s| !s.is_empty())?,
+        (None, None) => sent()?,
+    };
     let uid = token_uid.or_else(|| reg.and_then(|r| r.uid.clone())).unwrap_or_default();
     Some((name, uid, block_id))
 }

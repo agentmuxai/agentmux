@@ -3,7 +3,7 @@
 
 //! Routes that act for an agent (its jobs and its work queue) are served only
 //! to a request that carries an agent's token, and the agent a request names
-//! (`agent_id`, `created_by`) has to be the one that token belongs to. The
+//! (`agent_id`, `created_by`, `agent`) has to be the one that token belongs to. The
 //! handlers used to take the acting agent from those body fields, or record
 //! the action as the operator's when there was no token. The window reaches
 //! the same state over its RPC socket, not these routes.
@@ -25,12 +25,12 @@ fn refuse(status: StatusCode, error: &str) -> Response {
     (status, Json(serde_json::json!({ "ok": false, "error": error }))).into_response()
 }
 
-/// The agent names a JSON body gives as the one acting.
+/// The agent names a JSON body gives as the one acting (`agent` is what claims and posts call it).
 fn named_actors(body: &[u8]) -> Vec<String> {
     let Ok(serde_json::Value::Object(fields)) = serde_json::from_slice(body) else {
         return Vec::new();
     };
-    ["agent_id", "created_by"]
+    ["agent_id", "created_by", "agent"]
         .iter()
         .filter_map(|key| fields.get(*key)?.as_str())
         .map(|name| name.trim().to_string())

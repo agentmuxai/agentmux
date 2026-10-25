@@ -210,6 +210,11 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/agentmux/work/:id/submit", post(work_tasks::handle_work_submit))
         .route("/agentmux/work/:id/hold", post(work_tasks::handle_work_hold))
         .route("/agentmux/work/:id/unhold", post(work_tasks::handle_work_unhold))
+        // Presence claims and posts to a repository's coordination channel
+        // (SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15.md); reading is open.
+        .route("/api/v1/work-claims", post(work_claims_handlers::handle_claim_work))
+        .route("/api/v1/work-claims/release", post(work_claims_handlers::handle_release_work))
+        .route("/api/v1/coord/posts", post(coord_channel_handlers::handle_post_to_channel))
         .route_layer(middleware::from_fn_with_state(state.clone(), agent_only::require_agent_token));
 
     // MessageBus routes (authed, localhost-only)
@@ -395,14 +400,9 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/work-facts/who", get(work_facts_handlers::handle_who_is_working_on))
         // ClaimWork / ReleaseWork (same spec, §3.4): informational claims,
         // never a lock.
-        .route("/api/v1/work-claims", post(work_claims_handlers::handle_claim_work))
-        .route("/api/v1/work-claims/release", post(work_claims_handlers::handle_release_work))
         // PostToChannel / ReadChannel: a repository's coordination channel
         // (SPEC_AGENT_COORDINATION_CHANNEL_2026_10_15.md).
-        .route(
-            "/api/v1/coord/posts",
-            post(coord_channel_handlers::handle_post_to_channel).get(coord_channel_handlers::handle_read_channel),
-        )
+        .route("/api/v1/coord/posts", get(coord_channel_handlers::handle_read_channel))
         // MuxAPI — identity / preset / memory namespaces, the MCP-facing
         // slice of the app-API RPC surface (SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28).
         // The agent identity (`agent_id`) is supplied by agentmux-mcp from its
