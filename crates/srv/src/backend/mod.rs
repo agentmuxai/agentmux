@@ -182,6 +182,8 @@ pub mod work_facts;
 pub mod kanban;
 /// The wake at an out-of-quota agent's reset (SPEC_UNRESPONSIVE_AGENTS_2026_10_23.md §7).
 pub mod limit_wake;
+/// Which model a Claude agent's sub-agents run on (SPEC_SUBAGENT_MODELS_2026_10_25.md).
+pub mod subagent_model;
 /// A leader accepting or sending back a task on the operator's word.
 pub mod kanban_delegate;
 /// Holding a routine message for an agent whose session has gone cold (SPEC_JEKT_HOLD_FOR_COLD_SESSIONS_2026_10_25.md).
