@@ -154,14 +154,6 @@ impl WanIdentityStore {
         let rows = stmt.query_map([], row_to_pin)?.collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
-
-    /// Drop every pin: on logout or an account switch the pins belong to an
-    /// account that is no longer this one's.
-    pub fn agent_instance_pins_clear(&self) -> Result<(), StoreError> {
-        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
-        conn.execute("DELETE FROM wan_agent_instance_pins", [])?;
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -220,10 +212,10 @@ mod tests {
     }
 
     #[test]
-    fn clearing_forgets_every_pin() {
+    fn signing_out_or_switching_account_forgets_every_pin() {
         let (_dir, s) = store();
         s.agent_instance_pin_get_or_set("lazo", "stable", "inst-a", "narko", 10).unwrap();
-        s.agent_instance_pins_clear().unwrap();
+        s.peer_cache_clear().unwrap();
         assert!(s.agent_instance_pins_list().unwrap().is_empty());
     }
 }

@@ -43,6 +43,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use super::agent_lan_keys::random_seed_bytes;
 use super::error::StoreError;
 
+pub mod pins;
+
 /// Bumped only by additive changes (new tables, new nullable columns).
 /// v2 (D2): the receiver tables — peer-record cache, known instances, and
 /// seen signatures.
@@ -657,8 +659,6 @@ impl WanIdentityStore {
 /// Test helper: attach a fresh `wan.db` in a temp dir to `store`, as
 /// bootstrap does for the runtime object store. Keep the returned dir alive
 /// for the test's duration.
-pub mod pins;
-
 #[cfg(test)]
 pub fn attach_temp_wan_identity(store: &super::store::Store) -> (tempfile::TempDir, std::sync::Arc<WanIdentityStore>) {
     let dir = tempfile::tempdir().unwrap();
