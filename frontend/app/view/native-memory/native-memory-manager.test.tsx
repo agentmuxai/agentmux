@@ -44,6 +44,7 @@ async function openFile(filename: string): Promise<void> {
 
 const listAgentDefinitionsMock = vi.fn();
 const nativeMemoryListMock = vi.fn();
+const nativeMemoryWriteMock = vi.fn();
 /** `memory:launchcost`; rejects unless a test gives a cost. */
 const launchCostMock = vi.fn();
 
@@ -77,6 +78,7 @@ vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         ListAgentDefinitionsCommand: (...args: unknown[]) => listAgentDefinitionsMock(...args),
         NativeMemoryListCommand: (...args: unknown[]) => nativeMemoryListMock(...args),
+        NativeMemoryWriteFileCommand: (...args: unknown[]) => nativeMemoryWriteMock(...args),
         // The "earlier memory" panel above the file grid: nothing to offer.
         NativeMemoryAdoptionListCommand: () => Promise.resolve({ list: null }),
         NativeMemoryClaimsCommand: () => Promise.resolve({ list_id: "l", agent_uid: "a", folders: [] }),
@@ -113,6 +115,7 @@ vi.mock("./NativeMemoryFileView", () => ({
 
 import { fileMetaLabel, formatFileAge, formatFileSize } from "./MemoryFileCard";
 import { NativeMemoryManager } from "./native-memory-manager";
+import { createSignal } from "solid-js";
 import { makeTestHostApi } from "@/app/host/test-host";
 
 function agent(id: string, name: string): AgentDefinition {
@@ -127,6 +130,7 @@ beforeEach(() => {
     window.api = makeTestHostApi();
     listAgentDefinitionsMock.mockReset();
     nativeMemoryListMock.mockReset();
+    nativeMemoryWriteMock.mockReset().mockResolvedValue({});
     launchCostMock.mockReset();
     launchCostMock.mockRejectedValue(new Error("no srv"));
     listAgentDefinitionsMock.mockResolvedValue([agent("a1", "Manoz"), agent("a2", "AgentY")]);
@@ -1065,5 +1069,197 @@ describe("MemoryFileCard — label helpers", () => {
         const base = { filename: "x.md", is_index: false, metadata_type: null, tokens_est: 0, lines: 0 };
         expect(fileMetaLabel({ ...base, size_bytes: 440, tokens_est: 110, modified_at: 0 })).toBe("~110 tok");
         expect(fileMetaLabel({ ...base, size_bytes: 0, tokens_est: 0, modified_at: 0 })).toBe("~0 tok");
+    });
+});
+
+// New file and Create MEMORY.md moved here from the agent pane's own memory
+// view, ahead of the Stash drawer's removal.
+describe("NativeMemoryManager — create actions", () => {
+    function meta(filename: string, over: Partial<NativeMemoryFileMeta> = {}): NativeMemoryFileMeta {
+        return {
+            filename,
+            is_index: false,
+            metadata_type: null,
+            size_bytes: 512,
+            tokens_est: 128,
+            lines: 10,
+            modified_at: Date.now() - 86_400_000,
+            ...over,
+        };
+    }
+
+    /** A folder that gains each file written to it, as srv's would. */
+    function folderWith(initial: NativeMemoryFileMeta[], extra: Record<string, unknown> = {}) {
+        const files = [...initial];
+        nativeMemoryListMock.mockImplementation(() => Promise.resolve({ files: [...files], ...extra }));
+        nativeMemoryWriteMock.mockImplementation((_c: unknown, req: { filename: string }) => {
+            files.push(meta(req.filename, { is_index: req.filename === "MEMORY.md" }));
+            return Promise.resolve({});
+        });
+    }
+
+    async function openManoz(): Promise<void> {
+        render(() => <NativeMemoryManager />);
+        fireEvent.click(await screen.findByText("Manoz"));
+        await screen.findByText("← All agents");
+    }
+
+    test("New file writes the named file, refreshes the list and opens it", async () => {
+        folderWith([meta("MEMORY.md", { is_index: true })]);
+        await openManoz();
+        const listCalls = nativeMemoryListMock.mock.calls.length;
+
+        fireEvent.click(await screen.findByRole("button", { name: "New file" }));
+        fireEvent.input(screen.getByLabelText("File name"), { target: { value: "ideas" } });
+        fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+        await waitFor(() =>
+            expect(nativeMemoryWriteMock).toHaveBeenCalledWith(
+                undefined,
+                { agent_id: "a1", filename: "ideas.md", content: "", provenance: { source: "human" } }
+            )
+        );
+        expect((await screen.findByTestId("history-panel")).textContent).toBe("a1:ideas.md");
+        expect(nativeMemoryListMock.mock.calls.length).toBeGreaterThan(listCalls);
+
+        // Back on the file grid, the new file is one of the tiles.
+        fireEvent.click(screen.getByText("← All files"));
+        await waitFor(() => expect(fileTileNames()).toContain("ideas.md"));
+    });
+
+    test("Enter in the name box creates it, and Escape cancels", async () => {
+        folderWith([meta("MEMORY.md", { is_index: true })]);
+        await openManoz();
+
+        fireEvent.click(await screen.findByRole("button", { name: "New file" }));
+        fireEvent.keyDown(screen.getByLabelText("File name"), { key: "Escape" });
+        expect(screen.queryByLabelText("File name")).toBeNull();
+        expect(nativeMemoryWriteMock).not.toHaveBeenCalled();
+
+        fireEvent.click(screen.getByRole("button", { name: "New file" }));
+        fireEvent.input(screen.getByLabelText("File name"), { target: { value: "notes.md" } });
+        fireEvent.keyDown(screen.getByLabelText("File name"), { key: "Enter" });
+        await waitFor(() => expect(nativeMemoryWriteMock).toHaveBeenCalledTimes(1));
+    });
+
+    test("a bad or taken name is refused before anything is written", async () => {
+        folderWith([meta("MEMORY.md", { is_index: true }), meta("taken.md")]);
+        await openManoz();
+
+        fireEvent.click(await screen.findByRole("button", { name: "New file" }));
+        fireEvent.input(screen.getByLabelText("File name"), { target: { value: "bad name" } });
+        fireEvent.click(screen.getByRole("button", { name: "Create" }));
+        expect(await screen.findByText("Filename may only use letters, numbers, '-' and '_'.")).toBeInTheDocument();
+
+        fireEvent.input(screen.getByLabelText("File name"), { target: { value: "taken" } });
+        fireEvent.click(screen.getByRole("button", { name: "Create" }));
+        expect(await screen.findByText("taken.md already exists.")).toBeInTheDocument();
+        expect(nativeMemoryWriteMock).not.toHaveBeenCalled();
+    });
+
+    test("a failed write says why and keeps the name box open", async () => {
+        folderWith([meta("MEMORY.md", { is_index: true })]);
+        nativeMemoryWriteMock.mockRejectedValue(new Error("disk full"));
+        await openManoz();
+
+        fireEvent.click(await screen.findByRole("button", { name: "New file" }));
+        fireEvent.input(screen.getByLabelText("File name"), { target: { value: "ideas" } });
+        fireEvent.click(screen.getByRole("button", { name: "Create" }));
+        expect(await screen.findByText("Create failed: disk full")).toBeInTheDocument();
+        expect(screen.getByLabelText("File name")).toBeInTheDocument();
+    });
+
+    test("Create MEMORY.md writes the starter index when the folder has none", async () => {
+        folderWith([meta("notes.md")]);
+        await openManoz();
+
+        fireEvent.click(await screen.findByRole("button", { name: "Create MEMORY.md" }));
+
+        await waitFor(() => expect(nativeMemoryWriteMock).toHaveBeenCalledTimes(1));
+        const [, req] = nativeMemoryWriteMock.mock.calls[0];
+        expect(req.agent_id).toBe("a1");
+        expect(req.filename).toBe("MEMORY.md");
+        expect(req.content).toMatch(/^# Memory Index/);
+        expect(req.provenance).toEqual({ source: "human" });
+        expect((await screen.findByTestId("history-panel")).textContent).toBe("a1:MEMORY.md");
+    });
+
+    test("an empty folder offers both actions; one with an index offers only New file", async () => {
+        folderWith([]);
+        await openManoz();
+        expect(await screen.findByRole("button", { name: "Create MEMORY.md" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "New file" })).toBeInTheDocument();
+
+        cleanup();
+        folderWith([meta("MEMORY.md", { is_index: true })]);
+        await openManoz();
+        await screen.findByRole("button", { name: "New file" });
+        expect(screen.queryByRole("button", { name: "Create MEMORY.md" })).toBeNull();
+    });
+
+    test("a folder found by a guess can't be written to, and says so", async () => {
+        folderWith([], { unverified: true });
+        await openManoz();
+        await screen.findByText("Unverified folder");
+        expect(screen.getByRole("button", { name: "New file" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Create MEMORY.md" })).toBeDisabled();
+    });
+});
+
+// `openMemory("personal", { agentId })` writes `memory:agent` into the pane's
+// meta; the section follows it and writes it back as the user moves.
+describe("NativeMemoryManager — the agent named by the pane", () => {
+    function paneWith(initial: string | null) {
+        const [value, setValue] = createSignal<string | null>(initial);
+        const setMeta = vi.fn();
+        return {
+            setValue,
+            setMeta,
+            pane: {
+                meta: () => (value() === null ? {} : { "memory:agent": value() }) as MetaType,
+                setMeta,
+            },
+        };
+    }
+
+    const openAgentName = () => document.querySelector(".native-memory-manager-agent-name")?.textContent;
+
+    test("opens on the agent the pane names, not the grid", async () => {
+        const { pane } = paneWith("a2");
+        render(() => <NativeMemoryManager pane={pane} />);
+        await waitFor(() => expect(openAgentName()).toBe("AgentY"));
+        expect(nativeMemoryListMock).toHaveBeenCalledWith(undefined, { agent_id: "a2" });
+    });
+
+    test("moves to another agent when the pane is asked for one, even with an agent already open", async () => {
+        const { pane, setValue } = paneWith("a2");
+        render(() => <NativeMemoryManager pane={pane} />);
+        await waitFor(() => expect(openAgentName()).toBe("AgentY"));
+
+        setValue("a1");
+        await waitFor(() => expect(openAgentName()).toBe("Manoz"));
+    });
+
+    test("stays on the grid when the pane names no agent, or one that doesn't exist", async () => {
+        const none = paneWith(null);
+        render(() => <NativeMemoryManager pane={none.pane} />);
+        expect(await screen.findByText("Manoz")).toBeInTheDocument();
+        expect(openAgentName()).toBeUndefined();
+        cleanup();
+
+        const gone = paneWith("deleted-agent");
+        render(() => <NativeMemoryManager pane={gone.pane} />);
+        expect(await screen.findByText("Manoz")).toBeInTheDocument();
+        expect(openAgentName()).toBeUndefined();
+    });
+
+    test("writes the agent it opens, and clears it on Back, into the pane's meta", async () => {
+        const { pane, setMeta } = paneWith(null);
+        render(() => <NativeMemoryManager pane={pane} />);
+        fireEvent.click(await screen.findByText("Manoz"));
+        expect(setMeta).toHaveBeenLastCalledWith({ "memory:agent": "a1" });
+
+        fireEvent.click(await screen.findByText("← All agents"));
+        expect(setMeta).toHaveBeenLastCalledWith({ "memory:agent": null });
     });
 });

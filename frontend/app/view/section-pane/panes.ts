@@ -14,6 +14,8 @@ export const CONNECTORS_VIEW = "connectors";
 export const MEMORY_VIEW = "memory";
 export const CONNECTORS_SECTION_KEY = sectionKeyOf(CONNECTORS_VIEW);
 export const MEMORY_SECTION_KEY = sectionKeyOf(MEMORY_VIEW);
+/** Block meta key for the agent Memory → Personal has open (an agent definition id). */
+export const MEMORY_AGENT_KEY = "memory:agent";
 
 export type ConnectorsSection = "accounts" | "mcp" | "remotes";
 export type MemorySection = "global" | "personal" | "skills" | "bundles";
@@ -51,8 +53,12 @@ export function openConnectors(section: ConnectorsSection = "accounts"): Promise
     return openOrFocusPaneByView(CONNECTORS_VIEW, { meta: { view: CONNECTORS_VIEW, ...meta } }, meta);
 }
 
-/** Opens Memory, or focuses the one already in this tab, on `section`. */
-export function openMemory(section: MemorySection = "global"): Promise<void> {
-    const meta = { [MEMORY_SECTION_KEY]: section };
+/**
+ * Opens Memory, or focuses the one already in this tab, on `section`. With
+ * `agentId` it shows that agent's Personal memory (the section is "personal").
+ */
+export function openMemory(section: MemorySection = "global", opts?: { agentId?: string }): Promise<void> {
+    const meta: Record<string, string> = { [MEMORY_SECTION_KEY]: section };
+    if (opts?.agentId) meta[MEMORY_AGENT_KEY] = opts.agentId;
     return openOrFocusPaneByView(MEMORY_VIEW, { meta: { view: MEMORY_VIEW, ...meta } }, meta);
 }

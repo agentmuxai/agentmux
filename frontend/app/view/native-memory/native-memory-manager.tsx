@@ -43,7 +43,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { onMuxEvent } from "@/app/store/mps";
 import { useAgentDefinitions } from "@/app/view/agent/components/AgentPicker";
 import type { AgentDefinition, NativeMemoryFileMeta } from "@/app/store/rpc-api";
-import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack, type Accessor, type JSX } from "solid-js";
 import { MemoryAgentCard, type MemoryCountState } from "./MemoryAgentCard";
 import { AgentLaunchCost } from "./AgentLaunchCost";
 import { deliveredTotal, windowFromMetas } from "./agent-launch-cost";
@@ -59,6 +59,8 @@ import { resolveProviderAlias } from "@/app/view/agent/providers/catalog";
 import { NativeMemoryFileView } from "./NativeMemoryFileView";
 import { MemoryAdoptionPanel } from "./MemoryAdoptionPanel";
 import { MemoryClaimsPanel } from "./MemoryClaimsPanel";
+import { NativeMemoryCreate } from "./NativeMemoryCreate";
+import { MEMORY_AGENT_KEY } from "@/app/view/section-pane/panes";
 import "./native-memory-manager.scss";
 import { matchesEveryWord } from "@/app/util/fuzzysearch";
 
@@ -150,14 +152,32 @@ function compareAgents(
 
 const agentLabel = (a: AgentDefinition) => a.name || a.slug || a.id;
 
-export function NativeMemoryManager(): JSX.Element {
+/** The pane hosting this section: where an entry point (`openMemory`) names the agent to show. */
+interface NativeMemoryPane {
+    meta: Accessor<MetaType | undefined>;
+    setMeta: (patch: Record<string, unknown>) => void;
+}
+
+export function NativeMemoryManager(props: { pane?: NativeMemoryPane }): JSX.Element {
     // `agentsLoading` is why this hook returns a pair: `agents()` is `[]` both
     // before the first ListAgentDefinitions settles AND when there genuinely
     // are none. Without the flag the grid flashes "No agents defined yet" on
     // every mount (Codex P2, PR #2917) — the same reason AgentPicker consumes
     // it.
     const [agents, agentsLoading] = useAgentDefinitions();
-    const [selectedAgent, setSelectedAgent] = createSignal<AgentDefinition | null>(null);
+    const [selectedAgent, setSelectedAgentState] = createSignal<AgentDefinition | null>(null);
+    // Kept in the pane's meta too, so `openMemory("personal", { agentId })` can pick the agent,
+    // including in a pane already open on another one.
+    const setSelectedAgent = (agent: AgentDefinition | null) => {
+        setSelectedAgentState(agent);
+        props.pane?.setMeta({ [MEMORY_AGENT_KEY]: agent?.id ?? null });
+    };
+    createEffect(() => {
+        const id = props.pane?.meta()?.[MEMORY_AGENT_KEY];
+        if (typeof id !== "string" || id === "") return;
+        const wanted = agents().find((a) => a.id === id);
+        if (wanted && untrack(selectedAgent)?.id !== id) setSelectedAgentState(wanted);
+    });
     const [files, setFiles] = createSignal<NativeMemoryFileMeta[]>([]);
     // The folder was found by a guess, not the agent's own launch
     // (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.2): read-only.
@@ -700,6 +720,16 @@ export function NativeMemoryManager(): JSX.Element {
                                         {(cost) => <AgentLaunchCost cost={cost()} window={windowFor(agent().id)} />}
                                     </Show>
                                     <MemoryClaimsPanel agentId={agent().id} agentName={agentLabel(agent())} />
+                                    <NativeMemoryCreate
+                                        agentId={agent().id}
+                                        filenames={files().map((f) => f.filename)}
+                                        hasIndex={filesLoading() || filesError() !== null || files().some((f) => f.is_index)}
+                                        readOnly={unverified()}
+                                        onCreated={(filename) => {
+                                            refetchSelectedAgentFiles(agent());
+                                            setSelectedFilename(filename);
+                                        }}
+                                    />
                                     {/* Distinct from the "no files" empty state below:
                                         an unresolved list must not read as an agent that
                                         has remembered nothing, the same four-state care

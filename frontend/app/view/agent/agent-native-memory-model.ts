@@ -28,45 +28,7 @@ import { onMuxEvent } from "@/app/store/mps";
 import type { NativeMemoryFileMeta } from "@/app/store/rpc-api";
 import { MemoryDraftModel } from "@/app/view/memory-editor/memory-draft-model";
 import { sha256Hex } from "@/util/sha256";
-
-/** Validate a filename the same way the backend does, so the user gets
- *  feedback before the RPC round-trips. Mirrors validate_filename() in
- *  native_memory_handlers.rs: alphanumeric + `-_`, ends in `.md`, no path
- *  separators, stem ≤ 200 chars. */
-export function validateMemoryFilename(filename: string): string | null {
-    if (!filename) return "Filename must not be empty.";
-    if (!filename.endsWith(".md")) return "Filename must end with .md.";
-    if (filename.includes("/") || filename.includes("\\") || filename.includes("..")) {
-        return "Filename must not contain path separators.";
-    }
-    const stem = filename.slice(0, -3);
-    if (!stem) return "Filename needs a name before .md.";
-    if (stem.length > 200) return "Filename is too long (max 200 chars).";
-    if (!/^[a-zA-Z0-9_-]+$/.test(stem)) {
-        return "Filename may only use letters, numbers, '-' and '_'.";
-    }
-    return null;
-}
-
-/** Normalize raw user input into a valid `.md` filename: trim, drop a
- *  leading path if pasted, append `.md` if omitted. */
-export function normalizeMemoryFilename(raw: string): string {
-    let name = raw.trim();
-    if (!name) return name;
-    // Strip any pasted directory portion.
-    const slash = Math.max(name.lastIndexOf("/"), name.lastIndexOf("\\"));
-    if (slash >= 0) name = name.slice(slash + 1);
-    if (!name.toLowerCase().endsWith(".md")) name = `${name}.md`;
-    return name;
-}
-
-/** Starter content for a freshly-created MEMORY.md index. */
-const MEMORY_MD_TEMPLATE = `# Memory Index
-
-This file is loaded into every new Claude session for this agent.
-Keep it to an index of topic files — detail lives in the topic files,
-which Claude loads on demand.
-`;
+import { createMemoryFile, MEMORY_MD_TEMPLATE } from "../native-memory/memory-file-create";
 
 export class AgentNativeMemoryModel {
     readonly agentId: string;
@@ -287,29 +249,21 @@ export class AgentNativeMemoryModel {
 
     /** Create a new file with optional starter content, then select it. */
     async createFile(rawFilename: string, content = ""): Promise<void> {
-        const filename = normalizeMemoryFilename(rawFilename);
-        const invalid = validateMemoryFilename(filename);
-        if (invalid) {
-            this.setError(invalid);
-            return;
-        }
-        if (this.filesAtom().some((f) => f.filename === filename)) {
-            this.setError(`${filename} already exists.`);
-            return;
-        }
         this.setCreating(true);
         this.setError(null);
         try {
-            await RpcApi.NativeMemoryWriteFileCommand(TabRpcClient, {
-                agent_id: this.agentId,
-                filename,
+            const created = await createMemoryFile(
+                this.agentId,
+                rawFilename,
                 content,
-                provenance: { source: "human" },
-            });
+                this.filesAtom().map((f) => f.filename)
+            );
+            if ("error" in created) {
+                this.setError(created.error);
+                return;
+            }
             await this.loadFiles();
-            await this.selectFile(filename);
-        } catch (e) {
-            this.setError(`Create failed: ${(e as Error).message ?? e}`);
+            await this.selectFile(created.filename);
         } finally {
             this.setCreating(false);
         }

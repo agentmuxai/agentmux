@@ -28,6 +28,15 @@ describe("openConnectors / openMemory", () => {
         );
     });
 
+    it("names the agent when asked for one's Personal memory", async () => {
+        await openMemory("personal", { agentId: "uid-x" });
+        expect(openOrFocusPaneByView).toHaveBeenLastCalledWith(
+            "memory",
+            { meta: { view: "memory", "memory:section": "personal", "memory:agent": "uid-x" } },
+            { "memory:section": "personal", "memory:agent": "uid-x" }
+        );
+    });
+
     it("default to Accounts and Global", async () => {
         await openConnectors();
         expect(vi.mocked(openOrFocusPaneByView).mock.calls[0][2]).toEqual({ "connectors:section": "accounts" });

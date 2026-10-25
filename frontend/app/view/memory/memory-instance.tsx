@@ -15,7 +15,7 @@ import { SkillManager } from "@/app/view/skill/skill-manager";
 
 const MEMORY_SPEC = sectionPaneSpec<MemorySection>(MEMORY_VIEW, "Memory section", MEMORY_SECTIONS, {
     global: () => <GlobalBundleManager />,
-    personal: () => <NativeMemoryManager />,
+    personal: (pane) => <NativeMemoryManager pane={pane} />,
     skills: () => <SkillManager />,
     bundles: () => <BundleManager />,
 });

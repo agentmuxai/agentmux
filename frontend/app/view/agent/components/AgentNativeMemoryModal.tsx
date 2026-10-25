@@ -29,7 +29,8 @@ import { MemoryConflictBanner } from "@/app/view/memory-editor/MemoryConflictBan
 import { MemoryContent } from "@/app/view/memory-editor/MemoryContent";
 import { MemoryHistory } from "@/app/view/memory-editor/MemoryHistory";
 import { PinnedEditorLayout } from "@/app/view/memory-editor/PinnedEditorLayout";
-import { AgentNativeMemoryModel, normalizeMemoryFilename, validateMemoryFilename } from "../agent-native-memory-model";
+import { normalizeMemoryFilename, validateMemoryFilename } from "../../native-memory/memory-file-create";
+import { AgentNativeMemoryModel } from "../agent-native-memory-model";
 import { NativeMemoryHistoryModel } from "../native-memory-history-model";
 import "./AgentNativeMemoryModal.scss";
 import type { NativeMemoryFileMeta } from "@/app/store/rpc-api";

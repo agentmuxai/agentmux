@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AgentBundlesTab — the "Bundles" tab inside AgentStashModal: the agent's
- * Bundles list, in order (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6).
+ * AgentBundlesTab — the "Bundles" tab inside AgentStashModal, also opened from
+ * My Agents' row menu and the agent pane's right-click menu ("Bundles…"): the
+ * agent's Bundles list, in order (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6).
  * The agent's own bundle comes first and is fixed; the picks after it are
  * added, removed and reordered here, and saved on each change
  * (`setagentbundles`). From the next launch, their instructions go into the
@@ -24,6 +25,8 @@ import "./AgentPrimitiveModal.scss";
 
 interface AgentBundlesTabProps {
     agentId: string;
+    /** Given when hosted in a modal (My Agents' "Bundles…"): shows a Close button. */
+    onClose?: () => void;
 }
 
 export const AgentBundlesTab = (props: AgentBundlesTabProps): JSX.Element => {
@@ -87,11 +90,25 @@ export const AgentBundlesTab = (props: AgentBundlesTabProps): JSX.Element => {
                 />
                 <p class="agent-primitive-modal-global-note">
                     Bundles are edited in{" "}
-                    <Button tone="quiet" density="compact" onClick={() => void openMemory("bundles")}>
+                    <Button
+                        tone="quiet"
+                        density="compact"
+                        onClick={() => {
+                            props.onClose?.();
+                            void openMemory("bundles");
+                        }}
+                    >
                         Memory → Bundles
                     </Button>
                     . A change there reaches every agent using the bundle.
                 </p>
+                <Show when={props.onClose}>
+                    {(close) => (
+                        <div class="agent-primitive-modal-actions">
+                            <Button onClick={() => close()()}>Close</Button>
+                        </div>
+                    )}
+                </Show>
             </div>
         </div>
     );

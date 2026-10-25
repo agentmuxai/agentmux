@@ -115,6 +115,23 @@ describe("MyAgentsList — seats", () => {
         await waitFor(() => expect(screen.queryByTestId("agent-row-menu")).toBeNull());
     });
 
+    it("opens the Bundles editor from the row menu, beside Seat", async () => {
+        listRecent.mockResolvedValue({ rows: [row()], degraded: [] });
+        const layer = fakeLayer();
+        render(() => (
+            <ModalLayerContext.Provider value={layer}>
+                <MyAgentsList onReattach={() => {}} />
+            </ModalLayerContext.Provider>
+        ));
+        const user = userEvent.setup();
+        await user.click(await screen.findByTestId("agent-my-agents-menu-toggle"));
+        const bundles = await screen.findByTestId("agent-my-agents-bundles");
+        expect(screen.getByTestId("agent-my-agents-seat").nextElementSibling).toBe(bundles);
+        await user.click(bundles);
+        expect(layer.open).toHaveBeenCalledWith({ kind: "agent-bundles", agentId: "uid-x", agentName: "AgentX" });
+        await waitFor(() => expect(screen.queryByTestId("agent-row-menu")).toBeNull());
+    });
+
     it("opens the Environment editor from the row menu", async () => {
         listRecent.mockResolvedValue({ rows: [row()], degraded: [] });
         const layer = fakeLayer();
