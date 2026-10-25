@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, vi } from "vitest";
+import { MENU_ICON } from "@/app/util/menu-icons";
 
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: {} }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -51,6 +52,7 @@ describe("buildHostSessionsMenu", () => {
             "ended (exit 0)",
         ]);
         expect(menu[0].submenu?.map((m) => m.label)).toEqual(["Open in a New Pane", "End Session (stops its shell)"]);
+        expect(menu[0].submenu?.map((m) => m.icon)).toEqual([MENU_ICON.open, MENU_ICON.endSession]);
         menu[0].submenu?.[0].click?.();
         expect(a.open).toHaveBeenCalledWith("amx-orphan");
         expect(menu[1].submenu?.map((m) => m.label)).toEqual(["End Session (stops its shell)"]);

@@ -37,7 +37,7 @@ import {
 } from "@/app/store/editor-pane-state-store";
 import { DOC_TABS_META, hydrateDocTabs } from "@/app/doc-tabs/doc-tabs";
 import { DocTabsSaver } from "@/app/doc-tabs/doc-tabs-controller";
-import { RpcApi } from "@/app/store/rpc-api";
+import { RpcApi, type CommandReadEditorFileResult } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { makeORef } from "@/app/store/mos";
 import { onMuxEvent } from "@/app/store/mps";
@@ -45,7 +45,6 @@ import { WpsEvent } from "@/app/store/mps-events";
 import { fireAndForget } from "@/util/util";
 import { createEffect, createMemo, createRoot, createSignal, type Accessor } from "solid-js";
 import { FileTreeModel } from "./file-tree-model";
-import type { CommandReadEditorFileResult } from "@/app/store/rpc-api";
 import { registerFileDropTarget } from "@/app/drag/file-drop";
 import { notifyDrop } from "@/app/drag/file-drop-actions";
 import { createEditorDropHook, openEmptyScratch } from "./editor-drop";
@@ -61,6 +60,7 @@ import { readZoom } from "@/app/store/zoom-factor";
 import { isSshConnection } from "@/app/view/term/ssh-connection";
 import { META_OPEN_AT_LINE, readOpenAtLine } from "./open-at-line";
 import { openRemoteFile } from "./open-from-remote";
+import { MENU_ICON } from "@/app/util/menu-icons";
 
 const META_TREE_EXPANDED = "editor:tree_expanded";
 const META_SHOW_HIDDEN = "editor:show_hidden";
@@ -1350,7 +1350,7 @@ export class EditorViewModel {
                 click: () => void this.toggleWordWrap(),
             },
             { type: "separator" },
-            { label: "Open from remote…", click: () => this.setOpenFromRemote(true) },
+            { label: "Open from remote…", icon: MENU_ICON.remote, click: () => this.setOpenFromRemote(true) },
         ];
     }
 

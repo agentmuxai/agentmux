@@ -11,6 +11,7 @@ import { createBlock } from "@/app/store/block-layout-actions";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { formatBytes } from "@/util/format-bytes";
 import type { HostSession } from "@/types/rpc/HostSession";
+import { MENU_ICON } from "@/app/util/menu-icons";
 
 export type HostSessionActions = {
     /** Open the session in a new durable pane. */
@@ -56,9 +57,9 @@ export function buildHostSessionsMenu(
         }
         const submenu: ContextMenuItem[] = [];
         if (!s.blockid) {
-            submenu.push({ label: "Open in a New Pane", click: () => actions.open(s.id) });
+            submenu.push({ label: "Open in a New Pane", icon: MENU_ICON.open, click: () => actions.open(s.id) });
         }
-        submenu.push({ label: "End Session (stops its shell)", click: () => actions.end(s.id) });
+        submenu.push({ label: "End Session (stops its shell)", icon: MENU_ICON.endSession, click: () => actions.end(s.id) });
         return { label, submenu };
     });
 }
