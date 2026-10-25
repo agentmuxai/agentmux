@@ -30,12 +30,12 @@ vi.mock("@/app/util/reveal-block", () => ({ revealBlock: vi.fn() }));
 const warden = vi.hoisted(() => ({ open: vi.fn() }));
 vi.mock("@/app/view/warden/open-warden", () => ({ openWarden: (section: string) => warden.open(section) }));
 
-import { mkJob, mkRun, NOW } from "./jobs-fixtures";
+import { DEFAULTS, mkJob, mkRun, NOW } from "./jobs-fixtures";
 import { mergeReload } from "./jobs-history";
 import { WardenJobsManager } from "./warden-jobs-manager";
 
 function listOf(jobs: JobView[], pausedAll = false): JobsListResult {
-    return { jobs, paused_all: pausedAll ? { value: "1", set_at_ms: NOW - 60_000, set_by: "operator" } : null, now_ms: NOW };
+    return { jobs, paused_all: pausedAll ? { value: "1", set_at_ms: NOW - 60_000, set_by: "operator" } : null, now_ms: NOW, defaults: DEFAULTS };
 }
 
 afterEach(() => {

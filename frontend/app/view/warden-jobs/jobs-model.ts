@@ -13,10 +13,19 @@ import { onMuxEvent } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import type { JobTemplateApproveReq } from "@/types/rpc/JobTemplateApproveReq";
+import type { JobTemplateDetail } from "@/types/rpc/JobTemplateDetail";
+import type { JobTemplatesResult } from "@/types/rpc/JobTemplatesResult";
 import type { JobsActRequest } from "@/types/rpc/JobsActRequest";
 import type { JobsActResult } from "@/types/rpc/JobsActResult";
+import type { JobsDryRunRequest } from "@/types/rpc/JobsDryRunRequest";
+import type { JobsDryRunResult } from "@/types/rpc/JobsDryRunResult";
+import type { JobsGetResult } from "@/types/rpc/JobsGetResult";
 import type { JobsListResult } from "@/types/rpc/JobsListResult";
 import type { JobsRunsResult } from "@/types/rpc/JobsRunsResult";
+import type { JobsSaveRequest } from "@/types/rpc/JobsSaveRequest";
+import type { JobsSaveResult } from "@/types/rpc/JobsSaveResult";
+import type { TemplateUpdateDiff } from "@/types/rpc/TemplateUpdateDiff";
 
 const POLL_MS = 15_000;
 const DEBOUNCE_MS = 200;
@@ -125,6 +134,41 @@ export class JobsModel {
     /** One job's runs, newest first, at most `limit`; `before` pages on from the last one shown. */
     runs(jobId: string, before?: number, limit: number = RUNS_PAGE): Promise<JobsRunsResult> {
         return RpcApi.JobsRunsCommand(TabRpcClient, { job_id: jobId, limit, ...(before != null ? { before } : {}) });
+    }
+
+    /** A job's stored definition, for Edit and Clone. */
+    get(jobId: string): Promise<JobsGetResult> {
+        return RpcApi.JobsGetCommand(TabRpcClient, { job_id: jobId });
+    }
+
+    /** What a definition (or a stored job) would do; starts no agent. */
+    dryRun(req: JobsDryRunRequest): Promise<JobsDryRunResult> {
+        return RpcApi.JobsDryrunCommand(TabRpcClient, req);
+    }
+
+    /** Create a job, or edit one: the operator's window only. A refresh follows either way. */
+    async save(req: JobsSaveRequest): Promise<JobsSaveResult> {
+        try {
+            return await RpcApi.JobsSaveCommand(TabRpcClient, req);
+        } finally {
+            this.scheduleRefresh();
+        }
+    }
+
+    templates(): Promise<JobTemplatesResult> {
+        return RpcApi.JobsTemplatesListCommand(TabRpcClient);
+    }
+
+    templateDetail(id: string): Promise<JobTemplateDetail> {
+        return RpcApi.JobsTemplatesGetCommand(TabRpcClient, { id });
+    }
+
+    approveTemplate(req: JobTemplateApproveReq): Promise<JobTemplatesResult> {
+        return RpcApi.JobsTemplatesApproveCommand(TabRpcClient, req);
+    }
+
+    updateDiff(jobId: string): Promise<TemplateUpdateDiff> {
+        return RpcApi.JobsTemplatesUpdateDiffCommand(TabRpcClient, { job_id: jobId });
     }
 
     /** An action, then a refresh: the event usually comes first, but a refusal raises none. */

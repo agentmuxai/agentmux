@@ -11,7 +11,9 @@ import { Button, Pill } from "@/app/element/ui";
 import type { JobView } from "@/types/rpc/JobView";
 import { formatTimeAgo } from "@/util/format-time";
 
-import { costText, describeCron, failingCount, inWords, runBadge, stateText } from "./jobs-format";
+import { costText, describeTrigger, failingCount, inWords, runBadge, stateText } from "./jobs-format";
+import { JobEditor, type EditorStart } from "./job-editor";
+import { JobUpdateDiff } from "./job-update-diff";
 import { JobHistory } from "./jobs-history";
 import { JobsModel } from "./jobs-model";
 
@@ -36,7 +38,7 @@ function Strip(props: { job: JobView }): JSX.Element {
 function JobRow(props: { job: JobView; now: number; selected: boolean; onOpen: () => void }): JSX.Element {
     const last = () => props.job.recent[0];
     const state = () => stateText(props.job.state);
-    const trigger = () => (props.job.source === "drone" ? "by hand" : describeCron(props.job.expression));
+    const trigger = () => describeTrigger(props.job);
     return (
         <tr
             class="warden-jobs-row"
@@ -56,6 +58,17 @@ function JobRow(props: { job: JobView; now: number; selected: boolean; onOpen: (
                     {props.job.name}
                     <Show when={props.job.source === "drone"}>
                         <Pill>Drone</Pill>
+                    </Show>
+                    <Show when={props.job.template?.update}>
+                        {(u) => (
+                            <Pill
+                                tone="accent"
+                                icon="circle-up"
+                                title={`${props.job.template?.id} ${u().version} is installed${u().approved ? "" : ", waiting for your approval"}`}
+                            >
+                                {u().approved ? "Update available" : "Update to approve"}
+                            </Pill>
+                        )}
                     </Show>
                 </div>
                 <div class="warden-manager-dim">{props.job.owner ? `by ${props.job.owner}` : "yours"}</div>
@@ -105,12 +118,18 @@ export const WardenJobsManager = (props: {
     const [selected, setSelected] = createSignal<string | null>(null);
     const [busy, setBusy] = createSignal(false);
     const [note, setNote] = createSignal<string | null>(null);
+    const [editor, setEditor] = createSignal<EditorStart | null>(null);
+    const [updating, setUpdating] = createSignal<string | null>(null);
 
     const list = model.list;
     const jobs = createMemo(() => list()?.jobs ?? []);
     const now = () => list()?.now_ms ?? Date.now();
     const pausedAll = () => list()?.paused_all ?? null;
     const selectedJob = createMemo(() => jobs().find((j) => j.id === selected()) ?? null);
+    const openEditor = (start: EditorStart) => {
+        setUpdating(null);
+        setEditor(start);
+    };
     createEffect(() => props.onFailingCount?.(failingCount(jobs())));
 
     const togglePauseAll = async () => {
@@ -129,18 +148,34 @@ export const WardenJobsManager = (props: {
         <div class="warden-manager-body warden-jobs">
             <div class="warden-jobs-toolbar">
                 <p class="warden-manager-summary">
-                    Everything that runs by itself: scheduled jobs, and Drone graphs that have run. Times are UTC.
+                    Everything that runs by itself: scheduled jobs, and Drone graphs that have run. A schedule is read in its own time zone.
                 </p>
-                <Button
-                    density="compact"
-                    tone={pausedAll() ? "accent" : "danger"}
-                    icon={pausedAll() ? "play" : "pause"}
-                    busy={busy()}
-                    onClick={() => void togglePauseAll()}
-                >
-                    {pausedAll() ? "Resume all jobs" : "Pause all jobs"}
-                </Button>
+                <div class="warden-jobs-actions">
+                    <Button density="compact" tone="accent" icon="plus" onClick={() => openEditor({ mode: "new" })}>
+                        New job
+                    </Button>
+                    <Button
+                        density="compact"
+                        tone={pausedAll() ? "accent" : "danger"}
+                        icon={pausedAll() ? "play" : "pause"}
+                        busy={busy()}
+                        onClick={() => void togglePauseAll()}
+                    >
+                        {pausedAll() ? "Resume all jobs" : "Pause all jobs"}
+                    </Button>
+                </div>
             </div>
+            {/* keyed: opening Edit on another job starts a fresh editor. */}
+            <Show when={editor()} keyed>
+                {(start) => <JobEditor start={start} model={model} defaults={list()?.defaults} onClose={() => setEditor(null)} />}
+            </Show>
+            <Show when={updating()} keyed>
+                {(id) => (
+                    <Show when={jobs().find((j) => j.id === id)}>
+                        {(job) => <JobUpdateDiff job={job()} model={model} onClose={() => setUpdating(null)} />}
+                    </Show>
+                )}
+            </Show>
             <Show when={pausedAll()}>
                 {(p) => (
                     <div class="warden-jobs-banner" role="status">
@@ -157,7 +192,7 @@ export const WardenJobsManager = (props: {
                 fallback={
                     <Show when={list() || !model.error()}>
                         <div class="warden-section-stub">
-                            {list() ? "No jobs yet. An agent creates one with Schedule; a Drone graph shows here once it has run." : "Loading…"}
+                            {list() ? "No jobs yet. Create one with New job, or an agent creates one with Schedule; a Drone graph shows here once it has run." : "Loading…"}
                         </div>
                     </Show>
                 }
@@ -197,6 +232,13 @@ export const WardenJobsManager = (props: {
                         changed={model.changed()}
                         polled={model.polled()}
                         act={(req) => model.act(req)}
+                        dryRun={(id) => model.dryRun({ job_id: id })}
+                        onEdit={() => openEditor({ mode: "edit", jobId: job().id })}
+                        onClone={() => openEditor({ mode: "clone", jobId: job().id })}
+                        onReviewUpdate={() => {
+                            setEditor(null);
+                            setUpdating(job().id);
+                        }}
                         onClose={() => setSelected(null)}
                     />
                 )}

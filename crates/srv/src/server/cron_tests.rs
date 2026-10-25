@@ -266,7 +266,7 @@ async fn refused_definitions_say_why() {
         (definition(json!({ "action": { "kind": "drone", "drone_id": "d" } })), "action kind drone is available in a later version"),
         (definition(json!({ "policy": { "approval": "operator" } })), "policy.approval"),
         (definition(json!({ "trigger": { "kind": "cron", "cron": "*/5 * * * *" } })), "at most every 15 minutes"),
-        (definition(json!({ "template": { "id": "agentmux.weekly-report", "version": "1.0.0" } })), "templates are not available yet"),
+        (definition(json!({ "template": { "id": "agentmux.not-installed", "version": "1.0.0" } })), "template"),
         (definition(json!({ "policy": { "max_turns": 50 } })), "policy.max_turns is available in a later version"),
         (definition(json!({ "policy": { "retries": 4 } })), "policy.retries: at most 3"),
     ];
@@ -280,8 +280,9 @@ async fn refused_definitions_say_why() {
     let (status, v) = send(&state, Method::POST, Some(&owner), "/agentmux/cron", Some(body)).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{v}");
     let body = json!({ "name": "n", "expression": "0 9 * * *", "prompt": "p", "target": "t", "template": { "id": "a.b", "version": "1" } });
-    let (_, v) = send(&state, Method::POST, Some(&owner), "/agentmux/cron", Some(body)).await;
-    assert_eq!(v["error"], "templates are not available yet");
+    let (status, v) = send(&state, Method::POST, Some(&owner), "/agentmux/cron", Some(body)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{v}");
+    assert!(v["error"].as_str().unwrap().contains("template"), "a template that isn't installed and approved makes no job: {v}");
 }
 
 /// The Schedule tool's shape takes a zone and a policy too.

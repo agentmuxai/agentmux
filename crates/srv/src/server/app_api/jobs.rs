@@ -25,6 +25,7 @@ use serde_json::Value;
 use agentmux_common::time::now_ms;
 
 use crate::backend::jobs::caps;
+use crate::backend::jobs::from_template::{self, TemplatePinView};
 use crate::backend::jobs::verdict::{cron_job_state, job_failing, run_failed};
 use crate::backend::jobs::{self, RunLedger};
 use crate::backend::rpc::engine::WshRpcEngine;
@@ -78,8 +79,20 @@ pub struct JobView {
     pub owner_block_id: Option<String>,
     /// The agent a cron job messages.
     pub target: String,
-    /// The 5-field UTC cron expression; `""` for a Drone graph (manual).
+    /// The 5-field cron expression, read in `tz`; `""` unless the trigger is
+    /// `cron` (a Drone graph is manual).
     pub expression: String,
+    /// The trigger's kind: `cron`, `every`, `once` or `manual`.
+    #[ts(type = r#""cron" | "every" | "once" | "manual""#)]
+    pub trigger_kind: String,
+    /// The cron expression's IANA time zone.
+    pub tz: String,
+    /// `every`: the interval, in seconds.
+    #[ts(type = "number | null")]
+    pub every_secs: Option<i64>,
+    /// `once`: the time (ms epoch).
+    #[ts(type = "number | null")]
+    pub once_at_ms: Option<i64>,
     /// The next scheduled fire (ms epoch), for an enabled cron job.
     #[ts(type = "number | null")]
     pub next_run_ms: Option<i64>,
@@ -119,6 +132,20 @@ pub struct JobView {
     /// Its agent's provider reports no cost, so the caps can't stop it and only
     /// its timeout limits it: the tab says so.
     pub cost_not_reported: bool,
+    /// The template it was made from, and a newer version of it if one is
+    /// installed (§5.4).
+    pub template: Option<TemplatePinView>,
+}
+
+/// Settings' caps (`jobs:cap:*`): what a job without figures of its own gets
+/// (§5.3). The editor shows them beside the job's own.
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CapDefaults {
+    pub run_usd: f64,
+    pub job_day_usd: f64,
+    pub account_day_usd: f64,
+    pub messages_per_day: u32,
 }
 
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
@@ -129,6 +156,7 @@ pub struct JobsListResult {
     pub paused_all: Option<JobFlag>,
     #[ts(type = "number")]
     pub now_ms: i64,
+    pub defaults: CapDefaults,
 }
 
 #[derive(Debug, Clone, Deserialize, ts_rs::TS)]
@@ -247,6 +275,10 @@ fn cron_view(job: &CronJob, l: Ledgered, paused_all: bool, owner_block_id: Optio
         owner_block_id,
         target: job.target.clone(),
         expression: job.expression.clone(),
+        trigger_kind: if job.trigger_kind.is_empty() { "cron".to_string() } else { job.trigger_kind.clone() },
+        tz: if job.tz.is_empty() { "UTC".to_string() } else { job.tz.clone() },
+        every_secs: job.every_secs,
+        once_at_ms: job.once_at_ms,
         next_run_ms,
         state: cron_job_state(job, paused_all, now / 1000).to_string(),
         catch_up: job.catch_up.clone(),
@@ -264,6 +296,7 @@ fn cron_view(job: &CronJob, l: Ledgered, paused_all: bool, owner_block_id: Optio
         run_cap_usd: None,
         day_cap_usd: None,
         cost_not_reported: false,
+        template: None,
     }
 }
 
@@ -277,6 +310,10 @@ fn drone_view(id: &str, name: &str, l: Ledgered) -> JobView {
         owner_block_id: None,
         target: String::new(),
         expression: String::new(),
+        trigger_kind: "manual".to_string(),
+        tz: "UTC".to_string(),
+        every_secs: None,
+        once_at_ms: None,
         next_run_ms: None,
         state: crate::backend::jobs::verdict::job_state::ACTIVE.to_string(),
         catch_up: String::new(),
@@ -294,6 +331,7 @@ fn drone_view(id: &str, name: &str, l: Ledgered) -> JobView {
         run_cap_usd: None,
         day_cap_usd: None,
         cost_not_reported: false,
+        template: None,
     }
 }
 
@@ -305,7 +343,7 @@ fn sort_jobs(jobs: &mut [JobView]) {
     });
 }
 
-async fn list(state: &AppState) -> Result<JobsListResult, String> {
+pub(super) async fn list(state: &AppState) -> Result<JobsListResult, String> {
     let ledger = ledger(state)?;
     let jobs_store = crate::server::cron::jobs_store(state);
     let mstore = state.mstore.clone();
@@ -319,6 +357,7 @@ async fn list(state: &AppState) -> Result<JobsListResult, String> {
             Some(s) => s.cron_list().map_err(|e| e.to_string())?,
             None => Vec::new(),
         };
+        let mut templates = from_template::Latest::new();
         let mut views: Vec<JobView> = cron_jobs
             .iter()
             .map(|job| {
@@ -328,6 +367,7 @@ async fn list(state: &AppState) -> Result<JobsListResult, String> {
                 view.over_cap = ledger.over_cap_today(job).map(str::to_string);
                 (view.run_cap_usd, view.day_cap_usd) = (Some(eff.run_usd), Some(eff.day_usd));
                 view.cost_not_reported = job_caps::no_cost_provider(&st, job).is_some();
+                view.template = job.template.as_ref().map(|pin| from_template::pin_view(pin, &mut templates));
                 view
             })
             .collect();
@@ -339,7 +379,14 @@ async fn list(state: &AppState) -> Result<JobsListResult, String> {
             }
         }
         sort_jobs(&mut views);
-        Ok(JobsListResult { jobs: views, paused_all, now_ms: now })
+        let limits = job_caps::limits(&st);
+        let defaults = CapDefaults {
+            run_usd: limits.run_usd,
+            job_day_usd: limits.job_day_usd,
+            account_day_usd: limits.account_day_usd,
+            messages_per_day: limits.messages_per_day,
+        };
+        Ok(JobsListResult { jobs: views, paused_all, now_ms: now, defaults })
     })
     .await
     .map_err(|e| e.to_string())?
