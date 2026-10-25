@@ -88,6 +88,30 @@
           "default": true,
           "description": "A browser pane's address bar also asks the default search engine for suggestions while you type, sending it each edit before you submit, as Chrome does. On by default. Incognito tabs never ask (Chrome refuses suggest requests from off-the-record profiles). Off: suggestions come only from this computer (history, typed addresses)."
         },
+        "jobs:cap:runusd": {
+          "type": "number",
+          "minimum": 0,
+          "default": 5,
+          "description": "The most one job run may spend, in US dollars. A run that reaches it is stopped. A job can set a lower figure of its own; only you raise it."
+        },
+        "jobs:cap:jobdayusd": {
+          "type": "number",
+          "minimum": 0,
+          "default": 20,
+          "description": "The most one job may spend in a day, in US dollars. A day ends at your local midnight. A run starts only if the day's spend plus the run's cap still fits; later runs that day are skipped."
+        },
+        "jobs:cap:accountdayusd": {
+          "type": "number",
+          "minimum": 0,
+          "default": 50,
+          "description": "The most all job runs on one account may spend in a day, in US dollars. A day ends at your local midnight. Interactive work isn't counted."
+        },
+        "jobs:cap:messagesday": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 24,
+          "description": "The most messages one job may send in a day to an agent other than its owner. Further fires that day are skipped."
+        },
         "keybindings": {
           "type": "array",
           "description": "Your own keyboard shortcuts, applied over the defaults. Each entry: {\"key\": \"ctrl+shift+e\", \"command\": \"split:right\"}. A command starting with - unbinds it: {\"command\": \"-tab:new\"} removes every key, or add \"key\" to remove one. Optional \"when\" (e.g. \"!terminalFocus\") and \"platform\" (\"mac\" or \"other\"). Command ids are listed in the keyboard shortcuts help.",

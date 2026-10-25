@@ -144,7 +144,7 @@
         "catch_up": { "enum": ["skip", "latest"], "default": "skip" },
         "timeout_minutes": { "type": "integer", "minimum": 1, "maximum": 1440 },
         "retries": { "type": "integer", "minimum": 0, "maximum": 3, "default": 0, "description": "For infrastructure failures only." },
-        "max_turns": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "max_turns": { "type": "integer", "minimum": 1, "maximum": 10000, "description": "Valid, but refused for now: the turn limit is a launch flag a message to a running agent can't set." },
         "group": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,39}$", "description": "A concurrency group: one running run per group. deploy is built in." },
         "caps": { "$ref": "#/$defs/caps" },
         "approval": { "enum": ["none"], "default": "none", "description": "Other values are reserved for a later version." },
@@ -158,10 +158,11 @@
     "caps": {
       "type": "object",
       "additionalProperties": false,
+      "description": "Spending caps, on by default from Settings > Jobs ($5 a run, $20 a job a day, 24 messages a day to another agent). A job may set lower figures; a higher one set by an agent is clamped to the default, and only the operator raises a cap. A day is the operator's local calendar day.",
       "properties": {
-        "run_usd": { "type": "number", "minimum": 0 },
-        "day_usd": { "type": "number", "minimum": 0 },
-        "messages_per_day": { "type": "integer", "minimum": 0 }
+        "run_usd": { "type": "number", "minimum": 0, "description": "The most one run may spend; a run that reaches it is stopped." },
+        "day_usd": { "type": "number", "minimum": 0, "description": "The most the job may spend in a day; a run starts only if the day's spend plus run_usd fits." },
+        "messages_per_day": { "type": "integer", "minimum": 0, "description": "The most messages a message job sends a day to an agent other than its owner." }
       }
     },
     "secret": {

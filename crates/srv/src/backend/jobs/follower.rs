@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use agentmux_common::time::now_ms;
 
-use super::RunLedger;
+use super::{caps, RunLedger};
 use crate::backend::mps::{Broker, MuxEvent, EVENT_AGENT_TURN};
 use crate::backend::storage::job_runs::{infra, RunCost};
 
@@ -75,6 +75,12 @@ pub struct Armed {
     pub armed_at_ms: i64,
     pub turn_id: Option<i64>,
     pub last: Option<TurnSeen>,
+    /// The spend at which the run is stopped (its per-run cap, §5.3); none
+    /// for a provider that reports no cost.
+    pub cap_usd: Option<f64>,
+    /// The bound turn began before the run was armed: its cost isn't all the
+    /// run's, so the cap doesn't stop it.
+    pub partial: bool,
 }
 
 /// What a turn event means for one armed run.
@@ -82,6 +88,8 @@ pub struct Armed {
 pub enum Effect {
     Bind { turn_id: i64, partial: bool },
     Finish { infra: &'static str, cost: Option<RunCost>, summary: &'static str },
+    /// The turn is still going and has spent `cap` dollars: stop it.
+    OverBudget { cost: RunCost, cap: f64 },
 }
 
 /// Apply `t` to `a`. Pure, so the rules are testable without a broker.
@@ -93,7 +101,8 @@ pub fn on_turn(a: &mut Armed, t: &TurnSeen) -> Vec<Effect> {
                 return out;
             }
             a.turn_id = Some(t.turn_id);
-            out.push(Effect::Bind { turn_id: t.turn_id, partial: t.started_at_ms < a.armed_at_ms });
+            a.partial = t.started_at_ms < a.armed_at_ms;
+            out.push(Effect::Bind { turn_id: t.turn_id, partial: a.partial });
         }
         // An older turn's late publish.
         Some(bound) if t.turn_id < bound => return out,
@@ -110,6 +119,10 @@ pub fn on_turn(a: &mut Armed, t: &TurnSeen) -> Vec<Effect> {
         Some(_) => {}
     }
     a.last = Some(t.clone());
+    if let Some(cap) = a.cap_usd.filter(|cap| !a.partial && t.end.is_none() && caps::reached(t.cost_usd, *cap)) {
+        out.push(Effect::OverBudget { cost: t.cost(), cap });
+        return out;
+    }
     if let Some(end) = t.end.as_deref() {
         let status = if end == "exited" { infra::INTERRUPTED } else { infra::OK };
         out.push(Effect::Finish { infra: status, cost: Some(t.cost()), summary: "" });
@@ -118,7 +131,7 @@ pub fn on_turn(a: &mut Armed, t: &TurnSeen) -> Vec<Effect> {
 }
 
 enum Msg {
-    Arm { block_id: String, run_id: String, armed_at_ms: i64 },
+    Arm { block_id: String, run_id: String, armed_at_ms: i64, cap_usd: Option<f64> },
     /// A run another channel's pane took: checked at each sweep
     /// (`RunLedger::check_remote`, #1988).
     Watch { run_id: String, armed_at_ms: i64 },
@@ -161,8 +174,8 @@ impl Follower {
         Follower { tx }
     }
 
-    pub(super) fn arm(&self, block_id: &str, run_id: &str, armed_at_ms: i64) {
-        let _ = self.tx.send(Msg::Arm { block_id: block_id.to_string(), run_id: run_id.to_string(), armed_at_ms });
+    pub(super) fn arm(&self, block_id: &str, run_id: &str, armed_at_ms: i64, cap_usd: Option<f64>) {
+        let _ = self.tx.send(Msg::Arm { block_id: block_id.to_string(), run_id: run_id.to_string(), armed_at_ms, cap_usd });
     }
 
     pub(super) fn watch(&self, run_id: &str, armed_at_ms: i64) {
@@ -179,8 +192,8 @@ async fn run(ledger: Weak<RunLedger>, broker: Arc<Broker>, mut rx: tokio::sync::
             Msg::Watch { run_id, armed_at_ms } => {
                 watched.insert(run_id, armed_at_ms);
             }
-            Msg::Arm { block_id, run_id, armed_at_ms } => {
-                armed.entry(block_id.clone()).or_default().push(Armed { run_id, armed_at_ms, turn_id: None, last: None });
+            Msg::Arm { block_id, run_id, armed_at_ms, cap_usd } => {
+                armed.entry(block_id.clone()).or_default().push(Armed { run_id, armed_at_ms, turn_id: None, last: None, cap_usd, partial: false });
                 let latest = broker
                     .read_event_history(EVENT_AGENT_TURN, &format!("block:{block_id}"), 1)
                     .pop()
@@ -233,7 +246,7 @@ async fn apply(ledger: &Arc<RunLedger>, armed: &mut HashMap<String, Vec<Armed>>,
     let mut writes = Vec::new();
     runs.retain_mut(|a| {
         let effects = on_turn(a, t);
-        let done = effects.iter().any(|e| matches!(e, Effect::Finish { .. }));
+        let done = effects.iter().any(|e| matches!(e, Effect::Finish { .. } | Effect::OverBudget { .. }));
         writes.push((a.run_id.clone(), effects));
         !done
     });
@@ -247,6 +260,7 @@ async fn apply(ledger: &Arc<RunLedger>, armed: &mut HashMap<String, Vec<Armed>>,
                 match e {
                     Effect::Bind { turn_id, partial } => ledger.turn_bound(&run_id, turn_id, partial),
                     Effect::Finish { infra, cost, summary } => ledger.turn_finished(&run_id, infra, cost, summary),
+                    Effect::OverBudget { cost, cap } => ledger.over_budget(&run_id, cost, cap),
                 }
             }
         }

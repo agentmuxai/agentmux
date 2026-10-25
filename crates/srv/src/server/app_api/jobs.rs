@@ -24,6 +24,7 @@ use serde_json::Value;
 
 use agentmux_common::time::now_ms;
 
+use crate::backend::jobs::caps;
 use crate::backend::jobs::verdict::{cron_job_state, job_failing, run_failed};
 use crate::backend::jobs::{self, RunLedger};
 use crate::backend::rpc::engine::WshRpcEngine;
@@ -34,6 +35,7 @@ use crate::backend::storage::job_runs::{JobFlag, JobRun};
 use crate::drone::storage::DroneStore;
 use crate::server::caller::Caller;
 use crate::server::cron::{handle_cron_delete, handle_cron_patch, handle_cron_run_now};
+use crate::server::job_caps;
 
 use super::AppState;
 
@@ -106,6 +108,17 @@ pub struct JobView {
     /// It takes Run now, Pause, Resume and Delete here: a cron job does; a
     /// Drone graph, run from its own pane, doesn't.
     pub actions: bool,
+    /// The cap it is over today (`job_cap`, `account_cap` or `message_cap`):
+    /// the tab's "Over cap (today)". Its runs resume at the next local midnight.
+    pub over_cap: Option<String>,
+    /// The most one run may spend, and one day of its runs (§5.3), in dollars.
+    #[ts(type = "number | null")]
+    pub run_cap_usd: Option<f64>,
+    #[ts(type = "number | null")]
+    pub day_cap_usd: Option<f64>,
+    /// Its agent's provider reports no cost, so the caps can't stop it and only
+    /// its timeout limits it: the tab says so.
+    pub cost_not_reported: bool,
 }
 
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
@@ -182,14 +195,10 @@ fn ledger(state: &AppState) -> Result<Arc<RunLedger>, String> {
     state.cron_scheduler.runs().cloned().ok_or_else(|| "the run ledger isn't ready".to_string())
 }
 
-/// Local midnight today, ms epoch: a day is the operator's (§10, 7).
+/// Local midnight today, ms epoch: a day is the operator's (§10, 7), the same
+/// day the spending caps count.
 fn local_midnight_ms() -> i64 {
-    let now = chrono::Local::now();
-    now.date_naive()
-        .and_hms_opt(0, 0, 0)
-        .and_then(|m| m.and_local_timezone(chrono::Local).earliest())
-        .map(|m| m.timestamp_millis())
-        .unwrap_or_else(|| now.timestamp_millis() - DAY_MS)
+    caps::local_day_start_ms(now_ms())
 }
 
 /// The pane of the registered agent with this UID, else this name.
@@ -251,6 +260,10 @@ fn cron_view(job: &CronJob, l: Ledgered, paused_all: bool, owner_block_id: Optio
         cost_week_usd: l.cost_week_usd,
         cost_known: l.cost_known,
         actions: true,
+        over_cap: None,
+        run_cap_usd: None,
+        day_cap_usd: None,
+        cost_not_reported: false,
     }
 }
 
@@ -277,6 +290,10 @@ fn drone_view(id: &str, name: &str, l: Ledgered) -> JobView {
         cost_week_usd: l.cost_week_usd,
         cost_known: l.cost_known,
         actions: false,
+        over_cap: None,
+        run_cap_usd: None,
+        day_cap_usd: None,
+        cost_not_reported: false,
     }
 }
 
@@ -293,6 +310,7 @@ async fn list(state: &AppState) -> Result<JobsListResult, String> {
     let jobs_store = crate::server::cron::jobs_store(state);
     let mstore = state.mstore.clone();
     let regs = state.reactive_handler.list_agents();
+    let st = state.clone();
     tokio::task::spawn_blocking(move || {
         let now = now_ms();
         let (midnight, week) = (local_midnight_ms(), now - 7 * DAY_MS);
@@ -305,7 +323,12 @@ async fn list(state: &AppState) -> Result<JobsListResult, String> {
             .iter()
             .map(|job| {
                 let owner_block = block_of(&regs, job.owner_uid(), &job.created_by);
-                cron_view(job, ledgered(&ledger, &job.id, midnight, week), paused_all.is_some(), owner_block, now)
+                let mut view = cron_view(job, ledgered(&ledger, &job.id, midnight, week), paused_all.is_some(), owner_block, now);
+                let eff = caps::effective(job.policy.caps.as_ref(), &ledger.limits());
+                view.over_cap = ledger.over_cap_today(job).map(str::to_string);
+                (view.run_cap_usd, view.day_cap_usd) = (Some(eff.run_usd), Some(eff.day_usd));
+                view.cost_not_reported = job_caps::no_cost_provider(&st, job).is_some();
+                view
             })
             .collect();
         // Drone graphs are run by hand; list the ones the ledger has runs of.

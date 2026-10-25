@@ -502,6 +502,10 @@ impl CronScheduler {
                 let error = jobs::OVERLAP_REFUSAL.to_string();
                 return Fired { run_id: None, outcome: Some(FireOutcome::Failed { error }), waiting: None };
             }
+            Admission::Capped(refusal) => {
+                let error = format!("Run now is refused: {}", refusal.words());
+                return Fired { run_id: None, outcome: Some(FireOutcome::Failed { error }), waiting: None };
+            }
             Admission::Waiting(run_id, why) => {
                 self.publish_changed();
                 return Fired { run_id: Some(run_id), outcome: None, waiting: Some(why) };

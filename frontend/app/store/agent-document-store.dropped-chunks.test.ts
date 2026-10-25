@@ -14,7 +14,7 @@ vi.mock("@/app/store/rpc-api", () => ({
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
-import { __resetAllSlots, dispatch, registerPane, unregisterPane } from "./agent-document-store";
+import { __resetAllSlots, dispatch, endHistoryLoad, registerPane, unregisterPane } from "./agent-document-store";
 import type { ToolLogChunk } from "../view/agent/types";
 
 const chunk = (n: number): ToolLogChunk => ({ kind: "stdout", content: `line ${n}`, timestamp: n });
@@ -30,6 +30,10 @@ describe("agent-document-store: dropped tool chunks are logged once per burst", 
         __resetAllSlots();
         registerPane("block-aaaaaaa");
         registerPane("block-bbbbbbb");
+        // Panes whose history load has ended: a mounting pane holds these chunks
+        // instead (agent-document-store.chunk-hold.test.ts).
+        endHistoryLoad("block-aaaaaaa");
+        endHistoryLoad("block-bbbbbbb");
     });
     afterEach(() => {
         __resetAllSlots();

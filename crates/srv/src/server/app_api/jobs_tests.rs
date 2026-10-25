@@ -240,6 +240,10 @@ fn jobs_sort_by_next_run_then_name() {
         cost_week_usd: 0.0,
         cost_known: false,
         actions: true,
+        over_cap: None,
+        run_cap_usd: None,
+        day_cap_usd: None,
+        cost_not_reported: false,
     };
     let mut jobs = vec![mk("b", None), mk("c", Some(5)), mk("a", None), mk("d", Some(1))];
     sort_jobs(&mut jobs);

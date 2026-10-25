@@ -1043,6 +1043,14 @@ declare global {
         "browser:hibernateafter"?: number;
         /** Sites whose browser panes never hibernate, by origin or host. */
         "browser:keepawakesites"?: string[];
+        /** The most one job run may spend, in US dollars (default 5). */
+        "jobs:cap:runusd"?: number;
+        /** The most one job may spend in a local calendar day (default 20). */
+        "jobs:cap:jobdayusd"?: number;
+        /** The most all job runs on one account may spend in a local calendar day (default 50). */
+        "jobs:cap:accountdayusd"?: number;
+        /** The most messages one job may send a day to an agent other than its owner (default 24). */
+        "jobs:cap:messagesday"?: number;
         /** User shortcut overrides (frontend/app/keybindings/registry.ts `setUserKeybindings`). */
         "keybindings"?: { key?: string; command: string; when?: string; platform?: "mac" | "other" }[];
         "term:predictiveecho"?: boolean;

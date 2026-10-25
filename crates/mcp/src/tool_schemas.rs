@@ -209,7 +209,7 @@ pub(crate) const SCHEDULE_TOOL: &str = r#"{
       "action":         { "type": "string", "enum": ["create", "list", "pause", "resume", "delete", "history", "run_now", "report"], "description": "What to do" },
       "cron":           { "type": "string", "description": "create: a 5-field cron expression for a persistent job (min hour dom month dow), read in tz (UTC by default). An agent job runs at most every 15 minutes" },
       "tz":             { "type": "string", "description": "create with cron: an IANA time zone for the expression, e.g. Europe/Berlin (default UTC). A time a daylight-saving change skips runs once, at the next valid time" },
-      "policy":         { "type": "object", "description": "create with cron: the job policy (catch_up skip|latest today; overlap, timeout_minutes, retries, group and caps arrive in a later version)" },
+      "policy":         { "type": "object", "description": "create with cron: the job policy: catch_up skip|latest, overlap skip|buffer_one|cancel_other, timeout_minutes, retries (0 to 3), group, and caps {run_usd, day_usd, messages_per_day}. Caps are on by default (Settings > Jobs: $5 a run, $20 a job a day, $50 an account a day, 24 messages a day to another agent); yours may be lower, a higher figure is clamped to the default, and only the operator raises a cap. max_turns arrives in a later version" },
       "template":       { "type": "object", "description": "create with cron: a job template {id, version}. Not available yet" },
       "params":         { "type": "object", "description": "create with cron: the template's parameters" },
       "every":          { "type": "string", "description": "create: an interval for a loop for this session (\"30s\", \"5m\", \"1h\")" },
