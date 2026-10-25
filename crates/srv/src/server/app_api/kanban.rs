@@ -127,7 +127,7 @@ impl<'a> Decider<'a> {
 
 /// Review to done, and what that unlocks. The one Accept, whoever decides.
 pub(crate) fn accept_task(state: &AppState, t: &BoardTask, by: &Decider<'_>, note: &str, now: i64) -> Result<Value, String> {
-    let store = &state.identity_store;
+    let store = &state.work_store;
     let m = store.work_accept(&t.item.id, now).map_err(|e| e.to_string())?.ok_or("only a task in Review can be accepted")?;
     record(state, &t.item.id, by.actor, by.kind, "accepted", &m.from, &m.to, &by.body(note));
     let unlocked = crate::backend::kanban::notify_unlocked(store, &state.mstore, &t.item.id);
@@ -144,7 +144,7 @@ pub(crate) async fn send_back_task(
     reason: &str,
     now: i64,
 ) -> Result<Value, String> {
-    let store = &state.identity_store;
+    let store = &state.work_store;
     if t.item.state != work_state::REVIEW {
         return Err("only a task in Review can be sent back".into());
     }
