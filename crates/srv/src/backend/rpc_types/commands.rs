@@ -537,6 +537,8 @@ pub const COMMAND_AGENT_INPUT_HISTORY_APPEND: &str = "agent.input-history-append
 pub const COMMAND_AGENT_INPUT_HISTORY_SEARCH: &str = "agent.input-history-search";
 pub const COMMAND_AGENT_INPUT_HISTORY_DELETE: &str = "agent.input-history-delete";
 pub const COMMAND_AGENT_INPUT_HISTORY_CLEAR: &str = "agent.input-history-clear";
+pub const COMMAND_AGENT_INPUT_HISTORY_TRASH: &str = "agent.input-history-trash";
+pub const COMMAND_AGENT_INPUT_HISTORY_RESTORE: &str = "agent.input-history-restore";
 pub const COMMAND_AGENT_INPUT_DRAFT: &str = "agent.input-draft";
 // What srv knows about newer AgentMux releases (backend::update_check).
 pub const COMMAND_APP_UPDATE_STATUS: &str = "app.update-status";
