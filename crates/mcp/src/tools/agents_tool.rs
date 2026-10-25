@@ -108,7 +108,8 @@ async fn spawn(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     }
     let to = body["message_to"].as_str().unwrap_or_default().to_string();
     let leader = std::env::var("AGENTMUX_AGENT_ID").unwrap_or_default();
-    let sent = super::fleet::call("SendMessage", &json!({ "to": to, "message": brief_message(&leader, &brief) }), cx).await;
+    let worker = body["name"].as_str().unwrap_or_default();
+    let sent = super::fleet::call("SendMessage", &json!({ "to": to, "message": brief_message(&leader, worker, &to, &brief) }), cx).await;
     body["brief"] = json!(match sent {
         Ok(outcome) => outcome,
         Err(e) => format!("NOT SENT: {e:#}. The worker is open but has no task: send it the brief with Message send"),
@@ -116,15 +117,28 @@ async fn spawn(arguments: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     Ok(serde_json::to_string_pretty(&body)?)
 }
 
-/// The worker's first message: who it reports to, then the leader's brief.
-/// It names the tool exactly: a worker that went looking for "SendMessage"
-/// found Claude Code's own cross-session tool, whose message reaches the
-/// leader unverified and isn't counted as a report.
-fn brief_message(leader: &str, brief: &str) -> String {
+/// The worker's first message: who it is, who it reports to, then the leader's
+/// brief. It names the tool exactly: a worker that went looking for
+/// "SendMessage" found Claude Code's own cross-session tool, whose message
+/// reaches the leader unverified and isn't counted as a report.
+///
+/// It also says whose name goes on what the worker publishes. A worker's own
+/// name is in its environment, but the only name in the text it is handed is
+/// its leader's, and a file it reads may show another agent's name as an
+/// example (agentmux#5209: a worker started under another agent's workspace
+/// titled its PR with that agent's name, and the review notices went there).
+/// `gh-agent` rewrites a wrong signature at the PR; this keeps the worker from
+/// writing it, in commits and comments too. `worker` is the worker's name as
+/// srv made it; `slug` is its address, its `AGENTMUX_AGENT_ID`.
+fn brief_message(leader: &str, worker: &str, slug: &str, brief: &str) -> String {
+    let me = agentmux_common::slug::agent_route_name(worker);
     format!(
-        "You are a worker of {leader}, started to do the task below. Report to {leader} with the agentmux \
-         MCP server's Message tool (mcp__agentmux__Message in Claude Code; action \"send\", to \"{leader}\"), \
-         never a built-in SendMessage, when you finish, get stuck, or need a decision.\n\n{brief}"
+        "You are {worker} (AGENTMUX_AGENT_ID {slug}), a worker of {leader}, started to do the task below. Report to \
+         {leader} with the agentmux MCP server's Message tool (mcp__agentmux__Message in Claude Code; action \
+         \"send\", to \"{leader}\"), never a built-in SendMessage, when you finish, get stuck, or need a decision.\n\n\
+         Sign what you publish as yourself, {me}, never as {leader}: a PR title starts \"{me}@<host>: \", its \
+         \"Agent:\" line reads \"Agent: {me}@<host>\", and the agent_id tag in its body is {slug}. Where a file you \
+         read shows another agent's name as an example, use yours.\n\n{brief}"
     )
 }
 
@@ -201,14 +215,38 @@ mod tests {
 
     #[test]
     fn the_brief_tells_the_worker_who_it_reports_to() {
-        let m = brief_message("loap-3", "Implement SPEC_X.");
-        assert_eq!(
-            m,
-            "You are a worker of loap-3, started to do the task below. Report to loap-3 with the agentmux \
-             MCP server's Message tool (mcp__agentmux__Message in Claude Code; action \"send\", to \"loap-3\"), \
-             never a built-in SendMessage, when you finish, get stuck, or need a decision.\n\nImplement SPEC_X."
+        let m = brief_message("loap-3", "Loap-4", "loap-4", "Implement SPEC_X.");
+        assert!(
+            m.starts_with(
+                "You are Loap-4 (AGENTMUX_AGENT_ID loap-4), a worker of loap-3, started to do the task below. Report to \
+                 loap-3 with the agentmux MCP server's Message tool (mcp__agentmux__Message in Claude Code; action \"send\", \
+                 to \"loap-3\"), never a built-in SendMessage, when you finish, get stuck, or need a decision."
+            ),
+            "{m}"
         );
+        assert!(m.ends_with("\n\nImplement SPEC_X."), "{m}");
         assert!(!m.contains("  "), "{m}");
+    }
+
+    /// agentmux#5209: a worker signed its PR as its leader.
+    #[test]
+    fn the_brief_names_the_workers_own_signature_and_forbids_its_leaders() {
+        let m = brief_message("camper", "QTimer", "qtimer", "Add the side buttons.");
+        assert!(m.contains("Sign what you publish as yourself, QTimer, never as camper"), "{m}");
+        assert!(m.contains("a PR title starts \"QTimer@<host>: \""), "{m}");
+        assert!(m.contains("\"Agent: QTimer@<host>\""), "{m}");
+        assert!(m.contains("the agent_id tag in its body is qtimer"), "{m}");
+        // The leader is named as who to report to and who not to sign as, never as the worker's name.
+        assert!(!m.contains("camper@"), "{m}");
+        assert!(m.contains("Where a file you read shows another agent's name as an example, use yours."), "{m}");
+    }
+
+    /// A name that is not a valid id is signed in route form, as a title carries it.
+    #[test]
+    fn the_brief_signs_a_workers_name_in_route_form() {
+        let m = brief_message("loap", "Loap #4", "loap-4", "b");
+        assert!(m.contains("a PR title starts \"Loap-4@<host>: \""), "{m}");
+        assert!(m.contains("You are Loap #4 (AGENTMUX_AGENT_ID loap-4)"), "{m}");
     }
 
     #[test]
