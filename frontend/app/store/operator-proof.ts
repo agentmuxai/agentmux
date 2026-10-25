@@ -33,6 +33,7 @@ const OPERATOR_COMMANDS: ReadonlySet<string> = new Set([
     "tower.pair",
     "tower.peers",
     "tower.sample",
+    "writeagentconfig",
 ]);
 
 /** How srv words a refusal for a connection it hasn't seen proven. */

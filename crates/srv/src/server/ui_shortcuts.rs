@@ -32,6 +32,23 @@ fn refused_command(command: &str) -> Option<&'static str> {
     }
 }
 
+/// The pane a command or key press acts on: the caller's own pane (`own`) when `requested` is
+/// absent or names it, else the pane `other` accepts (a browser pane it opened), else the
+/// refusal. A command is the person's own action as far as the app can tell, so an agent
+/// never runs one against the focused pane (which may be another agent's, or theirs) or any
+/// pane it doesn't drive.
+fn shortcut_target(
+    own: &str,
+    requested: Option<&str>,
+    other: impl FnOnce(&str) -> Result<String, (StatusCode, String)>,
+) -> Result<String, (StatusCode, String)> {
+    match requested.map(str::trim).filter(|t| !t.is_empty()) {
+        None => Ok(own.to_string()),
+        Some(t) if t == own => Ok(own.to_string()),
+        Some(t) => other(t),
+    }
+}
+
 /// `POST /api/v1/ui/shortcuts/list` — backs `ListShortcuts`.
 pub(crate) async fn handle_ui_shortcuts_list(
     State(state): State<AppState>,
@@ -61,11 +78,17 @@ pub(crate) async fn handle_ui_run_command(
     if req.command == "pane:close" {
         return close_pane(&state, &req).await;
     }
+    let target = match shortcut_target(&block_id, req.target.as_deref(), |t| {
+        target_block_id(&state, caller.as_deref(), &req.auth, Some(t))
+    }) {
+        Ok(t) => t,
+        Err((code, e)) => return err_response(code, e),
+    };
     tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, command = %req.command, "[ui-automation] run command");
     proxy_data(
         &state,
         "run_command",
-        json!({ "block_id": block_id, "command": req.command, "target": req.target }),
+        json!({ "block_id": block_id, "command": req.command, "target": target }),
         std::time::Duration::from_secs(10),
     )
     .await
@@ -81,11 +104,17 @@ pub(crate) async fn handle_ui_press_keys(
         Ok(b) => b,
         Err((code, e)) => return err_response(code, e),
     };
+    let target = match shortcut_target(&block_id, req.target.as_deref(), |t| {
+        target_block_id(&state, caller.as_deref(), &req.auth, Some(t))
+    }) {
+        Ok(t) => t,
+        Err((code, e)) => return err_response(code, e),
+    };
     tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, keys = %req.keys, "[ui-automation] press keys");
     proxy_data(
         &state,
         "press_keys",
-        json!({ "block_id": block_id, "keys": req.keys, "target": req.target }),
+        json!({ "block_id": block_id, "keys": req.keys, "target": target }),
         std::time::Duration::from_secs(10),
     )
     .await
@@ -124,7 +153,8 @@ async fn close_pane(state: &AppState, req: &UiRunCommandRequest) -> axum::respon
 
 #[cfg(test)]
 mod tests {
-    use super::refused_command;
+    use super::{refused_command, shortcut_target};
+    use axum::http::StatusCode;
 
     #[test]
     fn refuses_only_the_commands_the_owner_ruled_out() {
@@ -133,5 +163,23 @@ mod tests {
         for allowed in ["tab:close", "split:right", "pane:replaceWithLauncher", "files:trash"] {
             assert!(refused_command(allowed).is_none(), "{allowed} keeps its own confirmation or undo");
         }
+    }
+
+    /// A command or key press acts on the caller's own pane unless it names a pane it drives:
+    /// never the focused pane, which may be another agent's or the user's.
+    #[test]
+    fn a_shortcut_acts_on_the_callers_own_pane_or_one_it_drives() {
+        let refuse = |_: &str| -> Result<String, (StatusCode, String)> { Err((StatusCode::FORBIDDEN, "not yours".into())) };
+        let accept = |t: &str| -> Result<String, (StatusCode, String)> { Ok(t.to_string()) };
+        // No target: its own pane, not whatever is focused.
+        assert_eq!(shortcut_target("mine", None, refuse).unwrap(), "mine");
+        assert_eq!(shortcut_target("mine", Some(""), refuse).unwrap(), "mine");
+        assert_eq!(shortcut_target("mine", Some("  "), refuse).unwrap(), "mine");
+        // Its own pane by name needs no further check.
+        assert_eq!(shortcut_target("mine", Some("mine"), refuse).unwrap(), "mine");
+        // Another pane goes through the ownership check, whose answer stands.
+        assert_eq!(shortcut_target("mine", Some(" theirs "), accept).unwrap(), "theirs");
+        let (code, why) = shortcut_target("mine", Some("theirs"), refuse).unwrap_err();
+        assert_eq!((code, why.as_str()), (StatusCode::FORBIDDEN, "not yours"));
     }
 }

@@ -319,6 +319,15 @@ async function caretArrives(blockId: string, ms = 500): Promise<boolean> {
  * (keybindings/app-api.ts). The host reaches it only in the window that
  * holds the calling agent's pane.
  */
+/** Why a command or key is held back while a prompt for the person is on screen. */
+export const OPERATOR_PROMPT_OPEN =
+    "a prompt for the user is open (an approval or a grant); only they can answer it, so no command or key is sent until it is closed";
+
+/** An approval or grant addressed to the person is showing (`Modal` `operatorOnly`). */
+export function operatorPromptOpen(): boolean {
+    return document.querySelector("[data-operator-only]") != null;
+}
+
 export function installShortcutApi() {
     const focusedBlockId = (): string | null => getLayoutModelForStaticTab().focusedNode?.()?.data?.blockId ?? null;
     const deps = () => ({
@@ -329,10 +338,12 @@ export function installShortcutApi() {
     });
     (window as unknown as { __agentmux_shortcuts: unknown }).__agentmux_shortcuts = {
         list: () => listShortcuts(keyPlatform()),
-        run: (command: string, target?: string): RunResult | Promise<RunResult> => runCommand(command, target || undefined, deps()),
+        run: (command: string, target?: string): RunResult | Promise<RunResult> =>
+            operatorPromptOpen() ? { ran: false, reason: OPERATOR_PROMPT_OPEN } : runCommand(command, target || undefined, deps()),
         // PressKeys: what to send, after focusing `target`. The host then
         // sends the events and reads `last()`.
         plan: async (keys: string, target?: string): Promise<KeyPressPlan | { reason: string }> => {
+            if (operatorPromptOpen()) return { reason: OPERATOR_PROMPT_OPEN };
             if (target && !(await focusPaneForApi(target))) return { reason: `pane ${target} is not in this window` };
             // A key goes where the caret is: refuse rather than press it into another pane.
             if (target && !(await caretArrives(target))) return { reason: `pane ${target} didn't take keyboard focus` };

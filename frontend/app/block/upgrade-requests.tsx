@@ -50,6 +50,7 @@ function UpgradeRequestPrompt(props: { request: UpgradeRequest } & ModalClosePro
             open={true}
             title={`${r.agent} asks to upgrade AgentMux to ${r.version}`}
             attention
+            operatorOnly
             confirmLabel="Upgrade now"
             cancelLabel="Later"
             onConfirm={() => decide(true)}
