@@ -1,9 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createEffect, onCleanup, untrack, type Accessor } from "solid-js";
+import { createEffect, on, onCleanup, untrack, type Accessor } from "solid-js";
 import { useAgentDormant } from "../agent-dormancy";
 import type { DocumentState } from "../types";
+import { SHOW_SETTLE_SAMPLE_MS, ShowSettle } from "./show-settle";
 
 /**
  * Which held-open rows to release (latched collapse) after the pane moved:
@@ -16,14 +17,10 @@ import type { DocumentState } from "../types";
  * or was drawn while the pane was hidden may have pushed them up, which nobody
  * saw, so a carried row is released only after it has been on screen again in
  * this visit (once the show has `settled`) and then scrolled off. Rows held
- * during this visit follow the plain rule.
+ * during this visit follow the plain rule. Rows a snapshot restored as held
+ * (after a restart or an upgrade) are carried the same way.
  */
 
-/**
- * How long after a show before a carried row on screen counts as seen: the
- * content drawn on return lands within this (one-way flow's SHOW_SETTLE_MS).
- */
-export const RETURN_SETTLE_MS = 400;
 /**
  * How long a carried row that hasn't been on screen keeps its hold while the
  * pane is shown. Then, if it is still off screen, it is released as it would
@@ -33,8 +30,6 @@ export const CARRY_MAX_MS = 60_000;
 
 /** The most ids kept of rows that finished or arrived while the pane was hidden. */
 export const AWAY_ARRIVALS_MAX = 200;
-/** How long after a show the away rows wait for the layout to settle before they are judged anyway. */
-export const AWAY_APPLY_MAX_MS = 3000;
 
 /**
  * Rows that finished (a tool) or arrived (a jekt) while the pane was hidden.
@@ -151,18 +146,28 @@ export function useScrolledOffRelease(opts: {
     let carried = new Set<string>();
     let shownAt = 0;
     let wasDormant = untrack(dormant);
+    // The show's catch-up is done when the cover is lifted and the content
+    // height has stopped changing (show-settle.ts), sampled while waiting.
+    const settle = new ShowSettle();
+    let settleTimer: ReturnType<typeof setTimeout> | undefined;
+    const stopSettleLoop = (): void => {
+        if (settleTimer) clearTimeout(settleTimer);
+        settleTimer = undefined;
+    };
+    const settleStep = (): void => {
+        settleTimer = undefined;
+        if (untrack(dormant)) return;
+        const scroller = opts.scroller();
+        // perf:allow-layout-read — one height read per sample, only until the show has settled (3 s at most)
+        const height = scroller ? scroller.scrollHeight : 0;
+        if (settle.sample(performance.now(), opts.covered(), height)) applyAway();
+        else settleTimer = setTimeout(settleStep, SHOW_SETTLE_SAMPLE_MS);
+    };
     // Judge the rows that arrived while hidden once the show has settled.
-    let awayTimer: ReturnType<typeof setTimeout> | undefined;
     const applyAway = (): void => {
-        awayTimer = undefined;
         const away = opts.away;
         const scroller = opts.scroller();
         if (!away || away.size === 0 || untrack(dormant)) return; // hidden again: keep them for the next show
-        const settled = performance.now() - shownAt >= RETURN_SETTLE_MS && !opts.covered();
-        if (!settled && performance.now() - shownAt < AWAY_APPLY_MAX_MS) {
-            awayTimer = setTimeout(applyAway, 100);
-            return;
-        }
         const ids = away.take();
         if (!scroller || !opts.onHold) return;
         const box = scroller.getBoundingClientRect(); // perf:allow-layout-read — once per show
@@ -181,22 +186,41 @@ export function useScrolledOffRelease(opts: {
         });
         for (const id of hold) opts.onHold(id);
     };
+    // The show (or the restore) starts the wait for the layout to settle.
+    const beginSettle = (): void => {
+        shownAt = performance.now();
+        settle.start(shownAt);
+        stopSettleLoop();
+        settleTimer = setTimeout(settleStep, SHOW_SETTLE_SAMPLE_MS);
+    };
+    // Rows a snapshot restored as held (a restart or an upgrade brought the pane
+    // back): carried like rows held when the pane was hidden, so they stay open
+    // until seen in this visit and then scrolled off. A pane that restores while
+    // hidden takes them with the rest of its held rows when it is shown.
+    createEffect(
+        on(
+            () => opts.documentState().restoredHeldNodes,
+            (restored) => {
+                if (!restored || restored.size === 0 || untrack(dormant)) return;
+                for (const id of restored) carried.add(id);
+                beginSettle();
+            }
+        )
+    );
     createEffect(() => {
         const d = dormant();
         if (wasDormant && !d) {
             carried = new Set(untrack(opts.documentState).heldOpenNodes);
-            shownAt = performance.now();
-            if (awayTimer) clearTimeout(awayTimer);
-            awayTimer = setTimeout(applyAway, RETURN_SETTLE_MS + 50);
+            beginSettle();
         }
-        if (d && awayTimer) {
-            clearTimeout(awayTimer);
-            awayTimer = undefined;
+        if (d) {
+            stopSettleLoop();
+            settle.cancel();
         }
         wasDormant = d;
     });
     onCleanup(() => {
-        if (awayTimer) clearTimeout(awayTimer);
+        stopSettleLoop();
         opts.away?.clear();
     });
     return () => {
@@ -212,7 +236,7 @@ export function useScrolledOffRelease(opts: {
             held: ds.heldOpenNodes,
             pinned: ds.pinnedNodes,
             carried,
-            settled: performance.now() - shownAt >= RETURN_SETTLE_MS && !opts.covered(),
+            settled: settle.settled(performance.now()) && !opts.covered(),
             carryExpired: performance.now() - shownAt >= CARRY_MAX_MS,
             viewportTop: box.top,
             viewportBottom: box.bottom,

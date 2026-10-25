@@ -25,7 +25,7 @@
 import { createEffect, onCleanup } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { SNAPSHOT_SCHEMA_VERSION } from "./useHistoryPagination";
+import { MAX_SAVED_HELD, SNAPSHOT_SCHEMA_VERSION } from "./useHistoryPagination";
 import type { AgentAtoms } from "../state";
 import type { DocumentNode } from "../types";
 import type { LogFn } from "./useAgentControllerStatus";
@@ -42,6 +42,11 @@ export interface UseSnapshotPersistenceOptions {
     getDetailsOpen: () => boolean;
     /** Returns true if the current snapshot belongs to a foreign block. */
     snapshotIsForeignBlock: () => boolean;
+    /**
+     * The pane isn't visible (its tab or its window). The rows held open are
+     * saved when it goes hidden and when the page unloads, not as they change.
+     */
+    hidden?: () => boolean;
     log: LogFn;
 }
 
@@ -120,6 +125,9 @@ export function useSnapshotPersistence(opts: UseSnapshotPersistenceOptions): voi
                 documentState: {
                     collapsedNodeIds: capturedDocState ? [...capturedDocState.collapsedNodes] : [],
                     pinnedNodeIds: capturedDocState ? [...capturedDocState.pinnedNodes] : [],
+                    // The newest few rows held open, ids only: what a restart or an
+                    // upgrade gives back as carried rows (held-release.ts).
+                    heldOpenNodeIds: capturedDocState ? [...capturedDocState.heldOpenNodes].slice(-MAX_SAVED_HELD) : [],
                     scrollPosition: capturedDocState?.scrollPosition ?? 0,
                     filter: capturedDocState?.filter ?? {
                         showThinking: false,
@@ -163,8 +171,10 @@ export function useSnapshotPersistence(opts: UseSnapshotPersistenceOptions): voi
     });
     // The overlay changes without the nodes changing (collapsing or pinning a
     // row, the filter, details), and was otherwise never saved by the interval.
-    // Only the saved fields count: `heldOpenNodes` isn't saved, and changes as
-    // tools finish. Each update replaces the changed field, so identity is enough.
+    // Only the saved fields count: `heldOpenNodes` is saved with whatever write
+    // happens, but changes as tools finish and as the reader scrolls, so it
+    // doesn't make one by itself (below: it does when the pane goes hidden or
+    // the page unloads). Each update replaces the changed field, so identity is enough.
     let lastOverlay: unknown[] | undefined;
     createEffect(() => {
         const ds = opts.getAtoms().documentStateAtom[0]();
@@ -172,6 +182,26 @@ export function useSnapshotPersistence(opts: UseSnapshotPersistenceOptions): voi
         if (lastOverlay && overlay.some((v, i) => v !== lastOverlay![i])) dirty = overlayDirty = true;
         lastOverlay = overlay;
     });
+    // The rows held open are written when the reader leaves (the pane goes
+    // hidden: the next tick of the interval below) and when the page goes away
+    // (a restart or an upgrade), not on every scroll.
+    if (opts.hidden) {
+        let wasHidden = false;
+        createEffect(() => {
+            const h = opts.hidden!();
+            if (h && !wasHidden && opts.getAtoms().documentStateAtom[0]().heldOpenNodes.size > 0) dirty = true;
+            wasHidden = h;
+        });
+    }
+    if (typeof window !== "undefined") {
+        const onPageHide = (): void => {
+            if (opts.getAtoms().documentStateAtom[0]().heldOpenNodes.size === 0 && !dirty) return;
+            dirty = false;
+            writeSnapshotNow();
+        };
+        window.addEventListener("pagehide", onPageHide);
+        onCleanup(() => window.removeEventListener("pagehide", onPageHide));
+    }
     const snapshotInterval = setInterval(() => {
         if (!dirty) return;
         dirty = false;

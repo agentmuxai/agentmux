@@ -193,6 +193,12 @@ const SNAPSHOT_SCHEMA_VERSION_V1 = 1;
 const SNAPSHOT_SCHEMA_VERSION_V2 = 2;
 /** Version written by writeSnapshotNow. */
 export const SNAPSHOT_SCHEMA_VERSION = SNAPSHOT_SCHEMA_VERSION_V2;
+/**
+ * The most held-open row ids a snapshot keeps (the newest). A row held open
+ * keeps its text in memory, so a restore can't open an unbounded set; ids
+ * only, so the snapshot stays small. Additive: an older build ignores the field.
+ */
+export const MAX_SAVED_HELD = 40;
 
 /**
  * Render viewport: lines loaded on restore. Not a storage cap — see §2 of spec.
@@ -394,13 +400,18 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
         const applySnapshotOverlay = (snapshot: any): void => {
             const ds = snapshot.documentState;
             if (!ds || !opts.onSnapshotOverlay) return;
+            const restoredHeld: string[] = Array.isArray(ds.heldOpenNodeIds)
+                ? ds.heldOpenNodeIds.filter((id: unknown): id is string => typeof id === "string").slice(-MAX_SAVED_HELD)
+                : [];
             opts.onSnapshotOverlay({
                 documentState: {
                     collapsedNodes: new Set<string>(ds.collapsedNodeIds ?? []),
                     pinnedNodes: new Set<string>(ds.pinnedNodeIds ?? []),
-                    // Not persisted — scroll-driven hold starts empty so
-                    // restored history renders collapsed.
-                    heldOpenNodes: new Set<string>(),
+                    // What the pane had open when it was last hidden or closed
+                    // (a few ids at most, `MAX_SAVED_HELD`); nothing for a
+                    // snapshot without them, so restored history renders collapsed.
+                    heldOpenNodes: new Set<string>(restoredHeld),
+                    restoredHeldNodes: restoredHeld.length > 0 ? new Set<string>(restoredHeld) : undefined,
                     scrollPosition: typeof ds.scrollPosition === "number" ? ds.scrollPosition : 0,
                     filter: ds.filter ?? DEFAULT_FILTER_STATE,
                 },
