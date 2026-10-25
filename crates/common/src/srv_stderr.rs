@@ -281,6 +281,13 @@ pub const UPGRADE_PREFIX: &str = "AGENTMUXSRV-UPGRADE";
 /// other way to tell it), so the user can start the upgrade again at once.
 pub const UPGRADE_DECLINED_FILE: &str = "declined.txt";
 
+/// Where the Linux launcher leaves why a `.deb`/`.rpm` upgrade didn't happen,
+/// in `updates/<version>/` of the data folder: JSON `{"version": "<v>", "error":
+/// "<one line>"}`. Left when the password was refused or unavailable, the file
+/// failed its checks, or the install failed (the waiter that restarts the old
+/// version writes it). srv shows it in the version panel.
+pub const INSTALL_RESULT_FILE: &str = "install-result.json";
+
 /// What an upgrade restarts into.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UpgradeTarget {

@@ -77,6 +77,17 @@ rmdir "$PKGROOT/opt/agentmux/usr"
 cp scripts/install-userns-apparmor-fix.sh "$PKGROOT/opt/agentmux/bin/install-userns-apparmor-fix.sh"
 chmod +x "$PKGROOT/opt/agentmux/bin/install-userns-apparmor-fix.sh"
 
+# --- 1c. The in-app upgrade's helper and its polkit policy
+#         (SPEC_LINUX_PACKAGE_UPGRADE_AND_REPOSITORY_2026_10_24.md §3.2, §3.3):
+#         AgentMux runs `pkexec /opt/agentmux/bin/agentmux-install-update`, the desktop
+#         asks for the password, and only this root-owned script (which checks the file
+#         itself) installs the update. The policy names that exact path. ---
+cp scripts/agentmux-install-update.sh "$PKGROOT/opt/agentmux/bin/agentmux-install-update"
+chmod 755 "$PKGROOT/opt/agentmux/bin/agentmux-install-update"
+mkdir -p "$PKGROOT/usr/share/polkit-1/actions"
+cp assets/linux/ai.agentmux.install-update.policy "$PKGROOT/usr/share/polkit-1/actions/ai.agentmux.install-update.policy"
+chmod 644 "$PKGROOT/usr/share/polkit-1/actions/ai.agentmux.install-update.policy"
+
 # --- 2. /usr/bin wrapper — identical to build-deb-linux.sh's step 2,
 #        including the LD_LIBRARY_PATH export (Codex P1 on PR #3236 caught
 #        this missing from the .deb's wrapper originally; same fix applies
@@ -132,6 +143,8 @@ fpm -s dir -t rpm \
     --url "https://agentmux.ai" \
     --license Apache-2.0 \
     --category Utilities \
+    --rpm-user root \
+    --rpm-group root \
     --rpm-compression xz \
     --rpm-compression-level 9 \
     --package "$OUTPUT" \

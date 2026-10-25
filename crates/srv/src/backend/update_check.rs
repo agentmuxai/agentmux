@@ -586,6 +586,30 @@ fn pinned_by_upgrade(cur: &AppUpdateStatus, next: &AppUpdateStatus) -> Option<St
 /// pins the release on offer ([`pinned_by_upgrade`]). A new check keeps a
 /// download of the release it still reports.
 fn publish_check(event_bus: &crate::backend::eventbus::EventBus, next: AppUpdateStatus) {
+    // Read (and removed) once, here: the closure below may run more than once.
+    let install_failure = match (&next.latest, &next.asset, matches!(install_kind(), InstallKind::LinuxPackage { .. })) {
+        (Some(version), Some(asset), true) if next.state == "available" && next.download.is_none() => {
+            let updates = crate::backend::update_download::updates_root();
+            crate::backend::update_restart::take_install_failure(&updates, version).map(|error| {
+                // The release file is still there: the panel offers the restart again, with the
+                // reason above it (a "failed" download would say "Download failed" and fetch it again).
+                let staged = crate::backend::update_download::installer_path(&updates.join(version), asset);
+                let kept = crate::backend::update_download::is_staged_installer(&staged, asset);
+                DownloadStatus {
+                    version: version.clone(),
+                    state: if kept { "ready" } else { "failed" }.into(),
+                    received: if kept { asset.size } else { 0 },
+                    total: asset.size,
+                    error: Some(error),
+                    folder: None,
+                    installer: kept.then(|| staged.display().to_string()),
+                    waiting_for: 0,
+                    stopping: Vec::new(),
+                }
+            })
+        }
+        _ => None,
+    };
     update(event_bus, |cur| {
         if let Some(version) = pinned_by_upgrade(cur, &next) {
             tracing::info!(latest = ?next.latest, version, "update check: a newer release is out; the upgrade under way finishes first");
@@ -594,6 +618,11 @@ fn publish_check(event_bus: &crate::backend::eventbus::EventBus, next: AppUpdate
         let mut next = next.clone();
         if next.download.is_none() && next.latest.is_some() && next.latest == cur.latest {
             next.download = cur.download.clone();
+        }
+        // A `.deb`/`.rpm` upgrade that didn't finish left its reason (the old version
+        // runs again): the panel says why, rather than offering it as if untried.
+        if next.download.is_none() {
+            next.download = install_failure.clone();
         }
         Some(next)
     });

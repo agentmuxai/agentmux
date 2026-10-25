@@ -16,11 +16,20 @@
 //!   outermost one); it can only be upgraded in place from a folder the user
 //!   can write, not from the mounted `.dmg` or an App-Translocated copy;
 //! - Linux: an AppImage (`$APPIMAGE`), a portable folder (the marker), or a
-//!   `.deb`/`.rpm` (under `/usr` or `/opt`).
+//!   `.deb`/`.rpm` (under `/usr` or `/opt`; dpkg's own file list says which
+//!   package manager owns it, and the packages' install helper says whether it can
+//!   upgrade itself: `docs/specs/SPEC_LINUX_PACKAGE_UPGRADE_AND_REPOSITORY_2026_10_24.md`).
 
 use std::path::{Path, PathBuf};
 
 const PORTABLE_MARKER: &str = "agentmux-portable.marker";
+
+/// What a `.deb` or `.rpm` ships to install its own updates as root, through
+/// polkit (`scripts/agentmux-install-update.sh`).
+pub const PACKAGE_HELPER: &str = "/opt/agentmux/bin/agentmux-install-update";
+
+/// dpkg's list of the files the package `agentmux` installed.
+const DPKG_FILE_LIST: &str = "/var/lib/dpkg/info/agentmux.list";
 
 /// How this AgentMux was installed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,7 +45,7 @@ pub enum InstallKind {
     /// A Linux portable: the release tarball's `AgentMux/` folder, which holds
     /// `agentmux.sh` above `usr/bin/` (or an older folder with the marker).
     LinuxPortable { root: PathBuf },
-    /// A `.deb` (`debian`) or `.rpm` install.
+    /// A `.deb` (`debian`: dpkg owns it) or `.rpm` install.
     LinuxPackage { debian: bool },
     Unknown,
 }
@@ -59,8 +68,16 @@ impl InstallKind {
     /// Whether AgentMux can download and stage this kind's upgrade itself.
     /// The others still open the release page (or the Store).
     pub fn can_download(&self) -> bool {
+        self.can_download_with(Path::new(PACKAGE_HELPER).is_file())
+    }
+
+    /// [`Self::can_download`], given whether the package's install helper
+    /// ([`PACKAGE_HELPER`]) is there: a `.deb` or `.rpm` from before it shipped
+    /// can't install an update itself, and keeps the release page.
+    pub fn can_download_with(&self, package_helper: bool) -> bool {
         match self {
             Self::MacApp { blocked, .. } => blocked.is_none(),
+            Self::LinuxPackage { .. } => package_helper,
             _ => matches!(
                 self,
                 Self::WindowsPortable { .. } | Self::WindowsSetup | Self::LinuxPortable { .. } | Self::LinuxAppImage
@@ -214,6 +231,14 @@ pub fn linux_portable_root(exe: &Path) -> Option<PathBuf> {
     root.join("agentmux.sh").is_file().then(|| root.to_path_buf())
 }
 
+/// Whether dpkg installed the file at `exe`, by its file list for the package
+/// `agentmux`; otherwise it came from an `.rpm`. The package manager that owns
+/// the install is what upgrades it, not the distribution's name: an rpm can sit
+/// on a Debian system and the reverse.
+fn owned_by_dpkg(exe: &Path, file_list: &Path) -> bool {
+    std::fs::read_to_string(file_list).is_ok_and(|list| list.lines().any(|l| Path::new(l) == exe))
+}
+
 /// How the running AgentMux was installed.
 pub fn detect() -> InstallKind {
     let Ok(exe) = std::env::current_exe() else { return InstallKind::Unknown };
@@ -221,7 +246,7 @@ pub fn detect() -> InstallKind {
         &exe,
         std::env::consts::OS,
         agentmux_common::runtime_mode::running_appimage(&exe).is_some(),
-        Path::new("/etc/debian_version").exists(),
+        owned_by_dpkg(&exe, Path::new(DPKG_FILE_LIST)),
     )
 }
 
@@ -279,6 +304,26 @@ mod tests {
             assert_eq!(detect_at(&srv, "linux", appimage, true), InstallKind::LinuxPortable { root: root.clone() });
         }
         assert!(InstallKind::LinuxPortable { root }.can_download() && InstallKind::LinuxAppImage.can_download());
+    }
+
+    #[test]
+    fn a_package_downloads_only_with_the_install_helper() {
+        let deb = InstallKind::LinuxPackage { debian: true };
+        assert!(deb.can_download_with(true));
+        assert!(!deb.can_download_with(false), "a package from before the helper shipped keeps the release page");
+        assert!(InstallKind::LinuxPackage { debian: false }.can_download_with(true));
+        assert!(InstallKind::LinuxAppImage.can_download_with(false), "the other kinds don't look for it");
+    }
+
+    #[test]
+    fn dpkg_owns_what_its_file_list_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let list = dir.path().join("agentmux.list");
+        std::fs::write(&list, "/.\n/opt\n/opt/agentmux/bin/agentmux-srv-0.60.1-linux.x64\n/usr/bin/agentmux\n").unwrap();
+        assert!(owned_by_dpkg(Path::new("/opt/agentmux/bin/agentmux-srv-0.60.1-linux.x64"), &list));
+        // Another version's file, or no list at all (an rpm install, or no dpkg).
+        assert!(!owned_by_dpkg(Path::new("/opt/agentmux/bin/agentmux-srv-0.60.0-linux.x64"), &list));
+        assert!(!owned_by_dpkg(Path::new("/opt/agentmux/bin/agentmux-srv-0.60.1-linux.x64"), &dir.path().join("missing")));
     }
 
     #[test]
