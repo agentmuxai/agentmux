@@ -241,6 +241,7 @@ mod tests {
             ts_ms: 0,
             hostname: "h".into(),
             panes: None,
+            memory: None,
             os: "windows".into(),
             cpu_count: 8,
             memory_metric: "private working set".into(),
