@@ -194,6 +194,13 @@ const FRONTEND_CONSTANTS: Record<string, [string, RegExp]> = {
 const UNSET_MEANS: Record<string, [unknown, string, RegExp]> = {
     // Anything but an explicit false shows the outdated agent id notice.
     "agent:outdatedidsnotice": [true, "frontend/app/view/settings/fork-slug-notice.ts", /settingsAtom\(\)\?\.\[NOTICE_SETTING\] === false/],
+    // Anything but an explicit false retries a turn that failed on the network once the API answers
+    // again (SPEC_OFFLINE_RESILIENCE_2026_10_20 §4.3, §9 Q1). The key is read through a constant.
+    "agent:retryonreconnect": [
+        true,
+        "frontend/app/view/agent/offline/useOfflineInput.ts",
+        /autoRetryOn: \(\) => getSettingsKeyAtom\(RETRY_ON_RECONNECT_SETTING\)\(\) !== false/,
+    ],
     // Anything but an explicit false keeps turn-scoped tails.
     "agent:turnscopedtail": [
         true,
